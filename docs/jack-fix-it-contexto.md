@@ -141,11 +141,12 @@ Também não mostrar como funcional algo que não funciona (ex.: voz) e não usa
 - `apps/api`: FastAPI + worker ARQ
 - `packages/shared`: tipos TypeScript gerados do OpenAPI da API
 
-**Hospedagem — decisão pendente:**
+**Hospedagem — Railway Pro** (decidido em 16/10/2026; `docs/adr/0001-hosting-railway.md`):
 
-- **Hostinger (VPS já existente):** Docker Compose com api, worker, postgres, redis, web e Caddy; backups com `pg_dump` diário para o R2. Custo quase zero, mas segurança e operação ficam com a gente.
-- **Railway Pro:** serviços gerenciados, Postgres com backups agendados e PITR, rede privada, SOC 2 Type II, audit log, rollback de deploy. Custo mensal variável.
-- Ambas nos EUA. O código deve funcionar nas duas: configuração só por variáveis de ambiente, armazenamento via API S3 genérica.
+- Um projeto com dois ambientes: **staging** faz deploy da `develop` e **produção** da `main`.
+- Serviços `api`, `worker` e `web` a partir do repositório, mais Postgres (backups agendados e PITR) e Redis na rede privada. Deploy só com o CI verde ("Wait for CI").
+- Sem Hostinger, sem Caddy e sem Docker Compose em produção; o `docker-compose.yml` serve só para desenvolvimento local.
+- O código continua portável: configuração só por variáveis de ambiente, armazenamento via API S3 genérica. Detalhes em `docs/railway.md`.
 
 ## 9. Modelo de dados (resumo)
 
@@ -172,10 +173,10 @@ O detalhe completo está no plano. Tabelas principais:
 - App mobile em React Native com Stripe já no MVP.
 - 5 categorias no lançamento.
 - O README antigo (repositório Lovable) serve só como referência de conteúdo e UX.
+- Hospedagem no Railway Pro: staging na `develop`, produção na `main` (16/10/2026, ADR 0001).
 
 **Pendentes:**
 
-- Hospedagem: Hostinger ou Railway.
 - Take rate final e quem absorve as taxas do Stripe.
 - Regra de cancelamento e reembolso.
 - Prazo da janela de garantia e o texto jurídico dela.
