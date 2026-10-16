@@ -1,0 +1,12 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "Dockerfile",
+    "watchPatterns": ["/apps/api/**"]
+  },
+  "deploy": {
+    "startCommand": "arq app.worker.WorkerSettings --custom-log-dict app.observability.WORKER_LOG_CONFIG",
+    "restartPolicyType": "ALWAYS"
+  }
+}
