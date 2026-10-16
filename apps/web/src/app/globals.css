@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+/*
+ * Brand tokens. PROVISIONAL: the hex values are placeholders until the design system
+ * lands (D2.1, #18). Keep them in sync with apps/mobile/src/theme/tokens.json.
+ */
+@theme {
+  --color-navy: #0b1f3a;
+  --color-orange: #f26a1b;
+  --color-white: #ffffff;
+  --color-gray-light: #f4f5f7;
+}

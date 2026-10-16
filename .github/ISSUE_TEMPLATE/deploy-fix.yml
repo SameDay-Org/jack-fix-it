@@ -1,0 +1,48 @@
+name: Deploy fix
+description: A Railway deploy failed because of the code (opened by Sentinel or a human).
+title: "deploy-fix: <service> <short cause>"
+labels: ["deploy:failed"]
+body:
+  - type: input
+    id: sha
+    attributes:
+      label: Failing commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: service
+    attributes:
+      label: Service
+      options:
+        - api
+        - worker
+        - web
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - staging
+        - production
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (sanitized)
+      description: Build log, deploy log and the last runtime lines. Remove tokens, keys, emails and phone numbers.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: hypothesis
+    attributes:
+      label: Root-cause hypothesis
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        **Done when:** staging deploy green, and `/health` and `/health/ready` return 200.

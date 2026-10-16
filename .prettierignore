@@ -1,0 +1,8 @@
+# Generated
+pnpm-lock.yaml
+packages/shared/openapi.json
+packages/shared/src/api.d.ts
+
+# Role prompts are kept verbatim
+docs/agents/*.md
+!docs/agents/README.md

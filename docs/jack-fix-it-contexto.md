@@ -35,6 +35,7 @@
 ## 4. Escopo do MVP
 
 ### Entra
+
 - **App mobile único** (React Native) com dois modos: cliente e profissional.
 - **Fluxo do pedido:** "o que aconteceu" (texto, fotos, vídeo, categoria opcional) → perguntas de contexto da categoria → local (ZIP, endereço, data e horário) → contato → confirmação "Jack is on it" com número do pedido (ex.: `JF-000124`).
 - **Orçamento com preço fechado**, enviado pelo profissional (ou atribuído pelo BDC).
@@ -49,9 +50,11 @@
 - **Idiomas:** inglês (principal) e espanhol. Arquitetura pronta para português.
 
 ### Categorias do lançamento (5)
+
 House Cleaning, Handyman, Painting, Lawn & Landscaping, Moving & Assembly. Categorias são cadastradas no admin; AC, encanamento, elétrica, piscina e eletrodomésticos entram depois, só quando a verificação de licença estiver validada (na Flórida esses ofícios exigem licença).
 
 ### Fica fora (pós-MVP)
+
 Rastreamento do profissional no mapa em tempo real, background check automático (Checkr), entrada por voz, classificação de pedidos com IA, análise de ligações do BDC com IA, telefonia integrada e mascaramento de número, pagamento por marcos, gorjeta, cupons, planos recorrentes, contas B2B, "My Home" (histórico da casa), apps separados para cliente e profissional.
 
 ## 5. Perfis e status
@@ -60,21 +63,22 @@ Rastreamento do profissional no mapa em tempo real, background check automático
 
 **Status que o cliente vê:**
 
-| Status | Quando aparece |
-|---|---|
-| Request Received | Pedido criado |
-| Reviewing | BDC classificando ou pedindo mais informação |
-| Finding a Pro | Pedido enviado aos profissionais |
-| Quote Ready | Há orçamento para aprovar |
-| Scheduled | Pago e com data marcada |
-| Professional On The Way | Profissional marcou "a caminho" |
-| In Progress | Check-in feito |
+| Status                   | Quando aparece                               |
+| ------------------------ | -------------------------------------------- |
+| Request Received         | Pedido criado                                |
+| Reviewing                | BDC classificando ou pedindo mais informação |
+| Finding a Pro            | Pedido enviado aos profissionais             |
+| Quote Ready              | Há orçamento para aprovar                    |
+| Scheduled                | Pago e com data marcada                      |
+| Professional On The Way  | Profissional marcou "a caminho"              |
+| In Progress              | Check-in feito                               |
 | Waiting for Confirmation | Profissional concluiu; janela de 48 h aberta |
-| Completed | Confirmado e repassado |
-| Needs Attention | Problema aberto ou ação pendente do cliente |
-| Cancelled | Cancelado por qualquer lado |
+| Completed                | Confirmado e repassado                       |
+| Needs Attention          | Problema aberto ou ação pendente do cliente  |
+| Cancelled                | Cancelado por qualquer lado                  |
 
 **Regras de negócio principais:**
+
 - Só profissionais aprovados e com Stripe ativo (`payouts_enabled`) recebem pedidos.
 - Cada pedido vai para até N profissionais da categoria e do ZIP (N configurável, padrão 5), ordenados por nota e tempo de resposta.
 - Pedido sem categoria cai na fila do BDC, que classifica antes de distribuir.
@@ -94,6 +98,7 @@ Rastreamento do profissional no mapa em tempo real, background check automático
 - Stripe em modo teste até o lançamento.
 
 **Regras técnicas obrigatórias:**
+
 - Webhooks com verificação de assinatura e processados uma única vez (tabela `webhook_events`).
 - Idempotency key em toda cobrança, transferência e reembolso.
 - Valores em centavos, calculados só no backend.
@@ -109,36 +114,39 @@ Também não mostrar como funcional algo que não funciona (ex.: voz) e não usa
 
 ## 8. Stack
 
-| Camada | Escolha |
-|---|---|
-| App mobile | React Native com Expo, Expo Router, TypeScript |
-| UI do app | NativeWind (Tailwind) + componentes próprios + Reanimated |
-| Dados no app | TanStack Query + Zustand |
-| Backend | Python, FastAPI, SQLAlchemy 2 (async), Alembic, Pydantic v2 |
-| Banco | PostgreSQL 16 (PostGIS opcional) |
-| Fila e agendamento | Redis + ARQ (webhooks, notificações, auto-confirmação, expirações); Redis também faz o pub/sub do chat |
-| Pagamentos | Stripe Connect (Express) + Payment Sheet |
-| Arquivos | Cloudflare R2 ou Railway Buckets (ambos S3), sempre por URL pré-assinada |
-| Autenticação | JWT próprio (access + refresh com rotação), senha com Argon2, OTP por SMS com Twilio Verify |
-| Notificações | Expo Push, Resend (e-mail), Twilio (SMS) |
-| Endereços | Google Places Autocomplete + Geocoding |
-| Admin/BDC + landing | Next.js + shadcn/ui + TanStack Table (SSR na landing) |
-| Admin interno rápido | SQLAdmin no FastAPI (aprovação de profissionais desde o Dia 7) |
-| Idiomas | i18next (app e web) |
-| Observabilidade | Sentry, UptimeRobot, logs em JSON |
-| Analytics | PostHog |
-| CI/CD | GitHub Actions; staging na `develop`, produção na `main` |
+| Camada               | Escolha                                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------------------------ |
+| App mobile           | React Native com Expo, Expo Router, TypeScript                                                         |
+| UI do app            | NativeWind (Tailwind) + componentes próprios + Reanimated                                              |
+| Dados no app         | TanStack Query + Zustand                                                                               |
+| Backend              | Python, FastAPI, SQLAlchemy 2 (async), Alembic, Pydantic v2                                            |
+| Banco                | PostgreSQL 16 (PostGIS opcional)                                                                       |
+| Fila e agendamento   | Redis + ARQ (webhooks, notificações, auto-confirmação, expirações); Redis também faz o pub/sub do chat |
+| Pagamentos           | Stripe Connect (Express) + Payment Sheet                                                               |
+| Arquivos             | Cloudflare R2 ou Railway Buckets (ambos S3), sempre por URL pré-assinada                               |
+| Autenticação         | JWT próprio (access + refresh com rotação), senha com Argon2, OTP por SMS com Twilio Verify            |
+| Notificações         | Expo Push, Resend (e-mail), Twilio (SMS)                                                               |
+| Endereços            | Google Places Autocomplete + Geocoding                                                                 |
+| Admin/BDC + landing  | Next.js + shadcn/ui + TanStack Table (SSR na landing)                                                  |
+| Admin interno rápido | SQLAdmin no FastAPI (aprovação de profissionais desde o Dia 7)                                         |
+| Idiomas              | i18next (app e web)                                                                                    |
+| Observabilidade      | Sentry, UptimeRobot, logs em JSON                                                                      |
+| Analytics            | PostHog                                                                                                |
+| CI/CD                | GitHub Actions; staging na `develop`, produção na `main`                                               |
 
 **Estrutura do monorepo:**
+
 - `apps/mobile`: React Native (cliente + profissional)
 - `apps/web`: Next.js (landing + painel admin/BDC)
 - `apps/api`: FastAPI + worker ARQ
 - `packages/shared`: tipos TypeScript gerados do OpenAPI da API
 
-**Hospedagem — decisão pendente:**
-- **Hostinger (VPS já existente):** Docker Compose com api, worker, postgres, redis, web e Caddy; backups com `pg_dump` diário para o R2. Custo quase zero, mas segurança e operação ficam com a gente.
-- **Railway Pro:** serviços gerenciados, Postgres com backups agendados e PITR, rede privada, SOC 2 Type II, audit log, rollback de deploy. Custo mensal variável.
-- Ambas nos EUA. O código deve funcionar nas duas: configuração só por variáveis de ambiente, armazenamento via API S3 genérica.
+**Hospedagem — Railway Pro** (decidido em 16/10/2026; `docs/adr/0001-hosting-railway.md`):
+
+- Um projeto com dois ambientes: **staging** faz deploy da `develop` e **produção** da `main`.
+- Serviços `api`, `worker` e `web` a partir do repositório, mais Postgres (backups agendados e PITR) e Redis na rede privada. Deploy só com o CI verde ("Wait for CI").
+- Sem Hostinger, sem Caddy e sem Docker Compose em produção; o `docker-compose.yml` serve só para desenvolvimento local.
+- O código continua portável: configuração só por variáveis de ambiente, armazenamento via API S3 genérica. Detalhes em `docs/railway.md`.
 
 ## 9. Modelo de dados (resumo)
 
@@ -160,13 +168,15 @@ O detalhe completo está no plano. Tabelas principais:
 ## 11. Decisões
 
 **Fechadas:**
+
 - Marca Jack Fix It; azul-marinho, laranja, branco e cinza claro.
 - App mobile em React Native com Stripe já no MVP.
 - 5 categorias no lançamento.
 - O README antigo (repositório Lovable) serve só como referência de conteúdo e UX.
+- Hospedagem no Railway Pro: staging na `develop`, produção na `main` (16/10/2026, ADR 0001).
 
 **Pendentes:**
-- Hospedagem: Hostinger ou Railway.
+
 - Take rate final e quem absorve as taxas do Stripe.
 - Regra de cancelamento e reembolso.
 - Prazo da janela de garantia e o texto jurídico dela.

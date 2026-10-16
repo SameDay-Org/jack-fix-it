@@ -1,0 +1,13 @@
+{
+  "brand": {
+    "name": "Jack Fix It",
+    "tagline": "Pase lo que pase en casa, lo arreglamos."
+  },
+  "landing": {
+    "comingSoon": "Nuestro sitio está en camino."
+  },
+  "admin": {
+    "title": "Panel de operaciones",
+    "notAvailable": "El panel de operaciones aún no está disponible."
+  }
+}

@@ -1,0 +1,54 @@
+name: Task
+description: A unit of work for the agent pipeline, usually a task from docs/mvp-plan.md.
+title: "[D__] "
+body:
+  - type: input
+    id: plan-task
+    attributes:
+      label: Plan task ID
+      description: From docs/mvp-plan.md, e.g. D8.2. Write "none" if it is not in the plan.
+      placeholder: D8.2
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: One area per issue. Cross-layer work is split, API first.
+      options:
+        - api
+        - web
+        - mobile
+        - infra
+        - docs
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What to build and why.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Checklist of the pieces, including migrations.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Each one objectively verifiable (input → expected behavior), including error cases.
+    validations:
+      required: true
+  - type: textarea
+    id: depends-on
+    attributes:
+      label: Depends on
+      description: "Issues that must land first, e.g. #24."
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Open questions, pending decisions that apply, links.

@@ -1,0 +1,19 @@
+{
+  "name": "jack-fix-it",
+  "private": true,
+  "packageManager": "pnpm@10.34.7",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "gen:api-types": "uv run --directory apps/api python -m scripts.export_openapi && pnpm --filter @jack/shared generate"
+  },
+  "devDependencies": {
+    "prettier": "3.9.10"
+  }
+}
