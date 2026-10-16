@@ -1,0 +1,35 @@
+# Local development only: backing services for apps/api.
+# Staging and production run on Railway (docs/railway.md); there is no production compose file.
+# Host ports can be moved if something else already uses them, e.g. POSTGRES_PORT=55432.
+name: jack-fix-it
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      # Throwaway local credentials, matching apps/api/.env.example.
+      POSTGRES_USER: jack
+      POSTGRES_PASSWORD: jack
+      POSTGRES_DB: jack
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jack -d jack"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:

@@ -1,0 +1,24 @@
+# Install once with: uvx pre-commit install
+# Run everything with: uvx pre-commit run --all-files
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.1
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: detect-private-key
+
+  # Uses the repo's own Prettier (pnpm install first) so hooks and CI agree. Called through node,
+  # not the pnpm shim, because cmd.exe on Windows chokes on route-group paths like (marketing).
+  - repo: local
+    hooks:
+      - id: prettier
+        name: prettier
+        entry: node node_modules/prettier/bin/prettier.cjs --write --ignore-unknown
+        language: system
+        types: [text]
