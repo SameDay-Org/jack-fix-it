@@ -1,0 +1,58 @@
+{
+  "name": "@jack/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "test": "jest"
+  },
+  "jest": {
+    "preset": "jest-expo",
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/dist/",
+      "/dist-ci/"
+    ]
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.104.3",
+    "expo": "~58.0.14",
+    "expo-constants": "~58.0.12",
+    "expo-dev-client": "~58.0.14",
+    "expo-font": "~58.0.8",
+    "expo-linking": "~58.0.13",
+    "expo-localization": "~58.0.4",
+    "expo-router": "~58.0.23",
+    "expo-secure-store": "~58.0.2",
+    "expo-splash-screen": "~58.0.10",
+    "expo-status-bar": "~58.0.3",
+    "expo-system-ui": "~58.0.6",
+    "i18next": "26.4.7",
+    "nativewind": "^4.2.7",
+    "react": "19.3.0",
+    "react-i18next": "^17.0.20",
+    "react-native": "0.88.0",
+    "react-native-gesture-handler": "~3.3.0",
+    "react-native-reanimated": "4.7.1",
+    "react-native-safe-area-context": "~5.10.1",
+    "react-native-screens": "~4.30.0",
+    "react-native-worklets": "0.13.0",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@react-native/jest-preset": "^0.88.0",
+    "@types/jest": "^30.0.0",
+    "@types/react": "~19.3.0",
+    "eslint": "^9.39.5",
+    "eslint-config-expo": "~58.0.4",
+    "jest": "^30.5.2",
+    "jest-expo": "~58.0.11",
+    "tailwindcss": "^3.4.19",
+    "typescript": "~6.0.3"
+  }
+}
