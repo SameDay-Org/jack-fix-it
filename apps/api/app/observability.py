@@ -99,19 +99,27 @@ def init_sentry(settings: Settings) -> None:
     )
 
 
-# A URL or path with a query, inside free text such as a log message: the query ends at a space.
-# Matches start only at a token boundary, so a long run without spaces is scanned once.
-_URL_QUERY_IN_TEXT: Final = re.compile(
-    r"(?<![^\s\"'(<=])((?:[A-Za-z][A-Za-z0-9+.-]*://|/)[^\s?]*)\?\S*"
-)
+# Whitespace runs, kept as separate parts by re.split so a message can be joined back unchanged.
+_WHITESPACE_RUN: Final = re.compile(r"(\s+)")
 
 
 def _without_query(url: str) -> str:
-    return url.split("?", 1)[0]
+    return url.partition("?")[0]
 
 
 def _is_url(value: str) -> bool:
     return value.startswith("/") or "://" in value
+
+
+def _without_url_queries(text: str) -> str:
+    """Cuts the query from every URL-like token of free text, such as a log message.
+
+    Linear by construction: one split on whitespace, constant work per character, one join.
+    Before_breadcrumb runs on every log record, so a regex that can backtrack is not an option.
+    """
+    return "".join(
+        _without_query(part) if _is_url(part) else part for part in _WHITESPACE_RUN.split(text)
+    )
 
 
 def before_send(event: Event, hint: Hint) -> Event:
@@ -143,7 +151,7 @@ def before_breadcrumb(crumb: Breadcrumb, hint: BreadcrumbHint) -> Breadcrumb:
     """
     message = crumb.get("message")
     if isinstance(message, str):
-        crumb["message"] = _URL_QUERY_IN_TEXT.sub(r"\1", message)
+        crumb["message"] = _without_url_queries(message)
     data = crumb.get("data")
     if isinstance(data, dict):
         data.pop("http.query", None)

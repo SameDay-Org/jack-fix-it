@@ -2,7 +2,8 @@
 
 import json
 import logging
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import httpx
@@ -191,13 +192,44 @@ def test_before_breadcrumb_strips_url_query_from_log_message() -> None:
         (f'calling "https://h.example.invalid/p?{QUERY}"', 'calling "https://h.example.invalid/p'),
         (f"url=https://h.example.invalid/p?{QUERY}", "url=https://h.example.invalid/p"),
         (f"(see /v1/jobs?{QUERY})", "(see /v1/jobs"),
-        # A URL glued to other text is not at a token boundary; long runs stay linear.
-        ("/" * 32_000, "/" * 32_000),
+        # A question mark in ordinary words is not a query.
+        ("is this a question? yes", "is this a question? yes"),
     ],
-    ids=["quoted", "assignment", "parenthesized", "long_run"],
+    ids=["quoted", "assignment", "parenthesized", "plain_question"],
 )
 def test_before_breadcrumb_message_url_boundaries(message: str, expected: str) -> None:
     assert before_breadcrumb({"type": "log", "message": message}, {})["message"] == expected
+
+
+# Inputs that made the earlier regex backtrack, by character count: (message, expected).
+ADVERSARIAL_MESSAGES: dict[str, Callable[[int], tuple[str, str]]] = {
+    "slash_equals": lambda n: ("/=" * (n // 2) + " ordinary?question",) * 2,
+    "slash_equals_then_url": lambda n: (
+        "/=" * (n // 2) + f" /v1/jobs?{QUERY} ordinary?question",
+        "/=" * (n // 2) + " /v1/jobs ordinary?question",
+    ),
+    "slash_question": lambda n: ("/?" * (n // 2), "/"),
+    "repeated_scheme": lambda n: ("http://" * (n // 7),) * 2,
+    "plain_then_question": lambda n: ("a" * n + "?b",) * 2,
+}
+
+
+@pytest.mark.parametrize("kind", ADVERSARIAL_MESSAGES)
+def test_before_breadcrumb_message_adversarial_inputs(kind: str) -> None:
+    message, expected = ADVERSARIAL_MESSAGES[kind](4_000)
+
+    assert before_breadcrumb({"type": "log", "message": message}, {})["message"] == expected
+
+
+@pytest.mark.parametrize("kind", ADVERSARIAL_MESSAGES)
+def test_before_breadcrumb_message_scrub_scales_linearly(kind: str) -> None:
+    # The hook runs on every log record. The quadratic regex took minutes at this size.
+    message, _ = ADVERSARIAL_MESSAGES[kind](256_000)
+
+    started = time.perf_counter()
+    before_breadcrumb({"type": "log", "message": message}, {})
+
+    assert time.perf_counter() - started < 1
 
 
 async def test_captured_event_contains_no_query_values(
