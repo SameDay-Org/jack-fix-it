@@ -16,11 +16,13 @@
     "testPathIgnorePatterns": [
       "/node_modules/",
       "/dist/",
-      "/dist-ci/"
+      "/dist-ci/",
+      "/__tests__/helpers.ts$"
     ],
     "resolver": "react-native-reanimated/jest/resolver"
   },
   "dependencies": {
+    "@jack/shared": "workspace:*",
     "@tanstack/react-query": "^5.104.3",
     "expo": "~58.0.14",
     "expo-constants": "~58.0.12",

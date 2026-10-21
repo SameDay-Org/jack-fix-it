@@ -2,6 +2,7 @@
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 
 
@@ -25,6 +26,9 @@ class UserAccount:
     role: UserRole
     locale: str
     status: UserStatus
+    # E.164; set together with phone_verified_at when verified by SMS code (#26).
+    phone: str | None = None
+    phone_verified_at: datetime | None = None
 
 
 @dataclass(frozen=True)

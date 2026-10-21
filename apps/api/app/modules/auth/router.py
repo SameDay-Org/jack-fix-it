@@ -1,12 +1,25 @@
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Response, status
 
 from app.errors import ErrorResponse
-from app.modules.auth.dependencies import CurrentUser, get_auth_service
+from app.modules.auth.dependencies import (
+    CurrentUser,
+    get_auth_service,
+    get_phone_service,
+    limit_login,
+    limit_logout,
+    limit_phone_send,
+    limit_phone_verify,
+    limit_refresh,
+    limit_register,
+)
+from app.modules.auth.phone_service import PhoneVerificationService
 from app.modules.auth.schemas import (
     AuthResponse,
     LoginRequest,
+    PhoneSendRequest,
+    PhoneVerifyRequest,
     RefreshTokenRequest,
     RegisterRequest,
 )
@@ -20,8 +33,22 @@ def _error(description: str) -> dict[str, Any]:
     return {"model": ErrorResponse, "description": description}
 
 
+_RATE_LIMITED: dict[int | str, dict[str, Any]] = {
+    status.HTTP_429_TOO_MANY_REQUESTS: {
+        **_error("rate_limited: too many requests from this client; retry later."),
+        "headers": {
+            "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {"type": "integer"},
+            }
+        },
+    },
+}
+
+
 @router.post(
     "/register",
+    dependencies=[Depends(limit_register)],
     status_code=status.HTTP_201_CREATED,
     response_model=AuthResponse,
     summary="Register",
@@ -30,6 +57,7 @@ def _error(description: str) -> dict[str, Any]:
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
             "validation_error: invalid email, role, locale, or password length."
         ),
+        **_RATE_LIMITED,
     },
 )
 async def register(
@@ -41,11 +69,13 @@ async def register(
 
 @router.post(
     "/login",
+    dependencies=[Depends(limit_login)],
     response_model=AuthResponse,
     summary="Log in",
     responses={
         status.HTTP_401_UNAUTHORIZED: _error("invalid_credentials: wrong email or password."),
         status.HTTP_403_FORBIDDEN: _error("account_suspended: the account is suspended."),
+        **_RATE_LIMITED,
     },
 )
 async def login(
@@ -57,6 +87,7 @@ async def login(
 
 @router.post(
     "/refresh",
+    dependencies=[Depends(limit_refresh)],
     response_model=AuthResponse,
     summary="Refresh the session",
     responses={
@@ -64,6 +95,7 @@ async def login(
             "invalid_refresh_token: unknown, expired, revoked or reused refresh token, or the "
             "account is suspended."
         ),
+        **_RATE_LIMITED,
     },
 )
 async def refresh(
@@ -81,6 +113,7 @@ async def refresh(
 
 @router.post(
     "/logout",
+    dependencies=[Depends(limit_logout)],
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
     summary="Log out",
@@ -88,6 +121,7 @@ async def refresh(
         status.HTTP_204_NO_CONTENT: {
             "description": "Always, whether the token was valid, unknown, expired or revoked."
         },
+        **_RATE_LIMITED,
     },
 )
 async def logout(
@@ -114,3 +148,66 @@ async def logout(
 async def me(user: CurrentUser) -> UserOut:
     """The caller's own account."""
     return UserOut.model_validate(user)
+
+
+_UNAUTHORIZED = _error("invalid_token: missing, invalid or expired access token.")
+_PHONE_INVALID = _error(
+    "validation_error: not an E.164 number, a country code that is not allowed, or a "
+    "malformed code."
+)
+_PHONE_UNAVAILABLE = _error("verification_unavailable: the SMS provider is unavailable.")
+
+
+@router.post(
+    "/phone/send",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_class=Response,
+    summary="Send a phone verification code",
+    dependencies=[Depends(limit_phone_send)],
+    responses={
+        status.HTTP_202_ACCEPTED: {"description": "Accepted; a code is on its way by SMS."},
+        status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
+        status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
+            "validation_error: not an E.164 number, or a country code that is not allowed."
+        ),
+        **_RATE_LIMITED,
+    },
+)
+async def send_phone_code(
+    data: PhoneSendRequest,
+    user: CurrentUser,
+    phones: Annotated[PhoneVerificationService, Depends(get_phone_service)],
+    background: BackgroundTasks,
+) -> None:
+    """Sends a verification code by SMS to the number, for the signed-in user.
+
+    Always 202 for a valid number, including one already verified by another account (then
+    nothing is sent). The SMS provider is called after the response, so neither the answer,
+    its timing nor a provider error tells whether a number is taken; a code that never
+    arrives surfaces at verify as invalid_code.
+    """
+    if await phones.prepare_send(user, data.phone):
+        background.add_task(phones.deliver_code, user.id, data.phone)
+
+
+@router.post(
+    "/phone/verify",
+    response_model=UserOut,
+    summary="Verify the phone with the code",
+    dependencies=[Depends(limit_phone_verify)],
+    responses={
+        status.HTTP_400_BAD_REQUEST: _error("invalid_code: wrong, expired or used code."),
+        status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
+        status.HTTP_409_CONFLICT: _error("phone_unavailable: the number is another account's."),
+        status.HTTP_422_UNPROCESSABLE_CONTENT: _PHONE_INVALID,
+        status.HTTP_503_SERVICE_UNAVAILABLE: _PHONE_UNAVAILABLE,
+        **_RATE_LIMITED,
+    },
+)
+async def verify_phone(
+    data: PhoneVerifyRequest,
+    user: CurrentUser,
+    phones: Annotated[PhoneVerificationService, Depends(get_phone_service)],
+) -> UserOut:
+    """Checks the code and stores the number as the user's verified phone (idempotent)."""
+    return UserOut.model_validate(await phones.verify_code(user, data.phone, data.code))

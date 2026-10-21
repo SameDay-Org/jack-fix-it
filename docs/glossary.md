@@ -25,8 +25,63 @@ status (D8.5, #47).
 
 ## Internal job states
 
-Defined in D12.1 (#60). The backend state machine will be the single source of truth for the
-internal states, their valid transitions and how each maps to a customer-visible status above.
+The values stored in the `status` columns (#108). Decided 2026-10-21 by Cesar; derived from the
+plan's job-state diagram (plan p. 12) and the customer-visible statuses above. Code never sets a
+status directly: the backend state machine (D12.1, #60) changes them and writes `job_events`.
+
+**Request** (`service_requests.status`)
+
+| State         | Meaning                                                                  |
+| ------------- | ------------------------------------------------------------------------ |
+| `received`    | Created from the app, the web or by phone; nobody has handled it yet.    |
+| `reviewing`   | The BDC is classifying it or asking for more information.                |
+| `finding_pro` | Sent to pros; waiting for quotes.                                        |
+| `quote_ready` | At least one quote waits for the customer's decision.                    |
+| `accepted`    | The customer accepted a quote; the job is created when payment succeeds. |
+| `expired`     | Closed without an accepted quote because it ran out of time.             |
+| `cancelled`   | Cancelled by either side before a job exists.                            |
+
+**Quote** (`quotes.status`)
+
+| State       | Meaning                                          |
+| ----------- | ------------------------------------------------ |
+| `pending`   | Sent to the customer, who has not decided yet.   |
+| `accepted`  | The customer accepted it; payment follows.       |
+| `rejected`  | The customer declined it.                        |
+| `expired`   | Its `expires_at` passed without a decision.      |
+| `withdrawn` | The pro withdrew it before the customer decided. |
+
+**Job** (`jobs.status`). A job is created when the payment succeeds (`payment_intent.succeeded`),
+so there is no unpaid state.
+
+| State         | Meaning                                                                          |
+| ------------- | -------------------------------------------------------------------------------- |
+| `scheduled`   | Paid and held, with a date set.                                                  |
+| `on_the_way`  | The pro marked "on the way".                                                     |
+| `in_progress` | The pro checked in (check-in and photos).                                        |
+| `completed`   | Done by the pro (after photos); the customer's 48 h confirmation window is open. |
+| `confirmed`   | Confirmed by the customer, or automatically after 48 h; the transfer is pending. |
+| `paid_out`    | The transfer to the pro was created, after a full or partial release.            |
+| `disputed`    | The customer opened a problem; the transfer is blocked until an admin decides.   |
+| `refunded`    | Fully refunded after an admin decision.                                          |
+| `cancelled`   | Cancelled by either side.                                                        |
+
+Job transitions, who may make each one, and the customer-visible mapping live in
+`apps/api/app/modules/jobs/transitions.py` (D12.1, #60): `JobStateMachine` applies them, writes
+a `job_events` row for every change and answers 409 `invalid_transition` otherwise. The
+terminal states are `paid_out`, `refunded` and `cancelled`.
+
+| Job state               | Customer sees                           |
+| ----------------------- | --------------------------------------- |
+| `scheduled`             | `customerStatus.scheduled`              |
+| `on_the_way`            | `customerStatus.professionalOnTheWay`   |
+| `in_progress`           | `customerStatus.inProgress`             |
+| `completed`             | `customerStatus.waitingForConfirmation` |
+| `confirmed`, `paid_out` | `customerStatus.completed`              |
+| `disputed`              | `customerStatus.needsAttention`         |
+| `refunded`, `cancelled` | `customerStatus.cancelled`              |
+
+`refunded` shows as Cancelled: decided 2026-10-21 by Cesar.
 
 ## Roles
 

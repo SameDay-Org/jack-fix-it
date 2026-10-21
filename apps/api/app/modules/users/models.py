@@ -1,4 +1,6 @@
-from sqlalchemy import CheckConstraint, String
+from datetime import datetime
+
+from sqlalchemy import CheckConstraint, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, IdTimestampsMixin, str_enum
@@ -15,6 +17,8 @@ class User(IdTimestampsMixin, Base):
     email: Mapped[str] = mapped_column(String(320), unique=True)
     # E.164; NULL until the user adds one, and several users may have none.
     phone: Mapped[str | None] = mapped_column(String(20), unique=True)
+    # Set when the phone was verified by SMS code (#26); NULL while unverified.
+    phone_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[UserRole] = mapped_column(str_enum(UserRole, "user_role"), index=True)
     # No CHECK: request schemas validate the locale, so adding one needs no migration.
