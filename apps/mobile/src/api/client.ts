@@ -1,4 +1,4 @@
-import { ApiError } from "./errors";
+import { ApiError, SessionExpiredError } from "./errors";
 import {
   sendRequest,
   throwIfAborted,
@@ -8,7 +8,7 @@ import {
   type PostPath,
   type PostResponse,
 } from "./http";
-import { getAccessToken, refreshSession } from "./session";
+import { getAccessToken, isCurrentGeneration, refreshSession, sessionGeneration } from "./session";
 
 export type RequestOptions = {
   /** Attach the session's bearer token; on `401 invalid_token`, refresh and retry once. */
@@ -42,22 +42,37 @@ export function apiPost<P extends PostPath>(
 const isExpiredAccess = (error: unknown): boolean =>
   error instanceof ApiError && error.status === 401 && error.code === INVALID_TOKEN;
 
-// One retry at most: a 401 with a freshly issued token is the server's final word. A caller that
-// cancels while a shared refresh runs sends nothing afterwards; the refresh still completes for
-// the others.
+/** The session the operation started in is gone: its results, errors and retries are void. */
+function ensureCurrent(startedIn: number): void {
+  if (!isCurrentGeneration(startedIn)) throw new SessionExpiredError("superseded");
+}
+
+// The whole authenticated operation belongs to the session generation it starts in. Whatever
+// comes back after a sign-out or a newer sign-in is discarded, even a 2xx, because the data was
+// the old session's; a 401 refreshes only while that generation is current, and the one retry
+// happens only if it still is once the refresh resolves. A caller that cancels while a shared
+// refresh runs sends nothing afterwards; the refresh still completes for the others.
 async function withSession<T>(
   options: RequestOptions,
   send: (accessToken?: string) => Promise<T>,
 ): Promise<T> {
   if (!options.auth) return send();
+  const startedIn = sessionGeneration();
   const accessToken = await getAccessToken();
+  ensureCurrent(startedIn);
   throwIfAborted(options.signal);
+
+  let result: T;
   try {
-    return await send(accessToken);
+    result = await send(accessToken);
   } catch (error) {
+    ensureCurrent(startedIn);
     if (!isExpiredAccess(error)) throw error;
     const freshToken = await refreshSession();
+    ensureCurrent(startedIn);
     throwIfAborted(options.signal);
-    return send(freshToken);
+    result = await send(freshToken);
   }
+  ensureCurrent(startedIn);
+  return result;
 }

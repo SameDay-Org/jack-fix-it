@@ -71,6 +71,12 @@ let generation = 0;
 const nextGeneration = (): number => ++generation;
 const isCurrent = (startedIn: number): boolean => startedIn === generation;
 
+/** The generation an authenticated operation starts in; it binds every later step to that session. */
+export const sessionGeneration = (): number => generation;
+
+/** Whether the session an operation started in is still the one on the device. */
+export const isCurrentGeneration = (startedIn: number): boolean => isCurrent(startedIn);
+
 /** Stores the pair for the session of `startedIn`; resolves to false when that session is gone. */
 async function applyAuth(auth: AuthResponse, startedIn: number): Promise<boolean> {
   const written = await refreshTokenStorage.write(auth.refresh_token, () => isCurrent(startedIn));

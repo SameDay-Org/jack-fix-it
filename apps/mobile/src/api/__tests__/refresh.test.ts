@@ -345,3 +345,100 @@ describe("session generation", () => {
     expect(revokedTokens()).toEqual([{ refresh_token: "refresh-3" }]);
   });
 });
+
+describe("operation generation", () => {
+  /** /me holds its first answer until the test releases it; later /me calls accept pair 3. */
+  function serveWithHeldMe(held: Promise<Response>) {
+    let meCalls = 0;
+    fetchMock.mockImplementation(async (url, init) => {
+      const path = new URL(url).pathname;
+      const bearer = (init?.headers as Record<string, string> | undefined)?.Authorization;
+      if (path === ME) {
+        meCalls += 1;
+        if (meCalls === 1) return held;
+        return bearer === "Bearer access-3"
+          ? jsonResponse(200, user)
+          : errorResponse(401, "invalid_token");
+      }
+      if (path === LOGIN) return jsonResponse(200, authResponse(3));
+      if (path === LOGOUT) return jsonResponse(204);
+      if (path === REFRESH) return jsonResponse(200, authResponse(2));
+      throw new Error(`unexpected path ${path}`);
+    });
+  }
+
+  it("a held 401 released after logout and a newer login is superseded: no refresh, no retry", async () => {
+    signedInWithStaleAccessToken();
+    const held = deferred<Response>();
+    serveWithHeldMe(held.promise);
+
+    const request = apiGet(ME, { auth: true });
+    await settle();
+    await logout();
+    await signIn();
+    expect(sessionStore.getState().accessToken).toBe("access-3");
+    held.resolve(errorResponse(401, "invalid_token"));
+
+    await expect(request).rejects.toMatchObject({
+      name: "SessionExpiredError",
+      reason: "superseded",
+    });
+    expect(callsTo(fetchMock, REFRESH)).toHaveLength(0);
+    expect(callsTo(fetchMock, ME)).toHaveLength(1);
+    expect(storedRefreshToken()).toBe("refresh-3");
+    expect(sessionStore.getState()).toMatchObject({
+      status: "signedIn",
+      user,
+      accessToken: "access-3",
+    });
+  });
+
+  it("a held 2xx released after a generation change is superseded too", async () => {
+    signedInWithStaleAccessToken();
+    const held = deferred<Response>();
+    serveWithHeldMe(held.promise);
+
+    const request = apiGet(ME, { auth: true });
+    await settle();
+    await logout();
+    await signIn();
+    held.resolve(jsonResponse(200, { ...user, email: "old-session@example.com" }));
+
+    await expect(request).rejects.toMatchObject({
+      name: "SessionExpiredError",
+      reason: "superseded",
+    });
+    expect(callsTo(fetchMock, REFRESH)).toHaveLength(0);
+    expect(callsTo(fetchMock, ME)).toHaveLength(1);
+    expect(storedRefreshToken()).toBe("refresh-3");
+  });
+
+  it("a held 401 released after logout alone is superseded and nothing is re-sent", async () => {
+    signedInWithStaleAccessToken();
+    const held = deferred<Response>();
+    serveWithHeldMe(held.promise);
+
+    const request = apiGet(ME, { auth: true });
+    await settle();
+    await logout();
+    held.resolve(errorResponse(401, "invalid_token"));
+
+    await expect(request).rejects.toMatchObject({
+      name: "SessionExpiredError",
+      reason: "superseded",
+    });
+    expect(callsTo(fetchMock, REFRESH)).toHaveLength(0);
+    expect(callsTo(fetchMock, ME)).toHaveLength(1);
+    expect(storedRefreshToken()).toBeNull();
+    expect(sessionStore.getState()).toEqual(SIGNED_OUT);
+  });
+
+  it("the normal path still does one refresh and one retry", async () => {
+    signedInWithStaleAccessToken();
+    serve();
+
+    await expect(apiGet(ME, { auth: true })).resolves.toEqual(user);
+
+    expect(fetchMock.mock.calls.map(callPath)).toEqual([ME, REFRESH, ME]);
+  });
+});
