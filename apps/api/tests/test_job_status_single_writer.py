@@ -114,18 +114,26 @@ class _Scanner:
         )
 
     def is_job_statement(self, node: ast.AST) -> bool:
-        """`update(Job)` or `insert(Job)`, or a name bound to one, anywhere in a call chain."""
+        """A DML statement on the jobs table, or a name bound to one, anywhere in a call chain.
+
+        Function forms: `update(Job)`, `insert(Job.__table__)`. Table method forms:
+        `Job.__table__.update()`, `jobs.insert()`, `table("jobs").delete()`, for any receiver
+        is_job() recognizes.
+        """
         while isinstance(node, ast.Call | ast.Attribute | ast.Name):
             if isinstance(node, ast.Name):
                 return node.id in self.job_statements
-            if (
-                isinstance(node, ast.Call)
-                and _called_name(node) in ("update", "insert")
-                and any(self.is_job(arg) for arg in node.args)
-            ):
+            if isinstance(node, ast.Call) and self._is_job_dml(node):
                 return True
             node = node.func if isinstance(node, ast.Call) else node.value
         return False
+
+    def _is_job_dml(self, call: ast.Call) -> bool:
+        if _called_name(call) not in ("update", "insert", "delete"):
+            return False
+        if any(self.is_job(arg) for arg in call.args):
+            return True
+        return isinstance(call.func, ast.Attribute) and self.is_job(call.func.value)
 
 
 def _is_status_key(key: ast.expr | None) -> bool:
@@ -341,6 +349,47 @@ PLANTED = {
         "    first, *job.status = values\n"
     ),
     "for_target": ("def f(job, values) -> None:\n    for job.status in values:\n        pass\n"),
+    # Review round 3 (Vault V1): Table method forms on the jobs table.
+    "table_method_update": (
+        "from app.modules.jobs.models import Job, JobStatus\n"
+        "def f(job_id) -> None:\n"
+        "    statement = (\n"
+        "        Job.__table__.update().where(Job.id == job_id).values(status=JobStatus.PAID_OUT)\n"
+        "    )\n"
+    ),
+    "table_alias_method_update": (
+        "from app.modules.jobs.models import Job\n"
+        "jobs = Job.__table__\n"
+        "statement = jobs.update().values(status='paid_out')\n"
+    ),
+    "table_method_values_before_where": (
+        "from app.modules.jobs.models import Job\n"
+        "statement = Job.__table__.update().values(status='paid_out').where(Job.id == 1)\n"
+    ),
+    "table_method_bound_then_values": (
+        "from app.modules.jobs.models import Job\n"
+        "jobs = Job.__table__\n"
+        "statement = jobs.update().where(jobs.c.id == 1)\n"
+        "statement = statement.values({jobs.c.status: 'paid_out'})\n"
+    ),
+    "table_method_bulk_execute": (
+        "from app.modules.jobs.models import Job\n"
+        "async def f(session) -> None:\n"
+        "    jobs = Job.__table__\n"
+        "    await session.execute(jobs.update(), [{'id': 1, 'status': 'paid_out'}])\n"
+    ),
+    "table_method_insert": (
+        "from app.modules.jobs.models import Job\n"
+        "statement = Job.__table__.insert().values(status='confirmed')\n"
+    ),
+    "module_table_method": (
+        "from app.modules.jobs import models\n"
+        "statement = models.Job.__table__.update().values(status='paid_out')\n"
+    ),
+    "lightweight_table_method": (
+        "import sqlalchemy as sa\n"
+        "statement = sa.table('jobs', sa.column('status')).update().values(status='paid_out')\n"
+    ),
     "constructor": (
         "from app.modules.jobs.models import Job, JobStatus\n"
         "job = Job(request_id=1, status=JobStatus.CONFIRMED)\n"
@@ -385,6 +434,18 @@ def test_guard_detects_a_planted_assignment(name: str) -> None:
             "statement = update(User.__table__).values(locale='es')\n"
         ),
         ("def f(job, values) -> None:\n    job.started_at, job.completed_at = values\n"),
+        (
+            "from app.modules.jobs.models import Job\n"
+            "statement = Job.__table__.update().where(Job.id == 1).values(started_at=None)\n"
+        ),
+        (
+            "from app.modules.jobs.models import Job\n"
+            "statement = Job.__table__.delete().where(Job.id == 1)\n"
+        ),
+        (
+            "from app.modules.users.models import User\n"
+            "statement = User.__table__.update().values(status='suspended')\n"
+        ),
     ],
     ids=[
         "read",
@@ -396,6 +457,9 @@ def test_guard_detects_a_planted_assignment(name: str) -> None:
         "other_columns_reassigned",
         "other_table_object",
         "tuple_without_status",
+        "table_method_other_column",
+        "table_method_delete",
+        "other_table_method",
     ],
 )
 def test_guard_ignores_reads_and_other_writes(source: str) -> None:
