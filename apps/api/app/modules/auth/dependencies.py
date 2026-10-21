@@ -16,10 +16,11 @@ from app.modules.auth.service import AuthConfig, AuthService, authenticate_acces
 from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount
 from app.rate_limit import (
+    IdentifierHasher,
     RateLimiter,
     enforce_limit,
+    get_identifier_hasher,
     get_rate_limiter,
-    hashed_identifier,
     limit_per_ip,
 )
 
@@ -69,13 +70,14 @@ async def limit_login(
     data: LoginRequest,
     _: Annotated[None, Depends(limit_login_per_ip)],
     limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    hasher: Annotated[IdentifierHasher, Depends(get_identifier_hasher)],
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> None:
     """Login: the per-IP limit first, then the per-email one (the email normalized, hashed)."""
     await enforce_limit(
         limiter,
         "auth_login_email",
-        hashed_identifier(data.email),
+        hasher(data.email),
         limit=settings.login_rate_limit_per_email,
         window_seconds=settings.auth_rate_limit_window_seconds,
         timeout_seconds=settings.rate_limit_timeout_seconds,
@@ -93,14 +95,15 @@ def get_phone_service(
 
 async def _limit_phone(
     limiter: RateLimiter,
+    hasher: IdentifierHasher,
     settings: Settings,
     scope: str,
     user: UserAccount,
     phone: str,
     limit: int,
 ) -> None:
-    """Per user first, then per phone; the number enters the key only as a hash."""
-    for kind, identifier in (("user", str(user.id)), ("phone", hashed_identifier(phone))):
+    """Per user first, then per phone; the number enters the key only as a keyed hash."""
+    for kind, identifier in (("user", str(user.id)), ("phone", hasher(phone))):
         await enforce_limit(
             limiter,
             f"{scope}_{kind}",
@@ -116,10 +119,11 @@ async def limit_phone_send(
     data: PhoneSendRequest,
     user: CurrentUser,
     limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    hasher: Annotated[IdentifierHasher, Depends(get_identifier_hasher)],
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> None:
     await _limit_phone(
-        limiter, settings, "phone_send", user, data.phone, settings.phone_otp_send_limit
+        limiter, hasher, settings, "phone_send", user, data.phone, settings.phone_otp_send_limit
     )
 
 
@@ -127,8 +131,9 @@ async def limit_phone_verify(
     data: PhoneVerifyRequest,
     user: CurrentUser,
     limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    hasher: Annotated[IdentifierHasher, Depends(get_identifier_hasher)],
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> None:
     await _limit_phone(
-        limiter, settings, "phone_check", user, data.phone, settings.phone_otp_check_limit
+        limiter, hasher, settings, "phone_check", user, data.phone, settings.phone_otp_check_limit
     )

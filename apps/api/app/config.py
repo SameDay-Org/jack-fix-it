@@ -33,6 +33,9 @@ _TWILIO_SETTINGS: tuple[str, ...] = (
     "twilio_auth_token",
     "twilio_verify_service_sid",
 )
+# The HMAC key for PII in rate-limit keys (#137): required where a weak one stops startup.
+RATE_LIMIT_KEY_SECRET_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
+RATE_LIMIT_KEY_SECRET_MIN_LENGTH = 32
 # Upper bound on passwords (NIST 800-63B allows a cap); also bounds the Argon2 input.
 PASSWORD_MAX_LENGTH = 128
 
@@ -87,6 +90,9 @@ class Settings(BaseSettings):
     login_rate_limit_per_email: int = Field(default=5, gt=0)
     # Longest wait on Redis for one limit check; past it the request goes through (fail open).
     rate_limit_timeout_seconds: float = Field(default=0.5, gt=0)
+    # Keys the HMAC that turns an email or phone into a rate-limit key (#137). Required in
+    # staging and production; elsewhere a documented, non-secret development key is used.
+    rate_limit_key_secret: SecretStr | None = None
     # Proxies whose X-Forwarded-For uvicorn trusts for the client IP (CSV, or "*").
     forwarded_allow_ips: str = "127.0.0.1"
     # Object storage, S3-compatible (R2 or Railway Buckets), reached only through presigned URLs.
@@ -114,6 +120,14 @@ class Settings(BaseSettings):
     # Codes sent and codes checked, per user and per phone, per AUTH_RATE_LIMIT_WINDOW_SECONDS.
     phone_otp_send_limit: int = Field(default=3, gt=0)
     phone_otp_check_limit: int = Field(default=5, gt=0)
+    # Service requests (D8.1, #42): limits on what one request may carry, how often a customer
+    # may create one, and how many a list page holds.
+    request_intake_max_bytes: int = Field(default=16_384, gt=0)
+    request_media_max_items: int = Field(default=10, gt=0)
+    request_create_limit: int = Field(default=10, gt=0)
+    request_create_window_seconds: int = Field(default=3_600, gt=0)
+    request_list_default_limit: int = Field(default=20, gt=0)
+    request_list_max_limit: int = Field(default=50, gt=0)
 
     @field_validator("database_url")
     @classmethod
@@ -154,11 +168,18 @@ class Settings(BaseSettings):
         "twilio_account_sid",
         "twilio_auth_token",
         "twilio_verify_service_sid",
+        "rate_limit_key_secret",
         mode="before",
     )
     @classmethod
     def _empty_is_none(cls, value: object) -> object:
         return None if value == "" else value
+
+    @model_validator(mode="after")
+    def _list_default_within_max(self) -> Self:
+        if self.request_list_default_limit > self.request_list_max_limit:
+            raise ValueError("REQUEST_LIST_DEFAULT_LIMIT must not exceed REQUEST_LIST_MAX_LIMIT")
+        return self
 
     @model_validator(mode="after")
     def _require_jwt_secret_when_deployed(self) -> Self:
@@ -188,6 +209,18 @@ class Settings(BaseSettings):
         missing = [name.upper() for name in _TWILIO_SETTINGS if getattr(self, name) is None]
         if missing:
             raise ValueError(f"{', '.join(missing)} must be set when APP_ENV is {self.app_env}")
+        return self
+
+    @model_validator(mode="after")
+    def _require_rate_limit_key_secret_when_deployed(self) -> Self:
+        if self.app_env not in RATE_LIMIT_KEY_SECRET_REQUIRED_IN:
+            return self
+        secret = self.rate_limit_key_secret
+        if secret is None or len(secret.get_secret_value()) < RATE_LIMIT_KEY_SECRET_MIN_LENGTH:
+            raise ValueError(
+                f"RATE_LIMIT_KEY_SECRET must be set to at least "
+                f"{RATE_LIMIT_KEY_SECRET_MIN_LENGTH} characters when APP_ENV is {self.app_env}"
+            )
         return self
 
 

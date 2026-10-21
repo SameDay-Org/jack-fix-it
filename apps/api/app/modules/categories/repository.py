@@ -1,5 +1,7 @@
+import uuid
 from collections.abc import Sequence
 
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,3 +28,7 @@ class CategoryRepository:
             .returning(Category.slug)
         )
         return list((await self._session.scalars(statement)).all())
+
+    async def is_active(self, category_id: uuid.UUID) -> bool:
+        statement = select(Category.id).where(Category.id == category_id, Category.active)
+        return (await self._session.scalar(statement)) is not None

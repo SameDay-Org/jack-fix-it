@@ -73,7 +73,7 @@ adb install <downloaded>.apk                                            # com.ja
 pnpm --filter @jack/mobile exec expo start --dev-client
 pnpm --filter @jack/mobile typecheck
 pnpm --filter @jack/mobile lint
-pnpm --filter @jack/mobile test        # jest-expo
+pnpm --filter @jack/mobile test        # jest-expo; jest.setup.ts warms RN's lazy components first (#140)
 pnpm --filter @jack/mobile exec expo export --platform android --output-dir dist-ci   # bundle check
 ```
 

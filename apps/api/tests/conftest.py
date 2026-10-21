@@ -34,6 +34,11 @@ TEST_TWILIO_SETTINGS: dict[str, object] = {
     "twilio_auth_token": "test-twilio-auth-token-not-real",
     "twilio_verify_service_sid": "VAtest00000000000000000000000000",
 }
+# Fixture value only. make_settings leaves it unset, so tests use the development key unless
+# a test sets it; deployed settings must have one.
+TEST_RATE_LIMIT_SETTINGS: dict[str, object] = {
+    "rate_limit_key_secret": "test-rate-limit-key-secret-not-real-0123",
+}
 
 
 def make_settings(**overrides: object) -> Settings:

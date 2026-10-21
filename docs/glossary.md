@@ -41,6 +41,22 @@ status directly: the backend state machine (D12.1, #60) changes them and writes 
 | `expired`     | Closed without an accepted quote because it ran out of time.             |
 | `cancelled`   | Cancelled by either side before a job exists.                            |
 
+What the customer sees for a request, decided 2026-10-21 by Cesar. The mapping lives in
+`apps/api/app/modules/requests/customer_status.py` and the API returns it as `customer_status`.
+Once the request is paid, the job's status takes over (see the job mapping below).
+
+| Request state | Customer sees                    |
+| ------------- | -------------------------------- |
+| `received`    | `customerStatus.requestReceived` |
+| `reviewing`   | `customerStatus.reviewing`       |
+| `finding_pro` | `customerStatus.findingAPro`     |
+| `quote_ready` | `customerStatus.quoteReady`      |
+| `accepted`    | `customerStatus.quoteReady`      |
+| `expired`     | `customerStatus.cancelled`       |
+| `cancelled`   | `customerStatus.cancelled`       |
+
+`accepted` keeps the quote screen while the payment is pending.
+
 **Quote** (`quotes.status`)
 
 | State       | Meaning                                          |
