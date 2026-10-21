@@ -173,6 +173,93 @@
         }
       }
     },
+    "/v1/auth/refresh": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Refresh the session",
+        "description": "Spends the refresh token and returns a new access token and a new refresh token.\n\nEach refresh token works once. Presenting one that was already rotated is treated as theft:\nthe whole session is revoked, including the newest token. Clients must therefore serialize\nrefresh calls: of two concurrent calls with the same token, one succeeds and the other one\nends the session.",
+        "operationId": "refresh_v1_auth_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_refresh_token: unknown, expired, revoked or reused refresh token, or the account is suspended.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Log out",
+        "description": "Revokes the session the refresh token belongs to. No bearer token is needed.\n\nAlways 204, so the endpoint cannot be used to test tokens. The access token is not revoked\non the server: it stops working when it expires (`expires_in`).",
+        "operationId": "logout_v1_auth_logout_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Always, whether the token was valid, unknown, expired or revoked."
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/auth/me": {
       "get": {
         "tags": [
@@ -365,6 +452,20 @@
           "checks"
         ],
         "title": "ReadinessResponse"
+      },
+      "RefreshTokenRequest": {
+        "properties": {
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token",
+            "description": "The refresh token from the last AuthResponse."
+          }
+        },
+        "type": "object",
+        "required": [
+          "refresh_token"
+        ],
+        "title": "RefreshTokenRequest"
       },
       "RegisterRequest": {
         "properties": {

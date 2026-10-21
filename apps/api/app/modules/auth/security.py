@@ -102,5 +102,9 @@ def new_refresh_token() -> str:
 
 
 def hash_refresh_token(token: str) -> str:
-    """SHA-256 hex digest (64 characters): the token is random, so no salt or slow hash."""
-    return hashlib.sha256(token.encode()).hexdigest()
+    """SHA-256 hex digest (64 characters): the token is random, so no salt or slow hash.
+
+    Never raises: a client can send a lone surrogate in JSON, which plain UTF-8 cannot encode.
+    Issued tokens are ASCII, so their digest is the same either way.
+    """
+    return hashlib.sha256(token.encode("utf-8", "surrogatepass")).hexdigest()

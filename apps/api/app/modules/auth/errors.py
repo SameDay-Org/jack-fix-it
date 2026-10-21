@@ -21,6 +21,16 @@ class InvalidTokenError(UnauthorizedError):
     headers = MappingProxyType({"WWW-Authenticate": "Bearer"})
 
 
+class InvalidRefreshTokenError(UnauthorizedError):
+    """Same body for an unknown, expired, revoked, reused or malformed refresh token.
+
+    No WWW-Authenticate: the refresh token is sent in the body, not as a bearer credential.
+    """
+
+    code = "invalid_refresh_token"
+    message = "The refresh token is invalid or expired."
+
+
 class PasswordTooShortError(AppError):
     """PASSWORD_MIN_LENGTH is a setting, so it is checked after schema validation."""
 
