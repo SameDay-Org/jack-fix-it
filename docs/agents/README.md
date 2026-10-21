@@ -1,15 +1,23 @@
-# Agent roles (Maestri)
+# Maestri agent roles
 
-Five roles run the pipeline. Each file holds that role's prompt verbatim: edit it here, then
-paste it into Maestri. Every role also follows the root `AGENTS.md`, whose
-[Labels](../../AGENTS.md#labels) section holds the label meanings and the state machine.
+Versioned role prompts for the Jack Fix It pipeline. Edit here first, then paste into Maestri, so the prompts and the repo rules (`AGENTS.md`) change together in reviewed PRs. Each role file contains only the prompt text, to be pasted verbatim.
 
-| Role                        | Acts on                                                  | Produces                                           | Writes to the repo  |
-| --------------------------- | -------------------------------------------------------- | -------------------------------------------------- | ------------------- |
-| [Foreman](foreman.md)       | Issue labeled `agent:ready`; Sentinel's deploy-fix issue | Builder prompt as an issue comment                 | No                  |
-| [Builder](builder.md)       | The Foreman's prompt                                     | PR against `develop`, labeled `agent:review`       | Its own branch only |
-| [Gatekeeper](gatekeeper.md) | PR labeled `agent:review` with CI finished               | PR review with a verdict                           | No                  |
-| [Vault](vault.md)           | PR labeled `needs-vault`, after the Gatekeeper approves  | Security and payments review with a verdict        | No                  |
-| [Sentinel](sentinel.md)     | Each merge into `develop`                                | Deploy check, deploy-fix issues, allowlisted fixes | No (staging config) |
+| Role           | File                | Tool / model                              | Trigger                                           | Output                                                  |
+| -------------- | ------------------- | ----------------------------------------- | ------------------------------------------------- | ------------------------------------------------------- |
+| Foreman        | `foreman.md`        | Claude Code, `claude-opus-5-5`, high      | issue labeled `agent:ready`                       | prompt comment, `agent:in-progress`, "Assigned to" line |
+| Builder        | `builder.md`        | Claude Code, `claude-opus-5-5`, ultracode | `agent:in-progress`, assigned to Builder          | branch + PR `Closes #N`, label `agent:review`           |
+| Builder-Mobile | `builder-mobile.md` | Claude Code, `claude-fable-5-1`           | `agent:in-progress`, assigned to Builder-Mobile   | branch + PR `Closes #N`, label `agent:review`           |
+| Gatekeeper     | `gatekeeper.md`     | Codex, `gpt-6-astra`, xhigh               | PR labeled `agent:review`, CI finished            | review comment, labels                                  |
+| Vault          | `vault.md`          | Codex, `gpt-6-astra`, xhigh               | PR labeled `needs-vault` after Gatekeeper APPROVE | review comment, labels                                  |
+| Sentinel       | `sentinel.md`       | Claude Code, `claude-sonnet-5-5`, high    | routine every 5 minutes                           | deploy comment or `deploy-fix` issue                    |
 
-Only Cesar merges. Services, variables and Sentinel's allowlist on Railway: `docs/railway.md`.
+## Labels
+
+`agent:ready` -> `agent:in-progress` -> `agent:review` -> `agent:changes-requested` (back to `agent:review`) or `agent:approved` -> human merge.
+`needs-vault`: payments, Stripe, webhooks, auth, permissions, audit_log, uploads, chat redaction.
+`needs-human`: pipeline stopped. `has-migration`: PR with an Alembic migration (one open at a time). `deploy:failed`: opened by Sentinel.
+Area labels: `area:api`, `area:web`, `area:mobile`, `area:infra`, `area:docs`.
+
+## Canvas connections
+
+Foreman -> Builder and Builder-Mobile -> Gatekeeper -> Vault (conditional). Sentinel is run by a 5-minute routine. Only Builder-Mobile is connected to the Pixel 8 portal.
