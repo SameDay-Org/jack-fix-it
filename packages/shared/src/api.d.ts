@@ -241,10 +241,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List my service requests
+         * @description The caller's own requests, newest first, in pages.
+         */
+        get: operations["list_requests_v1_requests_get"];
+        put?: never;
+        /**
+         * Create a service request
+         * @description Creates a request for the signed-in customer, with a new service address and media.
+         *
+         *     Attach photos and videos by uploading them first (POST /v1/uploads, purpose
+         *     request_media) and listing their keys. The server sets the origin (app), the language
+         *     (the account's) and the status (received).
+         */
+        post: operations["create_request_v1_requests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one of my service requests
+         * @description One of the caller's requests, with presigned URLs for its media.
+         */
+        get: operations["get_request_v1_requests__request_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AddressIn
+         * @description A US service address as the customer types it. Geocoding (lat/lng) comes later.
+         */
+        AddressIn: {
+            /** Line1 */
+            line1: string;
+            /** Line2 */
+            line2?: string | null;
+            /** City */
+            city: string;
+            /**
+             * State
+             * @description Two uppercase letters, e.g. FL.
+             */
+            state: string;
+            /**
+             * Zip Code
+             * @description 5 digits or ZIP+4.
+             */
+            zip_code: string;
+        };
+        /** AddressOut */
+        AddressOut: {
+            /** Line1 */
+            line1: string;
+            /** Line2 */
+            line2: string | null;
+            /** City */
+            city: string;
+            /** State */
+            state: string;
+            /** Zip Code */
+            zip_code: string;
+        };
         /** AuthResponse */
         AuthResponse: {
             user: components["schemas"]["UserOut"];
@@ -306,6 +389,7 @@ export interface components {
         ErrorResponse: {
             error: components["schemas"]["ErrorDetail"];
         };
+        JsonValue: unknown;
         /** LivenessResponse */
         LivenessResponse: {
             /**
@@ -324,6 +408,20 @@ export interface components {
             email: string;
             /** Password */
             password: string;
+        };
+        /** MediaOut */
+        MediaOut: {
+            kind: components["schemas"]["RequestMediaKind"];
+            /**
+             * Url
+             * @description Presigned GET URL.
+             */
+            url: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
         };
         /** PhoneSendRequest */
         PhoneSendRequest: {
@@ -386,6 +484,112 @@ export interface components {
              * @enum {string}
              */
             locale: "en" | "es";
+        };
+        /** RequestCreate */
+        RequestCreate: {
+            /** Description */
+            description: string;
+            /** Category Id */
+            category_id?: string | null;
+            address: components["schemas"]["AddressIn"];
+            /**
+             * Preferred Date
+             * @description Today or later, as a UTC date.
+             */
+            preferred_date?: string | null;
+            /**
+             * Intake Answers
+             * @description Answers to the category's intake questions; a size limit applies. NUL characters and non-finite numbers are refused.
+             */
+            intake_answers?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /**
+             * Media Keys
+             * @description Keys of the caller's own request_media uploads (POST /v1/uploads).
+             */
+            media_keys?: string[];
+            utm?: components["schemas"]["UtmIn"] | null;
+        };
+        /**
+         * RequestMediaKind
+         * @enum {string}
+         */
+        RequestMediaKind: "photo" | "video";
+        /** RequestOut */
+        RequestOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Public Code
+             * @description The code shown to the customer, e.g. JF-000124.
+             */
+            public_code: string;
+            status: components["schemas"]["RequestStatus"];
+            /**
+             * Customer Status
+             * @description The glossary i18n key the customer sees.
+             */
+            customer_status: string;
+            /** Category Id */
+            category_id: string | null;
+            /** Description */
+            description: string;
+            address: components["schemas"]["AddressOut"];
+            /** Preferred Date */
+            preferred_date: string | null;
+            /** Intake Answers */
+            intake_answers: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Media */
+            media: components["schemas"]["MediaOut"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** RequestPage */
+        RequestPage: {
+            /** Items */
+            items: components["schemas"]["RequestSummary"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor` for the next page.
+             */
+            next_cursor: string | null;
+        };
+        /**
+         * RequestStatus
+         * @description Internal states (docs/glossary.md). Transitions belong to the state machine (#60).
+         * @enum {string}
+         */
+        RequestStatus: "received" | "reviewing" | "finding_pro" | "quote_ready" | "accepted" | "expired" | "cancelled";
+        /** RequestSummary */
+        RequestSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Public Code */
+            public_code: string;
+            status: components["schemas"]["RequestStatus"];
+            /** Customer Status */
+            customer_status: string;
+            /** Category Id */
+            category_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Media Count */
+            media_count: number;
         };
         /**
          * UploadPurpose
@@ -465,6 +669,22 @@ export interface components {
          * @enum {string}
          */
         UserStatus: "active" | "suspended";
+        /**
+         * UtmIn
+         * @description Campaign attribution. Only these five keys; anything else is a 422.
+         */
+        UtmIn: {
+            /** Source */
+            source?: string | null;
+            /** Medium */
+            medium?: string | null;
+            /** Campaign */
+            campaign?: string | null;
+            /** Term */
+            term?: string | null;
+            /** Content */
+            content?: string | null;
+        };
     };
     responses: never;
     parameters: never;
@@ -994,6 +1214,177 @@ export interface operations {
                 };
             };
             /** @description upload_invalid: malformed key. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_requests_v1_requests_get: {
+        parameters: {
+            query?: {
+                /** @description Capped at the server's maximum. */
+                limit?: number | null;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestPage"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired access token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers have service requests. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_request_v1_requests_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired access token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers have service requests. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description invalid_category: unknown or inactive category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many requests created; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_request_v1_requests__request_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired access token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers have service requests. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no request of the caller with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
             422: {
                 headers: {
                     [name: string]: unknown;

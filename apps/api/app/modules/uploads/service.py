@@ -116,6 +116,33 @@ class UploadConfig:
         )
 
 
+@dataclass(frozen=True)
+class OwnedUpload:
+    """A file a feature may attach: its key and the content type its extension stands for."""
+
+    key: str
+    content_type: str
+
+
+_CONTENT_TYPE_BY_EXTENSION: Final = {extension: kind for kind, extension in EXTENSIONS.items()}
+
+
+def owned_upload(key: str, owner_id: uuid.UUID, purpose: UploadPurpose) -> OwnedUpload | None:
+    """The upload behind `key` if it is a well-formed key of `owner_id` for `purpose`, whose
+    type that purpose allows; None otherwise, without saying which check failed.
+
+    For features that record keys (request media, job photos...), so they never parse keys
+    themselves. It does not check that the file was actually uploaded.
+    """
+    match = KEY_PATTERN.fullmatch(key)
+    if match is None or match["purpose"] != purpose.value or match["user_id"] != str(owner_id):
+        return None
+    content_type = _CONTENT_TYPE_BY_EXTENSION[key[key.rindex(".") :]]
+    if content_type not in PURPOSES[purpose].content_types:
+        return None
+    return OwnedUpload(key=key, content_type=content_type)
+
+
 def make_key(user_id: uuid.UUID, purpose: UploadPurpose, content_type: str) -> str:
     return f"u/{user_id}/{purpose.value}/{uuid.uuid4().hex}{EXTENSIONS[content_type]}"
 

@@ -3,6 +3,7 @@ from datetime import date, datetime
 from enum import StrEnum
 from typing import Final
 
+from pydantic import JsonValue
 from sqlalchemy import DateTime, ForeignKey, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -48,7 +49,7 @@ class ServiceRequest(IdTimestampsMixin, Base):
     category_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("categories.id"), index=True)
     address_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("addresses.id"), index=True)
     description: Mapped[str] = mapped_column(Text)
-    intake_answers: Mapped[dict[str, object]] = mapped_column(
+    intake_answers: Mapped[dict[str, JsonValue]] = mapped_column(
         JSONB, server_default=text("'{}'::jsonb")
     )
     # No CHECK yet: their values are defined, and validated, by the request flow (#42).
@@ -67,3 +68,19 @@ class ServiceRequest(IdTimestampsMixin, Base):
     last_contact_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     origin: Mapped[RequestOrigin] = mapped_column(str_enum(RequestOrigin, "request_origin"))
     utm: Mapped[dict[str, str] | None] = mapped_column(JSONB)
+
+
+class RequestMediaKind(StrEnum):
+    PHOTO = "photo"
+    VIDEO = "video"
+
+
+class RequestMedia(IdTimestampsMixin, Base):
+    """A photo or video the customer uploaded (#35) and attached to a request."""
+
+    __tablename__ = "request_media"
+
+    request_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("service_requests.id"), index=True)
+    kind: Mapped[RequestMediaKind] = mapped_column(str_enum(RequestMediaKind, "request_media_kind"))
+    # The storage key (u/<user_id>/request_media/...); one file belongs to one request.
+    file_key: Mapped[str] = mapped_column(String(256), unique=True)

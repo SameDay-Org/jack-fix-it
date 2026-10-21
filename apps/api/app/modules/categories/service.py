@@ -1,5 +1,6 @@
 """Categories: the catalog of services. Its launch content is data (seed_data.json)."""
 
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,3 +35,7 @@ class CategoryService:
         inserted = await self._categories.insert_missing(entries)
         await self._session.commit()
         return SeedResult(inserted=len(inserted), skipped=len(entries) - len(inserted))
+
+    async def is_active(self, category_id: uuid.UUID) -> bool:
+        """True when the category exists and is offered (active)."""
+        return await self._categories.is_active(category_id)
