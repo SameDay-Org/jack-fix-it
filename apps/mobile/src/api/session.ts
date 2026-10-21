@@ -6,7 +6,7 @@ import { createStore } from "zustand/vanilla";
 
 import { ApiError, LocalCleanupError, SessionExpiredError } from "./errors";
 import { sendRequest, type PostBody } from "./http";
-import { refreshTokenStorage } from "./tokenStorage";
+import { refreshTokenStorage, type TakenToken } from "./tokenStorage";
 
 export type SessionStatus = "restoring" | "signedOut" | "signedIn";
 export type SessionUser = ApiSchema<"UserOut">;
@@ -77,6 +77,45 @@ export const sessionGeneration = (): number => generation;
 /** Whether the session an operation started in is still the one on the device. */
 export const isCurrentGeneration = (startedIn: number): boolean => isCurrent(startedIn);
 
+// Sign-out barrier. A sign-out begins synchronously: the generation moves on, memory and the Query
+// cache are cleared and the barrier goes up, all before the stored token is deleted or the server
+// is told. Auth work started behind the barrier (a token lookup, a refresh, a restore) is refused
+// as superseded, so nothing started during a sign-out can acquire, refresh or restore the
+// departing session, and nothing it carries can be applied once the sign-out completes. A newer
+// sign-in moves the generation again, which lowers the barrier for it: the old sign-out finishing
+// later does not touch the new session.
+let signingOut: number | null = null;
+const isSigningOut = (): boolean => signingOut === generation;
+
+/** Refuses auth work started while the current session is signing out. */
+function ensureNotSigningOut(): void {
+  if (isSigningOut()) throw new SessionExpiredError("superseded");
+}
+
+/** Starts a sign-out: new generation, barrier up, memory and cache cleared. Synchronous on purpose. */
+function beginSignOut(): number {
+  const startedIn = nextGeneration();
+  signingOut = startedIn;
+  sessionStore.setState((state) => ({ ...SIGNED_OUT, cleanupPending: state.cleanupPending }));
+  queryClient?.clear();
+  return startedIn;
+}
+
+/**
+ * Takes the stored token off the device, queued ahead of any storage work started later, and
+ * records a failed delete as `cleanupPending` while the sign-out of `startedIn` is current.
+ */
+async function forgetStoredToken(startedIn: number): Promise<TakenToken> {
+  const taken = await refreshTokenStorage.take();
+  if (isCurrent(startedIn)) sessionStore.setState({ cleanupPending: !taken.deleted });
+  return taken;
+}
+
+/** Lowers the barrier of the sign-out of `startedIn`; a newer sign-out keeps its own. */
+function endSignOut(startedIn: number): void {
+  if (signingOut === startedIn) signingOut = null;
+}
+
 /** Stores the pair for the session of `startedIn`; resolves to false when that session is gone. */
 async function applyAuth(auth: AuthResponse, startedIn: number): Promise<boolean> {
   const written = await refreshTokenStorage.write(auth.refresh_token, () => isCurrent(startedIn));
@@ -100,19 +139,6 @@ async function revokeRemote(refreshToken: string): Promise<void> {
   } catch {
     // Unreachable or already revoked: nothing more the client can do.
   }
-}
-
-/** Forgets the session on the device: memory and the Query cache always; resolves to whether the stored token was deleted. */
-async function forgetSession(): Promise<boolean> {
-  let deleted = true;
-  try {
-    await refreshTokenStorage.clear();
-  } catch {
-    deleted = false;
-  }
-  sessionStore.setState({ ...SIGNED_OUT, cleanupPending: !deleted });
-  queryClient?.clear();
-  return deleted;
 }
 
 async function signIn<P extends SignInPath>(path: P, body: PostBody<P>): Promise<void> {
@@ -139,23 +165,32 @@ export function login(body: PostBody<"/v1/auth/login">): Promise<void> {
 }
 
 /**
- * Ends the session: revokes it on the server (best effort) and forgets it on the device. Rejects
- * with `LocalCleanupError` when the stored token could not be deleted; memory and the cache are
- * cleared regardless and `cleanupPending` is set.
+ * Ends the session. Memory and the Query cache are cleared before the first await; the stored
+ * token is then deleted and revoked on the server (best effort), with the barrier up until the
+ * revoke settles. Rejects with `LocalCleanupError` when the stored token could not be deleted;
+ * `cleanupPending` is set in that case. A sign-in that completes meanwhile owns the session and
+ * is left alone.
  */
 export async function logout(): Promise<void> {
-  const startedIn = nextGeneration();
-  const refreshToken = await refreshTokenStorage.read().catch(() => null);
-  if (refreshToken) await revokeRemote(refreshToken);
-  if (!isCurrent(startedIn)) return; // a newer sign-in completed meanwhile and owns the session
-  if (!(await forgetSession())) throw new LocalCleanupError();
+  const startedIn = beginSignOut();
+  try {
+    const { token, deleted } = await forgetStoredToken(startedIn);
+    if (token) await revokeRemote(token);
+    if (!deleted && isCurrent(startedIn)) throw new LocalCleanupError();
+  } finally {
+    endSignOut(startedIn);
+  }
 }
 
 /** The server rejected the session of `startedIn`: forget it, unless a newer one replaced it. */
 async function signOutIfCurrent(startedIn: number): Promise<void> {
   if (!isCurrent(startedIn)) return;
-  nextGeneration();
-  await forgetSession();
+  const signingOutIn = beginSignOut();
+  try {
+    await forgetStoredToken(signingOutIn);
+  } finally {
+    endSignOut(signingOutIn);
+  }
 }
 
 type RefreshInFlight = { generation: number; promise: Promise<string> };
@@ -164,9 +199,11 @@ let refreshInFlight: RefreshInFlight | null = null;
 /**
  * Rotates the refresh token and resolves to the new access token. One refresh at a time per
  * session: every caller that needs one while it runs awaits the same promise, because two
- * refreshes with the same token make the server revoke the whole family.
+ * refreshes with the same token make the server revoke the whole family. Refused during a
+ * sign-out, since it would read the departing token.
  */
-export function refreshSession(): Promise<string> {
+export async function refreshSession(): Promise<string> {
+  ensureNotSigningOut();
   const inFlight =
     refreshInFlight?.generation === generation ? refreshInFlight : startRefresh(generation);
   return inFlight.promise;
@@ -210,8 +247,12 @@ async function rotateRefreshToken(startedIn: number): Promise<string> {
   return auth.access_token;
 }
 
-/** A usable access token: the one in memory while it is fresh, otherwise a refreshed one. */
+/**
+ * A usable access token: the one in memory while it is fresh, otherwise a refreshed one. Refused
+ * during a sign-out, so a request started then never carries the departing credentials.
+ */
 export async function getAccessToken(): Promise<string> {
+  ensureNotSigningOut();
   const { accessToken, accessTokenExpiresAt } = sessionStore.getState();
   const fresh =
     accessToken !== null &&
@@ -220,15 +261,27 @@ export async function getAccessToken(): Promise<string> {
   return fresh ? accessToken : refreshSession();
 }
 
+/** Finishes a sign-out whose delete failed earlier. The entry is deleted, never signed in from. */
+async function retryCleanup(startedIn: number): Promise<void> {
+  const deleted = await refreshTokenStorage.clear().then(
+    () => true,
+    () => false,
+  );
+  if (isCurrent(startedIn)) sessionStore.setState({ ...SIGNED_OUT, cleanupPending: !deleted });
+}
+
 /**
  * Rebuilds the session from the stored refresh token on app start. With no token the user is
  * signed out. When the server cannot be reached, the token stays on disk for the next attempt and
  * the app routes as signed out meanwhile. A pending cleanup is finished first, never signed in from.
+ * During a sign-out there is nothing to restore: memory already says signed out and the stored
+ * token is on its way out, so it is not read.
  */
 export async function restoreSession(): Promise<void> {
+  if (isSigningOut()) return;
   const startedIn = generation;
   if (sessionStore.getState().cleanupPending) {
-    await forgetSession();
+    await retryCleanup(startedIn);
     return;
   }
   const refreshToken = await refreshTokenStorage.read().catch(() => null);

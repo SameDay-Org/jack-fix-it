@@ -17,6 +17,9 @@ function serialized<T>(operation: () => Promise<T>): Promise<T> {
   return next;
 }
 
+/** What `take` removed: the token for a best-effort server revoke, and whether the delete worked. */
+export type TakenToken = { token: string | null; deleted: boolean };
+
 /** The refresh token's only home. Nothing here is logged, and no other module touches the store. */
 export const refreshTokenStorage = {
   read: (): Promise<string | null> => serialized(() => SecureStore.getItemAsync(REFRESH_TOKEN_KEY)),
@@ -30,4 +33,18 @@ export const refreshTokenStorage = {
     }),
 
   clear: (): Promise<void> => serialized(() => SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY)),
+
+  /**
+   * Reads the entry and deletes it in one queued step, so nothing reads it in between. Neither
+   * failure throws: the token still comes back for the revoke, and `deleted` says what happened.
+   */
+  take: (): Promise<TakenToken> =>
+    serialized(async () => {
+      const token = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY).catch(() => null);
+      const deleted = await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY).then(
+        () => true,
+        () => false,
+      );
+      return { token, deleted };
+    }),
 };
