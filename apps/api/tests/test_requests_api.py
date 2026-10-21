@@ -1,0 +1,756 @@
+"""Service requests over HTTP: create, list and read (D8.1, #42)."""
+
+import base64
+import json
+import logging
+import re
+import uuid
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+import httpx
+import pytest
+from fastapi import FastAPI
+from sqlalchemy import func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import Settings
+from app.integrations.storage import PresignedUpload, get_storage
+from app.modules.addresses.models import Address
+from app.modules.auth import security
+from app.modules.categories.models import Category
+from app.modules.requests.customer_status import REQUEST_CUSTOMER_STATUS
+from app.modules.requests.models import RequestMedia, RequestStatus, ServiceRequest
+from app.modules.users.models import User
+from app.modules.users.types import UserRole
+from app.observability import JsonFormatter
+from app.rate_limit import get_rate_limiter
+from tests.conftest import TEST_JWT_SECRET, InMemoryRateLimiter, make_settings
+
+GLOSSARY = Path(__file__).resolve().parents[3] / "docs" / "glossary.md"
+# Distinct from the defaults, so the tests prove the values come from settings.
+MEDIA_MAX = 3
+INTAKE_MAX_BYTES = 200
+CREATE_LIMIT = 3
+LIST_DEFAULT = 1
+LIST_MAX = 2
+MEDIA_TTL = 120
+NOW = 1_000.0
+
+DESCRIPTION = "Water leaks under the kitchen sink"
+ADDRESS = {"line1": "742 Evergreen Terrace", "city": "Orlando", "state": "FL", "zip_code": "32801"}
+INVALID_MEDIA = {"error": {"code": "invalid_media", "message": "The attached media is invalid."}}
+INVALID_CATEGORY = {
+    "error": {"code": "invalid_category", "message": "The category is not available."}
+}
+VALIDATION_ERROR = {"error": {"code": "validation_error", "message": "The request is invalid."}}
+FORBIDDEN = {"error": {"code": "forbidden", "message": "You do not have access to this resource."}}
+NOT_FOUND = {"error": {"code": "not_found", "message": "Resource not found."}}
+
+
+@dataclass
+class FakeStorage:
+    gets: list[tuple[str, int]] = field(default_factory=list)
+
+    def presign_put(
+        self, key: str, content_type: str, content_length: int, expires_in: int
+    ) -> PresignedUpload:  # pragma: no cover - not used here
+        raise AssertionError("requests never upload")
+
+    def presign_get(self, key: str, expires_in: int) -> str:
+        self.gets.append((key, expires_in))
+        return f"https://storage.example.invalid/get/{key}?sig=fake"
+
+
+@pytest.fixture
+def settings() -> Settings:
+    return make_settings(
+        request_media_max_items=MEDIA_MAX,
+        request_intake_max_bytes=INTAKE_MAX_BYTES,
+        request_create_limit=CREATE_LIMIT,
+        request_list_default_limit=LIST_DEFAULT,
+        request_list_max_limit=LIST_MAX,
+        download_url_ttl_seconds=MEDIA_TTL,
+    )
+
+
+@pytest.fixture
+def storage(app: FastAPI) -> FakeStorage:
+    fake = FakeStorage()
+    app.dependency_overrides[get_storage] = lambda: fake
+    # A fixed clock, so no test straddles two rate-limit windows.
+    limiter = InMemoryRateLimiter(clock=lambda: NOW)
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    return fake
+
+
+@dataclass(frozen=True)
+class Caller:
+    id: uuid.UUID
+    headers: dict[str, str]
+
+    def media_key(self, extension: str = ".jpg", purpose: str = "request_media") -> str:
+        return f"u/{self.id}/{purpose}/{uuid.uuid4().hex}{extension}"
+
+
+async def make_caller(
+    session: AsyncSession, role: UserRole = UserRole.CUSTOMER, locale: str = "en"
+) -> Caller:
+    user = User(
+        email=f"{role.value}-{uuid.uuid4().hex[:8]}@x.com",
+        password_hash="x",
+        role=role,
+        locale=locale,
+    )
+    session.add(user)
+    await session.flush()
+    token = security.create_access_token(
+        user_id=user.id, role=role, secret=TEST_JWT_SECRET, ttl_seconds=900, now=datetime.now(UTC)
+    )
+    return Caller(id=user.id, headers={"Authorization": f"Bearer {token}"})
+
+
+async def make_category(session: AsyncSession, active: bool = True) -> uuid.UUID:
+    category = Category(
+        slug=f"test-{uuid.uuid4().hex[:8]}", names={"en": "Test", "es": "Prueba"}, active=active
+    )
+    session.add(category)
+    await session.flush()
+    return category.id
+
+
+def body(**overrides: Any) -> dict[str, Any]:
+    values: dict[str, Any] = {"description": DESCRIPTION, "address": dict(ADDRESS)}
+    values.update(overrides)
+    return values
+
+
+async def create(client: httpx.AsyncClient, caller: Caller, **overrides: Any) -> httpx.Response:
+    return await client.post("/v1/requests", json=body(**overrides), headers=caller.headers)
+
+
+async def count_rows(
+    session: AsyncSession, model: type[Any], user_column: Any, user_id: uuid.UUID
+) -> int:
+    statement = select(func.count()).select_from(model).where(user_column == user_id)
+    return (await session.scalar(statement)) or 0
+
+
+# Create
+
+
+async def test_customer_creates_request_with_address_media_and_gets_public_code(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    ana = await make_caller(db_session)
+    category_id = await make_category(db_session)
+    photo, video = ana.media_key(".jpg"), ana.media_key(".mp4")
+    tomorrow = (datetime.now(UTC).date() + timedelta(days=1)).isoformat()
+
+    response = await create(
+        db_client,
+        ana,
+        category_id=str(category_id),
+        address={**ADDRESS, "line2": "Apt 2", "zip_code": "32801-1234"},
+        preferred_date=tomorrow,
+        intake_answers={"rooms": 2, "pets": True},
+        media_keys=[photo, video],
+    )
+
+    assert response.status_code == 201
+    out = response.json()
+    assert re.fullmatch(r"JF-[0-9]{6,}", out["public_code"])
+    assert out["status"] == "received"
+    assert out["customer_status"] == "customerStatus.requestReceived"
+    assert out["category_id"] == str(category_id)
+    assert out["description"] == DESCRIPTION
+    assert out["address"] == {**ADDRESS, "line2": "Apt 2", "zip_code": "32801-1234"}
+    assert out["preferred_date"] == tomorrow
+    assert out["intake_answers"] == {"rooms": 2, "pets": True}
+    # Media of one request share created_at, so their order is not the upload order.
+    assert sorted(m["kind"] for m in out["media"]) == ["photo", "video"]
+    # The address belongs to the caller.
+    row = await db_session.get(ServiceRequest, uuid.UUID(out["id"]))
+    assert row is not None
+    address = await db_session.get(Address, row.address_id)
+    assert address is not None
+    assert address.user_id == ana.id
+    assert set(out) == {
+        "id",
+        "public_code",
+        "status",
+        "customer_status",
+        "category_id",
+        "description",
+        "address",
+        "preferred_date",
+        "intake_answers",
+        "media",
+        "created_at",
+    }
+
+
+async def test_category_optional_and_inactive_category_rejected(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    ana = await make_caller(db_session)
+    inactive = await make_category(db_session, active=False)
+
+    without = await create(db_client, ana)
+    with_inactive = await create(db_client, ana, category_id=str(inactive))
+    with_unknown = await create(db_client, ana, category_id=str(uuid.uuid4()))
+
+    assert without.status_code == 201
+    assert without.json()["category_id"] is None
+    for response in (with_inactive, with_unknown):
+        assert response.status_code == 422
+        assert response.json() == INVALID_CATEGORY
+
+
+async def test_status_received_origin_app_language_from_user(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    maria = await make_caller(db_session, locale="es")
+
+    response = await create(db_client, maria, utm={"source": "instagram", "campaign": "launch"})
+
+    row = await db_session.get(ServiceRequest, uuid.UUID(response.json()["id"]))
+    assert row is not None
+    assert row.status is RequestStatus.RECEIVED
+    assert row.origin.value == "app"
+    assert row.language == "es"
+    assert row.urgency is None
+    assert row.preferred_contact is None
+    assert row.utm == {"source": "instagram", "campaign": "launch"}
+
+
+@pytest.mark.parametrize("field_name", ["urgency", "preferred_contact", "status", "origin"])
+async def test_urgency_and_preferred_contact_not_accepted(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage, field_name: str
+) -> None:
+    # Rejected (422), not ignored: their values come with the request flow (#45), and fields
+    # the server sets cannot be sent either.
+    ana = await make_caller(db_session)
+
+    response = await create(db_client, ana, **{field_name: "anything"})
+
+    assert response.status_code == 422
+    assert response.json() == VALIDATION_ERROR
+    assert await count_rows(db_session, ServiceRequest, ServiceRequest.customer_id, ana.id) == 0
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"description": "   "},
+        {"description": "x" * 2001},
+        {"address": {**ADDRESS, "state": "fl"}},
+        {"address": {**ADDRESS, "state": "FLA"}},
+        {"address": {**ADDRESS, "zip_code": "3280"}},
+        {"address": {**ADDRESS, "zip_code": "32801-12"}},
+        {"address": {**ADDRESS, "zip_code": "".join(chr(0xFF10 + int(d)) for d in "32801")}},
+        {"address": {**ADDRESS, "line1": "  "}},
+        {"address": {**ADDRESS, "city": ""}},
+        {"address": {key: value for key, value in ADDRESS.items() if key != "line1"}},
+        {"address": {**ADDRESS, "country": "US"}},
+    ],
+    ids=[
+        "blank_description",
+        "long_description",
+        "lowercase_state",
+        "three_letter_state",
+        "short_zip",
+        "bad_zip4",
+        "fullwidth_zip",
+        "blank_line1",
+        "empty_city",
+        "missing_line1",
+        "unknown_address_field",
+    ],
+)
+async def test_description_and_address_validation(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    overrides: dict[str, Any],
+) -> None:
+    ana = await make_caller(db_session)
+
+    response = await create(db_client, ana, **overrides)
+
+    assert response.status_code == 422
+    assert response.json() == VALIDATION_ERROR
+
+
+async def test_description_is_trimmed_and_bounds_accepted(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    ana = await make_caller(db_session)
+
+    trimmed = await create(db_client, ana, description="  Fix it  ")
+    longest = await create(db_client, ana, description="x" * 2000)
+
+    assert trimmed.json()["description"] == "Fix it"
+    assert longest.status_code == 201
+
+
+async def test_preferred_date_in_past_rejected(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    ana = await make_caller(db_session)
+    today = datetime.now(UTC).date()
+
+    past = await create(db_client, ana, preferred_date=(today - timedelta(days=1)).isoformat())
+    same_day = await create(db_client, ana, preferred_date=today.isoformat())
+
+    assert past.status_code == 422
+    assert past.json() == VALIDATION_ERROR
+    assert same_day.status_code == 201
+
+
+async def test_intake_answers_size_limit(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    ana = await make_caller(db_session)
+
+    too_big = await create(db_client, ana, intake_answers={"notes": "x" * INTAKE_MAX_BYTES})
+    fits = await create(db_client, ana, intake_answers={"notes": "x" * 50})
+    not_an_object = await create(db_client, ana, intake_answers=["a", "b"])
+
+    assert too_big.status_code == 422
+    assert too_big.json() == VALIDATION_ERROR
+    assert fits.status_code == 201
+    assert not_an_object.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"description": "leak\x00here"},
+        {"address": {**ADDRESS, "line1": "742\x00Evergreen"}},
+        {"address": {**ADDRESS, "line2": "Apt\x002"}},
+        {"address": {**ADDRESS, "city": "Or\x00lando"}},
+        {"utm": {"source": "ig\x00"}},
+        {"intake_answers": {"notes": "x\x00y"}},
+        {"intake_answers": {"no\x00tes": "x"}},
+        {"intake_answers": {"nested": [{"deep": "\x00"}]}},
+        {"intake_answers": {"rooms": float("nan")}},
+        {"intake_answers": {"rooms": float("inf")}},
+        {"intake_answers": {"notes": "\ud800"}},
+    ],
+    ids=[
+        "nul_description",
+        "nul_line1",
+        "nul_line2",
+        "nul_city",
+        "nul_utm",
+        "nul_intake_value",
+        "nul_intake_key",
+        "nul_intake_nested",
+        "nan_intake",
+        "infinity_intake",
+        "lone_surrogate_intake",
+    ],
+)
+async def test_values_postgres_cannot_store_are_422(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    overrides: dict[str, Any],
+) -> None:
+    # Refused before any write, not a 500 from the database.
+    ana = await make_caller(db_session)
+    # Serialized here: httpx refuses NaN and lone surrogates, a raw client does not.
+    raw = json.dumps(body(**overrides))
+
+    response = await db_client.post(
+        "/v1/requests",
+        content=raw,
+        headers={**ana.headers, "Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == VALIDATION_ERROR
+
+
+# Media
+
+
+async def test_media_key_of_other_user_rejected(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    ana = await make_caller(db_session)
+    bruno = await make_caller(db_session)
+    anas_key = ana.media_key()
+
+    response = await create(db_client, bruno, media_keys=[bruno.media_key(), anas_key])
+
+    assert response.status_code == 422
+    assert response.json() == INVALID_MEDIA
+    assert anas_key not in response.text
+    assert str(ana.id) not in response.text
+
+
+@pytest.mark.parametrize(
+    ("purpose", "extension"),
+    [
+        ("job_photo", ".jpg"),
+        ("profile_photo", ".jpg"),
+        ("pro_document", ".pdf"),
+        # A request_media key with an extension that purpose never issues.
+        ("request_media", ".pdf"),
+    ],
+)
+async def test_media_key_wrong_purpose_rejected(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    purpose: str,
+    extension: str,
+) -> None:
+    ana = await make_caller(db_session)
+
+    response = await create(db_client, ana, media_keys=[ana.media_key(extension, purpose)])
+
+    assert response.status_code == 422
+    assert response.json() == INVALID_MEDIA
+
+
+@pytest.mark.parametrize(
+    "key_template",
+    [
+        "../u/{id}/request_media/{hex}.jpg",
+        "u/{id}/request_media/{hex}.jpg/x",
+        "u/{id}/request_media/{hex}" + "0" * 300 + ".jpg",
+        "not a key",
+        "",
+    ],
+)
+async def test_malformed_media_key_rejected(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage, key_template: str
+) -> None:
+    ana = await make_caller(db_session)
+    key = key_template.format(id=ana.id, hex=uuid.uuid4().hex)
+
+    response = await create(db_client, ana, media_keys=[key])
+
+    assert response.status_code == 422
+    assert response.json() == INVALID_MEDIA
+
+
+async def test_too_many_media_rejected(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    ana = await make_caller(db_session)
+
+    too_many = await create(
+        db_client, ana, media_keys=[ana.media_key() for _ in range(MEDIA_MAX + 1)]
+    )
+    at_max = await create(db_client, ana, media_keys=[ana.media_key() for _ in range(MEDIA_MAX)])
+
+    assert too_many.status_code == 422
+    assert too_many.json() == INVALID_MEDIA
+    assert at_max.status_code == 201
+
+
+async def test_duplicate_media_key_rejected(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    ana = await make_caller(db_session)
+    key = ana.media_key()
+
+    response = await create(db_client, ana, media_keys=[key, key])
+
+    assert response.status_code == 422
+    assert response.json() == INVALID_MEDIA
+
+
+@pytest.mark.parametrize(
+    ("extension", "kind"),
+    [
+        (".jpg", "photo"),
+        (".png", "photo"),
+        (".webp", "photo"),
+        (".heic", "photo"),
+        (".mp4", "video"),
+        (".mov", "video"),
+    ],
+)
+async def test_media_kind_from_extension(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    extension: str,
+    kind: str,
+) -> None:
+    ana = await make_caller(db_session)
+
+    response = await create(db_client, ana, media_keys=[ana.media_key(extension)])
+
+    assert response.status_code == 201
+    assert [m["kind"] for m in response.json()["media"]] == [kind]
+
+
+@pytest.mark.parametrize(
+    "utm",
+    [{"source": "ig", "referrer": "x"}, {"source": "x" * 101}, {"campaign": 5}],
+    ids=["unknown_key", "too_long", "not_a_string"],
+)
+async def test_utm_keys_whitelisted(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    utm: dict[str, Any],
+) -> None:
+    ana = await make_caller(db_session)
+
+    response = await create(db_client, ana, utm=utm)
+
+    assert response.status_code == 422
+    assert response.json() == VALIDATION_ERROR
+
+
+async def test_transaction_rolls_back_on_failure(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    ana = await make_caller(db_session)
+    key = ana.media_key()
+    assert (await create(db_client, ana, media_keys=[key])).status_code == 201
+
+    # The key passes every check, but it is already attached: the insert fails after the
+    # address and the request were written, and all of it must roll back.
+    reused = await create(db_client, ana, media_keys=[ana.media_key(), key])
+
+    assert reused.status_code == 422
+    assert reused.json() == INVALID_MEDIA
+    assert await count_rows(db_session, ServiceRequest, ServiceRequest.customer_id, ana.id) == 1
+    assert await count_rows(db_session, Address, Address.user_id, ana.id) == 1
+    media = (await db_session.scalars(select(RequestMedia))).all()
+    assert [m.file_key for m in media] == [key]
+
+
+async def test_create_rate_limited_per_user(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    ana = await make_caller(db_session)
+    bruno = await make_caller(db_session)
+
+    for _ in range(CREATE_LIMIT):
+        assert (await create(db_client, ana)).status_code == 201
+    limited = await create(db_client, ana)
+
+    assert limited.status_code == 429
+    assert limited.json()["error"]["code"] == "rate_limited"
+    assert int(limited.headers["Retry-After"]) >= 1
+    assert (await create(db_client, bruno)).status_code == 201
+
+
+# List and read
+
+
+async def test_list_only_own_newest_first_with_cursor(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    ana = await make_caller(db_session)
+    bruno = await make_caller(db_session)
+    created = [
+        (await create(db_client, ana, media_keys=media)).json()
+        for media in ([], [ana.media_key()], [ana.media_key(), ana.media_key()])
+    ]
+    brunos = (await create(db_client, bruno)).json()
+    # One test transaction gives every row the same now(): spread them out, oldest first.
+    base = datetime(2026, 10, 1, tzinfo=UTC)
+    for minutes, request in enumerate(created):
+        await db_session.execute(
+            update(ServiceRequest)
+            .where(ServiceRequest.id == uuid.UUID(request["id"]))
+            .values(created_at=base + timedelta(minutes=minutes))
+        )
+
+    storage.gets.clear()
+
+    first = (await db_client.get("/v1/requests", headers=ana.headers)).json()
+    second = (
+        await db_client.get(
+            "/v1/requests",
+            params={"cursor": first["next_cursor"], "limit": LIST_MAX},
+            headers=ana.headers,
+        )
+    ).json()
+    capped = (await db_client.get("/v1/requests", params={"limit": 99}, headers=ana.headers)).json()
+    brunos_list = (await db_client.get("/v1/requests", headers=bruno.headers)).json()
+
+    newest_first = [request["id"] for request in reversed(created)]
+    assert [item["id"] for item in first["items"]] == newest_first[:LIST_DEFAULT]
+    assert [item["id"] for item in second["items"]] == newest_first[LIST_DEFAULT:]
+    assert second["next_cursor"] is None
+    assert [item["id"] for item in capped["items"]] == newest_first[:LIST_MAX]
+    assert [item["media_count"] for item in second["items"]] == [1, 0]
+    assert [item["media_count"] for item in first["items"]] == [2]
+    assert set(first["items"][0]) == {
+        "id",
+        "public_code",
+        "status",
+        "customer_status",
+        "category_id",
+        "created_at",
+        "media_count",
+    }
+    assert [item["id"] for item in brunos_list["items"]] == [brunos["id"]]
+    assert storage.gets == []  # the list never presigns
+    assert "sig=" not in json.dumps(first)
+
+
+def encoded_cursor(raw: str) -> str:
+    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+
+
+@pytest.mark.parametrize(
+    "cursor",
+    [
+        "not-base64!",
+        "Zm9v",
+        "MjAyNnx4",
+        encoded_cursor(f"2026-10-01T00:00:00|{uuid.UUID(int=1)}"),  # naive
+        # Valid ISO timestamps that leave the database's range once in UTC.
+        encoded_cursor(f"0001-01-01T00:00:00+05:00|{uuid.UUID(int=1)}"),
+        encoded_cursor(f"9999-12-31T23:59:59-05:00|{uuid.UUID(int=1)}"),
+    ],
+    ids=["not_base64", "no_separator", "bad_parts", "naive", "before_min", "after_max"],
+)
+async def test_list_rejects_malformed_cursor(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage, cursor: str
+) -> None:
+    ana = await make_caller(db_session)
+
+    response = await db_client.get("/v1/requests", params={"cursor": cursor}, headers=ana.headers)
+
+    assert response.status_code == 422
+    assert response.json() == VALIDATION_ERROR
+
+
+async def test_detail_own_200_other_customer_404(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    ana = await make_caller(db_session)
+    bruno = await make_caller(db_session)
+    request_id = (await create(db_client, ana)).json()["id"]
+
+    own = await db_client.get(f"/v1/requests/{request_id}", headers=ana.headers)
+    others = await db_client.get(f"/v1/requests/{request_id}", headers=bruno.headers)
+    unknown = await db_client.get(f"/v1/requests/{uuid.uuid4()}", headers=bruno.headers)
+    malformed = await db_client.get("/v1/requests/not-a-uuid", headers=ana.headers)
+
+    assert own.status_code == 200
+    assert own.json()["id"] == request_id
+    for response in (others, unknown):
+        assert response.status_code == 404
+        assert response.json() == NOT_FOUND
+    assert others.text == unknown.text
+    assert malformed.status_code == 422
+
+
+@pytest.mark.parametrize("role", [UserRole.PRO, UserRole.AGENT, UserRole.ADMIN])
+async def test_pro_agent_admin_get_403(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage, role: UserRole
+) -> None:
+    ana = await make_caller(db_session)
+    request_id = (await create(db_client, ana)).json()["id"]
+    caller = await make_caller(db_session, role)
+
+    responses = [
+        await create(db_client, caller),
+        await db_client.get("/v1/requests", headers=caller.headers),
+        await db_client.get(f"/v1/requests/{request_id}", headers=caller.headers),
+    ]
+
+    for response in responses:
+        assert response.status_code == 403
+        assert response.json() == FORBIDDEN
+
+
+async def test_unauthenticated_is_401(db_client: httpx.AsyncClient, storage: FakeStorage) -> None:
+    responses = [
+        await db_client.post("/v1/requests", json=body()),
+        await db_client.get("/v1/requests"),
+        await db_client.get(f"/v1/requests/{uuid.uuid4()}"),
+    ]
+
+    for response in responses:
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "invalid_token"
+
+
+async def test_detail_media_has_presigned_urls(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    ana = await make_caller(db_session)
+    photo, video = ana.media_key(".png"), ana.media_key(".mov")
+    request_id = (await create(db_client, ana, media_keys=[photo, video])).json()["id"]
+    storage.gets.clear()
+
+    detail = (await db_client.get(f"/v1/requests/{request_id}", headers=ana.headers)).json()
+
+    assert sorted(m["url"] for m in detail["media"]) == sorted(
+        f"https://storage.example.invalid/get/{key}?sig=fake" for key in (photo, video)
+    )
+    assert sorted(storage.gets) == sorted([(photo, MEDIA_TTL), (video, MEDIA_TTL)])
+    for media in detail["media"]:
+        delta = datetime.fromisoformat(media["expires_at"]) - datetime.now(UTC)
+        assert timedelta(seconds=MEDIA_TTL - 5) < delta <= timedelta(seconds=MEDIA_TTL)
+
+
+async def test_no_pii_in_logs(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ana = await make_caller(db_session)
+    key = ana.media_key()
+
+    with caplog.at_level(logging.DEBUG):
+        created = (await create(db_client, ana, media_keys=[key])).json()
+        await create(db_client, ana, media_keys=[key])  # rejected: key reused
+        await create(db_client, ana, address={**ADDRESS, "state": "fl"})  # rejected
+        await db_client.get("/v1/requests", headers=ana.headers)
+        await db_client.get(f"/v1/requests/{created['id']}", headers=ana.headers)
+
+    formatter = JsonFormatter()
+    output = "\n".join(formatter.format(record) for record in caplog.records)
+    for secret in (DESCRIPTION, ADDRESS["line1"], ADDRESS["zip_code"], key, "sig=fake"):
+        assert secret not in output
+    [record] = [r for r in caplog.records if r.message == "request_created"]
+    payload = json.loads(formatter.format(record))
+    assert set(payload) - {"timestamp", "level", "logger", "message", "request_id"} == {
+        "service_request_id",
+        "user_id",
+        "media_count",
+    }
+    assert payload["service_request_id"] == created["id"]
+    assert payload.get("request_id") != created["id"]  # the HTTP correlation id is kept
+    assert payload["media_count"] == 1
+
+
+# Customer-visible status
+
+
+def test_customer_status_mapping_is_total_and_uses_glossary_keys() -> None:
+    text = GLOSSARY.read_text(encoding="utf-8")
+    section = text.split("## Customer-visible statuses", 1)[1].split("\n## ", 1)[0]
+    keys = set(re.findall(r"`(customerStatus\.\w+)`", section))
+    expected = {
+        "received": "customerStatus.requestReceived",
+        "reviewing": "customerStatus.reviewing",
+        "finding_pro": "customerStatus.findingAPro",
+        "quote_ready": "customerStatus.quoteReady",
+        "accepted": "customerStatus.quoteReady",
+        "expired": "customerStatus.cancelled",
+        "cancelled": "customerStatus.cancelled",
+    }
+
+    assert len(keys) == 11
+    assert {status.value: REQUEST_CUSTOMER_STATUS[status] for status in RequestStatus} == expected
+    assert set(REQUEST_CUSTOMER_STATUS.values()) <= keys

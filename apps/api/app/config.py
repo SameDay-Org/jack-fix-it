@@ -139,6 +139,14 @@ class Settings(BaseSettings):
     # the guesses against one account per day (5 codes x 5 tries = 25 by default).
     password_reset_daily_limit: int = Field(default=5, gt=0)
     password_reset_daily_window_seconds: int = Field(default=86_400, gt=0)
+    # Service requests (D8.1, #42): limits on what one request may carry, how often a customer
+    # may create one, and how many a list page holds.
+    request_intake_max_bytes: int = Field(default=16_384, gt=0)
+    request_media_max_items: int = Field(default=10, gt=0)
+    request_create_limit: int = Field(default=10, gt=0)
+    request_create_window_seconds: int = Field(default=3_600, gt=0)
+    request_list_default_limit: int = Field(default=20, gt=0)
+    request_list_max_limit: int = Field(default=50, gt=0)
 
     @field_validator("database_url")
     @classmethod
@@ -187,6 +195,12 @@ class Settings(BaseSettings):
     @classmethod
     def _empty_is_none(cls, value: object) -> object:
         return None if value == "" else value
+
+    @model_validator(mode="after")
+    def _list_default_within_max(self) -> Self:
+        if self.request_list_default_limit > self.request_list_max_limit:
+            raise ValueError("REQUEST_LIST_DEFAULT_LIMIT must not exceed REQUEST_LIST_MAX_LIMIT")
+        return self
 
     @model_validator(mode="after")
     def _require_jwt_secret_when_deployed(self) -> Self:

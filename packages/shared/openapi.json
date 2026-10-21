@@ -811,10 +811,360 @@
           }
         ]
       }
+    },
+    "/v1/requests": {
+      "post": {
+        "tags": [
+          "requests"
+        ],
+        "summary": "Create a service request",
+        "description": "Creates a request for the signed-in customer, with a new service address and media.\n\nAttach photos and videos by uploading them first (POST /v1/uploads, purpose\nrequest_media) and listing their keys. The server sets the origin (app), the language\n(the account's) and the status (received).",
+        "operationId": "create_request_v1_requests_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_category: unknown or inactive category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers have service requests.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many requests created; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "requests"
+        ],
+        "summary": "List my service requests",
+        "description": "The caller's own requests, newest first, in pages.",
+        "operationId": "list_requests_v1_requests_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Capped at the server's maximum.",
+              "title": "Limit"
+            },
+            "description": "Capped at the server's maximum."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers have service requests.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/requests/{request_id}": {
+      "get": {
+        "tags": [
+          "requests"
+        ],
+        "summary": "Get one of my service requests",
+        "description": "One of the caller's requests, with presigned URLs for its media.",
+        "operationId": "get_request_v1_requests__request_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers have service requests.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no request of the caller with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AddressIn": {
+        "properties": {
+          "line1": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "pattern": "^[^\\x00]*$",
+            "title": "Line1"
+          },
+          "line2": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "pattern": "^[^\\x00]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line2"
+          },
+          "city": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[^\\x00]*$",
+            "title": "City"
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$",
+            "title": "State",
+            "description": "Two uppercase letters, e.g. FL."
+          },
+          "zip_code": {
+            "type": "string",
+            "pattern": "^[0-9]{5}(-[0-9]{4})?$",
+            "title": "Zip Code",
+            "description": "5 digits or ZIP+4."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "line1",
+          "city",
+          "state",
+          "zip_code"
+        ],
+        "title": "AddressIn",
+        "description": "A US service address as the customer types it. Geocoding (lat/lng) comes later."
+      },
+      "AddressOut": {
+        "properties": {
+          "line1": {
+            "type": "string",
+            "title": "Line1"
+          },
+          "line2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line2"
+          },
+          "city": {
+            "type": "string",
+            "title": "City"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "zip_code": {
+            "type": "string",
+            "title": "Zip Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "line1",
+          "line2",
+          "city",
+          "state",
+          "zip_code"
+        ],
+        "title": "AddressOut"
+      },
       "AuthResponse": {
         "properties": {
           "user": {
@@ -938,6 +1288,7 @@
         ],
         "title": "ErrorResponse"
       },
+      "JsonValue": {},
       "LivenessResponse": {
         "properties": {
           "status": {
@@ -970,6 +1321,30 @@
           "password"
         ],
         "title": "LoginRequest"
+      },
+      "MediaOut": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/RequestMediaKind"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "Presigned GET URL."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "url",
+          "expires_at"
+        ],
+        "title": "MediaOut"
       },
       "PasswordForgotRequest": {
         "properties": {
@@ -1124,6 +1499,268 @@
         ],
         "title": "RegisterRequest"
       },
+      "RequestCreate": {
+        "properties": {
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "pattern": "^[^\\x00]*$",
+            "title": "Description"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "address": {
+            "$ref": "#/components/schemas/AddressIn"
+          },
+          "preferred_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Date",
+            "description": "Today or later, as a UTC date."
+          },
+          "intake_answers": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Intake Answers",
+            "description": "Answers to the category's intake questions; a size limit applies. NUL characters and non-finite numbers are refused."
+          },
+          "media_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Media Keys",
+            "description": "Keys of the caller's own request_media uploads (POST /v1/uploads)."
+          },
+          "utm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UtmIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "description",
+          "address"
+        ],
+        "title": "RequestCreate"
+      },
+      "RequestMediaKind": {
+        "type": "string",
+        "enum": [
+          "photo",
+          "video"
+        ],
+        "title": "RequestMediaKind"
+      },
+      "RequestOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "public_code": {
+            "type": "string",
+            "title": "Public Code",
+            "description": "The code shown to the customer, e.g. JF-000124."
+          },
+          "status": {
+            "$ref": "#/components/schemas/RequestStatus"
+          },
+          "customer_status": {
+            "type": "string",
+            "title": "Customer Status",
+            "description": "The glossary i18n key the customer sees."
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "address": {
+            "$ref": "#/components/schemas/AddressOut"
+          },
+          "preferred_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Date"
+          },
+          "intake_answers": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Intake Answers"
+          },
+          "media": {
+            "items": {
+              "$ref": "#/components/schemas/MediaOut"
+            },
+            "type": "array",
+            "title": "Media"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "public_code",
+          "status",
+          "customer_status",
+          "category_id",
+          "description",
+          "address",
+          "preferred_date",
+          "intake_answers",
+          "media",
+          "created_at"
+        ],
+        "title": "RequestOut"
+      },
+      "RequestPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RequestSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Pass as `cursor` for the next page."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "RequestPage"
+      },
+      "RequestStatus": {
+        "type": "string",
+        "enum": [
+          "received",
+          "reviewing",
+          "finding_pro",
+          "quote_ready",
+          "accepted",
+          "expired",
+          "cancelled"
+        ],
+        "title": "RequestStatus",
+        "description": "Internal states (docs/glossary.md). Transitions belong to the state machine (#60)."
+      },
+      "RequestSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "public_code": {
+            "type": "string",
+            "title": "Public Code"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RequestStatus"
+          },
+          "customer_status": {
+            "type": "string",
+            "title": "Customer Status"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "media_count": {
+            "type": "integer",
+            "title": "Media Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "public_code",
+          "status",
+          "customer_status",
+          "category_id",
+          "created_at",
+          "media_count"
+        ],
+        "title": "RequestSummary"
+      },
       "UploadPurpose": {
         "type": "string",
         "enum": [
@@ -1262,6 +1899,79 @@
           "suspended"
         ],
         "title": "UserStatus"
+      },
+      "UtmIn": {
+        "properties": {
+          "source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "pattern": "^[^\\x00]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "medium": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "pattern": "^[^\\x00]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Medium"
+          },
+          "campaign": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "pattern": "^[^\\x00]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign"
+          },
+          "term": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "pattern": "^[^\\x00]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Term"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "pattern": "^[^\\x00]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "UtmIn",
+        "description": "Campaign attribution. Only these five keys; anything else is a 422."
       }
     },
     "securitySchemes": {
