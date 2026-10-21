@@ -1,9 +1,6 @@
 """Alembic environment: async engine, URL from app settings, metadata from app.db.Base."""
 
 import asyncio
-import importlib
-import importlib.util
-import pkgutil
 from logging.config import fileConfig
 
 from alembic import context
@@ -11,26 +8,17 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
-import app.modules
 from app.config import get_settings
-from app.db import Base
+from app.db import Base, import_models
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-
-def _import_models() -> None:
-    """Import app/modules/<domain>/models.py so autogenerate sees every table."""
-    for module in pkgutil.iter_modules(app.modules.__path__):
-        name = f"app.modules.{module.name}.models"
-        if importlib.util.find_spec(name) is not None:
-            importlib.import_module(name)
-
-
-_import_models()
+import_models()
 target_metadata = Base.metadata
-database_url = get_settings().database_url
+# Tests pass their own database in config.attributes (tests/conftest.py); otherwise DATABASE_URL.
+database_url: str = config.attributes.get("database_url") or get_settings().database_url
 
 
 def run_migrations_offline() -> None:

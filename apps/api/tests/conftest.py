@@ -1,11 +1,19 @@
+import asyncio
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import httpx
 import pytest
+from alembic import command
+from alembic.config import Config
 from fastapi import FastAPI
+from sqlalchemy import URL, make_url, pool, text
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.config import Settings
 from app.main import create_app
+
+API_DIR = Path(__file__).resolve().parents[1]
 
 
 def make_settings(**overrides: object) -> Settings:
@@ -36,3 +44,60 @@ async def client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         yield client
+
+
+async def _create_database_if_missing(url: URL) -> None:
+    # CREATE DATABASE cannot run inside a transaction, hence AUTOCOMMIT.
+    engine = create_async_engine(
+        url.set(database="postgres"), isolation_level="AUTOCOMMIT", poolclass=pool.NullPool
+    )
+    try:
+        async with engine.connect() as connection:
+            exists = await connection.scalar(
+                text("SELECT 1 FROM pg_database WHERE datname = :name"), {"name": url.database}
+            )
+            if not exists:
+                name = connection.dialect.identifier_preparer.quote(str(url.database))
+                await connection.execute(text(f"CREATE DATABASE {name}"))
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture(scope="session")
+def test_database_url() -> URL:
+    """<dbname>_test next to DATABASE_URL's database, created and migrated to head once.
+
+    Sync on purpose: alembic/env.py runs its own event loop. The dev database is never written.
+    """
+    url = make_url(Settings().database_url)
+    url = url.set(database=f"{url.database}_test")
+    asyncio.run(_create_database_if_missing(url))
+
+    # No ini file, so alembic/env.py does not reconfigure logging for the test run.
+    config = Config()
+    config.set_main_option("script_location", str(API_DIR / "alembic"))
+    config.attributes["database_url"] = url.render_as_string(hide_password=False)
+    command.upgrade(config, "head")
+    return url
+
+
+@pytest.fixture
+async def db_session(test_database_url: URL) -> AsyncIterator[AsyncSession]:
+    """A session inside an outer transaction that is rolled back after the test.
+
+    Commits inside the test only release a savepoint, so no row outlives the test.
+    """
+    engine = create_async_engine(test_database_url, poolclass=pool.NullPool)
+    try:
+        async with engine.connect() as connection:
+            transaction = await connection.begin()
+            session = AsyncSession(
+                bind=connection, join_transaction_mode="create_savepoint", expire_on_commit=False
+            )
+            try:
+                yield session
+            finally:
+                await session.close()
+                await transaction.rollback()
+    finally:
+        await engine.dispose()
