@@ -5,7 +5,8 @@ TypeScript, NativeWind 4 (Tailwind 3.4). One app with customer and pro modes. Ro
 rules apply.
 
 - Native modules go in with `npx expo install <pkg>` so versions match the SDK. A new native
-  module needs a new EAS dev build: write "Needs new dev build" under Risks / follow-ups.
+  module needs a new EAS dev build (steps below): write "Needs new dev build" under Risks /
+  follow-ups.
 - Styling: NativeWind `className`. Tokens are the deck palette, radius and type scales from
   `docs/design/README.md`, held in `src/theme/tokens.json` and mapped by `tailwind.config.js`
   (`bg-navy-900`, `rounded-lg`, `text-headline`), provisional until the design system (D2.1,
@@ -17,8 +18,12 @@ rules apply.
   gray-50) and of the top safe-area backdrop, which stays outside scrolling content. The root
   layout mounts no `StatusBar`, and ESLint rejects `expo-status-bar` or safe-area view imports
   in `src/app` (`eslint.config.js`).
-- Liquid Glass goes only through `GlassSurface` (#117), never directly through
-  `expo-glass-effect` in a screen (ADR 0008).
+- Liquid Glass: only through `GlassSurface` (`src/components/ui`): `tone` light | dark,
+  `shape` pill | xl | lg, `interactive`. Native `GlassView` on iOS 26+ when
+  `isLiquidGlassAvailable()` and Reduce Transparency is off (live, `useReduceTransparency`);
+  otherwise a solid token surface with the same shape (opaque white with the bubble shadow, or
+  solid navy-700); while the preference is still unknown it renders the solid surface too. Controls layer only, never content cards; ESLint rejects
+  `expo-glass-effect` anywhere else (ADR 0008).
 - Data: TanStack Query for server state, Zustand for small client state. Tokens go in
   `expo-secure-store` (D5.4, #32). API types come from `@jack/shared`.
 - Strings: `src/i18n/locales/{en,es}.json` through `useTranslation()`; the device language
@@ -32,7 +37,10 @@ rules apply.
   and error states.
 
 ```sh
-pnpm --filter @jack/mobile start       # needs a dev build (eas build --profile development-simulator)
+# Dev client (not Expo Go): build once on EAS, install the APK, then start Metro for it.
+npx eas-cli build --profile development-simulator --platform android   # needs `eas whoami`
+adb install <downloaded>.apk                                            # com.jackfixit.app.dev
+pnpm --filter @jack/mobile exec expo start --dev-client
 pnpm --filter @jack/mobile typecheck
 pnpm --filter @jack/mobile lint
 pnpm --filter @jack/mobile test        # jest-expo
