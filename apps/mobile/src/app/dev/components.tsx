@@ -1,20 +1,19 @@
 // Dev-only gallery, unreachable outside __DEV__: the sample strings below are literal on purpose.
 import { Redirect } from "expo-router";
-import { StatusBar } from "expo-status-bar";
 import { useState, type ReactNode } from "react";
 import { ScrollView, Text, View } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { HeroSample } from "@/components/dev/HeroSample";
 import {
   Avatar,
   Button,
   Card,
   Input,
+  Screen,
   Skeleton,
   StatusBadge,
   type StatusTone,
 } from "@/components/ui";
-import { continuousCorners } from "@/theme";
 
 const TONES: StatusTone[] = ["neutral", "info", "success", "warning", "danger", "brand"];
 
@@ -34,40 +33,6 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-// Hero sample after references 02a and 03: navy sheet, display headline with one lime word, a pill
-// search field. It shows the tokens together; the working search ships with the home screen (#33).
-function HeroSample() {
-  const insets = useSafeAreaInsets();
-
-  return (
-    <View
-      className="rounded-b-xl bg-navy-900"
-      style={[{ paddingTop: insets.top }, continuousCorners]}
-    >
-      <View className="gap-6 px-4 pb-8 pt-4">
-        <View className="gap-2">
-          <Text className="text-center text-display text-white">
-            What needs <Text className="text-green-500">fixing</Text> today?
-          </Text>
-          <Text className="text-center text-callout text-white">
-            Component kit sample, dev only
-          </Text>
-        </View>
-        <View className="flex-row overflow-hidden rounded-pill bg-white">
-          <View className="min-h-12 flex-1 justify-center px-5">
-            <Text numberOfLines={1} className="text-callout text-gray-500">
-              Describe the job
-            </Text>
-          </View>
-          <View className="min-h-12 items-center justify-center bg-green-500 px-5">
-            <Text className="text-headline text-navy-900">Search</Text>
-          </View>
-        </View>
-      </View>
-    </View>
-  );
-}
-
 function Gallery() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -75,8 +40,7 @@ function Gallery() {
   const bump = () => setPresses((count) => count + 1);
 
   return (
-    <SafeAreaView className="flex-1 bg-gray-50" edges={["bottom"]}>
-      <StatusBar style="light" />
+    <Screen bar="hero">
       <ScrollView contentContainerClassName="gap-8 pb-4" keyboardShouldPersistTaps="handled">
         <HeroSample />
         <Section title="Button">
@@ -163,7 +127,7 @@ function Gallery() {
           </Card>
         </Section>
       </ScrollView>
-    </SafeAreaView>
+    </Screen>
   );
 }
 

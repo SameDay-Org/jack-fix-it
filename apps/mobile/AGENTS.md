@@ -12,6 +12,11 @@ rules apply.
   #18). Spacing is Tailwind's scale on a 4-pt grid (`metro.config.js` sets rem 16). The bubble
   shadow and continuous corners come from `src/theme`. Third-party components need `cssInterop`
   before `className` works on them.
+- Screens: every route renders inside `Screen` (`src/components/ui`), the one owner of the
+  status-bar style (`bar="hero"`: light icons over navy-900; `bar="light"`: dark icons over
+  gray-50) and of the top safe-area backdrop, which stays outside scrolling content. The root
+  layout mounts no `StatusBar`, and ESLint rejects `expo-status-bar` or safe-area view imports
+  in `src/app` (`eslint.config.js`).
 - Liquid Glass goes only through `GlassSurface` (#117), never directly through
   `expo-glass-effect` in a screen (ADR 0008).
 - Data: TanStack Query for server state, Zustand for small client state. Tokens go in

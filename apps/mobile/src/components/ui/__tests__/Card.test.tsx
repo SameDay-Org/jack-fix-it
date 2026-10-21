@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react-native";
 import { StyleSheet, Text } from "react-native";
 
-import { bubbleShadow } from "@/theme";
+import { bubbleShadow, pressedTransform } from "@/theme";
 
 import { Card } from "../Card";
 
@@ -55,10 +55,10 @@ describe("Card", () => {
     const card = () => screen.getByRole("button", { name: "Open job" });
 
     await fireEvent(card(), "pressIn");
-    expect(card().props.className).toContain("scale-pressed");
+    expect(StyleSheet.flatten(card().props.style)).toMatchObject(pressedTransform);
     expect(card().props.className).toContain("bg-white");
 
     await fireEvent(card(), "pressOut");
-    expect(card().props.className).not.toContain("scale-pressed");
+    expect(StyleSheet.flatten(card().props.style).transform).toBeUndefined();
   });
 });

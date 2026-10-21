@@ -25,3 +25,12 @@ export const bubbleShadow = {
 
 /** Radii read as squircles on iOS; Android has no `borderCurve` and ignores it. */
 export const continuousCorners = { borderCurve: "continuous" } as const satisfies ViewStyle;
+
+/**
+ * A pressed surface shrinks a hair instead of flashing a color. It is a plain style, not a
+ * `scale-*` class: NativeWind builds transforms on CSS variables, and a variable that first appears
+ * on press makes the component remount mid-press (and crashes the dev warning that reports it).
+ */
+export const pressedTransform = {
+  transform: [{ scale: tokens.motion.pressedScale }],
+} as const satisfies ViewStyle;

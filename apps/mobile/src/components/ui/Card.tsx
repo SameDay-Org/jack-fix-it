@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Pressable, View } from "react-native";
 
-import { bubbleShadow, continuousCorners } from "@/theme";
+import { bubbleShadow, continuousCorners, pressedTransform } from "@/theme";
 
 import { cx } from "./cx";
 import { useFlag } from "./useFlag";
@@ -43,9 +43,8 @@ export function Card(props: CardProps) {
         onPressIn={pressIn}
         onPressOut={pressOut}
         testID={testID}
-        style={SURFACE_STYLE}
-        // A pressed card shrinks a hair instead of flashing a color.
-        className={cx(SURFACE, pressed && "scale-pressed", className)}
+        style={pressed ? [...SURFACE_STYLE, pressedTransform] : SURFACE_STYLE}
+        className={cx(SURFACE, className)}
       >
         {children}
       </Pressable>

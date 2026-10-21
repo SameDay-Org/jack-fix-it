@@ -26,9 +26,5 @@ module.exports = {
       ]),
     ),
     boxShadow: {},
-    extend: {
-      // Pressed cards shrink a hair (Card.tsx); a token so the value is not an arbitrary class.
-      scale: { pressed: ".98" },
-    },
   },
 };
