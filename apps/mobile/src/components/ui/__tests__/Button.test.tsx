@@ -77,5 +77,6 @@ describe("Button", () => {
     expect(button("Outline").props.className).toContain("border-2 border-navy-900");
     expect(button("Medium").props.style).toMatchObject({ borderCurve: "continuous" });
     expect(screen.getByText("Medium").props.className).toContain("text-headline");
+    expect(screen.getByText("Medium").props.numberOfLines).toBe(1); // one line by contract
   });
 });

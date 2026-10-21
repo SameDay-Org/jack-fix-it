@@ -8,6 +8,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { attachQueryClient, restoreSession } from "@/api";
+import { ToastHost } from "@/components/ui";
 
 // The status bar is owned per screen by `Screen` (src/components/ui); the root mounts none.
 export default function RootLayout() {
@@ -25,6 +26,7 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <Stack screenOptions={{ headerShown: false }} />
+          <ToastHost />
         </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

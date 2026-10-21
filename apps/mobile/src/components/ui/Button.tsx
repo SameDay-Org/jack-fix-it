@@ -97,8 +97,11 @@ export function Button({
         className,
       )}
     >
-      {/* The label stays mounted, invisible, while loading so the width does not jump. */}
+      {/* The label stays mounted, invisible, while loading so the width does not jump. A button label
+          is one line by contract: without `numberOfLines`, Android can wrap a label that measures as
+          one line by a fraction of a pixel and hide its second half. */}
       <Text
+        numberOfLines={1}
         className={cx(
           "text-center text-headline",
           forState(classes.label, pressed),
