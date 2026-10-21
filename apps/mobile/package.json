@@ -17,7 +17,8 @@
       "/node_modules/",
       "/dist/",
       "/dist-ci/"
-    ]
+    ],
+    "resolver": "react-native-reanimated/jest/resolver"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.3",
@@ -46,6 +47,7 @@
   },
   "devDependencies": {
     "@react-native/jest-preset": "^0.88.0",
+    "@testing-library/react-native": "14.1.0",
     "@types/jest": "^30.0.0",
     "@types/react": "~19.3.0",
     "eslint": "^9.39.5",
