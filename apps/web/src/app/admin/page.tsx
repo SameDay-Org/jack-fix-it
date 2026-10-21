@@ -8,7 +8,7 @@ export default async function AdminPage() {
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-3 px-6 text-center">
       <h1 className="text-2xl font-semibold">{t("admin.title")}</h1>
-      <p className="text-navy/70">{t("admin.notAvailable")}</p>
+      <p className="text-gray-500">{t("admin.notAvailable")}</p>
     </main>
   );
 }

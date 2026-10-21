@@ -1,12 +1,25 @@
 @import "tailwindcss";
 
 /*
- * Brand tokens. PROVISIONAL: the hex values are placeholders until the design system
- * lands (D2.1, #18). Keep them in sync with apps/mobile/src/theme/tokens.json.
+ * Brand tokens: the deck palette (ADR 0008, docs/design/README.md). PROVISIONAL until the
+ * design system lands (D2.1, #18). The source is apps/mobile/src/theme/tokens.json: same names,
+ * same values. src/theme/tokens.test.ts fails when the two drift.
  */
 @theme {
-  --color-navy: #0b1f3a;
-  --color-orange: #f26a1b;
+  --color-navy-900: #01172e;
+  --color-navy-700: #0b2d49;
+  --color-green-500: #5eb72b;
+  --color-green-700: #308127;
   --color-white: #ffffff;
-  --color-gray-light: #f4f5f7;
+  --color-gray-50: #f7fbfc;
+  --color-gray-500: #484f57;
+  --color-danger: #df1c2c;
+  --color-success: #409c2c;
+  --color-warning: #eaa745;
+
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-xl: 32px;
+  --radius-pill: 9999px;
 }

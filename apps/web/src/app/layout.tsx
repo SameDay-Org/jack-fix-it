@@ -14,7 +14,7 @@ export async function generateMetadata(): Promise<Metadata> {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang={defaultLocale}>
-      <body className="bg-white text-navy antialiased">{children}</body>
+      <body className="bg-white text-navy-900 antialiased">{children}</body>
     </html>
   );
 }
