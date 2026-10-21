@@ -13,7 +13,7 @@ import httpx
 import jwt
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import URL, delete, select, update
+from sqlalchemy import URL, delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import Settings
@@ -341,6 +341,62 @@ async def test_concurrent_refresh_only_one_succeeds(
     assert all(row.revoked_at is not None for row in rows)
     monkeypatch.undo()
     assert_invalid_refresh_token(await refresh(client, winner.json()["refresh_token"]))
+
+
+async def wait_for_lock_waiter(sessions: async_sessionmaker[AsyncSession]) -> None:
+    """Returns once some connection to the test database is waiting on a lock."""
+    query = text(
+        "SELECT count(*) FROM pg_stat_activity"
+        " WHERE datname = current_database() AND wait_event_type = 'Lock'"
+    )
+    async with asyncio.timeout(10):
+        while True:
+            async with sessions() as session:
+                if await session.scalar(query):
+                    return
+            await asyncio.sleep(0.01)
+
+
+@pytest.mark.parametrize("stale_use", ["reuse", "logout"])
+async def test_revocation_during_refresh_of_newest_token_catches_its_replacement(
+    committed: Committed, monkeypatch: pytest.MonkeyPatch, stale_use: str
+) -> None:
+    client = committed.client
+    token_a = (await register(client, email=committed.email)).json()["refresh_token"]
+    token_b = (await refresh(client, token_a)).json()["refresh_token"]
+    # The refresh of B inserts C, then holds its transaction open until the request that
+    # presents the stale token A is blocked; only then does it commit.
+    inserted = asyncio.Event()
+    add = RefreshTokenRepository.add
+    read_for_update = RefreshTokenRepository.get_by_hash_for_update
+
+    async def add_then_hold(self: RefreshTokenRepository, token: RefreshToken) -> RefreshToken:
+        row = await add(self, token)
+        inserted.set()
+        await wait_for_lock_waiter(committed.sessions)
+        return row
+
+    async def read_after_insert(
+        self: RefreshTokenRepository, token_hash: str
+    ) -> RefreshToken | None:
+        if token_hash == security.hash_refresh_token(token_a):
+            async with asyncio.timeout(10):
+                await inserted.wait()
+        return await read_for_update(self, token_hash)
+
+    monkeypatch.setattr(RefreshTokenRepository, "add", add_then_hold)
+    monkeypatch.setattr(RefreshTokenRepository, "get_by_hash_for_update", read_after_insert)
+    stale = refresh(client, token_a) if stale_use == "reuse" else logout(client, token_a)
+
+    rotated, stale_response = await asyncio.gather(refresh(client, token_b), stale)
+
+    assert rotated.status_code == 200
+    assert stale_response.status_code == (401 if stale_use == "reuse" else 204)
+    rows = await committed_family(committed, token_a)
+    assert len(rows) == 3
+    assert all(row.revoked_at is not None for row in rows)
+    monkeypatch.undo()
+    assert_invalid_refresh_token(await refresh(client, rotated.json()["refresh_token"]))
 
 
 @pytest.mark.parametrize("cause", ["reuse", "suspended"])

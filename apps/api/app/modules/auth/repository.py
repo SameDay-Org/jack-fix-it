@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.auth.models import RefreshToken
@@ -17,10 +17,22 @@ class RefreshTokenRepository:
         return token
 
     async def get_by_hash_for_update(self, token_hash: str) -> RefreshToken | None:
-        """The token row, locked until the transaction ends so one use at a time can spend it.
+        """The token row, locked with its family until the transaction ends.
 
+        The family lock comes first and serializes every change to a family: a revocation
+        running while another token of the family is rotated would otherwise miss the row that
+        rotation inserts (READ COMMITTED). One family lock, then rows: no deadlock.
         populate_existing: a waiter gets the row as the transaction that held the lock left it.
         """
+        family_id = await self._session.scalar(
+            select(RefreshToken.family_id).where(RefreshToken.token_hash == token_hash)
+        )
+        if family_id is None:
+            return None
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:family_id, 0))"),
+            {"family_id": str(family_id)},
+        )
         statement = (
             select(RefreshToken)
             .where(RefreshToken.token_hash == token_hash)
