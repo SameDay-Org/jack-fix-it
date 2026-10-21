@@ -22,15 +22,31 @@ rules apply.
   `shape` pill | xl | lg, `interactive`. Native `GlassView` on iOS 26+ when
   `isLiquidGlassAvailable()` and Reduce Transparency is off (live, `useReduceTransparency`);
   otherwise a solid token surface with the same shape (opaque white with the bubble shadow, or
-  solid navy-700); while the preference is still unknown it renders the solid surface too. Controls layer only, never content cards; ESLint rejects
-  `expo-glass-effect` anywhere else (ADR 0008).
-- Data: TanStack Query for server state, Zustand for small client state. Tokens go in
-  `expo-secure-store` (D5.4, #32). API types come from `@jack/shared`.
+  solid navy-700); while the preference is still unknown it renders the solid surface too.
+  Controls layer only, never content cards; ESLint rejects `expo-glass-effect` anywhere else
+  (ADR 0008).
+- Data: TanStack Query for server state, Zustand for small client state. API types come from
+  `@jack/shared`.
+- API layer (`src/api`, D5.4): the app reaches the API only through `apiGet(path)` and
+  `apiPost(path, body)`, with `{ auth: true }` for signed-in requests. Paths are the OpenAPI keys
+  from `@jack/shared`, never URLs; bodies and responses are typed from them. Errors are
+  `ApiError(status, code)`, `NetworkError` (offline or past `EXPO_PUBLIC_API_TIMEOUT_MS`) and
+  `SessionExpiredError`. The session (`useSession`, `login`, `register`, `logout`,
+  `restoreSession`) keeps the refresh token in `expo-secure-store` and the access token in
+  memory only, refreshes single-flight and retries a `401 invalid_token` once. Async auth work
+  carries a session generation: a result from before a sign-in or sign-out is discarded
+  (`SessionExpiredError` with reason `superseded`). A sign-out is a barrier: it clears memory
+  and the Query cache before its first await, and auth work started while it is in flight is
+  refused as `superseded`; a newer sign-in is not held by it. A sign-out that cannot delete the
+  stored token rejects with `LocalCleanupError` and sets `cleanupPending`; restore retries the
+  delete and never signs in from that entry. Cancelled callers send nothing, even after a shared
+  refresh. Never log a token. ESLint rejects `fetch` and `expo-secure-store` outside `src/api`.
 - Strings: `src/i18n/locales/{en,es}.json` through `useTranslation()`; the device language
   picks the catalog, English is the fallback.
 - Config: `app.config.ts` reads `APP_VARIANT` (development, preview, production) to suffix the
   name and bundle id. The EAS owner and project id are public constants there. The API URL is
-  `EXPO_PUBLIC_API_URL`, set per profile in `eas.json`.
+  `EXPO_PUBLIC_API_URL` (https outside development), set per profile in `eas.json`; the request
+  timeout is `EXPO_PUBLIC_API_TIMEOUT_MS`.
 - EAS profiles: `development` (dev client, device), `development-simulator` (iOS simulator,
   Android APK; used by the emulator portals), `preview`, `production`.
 - UI changes need screenshots from the Android emulator and the iOS simulator, including empty
