@@ -86,4 +86,7 @@ def init_sentry(settings: Settings) -> None:
         dsn=settings.sentry_dsn,
         environment=settings.app_env,
         send_default_pii=False,
+        # Request bodies and frame locals can hold emails, passwords and tokens.
+        max_request_body_size="never",
+        include_local_variables=False,
     )

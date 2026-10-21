@@ -72,7 +72,8 @@ def import_models() -> None:
 
 
 def create_engine(settings: Settings) -> AsyncEngine:
-    return create_async_engine(settings.database_url, pool_pre_ping=True)
+    # hide_parameters: database errors are logged, and their bound values can be PII or secrets.
+    return create_async_engine(settings.database_url, pool_pre_ping=True, hide_parameters=True)
 
 
 def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:

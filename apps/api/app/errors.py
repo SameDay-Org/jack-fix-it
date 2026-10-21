@@ -35,6 +35,8 @@ class AppError(Exception):
     status_code: int = 500
     code: str = "internal_error"
     message: str = "Internal server error."
+    # Extra response headers, e.g. WWW-Authenticate on a 401.
+    headers: Mapping[str, str] | None = None
 
     def __init__(self, message: str | None = None) -> None:
         self.message = message or type(self).message
@@ -83,7 +85,7 @@ def error_response(
 
 async def _handle_app_error(_: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, AppError)  # noqa: S101 - registered for AppError only
-    return error_response(exc.status_code, exc.code, exc.message)
+    return error_response(exc.status_code, exc.code, exc.message, headers=exc.headers)
 
 
 async def _handle_http_exception(_: Request, exc: Exception) -> JSONResponse:
