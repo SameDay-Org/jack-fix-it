@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, status
 from app.config import Settings, get_app_settings
 from app.errors import ErrorResponse
 from app.integrations.storage import Storage, get_storage
-from app.modules.auth.dependencies import CurrentUser
+from app.modules.auth.permissions import AppUser
 from app.modules.uploads.schemas import (
     DownloadUrlRequest,
     DownloadUrlResponse,
@@ -39,6 +39,7 @@ _UNAUTHORIZED = _error("invalid_token: missing, invalid or expired access token.
     responses={
         status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
         status.HTTP_403_FORBIDDEN: _error(
+            "forbidden: not a customer or pro (agents and admins upload nothing); "
             "upload_forbidden: the caller's role cannot upload for this purpose."
         ),
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
@@ -49,7 +50,7 @@ _UNAUTHORIZED = _error("invalid_token: missing, invalid or expired access token.
 )
 async def create_upload(
     data: UploadRequest,
-    user: CurrentUser,
+    user: AppUser,
     uploads: Annotated[UploadService, Depends(get_upload_service)],
 ) -> UploadResponse:
     """A short-lived presigned PUT URL for one file of the declared type and exact size.
@@ -67,13 +68,14 @@ async def create_upload(
     summary="Get a download URL",
     responses={
         status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN: _error("forbidden: not a customer or pro."),
         status.HTTP_404_NOT_FOUND: _error("upload_not_found: not a file of the caller."),
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error("upload_invalid: malformed key."),
     },
 )
 async def create_download_url(
     data: DownloadUrlRequest,
-    user: CurrentUser,
+    user: AppUser,
     uploads: Annotated[UploadService, Depends(get_upload_service)],
 ) -> DownloadUrlResponse:
     """A short-lived presigned GET URL for one of the caller's own files."""
