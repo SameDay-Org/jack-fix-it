@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.config import normalize_database_url
-from tests.conftest import TEST_STORAGE_SETTINGS, make_settings
+from tests.conftest import TEST_STORAGE_SETTINGS, TEST_TWILIO_SETTINGS, make_settings
 
 
 @pytest.mark.parametrize(
@@ -67,7 +67,9 @@ def test_jwt_secret_required_in_staging_and_production(app_env: str) -> None:
     assert short not in str(too_short.value)
     assert "JWT_SECRET" in str(missing.value)
     secret = "s" * 32
-    settings = make_settings(app_env=app_env, jwt_secret=secret, **TEST_STORAGE_SETTINGS)
+    settings = make_settings(
+        app_env=app_env, jwt_secret=secret, **TEST_STORAGE_SETTINGS, **TEST_TWILIO_SETTINGS
+    )
     assert settings.jwt_secret is not None
 
 
@@ -146,14 +148,17 @@ def test_rate_limit_settings_come_from_env(monkeypatch: pytest.MonkeyPatch) -> N
 )
 def test_s3_settings_required_in_staging_and_production(app_env: str, missing: str) -> None:
     secret_value = "test-secret-access-key-not-real"
-    values = {**TEST_STORAGE_SETTINGS, missing: None}
+    # Twilio is required there too; only the S3 setting under test is missing.
+    values = {**TEST_TWILIO_SETTINGS, **TEST_STORAGE_SETTINGS, missing: None}
 
     with pytest.raises(ValidationError, match=missing.upper()) as error:
         make_settings(app_env=app_env, jwt_secret="s" * 32, **values)
 
     # The error names the variable but never prints a value.
     assert secret_value not in str(error.value)
-    settings = make_settings(app_env=app_env, jwt_secret="s" * 32, **TEST_STORAGE_SETTINGS)
+    settings = make_settings(
+        app_env=app_env, jwt_secret="s" * 32, **TEST_STORAGE_SETTINGS, **TEST_TWILIO_SETTINGS
+    )
     assert settings.s3_bucket == TEST_STORAGE_SETTINGS["s3_bucket"]
 
 
@@ -195,5 +200,71 @@ def test_upload_settings_defaults() -> None:
     ],
 )
 def test_upload_settings_must_be_positive(name: str) -> None:
+    with pytest.raises(ValidationError, match=name):
+        make_settings(**{name: 0})
+
+
+@pytest.mark.parametrize("app_env", ["staging", "production"])
+@pytest.mark.parametrize(
+    "missing", ["twilio_account_sid", "twilio_auth_token", "twilio_verify_service_sid"]
+)
+def test_twilio_settings_required_in_staging_and_production(app_env: str, missing: str) -> None:
+    # Storage is required there too; only the Twilio setting under test is missing.
+    values = {**TEST_STORAGE_SETTINGS, **TEST_TWILIO_SETTINGS, missing: None}
+
+    with pytest.raises(ValidationError, match=missing.upper()) as error:
+        make_settings(app_env=app_env, jwt_secret="s" * 32, **values)
+
+    # The error names the variable but never prints a value.
+    assert "test-twilio-auth-token-not-real" not in str(error.value)
+    settings = make_settings(
+        app_env=app_env, jwt_secret="s" * 32, **TEST_TWILIO_SETTINGS, **TEST_STORAGE_SETTINGS
+    )
+    assert settings.twilio_verify_service_sid == TEST_TWILIO_SETTINGS["twilio_verify_service_sid"]
+
+
+@pytest.mark.parametrize("app_env", ["development", "test"])
+def test_twilio_settings_optional_in_development(app_env: str) -> None:
+    settings = make_settings(app_env=app_env, twilio_account_sid="", twilio_auth_token="")
+
+    assert settings.twilio_account_sid is None
+    assert settings.twilio_auth_token is None
+
+
+def test_twilio_auth_token_is_masked() -> None:
+    settings = make_settings(**TEST_TWILIO_SETTINGS)
+
+    assert "test-twilio-auth-token-not-real" not in repr(settings)
+
+
+def test_phone_settings_defaults() -> None:
+    settings = make_settings()
+
+    assert settings.phone_allowed_country_codes == ["+1"]
+    assert settings.phone_otp_send_limit == 3
+    assert settings.phone_otp_check_limit == 5
+    assert settings.twilio_timeout_seconds == 5
+
+
+def test_phone_country_codes_come_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PHONE_ALLOWED_COUNTRY_CODES", " +1, +52 ,")
+
+    assert make_settings().phone_allowed_country_codes == ["+1", "+52"]
+
+
+@pytest.mark.parametrize("value", ["", "1", "+0", "+12345", "+1,52", "US"])
+def test_phone_country_codes_must_be_calling_codes(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("PHONE_ALLOWED_COUNTRY_CODES", value)
+
+    with pytest.raises(ValidationError, match="PHONE_ALLOWED_COUNTRY_CODES"):
+        make_settings()
+
+
+@pytest.mark.parametrize(
+    "name", ["phone_otp_send_limit", "phone_otp_check_limit", "twilio_timeout_seconds"]
+)
+def test_phone_settings_must_be_positive(name: str) -> None:
     with pytest.raises(ValidationError, match=name):
         make_settings(**{name: 0})

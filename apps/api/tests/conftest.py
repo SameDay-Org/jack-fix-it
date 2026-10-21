@@ -28,6 +28,12 @@ TEST_STORAGE_SETTINGS: dict[str, object] = {
     "s3_access_key_id": "test-access-key-id",
     "s3_secret_access_key": "test-secret-access-key-not-real",
 }
+# Fixture values only, never real Twilio credentials; tests never call Twilio.
+TEST_TWILIO_SETTINGS: dict[str, object] = {
+    "twilio_account_sid": "ACtest00000000000000000000000000",
+    "twilio_auth_token": "test-twilio-auth-token-not-real",
+    "twilio_verify_service_sid": "VAtest00000000000000000000000000",
+}
 
 
 def make_settings(**overrides: object) -> Settings:
