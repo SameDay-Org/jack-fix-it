@@ -58,6 +58,15 @@ class Settings(BaseSettings):
     access_token_ttl_seconds: int = Field(default=900, gt=0)
     refresh_token_ttl_seconds: int = Field(default=2_592_000, gt=0)
     password_min_length: int = Field(default=10, gt=0, le=PASSWORD_MAX_LENGTH)
+    # Unauthenticated auth routes (D4.4, #28): requests per client IP per route per window,
+    # and logins per email over the same window.
+    auth_rate_limit_requests: int = Field(default=10, gt=0)
+    auth_rate_limit_window_seconds: int = Field(default=60, gt=0)
+    login_rate_limit_per_email: int = Field(default=5, gt=0)
+    # Longest wait on Redis for one limit check; past it the request goes through (fail open).
+    rate_limit_timeout_seconds: float = Field(default=0.5, gt=0)
+    # Proxies whose X-Forwarded-For uvicorn trusts for the client IP (CSV, or "*").
+    forwarded_allow_ips: str = "127.0.0.1"
 
     @field_validator("database_url")
     @classmethod

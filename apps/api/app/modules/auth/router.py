@@ -3,7 +3,14 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Response, status
 
 from app.errors import ErrorResponse
-from app.modules.auth.dependencies import CurrentUser, get_auth_service
+from app.modules.auth.dependencies import (
+    CurrentUser,
+    get_auth_service,
+    limit_login,
+    limit_logout,
+    limit_refresh,
+    limit_register,
+)
 from app.modules.auth.schemas import (
     AuthResponse,
     LoginRequest,
@@ -20,8 +27,22 @@ def _error(description: str) -> dict[str, Any]:
     return {"model": ErrorResponse, "description": description}
 
 
+_RATE_LIMITED: dict[int | str, dict[str, Any]] = {
+    status.HTTP_429_TOO_MANY_REQUESTS: {
+        **_error("rate_limited: too many requests from this client; retry later."),
+        "headers": {
+            "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {"type": "integer"},
+            }
+        },
+    },
+}
+
+
 @router.post(
     "/register",
+    dependencies=[Depends(limit_register)],
     status_code=status.HTTP_201_CREATED,
     response_model=AuthResponse,
     summary="Register",
@@ -30,6 +51,7 @@ def _error(description: str) -> dict[str, Any]:
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
             "validation_error: invalid email, role, locale, or password length."
         ),
+        **_RATE_LIMITED,
     },
 )
 async def register(
@@ -41,11 +63,13 @@ async def register(
 
 @router.post(
     "/login",
+    dependencies=[Depends(limit_login)],
     response_model=AuthResponse,
     summary="Log in",
     responses={
         status.HTTP_401_UNAUTHORIZED: _error("invalid_credentials: wrong email or password."),
         status.HTTP_403_FORBIDDEN: _error("account_suspended: the account is suspended."),
+        **_RATE_LIMITED,
     },
 )
 async def login(
@@ -57,6 +81,7 @@ async def login(
 
 @router.post(
     "/refresh",
+    dependencies=[Depends(limit_refresh)],
     response_model=AuthResponse,
     summary="Refresh the session",
     responses={
@@ -64,6 +89,7 @@ async def login(
             "invalid_refresh_token: unknown, expired, revoked or reused refresh token, or the "
             "account is suspended."
         ),
+        **_RATE_LIMITED,
     },
 )
 async def refresh(
@@ -81,6 +107,7 @@ async def refresh(
 
 @router.post(
     "/logout",
+    dependencies=[Depends(limit_logout)],
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
     summary="Log out",
@@ -88,6 +115,7 @@ async def refresh(
         status.HTTP_204_NO_CONTENT: {
             "description": "Always, whether the token was valid, unknown, expired or revoked."
         },
+        **_RATE_LIMITED,
     },
 )
 async def logout(

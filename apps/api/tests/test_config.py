@@ -98,3 +98,42 @@ def test_auth_settings_defaults() -> None:
 def test_auth_settings_must_be_positive(field: str, value: int) -> None:
     with pytest.raises(ValidationError):
         make_settings(**{field: value})
+
+
+def test_rate_limit_settings_defaults() -> None:
+    settings = make_settings()
+
+    assert settings.auth_rate_limit_requests == 10
+    assert settings.auth_rate_limit_window_seconds == 60
+    assert settings.login_rate_limit_per_email == 5
+    assert settings.rate_limit_timeout_seconds == 0.5
+    assert settings.forwarded_allow_ips == "127.0.0.1"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "auth_rate_limit_requests",
+        "auth_rate_limit_window_seconds",
+        "login_rate_limit_per_email",
+        "rate_limit_timeout_seconds",
+    ],
+)
+@pytest.mark.parametrize("value", [0, -1])
+def test_rate_limit_settings_must_be_positive(name: str, value: int) -> None:
+    with pytest.raises(ValidationError, match=name):
+        make_settings(**{name: value})
+
+
+def test_rate_limit_settings_come_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AUTH_RATE_LIMIT_REQUESTS", "7")
+    monkeypatch.setenv("AUTH_RATE_LIMIT_WINDOW_SECONDS", "30")
+    monkeypatch.setenv("LOGIN_RATE_LIMIT_PER_EMAIL", "3")
+    monkeypatch.setenv("FORWARDED_ALLOW_IPS", "10.0.0.0/8,fd00::/8")
+
+    settings = make_settings()
+
+    assert settings.auth_rate_limit_requests == 7
+    assert settings.auth_rate_limit_window_seconds == 30
+    assert settings.login_rate_limit_per_email == 3
+    assert settings.forwarded_allow_ips == "10.0.0.0/8,fd00::/8"

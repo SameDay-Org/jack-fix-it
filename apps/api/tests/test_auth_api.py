@@ -16,7 +16,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
-from app.main import create_app
 from app.modules.auth import security
 from app.modules.auth.models import RefreshToken
 from app.modules.users.errors import EmailAlreadyRegisteredError
@@ -24,7 +23,7 @@ from app.modules.users.models import User
 from app.modules.users.service import UserService
 from app.modules.users.types import UserRole, UserStatus
 from app.observability import JsonFormatter
-from tests.conftest import TEST_JWT_SECRET, make_settings
+from tests.conftest import TEST_JWT_SECRET, make_app, make_settings
 
 PASSWORD = "correct horse battery"
 EMAIL = "ana@example.com"
@@ -181,7 +180,7 @@ async def test_register_accepts_password_length_bounds(
 
 
 async def test_password_minimum_comes_from_settings(db_session: AsyncSession) -> None:
-    app = create_app(make_settings(password_min_length=16))
+    app = make_app(make_settings(password_min_length=16))
 
     async def test_session() -> AsyncIterator[AsyncSession]:
         yield db_session
@@ -243,7 +242,7 @@ async def test_register_stores_argon2id_hash_not_password(
 async def test_auth_without_jwt_secret_is_a_generic_500(
     db_session: AsyncSession, caplog: pytest.LogCaptureFixture
 ) -> None:
-    app = create_app(make_settings(app_env="development", jwt_secret=None))
+    app = make_app(make_settings(app_env="development", jwt_secret=None))
 
     async def test_session() -> AsyncIterator[AsyncSession]:
         yield db_session

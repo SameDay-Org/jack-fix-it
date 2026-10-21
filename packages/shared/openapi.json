@@ -107,6 +107,24 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "rate_limited: too many requests from this client; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -169,6 +187,24 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "rate_limited: too many requests from this client; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -221,6 +257,24 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "rate_limited: too many requests from this client; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -249,6 +303,24 @@
           },
           "422": {
             "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many requests from this client; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {

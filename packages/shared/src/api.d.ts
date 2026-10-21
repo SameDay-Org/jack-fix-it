@@ -384,6 +384,17 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description rate_limited: too many requests from this client; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     login_v1_auth_login_post: {
@@ -435,6 +446,17 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description rate_limited: too many requests from this client; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     refresh_v1_auth_refresh_post: {
@@ -477,6 +499,17 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description rate_limited: too many requests from this client; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     logout_v1_auth_logout_post: {
@@ -502,6 +535,17 @@ export interface operations {
             /** @description The request is invalid. */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many requests from this client; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
