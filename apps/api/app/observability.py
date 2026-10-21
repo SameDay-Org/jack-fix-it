@@ -170,7 +170,12 @@ def before_send(event: Event, hint: Hint) -> Event:
         headers = request.get("headers")
         if isinstance(headers, dict):
             for name, value in list(headers.items()):
-                if isinstance(value, str) and _is_url(value):
+                if not isinstance(value, str):
+                    continue
+                # Referer is a URI reference by definition and may be relative ("login?…",
+                # "?…", RFC 9110 §10.1.3), so its query goes whatever the value looks like.
+                is_referer = isinstance(name, str) and name.lower() == "referer"
+                if is_referer or _is_url(value):
                     headers[name] = _without_query(value)
     transaction = event.get("transaction")
     if isinstance(transaction, str) and _is_url(transaction):

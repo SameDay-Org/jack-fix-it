@@ -102,6 +102,28 @@ def test_before_send_strips_referer_query() -> None:
     }
 
 
+@pytest.mark.parametrize("header_name", ["Referer", "referer", "REFERER"])
+@pytest.mark.parametrize(
+    ("referer", "expected"),
+    [
+        (f"https://app.example.invalid/login?{QUERY}", "https://app.example.invalid/login"),
+        (f"/login?{QUERY}", "/login"),
+        (f"login?{QUERY}", "login"),
+        (f"?{QUERY}", ""),
+    ],
+    ids=["absolute", "absolute_path", "path_relative", "query_only"],
+)
+def test_before_send_strips_query_from_any_referer_form(
+    header_name: str, referer: str, expected: str
+) -> None:
+    # Other headers keep their current handling: a value that is not URL-like stays.
+    event: Any = {"request": {"headers": {header_name: referer, "user-agent": "probe/1.0?beta"}}}
+
+    result = before_send(event, {})
+
+    assert result["request"]["headers"] == {header_name: expected, "user-agent": "probe/1.0?beta"}
+
+
 def test_before_send_strips_url_transaction_query() -> None:
     url_based = before_send({"transaction": f"/v1/unknown?{QUERY}"}, {})
     function_based = before_send({"transaction": "app.main.handler"}, {})
@@ -341,6 +363,36 @@ async def test_captured_event_contains_no_query_values(
     logs = "\n".join(formatter.format(r) + r.getMessage() for r in caplog.records)
     for leak in LEAKS:
         assert leak not in logs
+
+
+@pytest.mark.parametrize(
+    ("referer", "expected"),
+    [(f"login?{QUERY}", "login"), (f"?{QUERY}", "")],
+    ids=["path_relative", "query_only"],
+)
+async def test_captured_event_relative_referer_has_no_query(
+    sentry_transport: MemoryTransport, referer: str, expected: str
+) -> None:
+    app = create_app(make_settings(sentry_dsn=TEST_DSN))
+
+    @app.get("/v1/test-sentry-referer-probe")
+    async def probe() -> None:
+        raise RuntimeError("probe failure")
+
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/v1/test-sentry-referer-probe", headers={"Referer": referer})
+    sentry_sdk.flush()
+
+    assert response.status_code == 500
+    payloads = _payloads(sentry_transport)
+    events = [json.loads(p) for p in payloads if '"exception"' in p]
+    assert events, "no event was captured"
+    wire = "\n".join(payloads)
+    for leak in LEAKS:
+        assert leak not in wire
+    for event in events:
+        assert event["request"]["headers"]["referer"] == expected
 
 
 async def test_captured_log_breadcrumb_with_quoted_relative_url_has_no_query(
