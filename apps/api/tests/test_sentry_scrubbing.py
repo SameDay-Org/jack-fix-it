@@ -2,6 +2,8 @@
 
 import json
 import logging
+import random
+import re
 import time
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -192,13 +194,73 @@ def test_before_breadcrumb_strips_url_query_from_log_message() -> None:
         (f'calling "https://h.example.invalid/p?{QUERY}"', 'calling "https://h.example.invalid/p'),
         (f"url=https://h.example.invalid/p?{QUERY}", "url=https://h.example.invalid/p"),
         (f"(see /v1/jobs?{QUERY})", "(see /v1/jobs"),
+        # The forms reproduced in review round 2.
+        (f'fetch "/v1/x?{QUERY}" failed', 'fetch "/v1/x failed'),
+        (f"fetch '/v1/x?{QUERY}' failed", "fetch '/v1/x failed"),
+        (f"retry (/v1/x?{QUERY}) later", "retry (/v1/x later"),
+        (f"request_path=/v1/jobs?{QUERY} status=500", "request_path=/v1/jobs status=500"),
+        ("[http://x/y?q=1]", "[http://x/y"),
+        ("<https://x?y>", "<https://x"),
+        ("see https://x/p?q=1, then", "see https://x/p then"),
+        ("{/v1/x?q=1}", "{/v1/x"),
+        ("at:/v1/x?q=1;also", "at:/v1/x"),
+        # The query runs to whitespace, so separators inside it cannot keep a part.
+        ("/v1/x?email=a@b.c,token=abc123;id=(1)", "/v1/x"),
         # A question mark in ordinary words is not a query.
         ("is this a question? yes", "is this a question? yes"),
+        ("ordinary?question what?", "ordinary?question what?"),
+        ("query?a=1 a/b?c", "query?a=1 a/b?c"),
     ],
-    ids=["quoted", "assignment", "parenthesized", "plain_question"],
+    ids=[
+        "quoted",
+        "assignment",
+        "parenthesized",
+        "double_quoted_path",
+        "single_quoted_path",
+        "parenthesized_path",
+        "request_path",
+        "bracketed_url",
+        "angle_bracketed_url",
+        "url_then_comma",
+        "braced_path",
+        "colon_path",
+        "separators_in_query",
+        "plain_question",
+        "words_with_question_marks",
+        "not_at_a_boundary",
+    ],
 )
 def test_before_breadcrumb_message_url_boundaries(message: str, expected: str) -> None:
     assert before_breadcrumb({"type": "log", "message": message}, {})["message"] == expected
+
+
+# The breadcrumb-message regex before review round 1. It backtracked quadratically on some long
+# messages, but on short ones it is a precise oracle for which characters are scrubbed.
+OLD_MESSAGE_REGEX = re.compile(r"(?<![^\s\"'(<=])((?:[A-Za-z][A-Za-z0-9+.-]*://|/)[^\s?]*)\?\S*")
+# The one intended difference: a URL may also start after [ { : , ; (review round 2).
+OLD_MESSAGE_REGEX_WIDER_START = re.compile(
+    r"(?<![^\s\"'(\[<{=:,;])((?:[A-Za-z][A-Za-z0-9+.-]*://|/)[^\s?]*)\?\S*"
+)
+DIFFERENTIAL_ALPHABET = "/?=:\"'()[]<>,; aAz.&-@{}"
+
+
+def test_before_breadcrumb_message_matches_old_regex() -> None:
+    rng = random.Random(1234)  # noqa: S311 - seeded test inputs, not secrets
+    messages = [
+        "".join(rng.choice(DIFFERENTIAL_ALPHABET) for _ in range(rng.randint(0, 40)))
+        for _ in range(5_000)
+    ]
+    without_new_starts = 0
+
+    for message in messages:
+        scrubbed = before_breadcrumb({"type": "log", "message": message}, {})["message"]
+        assert scrubbed == OLD_MESSAGE_REGEX_WIDER_START.sub(r"\1", message), message
+        # Where none of the added start boundaries occurs, the old regex itself agrees.
+        if not set("[{:,;") & set(message):
+            without_new_starts += 1
+            assert scrubbed == OLD_MESSAGE_REGEX.sub(r"\1", message), message
+
+    assert without_new_starts > 500
 
 
 # Inputs that made the earlier regex backtrack, by character count: (message, expected).
@@ -211,6 +273,10 @@ ADVERSARIAL_MESSAGES: dict[str, Callable[[int], tuple[str, str]]] = {
     "slash_question": lambda n: ("/?" * (n // 2), "/"),
     "repeated_scheme": lambda n: ("http://" * (n // 7),) * 2,
     "plain_then_question": lambda n: ("a" * n + "?b",) * 2,
+    # Every other character is a start boundary, followed by a scheme candidate or a path.
+    "assignment_run": lambda n: ("a=" * (n // 2) + "?",) * 2,
+    "colon_scheme_candidates": lambda n: (":ab" * (n // 3) + "?",) * 2,
+    "quoted_paths": lambda n: ('"/' * (n // 2) + "?x", '"/' * (n // 2)),
 }
 
 
@@ -275,6 +341,52 @@ async def test_captured_event_contains_no_query_values(
     logs = "\n".join(formatter.format(r) + r.getMessage() for r in caplog.records)
     for leak in LEAKS:
         assert leak not in logs
+
+
+async def test_captured_log_breadcrumb_with_quoted_relative_url_has_no_query(
+    sentry_transport: MemoryTransport,
+) -> None:
+    app = create_app(make_settings(sentry_dsn=TEST_DSN))
+
+    @app.get("/v1/test-sentry-quoted-probe")
+    async def probe() -> None:
+        # How a library logs: %-style arguments, and a URL in `extra`.
+        logging.getLogger("some.library").warning(
+            'calling "%s" failed',
+            f"/v1/lookup?{QUERY}",
+            extra={"request_path": f"/v1/lookup?{QUERY}"},
+        )
+        raise RuntimeError("probe failure")
+
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        assert (await client.get("/v1/test-sentry-quoted-probe")).status_code == 500
+    sentry_sdk.flush()
+
+    payloads = _payloads(sentry_transport)
+    events = [json.loads(p) for p in payloads if '"exception"' in p]
+    assert events, "no event was captured"
+    wire = "\n".join(payloads)
+    for leak in LEAKS:
+        assert leak not in wire
+    for event in events:
+        [crumb] = [c for c in event["breadcrumbs"]["values"] if c["category"] == "some.library"]
+        assert crumb["message"] == 'calling "/v1/lookup failed'
+        assert crumb["data"]["request_path"] == "/v1/lookup"
+
+
+def test_before_breadcrumb_strips_url_query_from_data_text() -> None:
+    crumb: dict[str, Any] = {
+        "type": "log",
+        "message": "request",
+        "data": {"request_path": f"/v1/jobs?{QUERY}", "count": 3, "note": "why? because"},
+    }
+
+    assert before_breadcrumb(crumb, {})["data"] == {
+        "request_path": "/v1/jobs",
+        "count": 3,
+        "note": "why? because",
+    }
 
 
 def test_sentry_disabled_without_dsn_still_holds(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -2,7 +2,7 @@
 
 import json
 import logging
-import re
+import string
 import sys
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -99,8 +99,10 @@ def init_sentry(settings: Settings) -> None:
     )
 
 
-# Whitespace runs, kept as separate parts by re.split so a message can be joined back unchanged.
-_WHITESPACE_RUN: Final = re.compile(r"(\s+)")
+_ASCII_LETTERS: Final = frozenset(string.ascii_letters)
+_SCHEME_CHARS: Final = _ASCII_LETTERS | frozenset(string.digits + "+.-")
+# Besides whitespace and the start of the text, a URL in free text may follow one of these.
+_URL_START_AFTER: Final = frozenset("\"'([<{=:,;")
 
 
 def _without_query(url: str) -> str:
@@ -111,15 +113,47 @@ def _is_url(value: str) -> bool:
     return value.startswith("/") or "://" in value
 
 
-def _without_url_queries(text: str) -> str:
-    """Cuts the query from every URL-like token of free text, such as a log message.
+def _url_starts_at(text: str, i: int) -> bool:
+    """A path (`/…`) or a `scheme://` URL starts at `i`, right after a start boundary."""
+    if i > 0 and not (text[i - 1].isspace() or text[i - 1] in _URL_START_AFTER):
+        return False
+    if text[i] == "/":
+        return True
+    if text[i] not in _ASCII_LETTERS:
+        return False
+    # Stops at the first non-scheme character; boundaries are not scheme characters, so two
+    # scans never overlap.
+    k = i + 1
+    while k < len(text) and text[k] in _SCHEME_CHARS:
+        k += 1
+    return text.startswith("://", k)
 
-    Linear by construction: one split on whitespace, constant work per character, one join.
-    Before_breadcrumb runs on every log record, so a regex that can backtrack is not an option.
+
+def _without_url_queries(text: str) -> str:
+    """Cuts the query from every URL or path in free text, such as a log message.
+
+    A query runs from the URL's first `?` to the next whitespace, quotes and brackets included,
+    so `?a=1;token=x` or `?q=(x)&token=y` cannot keep a part. One left-to-right pass that never
+    rescans a URL: linear by construction, as the hook runs on every log record.
     """
-    return "".join(
-        _without_query(part) if _is_url(part) else part for part in _WHITESPACE_RUN.split(text)
-    )
+    parts: list[str] = []
+    copied = i = 0
+    while i < len(text):
+        if not _url_starts_at(text, i):
+            i += 1
+            continue
+        k = i
+        while k < len(text) and text[k] != "?" and not text[k].isspace():
+            k += 1
+        if k < len(text) and text[k] == "?":
+            parts.append(text[copied:k])
+            while k < len(text) and not text[k].isspace():
+                k += 1
+            copied = k
+        # A URL without a query ends at whitespace too: nothing inside it can start a new one.
+        i = k
+    parts.append(text[copied:])
+    return "".join(parts)
 
 
 def before_send(event: Event, hint: Hint) -> Event:
@@ -147,7 +181,8 @@ def before_send(event: Event, hint: Hint) -> Event:
 def before_breadcrumb(crumb: Breadcrumb, hint: BreadcrumbHint) -> Breadcrumb:
     """Sentry hook: drops the query string from HTTP and navigation breadcrumbs.
 
-    Also from URLs in a breadcrumb's message, e.g. a library's log line naming a request URL.
+    Also from URLs in a breadcrumb's message and in the text values of its data, e.g. a
+    library's log line, or its `extra`, naming a request URL.
     """
     message = crumb.get("message")
     if isinstance(message, str):
@@ -155,6 +190,9 @@ def before_breadcrumb(crumb: Breadcrumb, hint: BreadcrumbHint) -> Breadcrumb:
     data = crumb.get("data")
     if isinstance(data, dict):
         data.pop("http.query", None)
+        for name, value in list(data.items()):
+            if isinstance(value, str):
+                data[name] = _without_url_queries(value)
         url = data.get("url")
         if crumb.get("type") in ("http", "navigation") and isinstance(url, str):
             data["url"] = _without_query(url)
