@@ -1,5 +1,6 @@
 """Settings, read only from environment variables (plus apps/api/.env for local development)."""
 
+import re
 from functools import lru_cache
 from typing import Annotated, Literal, Self
 
@@ -16,6 +17,13 @@ _SYNC_SCHEMES = ("postgres://", "postgresql://")
 # Environments where a missing or weak JWT_SECRET stops startup.
 _JWT_SECRET_REQUIRED_IN: tuple[AppEnv, ...] = ("staging", "production")
 JWT_SECRET_MIN_LENGTH = 32
+# Twilio Verify settings that deployed environments must set (D4.3, #26).
+_TWILIO_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
+_TWILIO_SETTINGS: tuple[str, ...] = (
+    "twilio_account_sid",
+    "twilio_auth_token",
+    "twilio_verify_service_sid",
+)
 # Upper bound on passwords (NIST 800-63B allows a cap); also bounds the Argon2 input.
 PASSWORD_MAX_LENGTH = 128
 
@@ -30,6 +38,11 @@ def normalize_database_url(url: str) -> str:
     raise ValueError(
         "DATABASE_URL must start with postgres://, postgresql:// or postgresql+asyncpg://"
     )
+
+
+def parse_country_codes(value: str) -> list[str]:
+    """Split a CSV of calling codes such as "+1,+52"; ignore blanks."""
+    return [code.strip() for code in value.split(",") if code.strip()]
 
 
 def parse_cors_origins(value: str) -> list[str]:
@@ -67,6 +80,19 @@ class Settings(BaseSettings):
     rate_limit_timeout_seconds: float = Field(default=0.5, gt=0)
     # Proxies whose X-Forwarded-For uvicorn trusts for the client IP (CSV, or "*").
     forwarded_allow_ips: str = "127.0.0.1"
+    # Phone verification by SMS code through Twilio Verify (D4.3, #26). Required in staging and
+    # production; without them, the phone endpoints answer a generic 500.
+    twilio_account_sid: str | None = None
+    twilio_auth_token: SecretStr | None = None
+    twilio_verify_service_sid: str | None = None
+    twilio_timeout_seconds: float = Field(default=5.0, gt=0)
+    # Calling codes a phone may start with (CSV): the service region, never hardcoded.
+    phone_allowed_country_codes: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["+1"]
+    )
+    # Codes sent and codes checked, per user and per phone, per AUTH_RATE_LIMIT_WINDOW_SECONDS.
+    phone_otp_send_limit: int = Field(default=3, gt=0)
+    phone_otp_check_limit: int = Field(default=5, gt=0)
 
     @field_validator("database_url")
     @classmethod
@@ -85,7 +111,26 @@ class Settings(BaseSettings):
             raise ValueError("CORS_ORIGINS must list explicit origins, not '*'")
         return value
 
-    @field_validator("sentry_dsn", "jwt_secret", mode="before")
+    @field_validator("phone_allowed_country_codes", mode="before")
+    @classmethod
+    def _split_country_codes(cls, value: object) -> object:
+        return parse_country_codes(value) if isinstance(value, str) else value
+
+    @field_validator("phone_allowed_country_codes")
+    @classmethod
+    def _check_country_codes(cls, value: list[str]) -> list[str]:
+        if not value or not all(re.fullmatch(r"\+[1-9]\d{0,3}", code) for code in value):
+            raise ValueError("PHONE_ALLOWED_COUNTRY_CODES must list calling codes such as +1")
+        return value
+
+    @field_validator(
+        "sentry_dsn",
+        "jwt_secret",
+        "twilio_account_sid",
+        "twilio_auth_token",
+        "twilio_verify_service_sid",
+        mode="before",
+    )
     @classmethod
     def _empty_is_none(cls, value: object) -> object:
         return None if value == "" else value
@@ -100,6 +145,15 @@ class Settings(BaseSettings):
                 f"JWT_SECRET must be set to at least {JWT_SECRET_MIN_LENGTH} characters "
                 f"when APP_ENV is {self.app_env}"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _require_twilio_when_deployed(self) -> Self:
+        if self.app_env not in _TWILIO_REQUIRED_IN:
+            return self
+        missing = [name.upper() for name in _TWILIO_SETTINGS if getattr(self, name) is None]
+        if missing:
+            raise ValueError(f"{', '.join(missing)} must be set when APP_ENV is {self.app_env}")
         return self
 
 

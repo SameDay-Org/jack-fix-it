@@ -378,6 +378,189 @@
           }
         ]
       }
+    },
+    "/v1/auth/phone/send": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Send a phone verification code",
+        "description": "Sends a verification code by SMS to the number, for the signed-in user.\n\nAlways 202 for a valid number, including one already verified by another account (then\nnothing is sent), so the endpoint cannot tell whether a number is taken.",
+        "operationId": "send_phone_code_v1_auth_phone_send_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneSendRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted; a code is on its way by SMS."
+          },
+          "422": {
+            "description": "validation_error: not an E.164 number, a country code that is not allowed, a number that cannot receive SMS, or a malformed code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "verification_unavailable: the SMS provider is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many requests from this client; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/auth/phone/verify": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Verify the phone with the code",
+        "description": "Checks the code and stores the number as the user's verified phone (idempotent).",
+        "operationId": "verify_phone_v1_auth_phone_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneVerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: not an E.164 number, a country code that is not allowed, a number that cannot receive SMS, or a malformed code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_code: wrong, expired or used code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "phone_unavailable: the number is another account's.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "verification_unavailable: the SMS provider is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many requests from this client; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -504,6 +687,43 @@
         ],
         "title": "LoginRequest"
       },
+      "PhoneSendRequest": {
+        "properties": {
+          "phone": {
+            "type": "string",
+            "pattern": "^\\+[1-9]\\d{7,14}$",
+            "title": "Phone",
+            "description": "E.164, e.g. +14075550123, with an allowed country code."
+          }
+        },
+        "type": "object",
+        "required": [
+          "phone"
+        ],
+        "title": "PhoneSendRequest"
+      },
+      "PhoneVerifyRequest": {
+        "properties": {
+          "phone": {
+            "type": "string",
+            "pattern": "^\\+[1-9]\\d{7,14}$",
+            "title": "Phone",
+            "description": "The number the code was sent to."
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^\\d{4,10}$",
+            "title": "Code",
+            "description": "The code received by SMS."
+          }
+        },
+        "type": "object",
+        "required": [
+          "phone",
+          "code"
+        ],
+        "title": "PhoneVerifyRequest"
+      },
       "ReadinessResponse": {
         "properties": {
           "status": {
@@ -598,6 +818,22 @@
           },
           "status": {
             "$ref": "#/components/schemas/UserStatus"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone",
+            "description": "E.164, set once verified by SMS code."
+          },
+          "phone_verified": {
+            "type": "boolean",
+            "title": "Phone Verified"
           }
         },
         "type": "object",
@@ -606,7 +842,9 @@
           "email",
           "role",
           "locale",
-          "status"
+          "status",
+          "phone",
+          "phone_verified"
         ],
         "title": "UserOut",
         "description": "The user as the API shows it. Never carries the password hash."

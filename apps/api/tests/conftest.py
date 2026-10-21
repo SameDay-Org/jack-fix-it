@@ -20,6 +20,12 @@ from app.rate_limit import RateLimitResult, get_rate_limiter, window_position
 API_DIR = Path(__file__).resolve().parents[1]
 # Fixture value only; real secrets live in Railway variables.
 TEST_JWT_SECRET = "test-jwt-secret-not-for-real-use-0123456789"
+# Fixture values only, never real Twilio credentials; tests never call Twilio.
+TEST_TWILIO_SETTINGS: dict[str, object] = {
+    "twilio_account_sid": "ACtest00000000000000000000000000",
+    "twilio_auth_token": "test-twilio-auth-token-not-real",
+    "twilio_verify_service_sid": "VAtest00000000000000000000000000",
+}
 
 
 def make_settings(**overrides: object) -> Settings:

@@ -152,6 +152,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/phone/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a phone verification code
+         * @description Sends a verification code by SMS to the number, for the signed-in user.
+         *
+         *     Always 202 for a valid number, including one already verified by another account (then
+         *     nothing is sent), so the endpoint cannot tell whether a number is taken.
+         */
+        post: operations["send_phone_code_v1_auth_phone_send_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/phone/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify the phone with the code
+         * @description Checks the code and stores the number as the user's verified phone (idempotent).
+         */
+        post: operations["verify_phone_v1_auth_phone_verify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -218,6 +261,27 @@ export interface components {
             /** Password */
             password: string;
         };
+        /** PhoneSendRequest */
+        PhoneSendRequest: {
+            /**
+             * Phone
+             * @description E.164, e.g. +14075550123, with an allowed country code.
+             */
+            phone: string;
+        };
+        /** PhoneVerifyRequest */
+        PhoneVerifyRequest: {
+            /**
+             * Phone
+             * @description The number the code was sent to.
+             */
+            phone: string;
+            /**
+             * Code
+             * @description The code received by SMS.
+             */
+            code: string;
+        };
         /** ReadinessResponse */
         ReadinessResponse: {
             /**
@@ -275,6 +339,13 @@ export interface components {
             /** Locale */
             locale: string;
             status: components["schemas"]["UserStatus"];
+            /**
+             * Phone
+             * @description E.164, set once verified by SMS code.
+             */
+            phone: string | null;
+            /** Phone Verified */
+            phone_verified: boolean;
         };
         /**
          * UserRole
@@ -583,6 +654,146 @@ export interface operations {
             };
             /** @description The request is invalid. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    send_phone_code_v1_auth_phone_send_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PhoneSendRequest"];
+            };
+        };
+        responses: {
+            /** @description Accepted; a code is on its way by SMS. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_token: missing, invalid or expired access token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: not an E.164 number, a country code that is not allowed, a number that cannot receive SMS, or a malformed code. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many requests from this client; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description verification_unavailable: the SMS provider is unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    verify_phone_v1_auth_phone_verify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PhoneVerifyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserOut"];
+                };
+            };
+            /** @description invalid_code: wrong, expired or used code. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired access token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description phone_unavailable: the number is another account's. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: not an E.164 number, a country code that is not allowed, a number that cannot receive SMS, or a malformed code. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many requests from this client; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description verification_unavailable: the SMS provider is unavailable. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
