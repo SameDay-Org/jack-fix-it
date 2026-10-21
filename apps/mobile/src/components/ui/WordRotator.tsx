@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Text, useWindowDimensions, View, type LayoutChangeEvent } from "react-native";
 import Animated, {
   cancelAnimation,
@@ -16,7 +16,7 @@ import Animated, {
 import { tokens } from "@/theme";
 
 import { cx } from "./cx";
-import { swapSteps, widthAt, wordFrame } from "./wordSwap";
+import { swapSequence, widthAt, wordFrame } from "./wordSwap";
 
 type TypeToken = keyof typeof tokens.fontSize;
 
@@ -42,7 +42,9 @@ export type WordRotatorProps = {
   transitionMs: number;
   /** Color classes for the words; the type classes come from `type`. */
   className?: string;
-  /** Index the run ends on, after every word has shown once. */
+  /** How many swaps the run makes: the next `swaps - 1` words in order, then `stopAt`. */
+  swaps: number;
+  /** Index the run ends on. */
   stopAt?: number;
   /** Called with the new index each time a word settles. */
   onCycle?: (index: number) => void;
@@ -57,7 +59,9 @@ export type WordRotatorProps = {
  * clip's width tweens between the two words' measured widths so the text after it never jumps.
  * Everything runs on the UI thread from one shared cycle value (`withSequence` of timings); no JS
  * timer drives frames. Under Reduce Motion the words crossfade in place. Screen readers do not
- * see the rotating words: the sentence around the rotator carries one static label.
+ * see the rotating words: the sentence around the rotator carries one static label. A run visits
+ * `swapSequence(words.length, swaps, stopAt)`: five words and three swaps roll through three of
+ * them and settle back on the first.
  */
 export function WordRotator({
   words,
@@ -65,6 +69,7 @@ export function WordRotator({
   intervalMs,
   transitionMs,
   className,
+  swaps,
   stopAt = 0,
   onCycle,
   onReady,
@@ -75,13 +80,20 @@ export function WordRotator({
   const lineHeight = tokens.fontSize[type].lineHeight * fontScale;
   const textClass = cx(TEXT_CLASS[type], className);
 
+  const sequence = useMemo(
+    () => swapSequence(words.length, swaps, stopAt),
+    [words.length, swaps, stopAt],
+  );
   const cycle = useSharedValue(0);
   const widths = useSharedValue<number[]>([]);
   const measured = useSharedValue(false);
   const [ready, setReady] = useState(false);
   const pending = useRef(new Map<number, number>());
+  // The run reads the latest callback without restarting when it changes.
   const onCycleRef = useRef(onCycle);
-  onCycleRef.current = onCycle;
+  useEffect(() => {
+    onCycleRef.current = onCycle;
+  }, [onCycle]);
 
   const record = (index: number, width: number) => {
     pending.current.set(index, width);
@@ -95,8 +107,8 @@ export function WordRotator({
   useEffect(() => {
     if (!ready) return;
     onReady?.();
-    const steps = swapSteps(words.length, stopAt);
-    if (steps === 0 || words.length < 2) return;
+    const steps = sequence.length - 1;
+    if (steps < 1 || words.length < 2) return;
     const easing = Easing.out(Easing.cubic);
     const hold = Math.max(intervalMs - transitionMs, 0);
     const settle = (index: number) => onCycleRef.current?.(index);
@@ -105,7 +117,7 @@ export function WordRotator({
         withDelay(
           hold,
           withTiming(k + 1, { duration: transitionMs, easing }, (finished) => {
-            if (finished) runOnJS(settle)((k + 1) % words.length);
+            if (finished) runOnJS(settle)(sequence[k + 1]);
           }),
         ),
       ),
@@ -115,7 +127,7 @@ export function WordRotator({
   }, [ready]);
 
   const clipStyle = useAnimatedStyle(() =>
-    measured.value ? { width: widthAt(cycle.value, widths.value) } : {},
+    measured.value ? { width: widthAt(cycle.value, sequence, widths.value) } : {},
   );
 
   return (
@@ -133,7 +145,7 @@ export function WordRotator({
             key={`${index}-${word}`}
             word={word}
             index={index}
-            count={words.length}
+            sequence={sequence}
             cycle={cycle}
             lineHeight={lineHeight}
             slide={!reduceMotion}
@@ -166,7 +178,7 @@ export function WordRotator({
 type RotatingWordProps = {
   word: string;
   index: number;
-  count: number;
+  sequence: readonly number[];
   cycle: SharedValue<number>;
   lineHeight: number;
   slide: boolean;
@@ -177,7 +189,7 @@ type RotatingWordProps = {
 function RotatingWord({
   word,
   index,
-  count,
+  sequence,
   cycle,
   lineHeight,
   slide,
@@ -185,7 +197,7 @@ function RotatingWord({
   testID,
 }: RotatingWordProps) {
   const frame = useAnimatedStyle(() => {
-    const { translateY, opacity } = wordFrame(cycle.value, index, count, lineHeight, slide);
+    const { translateY, opacity } = wordFrame(cycle.value, index, sequence, lineHeight, slide);
     return { opacity, transform: [{ translateY }] };
   });
 

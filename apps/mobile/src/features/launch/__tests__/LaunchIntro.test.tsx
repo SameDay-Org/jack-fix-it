@@ -30,11 +30,9 @@ jest.mock(
   "react-native-safe-area-context",
   () => jest.requireActual("react-native-safe-area-context/jest/mock").default,
 );
-jest.mock("react-native-reanimated", () => {
-  const actual =
-    jest.requireActual<typeof import("react-native-reanimated")>("react-native-reanimated");
-  return { __esModule: true, ...actual, useReducedMotion: jest.fn(() => true) };
-});
+// `expo-router/testing-library` installs Reanimated's official mock: timings call back at once
+// (so the exit completes in the same tick), `useReducedMotion` is false and `withSequence` is a
+// no-op, so the rotator stays on its first word here; its own suite covers the swaps.
 
 type Session = ReturnType<typeof useSession>;
 const { accessToken: _a, accessTokenExpiresAt: _b, ...SESSION_SIGNED_OUT } = SIGNED_OUT;
@@ -62,12 +60,11 @@ const routes = {
   "(app)/index": () => <Text>app stub</Text>,
 };
 
-const { launchMaxMs, launchExitMs } = tokens.motion;
+const { launchMinMs, launchMaxMs } = tokens.motion;
 
-// Under Reduce Motion (mocked above) the intro ends as soon as the gate has a destination, which
-// keeps these routing tests about routing; the exit still takes its timed fade.
+/** The minimum run elapses; with the session resolved the intro exits (at once, under the mock). */
 async function finishIntro() {
-  await act(async () => jest.advanceTimersByTime(launchExitMs + 50));
+  await act(async () => jest.advanceTimersByTime(launchMinMs + 1));
 }
 
 beforeEach(() => {
@@ -84,22 +81,28 @@ describe("LaunchIntro over the session gate", () => {
     expect(screen.getByTestId("launch-intro")).toBeTruthy();
     const headline = screen.getByTestId("launch-hero-headline");
     expect(headline.props.accessibilityLabel).toBe("Whatever happens at home, we fix it.");
-    expect(screen.getByTestId("launch-rotator").props.importantForAccessibility).toBe(
-      "no-hide-descendants",
-    );
+    expect(
+      screen.getByTestId("launch-rotator", { includeHiddenElements: true }).props
+        .importantForAccessibility,
+    ).toBe("no-hide-descendants");
     expect(screen.getByRole("button", { name: "Skip intro" })).toBeTruthy();
     expect(screen.getByText("Jack Fix It")).toBeTruthy();
   });
 
-  it("restoring: the gate shows the static hero under the intro and the splash stays until the intro is ready", async () => {
+  it("restoring: the gate shows the static hero under the intro, the splash stays until the intro is ready, and the intro never outlives launchMaxMs", async () => {
     session({ status: "restoring" });
     await renderRouter(routes);
 
     expect(screen.getByTestId("restoring-hero")).toBeTruthy();
     expect(SplashScreen.hideAsync).not.toHaveBeenCalled();
 
-    await act(async () => jest.advanceTimersByTime(launchMaxMs)); // the fallback lifts it at the latest
-    expect(SplashScreen.hideAsync).toHaveBeenCalledTimes(1);
+    await act(async () => jest.advanceTimersByTime(launchMinMs + 1));
+    expect(screen.getByTestId("launch-intro")).toBeTruthy(); // nothing to hand off to yet
+
+    await act(async () => jest.advanceTimersByTime(launchMaxMs - launchMinMs));
+    expect(SplashScreen.hideAsync).toHaveBeenCalledTimes(1); // the fallback lifts it at the latest
+    expect(screen.queryByTestId("launch-intro")).toBeNull();
+    expect(screen.getByTestId("restoring-hero")).toBeTruthy(); // the gate's own frame remains
   });
 
   it("routes signed out to welcome", async () => {
@@ -140,7 +143,6 @@ describe("LaunchIntro over the session gate", () => {
     expect(screen.getByTestId("launch-intro")).toBeTruthy();
 
     await act(async () => fireEvent.press(screen.getByRole("button", { name: "Skip intro" })));
-    await finishIntro();
 
     expect(screen.queryByTestId("launch-intro")).toBeNull();
     expect(screen.getByTestId("restoring-hero")).toBeTruthy(); // the gate's own frame remains

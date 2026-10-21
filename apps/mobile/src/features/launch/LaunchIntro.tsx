@@ -35,8 +35,14 @@ export function LaunchIntro({ onReady, onDone }: LaunchIntroProps) {
   const reduceMotion = useReducedMotion();
   const { phase, skip } = useLaunchIntro({ status, reduceMotion });
   const words = t("launch.words", { returnObjects: true });
-  const { wordSwapIntervalMs, wordSwapTransitionMs, launchExitMs, launchExitScale, launchMaxMs } =
-    tokens.motion;
+  const {
+    wordSwapIntervalMs,
+    wordSwapTransitionMs,
+    launchSwaps,
+    launchExitMs,
+    launchExitScale,
+    launchMaxMs,
+  } = tokens.motion;
 
   // The splash lifts when the first frame is final, or at the latest when the intro must end.
   const readyRef = useRef(false);
@@ -85,6 +91,7 @@ export function LaunchIntro({ onReady, onDone }: LaunchIntroProps) {
               className="text-green-500"
               intervalMs={wordSwapIntervalMs}
               transitionMs={wordSwapTransitionMs}
+              swaps={launchSwaps}
               stopAt={0}
               onReady={ready}
               testID="launch-rotator"
