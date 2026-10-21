@@ -100,7 +100,10 @@ def init_sentry(settings: Settings) -> None:
 
 
 # A URL or path with a query, inside free text such as a log message: the query ends at a space.
-_URL_QUERY_IN_TEXT: Final = re.compile(r"((?:[A-Za-z][A-Za-z0-9+.-]*://|/)[^\s?]*)\?\S*")
+# Matches start only at a token boundary, so a long run without spaces is scanned once.
+_URL_QUERY_IN_TEXT: Final = re.compile(
+    r"(?<![^\s\"'(<=])((?:[A-Za-z][A-Za-z0-9+.-]*://|/)[^\s?]*)\?\S*"
+)
 
 
 def _without_query(url: str) -> str:

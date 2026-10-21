@@ -185,6 +185,20 @@ def test_before_breadcrumb_strips_url_query_from_log_message() -> None:
     assert before_breadcrumb(dict(plain), {}) == plain
 
 
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        (f'calling "https://h.example.invalid/p?{QUERY}"', 'calling "https://h.example.invalid/p'),
+        (f"url=https://h.example.invalid/p?{QUERY}", "url=https://h.example.invalid/p"),
+        (f"(see /v1/jobs?{QUERY})", "(see /v1/jobs"),
+        # A URL glued to other text is not at a token boundary; long runs stay linear.
+        ("/" * 32_000, "/" * 32_000),
+    ],
+)
+def test_before_breadcrumb_message_url_boundaries(message: str, expected: str) -> None:
+    assert before_breadcrumb({"type": "log", "message": message}, {})["message"] == expected
+
+
 async def test_captured_event_contains_no_query_values(
     sentry_transport: MemoryTransport, caplog: pytest.LogCaptureFixture
 ) -> None:
