@@ -73,7 +73,6 @@ class AuthService:
             logger.info("auth_login_failed", extra={"reason": reason})
             raise InvalidCredentialsError
         if user.status is UserStatus.SUSPENDED:
-            logger.info("auth_login_failed", extra={"reason": "account_suspended"})
             raise AccountSuspendedError
         if security.password_needs_rehash(user.password_hash):
             new_hash = await asyncio.to_thread(security.hash_password, data.password)
