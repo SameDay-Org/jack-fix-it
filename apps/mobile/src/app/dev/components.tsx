@@ -3,6 +3,7 @@ import { Redirect } from "expo-router";
 import { useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { ScrollView, Text, View } from "react-native";
 
+import { FloatingBar } from "@/components/dev/FloatingBar";
 import { HeroSample } from "@/components/dev/HeroSample";
 import {
   Avatar,
@@ -30,24 +31,6 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
     <View className="gap-3 px-4">
       <Text className="text-title-2 text-navy-900">{title}</Text>
       {children}
-    </View>
-  );
-}
-
-// The floating bar pins above the bottom safe area over the scrolling content: the controls layer
-// for real (ADR 0008). The scroll content pads its bottom so the bar never covers the last item.
-function FloatingBar({ onTop, onEnd }: { onTop: () => void; onEnd: () => void }) {
-  return (
-    <View className="absolute inset-x-4 bottom-4">
-      <GlassSurface
-        tone="light"
-        shape="pill"
-        interactive
-        className="flex-row items-center justify-center gap-2 px-2 py-1"
-      >
-        <Button label="Top" variant="ghost" onPress={onTop} />
-        <Button label="End" variant="ghost" onPress={onEnd} />
-      </GlassSurface>
     </View>
   );
 }
@@ -167,10 +150,7 @@ function Gallery() {
           </GlassSurface>
         </Section>
       </ScrollView>
-      <FloatingBar
-        onTop={() => scroll.current?.scrollTo({ y: 0, animated: true })}
-        onEnd={() => scroll.current?.scrollToEnd({ animated: true })}
-      />
+      <FloatingBar scrollRef={scroll} />
     </Screen>
   );
 }

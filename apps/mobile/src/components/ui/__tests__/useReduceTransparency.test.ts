@@ -5,6 +5,20 @@ import { useReduceTransparency } from "../useReduceTransparency";
 
 const remove = jest.fn();
 
+/** A promise the test settles by hand, to order the read against the change event. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+const changeListener = () =>
+  jest.mocked(AccessibilityInfo.addEventListener).mock.calls[0][1] as (enabled: boolean) => void;
+
 describe("useReduceTransparency", () => {
   beforeEach(() => {
     remove.mockClear();
@@ -12,24 +26,50 @@ describe("useReduceTransparency", () => {
     jest.mocked(AccessibilityInfo.addEventListener).mockClear().mockReturnValue({ remove });
   });
 
-  it("reads the initial value and subscribes", async () => {
+  it("is unknown until the read answers, then reads the initial value and subscribes", async () => {
+    const read = deferred<boolean>();
+    jest.mocked(AccessibilityInfo.isReduceTransparencyEnabled).mockReturnValue(read.promise);
+
     const { result } = await renderHook(() => useReduceTransparency());
 
-    await waitFor(() => expect(result.current).toBe(true));
+    expect(result.current).toBeNull();
     expect(AccessibilityInfo.addEventListener).toHaveBeenCalledWith(
       "reduceTransparencyChanged",
       expect.any(Function),
     );
+    await act(async () => read.resolve(true));
+    expect(result.current).toBe(true);
   });
 
   it("follows the change event", async () => {
     const { result } = await renderHook(() => useReduceTransparency());
     await waitFor(() => expect(result.current).toBe(true));
-    const [, onChange] = jest.mocked(AccessibilityInfo.addEventListener).mock.calls[0];
 
-    await act(() => (onChange as (enabled: boolean) => void)(false));
+    await act(() => changeListener()(false));
 
     expect(result.current).toBe(false);
+  });
+
+  it("a late initial read never overwrites a change event", async () => {
+    const read = deferred<boolean>();
+    jest.mocked(AccessibilityInfo.isReduceTransparencyEnabled).mockReturnValue(read.promise);
+    const { result } = await renderHook(() => useReduceTransparency());
+
+    await act(() => changeListener()(true));
+    expect(result.current).toBe(true);
+    await act(async () => read.resolve(false));
+
+    expect(result.current).toBe(true);
+  });
+
+  it("a rejected read resolves to the safe value", async () => {
+    const read = deferred<boolean>();
+    jest.mocked(AccessibilityInfo.isReduceTransparencyEnabled).mockReturnValue(read.promise);
+    const { result } = await renderHook(() => useReduceTransparency());
+
+    await act(async () => read.reject(new Error("unavailable")));
+
+    expect(result.current).toBe(true);
   });
 
   it("unsubscribes on unmount", async () => {

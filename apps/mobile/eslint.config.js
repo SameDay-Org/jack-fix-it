@@ -1,50 +1,39 @@
 const { defineConfig } = require("eslint/config");
 const expoConfig = require("eslint-config-expo/flat");
 
+// Each native capability has one owner module; everything else goes through it. The lists are
+// composed per file set because a later `no-restricted-imports` entry replaces an earlier one.
+const GLASS = {
+  name: "expo-glass-effect",
+  message: "GlassSurface owns Liquid Glass: render <GlassSurface tone=... shape=...>.",
+};
+const SYSTEM_BAR = [
+  {
+    name: "expo-status-bar",
+    message: "Screen owns the status bar: render the route inside <Screen bar=...>.",
+  },
+  {
+    name: "react-native-safe-area-context",
+    importNames: ["SafeAreaView", "useSafeAreaInsets"],
+    message: "Screen owns the safe areas: render the route inside <Screen bar=...>.",
+  },
+];
+
+const restrictImports = (paths) => ({ "no-restricted-imports": ["error", { paths }] });
+
 module.exports = defineConfig([
   expoConfig,
   {
     ignores: ["dist/*", "dist-ci/*", ".expo/*"],
   },
   {
-    // Routes render inside <Screen> (src/components/ui), the one owner of the status-bar style and
-    // of the top safe-area backdrop; a route that handles either itself fights the owner.
-    files: ["src/app/**/*.{ts,tsx}"],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          paths: [
-            {
-              name: "expo-status-bar",
-              message: "Screen owns the status bar: render the route inside <Screen bar=...>.",
-            },
-            {
-              name: "react-native-safe-area-context",
-              importNames: ["SafeAreaView", "useSafeAreaInsets"],
-              message: "Screen owns the safe areas: render the route inside <Screen bar=...>.",
-            },
-          ],
-        },
-      ],
-    },
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/components/ui/GlassSurface.tsx", "src/**/__tests__/**"],
+    rules: restrictImports([GLASS]),
   },
   {
-    // Liquid Glass has one primitive (ADR 0008): everything else renders <GlassSurface>.
-    files: ["src/**/*.{ts,tsx}"],
-    ignores: ["src/components/ui/GlassSurface.tsx", "src/components/ui/__tests__/**"],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          paths: [
-            {
-              name: "expo-glass-effect",
-              message: "GlassSurface owns Liquid Glass: render <GlassSurface tone=... shape=...>.",
-            },
-          ],
-        },
-      ],
-    },
+    // Routes also leave the system bar and the safe areas to Screen.
+    files: ["src/app/**/*.{ts,tsx}"],
+    rules: restrictImports([GLASS, ...SYSTEM_BAR]),
   },
 ]);

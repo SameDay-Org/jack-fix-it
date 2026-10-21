@@ -159,7 +159,7 @@ describe("theme tokens", () => {
     for (const tone of Object.values(glass)) {
       expect(COLOR_TOKENS).toContain(tone.tint);
       expect(COLOR_TOKENS).toContain(tone.fallback);
-      expect(tone.fallbackOpacity).toBeGreaterThanOrEqual(0.94);
+      expect(tone.fallbackOpacity).toBe(1); // solid: text under a control never ghosts through
     }
     const light: Paint = {
       token: glass.light.fallback as ColorToken,

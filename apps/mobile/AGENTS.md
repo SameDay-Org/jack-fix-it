@@ -21,8 +21,8 @@ rules apply.
 - Liquid Glass: only through `GlassSurface` (`src/components/ui`): `tone` light | dark,
   `shape` pill | xl | lg, `interactive`. Native `GlassView` on iOS 26+ when
   `isLiquidGlassAvailable()` and Reduce Transparency is off (live, `useReduceTransparency`);
-  otherwise a near-solid token surface with the same shape (white 0.95 with the bubble shadow,
-  or solid navy-700). Controls layer only, never content cards; ESLint rejects
+  otherwise a solid token surface with the same shape (opaque white with the bubble shadow, or
+  solid navy-700); while the preference is still unknown it renders the solid surface too. Controls layer only, never content cards; ESLint rejects
   `expo-glass-effect` anywhere else (ADR 0008).
 - Data: TanStack Query for server state, Zustand for small client state. Tokens go in
   `expo-secure-store` (D5.4, #32). API types come from `@jack/shared`.

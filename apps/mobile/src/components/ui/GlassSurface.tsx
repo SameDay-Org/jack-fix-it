@@ -12,7 +12,7 @@ import {
   type Radius,
 } from "@/theme";
 
-import { useReduceTransparency } from "./useReduceTransparency";
+import { useReduceTransparency, type ReduceTransparency } from "./useReduceTransparency";
 
 export type { GlassTone };
 export type GlassShape = Extract<Radius, "pill" | "xl" | "lg">;
@@ -32,9 +32,9 @@ export type GlassSurfaceProps = {
 // Third-party views take `className` only once NativeWind knows them.
 cssInterop(GlassView, { className: "style" });
 
-/** Native Liquid Glass exists on this device and the system has not hidden it. */
-function canUseGlass(reduceTransparency: boolean): boolean {
-  return !reduceTransparency && isLiquidGlassAvailable() && isGlassEffectAPIAvailable();
+/** Native glass exists here and the system is known not to hide it; unknown means the fallback. */
+function canUseGlass(reduceTransparency: ReduceTransparency): boolean {
+  return reduceTransparency === false && isLiquidGlassAvailable() && isGlassEffectAPIAvailable();
 }
 
 /**

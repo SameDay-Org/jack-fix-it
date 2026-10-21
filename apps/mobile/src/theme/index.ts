@@ -60,8 +60,9 @@ export const glassTint: Record<GlassTone, string> = {
 };
 
 /**
- * The near-solid surface used when glass is unavailable or Reduce Transparency is on: the light
- * tone is a lifted white bubble (so it reads as a control over the page), the dark tone solid navy.
+ * The solid surface used when glass is unavailable, unknown or hidden by Reduce Transparency: the
+ * light tone is an opaque white bubble lifted by the shadow (text under a control never ghosts
+ * through), the dark tone solid navy.
  */
 export const glassFallback: Record<GlassTone, ViewStyle> = {
   light: {

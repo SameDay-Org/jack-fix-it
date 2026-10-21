@@ -46,6 +46,19 @@ describe("GlassSurface", () => {
       .mockReturnValue({ remove: jest.fn() });
   });
 
+  it("renders the solid fallback while the preference is unknown", async () => {
+    // A read that never answers: nothing may render glass before the system has spoken.
+    jest
+      .mocked(AccessibilityInfo.isReduceTransparencyEnabled)
+      .mockReturnValue(new Promise<boolean>(() => {}));
+
+    await renderSurface();
+
+    await act(async () => {});
+    expect(isNativeGlass()).toBe(false);
+    expect(surfaceStyle()).toMatchObject(glassFallback.light);
+  });
+
   it("uses native glass when available and reduce transparency is off", async () => {
     await renderSurface({ interactive: true });
 
@@ -95,7 +108,7 @@ describe("GlassSurface", () => {
   it.each([
     [
       "light",
-      { backgroundColor: "rgba(255, 255, 255, 0.95)", shadowColor: tokens.colors["navy-900"] },
+      { backgroundColor: "rgba(255, 255, 255, 1)", shadowColor: tokens.colors["navy-900"] },
     ],
     ["dark", { backgroundColor: "rgba(11, 45, 73, 1)" }],
   ] as const)("light and dark tones use their token surfaces: %s", async (tone, expected) => {
