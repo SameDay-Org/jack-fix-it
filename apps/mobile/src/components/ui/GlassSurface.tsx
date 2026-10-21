@@ -37,6 +37,11 @@ function canUseGlass(reduceTransparency: ReduceTransparency): boolean {
   return reduceTransparency === false && isLiquidGlassAvailable() && isGlassEffectAPIAvailable();
 }
 
+/** Whether this device renders native Liquid Glass right now, for surfaces the system draws. */
+export function useLiquidGlass(): boolean {
+  return canUseGlass(useReduceTransparency());
+}
+
 /**
  * The one way the app renders Liquid Glass (ADR 0008): native glass on iOS 26+ when available and
  * Reduce Transparency is off; otherwise a near-solid token surface with the same shape. For the

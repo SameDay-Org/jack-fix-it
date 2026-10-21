@@ -24,6 +24,12 @@ rules apply.
   otherwise a solid token surface with the same shape (opaque white with the bubble shadow, or
   solid navy-700); while the preference is still unknown it renders the solid surface too. Controls layer only, never content cards; ESLint rejects
   `expo-glass-effect` anywhere else (ADR 0008).
+- Sheets: a route presented with `sheetOptions(detents)` from its Stack (`<Stack.Screen name="x"
+options={sheetOptions([0.5, 0.95])} />`, or `"fitToContents"`), rendering `SheetContent`
+  (title, body, actions; safe area and keyboard handled). Native form sheet: system glass on
+  iOS 26+, same detents on Android. No sheet library.
+- Toasts: `showToast({ message, tone })` from anywhere; one at a time, `motion.toastMs` long,
+  rendered by the `ToastHost` the root layout mounts. Dismiss text is `common.dismiss`.
 - Data: TanStack Query for server state, Zustand for small client state. Tokens go in
   `expo-secure-store` (D5.4, #32). API types come from `@jack/shared`.
 - Strings: `src/i18n/locales/{en,es}.json` through `useTranslation()`; the device language

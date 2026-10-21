@@ -4,6 +4,7 @@
     "tagline": "Pase lo que pase en casa, lo arreglamos."
   },
   "common": {
-    "loading": "Cargando"
+    "loading": "Cargando",
+    "dismiss": "Cerrar"
   }
 }
