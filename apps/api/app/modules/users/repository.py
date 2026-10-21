@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.users.models import User
@@ -22,3 +22,8 @@ class UserRepository:
         self._session.add(user)
         await self._session.flush()
         return user
+
+    async def update_password_hash(self, user_id: uuid.UUID, password_hash: str) -> None:
+        await self._session.execute(
+            update(User).where(User.id == user_id).values(password_hash=password_hash)
+        )

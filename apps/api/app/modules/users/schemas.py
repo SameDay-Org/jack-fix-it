@@ -2,7 +2,7 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict
 
-from app.modules.users.models import UserRole, UserStatus
+from app.modules.users.types import UserRole, UserStatus
 
 
 class UserOut(BaseModel):

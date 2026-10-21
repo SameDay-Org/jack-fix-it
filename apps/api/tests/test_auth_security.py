@@ -10,7 +10,7 @@ import jwt
 import pytest
 
 from app.modules.auth import security
-from app.modules.users.models import UserRole
+from app.modules.users.types import UserRole
 from tests.conftest import TEST_JWT_SECRET
 
 TTL_SECONDS = 900

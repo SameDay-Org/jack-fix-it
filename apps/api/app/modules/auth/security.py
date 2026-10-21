@@ -14,7 +14,7 @@ import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 
-from app.modules.users.models import UserRole
+from app.modules.users.types import UserRole
 
 JWT_ALGORITHM: Final = "HS256"
 ACCESS_TOKEN_TYPE: Final = "access"  # noqa: S105 - the typ claim value, not a secret

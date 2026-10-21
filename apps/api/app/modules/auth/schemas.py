@@ -3,8 +3,8 @@ from typing import Annotated, Literal
 from pydantic import AfterValidator, BaseModel, BeforeValidator, EmailStr, Field
 
 from app.config import PASSWORD_MAX_LENGTH
-from app.modules.users.models import UserRole
 from app.modules.users.schemas import UserOut
+from app.modules.users.types import UserRole
 
 
 def _trim_and_lowercase(value: object) -> object:

@@ -19,9 +19,9 @@ from app.modules.auth.errors import (
 from app.modules.auth.models import RefreshToken
 from app.modules.auth.repository import RefreshTokenRepository
 from app.modules.auth.schemas import AuthResponse, LoginRequest, RegisterRequest
-from app.modules.users.models import User, UserStatus
 from app.modules.users.schemas import UserOut
 from app.modules.users.service import UserService
+from app.modules.users.types import UserAccount, UserStatus
 
 logger = logging.getLogger(__name__)
 
@@ -64,22 +64,23 @@ class AuthService:
         return await self._start_session(user)
 
     async def login(self, data: LoginRequest) -> AuthResponse:
-        user = await self._users.get_by_email(data.email)
+        credentials = await self._users.get_credentials_by_email(data.email)
         # One Argon2 verify on every path, so the timing does not tell whether the email exists.
-        stored_hash = user.password_hash if user else security.DUMMY_PASSWORD_HASH
+        stored_hash = credentials.password_hash if credentials else security.DUMMY_PASSWORD_HASH
         matches = await asyncio.to_thread(security.verify_password, stored_hash, data.password)
-        if user is None or not matches:
-            reason = "unknown_email" if user is None else "bad_password"
+        if credentials is None or not matches:
+            reason = "unknown_email" if credentials is None else "bad_password"
             logger.info("auth_login_failed", extra={"reason": reason})
             raise InvalidCredentialsError
+        user = credentials.account
         if user.status is UserStatus.SUSPENDED:
             raise AccountSuspendedError
-        if security.password_needs_rehash(user.password_hash):
+        if security.password_needs_rehash(stored_hash):
             new_hash = await asyncio.to_thread(security.hash_password, data.password)
-            await self._users.update_password_hash(user, new_hash)
+            await self._users.update_password_hash(user.id, new_hash)
         return await self._start_session(user)
 
-    async def _start_session(self, user: User) -> AuthResponse:
+    async def _start_session(self, user: UserAccount) -> AuthResponse:
         """Issues an access token and the first refresh token of a new family, then commits."""
         now = datetime.now(UTC)
         refresh_token = security.new_refresh_token()
@@ -107,7 +108,9 @@ class AuthService:
         )
 
 
-async def authenticate_access_token(token: str, *, users: UserService, config: AuthConfig) -> User:
+async def authenticate_access_token(
+    token: str, *, users: UserService, config: AuthConfig
+) -> UserAccount:
     """The active user the access token belongs to. Raises InvalidTokenError otherwise."""
     try:
         claims = security.decode_access_token(token, secret=config.jwt_secret)

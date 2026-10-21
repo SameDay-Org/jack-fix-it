@@ -20,8 +20,9 @@ from app.main import create_app
 from app.modules.auth import security
 from app.modules.auth.models import RefreshToken
 from app.modules.users.errors import EmailAlreadyRegisteredError
-from app.modules.users.models import User, UserRole, UserStatus
+from app.modules.users.models import User
 from app.modules.users.service import UserService
+from app.modules.users.types import UserRole, UserStatus
 from app.observability import JsonFormatter
 from tests.conftest import TEST_JWT_SECRET, make_settings
 
@@ -213,16 +214,19 @@ async def test_register_duplicate_email_conflict(
     assert len((await db_session.scalars(select(User))).all()) == 1
 
 
-async def test_concurrent_duplicate_is_caught_as_conflict(db_session: AsyncSession) -> None:
-    # A request that passed no pre-check still loses on the unique constraint, as a 409.
+async def test_create_user_maps_unique_violation_to_conflict(db_session: AsyncSession) -> None:
+    # create_user has no "email exists?" pre-check: every duplicate, including one from a
+    # concurrent request, is caught as the uq_users_email violation of the INSERT itself.
     users = UserService(db_session)
     await users.create_user(email=EMAIL, password_hash="x", role=UserRole.CUSTOMER, locale="en")
 
     with pytest.raises(EmailAlreadyRegisteredError):
         await users.create_user(email=EMAIL, password_hash="y", role=UserRole.PRO, locale="en")
 
-    # The session is still usable after the violation.
-    assert (await users.get_by_email(EMAIL)) is not None
+    # Only the savepoint was rolled back: the session and the first user are intact.
+    credentials = await users.get_credentials_by_email(EMAIL)
+    assert credentials is not None
+    assert credentials.account.role is UserRole.CUSTOMER
 
 
 async def test_register_stores_argon2id_hash_not_password(

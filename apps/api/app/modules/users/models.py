@@ -1,22 +1,11 @@
-from enum import StrEnum
-
 from sqlalchemy import CheckConstraint, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, IdTimestampsMixin, str_enum
+from app.modules.users.types import UserRole, UserStatus
 
-
-class UserRole(StrEnum):
-    CUSTOMER = "customer"
-    PRO = "pro"
-    # agent and admin only use the admin/BDC panel.
-    AGENT = "agent"
-    ADMIN = "admin"
-
-
-class UserStatus(StrEnum):
-    ACTIVE = "active"
-    SUSPENDED = "suspended"
+# The enums live in types.py so other modules can use them without the ORM model.
+__all__ = ["User", "UserRole", "UserStatus"]
 
 
 class User(IdTimestampsMixin, Base):
