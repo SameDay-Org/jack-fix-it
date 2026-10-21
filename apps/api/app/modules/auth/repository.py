@@ -21,7 +21,8 @@ class RefreshTokenRepository:
 
         The family lock comes first and serializes every change to a family: a revocation
         running while another token of the family is rotated would otherwise miss the row that
-        rotation inserts (READ COMMITTED). One family lock, then rows: no deadlock.
+        rotation inserts (READ COMMITTED). No deadlock as long as the lock protocol holds:
+        a request locks one family only, and always the family before any of its rows.
         populate_existing: a waiter gets the row as the transaction that held the lock left it.
         """
         family_id = await self._session.scalar(

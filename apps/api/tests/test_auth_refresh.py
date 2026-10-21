@@ -313,21 +313,64 @@ async def committed_family(committed: Committed, token: str) -> list[RefreshToke
         return await family_rows(session, family_id)
 
 
+LOCK_WAIT_DEADLINE_SECONDS = 5
+
+
+async def backend_pid(session: AsyncSession) -> int:
+    """The Postgres backend of the session's connection, which runs the request's transaction."""
+    pid = await session.scalar(text("SELECT pg_backend_pid()"))
+    assert isinstance(pid, int)
+    return pid
+
+
+async def wait_until_blocked(
+    sessions: async_sessionmaker[AsyncSession], *, waiter: int, holder: int
+) -> None:
+    """Returns once Postgres reports backend `waiter` waiting on a lock `holder` holds.
+
+    Each poll is the query itself, on its own connection; fails after the deadline.
+    """
+    query = text("SELECT CAST(:holder AS integer) = ANY(pg_blocking_pids(:waiter))")
+    async with sessions() as monitor:
+        try:
+            async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+                while not await monitor.scalar(query, {"holder": holder, "waiter": waiter}):
+                    pass
+        except TimeoutError:
+            pytest.fail(
+                f"backend {waiter} never waited on a lock of backend {holder} "
+                f"within {LOCK_WAIT_DEADLINE_SECONDS} s"
+            )
+
+
 async def test_concurrent_refresh_only_one_succeeds(
     committed: Committed, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client = committed.client
     token = (await register(client, email=committed.email)).json()["refresh_token"]
-    # Both requests read the token at the same moment; the row lock decides who wins.
-    barrier = asyncio.Barrier(2)
+    # Each request publishes its backend pid. The first one to get the token's locks keeps
+    # its transaction open until Postgres reports the other one waiting on them, so the two
+    # reads truly overlap; the lock decides who wins.
+    pids: list[int] = []
+    both_known = asyncio.Barrier(2)
+    first_holder = asyncio.Event()
     read_for_update = RefreshTokenRepository.get_by_hash_for_update
 
-    async def read_together(self: RefreshTokenRepository, token_hash: str) -> RefreshToken | None:
-        async with asyncio.timeout(10):
-            await barrier.wait()
-        return await read_for_update(self, token_hash)
+    async def read_concurrently(
+        self: RefreshTokenRepository, token_hash: str
+    ) -> RefreshToken | None:
+        own_pid = await backend_pid(self._session)
+        pids.append(own_pid)
+        async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+            await both_known.wait()
+        row = await read_for_update(self, token_hash)
+        if not first_holder.is_set():
+            first_holder.set()
+            [other_pid] = [pid for pid in pids if pid != own_pid]
+            await wait_until_blocked(committed.sessions, waiter=other_pid, holder=own_pid)
+        return row
 
-    monkeypatch.setattr(RefreshTokenRepository, "get_by_hash_for_update", read_together)
+    monkeypatch.setattr(RefreshTokenRepository, "get_by_hash_for_update", read_concurrently)
 
     responses = await asyncio.gather(refresh(client, token), refresh(client, token))
 
@@ -343,20 +386,6 @@ async def test_concurrent_refresh_only_one_succeeds(
     assert_invalid_refresh_token(await refresh(client, winner.json()["refresh_token"]))
 
 
-async def wait_for_lock_waiter(sessions: async_sessionmaker[AsyncSession]) -> None:
-    """Returns once some connection to the test database is waiting on a lock."""
-    query = text(
-        "SELECT count(*) FROM pg_stat_activity"
-        " WHERE datname = current_database() AND wait_event_type = 'Lock'"
-    )
-    async with asyncio.timeout(10):
-        while True:
-            async with sessions() as session:
-                if await session.scalar(query):
-                    return
-            await asyncio.sleep(0.01)
-
-
 @pytest.mark.parametrize("stale_use", ["reuse", "logout"])
 async def test_revocation_during_refresh_of_newest_token_catches_its_replacement(
     committed: Committed, monkeypatch: pytest.MonkeyPatch, stale_use: str
@@ -364,24 +393,34 @@ async def test_revocation_during_refresh_of_newest_token_catches_its_replacement
     client = committed.client
     token_a = (await register(client, email=committed.email)).json()["refresh_token"]
     token_b = (await refresh(client, token_a)).json()["refresh_token"]
-    # The refresh of B inserts C, then holds its transaction open until the request that
-    # presents the stale token A is blocked; only then does it commit.
+    # The refresh of B inserts C, then keeps its transaction open until Postgres reports the
+    # request that presents the stale token A waiting on a lock the refresh holds; only then
+    # does it commit. With the family lock that wait is on the family; without it, on B's row
+    # during the revocation UPDATE, which then misses C.
+    holder_pid: list[int] = []
+    stale_pid: list[int] = []
     inserted = asyncio.Event()
+    stale_ready = asyncio.Event()
     add = RefreshTokenRepository.add
     read_for_update = RefreshTokenRepository.get_by_hash_for_update
 
     async def add_then_hold(self: RefreshTokenRepository, token: RefreshToken) -> RefreshToken:
         row = await add(self, token)
+        holder_pid.append(await backend_pid(self._session))
         inserted.set()
-        await wait_for_lock_waiter(committed.sessions)
+        async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+            await stale_ready.wait()
+        await wait_until_blocked(committed.sessions, waiter=stale_pid[0], holder=holder_pid[0])
         return row
 
     async def read_after_insert(
         self: RefreshTokenRepository, token_hash: str
     ) -> RefreshToken | None:
         if token_hash == security.hash_refresh_token(token_a):
-            async with asyncio.timeout(10):
+            async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
                 await inserted.wait()
+            stale_pid.append(await backend_pid(self._session))
+            stale_ready.set()
         return await read_for_update(self, token_hash)
 
     monkeypatch.setattr(RefreshTokenRepository, "add", add_then_hold)
