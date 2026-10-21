@@ -6,11 +6,11 @@ export default async function LandingPage() {
   const t = await getT(defaultLocale);
 
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-5 bg-gray-light px-6 text-center">
-      <span aria-hidden className="h-1 w-12 rounded-full bg-orange" />
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-5 bg-gray-50 px-6 text-center">
+      <span aria-hidden className="h-1 w-12 rounded-full bg-green-500" />
       <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">{t("brand.name")}</h1>
       <p className="max-w-xl text-lg sm:text-xl">{t("brand.tagline")}</p>
-      <p className="text-sm text-navy/70">{t("landing.comingSoon")}</p>
+      <p className="text-sm text-gray-500">{t("landing.comingSoon")}</p>
     </main>
   );
 }
