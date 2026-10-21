@@ -37,7 +37,10 @@ export type InputProps = PassthroughProps & {
   /** Danger ring only, when the message is shown elsewhere (a form-level error that names this field). */
   invalid?: boolean;
   disabled?: boolean;
-  /** A control at the field's right end (a show/hide toggle); the text keeps clear of it. */
+  /**
+   * A control at the field's right end (a show/hide toggle). It gets its own cell in the bubble's
+   * row, so the text column is whatever width remains: nothing overlaps at any font scale.
+   */
   accessory?: ReactNode;
   /** The native field, so a previous field's return key can move focus here. */
   ref?: Ref<InputHandle>;
@@ -46,8 +49,9 @@ export type InputProps = PassthroughProps & {
   testID?: string;
 };
 
-// The field is a white bubble lifted by the shadow, with no hairline at rest. The 2 px ring is
-// always present so the size never changes: transparent at rest, green-700 focused, danger on error.
+// The bubble is a row: the field fills it, the accessory sits beside it. White, lifted by the
+// shadow, with no hairline at rest; the 2 px ring is always present so the size never changes:
+// transparent at rest, green-700 focused, danger on error.
 const RING = { rest: "border-transparent", focused: "border-green-700", error: "border-danger" };
 
 export function Input({
@@ -72,7 +76,15 @@ export function Input({
   return (
     <View className={className}>
       <Text className="mb-2 text-callout font-semibold text-navy-900">{label}</Text>
-      <View>
+      <View
+        testID={testID && `${testID}-bubble`}
+        style={[bubbleShadow, continuousCorners]}
+        className={cx(
+          "min-h-12 flex-row items-center rounded-md border-2 bg-white",
+          ring,
+          disabled && "opacity-50",
+        )}
+      >
         <TextInput
           {...textInputProps}
           ref={ref}
@@ -85,17 +97,9 @@ export function Input({
           onFocus={focus}
           onBlur={blur}
           testID={testID}
-          style={[bubbleShadow, continuousCorners]}
-          className={cx(
-            "min-h-12 rounded-md border-2 bg-white px-4 text-body text-navy-900",
-            ring,
-            accessory ? "pr-14" : null,
-            disabled && "opacity-50",
-          )}
+          className="min-h-12 flex-1 px-4 text-body text-navy-900"
         />
-        {accessory ? (
-          <View className="absolute inset-y-0 right-1 justify-center">{accessory}</View>
-        ) : null}
+        {accessory ? <View className="pr-1">{accessory}</View> : null}
       </View>
       {message ? (
         <Text

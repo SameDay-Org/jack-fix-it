@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AccessibilityInfo } from "react-native";
 
@@ -43,6 +43,9 @@ export function useCredentialsForm(
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [failure, setFailure] = useState<FormFailure | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // `submitting` is render state, so two submits in the same turn would both read false; the ref
+  // is set before the first await and released in `finally`, whatever the outcome.
+  const inFlight = useRef(false);
   const passwordMinLength = apiConfig.passwordMinLength;
 
   const setEmail = useCallback((text: string) => {
@@ -58,35 +61,42 @@ export function useCredentialsForm(
   }, []);
 
   const submitForm = useCallback(async () => {
-    if (submitting) return;
-    const errors: FieldErrors = {};
-    if (!EMAIL_PATTERN.test(normalizeEmail(email))) errors.email = t("auth.errors.emailInvalid");
-    if (password.length < passwordMinLength) {
-      errors.password = t("auth.errors.passwordTooShort", { min: passwordMinLength });
-    }
-    const firstError = errors.email ?? errors.password;
-    if (firstError) {
-      setFieldErrors(errors);
-      AccessibilityInfo.announceForAccessibility(firstError);
-      return;
-    }
-
-    setSubmitting(true);
+    if (inFlight.current) return;
+    inFlight.current = true;
     try {
-      await submit({ email: normalizeEmail(email), password });
-    } catch (error) {
-      const described = describeAuthFailure(error);
-      const message = t(described.messageKey);
-      setFailure({
-        message,
-        highlight: described.highlight ?? [],
-        offerLogin: described.offerLogin ?? false,
-      });
-      AccessibilityInfo.announceForAccessibility(message);
+      const errors: FieldErrors = {};
+      if (!EMAIL_PATTERN.test(normalizeEmail(email))) {
+        errors.email = t("auth.errors.emailInvalid");
+      }
+      if (password.length < passwordMinLength) {
+        errors.password = t("auth.errors.passwordTooShort", { min: passwordMinLength });
+      }
+      const firstError = errors.email ?? errors.password;
+      if (firstError) {
+        setFieldErrors(errors);
+        AccessibilityInfo.announceForAccessibility(firstError);
+        return;
+      }
+
+      setSubmitting(true);
+      try {
+        await submit({ email: normalizeEmail(email), password });
+      } catch (error) {
+        const described = describeAuthFailure(error);
+        const message = t(described.messageKey);
+        setFailure({
+          message,
+          highlight: described.highlight ?? [],
+          offerLogin: described.offerLogin ?? false,
+        });
+        AccessibilityInfo.announceForAccessibility(message);
+      } finally {
+        setSubmitting(false);
+      }
     } finally {
-      setSubmitting(false);
+      inFlight.current = false;
     }
-  }, [email, password, passwordMinLength, submit, submitting, t]);
+  }, [email, password, passwordMinLength, submit, t]);
 
   return {
     email,

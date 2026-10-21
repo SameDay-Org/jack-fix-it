@@ -15,7 +15,7 @@ describe("PasswordInput", () => {
     expect(field().props.secureTextEntry).toBe(true);
     expect(field().props.autoCapitalize).toBe("none");
     expect(field().props.autoCorrect).toBe(false);
-    expect(field().props.className).toContain("pr-14");
+    expect(screen.getByTestId("pw-bubble").children).toHaveLength(2);
     expect(screen.getByText("Show")).toBeTruthy();
 
     await fireEvent.press(screen.getByRole("button", { name: "Show password" }));

@@ -32,6 +32,8 @@ jest.mock(
 
 const email = () => screen.getByLabelText("Email");
 const password = () => screen.getByLabelText("Password");
+const bubble = (field: "email" | "password") =>
+  screen.getByTestId(`sign-up-screen-${field}-bubble`);
 const submitButton = () => screen.getByRole("button", { name: "Create account" });
 
 async function fillAndSubmit(address: string, secret: string) {
@@ -81,8 +83,8 @@ describe("SignUpScreen", () => {
 
     expect(screen.getByText("Enter a valid email address.")).toBeTruthy();
     expect(screen.getByText("Use at least 10 characters.")).toBeTruthy();
-    expect(email().props.className).toContain("border-danger");
-    expect(password().props.className).toContain("border-danger");
+    expect(bubble("email").props.className).toContain("border-danger");
+    expect(bubble("password").props.className).toContain("border-danger");
     expect(register).not.toHaveBeenCalled();
     expect(announce).toHaveBeenCalledWith("Enter a valid email address.");
 
@@ -121,8 +123,8 @@ describe("SignUpScreen", () => {
     expect(await screen.findAllByText("An account with this email already exists.")).toHaveLength(
       1,
     );
-    expect(email().props.className).toContain("border-danger");
-    expect(password().props.className).not.toContain("border-danger");
+    expect(bubble("email").props.className).toContain("border-danger");
+    expect(bubble("password").props.className).not.toContain("border-danger");
     await fireEvent.press(screen.getByRole("button", { name: "Log in instead" }));
     expect(router.replace).toHaveBeenCalledWith("/(auth)/login");
   });
