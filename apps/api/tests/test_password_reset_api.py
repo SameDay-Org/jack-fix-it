@@ -18,6 +18,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from redis.asyncio import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.types import Message, Receive, Scope, Send
@@ -31,7 +32,12 @@ from app.modules.users.models import User
 from app.modules.users.service import UserService
 from app.modules.users.types import UserCredentials, UserStatus
 from app.observability import JsonFormatter
-from app.rate_limit import DEVELOPMENT_HMAC_KEY, get_rate_limiter, hashed_identifier
+from app.rate_limit import (
+    DEVELOPMENT_HMAC_KEY,
+    RateLimitResult,
+    get_rate_limiter,
+    hashed_identifier,
+)
 from tests.conftest import (
     LOCK_WAIT_DEADLINE_SECONDS,
     Committed,
@@ -49,6 +55,8 @@ NEW_PASSWORD = "a-brand-new-password"
 # Distinct from the defaults, so the tests prove the values come from settings.
 TTL_SECONDS = 600
 MAX_ATTEMPTS = 3
+DAILY_LIMIT = 4  # not the default (5), so the tests prove it comes from settings
+DAILY_WINDOW_SECONDS = 7_200
 REQUEST_LIMIT = 2
 NOW = 1_000.0
 OTHER_IP = "203.0.113.7"
@@ -91,8 +99,9 @@ def settings_with(**overrides: object) -> Settings:
     values: dict[str, object] = {
         "password_reset_code_ttl_seconds": TTL_SECONDS,
         "password_reset_max_attempts": MAX_ATTEMPTS,
-        # High, so only the rate-limit tests ever reach it.
+        # High, so only the rate-limit and daily-cap tests ever reach them.
         "password_reset_request_limit": 50,
+        "password_reset_daily_limit": 50,
     }
     values.update(overrides)
     return make_settings(**values)
@@ -122,14 +131,20 @@ async def prefix(redis: Redis) -> AsyncIterator[str]:
 
 
 @pytest.fixture
-def sender(app: FastAPI, redis: Redis, prefix: str) -> FakeSender:
+def clock() -> list[float]:
+    """The rate limiter's time; a test moves it by setting clock[0]."""
+    return [NOW]
+
+
+@pytest.fixture
+def sender(app: FastAPI, redis: Redis, prefix: str, clock: list[float]) -> FakeSender:
     fake = FakeSender()
     app.dependency_overrides[get_email_sender] = lambda: fake
     app.dependency_overrides[get_reset_code_store] = lambda: ResetCodeStore(
         redis, timeout_seconds=STORE_TIMEOUT, prefix=prefix
     )
-    # A fixed clock, so no test straddles two rate-limit windows.
-    limiter = InMemoryRateLimiter(clock=lambda: NOW)
+    # A fixed clock, so no test straddles two rate-limit windows unless it moves it.
+    limiter = InMemoryRateLimiter(clock=lambda: clock[0])
     app.dependency_overrides[get_rate_limiter] = lambda: limiter
     return fake
 
@@ -729,3 +744,99 @@ async def test_login_racing_reset_cannot_keep_a_session(
     revoked = await refresh(client, logged_in.json()["refresh_token"])
     assert revoked.status_code == 401
     assert (await login(client, email=committed.email, password=NEW_PASSWORD)).status_code == 200
+
+
+# Daily cap on new codes (Cesar, 2026-10-21)
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        settings_with(
+            password_reset_daily_limit=DAILY_LIMIT,
+            password_reset_daily_window_seconds=DAILY_WINDOW_SECONDS,
+        )
+    ],
+)
+async def test_daily_cap_stops_new_codes_and_answer_stays_identical(
+    db_client: httpx.AsyncClient,
+    sender: FakeSender,
+    redis: Redis,
+    prefix: str,
+    codes: list[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    await register(db_client, email=EMAIL)
+    allowed = [await forgot(db_client) for _ in range(DAILY_LIMIT)]
+
+    with caplog.at_level(logging.INFO):
+        capped = await forgot(db_client)
+
+    assert len(sender.sent) == DAILY_LIMIT
+    assert codes == [email.code for email in sender.sent]
+    for response in allowed:
+        assert (response.status_code, response.content) == (capped.status_code, capped.content)
+        assert response.headers.keys() == capped.headers.keys()
+    assert capped.status_code == 202
+    # No new code: the last one sent is still the stored one, and still works.
+    assert (await stored(redis, prefix))["code"] == code_digest(codes[-1])
+    [record] = [r for r in caplog.records if r.message == "password_reset_daily_cap_reached"]
+    payload = json.loads(JsonFormatter().format(record))
+    assert payload["email_id"] == hashed_identifier(EMAIL, DEVELOPMENT_HMAC_KEY)
+    assert set(payload) - {"timestamp", "level", "logger", "message", "request_id"} == {"email_id"}
+    assert EMAIL not in json.dumps(payload)
+    assert (await reset(db_client, codes[-1])).status_code == 204
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        settings_with(
+            password_reset_daily_limit=DAILY_LIMIT,
+            password_reset_daily_window_seconds=DAILY_WINDOW_SECONDS,
+        )
+    ],
+)
+async def test_daily_cap_resets_in_a_new_window(
+    db_client: httpx.AsyncClient, sender: FakeSender, clock: list[float]
+) -> None:
+    await register(db_client, email=EMAIL)
+    await register(db_client, email=OTHER_EMAIL)
+    for _ in range(DAILY_LIMIT + 1):
+        await forgot(db_client)
+    assert len(sender.sent) == DAILY_LIMIT
+    # Per account: another account is not capped.
+    await forgot(db_client, OTHER_EMAIL)
+    assert sender.sent[-1].to == OTHER_EMAIL
+
+    clock[0] = NOW + DAILY_WINDOW_SECONDS
+    await forgot(db_client)
+
+    assert len(sender.sent) == DAILY_LIMIT + 2
+    assert sender.sent[-1].to == EMAIL
+
+
+class FailingLimiter:
+    async def hit(
+        self, scope: str, identifier: str, *, limit: int, window_seconds: int
+    ) -> RateLimitResult:
+        raise RedisConnectionError("Error connecting to redis:6379")
+
+
+async def test_daily_cap_fails_closed(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    sender: FakeSender,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Unlike the request limits, the cap is checked after the response: when the count cannot
+    # be taken, no code is issued (the answer was already the same 202).
+    await register(db_client, email=EMAIL)
+    app.dependency_overrides[get_rate_limiter] = FailingLimiter
+
+    with caplog.at_level(logging.INFO):
+        response = await forgot(db_client)
+
+    assert response.status_code == 202
+    assert sender.sent == []
+    assert [r for r in caplog.records if r.message == "password_reset_store_unavailable"]

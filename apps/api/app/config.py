@@ -135,6 +135,10 @@ class Settings(BaseSettings):
     password_reset_code_ttl_seconds: int = Field(default=900, gt=0)
     password_reset_max_attempts: int = Field(default=5, gt=0)
     password_reset_request_limit: int = Field(default=3, gt=0)
+    # New codes per account per window (Cesar, 2026-10-21): with the tries per code, this bounds
+    # the guesses against one account per day (5 codes x 5 tries = 25 by default).
+    password_reset_daily_limit: int = Field(default=5, gt=0)
+    password_reset_daily_window_seconds: int = Field(default=86_400, gt=0)
 
     @field_validator("database_url")
     @classmethod

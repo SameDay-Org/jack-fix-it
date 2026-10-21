@@ -38,11 +38,12 @@ from app.modules.auth.errors import InvalidCodeError, PasswordTooShortError
 from app.modules.auth.repository import RefreshTokenRepository
 from app.modules.users.service import UserService
 from app.modules.users.types import UserStatus
-from app.rate_limit import IdentifierHasher
+from app.rate_limit import IdentifierHasher, RateLimiter
 
 logger = logging.getLogger(__name__)
 
 KEY_PREFIX: Final = "pwreset"
+DAILY_SCOPE: Final = "password_reset_daily"
 CODE_DIGITS: Final = 6
 
 # One try, atomically: counts it and, within the limit, returns the stored digest and the count.
@@ -123,6 +124,9 @@ class PasswordResetConfig:
     code_ttl_seconds: int
     max_attempts: int
     password_min_length: int
+    daily_limit: int
+    daily_window_seconds: int
+    redis_timeout_seconds: float
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "PasswordResetConfig":
@@ -130,6 +134,9 @@ class PasswordResetConfig:
             code_ttl_seconds=settings.password_reset_code_ttl_seconds,
             max_attempts=settings.password_reset_max_attempts,
             password_min_length=settings.password_min_length,
+            daily_limit=settings.password_reset_daily_limit,
+            daily_window_seconds=settings.password_reset_daily_window_seconds,
+            redis_timeout_seconds=settings.rate_limit_timeout_seconds,
         )
 
 
@@ -145,9 +152,11 @@ class PasswordResetService:
         store: ResetCodeStore,
         sender: EmailSender,
         hasher: IdentifierHasher,
+        limiter: RateLimiter,
         config: PasswordResetConfig,
     ) -> None:
         self._session = session
+        self._limiter = limiter
         self._users = users
         self._refresh_tokens = RefreshTokenRepository(session)
         self._store = store
@@ -156,8 +165,9 @@ class PasswordResetService:
         self._config = config
 
     async def send_code(self, email: str) -> None:
-        """Emails a new code to an active account. Runs after the response: a Redis or email
-        failure is logged (user id only) and the user simply gets no code."""
+        """Emails a new code to an active account, at most PASSWORD_RESET_DAILY_LIMIT codes per
+        account per window. Runs after the response: a capped request, or a Redis or email
+        failure, is logged and the user simply gets no new code (an earlier one still works)."""
         credentials = await self._users.get_credentials_by_email(email)
         if credentials is None or credentials.account.status is not UserStatus.ACTIVE:
             reason = "unknown_email" if credentials is None else "inactive"
@@ -167,11 +177,22 @@ class PasswordResetService:
         # Ends the read transaction, so no pooled connection waits on Redis or Resend.
         await self._session.rollback()
         extra = {"user_id": str(user.id)}
-        code = new_code()
+        email_id = self._hasher(email)
         try:
-            await self._store.put(
-                self._hasher(email), self._code_digest(code), self._config.code_ttl_seconds
-            )
+            # Fails closed: when the count cannot be taken, no code is issued.
+            async with asyncio.timeout(self._config.redis_timeout_seconds):
+                daily = await self._limiter.hit(
+                    DAILY_SCOPE,
+                    email_id,
+                    limit=self._config.daily_limit,
+                    window_seconds=self._config.daily_window_seconds,
+                )
+            if not daily.allowed:
+                # The hashed id only (Cesar, 2026-10-21): repeated hits show one target.
+                logger.warning("password_reset_daily_cap_reached", extra={"email_id": email_id})
+                return
+            code = new_code()
+            await self._store.put(email_id, self._code_digest(code), self._config.code_ttl_seconds)
         except (RedisError, OSError):  # OSError includes TimeoutError
             logger.error("password_reset_store_unavailable", extra=extra)
             return

@@ -160,10 +160,17 @@ def get_password_reset_service(
     store: Annotated[ResetCodeStore, Depends(get_reset_code_store)],
     sender: Annotated[EmailSender, Depends(get_email_sender)],
     hasher: Annotated[IdentifierHasher, Depends(get_identifier_hasher)],
+    limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> PasswordResetService:
     return PasswordResetService(
-        session, users, store, sender, hasher, PasswordResetConfig.from_settings(settings)
+        session,
+        users,
+        store,
+        sender,
+        hasher,
+        limiter,
+        PasswordResetConfig.from_settings(settings),
     )
 
 

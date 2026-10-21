@@ -367,4 +367,6 @@ def test_password_reset_settings_defaults() -> None:
     assert settings.password_reset_code_ttl_seconds == 900
     assert settings.password_reset_max_attempts == 5
     assert settings.password_reset_request_limit == 3
+    assert settings.password_reset_daily_limit == 5
+    assert settings.password_reset_daily_window_seconds == 86_400
     assert settings.resend_timeout_seconds == 5
