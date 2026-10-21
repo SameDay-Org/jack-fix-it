@@ -30,6 +30,10 @@ PUBLIC_ROUTES: Final[frozenset[tuple[str, str]]] = frozenset(
         # The refresh token in the body is the credential: the access token may have expired.
         ("POST", "/v1/auth/refresh"),
         ("POST", "/v1/auth/logout"),
+        # Forgotten password: the caller has no session by definition; the emailed code is the
+        # credential, and both routes are rate-limited per IP and per email.
+        ("POST", "/v1/auth/password/forgot"),
+        ("POST", "/v1/auth/password/reset"),
     }
 )
 

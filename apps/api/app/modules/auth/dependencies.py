@@ -5,19 +5,34 @@ from typing import Annotated
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import Request
 
 from app.config import Settings, get_app_settings
 from app.db import get_session
+from app.integrations.email import EmailSender, get_email_sender
 from app.integrations.sms_verify import PhoneVerifier, get_phone_verifier
 from app.modules.auth.errors import InvalidTokenError
+from app.modules.auth.password_reset import (
+    PasswordResetConfig,
+    PasswordResetService,
+    ResetCodeStore,
+    get_reset_code_store,
+)
 from app.modules.auth.phone_service import PhoneVerificationService
-from app.modules.auth.schemas import LoginRequest, PhoneSendRequest, PhoneVerifyRequest
+from app.modules.auth.schemas import (
+    LoginRequest,
+    PasswordForgotRequest,
+    PasswordResetRequest,
+    PhoneSendRequest,
+    PhoneVerifyRequest,
+)
 from app.modules.auth.service import AuthConfig, AuthService, authenticate_access_token
 from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount
 from app.rate_limit import (
     IdentifierHasher,
     RateLimiter,
+    client_ip,
     enforce_limit,
     get_identifier_hasher,
     get_rate_limiter,
@@ -137,3 +152,64 @@ async def limit_phone_verify(
     await _limit_phone(
         limiter, hasher, settings, "phone_check", user, data.phone, settings.phone_otp_check_limit
     )
+
+
+def get_password_reset_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    users: Annotated[UserService, Depends(get_user_service)],
+    store: Annotated[ResetCodeStore, Depends(get_reset_code_store)],
+    sender: Annotated[EmailSender, Depends(get_email_sender)],
+    hasher: Annotated[IdentifierHasher, Depends(get_identifier_hasher)],
+    limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> PasswordResetService:
+    return PasswordResetService(
+        session,
+        users,
+        store,
+        sender,
+        hasher,
+        limiter,
+        PasswordResetConfig.from_settings(settings),
+    )
+
+
+async def _limit_password(
+    request: Request,
+    limiter: RateLimiter,
+    hasher: IdentifierHasher,
+    settings: Settings,
+    scope: str,
+    email: str,
+) -> None:
+    """Per IP first, then per email; the address enters the key only as a keyed hash."""
+    for kind, identifier in (("ip", client_ip(request)), ("email", hasher(email))):
+        await enforce_limit(
+            limiter,
+            f"{scope}_{kind}",
+            identifier,
+            limit=settings.password_reset_request_limit,
+            window_seconds=settings.auth_rate_limit_window_seconds,
+            timeout_seconds=settings.rate_limit_timeout_seconds,
+        )
+
+
+async def limit_password_forgot(
+    # Same name and model as the route's body, so FastAPI parses the body once.
+    data: PasswordForgotRequest,
+    request: Request,
+    limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    hasher: Annotated[IdentifierHasher, Depends(get_identifier_hasher)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> None:
+    await _limit_password(request, limiter, hasher, settings, "password_forgot", data.email)
+
+
+async def limit_password_reset(
+    data: PasswordResetRequest,
+    request: Request,
+    limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    hasher: Annotated[IdentifierHasher, Depends(get_identifier_hasher)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> None:
+    await _limit_password(request, limiter, hasher, settings, "password_reset", data.email)

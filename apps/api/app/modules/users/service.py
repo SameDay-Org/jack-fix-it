@@ -28,9 +28,14 @@ class UserService:
         user = await self._users.get_by_id(user_id)
         return _to_account(user) if user else None
 
-    async def get_credentials_by_email(self, email: str) -> UserCredentials | None:
-        """For login only. Exact match: emails are stored lowercase, so pass a normalized email."""
-        user = await self._users.get_by_email(email)
+    async def get_credentials_by_email(
+        self, email: str, *, lock: bool = False
+    ) -> UserCredentials | None:
+        """For login and password reset. Exact match: emails are stored lowercase, so pass a
+        normalized email. `lock` holds the user row until the transaction ends and reads it as
+        last committed, so a login (after its password matched) and a password reset of the
+        same user run one after the other."""
+        user = await self._users.get_by_email(email, lock=lock)
         if user is None:
             return None
         return UserCredentials(account=_to_account(user), password_hash=user.password_hash)

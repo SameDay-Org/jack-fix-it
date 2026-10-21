@@ -69,3 +69,19 @@ class PhoneSendRequest(BaseModel):
 class PhoneVerifyRequest(BaseModel):
     phone: str = Field(pattern=E164_PATTERN, description="The number the code was sent to.")
     code: str = Field(pattern=r"^[0-9]{4,10}$", description="The code received by SMS.")
+
+
+class PasswordForgotRequest(BaseModel):
+    email: NormalizedEmail
+
+
+class PasswordResetRequest(BaseModel):
+    email: NormalizedEmail
+    code: str = Field(pattern=r"^[0-9]{6}$", description="The 6-digit code from the email.")
+    new_password: str = Field(
+        max_length=PASSWORD_MAX_LENGTH,
+        description=(
+            "Between the server's minimum (setting PASSWORD_MIN_LENGTH, 10 by default) and "
+            f"{PASSWORD_MAX_LENGTH} characters, as at registration."
+        ),
+    )

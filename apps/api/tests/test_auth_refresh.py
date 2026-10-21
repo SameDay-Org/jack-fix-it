@@ -5,16 +5,13 @@ import hashlib
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import httpx
 import jwt
 import pytest
-from fastapi import FastAPI
-from sqlalchemy import URL, delete, select, text, update
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.modules.auth import security
@@ -24,7 +21,14 @@ from app.modules.users.models import User
 from app.modules.users.service import UserService
 from app.modules.users.types import UserStatus
 from app.observability import JsonFormatter
-from tests.conftest import TEST_JWT_SECRET, make_settings
+from tests.conftest import (
+    LOCK_WAIT_DEADLINE_SECONDS,
+    TEST_JWT_SECRET,
+    Committed,
+    backend_pid,
+    make_settings,
+    wait_until_blocked,
+)
 from tests.test_auth_api import EMAIL, PASSWORD, get_user, login, me, register, set_status
 
 # Not the default, so the tests prove the TTL comes from the setting.
@@ -274,73 +278,10 @@ async def test_refresh_for_missing_user_revokes_family(
     assert (await get_row(db_session, token)).revoked_at is not None
 
 
-# Real commits on separate connections: the rolled-back db_session cannot show either.
-
-
-@dataclass(frozen=True)
-class Committed:
-    client: httpx.AsyncClient
-    sessions: async_sessionmaker[AsyncSession]
-    email: str
-
-
-@pytest.fixture
-async def committed(app: FastAPI, test_database_url: URL) -> AsyncIterator[Committed]:
-    """The app with one real session per request on the test database; rows are committed.
-
-    Uses its own user and deletes it, with its tokens, afterwards.
-    """
-    engine = create_async_engine(test_database_url)
-    sessions = async_sessionmaker(engine, expire_on_commit=False)
-    app.state.session_factory = sessions
-    email = f"refresh-{uuid.uuid4().hex}@example.com"
-    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
-    try:
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-            yield Committed(client=client, sessions=sessions, email=email)
-    finally:
-        async with sessions() as session:
-            user_ids = select(User.id).where(User.email == email).scalar_subquery()
-            await session.execute(delete(RefreshToken).where(RefreshToken.user_id.in_(user_ids)))
-            await session.execute(delete(User).where(User.email == email))
-            await session.commit()
-        await engine.dispose()
-
-
 async def committed_family(committed: Committed, token: str) -> list[RefreshToken]:
     async with committed.sessions() as session:
         family_id = (await get_row(session, token)).family_id
         return await family_rows(session, family_id)
-
-
-LOCK_WAIT_DEADLINE_SECONDS = 5
-
-
-async def backend_pid(session: AsyncSession) -> int:
-    """The Postgres backend of the session's connection, which runs the request's transaction."""
-    pid = await session.scalar(text("SELECT pg_backend_pid()"))
-    assert isinstance(pid, int)
-    return pid
-
-
-async def wait_until_blocked(
-    sessions: async_sessionmaker[AsyncSession], *, waiter: int, holder: int
-) -> None:
-    """Returns once Postgres reports backend `waiter` waiting on a lock `holder` holds.
-
-    Each poll is the query itself, on its own connection; fails after the deadline.
-    """
-    query = text("SELECT CAST(:holder AS integer) = ANY(pg_blocking_pids(:waiter))")
-    async with sessions() as monitor:
-        try:
-            async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
-                while not await monitor.scalar(query, {"holder": holder, "waiter": waiter}):
-                    pass
-        except TimeoutError:
-            pytest.fail(
-                f"backend {waiter} never waited on a lock of backend {holder} "
-                f"within {LOCK_WAIT_DEADLINE_SECONDS} s"
-            )
 
 
 async def test_concurrent_refresh_only_one_succeeds(
