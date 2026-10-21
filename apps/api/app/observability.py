@@ -63,6 +63,10 @@ def configure_logging(level: str) -> None:
     logging.getLogger("uvicorn.access").disabled = True
     # httpx logs every outgoing request at INFO with the full URL, query string included.
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    # At DEBUG, botocore logs the canonical request and the signature of every presigned URL:
+    # enough to rebuild a working URL from the logs.
+    for name in ("boto3", "botocore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 # Passed to `arq --custom-log-dict` so ARQ's own startup lines are JSON too.

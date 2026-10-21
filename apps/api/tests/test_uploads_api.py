@@ -433,7 +433,8 @@ async def test_logs_have_no_urls_or_signatures(
     customer = await make_caller(db_session, UserRole.CUSTOMER)
     caplog.clear()
 
-    with caplog.at_level(logging.INFO):
+    # DEBUG, as an operator chasing an incident might set LOG_LEVEL.
+    with caplog.at_level(logging.DEBUG):
         upload = await ask_upload(real_storage_client, customer, "request_media", "image/png", 10)
         key = upload.json()["key"]
         download = await ask_download(real_storage_client, customer, key)
