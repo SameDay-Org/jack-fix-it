@@ -17,6 +17,15 @@ _SYNC_SCHEMES = ("postgres://", "postgresql://")
 # Environments where a missing or weak JWT_SECRET stops startup.
 _JWT_SECRET_REQUIRED_IN: tuple[AppEnv, ...] = ("staging", "production")
 JWT_SECRET_MIN_LENGTH = 32
+# Object storage settings that deployed environments must set (D6.2, #35).
+_STORAGE_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
+_STORAGE_SETTINGS: tuple[str, ...] = (
+    "s3_endpoint_url",
+    "s3_bucket",
+    "s3_access_key_id",
+    "s3_secret_access_key",
+)
+MIB = 1024 * 1024
 # Twilio Verify settings that deployed environments must set (D4.3, #26).
 _TWILIO_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
 _TWILIO_SETTINGS: tuple[str, ...] = (
@@ -80,6 +89,18 @@ class Settings(BaseSettings):
     rate_limit_timeout_seconds: float = Field(default=0.5, gt=0)
     # Proxies whose X-Forwarded-For uvicorn trusts for the client IP (CSV, or "*").
     forwarded_allow_ips: str = "127.0.0.1"
+    # Object storage, S3-compatible (R2 or Railway Buckets), reached only through presigned URLs.
+    # Required in staging and production; without it, upload endpoints answer a generic 500.
+    s3_endpoint_url: str | None = None
+    s3_bucket: str | None = None
+    s3_access_key_id: SecretStr | None = None
+    s3_secret_access_key: SecretStr | None = None
+    s3_region: str = "auto"  # what R2 expects
+    upload_url_ttl_seconds: int = Field(default=300, gt=0)
+    download_url_ttl_seconds: int = Field(default=300, gt=0)
+    upload_max_image_bytes: int = Field(default=10 * MIB, gt=0)
+    upload_max_video_bytes: int = Field(default=100 * MIB, gt=0)
+    upload_max_document_bytes: int = Field(default=15 * MIB, gt=0)
     # Phone verification by SMS code through Twilio Verify (D4.3, #26). Required in staging and
     # production; without them, the phone endpoints answer a generic 500.
     twilio_account_sid: str | None = None
@@ -126,6 +147,10 @@ class Settings(BaseSettings):
     @field_validator(
         "sentry_dsn",
         "jwt_secret",
+        "s3_endpoint_url",
+        "s3_bucket",
+        "s3_access_key_id",
+        "s3_secret_access_key",
         "twilio_account_sid",
         "twilio_auth_token",
         "twilio_verify_service_sid",
@@ -145,6 +170,15 @@ class Settings(BaseSettings):
                 f"JWT_SECRET must be set to at least {JWT_SECRET_MIN_LENGTH} characters "
                 f"when APP_ENV is {self.app_env}"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _require_storage_when_deployed(self) -> Self:
+        if self.app_env not in _STORAGE_REQUIRED_IN:
+            return self
+        missing = [name.upper() for name in _STORAGE_SETTINGS if getattr(self, name) is None]
+        if missing:
+            raise ValueError(f"{', '.join(missing)} must be set when APP_ENV is {self.app_env}")
         return self
 
     @model_validator(mode="after")

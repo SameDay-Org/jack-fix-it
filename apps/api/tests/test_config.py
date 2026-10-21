@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.config import normalize_database_url
-from tests.conftest import TEST_TWILIO_SETTINGS, make_settings
+from tests.conftest import TEST_STORAGE_SETTINGS, TEST_TWILIO_SETTINGS, make_settings
 
 
 @pytest.mark.parametrize(
@@ -67,7 +67,9 @@ def test_jwt_secret_required_in_staging_and_production(app_env: str) -> None:
     assert short not in str(too_short.value)
     assert "JWT_SECRET" in str(missing.value)
     secret = "s" * 32
-    settings = make_settings(app_env=app_env, jwt_secret=secret, **TEST_TWILIO_SETTINGS)
+    settings = make_settings(
+        app_env=app_env, jwt_secret=secret, **TEST_STORAGE_SETTINGS, **TEST_TWILIO_SETTINGS
+    )
     assert settings.jwt_secret is not None
 
 
@@ -142,17 +144,82 @@ def test_rate_limit_settings_come_from_env(monkeypatch: pytest.MonkeyPatch) -> N
 
 @pytest.mark.parametrize("app_env", ["staging", "production"])
 @pytest.mark.parametrize(
+    "missing", ["s3_endpoint_url", "s3_bucket", "s3_access_key_id", "s3_secret_access_key"]
+)
+def test_s3_settings_required_in_staging_and_production(app_env: str, missing: str) -> None:
+    secret_value = "test-secret-access-key-not-real"
+    # Twilio is required there too; only the S3 setting under test is missing.
+    values = {**TEST_TWILIO_SETTINGS, **TEST_STORAGE_SETTINGS, missing: None}
+
+    with pytest.raises(ValidationError, match=missing.upper()) as error:
+        make_settings(app_env=app_env, jwt_secret="s" * 32, **values)
+
+    # The error names the variable but never prints a value.
+    assert secret_value not in str(error.value)
+    settings = make_settings(
+        app_env=app_env, jwt_secret="s" * 32, **TEST_STORAGE_SETTINGS, **TEST_TWILIO_SETTINGS
+    )
+    assert settings.s3_bucket == TEST_STORAGE_SETTINGS["s3_bucket"]
+
+
+@pytest.mark.parametrize("app_env", ["development", "test"])
+def test_s3_settings_optional_in_development(app_env: str) -> None:
+    settings = make_settings(app_env=app_env, s3_endpoint_url="", s3_access_key_id="")
+
+    assert settings.s3_endpoint_url is None
+    assert settings.s3_access_key_id is None
+    assert settings.s3_secret_access_key is None
+
+
+def test_s3_secrets_are_masked() -> None:
+    settings = make_settings(**TEST_STORAGE_SETTINGS)
+
+    assert "test-secret-access-key-not-real" not in repr(settings)
+    assert "test-access-key-id" not in repr(settings)
+
+
+def test_upload_settings_defaults() -> None:
+    settings = make_settings()
+
+    assert settings.s3_region == "auto"
+    assert settings.upload_url_ttl_seconds == 300
+    assert settings.download_url_ttl_seconds == 300
+    assert settings.upload_max_image_bytes == 10 * 1024 * 1024
+    assert settings.upload_max_video_bytes == 100 * 1024 * 1024
+    assert settings.upload_max_document_bytes == 15 * 1024 * 1024
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "upload_url_ttl_seconds",
+        "download_url_ttl_seconds",
+        "upload_max_image_bytes",
+        "upload_max_video_bytes",
+        "upload_max_document_bytes",
+    ],
+)
+def test_upload_settings_must_be_positive(name: str) -> None:
+    with pytest.raises(ValidationError, match=name):
+        make_settings(**{name: 0})
+
+
+@pytest.mark.parametrize("app_env", ["staging", "production"])
+@pytest.mark.parametrize(
     "missing", ["twilio_account_sid", "twilio_auth_token", "twilio_verify_service_sid"]
 )
 def test_twilio_settings_required_in_staging_and_production(app_env: str, missing: str) -> None:
-    values = {**TEST_TWILIO_SETTINGS, missing: None}
+    # Storage is required there too; only the Twilio setting under test is missing.
+    values = {**TEST_STORAGE_SETTINGS, **TEST_TWILIO_SETTINGS, missing: None}
 
     with pytest.raises(ValidationError, match=missing.upper()) as error:
         make_settings(app_env=app_env, jwt_secret="s" * 32, **values)
 
     # The error names the variable but never prints a value.
     assert "test-twilio-auth-token-not-real" not in str(error.value)
-    settings = make_settings(app_env=app_env, jwt_secret="s" * 32, **TEST_TWILIO_SETTINGS)
+    settings = make_settings(
+        app_env=app_env, jwt_secret="s" * 32, **TEST_TWILIO_SETTINGS, **TEST_STORAGE_SETTINGS
+    )
     assert settings.twilio_verify_service_sid == TEST_TWILIO_SETTINGS["twilio_verify_service_sid"]
 
 

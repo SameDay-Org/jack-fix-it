@@ -197,6 +197,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get an upload URL
+         * @description A short-lived presigned PUT URL for one file of the declared type and exact size.
+         *
+         *     PUT the file to `upload_url` with exactly the returned `headers`: Content-Type and
+         *     Content-Length are signed, so any other type or size is rejected by the storage. Keep
+         *     `key` to attach the file to a request, job or profile.
+         */
+        post: operations["create_upload_v1_uploads_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/uploads/download-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get a download URL
+         * @description A short-lived presigned GET URL for one of the caller's own files.
+         */
+        post: operations["create_download_url_v1_uploads_download_url_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -232,6 +276,24 @@ export interface components {
         DependencyChecks: {
             database: components["schemas"]["CheckStatus"];
             redis: components["schemas"]["CheckStatus"];
+        };
+        /** DownloadUrlRequest */
+        DownloadUrlRequest: {
+            /** Key */
+            key: string;
+        };
+        /** DownloadUrlResponse */
+        DownloadUrlResponse: {
+            /**
+             * Url
+             * @description Presigned GET URL.
+             */
+            url: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
         };
         /** ErrorDetail */
         ErrorDetail: {
@@ -324,6 +386,50 @@ export interface components {
              * @enum {string}
              */
             locale: "en" | "es";
+        };
+        /**
+         * UploadPurpose
+         * @enum {string}
+         */
+        UploadPurpose: "request_media" | "job_photo" | "pro_document" | "profile_photo";
+        /** UploadRequest */
+        UploadRequest: {
+            purpose: components["schemas"]["UploadPurpose"];
+            /**
+             * Content Type
+             * @description An allowed MIME type, e.g. image/jpeg.
+             */
+            content_type: string;
+            /**
+             * Size Bytes
+             * @description Exact size of the file; it is signed into the URL.
+             */
+            size_bytes: number;
+        };
+        /** UploadResponse */
+        UploadResponse: {
+            /**
+             * Key
+             * @description Where the file will live; features store it.
+             */
+            key: string;
+            /**
+             * Upload Url
+             * @description Presigned PUT URL.
+             */
+            upload_url: string;
+            /**
+             * Headers
+             * @description Send exactly these headers with the PUT, or the storage rejects it.
+             */
+            headers: {
+                [key: string]: string;
+            };
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
         };
         /**
          * UserOut
@@ -787,6 +893,108 @@ export interface operations {
             };
             /** @description verification_unavailable: the SMS provider is unavailable. */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_upload_v1_uploads_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadResponse"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired access token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description upload_forbidden: the caller's role cannot upload for this purpose. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description upload_invalid: content type not allowed for the purpose, or size out of range; validation_error: malformed body. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_download_url_v1_uploads_download_url_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DownloadUrlRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DownloadUrlResponse"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired access token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description upload_not_found: not a file of the caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description upload_invalid: malformed key. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

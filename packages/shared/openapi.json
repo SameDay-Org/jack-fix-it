@@ -551,6 +551,140 @@
           }
         ]
       }
+    },
+    "/v1/uploads": {
+      "post": {
+        "tags": [
+          "uploads"
+        ],
+        "summary": "Get an upload URL",
+        "description": "A short-lived presigned PUT URL for one file of the declared type and exact size.\n\nPUT the file to `upload_url` with exactly the returned `headers`: Content-Type and\nContent-Length are signed, so any other type or size is rejected by the storage. Keep\n`key` to attach the file to a request, job or profile.",
+        "operationId": "create_upload_v1_uploads_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "upload_invalid: content type not allowed for the purpose, or size out of range; validation_error: malformed body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "upload_forbidden: the caller's role cannot upload for this purpose.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/uploads/download-url": {
+      "post": {
+        "tags": [
+          "uploads"
+        ],
+        "summary": "Get a download URL",
+        "description": "A short-lived presigned GET URL for one of the caller's own files.",
+        "operationId": "create_download_url_v1_uploads_download_url_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DownloadUrlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadUrlResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "upload_invalid: malformed key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "upload_not_found: not a file of the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -613,6 +747,40 @@
           "redis"
         ],
         "title": "DependencyChecks"
+      },
+      "DownloadUrlRequest": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 256,
+            "title": "Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "title": "DownloadUrlRequest"
+      },
+      "DownloadUrlResponse": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "Presigned GET URL."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "expires_at"
+        ],
+        "title": "DownloadUrlResponse"
       },
       "ErrorDetail": {
         "properties": {
@@ -787,6 +955,76 @@
           "role"
         ],
         "title": "RegisterRequest"
+      },
+      "UploadPurpose": {
+        "type": "string",
+        "enum": [
+          "request_media",
+          "job_photo",
+          "pro_document",
+          "profile_photo"
+        ],
+        "title": "UploadPurpose"
+      },
+      "UploadRequest": {
+        "properties": {
+          "purpose": {
+            "$ref": "#/components/schemas/UploadPurpose"
+          },
+          "content_type": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Content Type",
+            "description": "An allowed MIME type, e.g. image/jpeg."
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes",
+            "description": "Exact size of the file; it is signed into the URL."
+          }
+        },
+        "type": "object",
+        "required": [
+          "purpose",
+          "content_type",
+          "size_bytes"
+        ],
+        "title": "UploadRequest"
+      },
+      "UploadResponse": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key",
+            "description": "Where the file will live; features store it."
+          },
+          "upload_url": {
+            "type": "string",
+            "title": "Upload Url",
+            "description": "Presigned PUT URL."
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Headers",
+            "description": "Send exactly these headers with the PUT, or the storage rejects it."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "upload_url",
+          "headers",
+          "expires_at"
+        ],
+        "title": "UploadResponse"
       },
       "UserOut": {
         "properties": {

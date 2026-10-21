@@ -20,6 +20,14 @@ from app.rate_limit import RateLimitResult, get_rate_limiter, window_position
 API_DIR = Path(__file__).resolve().parents[1]
 # Fixture value only; real secrets live in Railway variables.
 TEST_JWT_SECRET = "test-jwt-secret-not-for-real-use-0123456789"
+# Fixture values only: a dummy endpoint (.invalid never resolves) and fake credentials. Signing is
+# local, so nothing reaches a network.
+TEST_STORAGE_SETTINGS: dict[str, object] = {
+    "s3_endpoint_url": "https://storage.example.invalid",
+    "s3_bucket": "jack-test-bucket",
+    "s3_access_key_id": "test-access-key-id",
+    "s3_secret_access_key": "test-secret-access-key-not-real",
+}
 # Fixture values only, never real Twilio credentials; tests never call Twilio.
 TEST_TWILIO_SETTINGS: dict[str, object] = {
     "twilio_account_sid": "ACtest00000000000000000000000000",
