@@ -2,5 +2,8 @@
   "brand": {
     "name": "Jack Fix It",
     "tagline": "Whatever happens at home, we fix it."
+  },
+  "common": {
+    "loading": "Loading"
   }
 }

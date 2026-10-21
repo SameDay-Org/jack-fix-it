@@ -1,0 +1,74 @@
+import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
+import { View, type DimensionValue } from "react-native";
+import Animated, {
+  cancelAnimation,
+  Easing,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from "react-native-reanimated";
+
+import { cx } from "./cx";
+
+export type SkeletonProps = {
+  width?: DimensionValue;
+  height?: number;
+  radius?: number;
+  /** Round placeholder: `height` is the diameter; `width` and `radius` are ignored. */
+  circle?: boolean;
+  /** Extra classes for the placeholder (margins). */
+  className?: string;
+  testID?: string;
+};
+
+const PULSE_DURATION_MS = 900;
+const PULSE_MIN_OPACITY = 0.4;
+
+export function Skeleton({
+  width = "100%",
+  height = 16,
+  radius = 8,
+  circle = false,
+  className,
+  testID,
+}: SkeletonProps) {
+  const { t } = useTranslation();
+  const reducedMotion = useReducedMotion();
+  const opacity = useSharedValue(1);
+
+  useEffect(() => {
+    if (reducedMotion) return; // static placeholder
+    opacity.value = withRepeat(
+      withTiming(PULSE_MIN_OPACITY, {
+        duration: PULSE_DURATION_MS,
+        easing: Easing.inOut(Easing.ease),
+      }),
+      -1,
+      true,
+    );
+    return () => {
+      cancelAnimation(opacity);
+      opacity.value = 1;
+    };
+  }, [opacity, reducedMotion]);
+
+  const animatedStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
+  const shape = circle
+    ? { width: height, height, borderRadius: height / 2 }
+    : { width, height, borderRadius: radius };
+
+  return (
+    <Animated.View
+      accessible
+      accessibilityRole="progressbar"
+      accessibilityLabel={t("common.loading")}
+      testID={testID}
+      style={animatedStyle}
+    >
+      <View className={cx("bg-gray/20", className)} style={shape} />
+    </Animated.View>
+  );
+}
