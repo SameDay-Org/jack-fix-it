@@ -10,6 +10,7 @@ export default function DevLayout() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="components" />
       <Stack.Screen name="sheet" options={sheetOptions([0.6, 0.95])} />
+      <Stack.Screen name="sheet-fit" options={sheetOptions("fitToContents")} />
     </Stack>
   );
 }

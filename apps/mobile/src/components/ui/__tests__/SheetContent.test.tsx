@@ -47,4 +47,26 @@ describe("SheetContent", () => {
     expect(screen.getByTestId("sheet").props.className).toContain("bg-white");
     expect(screen.queryByText("Confirm the visit")).toBeNull();
   });
+
+  it("fills the sheet with fraction detents and sizes from the content with fitToContents", async () => {
+    // Android shows only the dimmed backdrop when a fit-to-contents sheet gets a flex: 1 root.
+    const withDetents = await renderInSafeArea(
+      <SheetContent testID="sheet">
+        <Text>Body</Text>
+      </SheetContent>,
+    );
+    const detents = withDetents.getByTestId("sheet").props.className.split(" ");
+    withDetents.unmount();
+    const fitted = await renderInSafeArea(
+      <SheetContent testID="sheet" fitToContents>
+        <Text>Body</Text>
+      </SheetContent>,
+    );
+    const fit = fitted.getByTestId("sheet").props.className.split(" ");
+
+    expect(detents).toContain("flex-1");
+    expect(fit).not.toContain("flex-1");
+    expect(fit).toContain("shrink");
+    expect(fit).toContain("bg-white");
+  });
 });

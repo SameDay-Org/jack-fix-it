@@ -32,9 +32,13 @@ export type GlassSurfaceProps = {
 // Third-party views take `className` only once NativeWind knows them.
 cssInterop(GlassView, { className: "style" });
 
+/** Whether this device can draw native Liquid Glass at all (iOS 26+ with the API), whatever the settings say. */
+export const isLiquidGlassCapable = (): boolean =>
+  isLiquidGlassAvailable() && isGlassEffectAPIAvailable();
+
 /** Native glass exists here and the system is known not to hide it; unknown means the fallback. */
 function canUseGlass(reduceTransparency: ReduceTransparency): boolean {
-  return reduceTransparency === false && isLiquidGlassAvailable() && isGlassEffectAPIAvailable();
+  return reduceTransparency === false && isLiquidGlassCapable();
 }
 
 /** Whether this device renders native Liquid Glass right now, for surfaces the system draws. */

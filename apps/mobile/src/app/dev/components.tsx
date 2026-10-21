@@ -142,6 +142,11 @@ function Gallery() {
             onPress={() => router.push("/dev/sheet")}
           />
           <Button
+            label="Show short sheet"
+            variant="secondary"
+            onPress={() => router.push("/dev/sheet-fit")}
+          />
+          <Button
             label="Toast: neutral"
             variant="ghost"
             onPress={() => showToast({ message: "Your note was saved", tone: "neutral" })}

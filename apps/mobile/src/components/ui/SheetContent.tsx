@@ -10,6 +10,12 @@ export type SheetContentProps = {
   children: ReactNode;
   /** Buttons for the actions row, right-aligned, always in view. */
   actions?: ReactNode;
+  /**
+   * Pair with `sheetOptions("fitToContents")`: the sheet is as tall as this content, so the
+   * scaffold must size itself from the content instead of filling the sheet. Android shows only
+   * the dimmed backdrop when a fit-to-contents sheet gets a filling (`flex: 1`) root.
+   */
+  fitToContents?: boolean;
   testID?: string;
 };
 
@@ -18,9 +24,16 @@ export type SheetContentProps = {
  * is shorter than the content, and an actions row that stays in view. It respects the bottom safe
  * area and keeps inputs above the keyboard. Where the system draws Liquid Glass the surface stays
  * transparent; everywhere else it is the white sheet surface (the route's `sheetCornerRadius`
- * rounds it). With `fitToContents` the sheet takes the content's height.
+ * rounds it). With fraction detents the scaffold fills the sheet; with `fitToContents` it takes
+ * the content's height.
  */
-export function SheetContent({ title, children, actions, testID }: SheetContentProps) {
+export function SheetContent({
+  title,
+  children,
+  actions,
+  fitToContents = false,
+  testID,
+}: SheetContentProps) {
   const { bottom } = useSafeAreaInsets();
   const glass = useLiquidGlass();
 
@@ -29,7 +42,7 @@ export function SheetContent({ title, children, actions, testID }: SheetContentP
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       testID={testID}
-      className={cx("flex-1", !glass && "bg-white")}
+      className={cx(fitToContents ? "shrink" : "flex-1", !glass && "bg-white")}
     >
       <View
         className="shrink"

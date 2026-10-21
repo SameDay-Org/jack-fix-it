@@ -3,12 +3,18 @@ import type { ComponentProps } from "react";
 
 import { tokens } from "@/theme";
 
+import { isLiquidGlassCapable } from "./GlassSurface";
+
 type ScreenOptions = Exclude<
   NonNullable<ComponentProps<typeof Stack.Screen>["options"]>,
   (...args: never[]) => unknown
 >;
 
-/** Fractions of the screen height the sheet may rest at, or the height of its content. */
+/**
+ * Fractions of the screen height the sheet may rest at, or the height of its content. A
+ * `"fitToContents"` route renders `<SheetContent fitToContents>`: Android hides a fit-to-contents
+ * sheet whose root fills, since the sheet, not the parent, is the source of the size.
+ */
 export type SheetDetents = "fitToContents" | number[];
 
 /**
@@ -23,7 +29,11 @@ export function sheetOptions(detents: SheetDetents): ScreenOptions {
     sheetGrabberVisible: true,
     sheetCornerRadius: tokens.radius.xl,
     headerShown: false,
-    // The route paints its own surface only where the system does not (see SheetContent).
-    contentStyle: { backgroundColor: "transparent" },
+    // Whatever the content does not cover belongs to the system where it draws glass, and is the
+    // white surface everywhere else (on iOS a filling root stops at its content with fraction
+    // detents, so the surface cannot be left to the route alone).
+    contentStyle: {
+      backgroundColor: isLiquidGlassCapable() ? "transparent" : tokens.colors.white,
+    },
   };
 }
