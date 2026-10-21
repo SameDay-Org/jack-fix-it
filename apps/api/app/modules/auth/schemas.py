@@ -47,3 +47,7 @@ class AuthResponse(BaseModel):
     refresh_token: str = Field(description="Opaque. Returned once; the server keeps a hash.")
     token_type: Literal["bearer"] = "bearer"  # noqa: S105 - OAuth token type, not a secret
     expires_in: int = Field(description="Seconds until the access token expires.")
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str = Field(description="The refresh token from the last AuthResponse.")

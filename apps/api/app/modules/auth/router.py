@@ -1,10 +1,15 @@
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 
 from app.errors import ErrorResponse
 from app.modules.auth.dependencies import CurrentUser, get_auth_service
-from app.modules.auth.schemas import AuthResponse, LoginRequest, RegisterRequest
+from app.modules.auth.schemas import (
+    AuthResponse,
+    LoginRequest,
+    RefreshTokenRequest,
+    RegisterRequest,
+)
 from app.modules.auth.service import AuthService
 from app.modules.users.schemas import UserOut
 
@@ -48,6 +53,52 @@ async def login(
 ) -> AuthResponse:
     """Checks the email and password and starts a new session."""
     return await auth.login(data)
+
+
+@router.post(
+    "/refresh",
+    response_model=AuthResponse,
+    summary="Refresh the session",
+    responses={
+        status.HTTP_401_UNAUTHORIZED: _error(
+            "invalid_refresh_token: unknown, expired, revoked or reused refresh token, or the "
+            "account is suspended."
+        ),
+    },
+)
+async def refresh(
+    data: RefreshTokenRequest, auth: Annotated[AuthService, Depends(get_auth_service)]
+) -> AuthResponse:
+    """Spends the refresh token and returns a new access token and a new refresh token.
+
+    Each refresh token works once. Presenting one that was already rotated is treated as theft:
+    the whole session is revoked, including the newest token. Clients must therefore serialize
+    refresh calls: of two concurrent calls with the same token, one succeeds and the other one
+    ends the session.
+    """
+    return await auth.refresh(data.refresh_token)
+
+
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    summary="Log out",
+    responses={
+        status.HTTP_204_NO_CONTENT: {
+            "description": "Always, whether the token was valid, unknown, expired or revoked."
+        },
+    },
+)
+async def logout(
+    data: RefreshTokenRequest, auth: Annotated[AuthService, Depends(get_auth_service)]
+) -> None:
+    """Revokes the session the refresh token belongs to. No bearer token is needed.
+
+    Always 204, so the endpoint cannot be used to test tokens. The access token is not revoked
+    on the server: it stops working when it expires (`expires_in`).
+    """
+    await auth.logout(data.refresh_token)
 
 
 @router.get(

@@ -84,6 +84,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh the session
+         * @description Spends the refresh token and returns a new access token and a new refresh token.
+         *
+         *     Each refresh token works once. Presenting one that was already rotated is treated as theft:
+         *     the whole session is revoked, including the newest token. Clients must therefore serialize
+         *     refresh calls: of two concurrent calls with the same token, one succeeds and the other one
+         *     ends the session.
+         */
+        post: operations["refresh_v1_auth_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Log out
+         * @description Revokes the session the refresh token belongs to. No bearer token is needed.
+         *
+         *     Always 204, so the endpoint cannot be used to test tokens. The access token is not revoked
+         *     on the server: it stops working when it expires (`expires_in`).
+         */
+        post: operations["logout_v1_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/me": {
         parameters: {
             query?: never;
@@ -178,6 +226,14 @@ export interface components {
              */
             status: "ok" | "unavailable";
             checks: components["schemas"]["DependencyChecks"];
+        };
+        /** RefreshTokenRequest */
+        RefreshTokenRequest: {
+            /**
+             * Refresh Token
+             * @description The refresh token from the last AuthResponse.
+             */
+            refresh_token: string;
         };
         /** RegisterRequest */
         RegisterRequest: {
@@ -369,6 +425,79 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    refresh_v1_auth_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefreshTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthResponse"];
+                };
+            };
+            /** @description invalid_refresh_token: unknown, expired, revoked or reused refresh token, or the account is suspended. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    logout_v1_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefreshTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description Always, whether the token was valid, unknown, expired or revoked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description The request is invalid. */
             422: {

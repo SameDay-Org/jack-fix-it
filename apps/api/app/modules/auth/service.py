@@ -1,4 +1,8 @@
-"""Register and login: verify the password, then start a session (access + refresh token)."""
+"""Register and login start a session (access + refresh token); refresh rotates it; logout ends it.
+
+A session is a family of refresh tokens: each refresh spends the presented token and issues the
+next one. A spent token presented again means it leaked, so its whole family is revoked.
+"""
 
 import asyncio
 import logging
@@ -13,6 +17,7 @@ from app.modules.auth import security
 from app.modules.auth.errors import (
     AccountSuspendedError,
     InvalidCredentialsError,
+    InvalidRefreshTokenError,
     InvalidTokenError,
     PasswordTooShortError,
 )
@@ -80,18 +85,66 @@ class AuthService:
             await self._users.update_password_hash(user.id, new_hash)
         return await self._start_session(user)
 
+    async def refresh(self, refresh_token: str) -> AuthResponse:
+        """Rotates the refresh token: the old one is spent, a new one joins its family."""
+        now = datetime.now(UTC)
+        token = await self._refresh_tokens.get_by_hash_for_update(
+            security.hash_refresh_token(refresh_token)
+        )
+        if token is None:
+            raise InvalidRefreshTokenError
+        if token.revoked_at is not None:
+            if token.replaced_by_id is not None:
+                # Already rotated, so a copy leaked: the owner or a thief holds the newest token.
+                logger.warning(
+                    "auth_refresh_reuse_detected",
+                    extra={"user_id": str(token.user_id), "family_id": str(token.family_id)},
+                )
+                await self._revoke_family(token.family_id, now)
+            raise InvalidRefreshTokenError
+        if token.expires_at <= now:
+            raise InvalidRefreshTokenError
+        user = await self._users.get_by_id(token.user_id)
+        if user is None or user.status is not UserStatus.ACTIVE:
+            await self._revoke_family(token.family_id, now)
+            raise InvalidRefreshTokenError
+        new_refresh_token = security.new_refresh_token()
+        replacement = await self._add_refresh_token(user, token.family_id, new_refresh_token, now)
+        token.revoked_at = now
+        token.replaced_by_id = replacement.id
+        return await self._issue_tokens(user, new_refresh_token, now)
+
+    async def logout(self, refresh_token: str) -> None:
+        """Revokes the session of a known token. An unknown token is ignored, without a sign."""
+        token = await self._refresh_tokens.get_by_hash_for_update(
+            security.hash_refresh_token(refresh_token)
+        )
+        if token is not None:
+            await self._revoke_family(token.family_id, datetime.now(UTC))
+
     async def _start_session(self, user: UserAccount) -> AuthResponse:
         """Issues an access token and the first refresh token of a new family, then commits."""
         now = datetime.now(UTC)
         refresh_token = security.new_refresh_token()
-        await self._refresh_tokens.add(
+        await self._add_refresh_token(user, uuid.uuid4(), refresh_token, now)
+        return await self._issue_tokens(user, refresh_token, now)
+
+    async def _add_refresh_token(
+        self, user: UserAccount, family_id: uuid.UUID, refresh_token: str, now: datetime
+    ) -> RefreshToken:
+        return await self._refresh_tokens.add(
             RefreshToken(
                 user_id=user.id,
-                family_id=uuid.uuid4(),
+                family_id=family_id,
                 token_hash=security.hash_refresh_token(refresh_token),
                 expires_at=now + timedelta(seconds=self._config.refresh_token_ttl_seconds),
             )
         )
+
+    async def _issue_tokens(
+        self, user: UserAccount, refresh_token: str, now: datetime
+    ) -> AuthResponse:
+        """Creates the access token, commits the refresh token rows and builds the response."""
         access_token = security.create_access_token(
             user_id=user.id,
             role=user.role,
@@ -106,6 +159,11 @@ class AuthService:
             refresh_token=refresh_token,
             expires_in=self._config.access_token_ttl_seconds,
         )
+
+    async def _revoke_family(self, family_id: uuid.UUID, now: datetime) -> None:
+        """Commits at once: on a failed refresh the revocation must outlive the error."""
+        await self._refresh_tokens.revoke_family(family_id, now)
+        await self._session.commit()
 
 
 async def authenticate_access_token(
