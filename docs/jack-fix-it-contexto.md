@@ -1,6 +1,6 @@
 # Jack Fix It — Contexto do projeto
 
-> Documento de referência para o Claude. Junto com o **Plano de Desenvolvimento do MVP** (escopo, modelo de dados e tasks diárias), ele descreve tudo o que é preciso saber para trabalhar no projeto. Última atualização: 16/10/2026.
+> Documento de referência para o Claude. Junto com o **Plano de Desenvolvimento do MVP** (escopo, modelo de dados e tasks diárias), ele descreve tudo o que é preciso saber para trabalhar no projeto. Última atualização: 20/10/2026.
 
 ---
 
@@ -19,7 +19,7 @@
 ## 2. Marca
 
 - **Nome:** Jack Fix It. "Jack" é o concierge da casa e a cara da marca. A interface tem que ficar premium mesmo sem o personagem.
-- **Cores:** azul-marinho profundo, laranja vivo e premium, branco e cinza claro nos fundos.
+- **Cores:** azul-marinho profundo + verde-limão, branco e cinza claro nos fundos (decided 2026-10-20 by Cesar, docs/design/README.md, ADR 0008).
 - **Estilo:** produto de tecnologia moderno e confiável. Nada de visual de construtora, de handyman antigo ou de cartoon. Muito espaço em branco, tipografia premium, cards arredondados, sombras sutis, ícones simples, pouca animação.
 - **Tagline principal:** "Whatever happens at home, we fix it."
 - **Apoio:** "Tell Jack. We'll take care of the rest." CTA principal: **"Tell Jack What Happened"**.
@@ -169,7 +169,7 @@ O detalhe completo está no plano. Tabelas principais:
 
 **Fechadas:**
 
-- Marca Jack Fix It; azul-marinho, laranja, branco e cinza claro.
+- Marca Jack Fix It; azul-marinho profundo + verde-limão, branco e cinza claro (decided 2026-10-20 by Cesar, docs/design/README.md, ADR 0008).
 - App mobile em React Native com Stripe já no MVP.
 - 5 categorias no lançamento.
 - O README antigo (repositório Lovable) serve só como referência de conteúdo e UX.

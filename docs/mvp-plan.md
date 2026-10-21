@@ -20,7 +20,7 @@ O que o produto precisa entregar:
 
 **Premissas deste plano:** um desenvolvedor, dias úteis de segunda a sexta, marca e textos legais fornecidos pelos sócios. O plano conta só tempo de execução, sem custos.
 
-**Decisões fechadas:** marca Jack Fix It; cores azul-marinho, laranja, branco e cinza claro; app mobile em React Native (cliente e profissional) com Stripe já no MVP; lançamento com as 5 categorias do deck. O README do repositório antigo (Lovable) serve só como referência de conteúdo e UX.
+**Decisões fechadas:** marca Jack Fix It; cores azul-marinho profundo + verde-limão, branco e cinza claro (decided 2026-10-20 by Cesar, docs/design/README.md, ADR 0008); app mobile em React Native (cliente e profissional) com Stripe já no MVP; lançamento com as 5 categorias do deck. O README do repositório antigo (Lovable) serve só como referência de conteúdo e UX.
 
 **Hospedagem (decidida em 2026-10-16):** Railway Pro, nos EUA. Ambientes staging (deploy da `develop`) e produção (deploy da `main`); serviços api, worker e web; Postgres com backups agendados e PITR; Redis; rede privada entre os serviços; "Wait for CI" para não publicar commit com CI vermelho. Detalhes em [ADR 0001](adr/0001-hosting-railway.md) e [railway.md](railway.md).
 
@@ -115,7 +115,7 @@ As chaves de i18n de cada status estão em [glossary.md](glossary.md).
 
 ## Landing page (página de produto)
 
-A landing é uma página de produto mobile-first com um único trabalho: fazer o cliente abrir um pedido em cerca de 60 segundos. O conteúdo vem do README do repositório antigo (Lovable); a marca é Jack Fix It, em azul-marinho, laranja e branco.
+A landing é uma página de produto mobile-first com um único trabalho: fazer o cliente abrir um pedido em cerca de 60 segundos. O conteúdo vem do README do repositório antigo (Lovable); a marca é Jack Fix It, em azul-marinho profundo + verde-limão, branco e cinza claro (decided 2026-10-20 by Cesar, docs/design/README.md, ADR 0008).
 
 ### Estrutura da página
 
@@ -270,7 +270,7 @@ Entrega: contas criadas, repositório no ar, board pronto.
 
 ### Dia 2 — Design
 
-- [ ] **D2.1** Design system da marca: azul-marinho, laranja, branco e cinza claro, tipografia, espaçamentos, raios, ícones — #18
+- [ ] **D2.1** Design system da marca: azul-marinho profundo + verde-limão, branco e cinza claro (decided 2026-10-20 by Cesar, docs/design/README.md, ADR 0008), tipografia, espaçamentos, raios, ícones — #18
 - [ ] **D2.2** Protótipo das telas-chave no Figma: boas-vindas, home do cliente, criar pedido, orçamentos, acompanhamento do job, feed do profissional, detalhe do job, perfil, avaliação — #19
 - [ ] **D2.3** Definir estados vazios, de carregamento e de erro — #19
 - [ ] **D2.4** Validar o protótipo com o Guilherme (30 min), que cuida da marca — #19
