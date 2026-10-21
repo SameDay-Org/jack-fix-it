@@ -385,7 +385,7 @@
           "auth"
         ],
         "summary": "Send a phone verification code",
-        "description": "Sends a verification code by SMS to the number, for the signed-in user.\n\nAlways 202 for a valid number, including one already verified by another account (then\nnothing is sent), so the endpoint cannot tell whether a number is taken.",
+        "description": "Sends a verification code by SMS to the number, for the signed-in user.\n\nAlways 202 for a valid number, including one already verified by another account (then\nnothing is sent). The SMS provider is called after the response, so neither the answer,\nits timing nor a provider error tells whether a number is taken; a code that never\narrives surfaces at verify as invalid_code.",
         "operationId": "send_phone_code_v1_auth_phone_send_post",
         "requestBody": {
           "content": {
@@ -402,7 +402,7 @@
             "description": "Accepted; a code is on its way by SMS."
           },
           "422": {
-            "description": "validation_error: not an E.164 number, a country code that is not allowed, a number that cannot receive SMS, or a malformed code.",
+            "description": "validation_error: not an E.164 number, or a country code that is not allowed.",
             "content": {
               "application/json": {
                 "schema": {
@@ -413,16 +413,6 @@
           },
           "401": {
             "description": "invalid_token: missing, invalid or expired access token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "verification_unavailable: the SMS provider is unavailable.",
             "content": {
               "application/json": {
                 "schema": {
@@ -487,7 +477,7 @@
             }
           },
           "422": {
-            "description": "validation_error: not an E.164 number, a country code that is not allowed, a number that cannot receive SMS, or a malformed code.",
+            "description": "validation_error: not an E.164 number, a country code that is not allowed, or a malformed code.",
             "content": {
               "application/json": {
                 "schema": {
@@ -691,7 +681,7 @@
         "properties": {
           "phone": {
             "type": "string",
-            "pattern": "^\\+[1-9]\\d{7,14}$",
+            "pattern": "^\\+[1-9][0-9]{7,14}$",
             "title": "Phone",
             "description": "E.164, e.g. +14075550123, with an allowed country code."
           }
@@ -706,13 +696,13 @@
         "properties": {
           "phone": {
             "type": "string",
-            "pattern": "^\\+[1-9]\\d{7,14}$",
+            "pattern": "^\\+[1-9][0-9]{7,14}$",
             "title": "Phone",
             "description": "The number the code was sent to."
           },
           "code": {
             "type": "string",
-            "pattern": "^\\d{4,10}$",
+            "pattern": "^[0-9]{4,10}$",
             "title": "Code",
             "description": "The code received by SMS."
           }

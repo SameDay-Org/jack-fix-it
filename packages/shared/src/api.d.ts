@@ -166,7 +166,9 @@ export interface paths {
          * @description Sends a verification code by SMS to the number, for the signed-in user.
          *
          *     Always 202 for a valid number, including one already verified by another account (then
-         *     nothing is sent), so the endpoint cannot tell whether a number is taken.
+         *     nothing is sent). The SMS provider is called after the response, so neither the answer,
+         *     its timing nor a provider error tells whether a number is taken; a code that never
+         *     arrives surfaces at verify as invalid_code.
          */
         post: operations["send_phone_code_v1_auth_phone_send_post"];
         delete?: never;
@@ -692,7 +694,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description validation_error: not an E.164 number, a country code that is not allowed, a number that cannot receive SMS, or a malformed code. */
+            /** @description validation_error: not an E.164 number, or a country code that is not allowed. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -706,15 +708,6 @@ export interface operations {
                 headers: {
                     /** @description Seconds until the current limit window ends. */
                     "Retry-After"?: number;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description verification_unavailable: the SMS provider is unavailable. */
-            503: {
-                headers: {
                     [name: string]: unknown;
                 };
                 content: {
@@ -772,7 +765,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description validation_error: not an E.164 number, a country code that is not allowed, a number that cannot receive SMS, or a malformed code. */
+            /** @description validation_error: not an E.164 number, a country code that is not allowed, or a malformed code. */
             422: {
                 headers: {
                     [name: string]: unknown;

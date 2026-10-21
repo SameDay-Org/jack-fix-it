@@ -1,6 +1,6 @@
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Response, status
 
 from app.errors import ErrorResponse
 from app.modules.auth.dependencies import (
@@ -152,8 +152,8 @@ async def me(user: CurrentUser) -> UserOut:
 
 _UNAUTHORIZED = _error("invalid_token: missing, invalid or expired access token.")
 _PHONE_INVALID = _error(
-    "validation_error: not an E.164 number, a country code that is not allowed, a number "
-    "that cannot receive SMS, or a malformed code."
+    "validation_error: not an E.164 number, a country code that is not allowed, or a "
+    "malformed code."
 )
 _PHONE_UNAVAILABLE = _error("verification_unavailable: the SMS provider is unavailable.")
 
@@ -167,8 +167,9 @@ _PHONE_UNAVAILABLE = _error("verification_unavailable: the SMS provider is unava
     responses={
         status.HTTP_202_ACCEPTED: {"description": "Accepted; a code is on its way by SMS."},
         status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
-        status.HTTP_422_UNPROCESSABLE_CONTENT: _PHONE_INVALID,
-        status.HTTP_503_SERVICE_UNAVAILABLE: _PHONE_UNAVAILABLE,
+        status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
+            "validation_error: not an E.164 number, or a country code that is not allowed."
+        ),
         **_RATE_LIMITED,
     },
 )
@@ -176,13 +177,17 @@ async def send_phone_code(
     data: PhoneSendRequest,
     user: CurrentUser,
     phones: Annotated[PhoneVerificationService, Depends(get_phone_service)],
+    background: BackgroundTasks,
 ) -> None:
     """Sends a verification code by SMS to the number, for the signed-in user.
 
     Always 202 for a valid number, including one already verified by another account (then
-    nothing is sent), so the endpoint cannot tell whether a number is taken.
+    nothing is sent). The SMS provider is called after the response, so neither the answer,
+    its timing nor a provider error tells whether a number is taken; a code that never
+    arrives surfaces at verify as invalid_code.
     """
-    await phones.send_code(user, data.phone)
+    if await phones.prepare_send(user, data.phone):
+        background.add_task(phones.deliver_code, user.id, data.phone)
 
 
 @router.post(

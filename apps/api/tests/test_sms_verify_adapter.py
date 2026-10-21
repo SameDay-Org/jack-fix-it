@@ -13,6 +13,7 @@ import pytest
 from app.integrations.sms_verify import (
     InvalidPhoneError,
     TwilioPhoneVerifier,
+    VerificationThrottledError,
     VerificationUnavailableError,
 )
 from app.observability import JsonFormatter
@@ -146,6 +147,42 @@ async def test_check_with_an_unreadable_body_is_unavailable() -> None:
         await client.check(PHONE, CODE)
 
 
+@pytest.mark.parametrize(
+    ("status", "twilio_code"),
+    [
+        (400, 60223),  # delivery channel disabled on the Verify service: configuration
+        (400, 21608),  # trial account restriction: configuration
+        (400, None),
+        (429, 20429),  # account-wide concurrency limit: an outage for us
+    ],
+)
+async def test_errors_not_about_the_number_or_code_are_unavailable(
+    status: int, twilio_code: int | None
+) -> None:
+    body = {"code": twilio_code} if twilio_code else {}
+    client = verifier(respond(status, body))
+
+    with pytest.raises(VerificationUnavailableError):
+        await client.start(PHONE)
+    with pytest.raises(VerificationUnavailableError):
+        await client.check(PHONE, CODE)
+
+
+@pytest.mark.parametrize("twilio_code", [60200, 60205, 21211, 21614])
+async def test_number_errors_raise_invalid_phone(twilio_code: int) -> None:
+    client = verifier(respond(400, {"code": twilio_code}))
+
+    with pytest.raises(InvalidPhoneError):
+        await client.start(PHONE)
+    with pytest.raises(InvalidPhoneError):
+        await client.check(PHONE, CODE)
+
+
+async def test_max_send_attempts_raises_throttled() -> None:
+    with pytest.raises(VerificationThrottledError):
+        await verifier(respond(429, {"code": 60203})).start(PHONE)
+
+
 async def test_start_404_is_unavailable_not_a_bad_code() -> None:
     # On start, a 404 means a wrong service SID: a configuration problem.
     with pytest.raises(VerificationUnavailableError):
@@ -205,5 +242,6 @@ async def test_adapter_logs_no_number_or_code(caplog: pytest.LogCaptureFixture) 
                 "request_id",
                 "operation",
                 "status_code",
+                "twilio_code",
                 "error",
             }

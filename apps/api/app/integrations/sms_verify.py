@@ -29,6 +29,24 @@ class VerificationUnavailableError(Exception):
     """Twilio could not be reached or did not behave as expected."""
 
 
+class VerificationThrottledError(Exception):
+    """Twilio refused to send another code to this number for now (max send attempts)."""
+
+
+# Twilio error codes (https://www.twilio.com/docs/api/errors) that are about the number itself.
+INVALID_NUMBER_CODES: Final = frozenset(
+    {
+        60200,  # Invalid parameter: the To number
+        60205,  # SMS is not supported by landline phone numbers
+        21211,  # Invalid 'To' phone number
+        21614,  # 'To' number is not a valid mobile number
+    }
+)
+MAX_SEND_ATTEMPTS: Final = 60203
+MAX_CHECK_ATTEMPTS: Final = 60202
+VERIFICATION_NOT_FOUND: Final = 20404
+
+
 class PhoneVerifier(Protocol):
     async def start(self, phone: str) -> None:
         """Sends a code to the phone by SMS."""
@@ -71,18 +89,24 @@ class TwilioPhoneVerifier:
 
     async def start(self, phone: str) -> None:
         response = await self._post("Verifications", {"To": phone, "Channel": "sms"}, "start")
-        if response.status_code == 400:
-            # 400 on start is about the number: the other parameters are fixed here.
+        error = _error_code(response)
+        if response.status_code == 400 and error in INVALID_NUMBER_CODES:
             raise InvalidPhoneError
+        if response.status_code == 429 and error == MAX_SEND_ATTEMPTS:
+            raise VerificationThrottledError
         self._expect_success(response, "start")
 
     async def check(self, phone: str, code: str) -> bool:
         response = await self._post("VerificationCheck", {"To": phone, "Code": code}, "check")
-        # 404: no pending verification (expired, already used or never sent).
-        # 429: too many wrong codes, so Twilio closed the verification. Both mean a bad code.
-        if response.status_code in (404, 429):
+        error = _error_code(response)
+        # No pending verification (expired, already used or never sent), or too many wrong
+        # codes so Twilio closed it: both mean a bad code, not an outage.
+        if (response.status_code, error) in (
+            (404, VERIFICATION_NOT_FOUND),
+            (429, MAX_CHECK_ATTEMPTS),
+        ):
             return False
-        if response.status_code == 400:
+        if response.status_code == 400 and error in INVALID_NUMBER_CODES:
             raise InvalidPhoneError
         self._expect_success(response, "check")
         try:
@@ -112,9 +136,25 @@ class TwilioPhoneVerifier:
             return
         logger.error(
             "twilio_verify_failed",
-            extra={"operation": operation, "status_code": response.status_code},
+            extra={
+                "operation": operation,
+                "status_code": response.status_code,
+                "twilio_code": _error_code(response),
+            },
         )
         raise VerificationUnavailableError
+
+
+def _error_code(response: httpx.Response) -> int | None:
+    """Twilio's numeric error code from an error body; never the body's message, which can
+    echo the number."""
+    if response.is_success:
+        return None
+    try:
+        code = response.json().get("code")
+    except (ValueError, AttributeError):
+        return None
+    return code if isinstance(code, int) else None
 
 
 def get_phone_verifier(request: Request) -> PhoneVerifier:

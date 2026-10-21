@@ -1,10 +1,11 @@
 """Phone verification by SMS code over HTTP (D4.3 phone, #26). Never calls Twilio."""
 
+import asyncio
 import hashlib
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 
 import httpx
@@ -13,11 +14,13 @@ from fastapi import FastAPI
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.types import Message, Receive, Scope, Send
 
 from app.config import Settings
 from app.db import get_session
 from app.integrations.sms_verify import (
     InvalidPhoneError,
+    VerificationThrottledError,
     VerificationUnavailableError,
     get_phone_verifier,
 )
@@ -60,8 +63,11 @@ class FakeVerifier:
     started: list[str] = field(default_factory=list)
     checked: list[tuple[str, str]] = field(default_factory=list)
     error: Exception | None = None
+    on_start: Callable[[str], None] | None = None
 
     async def start(self, phone: str) -> None:
+        if self.on_start:
+            self.on_start(phone)
         if self.error:
             raise self.error
         self.started.append(phone)
@@ -197,16 +203,92 @@ async def test_send_for_number_verified_by_other_user_is_202_and_sends_nothing(
     assert getattr(skipped, "user_id", None) == ana.id
 
 
-async def test_send_invalid_number_for_sms_is_422(
-    db_client: httpx.AsyncClient, verifier: FakeVerifier
+@pytest.mark.parametrize(
+    ("error", "level", "reason"),
+    [
+        (InvalidPhoneError(), logging.INFO, "invalid_number"),
+        (VerificationThrottledError(), logging.INFO, "throttled"),
+        (VerificationUnavailableError(), logging.ERROR, None),
+    ],
+    ids=["invalid_number", "throttled", "provider_down"],
+)
+async def test_send_provider_outcomes_are_202_and_logged(
+    db_client: httpx.AsyncClient,
+    verifier: FakeVerifier,
+    caplog: pytest.LogCaptureFixture,
+    error: Exception,
+    level: int,
+    reason: str | None,
 ) -> None:
+    # The provider is called after the response: its errors cannot change the answer, which
+    # would otherwise differ only for numbers that are not taken.
     ana = await sign_up(db_client, "ana")
-    verifier.error = InvalidPhoneError()
+    verifier.error = error
 
-    response = await send(db_client, ana)
+    with caplog.at_level(logging.INFO):
+        response = await send(db_client, ana)
 
-    assert response.status_code == 422
-    assert response.json() == VALIDATION_ERROR
+    assert response.status_code == 202
+    assert response.content == b""
+    names = {"phone_code_not_sent", "phone_verification_unavailable"}
+    [record] = [r for r in caplog.records if r.message in names]
+    assert record.levelno == level
+    assert getattr(record, "user_id", None) == ana.id
+    assert getattr(record, "reason", None) == reason
+
+
+@pytest.mark.parametrize(
+    "phone",
+    [
+        "+1" + "".join(chr(0xFF10 + int(d)) for d in "4075550123"),  # fullwidth digits
+        "+1" + "".join(chr(0x0660 + int(d)) for d in "4075550123"),  # Arabic-Indic digits
+        "+1407555" + "".join(chr(0x0966 + int(d)) for d in "0123"),  # Devanagari, mixed
+    ],
+    ids=["fullwidth", "arabic_indic", "devanagari_mixed"],
+)
+async def test_non_ascii_digits_are_422(
+    db_client: httpx.AsyncClient, verifier: FakeVerifier, phone: str
+) -> None:
+    # One number written in other scripts would get its own hash and rate-limit key.
+    ana = await sign_up(db_client, "ana")
+    arabic_code = "".join(chr(0x0660 + int(d)) for d in CODE)
+
+    sent = await send(db_client, ana, phone)
+    checked = await verify(db_client, ana, code=arabic_code)
+
+    assert sent.status_code == checked.status_code == 422
+    assert verifier.started == []
+    assert verifier.checked == []
+
+
+async def test_provider_is_called_only_after_the_response_is_sent(
+    app: FastAPI, db_session: AsyncSession, verifier: FakeVerifier
+) -> None:
+    # Taken and free numbers answer at the same speed: the provider's latency comes after.
+    response_sent = asyncio.Event()
+    started_after_response: list[bool] = []
+
+    async def wrapped(scope: Scope, receive: Receive, send_message: Send) -> None:
+        async def tracking_send(message: Message) -> None:
+            await send_message(message)
+            if message["type"] == "http.response.body" and not message.get("more_body"):
+                response_sent.set()
+
+        response_sent.clear()
+        await app(scope, receive, tracking_send)
+
+    verifier.on_start = lambda phone: started_after_response.append(response_sent.is_set())
+
+    async def session_override() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_session] = session_override
+    transport = httpx.ASGITransport(app=wrapped, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        ana = await sign_up(client, "ana")
+        assert (await send(client, ana)).status_code == 202
+
+    assert started_after_response == [True]
 
 
 async def test_send_rate_limited_per_user_and_per_phone(
@@ -343,18 +425,16 @@ async def test_verify_another_number_replaces_the_phone(
 # Failures, auth and privacy
 
 
-@pytest.mark.parametrize("route", ["send", "verify"])
 async def test_provider_down_is_503(
     db_client: httpx.AsyncClient,
     verifier: FakeVerifier,
     caplog: pytest.LogCaptureFixture,
-    route: str,
 ) -> None:
     ana = await sign_up(db_client, "ana")
     verifier.error = VerificationUnavailableError()
 
     with caplog.at_level(logging.INFO):
-        response = await (send(db_client, ana) if route == "send" else verify(db_client, ana))
+        response = await verify(db_client, ana)
 
     assert response.status_code == 503
     assert response.json() == UNAVAILABLE

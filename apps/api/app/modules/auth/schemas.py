@@ -54,7 +54,9 @@ class RefreshTokenRequest(BaseModel):
 
 
 # E.164: a plus, a country code that does not start with 0, and at most 15 digits in all.
-E164_PATTERN = r"^\+[1-9]\d{7,14}$"
+# [0-9], not \d: in Pydantic's regex \d also matches non-ASCII digits (Arabic-Indic,
+# fullwidth...), which would give one number many spellings, hashes and rate-limit keys.
+E164_PATTERN = r"^\+[1-9][0-9]{7,14}$"
 
 
 class PhoneSendRequest(BaseModel):
@@ -66,4 +68,4 @@ class PhoneSendRequest(BaseModel):
 
 class PhoneVerifyRequest(BaseModel):
     phone: str = Field(pattern=E164_PATTERN, description="The number the code was sent to.")
-    code: str = Field(pattern=r"^\d{4,10}$", description="The code received by SMS.")
+    code: str = Field(pattern=r"^[0-9]{4,10}$", description="The code received by SMS.")
