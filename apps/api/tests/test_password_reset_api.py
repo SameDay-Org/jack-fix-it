@@ -9,25 +9,29 @@ import json
 import logging
 import re
 import secrets
+import threading
 import uuid
 from collections.abc import AsyncIterator, Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from datetime import datetime
 
 import httpx
 import pytest
 from fastapi import FastAPI
 from redis.asyncio import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
-from sqlalchemy import update
+from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.types import Message, Receive, Scope, Send
 
 from app.config import Settings
 from app.integrations.email import EmailUnavailableError, get_email_sender
-from app.modules.auth import password_reset
+from app.modules.auth import password_reset, security
 from app.modules.auth.email_copy import PASSWORD_RESET_CODE, password_reset_code_email
+from app.modules.auth.models import RefreshToken
 from app.modules.auth.password_reset import ResetCodeStore, get_reset_code_store
+from app.modules.auth.repository import RefreshTokenRepository
 from app.modules.users.models import User
 from app.modules.users.service import UserService
 from app.modules.users.types import UserCredentials, UserStatus
@@ -468,8 +472,9 @@ async def test_expired_code_is_400(
     await register(db_client, email=EMAIL)
     await forgot(db_client)
     [email] = sender.sent
-    await redis.pexpire(key(prefix, EMAIL), 1)
-    await asyncio.sleep(0.05)
+    # An expiry time already past: Redis drops the key at once, no waiting.
+    assert await redis.pexpireat(key(prefix, EMAIL), 1)
+    assert await redis.exists(key(prefix, EMAIL)) == 0
 
     response = await reset(db_client, email.code)
 
@@ -697,7 +702,7 @@ async def test_login_racing_reset_cannot_keep_a_session(
     sender: FakeSender,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # A login that read the old hash holds the user row until it commits; the reset waits for
+    # A login whose password matched holds the user row until it commits; the reset waits for
     # it (Postgres reports the wait), then revokes the session that login created.
     client = committed.client
     await register(client, email=committed.email)
@@ -715,6 +720,8 @@ async def test_login_racing_reset_cannot_keep_a_session(
         self: UserService, email_address: str, *, lock: bool = False
     ) -> UserCredentials | None:
         if is_login.get():
+            if not lock:  # the verify's read; the lock comes once the password matched
+                return await original(self, email_address)
             credentials = await original(self, email_address, lock=lock)
             pids["login"] = await backend_pid(self._session)
             login_locked.set()
@@ -840,3 +847,151 @@ async def test_daily_cap_fails_closed(
     assert response.status_code == 202
     assert sender.sent == []
     assert [r for r in caplog.records if r.message == "password_reset_store_unavailable"]
+
+
+# #146 round 1: login takes the user lock only after a correct password; rotation vs reset
+
+
+async def test_wrong_logins_neither_wait_nor_lock_while_a_verify_is_held(
+    committed: Committed, sender: FakeSender, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A login whose Argon2 verify is still running holds no lock on the user row, so wrong
+    # passwords for a known and an unknown email both answer 401 at once: concurrency cannot
+    # tell them apart.
+    client = committed.client
+    await register(client, email=committed.email)
+    verify = security.verify_password
+    held = threading.Event()
+    release = threading.Event()
+    calls = itertools.count()
+
+    def held_first_verify(password_hash: str, password: str) -> bool:
+        if next(calls) == 0:
+            held.set()
+            release.wait(LOCK_WAIT_DEADLINE_SECONDS)
+        return verify(password_hash, password)
+
+    lookup = UserService.get_credentials_by_email
+    first_pid: list[int] = []
+
+    async def recording_lookup(
+        self: UserService, email_address: str, *, lock: bool = False
+    ) -> UserCredentials | None:
+        if not first_pid:
+            first_pid.append(await backend_pid(self._session))
+        return await lookup(self, email_address, lock=lock)
+
+    monkeypatch.setattr(security, "verify_password", held_first_verify)
+    monkeypatch.setattr(UserService, "get_credentials_by_email", recording_lookup)
+
+    first = asyncio.create_task(login(client, email=committed.email))
+    try:
+        assert await asyncio.to_thread(held.wait, LOCK_WAIT_DEADLINE_SECONDS)
+        async with committed.sessions() as monitor:
+            modes = await monitor.scalars(
+                text("SELECT mode FROM pg_locks WHERE pid = :pid AND relation = 'users'::regclass"),
+                {"pid": first_pid[0]},
+            )
+            # A plain read only: no row lock (FOR NO KEY UPDATE takes RowShareLock).
+            assert "RowShareLock" not in modes.all()
+        async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+            known = await login(client, email=committed.email, password="a-wrong-password")
+            unknown = await login(
+                client, email=f"nobody-{uuid.uuid4().hex}@example.com", password="a-wrong-password"
+            )
+        assert not first.done()
+    finally:
+        release.set()
+
+    assert known.status_code == unknown.status_code == 401
+    assert known.json() == unknown.json()
+    assert (await first).status_code == 200
+
+
+async def test_login_fails_if_the_password_changed_after_its_verify(
+    committed: Committed, sender: FakeSender, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A reset that commits between the verify and the lock: the re-read under the lock sees the
+    # new hash, so the old password does not start a session.
+    client = committed.client
+    await register(client, email=committed.email)
+    lookup = UserService.get_credentials_by_email
+    new_hash = security.hash_password(NEW_PASSWORD)
+
+    async def reset_before_the_lock(
+        self: UserService, email_address: str, *, lock: bool = False
+    ) -> UserCredentials | None:
+        if lock:
+            async with committed.sessions() as other:
+                await other.execute(
+                    update(User).where(User.email == email_address).values(password_hash=new_hash)
+                )
+                await other.commit()
+        return await lookup(self, email_address, lock=lock)
+
+    monkeypatch.setattr(UserService, "get_credentials_by_email", reset_before_the_lock)
+
+    response = await login(client, email=committed.email)
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "invalid_credentials"
+
+
+async def test_reset_revokes_the_replacement_of_a_refresh_in_flight(
+    committed: Committed, sender: FakeSender, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A refresh has flushed its replacement token but not committed when the reset revokes
+    # everything. The reset must wait on the family lock the refresh holds, then see and revoke
+    # the replacement. Without the family locks in revoke_all_for_user, the reset's UPDATE
+    # misses the uncommitted replacement, which keeps refreshing after the reset: this test
+    # then fails (the reset never waits).
+    client = committed.client
+    token = (await register(client, email=committed.email)).json()["refresh_token"]
+    await forgot(client, committed.email)
+    [email] = sender.sent
+    add = RefreshTokenRepository.add
+    revoke_all = RefreshTokenRepository.revoke_all_for_user
+    pids: dict[str, int] = {}
+    replacement_flushed = asyncio.Event()
+    reset_revoking = asyncio.Event()
+    is_refresh: ContextVar[bool] = ContextVar("is_refresh", default=False)
+
+    async def add_then_hold(self: RefreshTokenRepository, row: RefreshToken) -> RefreshToken:
+        added = await add(self, row)
+        if is_refresh.get():
+            pids["refresh"] = await backend_pid(self._session)
+            replacement_flushed.set()
+            async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+                await reset_revoking.wait()
+            await wait_until_blocked(
+                committed.sessions, waiter=pids["reset"], holder=pids["refresh"]
+            )
+        return added
+
+    async def recording_revoke_all(
+        self: RefreshTokenRepository, user_id: uuid.UUID, now: datetime
+    ) -> None:
+        pids["reset"] = await backend_pid(self._session)
+        reset_revoking.set()
+        await revoke_all(self, user_id, now)
+
+    async def refresh_in_flight() -> httpx.Response:
+        is_refresh.set(True)
+        return await refresh(client, token)
+
+    async def reset_after_the_flush() -> httpx.Response:
+        async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+            await replacement_flushed.wait()
+        return await reset(client, email.code, email=committed.email)
+
+    monkeypatch.setattr(RefreshTokenRepository, "add", add_then_hold)
+    monkeypatch.setattr(RefreshTokenRepository, "revoke_all_for_user", recording_revoke_all)
+
+    rotated, reset_response = await asyncio.gather(refresh_in_flight(), reset_after_the_flush())
+
+    assert rotated.status_code == 200
+    assert reset_response.status_code == 204
+    monkeypatch.undo()
+    replacement = await refresh(client, rotated.json()["refresh_token"])
+    assert replacement.status_code == 401
+    assert replacement.json()["error"]["code"] == "invalid_refresh_token"

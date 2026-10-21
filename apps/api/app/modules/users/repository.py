@@ -15,11 +15,15 @@ class UserRepository:
         return await self._session.get(User, user_id)
 
     async def get_by_email(self, email: str, *, lock: bool = False) -> User | None:
-        """`lock`: FOR NO KEY UPDATE until the transaction ends. Not FOR UPDATE, so rows that
-        reference the user (refresh tokens, requests) can still be inserted meanwhile."""
+        """`lock`: FOR NO KEY UPDATE until the transaction ends, reading the row as last
+        committed (populate_existing, not the copy an earlier read left in the session). Not
+        FOR UPDATE, so rows that reference the user (refresh tokens, requests) can still be
+        inserted meanwhile."""
         statement = select(User).where(User.email == email)
         if lock:
-            statement = statement.with_for_update(key_share=True)
+            statement = statement.with_for_update(key_share=True).execution_options(
+                populate_existing=True
+            )
         result = await self._session.scalars(statement)
         return result.one_or_none()
 
