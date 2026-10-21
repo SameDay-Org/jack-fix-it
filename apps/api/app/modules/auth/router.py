@@ -6,18 +6,24 @@ from app.errors import ErrorResponse
 from app.modules.auth.dependencies import (
     CurrentUser,
     get_auth_service,
+    get_password_reset_service,
     get_phone_service,
     limit_login,
     limit_logout,
+    limit_password_forgot,
+    limit_password_reset,
     limit_phone_send,
     limit_phone_verify,
     limit_refresh,
     limit_register,
 )
+from app.modules.auth.password_reset import PasswordResetService
 from app.modules.auth.phone_service import PhoneVerificationService
 from app.modules.auth.schemas import (
     AuthResponse,
     LoginRequest,
+    PasswordForgotRequest,
+    PasswordResetRequest,
     PhoneSendRequest,
     PhoneVerifyRequest,
     RefreshTokenRequest,
@@ -211,3 +217,61 @@ async def verify_phone(
 ) -> UserOut:
     """Checks the code and stores the number as the user's verified phone (idempotent)."""
     return UserOut.model_validate(await phones.verify_code(user, data.phone, data.code))
+
+
+@router.post(
+    "/password/forgot",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_class=Response,
+    summary="Ask for a password reset code",
+    dependencies=[Depends(limit_password_forgot)],
+    responses={
+        status.HTTP_202_ACCEPTED: {
+            "description": "Always, whether or not an account has this email."
+        },
+        status.HTTP_422_UNPROCESSABLE_CONTENT: _error("validation_error: not an email address."),
+        **_RATE_LIMITED,
+    },
+)
+async def forgot_password(
+    data: PasswordForgotRequest,
+    resets: Annotated[PasswordResetService, Depends(get_password_reset_service)],
+    background: BackgroundTasks,
+) -> None:
+    """Emails a 6-digit reset code to the account with this email, if it exists and is active.
+
+    Always 202 with no body. The account lookup and the email happen after the response, so
+    neither the answer nor its timing tells whether the email has an account. A new request
+    replaces the previous code; a code that never arrives surfaces at reset as invalid_code.
+    """
+    background.add_task(resets.send_code, data.email)
+
+
+@router.post(
+    "/password/reset",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    summary="Reset the password with the code",
+    dependencies=[Depends(limit_password_reset)],
+    responses={
+        status.HTTP_204_NO_CONTENT: {"description": "The password changed; all sessions ended."},
+        status.HTTP_400_BAD_REQUEST: _error(
+            "invalid_code: no code, expired, wrong, already used or out of tries, or no "
+            "active account with this email."
+        ),
+        status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
+            "validation_error: invalid email, a code that is not 6 digits, or password length."
+        ),
+        **_RATE_LIMITED,
+    },
+)
+async def reset_password(
+    data: PasswordResetRequest,
+    resets: Annotated[PasswordResetService, Depends(get_password_reset_service)],
+) -> None:
+    """Sets a new password with the emailed code. No bearer token is needed.
+
+    The code works once. A success revokes every refresh token of the account, so every
+    session must log in again; access tokens already issued stop working when they expire.
+    """
+    await resets.reset(data.email, data.code, data.new_password)

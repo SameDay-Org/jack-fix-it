@@ -197,6 +197,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/password/forgot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask for a password reset code
+         * @description Emails a 6-digit reset code to the account with this email, if it exists and is active.
+         *
+         *     Always 202 with no body. The account lookup and the email happen after the response, so
+         *     neither the answer nor its timing tells whether the email has an account. A new request
+         *     replaces the previous code; a code that never arrives surfaces at reset as invalid_code.
+         */
+        post: operations["forgot_password_v1_auth_password_forgot_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/password/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset the password with the code
+         * @description Sets a new password with the emailed code. No bearer token is needed.
+         *
+         *     The code works once. A success revokes every refresh token of the account, so every
+         *     session must log in again; access tokens already issued stop working when they expire.
+         */
+        post: operations["reset_password_v1_auth_password_reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/uploads": {
         parameters: {
             query?: never;
@@ -422,6 +469,32 @@ export interface components {
              * Format: date-time
              */
             expires_at: string;
+        };
+        /** PasswordForgotRequest */
+        PasswordForgotRequest: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+        };
+        /** PasswordResetRequest */
+        PasswordResetRequest: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /**
+             * Code
+             * @description The 6-digit code from the email.
+             */
+            code: string;
+            /**
+             * New Password
+             * @description Between the server's minimum (setting PASSWORD_MIN_LENGTH, 10 by default) and 128 characters, as at registration.
+             */
+            new_password: string;
         };
         /** PhoneSendRequest */
         PhoneSendRequest: {
@@ -1114,6 +1187,99 @@ export interface operations {
             /** @description verification_unavailable: the SMS provider is unavailable. */
             503: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    forgot_password_v1_auth_password_forgot_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordForgotRequest"];
+            };
+        };
+        responses: {
+            /** @description Always, whether or not an account has this email. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description validation_error: not an email address. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many requests from this client; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    reset_password_v1_auth_password_reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetRequest"];
+            };
+        };
+        responses: {
+            /** @description The password changed; all sessions ended. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_code: no code, expired, wrong, already used or out of tries, or no active account with this email. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: invalid email, a code that is not 6 digits, or password length. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many requests from this client; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {

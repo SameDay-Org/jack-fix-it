@@ -36,6 +36,9 @@ _TWILIO_SETTINGS: tuple[str, ...] = (
 # The HMAC key for PII in rate-limit keys (#137): required where a weak one stops startup.
 RATE_LIMIT_KEY_SECRET_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
 RATE_LIMIT_KEY_SECRET_MIN_LENGTH = 32
+# Email through Resend (D4.3, #27): deployed environments must be able to send.
+_EMAIL_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
+_EMAIL_SETTINGS: tuple[str, ...] = ("resend_api_key", "email_from")
 # Upper bound on passwords (NIST 800-63B allows a cap); also bounds the Argon2 input.
 PASSWORD_MAX_LENGTH = 128
 
@@ -88,7 +91,8 @@ class Settings(BaseSettings):
     auth_rate_limit_requests: int = Field(default=10, gt=0)
     auth_rate_limit_window_seconds: int = Field(default=60, gt=0)
     login_rate_limit_per_email: int = Field(default=5, gt=0)
-    # Longest wait on Redis for one limit check; past it the request goes through (fail open).
+    # Longest wait on Redis for one limit check (past it the request goes through: fail open)
+    # or one password-reset code operation (past it the reset fails).
     rate_limit_timeout_seconds: float = Field(default=0.5, gt=0)
     # Keys the HMAC that turns an email or phone into a rate-limit key (#137). Required in
     # staging and production; elsewhere a documented, non-secret development key is used.
@@ -120,6 +124,21 @@ class Settings(BaseSettings):
     # Codes sent and codes checked, per user and per phone, per AUTH_RATE_LIMIT_WINDOW_SECONDS.
     phone_otp_send_limit: int = Field(default=3, gt=0)
     phone_otp_check_limit: int = Field(default=5, gt=0)
+    # Email through Resend (D4.3, #27). Required in staging and production; without them, the
+    # reset code is never sent (logged as an error).
+    resend_api_key: SecretStr | None = None
+    # The sender, e.g. "Jack Fix It <no-reply@...>" on a domain verified in Resend.
+    email_from: str | None = None
+    resend_timeout_seconds: float = Field(default=5.0, gt=0)
+    # Password reset by emailed code (#27): how long a code lives, how many tries it allows,
+    # and forgot/reset requests per IP and per email per AUTH_RATE_LIMIT_WINDOW_SECONDS.
+    password_reset_code_ttl_seconds: int = Field(default=900, gt=0)
+    password_reset_max_attempts: int = Field(default=5, gt=0)
+    password_reset_request_limit: int = Field(default=3, gt=0)
+    # New codes per account per window (Cesar, 2026-10-21): with the tries per code, this bounds
+    # the guesses against one account per day (5 codes x 5 tries = 25 by default).
+    password_reset_daily_limit: int = Field(default=5, gt=0)
+    password_reset_daily_window_seconds: int = Field(default=86_400, gt=0)
     # Service requests (D8.1, #42): limits on what one request may carry, how often a customer
     # may create one, and how many a list page holds.
     request_intake_max_bytes: int = Field(default=16_384, gt=0)
@@ -169,6 +188,8 @@ class Settings(BaseSettings):
         "twilio_auth_token",
         "twilio_verify_service_sid",
         "rate_limit_key_secret",
+        "resend_api_key",
+        "email_from",
         mode="before",
     )
     @classmethod
@@ -221,6 +242,15 @@ class Settings(BaseSettings):
                 f"RATE_LIMIT_KEY_SECRET must be set to at least "
                 f"{RATE_LIMIT_KEY_SECRET_MIN_LENGTH} characters when APP_ENV is {self.app_env}"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _require_email_when_deployed(self) -> Self:
+        if self.app_env not in _EMAIL_REQUIRED_IN:
+            return self
+        missing = [name.upper() for name in _EMAIL_SETTINGS if getattr(self, name) is None]
+        if missing:
+            raise ValueError(f"{', '.join(missing)} must be set when APP_ENV is {self.app_env}")
         return self
 
 
