@@ -379,25 +379,6 @@ async def test_redis_failure_allows_request_and_logs(
         assert secret not in output
 
 
-@pytest.fixture
-async def silent_redis_url() -> AsyncIterator[str]:
-    """A TCP server that accepts connections and never answers: a hung Redis."""
-    connections: list[asyncio.StreamWriter] = []
-
-    async def accept(_: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        connections.append(writer)
-
-    server = await asyncio.start_server(accept, "127.0.0.1", 0)
-    port = server.sockets[0].getsockname()[1]
-    try:
-        yield f"redis://127.0.0.1:{port}/0"
-    finally:
-        for writer in connections:
-            writer.close()
-        server.close()
-        await server.wait_closed()
-
-
 async def test_hung_redis_fails_open_within_timeout(
     app: FastAPI,
     db_client: httpx.AsyncClient,

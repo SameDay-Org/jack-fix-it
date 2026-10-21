@@ -3,6 +3,7 @@ from pydantic import ValidationError
 
 from app.config import normalize_database_url
 from tests.conftest import (
+    TEST_EMAIL_SETTINGS,
     TEST_RATE_LIMIT_SETTINGS,
     TEST_STORAGE_SETTINGS,
     TEST_TWILIO_SETTINGS,
@@ -78,6 +79,7 @@ def test_jwt_secret_required_in_staging_and_production(app_env: str) -> None:
         **TEST_STORAGE_SETTINGS,
         **TEST_TWILIO_SETTINGS,
         **TEST_RATE_LIMIT_SETTINGS,
+        **TEST_EMAIL_SETTINGS,
     )
     assert settings.jwt_secret is not None
 
@@ -109,7 +111,7 @@ def test_secret_required_in_staging_and_production(app_env: str) -> None:
     # The error names the variable but never prints its value.
     assert short not in str(too_short.value)
     assert "32 characters" in str(missing.value)
-    settings = make_settings(**deployed, **TEST_RATE_LIMIT_SETTINGS)
+    settings = make_settings(**deployed, **TEST_RATE_LIMIT_SETTINGS, **TEST_EMAIL_SETTINGS)
     assert settings.rate_limit_key_secret is not None
 
 
@@ -207,6 +209,7 @@ def test_s3_settings_required_in_staging_and_production(app_env: str, missing: s
         **TEST_STORAGE_SETTINGS,
         **TEST_TWILIO_SETTINGS,
         **TEST_RATE_LIMIT_SETTINGS,
+        **TEST_EMAIL_SETTINGS,
     )
     assert settings.s3_bucket == TEST_STORAGE_SETTINGS["s3_bucket"]
 
@@ -272,6 +275,7 @@ def test_twilio_settings_required_in_staging_and_production(app_env: str, missin
         **TEST_TWILIO_SETTINGS,
         **TEST_STORAGE_SETTINGS,
         **TEST_RATE_LIMIT_SETTINGS,
+        **TEST_EMAIL_SETTINGS,
     )
     assert settings.twilio_verify_service_sid == TEST_TWILIO_SETTINGS["twilio_verify_service_sid"]
 
@@ -321,3 +325,46 @@ def test_phone_country_codes_must_be_calling_codes(
 def test_phone_settings_must_be_positive(name: str) -> None:
     with pytest.raises(ValidationError, match=name):
         make_settings(**{name: 0})
+
+
+@pytest.mark.parametrize("app_env", ["staging", "production"])
+@pytest.mark.parametrize("missing", ["resend_api_key", "email_from"])
+def test_resend_settings_required_in_staging_and_production(app_env: str, missing: str) -> None:
+    # Everything else deployed environments require is set; only the setting under test is not.
+    values = {
+        **TEST_STORAGE_SETTINGS,
+        **TEST_TWILIO_SETTINGS,
+        **TEST_RATE_LIMIT_SETTINGS,
+        **TEST_EMAIL_SETTINGS,
+    }
+
+    for absent in (None, ""):
+        with pytest.raises(ValidationError, match=missing.upper()) as error:
+            make_settings(app_env=app_env, jwt_secret="s" * 32, **{**values, missing: absent})
+        # The error names the variable but never prints a value.
+        assert "re_test_key_not_real" not in str(error.value)
+    settings = make_settings(app_env=app_env, jwt_secret="s" * 32, **values)
+    assert settings.email_from == TEST_EMAIL_SETTINGS["email_from"]
+
+
+@pytest.mark.parametrize("app_env", ["development", "test"])
+def test_resend_settings_optional_in_development(app_env: str) -> None:
+    settings = make_settings(app_env=app_env, resend_api_key="", email_from="")
+
+    assert settings.resend_api_key is None
+    assert settings.email_from is None
+
+
+def test_resend_api_key_is_masked() -> None:
+    settings = make_settings(**TEST_EMAIL_SETTINGS)
+
+    assert "re_test_key_not_real" not in repr(settings)
+
+
+def test_password_reset_settings_defaults() -> None:
+    settings = make_settings()
+
+    assert settings.password_reset_code_ttl_seconds == 900
+    assert settings.password_reset_max_attempts == 5
+    assert settings.password_reset_request_limit == 3
+    assert settings.resend_timeout_seconds == 5

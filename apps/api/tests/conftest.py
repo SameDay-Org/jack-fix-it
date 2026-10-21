@@ -1,7 +1,9 @@
 import asyncio
 import time
+import uuid
 from collections import Counter
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
@@ -9,12 +11,14 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI
-from sqlalchemy import URL, make_url, pool, text
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy import URL, delete, make_url, pool, select, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import Settings
 from app.db import get_session
 from app.main import create_app
+from app.modules.auth.models import RefreshToken
+from app.modules.users.models import User
 from app.rate_limit import RateLimitResult, get_rate_limiter, window_position
 
 API_DIR = Path(__file__).resolve().parents[1]
@@ -38,6 +42,12 @@ TEST_TWILIO_SETTINGS: dict[str, object] = {
 # a test sets it; deployed settings must have one.
 TEST_RATE_LIMIT_SETTINGS: dict[str, object] = {
     "rate_limit_key_secret": "test-rate-limit-key-secret-not-real-0123",
+}
+# Fixture values only: a fake key, and a sender on a domain that never resolves. Tests never
+# call Resend.
+TEST_EMAIL_SETTINGS: dict[str, object] = {
+    "resend_api_key": "re_test_key_not_real",
+    "email_from": "Jack Fix It <no-reply@example.invalid>",
 }
 
 
@@ -165,3 +175,85 @@ async def db_session(test_database_url: URL) -> AsyncIterator[AsyncSession]:
                 await transaction.rollback()
     finally:
         await engine.dispose()
+
+
+# Real commits on separate connections: the rolled-back db_session cannot show either.
+
+
+@dataclass(frozen=True)
+class Committed:
+    client: httpx.AsyncClient
+    sessions: async_sessionmaker[AsyncSession]
+    email: str
+
+
+@pytest.fixture
+async def committed(app: FastAPI, test_database_url: URL) -> AsyncIterator[Committed]:
+    """The app with one real session per request on the test database; rows are committed.
+
+    Uses its own user and deletes it, with its tokens, afterwards.
+    """
+    engine = create_async_engine(test_database_url)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    app.state.session_factory = sessions
+    email = f"refresh-{uuid.uuid4().hex}@example.com"
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            yield Committed(client=client, sessions=sessions, email=email)
+    finally:
+        async with sessions() as session:
+            user_ids = select(User.id).where(User.email == email).scalar_subquery()
+            await session.execute(delete(RefreshToken).where(RefreshToken.user_id.in_(user_ids)))
+            await session.execute(delete(User).where(User.email == email))
+            await session.commit()
+        await engine.dispose()
+
+
+LOCK_WAIT_DEADLINE_SECONDS = 5
+
+
+async def backend_pid(session: AsyncSession) -> int:
+    """The Postgres backend of the session's connection, which runs the request's transaction."""
+    pid = await session.scalar(text("SELECT pg_backend_pid()"))
+    assert isinstance(pid, int)
+    return pid
+
+
+async def wait_until_blocked(
+    sessions: async_sessionmaker[AsyncSession], *, waiter: int, holder: int
+) -> None:
+    """Returns once Postgres reports backend `waiter` waiting on a lock `holder` holds.
+
+    Each poll is the query itself, on its own connection; fails after the deadline.
+    """
+    query = text("SELECT CAST(:holder AS integer) = ANY(pg_blocking_pids(:waiter))")
+    async with sessions() as monitor:
+        try:
+            async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+                while not await monitor.scalar(query, {"holder": holder, "waiter": waiter}):
+                    pass
+        except TimeoutError:
+            pytest.fail(
+                f"backend {waiter} never waited on a lock of backend {holder} "
+                f"within {LOCK_WAIT_DEADLINE_SECONDS} s"
+            )
+
+
+@pytest.fixture
+async def silent_redis_url() -> AsyncIterator[str]:
+    """A TCP server that accepts connections and never answers: a hung Redis."""
+    connections: list[asyncio.StreamWriter] = []
+
+    async def accept(_: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        connections.append(writer)
+
+    server = await asyncio.start_server(accept, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        yield f"redis://127.0.0.1:{port}/0"
+    finally:
+        for writer in connections:
+            writer.close()
+        server.close()
+        await server.wait_closed()

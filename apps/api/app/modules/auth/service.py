@@ -69,7 +69,11 @@ class AuthService:
         return await self._start_session(user)
 
     async def login(self, data: LoginRequest) -> AuthResponse:
-        credentials = await self._users.get_credentials_by_email(data.email)
+        # Locked until the session is committed: a password reset waits for this login, then
+        # revokes the session it creates; or this login waits for the reset and reads the new
+        # hash. Unlocked, a login that read the old hash could commit a session after the
+        # reset's revocation, or its rehash could overwrite the new password.
+        credentials = await self._users.get_credentials_by_email(data.email, lock=True)
         # One Argon2 verify on every path, so the timing does not tell whether the email exists.
         stored_hash = credentials.password_hash if credentials else security.DUMMY_PASSWORD_HASH
         matches = await asyncio.to_thread(security.verify_password, stored_hash, data.password)
