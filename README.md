@@ -35,6 +35,7 @@ docker compose up -d              # Postgres 16 on 5432, Redis 7 on 6379
 cd apps/api
 cp .env.example .env
 uv run alembic upgrade head
+uv run python -m scripts.seed_categories   # launch categories; safe to re-run
 uv run python -m app.serve
 uv run arq app.worker.WorkerSettings --custom-log-dict app.observability.WORKER_LOG_CONFIG   # worker, second terminal
 ```
