@@ -25,16 +25,19 @@ def v1_routes(app: FastAPI) -> dict[tuple[str, str], bool]:
     """(method, path) of every /v1 route -> whether it requires an access token.
 
     Walks the effective routes, so router and include_router dependencies count too.
+    A (method, path) registered twice counts as authenticated only if every registration is:
+    Starlette serves the first match, whichever it is.
     """
     routes: dict[tuple[str, str], bool] = {}
     for context in iter_route_contexts(app.routes):
         if not isinstance(context.original_route, APIRoute) or context.path is None:
             continue
-        if not context.path.startswith(f"{V1_PREFIX}/"):
+        if context.path != V1_PREFIX and not context.path.startswith(f"{V1_PREFIX}/"):
             continue
         authenticated = depends_on(context.dependant, get_current_user)
         for method in context.methods or ():
-            routes[(method, context.path)] = authenticated
+            key = (method, context.path)
+            routes[key] = routes.get(key, True) and authenticated
     return routes
 
 
@@ -87,6 +90,23 @@ def test_guard_detects_an_unprotected_route() -> None:
     ) -> None: ...
 
     app.include_router(router)
+    # The same method and path twice: Starlette serves the first, unprotected one.
+    duplicated = APIRouter(prefix=f"{V1_PREFIX}/test-guard")
+
+    @duplicated.get("/duplicated")
+    async def duplicated_open() -> None: ...
+
+    @duplicated.get("/duplicated")
+    async def duplicated_signed_in(user: CurrentUser) -> None: ...
+
+    app.include_router(duplicated)
+    # A route at exactly /v1 is under /v1 too.
+    root = APIRouter(prefix=V1_PREFIX)
+
+    @root.get("")
+    async def v1_index() -> None: ...
+
+    app.include_router(root)
     # A whole router protected when it is included also counts.
     protected_router = APIRouter()
 
@@ -99,4 +119,8 @@ def test_guard_detects_an_unprotected_route() -> None:
         dependencies=[Depends(get_current_user)],
     )
 
-    assert unprotected_routes(app) == ["GET /v1/test-guard/unprotected"]
+    assert unprotected_routes(app) == [
+        "GET /v1",
+        "GET /v1/test-guard/duplicated",
+        "GET /v1/test-guard/unprotected",
+    ]
