@@ -5,11 +5,15 @@ import { Avatar } from "../Avatar";
 const images = () => screen.getByRole("image").queryAll((node) => node.type === "Image");
 
 describe("Avatar", () => {
-  it('renders initials for "maria lopez"', async () => {
+  it("renders initials for maria lopez as white headline on a navy-700 circle", async () => {
     await render(<Avatar name="maria lopez" />);
 
     expect(screen.getByText("ML")).toBeTruthy();
-    expect(screen.getByRole("image", { name: "maria lopez" })).toBeTruthy();
+    expect(screen.getByText("ML").props.className).toContain("text-white");
+    expect(screen.getByText("ML").props.className).toContain("text-headline");
+    expect(screen.getByRole("image", { name: "maria lopez" }).props.className).toContain(
+      "rounded-pill bg-navy-700",
+    );
   });
 
   it("single word gives one initial", async () => {

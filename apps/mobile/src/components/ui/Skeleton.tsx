@@ -11,17 +11,28 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
+import type { Radius } from "@/theme";
+
 import { cx } from "./cx";
 
 export type SkeletonProps = {
   width?: DimensionValue;
   height?: number;
-  radius?: number;
+  /** Corner radius token; text lines read as pills at `sm`. */
+  radius?: Radius;
   /** Round placeholder: `height` is the diameter; `width` and `radius` are ignored. */
   circle?: boolean;
   /** Extra classes for the placeholder (margins). */
   className?: string;
   testID?: string;
+};
+
+const RADIUS: Record<Radius, string> = {
+  sm: "rounded-sm",
+  md: "rounded-md",
+  lg: "rounded-lg",
+  xl: "rounded-xl",
+  pill: "rounded-pill",
 };
 
 const PULSE_DURATION_MS = 900;
@@ -30,7 +41,7 @@ const PULSE_MIN_OPACITY = 0.4;
 export function Skeleton({
   width = "100%",
   height = 16,
-  radius = 8,
+  radius = "sm",
   circle = false,
   className,
   testID,
@@ -56,9 +67,7 @@ export function Skeleton({
   }, [opacity, reducedMotion]);
 
   const animatedStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
-  const shape = circle
-    ? { width: height, height, borderRadius: height / 2 }
-    : { width, height, borderRadius: radius };
+  const shape = circle ? { width: height, height } : { width, height };
 
   return (
     <Animated.View
@@ -68,7 +77,10 @@ export function Skeleton({
       testID={testID}
       style={animatedStyle}
     >
-      <View className={cx("bg-gray/20", className)} style={shape} />
+      <View
+        className={cx("bg-gray-500/15", circle ? RADIUS.pill : RADIUS[radius], className)}
+        style={shape}
+      />
     </Animated.View>
   );
 }

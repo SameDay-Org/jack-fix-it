@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Image, Text, View } from "react-native";
 
+import { cx } from "./cx";
+
 export type AvatarSize = "sm" | "md" | "lg";
 
 export type AvatarProps = {
@@ -11,8 +13,13 @@ export type AvatarProps = {
   testID?: string;
 };
 
+// Diameters on the 4-pt grid; the initials take the type style that fits each circle (md: headline).
 const DIAMETER: Record<AvatarSize, number> = { sm: 32, md: 48, lg: 72 };
-const FONT_SIZE: Record<AvatarSize, number> = { sm: 13, md: 18, lg: 28 };
+const INITIALS_TYPE: Record<AvatarSize, string> = {
+  sm: "text-caption",
+  md: "text-headline",
+  lg: "text-title-2",
+};
 
 /** First letter of the first two words, uppercase: "maria lopez" gives "ML", "Jack" gives "J", blank gives "". */
 export function initialsOf(name: string): string {
@@ -39,7 +46,7 @@ export function Avatar({ name, imageUri, size = "md", testID }: AvatarProps) {
       accessibilityRole="image"
       accessibilityLabel={name}
       testID={testID}
-      className="items-center justify-center overflow-hidden rounded-full bg-gray/20"
+      className="items-center justify-center overflow-hidden rounded-pill bg-navy-700"
       style={dimension}
     >
       {showImage ? (
@@ -49,9 +56,7 @@ export function Avatar({ name, imageUri, size = "md", testID }: AvatarProps) {
           style={dimension}
         />
       ) : initials ? (
-        <Text className="font-semibold text-navy" style={{ fontSize: FONT_SIZE[size] }}>
-          {initials}
-        </Text>
+        <Text className={cx("text-white", INITIALS_TYPE[size])}>{initials}</Text>
       ) : null}
     </View>
   );

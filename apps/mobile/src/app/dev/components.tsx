@@ -2,13 +2,14 @@
 import { Redirect } from "expo-router";
 import { useState, type ReactNode } from "react";
 import { ScrollView, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
+import { HeroSample } from "@/components/dev/HeroSample";
 import {
   Avatar,
   Button,
   Card,
   Input,
+  Screen,
   Skeleton,
   StatusBadge,
   type StatusTone,
@@ -16,17 +17,17 @@ import {
 
 const TONES: StatusTone[] = ["neutral", "info", "success", "warning", "danger", "brand"];
 
-// 1x1 orange PNG: the image state needs no network. The .invalid host never resolves, so onError fires.
+// 1x1 green-500 PNG: the image state needs no network. The .invalid host never resolves, so onError fires.
 const SAMPLE_IMAGE =
-  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4lCUNAAPJAXjt1tnnAAAAAElFTkSuQmCC";
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGOI264NAAK3AUHeD95MAAAAAElFTkSuQmCC";
 const BROKEN_IMAGE = "https://images.invalid/missing.png";
 
 function noop() {}
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <View className="gap-3">
-      <Text className="text-lg font-semibold text-navy">{title}</Text>
+    <View className="gap-3 px-4">
+      <Text className="text-title-2 text-navy-900">{title}</Text>
       {children}
     </View>
   );
@@ -39,10 +40,9 @@ function Gallery() {
   const bump = () => setPresses((count) => count + 1);
 
   return (
-    <SafeAreaView className="flex-1 bg-gray-light" edges={["top", "bottom"]}>
-      <ScrollView contentContainerClassName="gap-8 p-4" keyboardShouldPersistTaps="handled">
-        <Text className="text-2xl font-semibold text-navy">UI components (dev)</Text>
-
+    <Screen bar="hero">
+      <ScrollView contentContainerClassName="gap-8 pb-4" keyboardShouldPersistTaps="handled">
+        <HeroSample />
         <Section title="Button">
           <Button label="Primary md" onPress={bump} />
           <Button label="Primary lg" size="lg" onPress={bump} />
@@ -51,7 +51,7 @@ function Gallery() {
           <Button label="Disabled" disabled onPress={bump} />
           <Button label="Loading" loading onPress={bump} />
           <Button label="Secondary loading" variant="secondary" loading onPress={bump} />
-          <Text className="text-sm text-gray">Presses: {presses}</Text>
+          <Text className="text-footnote text-gray-500">Presses: {presses}</Text>
         </Section>
 
         <Section title="Input">
@@ -83,10 +83,10 @@ function Gallery() {
 
         <Section title="Card">
           <Card>
-            <Text className="text-base text-navy">Static card</Text>
+            <Text className="text-body text-navy-900">Static card</Text>
           </Card>
           <Card onPress={bump} accessibilityLabel="Pressable card">
-            <Text className="text-base text-navy">Pressable card</Text>
+            <Text className="text-body text-navy-900">Pressable card</Text>
           </Card>
         </Section>
 
@@ -114,7 +114,7 @@ function Gallery() {
 
         <Section title="Skeleton">
           <Skeleton />
-          <Skeleton width="60%" height={24} radius={12} />
+          <Skeleton width="60%" height={24} radius="md" />
           <Skeleton circle height={48} />
           <Card>
             <View className="flex-row items-center gap-3">
@@ -127,7 +127,7 @@ function Gallery() {
           </Card>
         </Section>
       </ScrollView>
-    </SafeAreaView>
+    </Screen>
   );
 }
 

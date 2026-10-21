@@ -6,6 +6,8 @@ export { Card } from "./Card";
 export type { CardProps } from "./Card";
 export { Input } from "./Input";
 export type { InputProps } from "./Input";
+export { Screen } from "./Screen";
+export type { ScreenProps, SystemBar } from "./Screen";
 export { Skeleton } from "./Skeleton";
 export type { SkeletonProps } from "./Skeleton";
 export { StatusBadge } from "./StatusBadge";

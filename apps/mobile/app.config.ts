@@ -12,6 +12,10 @@ const VARIANTS: Record<AppVariant, { nameSuffix: string; idSuffix: string }> = {
 // TODO(needs-human): confirm the bundle id / package name before the first store build.
 const BASE_APP_ID = "com.jackfixit.app";
 
+// Public EAS identifiers, not secrets: the project Cesar created under the organization's account.
+const EAS_OWNER = "same-day-auto-group";
+const EAS_PROJECT_ID = "491f33d8-b909-4c74-a1bb-6d373331404f";
+
 function appVariant(): AppVariant {
   const value = process.env.APP_VARIANT ?? "development";
   if (Object.hasOwn(VARIANTS, value)) return value as AppVariant;
@@ -26,6 +30,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     name: `Jack Fix It${variant.nameSuffix}`,
     slug: "jack-fix-it",
+    owner: EAS_OWNER,
     platforms: ["ios", "android"],
     version: "0.1.0",
     orientation: "portrait",
@@ -42,9 +47,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       "expo-status-bar",
     ],
     experiments: { typedRoutes: true },
-    extra: {
-      // Set by a human once the EAS project exists (see .env.example).
-      eas: { projectId: process.env.EAS_PROJECT_ID },
-    },
+    extra: { eas: { projectId: EAS_PROJECT_ID } },
   };
 };
