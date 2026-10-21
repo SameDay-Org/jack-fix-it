@@ -1,9 +1,74 @@
 {
   "brand": {
-    "name": "Jack Fix It",
-    "tagline": "Whatever happens at home, we fix it."
+    "name": "Jack Fix It"
   },
   "common": {
-    "loading": "Loading"
+    "loading": "Loading",
+    "back": "Back",
+    "continue": "Continue",
+    "show": "Show",
+    "hide": "Hide",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password"
+  },
+  "welcome": {
+    "tagline": "Whatever happens at home, we <accent>fix</accent> it.",
+    "support": "Tell Jack. We'll take care of the rest.",
+    "getStarted": "Get started",
+    "haveAccount": "I already have an account",
+    "partialCleanup": "Signed out. Some data couldn't be cleared from this device."
+  },
+  "offline": {
+    "title": "Can't reach Jack right now",
+    "body": "Check your connection, then try again.",
+    "retry": "Try again",
+    "otherAccount": "Log in with another account"
+  },
+  "role": {
+    "title": "How will you use Jack?",
+    "customerTitle": "I need help at home",
+    "customerDescription": "Tell us what happened and we'll find a local pro.",
+    "proTitle": "I'm a pro",
+    "proDescription": "Receive requests near you and send your quotes."
+  },
+  "signUp": {
+    "title": "Create your account",
+    "asCustomer": "As a customer",
+    "asPro": "As a pro",
+    "submit": "Create account"
+  },
+  "login": {
+    "title": "Welcome back",
+    "submit": "Log in"
+  },
+  "fields": {
+    "email": "Email",
+    "password": "Password",
+    "passwordHint": "At least {{min}} characters"
+  },
+  "auth": {
+    "errors": {
+      "invalidCredentials": "Email or password is incorrect.",
+      "emailTaken": "An account with this email already exists.",
+      "loginInstead": "Log in instead",
+      "suspended": "This account is suspended. Contact support.",
+      "rateLimited": "Too many attempts. Try again in a moment.",
+      "checkFields": "Check the highlighted fields.",
+      "offline": "No connection. Check your internet and try again.",
+      "generic": "Something went wrong. Try again.",
+      "emailInvalid": "Enter a valid email address.",
+      "passwordTooShort": "Use at least {{min}} characters."
+    }
+  },
+  "home": {
+    "welcome": "Welcome,\n<email>{{email}}</email>",
+    "comingSoon": "Your home screen is on its way.",
+    "logOut": "Log out"
+  },
+  "roles": {
+    "customer": "Customer",
+    "pro": "Pro",
+    "agent": "Agent",
+    "admin": "Admin"
   }
 }

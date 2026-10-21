@@ -1,4 +1,4 @@
-import { DEFAULT_TIMEOUT_MS, readApiConfig } from "../config";
+import { DEFAULT_PASSWORD_MIN_LENGTH, DEFAULT_TIMEOUT_MS, readApiConfig } from "../config";
 
 jest.mock("../config", () => {
   // The module reads the environment at import time; tests exercise the pure reader instead.
@@ -48,6 +48,18 @@ describe("readApiConfig", () => {
     );
     expect(() => readApiConfig({ url: https, timeoutMs: "0", dev: false })).toThrow(
       /EXPO_PUBLIC_API_TIMEOUT_MS/,
+    );
+  });
+
+  it("defaults the password minimum and rejects a bad one", () => {
+    const base = { url: https, timeoutMs: undefined, dev: false };
+    expect(readApiConfig(base).passwordMinLength).toBe(DEFAULT_PASSWORD_MIN_LENGTH);
+    expect(readApiConfig({ ...base, passwordMinLength: "12" }).passwordMinLength).toBe(12);
+    expect(() => readApiConfig({ ...base, passwordMinLength: "ten" })).toThrow(
+      /EXPO_PUBLIC_PASSWORD_MIN_LENGTH/,
+    );
+    expect(() => readApiConfig({ ...base, passwordMinLength: "0" })).toThrow(
+      /EXPO_PUBLIC_PASSWORD_MIN_LENGTH/,
     );
   });
 });

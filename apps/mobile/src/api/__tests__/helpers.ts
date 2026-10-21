@@ -3,7 +3,7 @@ import type { ApiSchema } from "@jack/shared";
 /** The API under test, as `jest.mock("../config", () => require("./helpers").configMock)`. */
 export const API_ORIGIN = "http://api.test.invalid:8000";
 export const configMock = {
-  apiConfig: { baseUrl: new URL(`${API_ORIGIN}/`), timeoutMs: 15_000 },
+  apiConfig: { baseUrl: new URL(`${API_ORIGIN}/`), timeoutMs: 15_000, passwordMinLength: 10 },
 };
 
 /**

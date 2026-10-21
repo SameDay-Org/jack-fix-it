@@ -18,6 +18,12 @@ rules apply.
   gray-50) and of the top safe-area backdrop, which stays outside scrolling content. The root
   layout mounts no `StatusBar`, and ESLint rejects `expo-status-bar` or safe-area view imports
   in `src/app` (`eslint.config.js`).
+- Routing (D5.3, #33): `src/app/(auth)` holds welcome, role, sign-up and login; `src/app/(app)`
+  holds the signed-in screens. `SessionGate` (`src/features/auth`) is the one gate: `restoring`
+  keeps the native splash, `restoreFailure: "offline"` shows the offline screen, and
+  `Stack.Protected` guards send `signedIn` to `(app)` and everyone else to `(auth)/welcome`,
+  deep links included. Routes stay thin: screens, form hooks and error mapping live in
+  `src/features/auth`, and screen tests live there too (never under `src/app`).
 - Liquid Glass: only through `GlassSurface` (`src/components/ui`): `tone` light | dark,
   `shape` pill | xl | lg, `interactive`. Native `GlassView` on iOS 26+ when
   `isLiquidGlassAvailable()` and Reduce Transparency is off (live, `useReduceTransparency`);

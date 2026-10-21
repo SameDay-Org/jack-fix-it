@@ -1,3 +1,4 @@
+import type { ComponentRef, ReactNode, Ref } from "react";
 import { Text, TextInput, View, type TextInputProps } from "react-native";
 
 import { bubbleShadow, continuousCorners } from "@/theme";
@@ -7,8 +8,22 @@ import { useFlag } from "./useFlag";
 
 type PassthroughProps = Pick<
   TextInputProps,
-  "secureTextEntry" | "keyboardType" | "autoComplete" | "textContentType" | "autoCapitalize"
+  | "secureTextEntry"
+  | "keyboardType"
+  | "inputMode"
+  | "autoComplete"
+  | "textContentType"
+  | "autoCapitalize"
+  | "autoCorrect"
+  | "autoFocus"
+  | "importantForAutofill"
+  | "returnKeyType"
+  | "submitBehavior"
+  | "onSubmitEditing"
 >;
+
+/** The native field behind an `Input`, for focus management between fields. */
+export type InputHandle = ComponentRef<typeof TextInput>;
 
 export type InputProps = PassthroughProps & {
   /** Visible label; also the accessible name of the field. */
@@ -19,7 +34,13 @@ export type InputProps = PassthroughProps & {
   hint?: string;
   /** Validation message: danger ring, text under the field and the screen-reader hint. */
   error?: string;
+  /** Danger ring only, when the message is shown elsewhere (a form-level error that names this field). */
+  invalid?: boolean;
   disabled?: boolean;
+  /** A control at the field's right end (a show/hide toggle); the text keeps clear of it. */
+  accessory?: ReactNode;
+  /** The native field, so a previous field's return key can move focus here. */
+  ref?: Ref<InputHandle>;
   /** Layout-only classes for the wrapper (margins, width). */
   className?: string;
   testID?: string;
@@ -35,7 +56,10 @@ export function Input({
   onChangeText,
   hint,
   error,
+  invalid = false,
   disabled = false,
+  accessory,
+  ref,
   className,
   testID,
   ...textInputProps
@@ -43,29 +67,36 @@ export function Input({
   const [focused, focus, blur] = useFlag();
   const hasError = Boolean(error);
   const message = error || hint;
-  const ring = hasError ? RING.error : focused ? RING.focused : RING.rest;
+  const ring = hasError || invalid ? RING.error : focused ? RING.focused : RING.rest;
 
   return (
     <View className={className}>
       <Text className="mb-2 text-callout font-semibold text-navy-900">{label}</Text>
-      <TextInput
-        {...textInputProps}
-        accessibilityLabel={label}
-        accessibilityHint={message}
-        accessibilityState={{ disabled }}
-        editable={!disabled}
-        value={value}
-        onChangeText={onChangeText}
-        onFocus={focus}
-        onBlur={blur}
-        testID={testID}
-        style={[bubbleShadow, continuousCorners]}
-        className={cx(
-          "min-h-12 rounded-md border-2 bg-white px-4 text-body text-navy-900",
-          ring,
-          disabled && "opacity-50",
-        )}
-      />
+      <View>
+        <TextInput
+          {...textInputProps}
+          ref={ref}
+          accessibilityLabel={label}
+          accessibilityHint={message}
+          accessibilityState={{ disabled }}
+          editable={!disabled}
+          value={value}
+          onChangeText={onChangeText}
+          onFocus={focus}
+          onBlur={blur}
+          testID={testID}
+          style={[bubbleShadow, continuousCorners]}
+          className={cx(
+            "min-h-12 rounded-md border-2 bg-white px-4 text-body text-navy-900",
+            ring,
+            accessory ? "pr-14" : null,
+            disabled && "opacity-50",
+          )}
+        />
+        {accessory ? (
+          <View className="absolute inset-y-0 right-1 justify-center">{accessory}</View>
+        ) : null}
+      </View>
       {message ? (
         <Text
           accessibilityLiveRegion={hasError ? "polite" : "none"}

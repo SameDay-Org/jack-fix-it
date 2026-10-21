@@ -44,6 +44,7 @@ const SIGNED_OUT = {
   accessToken: null,
   accessTokenExpiresAt: null,
   cleanupPending: false,
+  restoreFailure: null,
 };
 
 let fetchMock: FetchMock;

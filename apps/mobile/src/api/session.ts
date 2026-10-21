@@ -4,12 +4,14 @@ import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { createStore } from "zustand/vanilla";
 
-import { ApiError, LocalCleanupError, SessionExpiredError } from "./errors";
+import { ApiError, LocalCleanupError, NetworkError, SessionExpiredError } from "./errors";
 import { sendRequest, type PostBody } from "./http";
 import { refreshTokenStorage, type TakenToken } from "./tokenStorage";
 
 export type SessionStatus = "restoring" | "signedOut" | "signedIn";
 export type SessionUser = ApiSchema<"UserOut">;
+/** Why the last restore left a stored token unused: the server could not be reached. */
+export type RestoreFailure = "offline";
 type AuthResponse = ApiSchema<"AuthResponse">;
 type SignInPath = "/v1/auth/login" | "/v1/auth/register";
 
@@ -25,6 +27,12 @@ type SessionState = {
    * retries the delete before anything else and never signs in from that entry.
    */
   cleanupPending: boolean;
+  /**
+   * The last restore found a stored token but the server was unreachable (network, timeout or
+   * 5xx), so the token stays for the next attempt. Set only there; cleared by a sign-in or a
+   * sign-out.
+   */
+  restoreFailure: RestoreFailure | null;
 };
 
 const SIGNED_OUT: SessionState = {
@@ -33,6 +41,7 @@ const SIGNED_OUT: SessionState = {
   accessToken: null,
   accessTokenExpiresAt: null,
   cleanupPending: false,
+  restoreFailure: null,
 };
 const RESTORING: SessionState = { ...SIGNED_OUT, status: "restoring" };
 
@@ -44,13 +53,17 @@ const MS_PER_SECOND = 1000;
 export const sessionStore = createStore<SessionState>()(() => RESTORING);
 
 /** The session as screens read it. Tokens never leave this module. */
-export function useSession(): Pick<SessionState, "status" | "user" | "cleanupPending"> {
+export function useSession(): Pick<
+  SessionState,
+  "status" | "user" | "cleanupPending" | "restoreFailure"
+> {
   return useStore(
     sessionStore,
     useShallow((state) => ({
       status: state.status,
       user: state.user,
       cleanupPending: state.cleanupPending,
+      restoreFailure: state.restoreFailure,
     })),
   );
 }
@@ -126,6 +139,7 @@ async function applyAuth(auth: AuthResponse, startedIn: number): Promise<boolean
     accessToken: auth.access_token,
     accessTokenExpiresAt: Date.now() + auth.expires_in * MS_PER_SECOND,
     cleanupPending: false,
+    restoreFailure: null,
   });
   return true;
 }
@@ -294,6 +308,19 @@ export async function restoreSession(): Promise<void> {
     await refreshSession();
   } catch (error) {
     if (!isCurrent(startedIn) || error instanceof SessionExpiredError) return;
-    sessionStore.setState(SIGNED_OUT);
+    sessionStore.setState({
+      ...SIGNED_OUT,
+      restoreFailure: isServerUnreachable(error) ? "offline" : null,
+    });
   }
+}
+
+const SERVER_ERROR_MIN_STATUS = 500;
+
+/** No answer, a timeout or a server failure: the session may well be valid, the device just cannot tell. */
+function isServerUnreachable(error: unknown): boolean {
+  return (
+    error instanceof NetworkError ||
+    (error instanceof ApiError && error.status >= SERVER_ERROR_MIN_STATUS)
+  );
 }
