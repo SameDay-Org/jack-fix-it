@@ -39,6 +39,10 @@ IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic"]
 FORBIDDEN = {
     "error": {"code": "upload_forbidden", "message": "You cannot upload files for this purpose."}
 }
+# #133: agents and admins are stopped by AppUser before the purpose is looked at.
+ROLE_FORBIDDEN = {
+    "error": {"code": "forbidden", "message": "You do not have access to this resource."}
+}
 INVALID = {"error": {"code": "upload_invalid", "message": "The upload request is invalid."}}
 NOT_FOUND = {"error": {"code": "upload_not_found", "message": "File not found."}}
 KEY_SHAPE = r"u/{user_id}/{purpose}/[0-9a-f]{{32}}\{ext}"
@@ -201,10 +205,11 @@ async def test_role_not_allowed_for_purpose_is_403(
 ) -> None:
     caller = await make_caller(db_session, role)
 
+    expected = ROLE_FORBIDDEN if role in (UserRole.AGENT, UserRole.ADMIN) else FORBIDDEN
     for purpose in purposes:
         response = await ask_upload(db_client, caller, purpose, "image/jpeg", 1)
         assert response.status_code == 403, purpose
-        assert response.json() == FORBIDDEN
+        assert response.json() == expected
 
     assert storage.puts == []
 
@@ -334,12 +339,17 @@ async def test_download_url_for_another_users_key_is_404(
 async def test_staff_cannot_read_a_users_key_here(
     db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
 ) -> None:
-    # Staff reads come later through the feature services (#124), not this endpoint.
+    # Staff reads come later through the feature services, not this endpoint. Since #133 the
+    # route's AppUser dependency stops staff with the generic 403, before the key is read.
     customer = await make_caller(db_session, UserRole.CUSTOMER)
-    admin = await make_caller(db_session, UserRole.ADMIN)
     key = (await ask_upload(db_client, customer, "request_media", "image/jpeg", 10)).json()["key"]
 
-    assert (await ask_download(db_client, admin, key)).status_code == 404
+    for role in (UserRole.ADMIN, UserRole.AGENT):
+        staff = await make_caller(db_session, role)
+        response = await ask_download(db_client, staff, key)
+        assert response.status_code == 403
+        assert response.json() == ROLE_FORBIDDEN
+    assert storage.gets == []
 
 
 @pytest.mark.parametrize(

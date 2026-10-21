@@ -4,13 +4,15 @@
   them against PURPOSES and the size settings, makes a random key namespaced by the owner and
   returns a short-lived PUT URL with Content-Type and Content-Length signed in. File bytes
   never pass through the API, and no client file name, path or extension is ever used.
-- Download: here a caller gets a GET URL only for a key under their own `u/<user_id>/`; any
-  other key answers 404, so another user's files are never revealed.
+- Download: here a caller gets a GET URL only for a key under their own `u/<user_id>/`
+  (`ensure_owner`); any other key answers 404, so another user's files are never revealed.
   Staff and cross-user reads (e.g. a pro seeing a request's photos) belong to the feature
-  services, which call `Storage.presign_get` after their own authorization (#124).
+  services, which call `Storage.presign_get` after their own authorization.
 
-PURPOSES is code policy, deliberately: which roles may upload what. Sizes and URL lifetimes
-are settings.
+Access: both routes depend on `AppUser` (customer or pro; agents and admins get the generic
+403). The purpose arrives in the body, so the per-purpose role check stays here, in PURPOSES,
+the one table of which role may upload what: code policy, deliberately. Sizes and URL
+lifetimes are settings.
 """
 
 import logging
@@ -22,7 +24,9 @@ from enum import StrEnum
 from typing import Final
 
 from app.config import Settings
+from app.errors import NotFoundError
 from app.integrations.storage import Storage
+from app.modules.auth.permissions import ensure_owner
 from app.modules.uploads.errors import (
     UploadForbiddenError,
     UploadInvalidError,
@@ -153,8 +157,11 @@ class UploadService:
         match = KEY_PATTERN.fullmatch(key)
         if match is None:
             raise UploadInvalidError
-        if match["user_id"] != str(user.id):
-            raise UploadNotFoundError
+        try:
+            ensure_owner(uuid.UUID(match["user_id"]), user)
+        except NotFoundError:
+            # The same body as before: another user's key reads like a missing file.
+            raise UploadNotFoundError from None
         ttl = self._config.download_url_ttl_seconds
         expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
         url = self._storage.presign_get(key, ttl)
