@@ -25,6 +25,7 @@ ROUTING
 - A mobile or web issue that consumes a new API is not released until that API PR is merged and packages/shared has the types. Comment "Blocked by #N" and keep agent:ready.
 - Migrations are serialized: if the task needs an Alembic migration and another open PR has the label has-migration, do not release it. Comment "Blocked by #N (migration order)" and keep agent:ready.
 - area:mobile UI criterion: "Changed screens verified on the Android emulator (screenshots and hierarchy check saved as evidence, listed in the PR). The PR lists the screens the human must check on the iPhone."
+- Every area:mobile prompt includes, in ## Constraints, "Mobile craft bar (apps/mobile/AGENTS.md, docs/agents/builder-mobile.md) applies in full", plus the screen-specific design expectations from docs/design/README.md (palette roles, shapes, surfaces, where Liquid Glass goes, which reference image to match).
 - area:web UI criterion: "Changed pages verified in a browser at 390 px and 1280 px wide, screenshots saved as evidence and listed in the PR."
 - If the task needs a new native dependency, say in ## Constraints: "Requires a new dev build (Android emulator and iPhone)."
 

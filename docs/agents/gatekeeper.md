@@ -26,6 +26,7 @@ AUTOMATIC BLOCKERS (any one -> REQUEST_CHANGES)
 - Stack/library change not approved.
 - UI change without evidence: web needs screenshots at 390 px and 1280 px; mobile needs Android emulator screenshots plus the hierarchy findings. Open the files listed under "Evidence" and check they match the changed screens.
 - Mobile PR without the line "iOS: pending human check - screens: ...", or a PR that claims iOS was verified. Do NOT block for missing iOS screenshots.
+- Mobile PR that visibly breaks the Mobile craft bar (default-looking controls, i.e. a control whose radius, color or padding is not a theme token or does not match docs/design/reference/; sharp corners; off-token values; missing loading/empty/error state; text clipped at font scale 1.3; glass on content cards; or screenshots not compared with docs/design/reference/).
 - More than one Alembic head, or a migration PR while another PR labeled has-migration is open.
 - API schema changed without packages/shared regenerated in the same PR.
 

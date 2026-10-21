@@ -51,3 +51,6 @@ Thumbs.db
 
 # Local Maestri canvas state
 .maestri/
+
+# Partner deck: contains partnership and compensation slides, never committed
+docs/Joe fix it*.pdf
