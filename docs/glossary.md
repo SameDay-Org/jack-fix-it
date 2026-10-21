@@ -66,8 +66,22 @@ so there is no unpaid state.
 | `refunded`    | Fully refunded after an admin decision.                                          |
 | `cancelled`   | Cancelled by either side.                                                        |
 
-Transitions, and the mapping of each state to a customer-visible status, are defined in D12.1
-(#60).
+Job transitions, who may make each one, and the customer-visible mapping live in
+`apps/api/app/modules/jobs/transitions.py` (D12.1, #60): `JobStateMachine` applies them, writes
+a `job_events` row for every change and answers 409 `invalid_transition` otherwise. The
+terminal states are `paid_out`, `refunded` and `cancelled`.
+
+| Job state               | Customer sees                           |
+| ----------------------- | --------------------------------------- |
+| `scheduled`             | `customerStatus.scheduled`              |
+| `on_the_way`            | `customerStatus.professionalOnTheWay`   |
+| `in_progress`           | `customerStatus.inProgress`             |
+| `completed`             | `customerStatus.waitingForConfirmation` |
+| `confirmed`, `paid_out` | `customerStatus.completed`              |
+| `disputed`              | `customerStatus.needsAttention`         |
+| `refunded`, `cancelled` | `customerStatus.cancelled`              |
+
+`refunded` shows as Cancelled: decided 2026-10-21 by Cesar.
 
 ## Roles
 
