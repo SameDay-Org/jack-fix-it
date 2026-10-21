@@ -19,13 +19,22 @@ rules apply.
   in `src/app` (`eslint.config.js`).
 - Liquid Glass goes only through `GlassSurface` (#117), never directly through
   `expo-glass-effect` in a screen (ADR 0008).
-- Data: TanStack Query for server state, Zustand for small client state. Tokens go in
-  `expo-secure-store` (D5.4, #32). API types come from `@jack/shared`.
+- Data: TanStack Query for server state, Zustand for small client state. API types come from
+  `@jack/shared`.
+- API layer (`src/api`, D5.4): the app reaches the API only through `apiGet(path)` and
+  `apiPost(path, body)`, with `{ auth: true }` for signed-in requests. Paths are the OpenAPI keys
+  from `@jack/shared`, never URLs; bodies and responses are typed from them. Errors are
+  `ApiError(status, code)`, `NetworkError` (offline or past `EXPO_PUBLIC_API_TIMEOUT_MS`) and
+  `SessionExpiredError`. The session (`useSession`, `login`, `register`, `logout`,
+  `restoreSession`) keeps the refresh token in `expo-secure-store` and the access token in
+  memory only, refreshes single-flight and retries a `401 invalid_token` once. Never log a token.
+  ESLint rejects `fetch` and `expo-secure-store` outside `src/api`.
 - Strings: `src/i18n/locales/{en,es}.json` through `useTranslation()`; the device language
   picks the catalog, English is the fallback.
 - Config: `app.config.ts` reads `APP_VARIANT` (development, preview, production) to suffix the
   name and bundle id. The EAS owner and project id are public constants there. The API URL is
-  `EXPO_PUBLIC_API_URL`, set per profile in `eas.json`.
+  `EXPO_PUBLIC_API_URL` (https outside development), set per profile in `eas.json`; the request
+  timeout is `EXPO_PUBLIC_API_TIMEOUT_MS`.
 - EAS profiles: `development` (dev client, device), `development-simulator` (iOS simulator,
   Android APK; used by the emulator portals), `preview`, `production`.
 - UI changes need screenshots from the Android emulator and the iOS simulator, including empty
