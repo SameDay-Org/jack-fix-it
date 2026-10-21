@@ -207,20 +207,25 @@ UPLOAD_FORBIDDEN = {
     "error": {"code": "upload_forbidden", "message": "You cannot upload files for this purpose."}
 }
 UPLOAD_NOT_FOUND = {"error": {"code": "upload_not_found", "message": "File not found."}}
-UPLOAD_EXPECTED: dict[str, dict[UserRole, int | dict[str, dict[str, str]]]] = {
-    "request_media": {C: 201, P: UPLOAD_FORBIDDEN, AG: FORBIDDEN, AD: FORBIDDEN},
-    "job_photo": {C: UPLOAD_FORBIDDEN, P: 201, AG: FORBIDDEN, AD: FORBIDDEN},
-    "pro_document": {C: UPLOAD_FORBIDDEN, P: 201, AG: FORBIDDEN, AD: FORBIDDEN},
-    "profile_photo": {C: 201, P: 201, AG: FORBIDDEN, AD: FORBIDDEN},
+# Each expectation is the exact status and, for an error, the exact body.
+Outcome = tuple[int, dict[str, dict[str, str]] | None]
+CREATED: Outcome = (201, None)
+OK: Outcome = (200, None)
+WRONG_ROLE: Outcome = (403, FORBIDDEN)
+WRONG_PURPOSE: Outcome = (403, UPLOAD_FORBIDDEN)
+NOT_OWNED: Outcome = (404, UPLOAD_NOT_FOUND)
+UPLOAD_EXPECTED: dict[str, dict[UserRole, Outcome]] = {
+    "request_media": {C: CREATED, P: WRONG_PURPOSE, AG: WRONG_ROLE, AD: WRONG_ROLE},
+    "job_photo": {C: WRONG_PURPOSE, P: CREATED, AG: WRONG_ROLE, AD: WRONG_ROLE},
+    "pro_document": {C: WRONG_PURPOSE, P: CREATED, AG: WRONG_ROLE, AD: WRONG_ROLE},
+    "profile_photo": {C: CREATED, P: CREATED, AG: WRONG_ROLE, AD: WRONG_ROLE},
 }
 # Download of a key under the caller's own id, and of another user's key.
-DOWNLOAD_EXPECTED: dict[
-    UserRole, tuple[int | dict[str, dict[str, str]], dict[str, dict[str, str]]]
-] = {
-    C: (200, UPLOAD_NOT_FOUND),
-    P: (200, UPLOAD_NOT_FOUND),
-    AG: (FORBIDDEN, FORBIDDEN),
-    AD: (FORBIDDEN, FORBIDDEN),
+DOWNLOAD_EXPECTED: dict[UserRole, tuple[Outcome, Outcome]] = {
+    C: (OK, NOT_OWNED),
+    P: (OK, NOT_OWNED),
+    AG: (WRONG_ROLE, WRONG_ROLE),
+    AD: (WRONG_ROLE, WRONG_ROLE),
 }
 UPLOAD_MATRIX = [(purpose, role) for purpose in UPLOAD_EXPECTED for role in UserRole]
 
@@ -241,12 +246,11 @@ def fake_storage(app: FastAPI) -> None:
     app.dependency_overrides[get_storage] = lambda: storage
 
 
-def assert_outcome(response: httpx.Response, expected: int | dict[str, dict[str, str]]) -> None:
-    if isinstance(expected, int):
-        assert response.status_code == expected
-    else:
-        assert response.status_code in (403, 404)
-        assert response.json() == expected
+def assert_outcome(response: httpx.Response, expected: Outcome) -> None:
+    status, body = expected
+    assert response.status_code == status
+    if body is not None:
+        assert response.json() == body
 
 
 @pytest.mark.parametrize(
