@@ -71,5 +71,10 @@
     "pro": "Profesional",
     "agent": "Agente",
     "admin": "Administrador"
+  },
+  "launch": {
+    "headline": "Pase lo que pase en casa, lo {{word}}.",
+    "words": ["arreglamos", "limpiamos", "pintamos", "podamos", "mudamos"],
+    "skip": "Saltar introducción"
   }
 }

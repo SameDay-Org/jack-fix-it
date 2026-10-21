@@ -52,12 +52,14 @@ beforeEach(() => {
 });
 
 describe("session gate", () => {
-  it("restoring keeps splash", async () => {
+  it("restoring shows the static launch frame and routes nowhere yet", async () => {
     session({ status: "restoring" });
 
     await renderRouter(routes);
 
-    expect(SplashScreen.hideAsync).not.toHaveBeenCalled();
+    expect(screen.getByTestId("restoring-hero")).toBeTruthy();
+    expect(screen.getByText("fix").props.className).toContain("text-green-500");
+    expect(SplashScreen.hideAsync).not.toHaveBeenCalled(); // the launch intro owns the splash
     expect(screen.queryByText("welcome stub")).toBeNull();
     expect(screen.queryByText("app stub")).toBeNull();
   });
@@ -69,7 +71,6 @@ describe("session gate", () => {
 
     expect(result.getPathname()).toBe("/welcome");
     expect(screen.getByText("welcome stub")).toBeTruthy();
-    expect(SplashScreen.hideAsync).toHaveBeenCalledTimes(1);
   });
 
   it("signedIn routes to app", async () => {
