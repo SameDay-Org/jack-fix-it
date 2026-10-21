@@ -55,19 +55,69 @@ def _called_name(call: ast.Call) -> str | None:
     return None
 
 
+def _assigned_names(target: ast.expr) -> list[ast.expr]:
+    """The leaves of an assignment target: `a, (b, *c) = ...` gives a, b and c."""
+    if isinstance(target, ast.Tuple | ast.List):
+        return [leaf for element in target.elts for leaf in _assigned_names(element)]
+    if isinstance(target, ast.Starred):
+        return _assigned_names(target.value)
+    return [target]
+
+
+def _assignments(tree: ast.Module) -> list[tuple[list[ast.expr], ast.expr]]:
+    pairs: list[tuple[list[ast.expr], ast.expr]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            pairs.append(([leaf for t in node.targets for leaf in _assigned_names(t)], node.value))
+        elif isinstance(node, ast.AnnAssign | ast.NamedExpr) and node.value is not None:
+            pairs.append(([node.target], node.value))
+    return pairs
+
+
 class _Scanner:
+    """Knows which local names stand for the Job model or table, or a statement on it."""
+
     def __init__(self, tree: ast.Module) -> None:
         self.job_classes, self.job_modules = _job_names(tree)
+        self.job_statements: set[str] = set()
+        # Bind names until nothing changes: `t = Job.__table__`, `s = update(t)`, `s = s.where()`.
+        assignments = _assignments(tree)
+        changed = True
+        while changed:
+            changed = False
+            for targets, value in assignments:
+                names = {t.id for t in targets if isinstance(t, ast.Name)}
+                if len(targets) != 1 or not names:
+                    continue
+                if self.is_job(value) and not names <= self.job_classes:
+                    self.job_classes |= names
+                    changed = True
+                elif self.is_job_statement(value) and not names <= self.job_statements:
+                    self.job_statements |= names
+                    changed = True
 
     def is_job(self, node: ast.expr) -> bool:
+        """Job, an alias of it, models.Job, Job.__table__, or a Table/table named "jobs"."""
         if isinstance(node, ast.Name):
             return node.id in self.job_classes
-        # models.Job, or app.modules.jobs.models.Job.
-        return isinstance(node, ast.Attribute) and node.attr == "Job"
+        if isinstance(node, ast.Attribute):
+            if node.attr == "Job":
+                return True
+            if node.attr == "__table__":
+                return self.is_job(node.value)
+        return (
+            isinstance(node, ast.Call)
+            and _called_name(node) in ("Table", "table")
+            and bool(node.args)
+            and isinstance(node.args[0], ast.Constant)
+            and node.args[0].value == "jobs"
+        )
 
     def is_job_statement(self, node: ast.AST) -> bool:
-        """`update(Job)` or `insert(Job)` somewhere in a call chain."""
-        while isinstance(node, ast.Call | ast.Attribute):
+        """`update(Job)` or `insert(Job)`, or a name bound to one, anywhere in a call chain."""
+        while isinstance(node, ast.Call | ast.Attribute | ast.Name):
+            if isinstance(node, ast.Name):
+                return node.id in self.job_statements
             if (
                 isinstance(node, ast.Call)
                 and _called_name(node) in ("update", "insert")
@@ -107,9 +157,14 @@ def status_writes(source: str, path: str) -> list[str]:
         line = getattr(node, "lineno", 0)
         targets: list[ast.expr] = []
         if isinstance(node, ast.Assign):
-            targets = node.targets
+            targets = [leaf for target in node.targets for leaf in _assigned_names(target)]
         elif isinstance(node, ast.AugAssign | ast.AnnAssign):
             targets = [node.target]
+        elif isinstance(node, ast.For | ast.AsyncFor | ast.withitem):
+            loop_target = (
+                node.target if isinstance(node, ast.For | ast.AsyncFor) else node.optional_vars
+            )
+            targets = _assigned_names(loop_target) if loop_target is not None else []
         if any(isinstance(t, ast.Attribute) and t.attr == "status" for t in targets):
             found.append(line)
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -150,14 +205,9 @@ def status_writes(source: str, path: str) -> list[str]:
                 or any(key is None or _is_status_key(key) for key in set_.keys)
             ):
                 found.append(line)
-        # ORM bulk UPDATE by primary key: execute(update(Job), [{"id": ..., "status": ...}]).
-        if (
-            name == "execute"
-            and len(node.args) >= 2
-            and isinstance(node.args[0], ast.Call)
-            and _called_name(node.args[0]) == "update"
-            and any(scanner.is_job(arg) for arg in node.args[0].args)
-        ):
+        # ORM bulk UPDATE by primary key: execute(update(Job), [{"id": ..., "status": ...}]),
+        # also through a name bound to the statement. The parameters are opaque here.
+        if name == "execute" and len(node.args) >= 2 and scanner.is_job_statement(node.args[0]):
             found.append(line)
     return [f"{path}:{line}" for line in sorted(set(found))]
 
@@ -238,6 +288,59 @@ PLANTED = {
         "    index_elements=[Job.id], set_={'status': 'confirmed'}\n"
         ")\n"
     ),
+    # Review round 1: statements bound to names, the table object, destructuring.
+    "reassigned_statement": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "statement = update(Job).where(Job.id == 1)\n"
+        "statement = statement.values(status='paid_out')\n"
+    ),
+    "reassigned_through_returning": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "base = update(Job)\n"
+        "scoped = base.where(Job.id == 1).returning(Job.id)\n"
+        "final = scoped.values({'status': 'paid_out'})\n"
+    ),
+    "values_then_where": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "statement = update(Job).values(status='paid_out').where(Job.id == 1)\n"
+    ),
+    "table_object": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "statement = update(Job.__table__).values(status='paid_out')\n"
+    ),
+    "table_alias": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "jobs_table = Job.__table__\n"
+        "statement = update(jobs_table).where(jobs_table.c.id == 1).values(status='paid_out')\n"
+    ),
+    "lightweight_table": (
+        "import sqlalchemy as sa\n"
+        "jobs = sa.table('jobs', sa.column('id'), sa.column('status'))\n"
+        "statement = sa.update(jobs).values(status='paid_out')\n"
+    ),
+    "named_bulk_execute": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "async def f(session, rows) -> None:\n"
+        "    statement = update(Job)\n"
+        "    await session.execute(statement, rows)\n"
+    ),
+    "tuple_target": (
+        "from app.modules.jobs.models import JobStatus\n"
+        "def f(job) -> None:\n"
+        "    job.status, job.confirmed_at = JobStatus.CONFIRMED, None\n"
+    ),
+    "nested_and_starred_target": (
+        "def f(job, other, values) -> None:\n"
+        "    (other.note, (job.status, *_)) = values\n"
+        "    first, *job.status = values\n"
+    ),
+    "for_target": ("def f(job, values) -> None:\n    for job.status in values:\n        pass\n"),
     "constructor": (
         "from app.modules.jobs.models import Job, JobStatus\n"
         "job = Job(request_id=1, status=JobStatus.CONFIRMED)\n"
@@ -270,8 +373,30 @@ def test_guard_detects_a_planted_assignment(name: str) -> None:
         # Raw SQL on another table, or reading jobs.
         "statement = 'UPDATE jobs_archive SET status = :s'\n",
         "statement = 'SELECT status FROM jobs WHERE id = :id'\n",
+        (
+            "from sqlalchemy import update\n"
+            "from app.modules.jobs.models import Job\n"
+            "statement = update(Job).where(Job.id == 1)\n"
+            "statement = statement.values(started_at=None)\n"
+        ),
+        (
+            "from sqlalchemy import update\n"
+            "from app.modules.users.models import User\n"
+            "statement = update(User.__table__).values(locale='es')\n"
+        ),
+        ("def f(job, values) -> None:\n    job.started_at, job.completed_at = values\n"),
     ],
-    ids=["read", "query_filter", "other_columns", "default_status", "other_table", "select"],
+    ids=[
+        "read",
+        "query_filter",
+        "other_columns",
+        "default_status",
+        "other_table",
+        "select",
+        "other_columns_reassigned",
+        "other_table_object",
+        "tuple_without_status",
+    ],
 )
 def test_guard_ignores_reads_and_other_writes(source: str) -> None:
     assert status_writes(source, "allowed.py") == []
