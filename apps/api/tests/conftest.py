@@ -11,9 +11,12 @@ from sqlalchemy import URL, make_url, pool, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.config import Settings
+from app.db import get_session
 from app.main import create_app
 
 API_DIR = Path(__file__).resolve().parents[1]
+# Fixture value only; real secrets live in Railway variables.
+TEST_JWT_SECRET = "test-jwt-secret-not-for-real-use-0123456789"
 
 
 def make_settings(**overrides: object) -> Settings:
@@ -22,6 +25,7 @@ def make_settings(**overrides: object) -> Settings:
         "app_env": "test",
         "database_url": "postgresql://test:test@localhost:5432/test",
         "redis_url": "redis://localhost:6379/0",
+        "jwt_secret": TEST_JWT_SECRET,
     }
     values.update(overrides)
     return Settings(_env_file=None, **values)  # type: ignore[arg-type]
@@ -79,6 +83,20 @@ def test_database_url() -> URL:
     config.attributes["database_url"] = url.render_as_string(hide_password=False)
     command.upgrade(config, "head")
     return url
+
+
+@pytest.fixture
+async def db_client(app: FastAPI, db_session: AsyncSession) -> AsyncIterator[httpx.AsyncClient]:
+    """The HTTP client with get_session replaced by the rolled-back test session."""
+
+    async def test_session() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_session] = test_session
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        yield client
+    app.dependency_overrides.pop(get_session, None)
 
 
 @pytest.fixture

@@ -1,0 +1,49 @@
+from typing import Annotated, Literal
+
+from pydantic import AfterValidator, BaseModel, BeforeValidator, EmailStr, Field
+
+from app.config import PASSWORD_MAX_LENGTH
+from app.modules.users.schemas import UserOut
+from app.modules.users.types import UserRole
+
+
+def _trim_and_lowercase(value: object) -> object:
+    return value.strip().lower() if isinstance(value, str) else value
+
+
+def _lowercase(value: str) -> str:
+    # EmailStr may re-normalize the domain; the database only accepts lowercase.
+    return value.lower()
+
+
+# Trimmed and lowercased before the address is validated, so lookups match the stored value.
+NormalizedEmail = Annotated[
+    EmailStr, BeforeValidator(_trim_and_lowercase), AfterValidator(_lowercase)
+]
+
+
+class RegisterRequest(BaseModel):
+    email: NormalizedEmail
+    password: str = Field(
+        max_length=PASSWORD_MAX_LENGTH,
+        description=(
+            "Between the server's minimum (setting PASSWORD_MIN_LENGTH, 10 by default) and "
+            f"{PASSWORD_MAX_LENGTH} characters. No composition rules."
+        ),
+    )
+    # Staff accounts (agent, admin) are never self-registered.
+    role: Literal[UserRole.CUSTOMER, UserRole.PRO]
+    locale: Literal["en", "es"] = "en"
+
+
+class LoginRequest(BaseModel):
+    email: NormalizedEmail
+    password: str = Field(min_length=1, max_length=PASSWORD_MAX_LENGTH)
+
+
+class AuthResponse(BaseModel):
+    user: UserOut
+    access_token: str
+    refresh_token: str = Field(description="Opaque. Returned once; the server keeps a hash.")
+    token_type: Literal["bearer"] = "bearer"  # noqa: S105 - OAuth token type, not a secret
+    expires_in: int = Field(description="Seconds until the access token expires.")
