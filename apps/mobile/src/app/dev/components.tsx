@@ -1,13 +1,15 @@
 // Dev-only gallery, unreachable outside __DEV__: the sample strings below are literal on purpose.
 import { Redirect } from "expo-router";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { ScrollView, Text, View } from "react-native";
 
+import { FloatingBar } from "@/components/dev/FloatingBar";
 import { HeroSample } from "@/components/dev/HeroSample";
 import {
   Avatar,
   Button,
   Card,
+  GlassSurface,
   Input,
   Screen,
   Skeleton,
@@ -34,6 +36,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 function Gallery() {
+  const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [presses, setPresses] = useState(0);
@@ -41,7 +44,11 @@ function Gallery() {
 
   return (
     <Screen bar="hero">
-      <ScrollView contentContainerClassName="gap-8 pb-4" keyboardShouldPersistTaps="handled">
+      <ScrollView
+        ref={scroll}
+        contentContainerClassName="gap-8 pb-24"
+        keyboardShouldPersistTaps="handled"
+      >
         <HeroSample />
         <Section title="Button">
           <Button label="Primary md" onPress={bump} />
@@ -126,7 +133,24 @@ function Gallery() {
             </View>
           </Card>
         </Section>
+
+        <Section title="Glass">
+          <GlassSurface tone="light" shape="xl" className="gap-1 p-4">
+            <Text className="text-headline text-navy-900">Light tone, xl</Text>
+            <Text className="text-footnote text-gray-500">
+              Native glass on iOS 26; a lifted white surface everywhere else.
+            </Text>
+          </GlassSurface>
+          <GlassSurface tone="dark" shape="lg" className="gap-1 p-4">
+            <Text className="text-headline text-white">Dark tone, lg</Text>
+            <Text className="text-footnote text-white">Solid navy-700 when glass is off.</Text>
+          </GlassSurface>
+          <GlassSurface tone="light" shape="pill" interactive className="self-start px-5 py-3">
+            <Text className="text-headline text-navy-900">Interactive pill</Text>
+          </GlassSurface>
+        </Section>
       </ScrollView>
+      <FloatingBar scrollRef={scroll} />
     </Screen>
   );
 }

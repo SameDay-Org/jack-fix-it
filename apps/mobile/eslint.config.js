@@ -1,7 +1,8 @@
 const { defineConfig } = require("eslint/config");
 const expoConfig = require("eslint-config-expo/flat");
 
-// Each native capability has one owner module; everything else goes through it.
+// Each native capability has one owner module; everything else goes through it. The lists are
+// composed per file set because a later `no-restricted-imports` entry replaces an earlier one.
 const GLASS = {
   name: "expo-glass-effect",
   message: "GlassSurface owns Liquid Glass: render <GlassSurface tone=... shape=...>.",

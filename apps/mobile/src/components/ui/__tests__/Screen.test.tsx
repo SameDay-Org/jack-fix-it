@@ -8,10 +8,13 @@ import { Screen } from "../Screen";
 
 // The StatusBar renders no host view, so the mock exposes the props it was given.
 jest.mock("expo-status-bar", () => ({ StatusBar: jest.fn(() => null) }));
-jest.mock(
-  "react-native-safe-area-context",
-  () => jest.requireActual("react-native-safe-area-context/jest/mock").default,
-);
+jest.mock("react-native-safe-area-context", () => {
+  const mock = jest.requireActual("react-native-safe-area-context/jest/mock").default;
+  const { View } = jest.requireActual<typeof import("react-native")>("react-native");
+  const { createElement } = jest.requireActual<typeof import("react")>("react");
+  // A plain View keeps the `edges` prop readable instead of the native edge map.
+  return { ...mock, SafeAreaView: (props: object) => createElement(View, props) };
+});
 
 const METRICS = {
   frame: { x: 0, y: 0, width: 320, height: 640 },
@@ -49,5 +52,25 @@ describe("Screen", () => {
 
     expect(statusBarStyle()).toBe("dark");
     expect(screen.getByTestId("system-bar-backdrop").props.className).toContain("bg-gray-50");
+  });
+
+  it("edges defaults to bottom", async () => {
+    await renderScreen(
+      <Screen bar="light" testID="screen">
+        <Text>Body</Text>
+      </Screen>,
+    );
+
+    expect(screen.getByTestId("screen").props.edges).toEqual(["bottom"]);
+  });
+
+  it("edges can be overridden", async () => {
+    await renderScreen(
+      <Screen bar="light" edges={[]} testID="screen">
+        <Text>Body</Text>
+      </Screen>,
+    );
+
+    expect(screen.getByTestId("screen").props.edges).toEqual([]);
   });
 });
