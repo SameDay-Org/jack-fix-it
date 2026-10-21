@@ -1,6 +1,6 @@
 // Dev-only gallery, unreachable outside __DEV__: the sample strings below are literal on purpose.
 import { Redirect } from "expo-router";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { ScrollView, Text, View } from "react-native";
 
 import { HeroSample } from "@/components/dev/HeroSample";
@@ -8,6 +8,7 @@ import {
   Avatar,
   Button,
   Card,
+  GlassSurface,
   Input,
   Screen,
   Skeleton,
@@ -33,7 +34,26 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+// The floating bar pins above the bottom safe area over the scrolling content: the controls layer
+// for real (ADR 0008). The scroll content pads its bottom so the bar never covers the last item.
+function FloatingBar({ onTop, onEnd }: { onTop: () => void; onEnd: () => void }) {
+  return (
+    <View className="absolute inset-x-4 bottom-4">
+      <GlassSurface
+        tone="light"
+        shape="pill"
+        interactive
+        className="flex-row items-center justify-center gap-2 px-2 py-1"
+      >
+        <Button label="Top" variant="ghost" onPress={onTop} />
+        <Button label="End" variant="ghost" onPress={onEnd} />
+      </GlassSurface>
+    </View>
+  );
+}
+
 function Gallery() {
+  const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [presses, setPresses] = useState(0);
@@ -41,7 +61,11 @@ function Gallery() {
 
   return (
     <Screen bar="hero">
-      <ScrollView contentContainerClassName="gap-8 pb-4" keyboardShouldPersistTaps="handled">
+      <ScrollView
+        ref={scroll}
+        contentContainerClassName="gap-8 pb-24"
+        keyboardShouldPersistTaps="handled"
+      >
         <HeroSample />
         <Section title="Button">
           <Button label="Primary md" onPress={bump} />
@@ -126,7 +150,27 @@ function Gallery() {
             </View>
           </Card>
         </Section>
+
+        <Section title="Glass">
+          <GlassSurface tone="light" shape="xl" className="gap-1 p-4">
+            <Text className="text-headline text-navy-900">Light tone, xl</Text>
+            <Text className="text-footnote text-gray-500">
+              Native glass on iOS 26; a lifted white surface everywhere else.
+            </Text>
+          </GlassSurface>
+          <GlassSurface tone="dark" shape="lg" className="gap-1 p-4">
+            <Text className="text-headline text-white">Dark tone, lg</Text>
+            <Text className="text-footnote text-white">Solid navy-700 when glass is off.</Text>
+          </GlassSurface>
+          <GlassSurface tone="light" shape="pill" interactive className="self-start px-5 py-3">
+            <Text className="text-headline text-navy-900">Interactive pill</Text>
+          </GlassSurface>
+        </Section>
       </ScrollView>
+      <FloatingBar
+        onTop={() => scroll.current?.scrollTo({ y: 0, animated: true })}
+        onEnd={() => scroll.current?.scrollToEnd({ animated: true })}
+      />
     </Screen>
   );
 }

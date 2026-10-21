@@ -29,4 +29,22 @@ module.exports = defineConfig([
       ],
     },
   },
+  {
+    // Liquid Glass has one primitive (ADR 0008): everything else renders <GlassSurface>.
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/components/ui/GlassSurface.tsx", "src/components/ui/__tests__/**"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "expo-glass-effect",
+              message: "GlassSurface owns Liquid Glass: render <GlassSurface tone=... shape=...>.",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ]);

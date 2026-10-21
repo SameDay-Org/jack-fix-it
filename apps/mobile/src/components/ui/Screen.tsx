@@ -1,7 +1,7 @@
 import { StatusBar, type StatusBarStyle } from "expo-status-bar";
 import type { ReactNode } from "react";
 import { View } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets, type Edge } from "react-native-safe-area-context";
 
 import { cx } from "./cx";
 
@@ -11,6 +11,8 @@ export type SystemBar = "hero" | "light";
 export type ScreenProps = {
   bar: SystemBar;
   children: ReactNode;
+  /** Safe-area edges the screen pads. A screen under a floating bar that pads itself drops "bottom". */
+  edges?: Edge[];
   /** Extra classes for the page; the background is gray-50. */
   className?: string;
   testID?: string;
@@ -25,14 +27,18 @@ const BAR: Record<SystemBar, { style: StatusBarStyle; backdrop: string }> = {
   light: { style: "dark", backdrop: "bg-gray-50" },
 };
 
-export function Screen({ bar, children, className, testID }: ScreenProps) {
+const DEFAULT_EDGES: Edge[] = ["bottom"];
+
+export function Screen({ bar, children, edges = DEFAULT_EDGES, className, testID }: ScreenProps) {
   const { top } = useSafeAreaInsets();
 
   return (
-    <SafeAreaView edges={["bottom"]} testID={testID} className={cx("flex-1 bg-gray-50", className)}>
+    <SafeAreaView edges={edges} testID={testID} className={cx("flex-1 bg-gray-50", className)}>
       <StatusBar style={BAR[bar].style} />
       <View testID="system-bar-backdrop" className={BAR[bar].backdrop} style={{ height: top }} />
-      {children}
+      {/* The content area ends above the padded edges, so an absolutely positioned child (a
+          floating bar) sits above the bottom inset without reading it. */}
+      <View className="flex-1">{children}</View>
     </SafeAreaView>
   );
 }

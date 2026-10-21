@@ -151,6 +151,34 @@ describe("theme tokens", () => {
     },
   );
 
+  it("glass tokens name color tokens and their fallbacks carry text at AA", () => {
+    const glass = tokens.glass as Record<
+      string,
+      { tint: string; tintOpacity: number; fallback: string; fallbackOpacity: number }
+    >;
+    for (const tone of Object.values(glass)) {
+      expect(COLOR_TOKENS).toContain(tone.tint);
+      expect(COLOR_TOKENS).toContain(tone.fallback);
+      expect(tone.fallbackOpacity).toBeGreaterThanOrEqual(0.94);
+    }
+    const light: Paint = {
+      token: glass.light.fallback as ColorToken,
+      alpha: glass.light.fallbackOpacity,
+    };
+    for (const surface of LIGHT_SURFACES) {
+      expect(
+        paintedContrast({ token: "navy-900", alpha: 1 }, light, surface),
+      ).toBeGreaterThanOrEqual(AA_TEXT);
+    }
+    const dark: Paint = {
+      token: glass.dark.fallback as ColorToken,
+      alpha: glass.dark.fallbackOpacity,
+    };
+    expect(paintedContrast({ token: "white", alpha: 1 }, dark, "white")).toBeGreaterThanOrEqual(
+      AA_TEXT,
+    );
+  });
+
   it.each(Object.entries(VARIANT))(
     "button labels keep AA at rest and pressed: %s",
     (_variant, { fill, label }) => {
