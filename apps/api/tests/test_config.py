@@ -2,7 +2,12 @@ import pytest
 from pydantic import ValidationError
 
 from app.config import normalize_database_url
-from tests.conftest import TEST_STORAGE_SETTINGS, TEST_TWILIO_SETTINGS, make_settings
+from tests.conftest import (
+    TEST_RATE_LIMIT_SETTINGS,
+    TEST_STORAGE_SETTINGS,
+    TEST_TWILIO_SETTINGS,
+    make_settings,
+)
 
 
 @pytest.mark.parametrize(
@@ -68,7 +73,11 @@ def test_jwt_secret_required_in_staging_and_production(app_env: str) -> None:
     assert "JWT_SECRET" in str(missing.value)
     secret = "s" * 32
     settings = make_settings(
-        app_env=app_env, jwt_secret=secret, **TEST_STORAGE_SETTINGS, **TEST_TWILIO_SETTINGS
+        app_env=app_env,
+        jwt_secret=secret,
+        **TEST_STORAGE_SETTINGS,
+        **TEST_TWILIO_SETTINGS,
+        **TEST_RATE_LIMIT_SETTINGS,
     )
     assert settings.jwt_secret is not None
 
@@ -78,6 +87,42 @@ def test_jwt_secret_optional_in_development(app_env: str) -> None:
     assert make_settings(app_env=app_env, jwt_secret=None).jwt_secret is None
     # An empty JWT_SECRET= line in .env means unset.
     assert make_settings(app_env=app_env, jwt_secret="").jwt_secret is None
+
+
+@pytest.mark.parametrize("app_env", ["staging", "production"])
+def test_secret_required_in_staging_and_production(app_env: str) -> None:
+    deployed = {
+        "app_env": app_env,
+        "jwt_secret": "s" * 32,
+        **TEST_STORAGE_SETTINGS,
+        **TEST_TWILIO_SETTINGS,
+    }
+    short = "k" * 31
+
+    with pytest.raises(ValidationError, match="RATE_LIMIT_KEY_SECRET") as missing:
+        make_settings(**deployed)
+    with pytest.raises(ValidationError, match="RATE_LIMIT_KEY_SECRET"):
+        make_settings(**deployed, rate_limit_key_secret="")
+    with pytest.raises(ValidationError, match="RATE_LIMIT_KEY_SECRET") as too_short:
+        make_settings(**deployed, rate_limit_key_secret=short)
+
+    # The error names the variable but never prints its value.
+    assert short not in str(too_short.value)
+    assert "32 characters" in str(missing.value)
+    settings = make_settings(**deployed, **TEST_RATE_LIMIT_SETTINGS)
+    assert settings.rate_limit_key_secret is not None
+
+
+@pytest.mark.parametrize("app_env", ["development", "test"])
+def test_rate_limit_key_secret_optional_in_development(app_env: str) -> None:
+    assert make_settings(app_env=app_env).rate_limit_key_secret is None
+    assert make_settings(app_env=app_env, rate_limit_key_secret="").rate_limit_key_secret is None
+
+
+def test_rate_limit_key_secret_is_masked() -> None:
+    settings = make_settings(**TEST_RATE_LIMIT_SETTINGS)
+
+    assert str(TEST_RATE_LIMIT_SETTINGS["rate_limit_key_secret"]) not in repr(settings)
 
 
 def test_jwt_secret_is_masked() -> None:
@@ -157,7 +202,11 @@ def test_s3_settings_required_in_staging_and_production(app_env: str, missing: s
     # The error names the variable but never prints a value.
     assert secret_value not in str(error.value)
     settings = make_settings(
-        app_env=app_env, jwt_secret="s" * 32, **TEST_STORAGE_SETTINGS, **TEST_TWILIO_SETTINGS
+        app_env=app_env,
+        jwt_secret="s" * 32,
+        **TEST_STORAGE_SETTINGS,
+        **TEST_TWILIO_SETTINGS,
+        **TEST_RATE_LIMIT_SETTINGS,
     )
     assert settings.s3_bucket == TEST_STORAGE_SETTINGS["s3_bucket"]
 
@@ -218,7 +267,11 @@ def test_twilio_settings_required_in_staging_and_production(app_env: str, missin
     # The error names the variable but never prints a value.
     assert "test-twilio-auth-token-not-real" not in str(error.value)
     settings = make_settings(
-        app_env=app_env, jwt_secret="s" * 32, **TEST_TWILIO_SETTINGS, **TEST_STORAGE_SETTINGS
+        app_env=app_env,
+        jwt_secret="s" * 32,
+        **TEST_TWILIO_SETTINGS,
+        **TEST_STORAGE_SETTINGS,
+        **TEST_RATE_LIMIT_SETTINGS,
     )
     assert settings.twilio_verify_service_sid == TEST_TWILIO_SETTINGS["twilio_verify_service_sid"]
 
