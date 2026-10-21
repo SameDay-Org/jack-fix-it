@@ -13,6 +13,12 @@ rules apply.
 - Public routes go under `/v1`: include the domain router in `app/api.py`.
 - `app/config.py` `Settings` is the only reader of env vars (env name = field name in upper
   case). Add new names to `.env.example`; secrets stay commented, with their task ID.
+- Access (`app/modules/auth/permissions.py`): every new `/v1` route picks exactly one of public
+  (added to `PUBLIC_ROUTES` with a reason), `CurrentUser`, `AppUser` (customer, pro),
+  `PanelUser` (agent, admin), `CustomerUser`, `ProUser`, `AdminUser` or `require_roles(...)`. A
+  wrong role is 403. Resources addressed by id call `ensure_owner` (404 for anyone else) or a
+  feature rule, and carry a test proving user A cannot read or change user B's.
+  `tests/test_route_permissions.py` fails CI on a route with no decision.
 - Errors: raise an `AppError` subclass from `app/errors.py`; responses always have the shape
   `{"error": {"code", "message"}}`. Unexpected exceptions become a generic 500.
 - Logging: `logging.getLogger(__name__)`, an event-style message plus `extra={...}`; the JSON
