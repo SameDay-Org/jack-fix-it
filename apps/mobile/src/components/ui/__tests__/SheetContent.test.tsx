@@ -1,7 +1,9 @@
-import { render, screen } from "@testing-library/react-native";
+import { render, screen, type RenderResult } from "@testing-library/react-native";
 import type { ReactElement } from "react";
-import { Text } from "react-native";
+import { Dimensions, Text } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+
+import { tokens } from "@/theme";
 
 import { SheetContent } from "../SheetContent";
 
@@ -22,6 +24,23 @@ const METRICS = {
 
 const renderInSafeArea = (ui: ReactElement) =>
   render(<SafeAreaProvider initialMetrics={METRICS}>{ui}</SafeAreaProvider>);
+
+type HostNode = ReturnType<RenderResult["getByTestId"]>;
+
+/** The body scroll view's flattened style under a rendered sheet root (`{}` when it has none). */
+function bodyStyle(root: HostNode): Record<string, unknown> | undefined {
+  const queue: (HostNode | string)[] = [root];
+  for (let node = queue.shift(); node !== undefined; node = queue.shift()) {
+    if (typeof node === "string") continue;
+    if (/ScrollView/.test(node.type)) {
+      const style: unknown = node.props.style;
+      const layers = Array.isArray(style) ? style : [style ?? {}];
+      return Object.assign({}, ...layers) as Record<string, unknown>;
+    }
+    queue.push(...node.children);
+  }
+  return undefined;
+}
 
 describe("SheetContent", () => {
   it("renders title, body and actions", async () => {
@@ -56,7 +75,6 @@ describe("SheetContent", () => {
       </SheetContent>,
     );
     const detents = withDetents.getByTestId("sheet").props.className.split(" ");
-    withDetents.unmount();
     const fitted = await renderInSafeArea(
       <SheetContent testID="sheet" fitToContents>
         <Text>Body</Text>
@@ -68,5 +86,26 @@ describe("SheetContent", () => {
     expect(fit).not.toContain("flex-1");
     expect(fit).toContain("shrink");
     expect(fit).toContain("bg-white");
+  });
+
+  it("caps a fit-to-contents body at the token fraction of the window so the actions stay in view", async () => {
+    const { height } = Dimensions.get("window");
+    const withDetents = await renderInSafeArea(
+      <SheetContent testID="sheet">
+        <Text>Body</Text>
+      </SheetContent>,
+    );
+    const detentsRoot = withDetents.getByTestId("sheet");
+    expect(bodyStyle(detentsRoot)).toBeDefined();
+    expect(bodyStyle(detentsRoot)?.maxHeight).toBeUndefined();
+
+    const fitted = await renderInSafeArea(
+      <SheetContent testID="sheet" fitToContents>
+        <Text>Body</Text>
+      </SheetContent>,
+    );
+    expect(bodyStyle(fitted.getByTestId("sheet"))?.maxHeight).toBe(
+      height * tokens.sheet.fitBodyMaxFraction,
+    );
   });
 });

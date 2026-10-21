@@ -1,6 +1,15 @@
 import type { ReactNode } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, Text, View } from "react-native";
+import {
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { tokens } from "@/theme";
 
 import { cx } from "./cx";
 import { useLiquidGlass } from "./GlassSurface";
@@ -12,8 +21,10 @@ export type SheetContentProps = {
   actions?: ReactNode;
   /**
    * Pair with `sheetOptions("fitToContents")`: the sheet is as tall as this content, so the
-   * scaffold must size itself from the content instead of filling the sheet. Android shows only
-   * the dimmed backdrop when a fit-to-contents sheet gets a filling (`flex: 1`) root.
+   * scaffold sizes itself from the content instead of filling the sheet, and the body is capped
+   * at `sheet.fitBodyMaxFraction` of the window so a long body scrolls and the actions stay in
+   * view. Android shows only the dimmed backdrop when a fit-to-contents sheet gets a filling
+   * (`flex: 1`) root.
    */
   fitToContents?: boolean;
   testID?: string;
@@ -35,7 +46,11 @@ export function SheetContent({
   testID,
 }: SheetContentProps) {
   const { bottom } = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const glass = useLiquidGlass();
+  const bodyStyle = fitToContents
+    ? { maxHeight: windowHeight * tokens.sheet.fitBodyMaxFraction }
+    : undefined;
 
   return (
     // iOS needs the padding; Android resizes the window for the keyboard on its own.
@@ -53,6 +68,7 @@ export function SheetContent({
           {title ? <Text className="text-title-2 text-navy-900">{title}</Text> : null}
           <ScrollView
             className="shrink"
+            style={bodyStyle}
             contentContainerClassName="gap-3"
             keyboardShouldPersistTaps="handled"
             bounces={false}
