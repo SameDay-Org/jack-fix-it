@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
 import uuid
@@ -26,9 +27,14 @@ from app.integrations.sms_verify import (
 )
 from app.modules.users.models import User
 from app.observability import JsonFormatter
-from app.rate_limit import RedisRateLimiter, get_rate_limiter
+from app.rate_limit import (
+    DEVELOPMENT_HMAC_KEY,
+    RedisRateLimiter,
+    get_rate_limiter,
+    hashed_identifier,
+)
 from tests.conftest import InMemoryRateLimiter, make_app, make_settings
-from tests.test_auth_api import PASSWORD, register
+from tests.test_auth_api import PASSWORD, login, register
 
 # Fictional numbers (555-01xx), in the allowed +1 region.
 PHONE = "+14075550123"
@@ -500,9 +506,24 @@ async def test_no_phone_or_code_in_logs(
             }
 
 
-async def test_rate_limit_keys_hash_the_phone(
+# Fixture value only; real secrets live in Railway variables.
+KEY_SECRET = "test-rate-limit-key-secret-not-real-0123"
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        make_settings(
+            phone_otp_send_limit=SEND_LIMIT,
+            phone_otp_check_limit=CHECK_LIMIT,
+            rate_limit_key_secret=KEY_SECRET,
+        )
+    ],
+)
+async def test_no_raw_identifier_in_any_key(
     app: FastAPI, db_client: httpx.AsyncClient, verifier: FakeVerifier
 ) -> None:
+    # Login (email) and phone send and check (phone), on the real Redis.
     redis = Redis.from_url(Settings().redis_url)
     prefix = f"rl-test-{uuid.uuid4().hex}"
     app.dependency_overrides[get_rate_limiter] = lambda: RedisRateLimiter(
@@ -510,25 +531,35 @@ async def test_rate_limit_keys_hash_the_phone(
     )
     try:
         ana = await sign_up(db_client, "ana")
+        await login(db_client, email="Ana@Example.com")
         await send(db_client, ana)
         await verify(db_client, ana)
-        # Only the phone limits; sign-up has its own per-IP key.
-        keys = sorted([k.decode() async for k in redis.scan_iter(match=f"{prefix}:phone_*")])
+        keys = sorted([k.decode() async for k in redis.scan_iter(match=f"{prefix}:*")])
     finally:
         found = [k async for k in redis.scan_iter(match=f"{prefix}:*")]
         if found:
             await redis.delete(*found)
         await redis.aclose()
 
-    digest = hashlib.sha256(PHONE.encode()).hexdigest()
+    email = "ana@example.com"  # normalized before hashing
+    email_key = hmac.new(KEY_SECRET.encode(), email.encode(), hashlib.sha256).hexdigest()
+    phone_key = hmac.new(KEY_SECRET.encode(), PHONE.encode(), hashlib.sha256).hexdigest()
     assert keys == sorted(
         [
+            f"{prefix}:auth_register:127.0.0.1:16",
+            f"{prefix}:auth_login:127.0.0.1:16",
+            f"{prefix}:auth_login_email:{email_key}:16",
             f"{prefix}:phone_send_user:{ana.id}:16",
-            f"{prefix}:phone_send_phone:{digest}:16",
+            f"{prefix}:phone_send_phone:{phone_key}:16",
             f"{prefix}:phone_check_user:{ana.id}:16",
-            f"{prefix}:phone_check_phone:{digest}:16",
+            f"{prefix}:phone_check_phone:{phone_key}:16",
         ]
     )
+    # Neither the raw value, nor its plain hash, nor the development key's HMAC.
+    forbidden = [email, "ana", PHONE[1:], PHONE[-7:]]
+    for value in (email, PHONE):
+        forbidden.append(hashlib.sha256(value.encode()).hexdigest())
+        forbidden.append(hashed_identifier(value, DEVELOPMENT_HMAC_KEY))
     for key in keys:
-        assert PHONE[1:] not in key
-        assert PHONE[-7:] not in key
+        for value in forbidden:
+            assert value not in key

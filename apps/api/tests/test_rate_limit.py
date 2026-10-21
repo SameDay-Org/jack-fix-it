@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
 import time
@@ -13,18 +14,22 @@ import httpx
 import pytest
 from argon2 import PasswordHasher
 from fastapi import FastAPI
+from pydantic import SecretStr
 from redis.asyncio import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from app.config import Settings
+from app.config import AppEnv, Settings
 from app.modules.auth import security
 from app.modules.users.service import UserService
 from app.observability import JsonFormatter
 from app.rate_limit import (
+    DEVELOPMENT_HMAC_KEY,
+    IdentifierHasher,
     RateLimiter,
     RateLimitResult,
     RedisRateLimiter,
     get_rate_limiter,
+    hashed_identifier,
     window_position,
 )
 from tests.conftest import InMemoryRateLimiter, make_settings
@@ -96,6 +101,57 @@ def assert_rate_limited(response: httpx.Response) -> None:
 
 def email(n: int) -> str:
     return f"user{n}@example.com"
+
+
+# Keyed identifiers (#137)
+
+# Fixture values only; real secrets live in Railway variables.
+SECRET_A = "test-rate-limit-key-a-not-real-0123456789"
+SECRET_B = "test-rate-limit-key-b-not-real-0123456789"
+
+
+def test_hmac_key_depends_on_secret() -> None:
+    value = "probe.user@example.com"
+
+    under_a = hashed_identifier(value, SECRET_A)
+
+    assert under_a == hmac.new(SECRET_A.encode(), value.encode(), hashlib.sha256).hexdigest()
+    assert under_a != hashed_identifier(value, SECRET_B)
+    assert under_a != hashlib.sha256(value.encode()).hexdigest()
+
+
+def test_same_input_same_key() -> None:
+    hasher = IdentifierHasher.from_settings(make_settings(rate_limit_key_secret=SECRET_A))
+
+    assert hasher("+14075550123") == hasher("+14075550123")
+    assert hasher("+14075550123") == hashed_identifier("+14075550123", SECRET_A)
+    assert hasher("+14075550123") != hasher("+14075550124")
+    assert SECRET_A not in repr(hasher)
+
+
+@pytest.mark.parametrize("app_env", ["development", "test"])
+def test_dev_fallback_only_without_secret(app_env: AppEnv) -> None:
+    unset = IdentifierHasher.from_settings(make_settings(app_env=app_env))
+    configured = IdentifierHasher.from_settings(
+        make_settings(app_env=app_env, rate_limit_key_secret=SECRET_A)
+    )
+
+    assert unset("x") == hashed_identifier("x", DEVELOPMENT_HMAC_KEY)
+    assert configured("x") == hashed_identifier("x", SECRET_A)
+
+
+@pytest.mark.parametrize("app_env", ["staging", "production"])
+def test_dev_fallback_never_used_when_deployed(app_env: AppEnv) -> None:
+    # Settings refuses to load without the secret (test_config); a hand-built one that skips
+    # validation must not fall back either.
+    unvalidated = Settings.model_construct(app_env=app_env, rate_limit_key_secret=None)
+    with pytest.raises(RuntimeError, match="RATE_LIMIT_KEY_SECRET"):
+        IdentifierHasher.from_settings(unvalidated)
+
+    deployed = Settings.model_construct(app_env=app_env, rate_limit_key_secret=SecretStr(SECRET_A))
+    hasher = IdentifierHasher.from_settings(deployed)
+    assert hasher("x") == hashed_identifier("x", SECRET_A)
+    assert hasher("x") != hashed_identifier("x", DEVELOPMENT_HMAC_KEY)
 
 
 # The limiter
@@ -315,7 +371,11 @@ async def test_redis_failure_allows_request_and_logs(
         payload = json.loads(formatter.format(record))
         assert set(payload) <= {"timestamp", "level", "logger", "message", "request_id", "scope"}
     output = "\n".join(formatter.format(r) for r in caplog.records)
-    for secret in (target, hashlib.sha256(target.encode()).hexdigest(), "127.0.0.1", PASSWORD):
+    hashes = (
+        hashlib.sha256(target.encode()).hexdigest(),
+        hashed_identifier(target, DEVELOPMENT_HMAC_KEY),
+    )
+    for secret in (target, *hashes, "127.0.0.1", PASSWORD):
         assert secret not in output
 
 
@@ -392,7 +452,8 @@ async def test_email_is_hashed_in_key(
     assert (await login(db_client, email=target)).status_code == 401
 
     keys = sorted([key.decode() async for key in redis_client.scan_iter(match=f"{key_prefix}:*")])
-    digest = hashlib.sha256(b"probe.user@example.com").hexdigest()
+    # These settings set no RATE_LIMIT_KEY_SECRET, so the development key applies.
+    digest = hashed_identifier("probe.user@example.com", DEVELOPMENT_HMAC_KEY)
     assert keys == sorted(
         [
             f"{key_prefix}:auth_login:127.0.0.1:16",

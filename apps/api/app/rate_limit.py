@@ -1,17 +1,20 @@
 """Fixed-window rate limiting on Redis, for routes that do expensive work before any auth.
 
 A limit is checked in a FastAPI dependency, so a limited request never reaches the service.
-Keys are `rl:<scope>:<identifier>:<window index>`; identifiers that are PII arrive hashed.
+Keys are `rl:<scope>:<identifier>:<window index>`. Identifiers that are PII (an email, a phone)
+arrive as an HMAC-SHA-256 under RATE_LIMIT_KEY_SECRET (#137): emails and phone numbers are few
+enough that a plain hash could be reversed by enumeration if Redis contents leaked.
 """
 
 import asyncio
 import hashlib
+import hmac
 import ipaddress
 import logging
 import math
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated, Final, Protocol
 
 from fastapi import Depends
@@ -19,12 +22,15 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from starlette.requests import Request
 
-from app.config import Settings, get_app_settings
+from app.config import RATE_LIMIT_KEY_SECRET_REQUIRED_IN, Settings, get_app_settings
 from app.errors import AppError
 
 logger = logging.getLogger(__name__)
 
 KEY_PREFIX: Final = "rl"
+# Not a secret: the key development and test runs use when RATE_LIMIT_KEY_SECRET is unset.
+# Settings refuses to start staging or production without the real one.
+DEVELOPMENT_HMAC_KEY: Final = "jack-fix-it-development-rate-limit-key-not-secret"
 
 # INCR, and EXPIRE only on the first hit of the window, as one atomic step.
 _INCREMENT_SCRIPT: Final = """
@@ -85,9 +91,34 @@ class RedisRateLimiter:
         return RateLimitResult(allowed=count <= limit, retry_after_seconds=retry_after)
 
 
-def hashed_identifier(value: str) -> str:
-    """For identifiers that are PII, such as an email: the key carries only the digest."""
-    return hashlib.sha256(value.encode()).hexdigest()
+def hashed_identifier(value: str, secret: str) -> str:
+    """For identifiers that are PII, such as an email: the key carries only the keyed digest."""
+    return hmac.new(secret.encode(), value.encode(), hashlib.sha256).hexdigest()
+
+
+@dataclass(frozen=True)
+class IdentifierHasher:
+    """hashed_identifier under the configured secret; build it with `from_settings`."""
+
+    secret: str = field(repr=False)
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> "IdentifierHasher":
+        if settings.rate_limit_key_secret is not None:
+            return cls(settings.rate_limit_key_secret.get_secret_value())
+        # Settings already refuses this; a hand-built Settings must not reach the fallback.
+        if settings.app_env in RATE_LIMIT_KEY_SECRET_REQUIRED_IN:
+            raise RuntimeError("RATE_LIMIT_KEY_SECRET is not set")
+        return cls(DEVELOPMENT_HMAC_KEY)
+
+    def __call__(self, value: str) -> str:
+        return hashed_identifier(value, self.secret)
+
+
+def get_identifier_hasher(
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> IdentifierHasher:
+    return IdentifierHasher.from_settings(settings)
 
 
 def get_rate_limiter(request: Request) -> RateLimiter:
