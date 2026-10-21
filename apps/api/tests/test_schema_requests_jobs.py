@@ -353,6 +353,8 @@ async def test_job_event_actor_nullable_for_system_events(
 # Foreign keys
 
 
+# SQLSTATE of foreign_key_violation.
+FOREIGN_KEY_VIOLATION = "23503"
 FOREIGN_KEYS = [
     ("service_requests", "customer_id"),
     ("service_requests", "category_id"),
@@ -375,17 +377,30 @@ FOREIGN_KEYS = [
 async def test_fk_targets_must_exist(
     db_session: AsyncSession, world: World, table: str, column: str
 ) -> None:
-    request, quote, job = await make_job_graph(db_session, world)
+    request, _, job = await make_job_graph(db_session, world)
+    # The jobs candidate needs its own request and quote: valid in every other column, so
+    # only the foreign key under test can fail.
+    free_request = make_request(world)
+    await add(db_session, free_request)
+    free_quote = make_quote(free_request, world.other_pro)
+    await add(db_session, free_quote)
     candidates: dict[str, object] = {
         "service_requests": make_request(world),
         "quotes": make_quote(request, world.other_pro),
-        "jobs": make_job(make_request(world), quote, world),
+        "jobs": make_job(free_request, free_quote, world),
         "job_events": JobEvent(job_id=job.id, type="note", actor_id=world.agent.id),
     }
     row = candidates[table]
     setattr(row, column, uuid.uuid4())
 
-    await assert_rejected(db_session, row)
+    savepoint = await db_session.begin_nested()
+    db_session.add(row)
+    with pytest.raises(IntegrityError) as error:
+        await db_session.flush()
+    await savepoint.rollback()
+    # The foreign key itself, not another constraint, rejected the row.
+    cause = error.value.orig.__cause__ if error.value.orig else None
+    assert getattr(cause, "sqlstate", None) == FOREIGN_KEY_VIOLATION
 
 
 def test_every_foreign_key_is_indexed() -> None:
