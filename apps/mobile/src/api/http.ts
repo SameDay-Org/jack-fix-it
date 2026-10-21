@@ -52,6 +52,13 @@ function resolveUrl(path: string): URL {
   return url;
 }
 
+/** Rethrows a caller's cancellation, so nothing is sent on behalf of a request it gave up on. */
+export function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  const { reason } = signal as { reason?: unknown };
+  throw reason ?? Object.assign(new Error("The request was cancelled"), { name: "AbortError" });
+}
+
 async function readErrorCode(response: Response): Promise<string | undefined> {
   try {
     const body = (await response.json()) as { error?: { code?: unknown } };
@@ -70,6 +77,7 @@ export async function sendRequest<T>(
   path: GetPath | PostPath,
   options: SendOptions = {},
 ): Promise<T> {
+  throwIfAborted(options.signal);
   const url = resolveUrl(path);
   const headers: Record<string, string> = { Accept: "application/json" };
   if (options.body !== undefined) headers["Content-Type"] = "application/json";

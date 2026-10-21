@@ -4,13 +4,14 @@ import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { createStore } from "zustand/vanilla";
 
-import { ApiError, SessionExpiredError } from "./errors";
-import { sendRequest, type PostBody, type PostResponse } from "./http";
+import { ApiError, LocalCleanupError, SessionExpiredError } from "./errors";
+import { sendRequest, type PostBody } from "./http";
 import { refreshTokenStorage } from "./tokenStorage";
 
 export type SessionStatus = "restoring" | "signedOut" | "signedIn";
 export type SessionUser = ApiSchema<"UserOut">;
 type AuthResponse = ApiSchema<"AuthResponse">;
+type SignInPath = "/v1/auth/login" | "/v1/auth/register";
 
 type SessionState = {
   status: SessionStatus;
@@ -19,6 +20,11 @@ type SessionState = {
   accessToken: string | null;
   /** Epoch milliseconds. The token counts as expired ACCESS_TOKEN_SKEW_MS earlier. */
   accessTokenExpiresAt: number | null;
+  /**
+   * A sign-out could not delete the stored refresh token. The session is over in memory; restore
+   * retries the delete before anything else and never signs in from that entry.
+   */
+  cleanupPending: boolean;
 };
 
 const SIGNED_OUT: SessionState = {
@@ -26,6 +32,7 @@ const SIGNED_OUT: SessionState = {
   user: null,
   accessToken: null,
   accessTokenExpiresAt: null,
+  cleanupPending: false,
 };
 const RESTORING: SessionState = { ...SIGNED_OUT, status: "restoring" };
 
@@ -36,11 +43,15 @@ const MS_PER_SECOND = 1000;
 
 export const sessionStore = createStore<SessionState>()(() => RESTORING);
 
-/** The session as screens read it: status and user. Tokens never leave this module. */
-export function useSession(): Pick<SessionState, "status" | "user"> {
+/** The session as screens read it. Tokens never leave this module. */
+export function useSession(): Pick<SessionState, "status" | "user" | "cleanupPending"> {
   return useStore(
     sessionStore,
-    useShallow((state) => ({ status: state.status, user: state.user })),
+    useShallow((state) => ({
+      status: state.status,
+      user: state.user,
+      cleanupPending: state.cleanupPending,
+    })),
   );
 }
 
@@ -51,90 +62,146 @@ export function attachQueryClient(client: QueryClient): void {
   queryClient = client;
 }
 
-async function applyAuth(auth: AuthResponse): Promise<void> {
-  await refreshTokenStorage.write(auth.refresh_token);
+// Session generation. Every sign-in and sign-out starts a new one. Async work notes the generation
+// it started in and applies its result (storage write or delete, memory update) only while that
+// generation is still current; a result from an older generation is discarded, so a refresh
+// released after a logout cannot bring the session back, and an old refresh's 401 cannot clear a
+// newer login. Storage writes check the generation again as they run, inside the store's queue.
+let generation = 0;
+const nextGeneration = (): number => ++generation;
+const isCurrent = (startedIn: number): boolean => startedIn === generation;
+
+/** Stores the pair for the session of `startedIn`; resolves to false when that session is gone. */
+async function applyAuth(auth: AuthResponse, startedIn: number): Promise<boolean> {
+  const written = await refreshTokenStorage.write(auth.refresh_token, () => isCurrent(startedIn));
+  if (!written || !isCurrent(startedIn)) return false;
   sessionStore.setState({
     status: "signedIn",
     user: auth.user,
     accessToken: auth.access_token,
     accessTokenExpiresAt: Date.now() + auth.expires_in * MS_PER_SECOND,
+    cleanupPending: false,
   });
+  return true;
 }
 
-async function clearSession(): Promise<void> {
+/** Asks the server to revoke a token family. Best effort: the device forgets it either way. */
+async function revokeRemote(refreshToken: string): Promise<void> {
+  try {
+    await sendRequest<undefined>("POST", "/v1/auth/logout", {
+      body: { refresh_token: refreshToken },
+    });
+  } catch {
+    // Unreachable or already revoked: nothing more the client can do.
+  }
+}
+
+/** Forgets the session on the device: memory and the Query cache always; resolves to whether the stored token was deleted. */
+async function forgetSession(): Promise<boolean> {
+  let deleted = true;
   try {
     await refreshTokenStorage.clear();
   } catch {
-    // The entry could not be deleted right now; the memory and the cache are cleared regardless,
-    // and the next sign-in overwrites it.
+    deleted = false;
   }
-  sessionStore.setState(SIGNED_OUT);
+  sessionStore.setState({ ...SIGNED_OUT, cleanupPending: !deleted });
   queryClient?.clear();
+  return deleted;
 }
 
-export async function register(body: PostBody<"/v1/auth/register">): Promise<void> {
-  const auth = await sendRequest<PostResponse<"/v1/auth/register">>("POST", "/v1/auth/register", {
-    body,
-  });
-  await applyAuth(auth);
-}
-
-export async function login(body: PostBody<"/v1/auth/login">): Promise<void> {
-  const auth = await sendRequest<PostResponse<"/v1/auth/login">>("POST", "/v1/auth/login", {
-    body,
-  });
-  await applyAuth(auth);
-}
-
-/** Tells the server, best effort, then forgets the session on the device whatever the answer. */
-export async function logout(): Promise<void> {
-  const refreshToken = await refreshTokenStorage.read().catch(() => null);
-  if (refreshToken) {
-    try {
-      await sendRequest<PostResponse<"/v1/auth/logout">>("POST", "/v1/auth/logout", {
-        body: { refresh_token: refreshToken },
-      });
-    } catch {
-      // The server revokes the family when it can; the device forgets either way.
-    }
+async function signIn<P extends SignInPath>(path: P, body: PostBody<P>): Promise<void> {
+  const startedIn = generation;
+  const auth = await sendRequest<AuthResponse>("POST", path, { body });
+  // A sign-out or another sign-in won while the request was in flight: the new server session is
+  // not ours to keep.
+  if (!isCurrent(startedIn)) {
+    await revokeRemote(auth.refresh_token);
+    throw new SessionExpiredError("superseded");
   }
-  await clearSession();
+  if (!(await applyAuth(auth, nextGeneration()))) {
+    await revokeRemote(auth.refresh_token);
+    throw new SessionExpiredError("superseded");
+  }
 }
 
-let refreshInFlight: Promise<string> | null = null;
+export function register(body: PostBody<"/v1/auth/register">): Promise<void> {
+  return signIn("/v1/auth/register", body);
+}
+
+export function login(body: PostBody<"/v1/auth/login">): Promise<void> {
+  return signIn("/v1/auth/login", body);
+}
 
 /**
- * Rotates the refresh token and resolves to the new access token. One refresh at a time: every
- * caller that needs one while it runs awaits the same promise, because two refreshes with the same
- * token make the server revoke the whole session.
+ * Ends the session: revokes it on the server (best effort) and forgets it on the device. Rejects
+ * with `LocalCleanupError` when the stored token could not be deleted; memory and the cache are
+ * cleared regardless and `cleanupPending` is set.
+ */
+export async function logout(): Promise<void> {
+  const startedIn = nextGeneration();
+  const refreshToken = await refreshTokenStorage.read().catch(() => null);
+  if (refreshToken) await revokeRemote(refreshToken);
+  if (!isCurrent(startedIn)) return; // a newer sign-in completed meanwhile and owns the session
+  if (!(await forgetSession())) throw new LocalCleanupError();
+}
+
+/** The server rejected the session of `startedIn`: forget it, unless a newer one replaced it. */
+async function signOutIfCurrent(startedIn: number): Promise<void> {
+  if (!isCurrent(startedIn)) return;
+  nextGeneration();
+  await forgetSession();
+}
+
+type RefreshInFlight = { generation: number; promise: Promise<string> };
+let refreshInFlight: RefreshInFlight | null = null;
+
+/**
+ * Rotates the refresh token and resolves to the new access token. One refresh at a time per
+ * session: every caller that needs one while it runs awaits the same promise, because two
+ * refreshes with the same token make the server revoke the whole family.
  */
 export function refreshSession(): Promise<string> {
-  refreshInFlight ??= rotateRefreshToken().finally(() => {
-    refreshInFlight = null;
+  const inFlight =
+    refreshInFlight?.generation === generation ? refreshInFlight : startRefresh(generation);
+  return inFlight.promise;
+}
+
+function startRefresh(startedIn: number): RefreshInFlight {
+  const promise = rotateRefreshToken(startedIn).finally(() => {
+    if (refreshInFlight?.promise === promise) refreshInFlight = null;
   });
+  refreshInFlight = { generation: startedIn, promise };
   return refreshInFlight;
 }
 
-async function rotateRefreshToken(): Promise<string> {
+async function rotateRefreshToken(startedIn: number): Promise<string> {
+  if (sessionStore.getState().cleanupPending) throw new SessionExpiredError();
   const refreshToken = await refreshTokenStorage.read();
+  if (!isCurrent(startedIn)) throw new SessionExpiredError("superseded");
   if (!refreshToken) {
-    await clearSession();
+    await signOutIfCurrent(startedIn);
     throw new SessionExpiredError();
   }
+
+  let auth: AuthResponse;
   try {
-    const auth = await sendRequest<PostResponse<"/v1/auth/refresh">>("POST", "/v1/auth/refresh", {
+    auth = await sendRequest<AuthResponse>("POST", "/v1/auth/refresh", {
       body: { refresh_token: refreshToken },
     });
-    await applyAuth(auth);
-    return auth.access_token;
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) {
-      await clearSession();
+      await signOutIfCurrent(startedIn);
       throw new SessionExpiredError();
     }
     // A network failure, a timeout or a 5xx: the session and the stored token stay.
     throw error;
   }
+
+  if (!(await applyAuth(auth, startedIn))) {
+    await revokeRemote(auth.refresh_token);
+    throw new SessionExpiredError("superseded");
+  }
+  return auth.access_token;
 }
 
 /** A usable access token: the one in memory while it is fresh, otherwise a refreshed one. */
@@ -150,10 +217,16 @@ export async function getAccessToken(): Promise<string> {
 /**
  * Rebuilds the session from the stored refresh token on app start. With no token the user is
  * signed out. When the server cannot be reached, the token stays on disk for the next attempt and
- * the app routes as signed out meanwhile.
+ * the app routes as signed out meanwhile. A pending cleanup is finished first, never signed in from.
  */
 export async function restoreSession(): Promise<void> {
+  const startedIn = generation;
+  if (sessionStore.getState().cleanupPending) {
+    await forgetSession();
+    return;
+  }
   const refreshToken = await refreshTokenStorage.read().catch(() => null);
+  if (!isCurrent(startedIn)) return;
   if (!refreshToken) {
     sessionStore.setState(SIGNED_OUT);
     return;
@@ -161,7 +234,7 @@ export async function restoreSession(): Promise<void> {
   try {
     await refreshSession();
   } catch (error) {
-    if (error instanceof SessionExpiredError) return; // already signed out and cleared
+    if (!isCurrent(startedIn) || error instanceof SessionExpiredError) return;
     sessionStore.setState(SIGNED_OUT);
   }
 }

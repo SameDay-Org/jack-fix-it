@@ -2,18 +2,21 @@ import { QueryClient } from "@tanstack/react-query";
 
 import { apiGet } from "../client";
 import { ApiError, NetworkError, SessionExpiredError } from "../errors";
-import { attachQueryClient, restoreSession, sessionStore } from "../session";
+import { attachQueryClient, login, logout, restoreSession, sessionStore } from "../session";
 import {
   authResponse,
+  callBody,
   callHeader,
   callPath,
   callsTo,
+  deferred,
   errorResponse,
   installFetchMock,
   jsonResponse,
   resetSecureStore,
-  seedRefreshToken,
   secureStoreMock,
+  seedRefreshToken,
+  settle,
   storedRefreshToken,
   user,
   watchConsole,
@@ -25,22 +28,37 @@ jest.mock("expo-secure-store", () => jest.requireActual("./helpers").secureStore
 
 const ME = "/v1/auth/me";
 const REFRESH = "/v1/auth/refresh";
+const LOGIN = "/v1/auth/login";
+const LOGOUT = "/v1/auth/logout";
+
+const SIGNED_OUT = {
+  status: "signedOut",
+  user: null,
+  accessToken: null,
+  accessTokenExpiresAt: null,
+  cleanupPending: false,
+};
 
 let fetchMock: FetchMock;
 let queryClient: QueryClient;
 let consoleWatch: ReturnType<typeof watchConsole>;
 
-/** The server: /me accepts only access-2, /refresh rotates refresh-1 into pair 2. */
-function serveRotatingServer(options: { refresh?: () => Response | Promise<Response> } = {}) {
+type Served = Response | Promise<Response>;
+
+/**
+ * The server: /me accepts the access token of pair `acceptedPair`, /refresh rotates into pair 2
+ * (or whatever `refresh` returns), /login answers pair 3, /logout always 204.
+ */
+function serve(options: { refresh?: () => Served; acceptedPair?: number } = {}) {
+  const accepted = `Bearer access-${options.acceptedPair ?? 2}`;
   fetchMock.mockImplementation(async (url, init) => {
     const path = new URL(url).pathname;
     const bearer = (init?.headers as Record<string, string> | undefined)?.Authorization;
-    if (path === REFRESH)
-      return options.refresh ? options.refresh() : jsonResponse(200, authResponse(2));
+    if (path === REFRESH) return options.refresh?.() ?? jsonResponse(200, authResponse(2));
+    if (path === LOGIN) return jsonResponse(200, authResponse(3));
+    if (path === LOGOUT) return jsonResponse(204);
     if (path === ME) {
-      return bearer === "Bearer access-2"
-        ? jsonResponse(200, user)
-        : errorResponse(401, "invalid_token");
+      return bearer === accepted ? jsonResponse(200, user) : errorResponse(401, "invalid_token");
     }
     throw new Error(`unexpected path ${path}`);
   });
@@ -53,20 +71,19 @@ function signedInWithStaleAccessToken(): void {
     user,
     accessToken: "access-1",
     accessTokenExpiresAt: Date.now() + 900_000,
+    cleanupPending: false,
   });
 }
+
+const signIn = () => login({ email: user.email, password: "correct horse battery" });
+const revokedTokens = () => callsTo(fetchMock, LOGOUT).map(callBody);
 
 beforeEach(() => {
   fetchMock = installFetchMock();
   resetSecureStore();
   queryClient = new QueryClient();
   attachQueryClient(queryClient);
-  sessionStore.setState({
-    status: "restoring",
-    user: null,
-    accessToken: null,
-    accessTokenExpiresAt: null,
-  });
+  sessionStore.setState({ ...SIGNED_OUT, status: "restoring" });
   consoleWatch = watchConsole();
 });
 
@@ -78,7 +95,7 @@ afterEach(() => {
 describe("refresh", () => {
   it("401 invalid_token triggers one refresh and one retry", async () => {
     signedInWithStaleAccessToken();
-    serveRotatingServer();
+    serve();
 
     await expect(apiGet(ME, { auth: true })).resolves.toEqual(user);
 
@@ -91,7 +108,7 @@ describe("refresh", () => {
 
   it("concurrent 401s share a single refresh request", async () => {
     signedInWithStaleAccessToken();
-    serveRotatingServer();
+    serve();
 
     const results = await Promise.all(Array.from({ length: 5 }, () => apiGet(ME, { auth: true })));
 
@@ -102,7 +119,7 @@ describe("refresh", () => {
 
   it("restore and a concurrent request share the same refresh", async () => {
     seedRefreshToken("refresh-1");
-    serveRotatingServer();
+    serve();
 
     const [, me] = await Promise.all([restoreSession(), apiGet(ME, { auth: true })]);
 
@@ -119,8 +136,9 @@ describe("refresh", () => {
       user,
       accessToken: "access-1",
       accessTokenExpiresAt: Date.now() - 1,
+      cleanupPending: false,
     });
-    serveRotatingServer();
+    serve();
 
     await expect(apiGet(ME, { auth: true })).resolves.toEqual(user);
 
@@ -130,25 +148,20 @@ describe("refresh", () => {
   it("refresh 401 signs out, clears the store and the cache, and throws SessionExpiredError", async () => {
     signedInWithStaleAccessToken();
     queryClient.setQueryData(["me"], user);
-    serveRotatingServer({ refresh: () => errorResponse(401, "invalid_refresh_token") });
+    serve({ refresh: () => errorResponse(401, "invalid_refresh_token") });
 
     await expect(apiGet(ME, { auth: true })).rejects.toBeInstanceOf(SessionExpiredError);
 
     expect(storedRefreshToken()).toBeNull();
     expect(secureStoreMock.deleteItemAsync).toHaveBeenCalledTimes(1);
-    expect(sessionStore.getState()).toEqual({
-      status: "signedOut",
-      user: null,
-      accessToken: null,
-      accessTokenExpiresAt: null,
-    });
+    expect(sessionStore.getState()).toEqual(SIGNED_OUT);
     expect(queryClient.getQueryData(["me"])).toBeUndefined();
     expect(callsTo(fetchMock, ME)).toHaveLength(1);
   });
 
   it("refresh network error keeps the session and the token", async () => {
     signedInWithStaleAccessToken();
-    serveRotatingServer({ refresh: () => Promise.reject(new TypeError("Network request failed")) });
+    serve({ refresh: () => Promise.reject(new TypeError("Network request failed")) });
 
     await expect(apiGet(ME, { auth: true })).rejects.toBeInstanceOf(NetworkError);
 
@@ -163,7 +176,7 @@ describe("refresh", () => {
 
   it("refresh 5xx keeps the session like a network error", async () => {
     signedInWithStaleAccessToken();
-    serveRotatingServer({ refresh: () => errorResponse(503, "unavailable") });
+    serve({ refresh: () => errorResponse(503, "unavailable") });
 
     await expect(apiGet(ME, { auth: true })).rejects.toEqual(new ApiError(503, "unavailable"));
 
@@ -186,5 +199,149 @@ describe("refresh", () => {
 
     expect(fetchMock.mock.calls.map(callPath)).toEqual([ME, REFRESH, ME]);
     expect(sessionStore.getState().status).toBe("signedIn");
+  });
+
+  it("cancellation while awaiting the shared refresh sends nothing for the cancelled caller", async () => {
+    signedInWithStaleAccessToken();
+    const refresh = deferred<Response>();
+    serve({ refresh: () => refresh.promise });
+    const cancelled = new AbortController();
+
+    const requestA = apiGet(ME, { auth: true, signal: cancelled.signal });
+    const requestB = apiGet(ME, { auth: true });
+    await settle(); // both got 401; one refresh is in flight
+    cancelled.abort();
+    refresh.resolve(jsonResponse(200, authResponse(2)));
+
+    await expect(requestA).rejects.toMatchObject({ name: "AbortError" });
+    await expect(requestB).resolves.toEqual(user);
+    expect(callsTo(fetchMock, REFRESH)).toHaveLength(1);
+    expect(callsTo(fetchMock, ME).map((call) => callHeader(call, "Authorization"))).toEqual([
+      "Bearer access-1",
+      "Bearer access-1",
+      "Bearer access-2",
+    ]);
+    expect(sessionStore.getState().accessToken).toBe("access-2");
+  });
+});
+
+describe("session generation", () => {
+  it("a refresh released after logout is discarded", async () => {
+    signedInWithStaleAccessToken();
+    const refresh = deferred<Response>();
+    serve({ refresh: () => refresh.promise });
+    queryClient.setQueryData(["me"], user);
+
+    const request = apiGet(ME, { auth: true });
+    await settle(); // the 401 came back and the refresh is in flight
+    await logout();
+    expect(storedRefreshToken()).toBeNull();
+    refresh.resolve(jsonResponse(200, authResponse(2)));
+
+    await expect(request).rejects.toMatchObject({
+      name: "SessionExpiredError",
+      reason: "superseded",
+    });
+    expect(storedRefreshToken()).toBeNull();
+    expect(sessionStore.getState()).toEqual(SIGNED_OUT);
+    expect(queryClient.getQueryData(["me"])).toBeUndefined();
+    expect(secureStoreMock.setItemAsync).not.toHaveBeenCalledWith(
+      expect.any(String),
+      "refresh-2",
+      expect.anything(),
+    );
+    // The pair the stale refresh received is revoked, not kept.
+    expect(revokedTokens()).toEqual([
+      { refresh_token: "refresh-1" },
+      { refresh_token: "refresh-2" },
+    ]);
+  });
+
+  it("a newer login wins over an old refresh success", async () => {
+    signedInWithStaleAccessToken();
+    const refresh = deferred<Response>();
+    serve({ refresh: () => refresh.promise, acceptedPair: 3 });
+
+    const request = apiGet(ME, { auth: true });
+    await settle();
+    await signIn();
+    expect(sessionStore.getState().accessToken).toBe("access-3");
+    refresh.resolve(jsonResponse(200, authResponse(2)));
+
+    await expect(request).rejects.toMatchObject({
+      name: "SessionExpiredError",
+      reason: "superseded",
+    });
+    expect(storedRefreshToken()).toBe("refresh-3");
+    expect(sessionStore.getState()).toMatchObject({
+      status: "signedIn",
+      user,
+      accessToken: "access-3",
+    });
+    expect(revokedTokens()).toEqual([{ refresh_token: "refresh-2" }]);
+  });
+
+  it("an old refresh 401 after a newer login keeps the newer session", async () => {
+    signedInWithStaleAccessToken();
+    const refresh = deferred<Response>();
+    serve({ refresh: () => refresh.promise, acceptedPair: 3 });
+    queryClient.setQueryData(["me"], user);
+
+    const request = apiGet(ME, { auth: true });
+    await settle();
+    await signIn();
+    refresh.resolve(errorResponse(401, "invalid_refresh_token"));
+
+    await expect(request).rejects.toBeInstanceOf(SessionExpiredError);
+    expect(storedRefreshToken()).toBe("refresh-3");
+    expect(secureStoreMock.deleteItemAsync).not.toHaveBeenCalled();
+    expect(sessionStore.getState()).toMatchObject({
+      status: "signedIn",
+      user,
+      accessToken: "access-3",
+    });
+    expect(queryClient.getQueryData(["me"])).toEqual(user);
+  });
+
+  it("a stale restore completion is discarded", async () => {
+    seedRefreshToken("refresh-1");
+    const refresh = deferred<Response>();
+    serve({ refresh: () => refresh.promise, acceptedPair: 3 });
+
+    const restoring = restoreSession();
+    await settle();
+    await signIn();
+    refresh.resolve(jsonResponse(200, authResponse(2)));
+    await restoring;
+
+    expect(storedRefreshToken()).toBe("refresh-3");
+    expect(sessionStore.getState()).toMatchObject({
+      status: "signedIn",
+      user,
+      accessToken: "access-3",
+    });
+  });
+
+  it("a sign-in completed after a logout is discarded and its server session revoked", async () => {
+    const loginAnswer = deferred<Response>();
+    fetchMock.mockImplementation(async (url) => {
+      const path = new URL(url).pathname;
+      if (path === LOGIN) return loginAnswer.promise;
+      if (path === LOGOUT) return jsonResponse(204);
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const signingIn = signIn();
+    await settle();
+    await logout();
+    loginAnswer.resolve(jsonResponse(200, authResponse(3)));
+
+    await expect(signingIn).rejects.toMatchObject({
+      name: "SessionExpiredError",
+      reason: "superseded",
+    });
+    expect(storedRefreshToken()).toBeNull();
+    expect(sessionStore.getState()).toEqual(SIGNED_OUT);
+    expect(revokedTokens()).toEqual([{ refresh_token: "refresh-3" }]);
   });
 });

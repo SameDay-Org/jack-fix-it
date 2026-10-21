@@ -95,6 +95,24 @@ export const neverAnswers = (_url: string, init?: RequestInit): Promise<Response
     );
   });
 
+/** A promise the test settles by hand, to order one answer against another. */
+export function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason: unknown) => void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/** Lets every pending microtask and the current macrotask settle. */
+export const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
 const CONSOLE_METHODS = ["log", "info", "warn", "error", "debug"] as const;
 
 /**

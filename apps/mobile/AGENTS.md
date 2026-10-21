@@ -27,8 +27,12 @@ rules apply.
   `ApiError(status, code)`, `NetworkError` (offline or past `EXPO_PUBLIC_API_TIMEOUT_MS`) and
   `SessionExpiredError`. The session (`useSession`, `login`, `register`, `logout`,
   `restoreSession`) keeps the refresh token in `expo-secure-store` and the access token in
-  memory only, refreshes single-flight and retries a `401 invalid_token` once. Never log a token.
-  ESLint rejects `fetch` and `expo-secure-store` outside `src/api`.
+  memory only, refreshes single-flight and retries a `401 invalid_token` once. Async auth work
+  carries a session generation: a result from before a sign-in or sign-out is discarded
+  (`SessionExpiredError` with reason `superseded`). A sign-out that cannot delete the stored
+  token rejects with `LocalCleanupError` and sets `cleanupPending`; restore retries the delete
+  and never signs in from that entry. Cancelled callers send nothing, even after a shared
+  refresh. Never log a token. ESLint rejects `fetch` and `expo-secure-store` outside `src/api`.
 - Strings: `src/i18n/locales/{en,es}.json` through `useTranslation()`; the device language
   picks the catalog, English is the fallback.
 - Config: `app.config.ts` reads `APP_VARIANT` (development, preview, production) to suffix the

@@ -20,10 +20,24 @@ export class NetworkError extends Error {
   }
 }
 
-/** The refresh token was rejected: the session is over and the user has to sign in again. */
+/**
+ * The session this call belonged to is over: the server rejected the refresh token (`expired`),
+ * or a newer sign-in or sign-out superseded the call while it was in flight (`superseded`).
+ */
 export class SessionExpiredError extends Error {
-  constructor() {
-    super("Session expired");
+  constructor(readonly reason: "expired" | "superseded" = "expired") {
+    super(reason === "expired" ? "Session expired" : "Superseded by a newer sign-in or sign-out");
     this.name = "SessionExpiredError";
+  }
+}
+
+/**
+ * The device could not delete the stored refresh token on sign-out. Memory and the Query cache
+ * are cleared anyway, and `restoreSession` retries the delete before it does anything else.
+ */
+export class LocalCleanupError extends Error {
+  constructor(readonly cause?: unknown) {
+    super("The device could not forget the session; it will retry on the next start");
+    this.name = "LocalCleanupError";
   }
 }

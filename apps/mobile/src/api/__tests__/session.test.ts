@@ -1,5 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 
+import { apiGet } from "../client";
+import { LocalCleanupError, SessionExpiredError } from "../errors";
 import {
   attachQueryClient,
   login,
@@ -12,12 +14,13 @@ import {
   authResponse,
   callBody,
   callPath,
+  callsTo,
   errorResponse,
   installFetchMock,
   jsonResponse,
   resetSecureStore,
-  seedRefreshToken,
   secureStoreMock,
+  seedRefreshToken,
   storedRefreshToken,
   user,
   watchConsole,
@@ -26,6 +29,14 @@ import {
 
 jest.mock("../config", () => jest.requireActual("./helpers").configMock);
 jest.mock("expo-secure-store", () => jest.requireActual("./helpers").secureStoreMock);
+
+const SIGNED_OUT = {
+  status: "signedOut",
+  user: null,
+  accessToken: null,
+  accessTokenExpiresAt: null,
+  cleanupPending: false,
+};
 
 let fetchMock: FetchMock;
 let queryClient: QueryClient;
@@ -36,12 +47,7 @@ beforeEach(() => {
   resetSecureStore();
   queryClient = new QueryClient();
   attachQueryClient(queryClient);
-  sessionStore.setState({
-    status: "restoring",
-    user: null,
-    accessToken: null,
-    accessTokenExpiresAt: null,
-  });
+  sessionStore.setState({ ...SIGNED_OUT, status: "restoring" });
   consoleWatch = watchConsole();
 });
 
@@ -82,6 +88,7 @@ describe("session", () => {
       status: "signedIn",
       user,
       accessToken: "access-1",
+      cleanupPending: false,
     });
     expect(sessionStore.getState().accessTokenExpiresAt).toBeGreaterThan(Date.now());
   });
@@ -127,6 +134,7 @@ describe("session", () => {
       user,
       accessToken: "access-1",
       accessTokenExpiresAt: Date.now() + 900_000,
+      cleanupPending: false,
     });
     queryClient.setQueryData(["me"], user);
     fetchMock.mockResolvedValue(errorResponse(500, "internal_error"));
@@ -136,12 +144,40 @@ describe("session", () => {
     expect(callPath(fetchMock.mock.calls[0])).toBe("/v1/auth/logout");
     expect(callBody(fetchMock.mock.calls[0])).toEqual({ refresh_token: "refresh-1" });
     expect(storedRefreshToken()).toBeNull();
-    expect(sessionStore.getState()).toEqual({
-      status: "signedOut",
-      user: null,
-      accessToken: null,
-      accessTokenExpiresAt: null,
-    });
+    expect(sessionStore.getState()).toEqual(SIGNED_OUT);
     expect(queryClient.getQueryData(["me"])).toBeUndefined();
+  });
+
+  it("a sign-out that cannot delete the stored token is observable and restore does not sign in", async () => {
+    seedRefreshToken("refresh-1");
+    sessionStore.setState({
+      status: "signedIn",
+      user,
+      accessToken: "access-1",
+      accessTokenExpiresAt: Date.now() + 900_000,
+      cleanupPending: false,
+    });
+    queryClient.setQueryData(["me"], user);
+    fetchMock.mockRejectedValue(new TypeError("Network request failed")); // remote logout unreachable
+    secureStoreMock.deleteItemAsync.mockRejectedValueOnce(new Error("keychain busy"));
+
+    await expect(logout()).rejects.toBeInstanceOf(LocalCleanupError);
+
+    expect(sessionStore.getState()).toEqual({ ...SIGNED_OUT, cleanupPending: true });
+    expect(queryClient.getQueryData(["me"])).toBeUndefined();
+    expect(storedRefreshToken()).toBe("refresh-1"); // still on disk, and known to be
+
+    // No request may sign back in from that entry.
+    await expect(apiGet("/v1/auth/me", { auth: true })).rejects.toBeInstanceOf(SessionExpiredError);
+    secureStoreMock.deleteItemAsync.mockRejectedValueOnce(new Error("keychain busy"));
+    await restoreSession();
+    expect(sessionStore.getState()).toEqual({ ...SIGNED_OUT, cleanupPending: true });
+    expect(callsTo(fetchMock, "/v1/auth/refresh")).toHaveLength(0);
+
+    // Once the device cooperates, restore finishes the cleanup instead of restoring.
+    await restoreSession();
+    expect(storedRefreshToken()).toBeNull();
+    expect(sessionStore.getState()).toEqual(SIGNED_OUT);
+    expect(callsTo(fetchMock, "/v1/auth/refresh")).toHaveLength(0);
   });
 });

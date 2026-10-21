@@ -1,6 +1,7 @@
 import { ApiError } from "./errors";
 import {
   sendRequest,
+  throwIfAborted,
   type GetPath,
   type GetResponse,
   type PostBody,
@@ -38,18 +39,25 @@ export function apiPost<P extends PostPath>(
   );
 }
 
-// One retry at most: a 401 with a freshly issued token is the server's final word.
+const isExpiredAccess = (error: unknown): boolean =>
+  error instanceof ApiError && error.status === 401 && error.code === INVALID_TOKEN;
+
+// One retry at most: a 401 with a freshly issued token is the server's final word. A caller that
+// cancels while a shared refresh runs sends nothing afterwards; the refresh still completes for
+// the others.
 async function withSession<T>(
   options: RequestOptions,
   send: (accessToken?: string) => Promise<T>,
 ): Promise<T> {
   if (!options.auth) return send();
+  const accessToken = await getAccessToken();
+  throwIfAborted(options.signal);
   try {
-    return await send(await getAccessToken());
+    return await send(accessToken);
   } catch (error) {
-    const expiredAccess =
-      error instanceof ApiError && error.status === 401 && error.code === INVALID_TOKEN;
-    if (!expiredAccess) throw error;
-    return send(await refreshSession());
+    if (!isExpiredAccess(error)) throw error;
+    const freshToken = await refreshSession();
+    throwIfAborted(options.signal);
+    return send(freshToken);
   }
 }

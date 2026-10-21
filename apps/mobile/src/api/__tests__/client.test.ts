@@ -92,12 +92,37 @@ describe("apiGet / apiPost", () => {
     await expect(apiGet("/health")).rejects.toMatchObject({ timedOut: false });
   });
 
+  it("a pre-aborted request sends nothing", async () => {
+    const cancelled = new AbortController();
+    cancelled.abort();
+
+    await expect(apiGet("/health", { signal: cancelled.signal })).rejects.toMatchObject({
+      name: "AbortError",
+    });
+
+    sessionStore.setState({
+      status: "signedIn",
+      user,
+      accessToken: "access-1",
+      accessTokenExpiresAt: Date.now() + 900_000,
+      cleanupPending: false,
+    });
+    await expect(
+      apiGet("/v1/auth/me", { auth: true, signal: cancelled.signal }),
+    ).rejects.toMatchObject({
+      name: "AbortError",
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("never sends Authorization to another host", async () => {
     sessionStore.setState({
       status: "signedIn",
       user,
       accessToken: "access-1",
       accessTokenExpiresAt: Date.now() + 900_000,
+      cleanupPending: false,
     });
 
     await expect(
