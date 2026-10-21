@@ -32,6 +32,12 @@ const TEXT_CLASS: Record<TypeToken, string> = {
   caption: "text-caption",
 };
 
+// The hidden measurement row. `alignItems` stops the column from stretching every word to the
+// widest one's width; the explicit width is set per render (the window's), because an absolute
+// child without one is measured against its parent, and the parent here is only as wide as the
+// current word: measured against that, the other words would ellipsize and report its width.
+const MEASURE_ROW = { position: "absolute", opacity: 0, alignItems: "flex-start" } as const;
+
 export type WordRotatorProps = {
   words: readonly string[];
   /** Type token: the words' text style, and the clip height (one line of it, at the device's font scale). */
@@ -75,7 +81,7 @@ export function WordRotator({
   onReady,
   testID,
 }: WordRotatorProps) {
-  const { fontScale } = useWindowDimensions();
+  const { fontScale, width: windowWidth } = useWindowDimensions();
   const reduceMotion = useReducedMotion();
   const lineHeight = tokens.fontSize[type].lineHeight * fontScale;
   const textClass = cx(TEXT_CLASS[type], className);
@@ -88,6 +94,10 @@ export function WordRotator({
   const widths = useSharedValue<number[]>([]);
   const measured = useSharedValue(false);
   const [ready, setReady] = useState(false);
+  // The words sit on a stage wide enough for the widest of them: an absolute child with an inset
+  // is measured against its parent's width, and a word measured against a narrower clip would be
+  // ellipsized rather than clipped.
+  const [stageWidth, setStageWidth] = useState<number>();
   const pending = useRef(new Map<number, number>());
   // The run reads the latest callback without restarting when it changes.
   const onCycleRef = useRef(onCycle);
@@ -98,8 +108,10 @@ export function WordRotator({
   const record = (index: number, width: number) => {
     pending.current.set(index, width);
     if (pending.current.size < words.length) return;
-    widths.value = words.map((_, i) => pending.current.get(i) ?? 0);
+    const all = words.map((_, i) => pending.current.get(i) ?? 0);
+    widths.value = all;
     measured.value = true;
+    setStageWidth(Math.ceil(Math.max(0, ...all)) + 1);
     setReady(true);
   };
 
@@ -140,24 +152,29 @@ export function WordRotator({
         style={[{ height: lineHeight, overflow: "hidden" }, clipStyle]}
         testID={testID && `${testID}-clip`}
       >
-        {words.map((word, index) => (
-          <RotatingWord
-            key={`${index}-${word}`}
-            word={word}
-            index={index}
-            sequence={sequence}
-            cycle={cycle}
-            lineHeight={lineHeight}
-            slide={!reduceMotion}
-            className={textClass}
-            testID={testID && `${testID}-word-${index}`}
-          />
-        ))}
+        <View
+          style={{ position: "absolute", left: 0, top: 0, width: stageWidth, height: lineHeight }}
+          testID={testID && `${testID}-stage`}
+        >
+          {words.map((word, index) => (
+            <RotatingWord
+              key={`${index}-${word}`}
+              word={word}
+              index={index}
+              sequence={sequence}
+              cycle={cycle}
+              lineHeight={lineHeight}
+              slide={!reduceMotion}
+              className={textClass}
+              testID={testID && `${testID}-word-${index}`}
+            />
+          ))}
+        </View>
       </Animated.View>
       {/* Measurement pass: the same words in the same style, invisible, each reporting its width. */}
       <View
         pointerEvents="none"
-        style={{ position: "absolute", opacity: 0 }}
+        style={[MEASURE_ROW, { width: windowWidth }]}
         testID={testID && `${testID}-measure`}
       >
         {words.map((word, index) => (

@@ -92,6 +92,33 @@ describe("WordRotator", () => {
     expect(word(0).props.className).toContain("text-green-500");
   });
 
+  it("measures each word at its own width: the hidden column must not stretch its words", async () => {
+    await renderRotator();
+
+    // Yoga stretches a column's children by default, which would make every word report the
+    // widest one's width and freeze the clip there; and an absolute child without a width is
+    // measured against its parent, here the clip, which is only as wide as the current word.
+    // The layout engine is not under Jest, so pin the styles that prevent both.
+    expect(screen.getByTestId("rot-measure", HIDDEN).props.style).toEqual([
+      { position: "absolute", opacity: 0, alignItems: "flex-start" },
+      { width: Dimensions.get("window").width },
+    ]);
+    const measureRow = within(screen.getByTestId("rot-measure", HIDDEN));
+    for (const text of WORDS) {
+      expect(measureRow.getByText(text, HIDDEN).props.numberOfLines).toBe(1);
+    }
+
+    // Once measured, the words' stage is as wide as the widest word (plus rounding slack), so a
+    // word is never ellipsized by a clip that is narrower than it: the clip clips, nothing else.
+    expect(screen.getByTestId("rot-stage", HIDDEN).props.style).toMatchObject({ width: undefined });
+    await measure();
+    expect(screen.getByTestId("rot-stage", HIDDEN).props.style).toMatchObject({
+      position: "absolute",
+      width: Math.ceil(Math.max(...WIDTHS)) + 1,
+      height: LINE,
+    });
+  });
+
   it("starts only once every word is measured, as one UI-thread sequence of timed steps", async () => {
     const onReady = jest.fn();
     await renderRotator({ onReady });
