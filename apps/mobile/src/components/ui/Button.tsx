@@ -1,7 +1,10 @@
 import { useTranslation } from "react-i18next";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
+import { continuousCorners } from "@/theme";
+
 import { cx } from "./cx";
+import { useFlag } from "./useFlag";
 
 export type ButtonVariant = "primary" | "secondary" | "ghost";
 export type ButtonSize = "md" | "lg";
@@ -21,18 +24,43 @@ export type ButtonProps = {
   testID?: string;
 };
 
-// Primary is navy on orange (5.39:1): white on orange is 3.06:1 and fails WCAG AA.
-const VARIANT: Record<ButtonVariant, { container: string; text: string }> = {
-  primary: { container: "bg-orange active:bg-orange/90", text: "text-navy" },
-  secondary: { container: "border-2 border-navy active:bg-navy/10", text: "text-navy" },
-  ghost: { container: "active:bg-navy/10", text: "text-navy" },
+type StateClasses = { rest: string; pressed: string };
+
+type VariantClasses = {
+  /** Always on the container. */
+  base: string;
+  fill: StateClasses;
+  label: StateClasses;
 };
 
-// px values so the touch target (48 dp minimum) does not depend on the rem base.
-const SIZE: Record<ButtonSize, { container: string; text: string }> = {
-  md: { container: "min-h-[48px] min-w-[48px] px-5", text: "text-base" },
-  lg: { container: "min-h-[56px] min-w-[56px] px-6", text: "text-lg" },
+// Pairs from the contrast table in docs/design/README.md: navy-900 on green-500 at rest, white on
+// green-700 while pressed. Secondary and ghost press into a navy-900 tint and keep navy-900 text.
+export const VARIANT: Record<ButtonVariant, VariantClasses> = {
+  primary: {
+    base: "",
+    fill: { rest: "bg-green-500", pressed: "bg-green-700" },
+    label: { rest: "text-navy-900", pressed: "text-white" },
+  },
+  secondary: {
+    base: "border-2 border-navy-900",
+    fill: { rest: "", pressed: "bg-navy-900/10" },
+    label: { rest: "text-navy-900", pressed: "text-navy-900" },
+  },
+  ghost: {
+    base: "",
+    fill: { rest: "", pressed: "bg-navy-900/10" },
+    label: { rest: "text-navy-900", pressed: "text-navy-900" },
+  },
 };
+
+// Touch targets of 48 dp (md) and 56 dp (lg) on the spacing scale; both sizes use the headline style.
+const SIZE: Record<ButtonSize, string> = {
+  md: "min-h-12 min-w-12 px-5",
+  lg: "min-h-14 min-w-14 px-6",
+};
+
+const forState = (classes: StateClasses, pressed: boolean) =>
+  pressed ? classes.pressed : classes.rest;
 
 export function Button({
   label,
@@ -45,7 +73,9 @@ export function Button({
   testID,
 }: ButtonProps) {
   const { t } = useTranslation();
+  const [pressed, pressIn, pressOut] = useFlag();
   const inactive = disabled || loading;
+  const classes = VARIANT[variant];
 
   return (
     <Pressable
@@ -54,11 +84,15 @@ export function Button({
       accessibilityState={{ disabled: inactive, busy: loading }}
       disabled={inactive}
       onPress={onPress}
+      onPressIn={pressIn}
+      onPressOut={pressOut}
       testID={testID}
+      style={continuousCorners}
       className={cx(
-        "flex-row items-center justify-center rounded-2xl",
-        VARIANT[variant].container,
-        SIZE[size].container,
+        "flex-row items-center justify-center rounded-pill",
+        classes.base,
+        forState(classes.fill, pressed),
+        SIZE[size],
         disabled && "opacity-50",
         className,
       )}
@@ -66,9 +100,8 @@ export function Button({
       {/* The label stays mounted, invisible, while loading so the width does not jump. */}
       <Text
         className={cx(
-          "text-center font-semibold",
-          VARIANT[variant].text,
-          SIZE[size].text,
+          "text-center text-headline",
+          forState(classes.label, pressed),
           loading && "opacity-0",
         )}
       >
@@ -76,7 +109,7 @@ export function Button({
       </Text>
       {loading ? (
         <View className="pointer-events-none absolute inset-0 items-center justify-center">
-          <ActivityIndicator className={VARIANT[variant].text} />
+          <ActivityIndicator className={classes.label.rest} />
         </View>
       ) : null}
     </Pressable>

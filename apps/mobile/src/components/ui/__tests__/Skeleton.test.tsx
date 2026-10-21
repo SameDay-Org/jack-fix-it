@@ -16,6 +16,9 @@ jest.mock("react-native-reanimated", () => {
   };
 });
 
+const placeholderClasses = () =>
+  screen.getByRole("progressbar").queryAll((node) => node.type === "View")[0].props.className;
+
 describe("Skeleton", () => {
   beforeEach(() => {
     jest.mocked(useReducedMotion).mockReturnValue(false);
@@ -37,5 +40,17 @@ describe("Skeleton", () => {
 
     expect(screen.getByRole("progressbar")).toBeTruthy();
     expect(withRepeat).not.toHaveBeenCalled();
+  });
+
+  it("is a low-opacity gray-500 shape with a token radius", async () => {
+    const { rerender } = await render(<Skeleton />);
+    expect(placeholderClasses()).toContain("bg-gray-500/15");
+    expect(placeholderClasses()).toContain("rounded-sm");
+
+    await rerender(<Skeleton radius="lg" />);
+    expect(placeholderClasses()).toContain("rounded-lg");
+
+    await rerender(<Skeleton circle height={48} />);
+    expect(placeholderClasses()).toContain("rounded-pill");
   });
 });

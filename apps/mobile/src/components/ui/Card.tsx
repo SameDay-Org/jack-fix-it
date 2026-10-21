@@ -1,7 +1,10 @@
 import type { ReactNode } from "react";
 import { Pressable, View } from "react-native";
 
+import { bubbleShadow, continuousCorners } from "@/theme";
+
 import { cx } from "./cx";
+import { useFlag } from "./useFlag";
 
 type CardBaseProps = {
   children: ReactNode;
@@ -23,11 +26,13 @@ type StaticCardProps = CardBaseProps & {
 
 export type CardProps = PressableCardProps | StaticCardProps;
 
-// shadow-sm sets shadow* and elevation together (NativeWind); shadow-navy keeps the color a token.
-const SURFACE = "rounded-2xl bg-white p-4 shadow-sm shadow-navy";
+// The bubble: white, radius lg, continuous corners, the shared soft shadow, padding on the 4-pt grid.
+const SURFACE = "rounded-lg bg-white p-4";
+const SURFACE_STYLE = [bubbleShadow, continuousCorners];
 
 export function Card(props: CardProps) {
   const { children, className, testID } = props;
+  const [pressed, pressIn, pressOut] = useFlag();
 
   if (props.onPress) {
     return (
@@ -35,8 +40,12 @@ export function Card(props: CardProps) {
         accessibilityRole="button"
         accessibilityLabel={props.accessibilityLabel}
         onPress={props.onPress}
+        onPressIn={pressIn}
+        onPressOut={pressOut}
         testID={testID}
-        className={cx(SURFACE, "active:opacity-80", className)}
+        style={SURFACE_STYLE}
+        // A pressed card shrinks a hair instead of flashing a color.
+        className={cx(SURFACE, pressed && "scale-pressed", className)}
       >
         {children}
       </Pressable>
@@ -44,7 +53,7 @@ export function Card(props: CardProps) {
   }
 
   return (
-    <View testID={testID} className={cx(SURFACE, className)}>
+    <View testID={testID} style={SURFACE_STYLE} className={cx(SURFACE, className)}>
       {children}
     </View>
   );

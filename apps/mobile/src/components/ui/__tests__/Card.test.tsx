@@ -1,5 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react-native";
-import { Text } from "react-native";
+import { StyleSheet, Text } from "react-native";
+
+import { bubbleShadow } from "@/theme";
 
 import { Card } from "../Card";
 
@@ -26,5 +28,37 @@ describe("Card", () => {
 
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.getByText("Job")).toBeTruthy();
+  });
+
+  it("is a white bubble with the shared shadow and continuous corners", async () => {
+    await render(
+      <Card testID="card">
+        <Text>Job</Text>
+      </Card>,
+    );
+    const card = screen.getByTestId("card");
+
+    expect(card.props.className).toContain("rounded-lg bg-white p-4");
+    expect(card.props.className).not.toMatch(/\bborder/);
+    expect(StyleSheet.flatten(card.props.style)).toMatchObject({
+      ...bubbleShadow,
+      borderCurve: "continuous",
+    });
+  });
+
+  it("shrinks while pressed instead of changing color", async () => {
+    await render(
+      <Card onPress={jest.fn()} accessibilityLabel="Open job">
+        <Text>Job</Text>
+      </Card>,
+    );
+    const card = () => screen.getByRole("button", { name: "Open job" });
+
+    await fireEvent(card(), "pressIn");
+    expect(card().props.className).toContain("scale-pressed");
+    expect(card().props.className).toContain("bg-white");
+
+    await fireEvent(card(), "pressOut");
+    expect(card().props.className).not.toContain("scale-pressed");
   });
 });

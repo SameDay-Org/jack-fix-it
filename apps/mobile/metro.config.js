@@ -3,4 +3,5 @@ const { withNativeWind } = require("nativewind/metro");
 
 const config = getDefaultConfig(__dirname);
 
-module.exports = withNativeWind(config, { input: "./src/global.css" });
+// rem 16 (NativeWind's default is 14) makes Tailwind's spacing scale the 4-pt grid: p-1 = 4 dp.
+module.exports = withNativeWind(config, { input: "./src/global.css", inlineRem: 16 });
