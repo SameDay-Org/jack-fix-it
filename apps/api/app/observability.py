@@ -2,12 +2,14 @@
 
 import json
 import logging
+import re
 import sys
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any, Final
 
 import sentry_sdk
+from sentry_sdk.types import Breadcrumb, BreadcrumbHint, Event, Hint
 
 from app.config import Settings
 
@@ -59,6 +61,8 @@ def configure_logging(level: str) -> None:
     # uvicorn's access line includes the query string, which can carry PII.
     # RequestIdMiddleware logs every request instead (app.access).
     logging.getLogger("uvicorn.access").disabled = True
+    # httpx logs every outgoing request at INFO with the full URL, query string included.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 # Passed to `arq --custom-log-dict` so ARQ's own startup lines are JSON too.
@@ -89,4 +93,58 @@ def init_sentry(settings: Settings) -> None:
         # Request bodies and frame locals can hold emails, passwords and tokens.
         max_request_body_size="never",
         include_local_variables=False,
+        # send_default_pii=False still sends the query string, which can carry emails or tokens.
+        before_send=before_send,
+        before_breadcrumb=before_breadcrumb,
     )
+
+
+# A URL or path with a query, inside free text such as a log message: the query ends at a space.
+_URL_QUERY_IN_TEXT: Final = re.compile(r"((?:[A-Za-z][A-Za-z0-9+.-]*://|/)[^\s?]*)\?\S*")
+
+
+def _without_query(url: str) -> str:
+    return url.split("?", 1)[0]
+
+
+def _is_url(value: str) -> bool:
+    return value.startswith("/") or "://" in value
+
+
+def before_send(event: Event, hint: Hint) -> Event:
+    """Sentry hook: drops the query string from the request URL, its Referer and the transaction.
+
+    Keeps the path and every other field. Fields of an unexpected shape are left as they are.
+    """
+    request = event.get("request")
+    if isinstance(request, dict):
+        request.pop("query_string", None)
+        url = request.get("url")
+        if isinstance(url, str):
+            request["url"] = _without_query(url)
+        headers = request.get("headers")
+        if isinstance(headers, dict):
+            for name, value in list(headers.items()):
+                if isinstance(value, str) and _is_url(value):
+                    headers[name] = _without_query(value)
+    transaction = event.get("transaction")
+    if isinstance(transaction, str) and _is_url(transaction):
+        event["transaction"] = _without_query(transaction)
+    return event
+
+
+def before_breadcrumb(crumb: Breadcrumb, hint: BreadcrumbHint) -> Breadcrumb:
+    """Sentry hook: drops the query string from HTTP and navigation breadcrumbs.
+
+    Also from URLs in a breadcrumb's message, e.g. a library's log line naming a request URL.
+    """
+    message = crumb.get("message")
+    if isinstance(message, str):
+        crumb["message"] = _URL_QUERY_IN_TEXT.sub(r"\1", message)
+    data = crumb.get("data")
+    if isinstance(data, dict):
+        data.pop("http.query", None)
+        url = data.get("url")
+        if crumb.get("type") in ("http", "navigation") and isinstance(url, str):
+            data["url"] = _without_query(url)
+    return crumb
