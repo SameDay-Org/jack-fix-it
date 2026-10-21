@@ -1,5 +1,7 @@
 import asyncio
-from collections.abc import AsyncIterator
+import time
+from collections import Counter
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 
 import httpx
@@ -13,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from app.config import Settings
 from app.db import get_session
 from app.main import create_app
+from app.rate_limit import RateLimitResult, get_rate_limiter, window_position
 
 API_DIR = Path(__file__).resolve().parents[1]
 # Fixture value only; real secrets live in Railway variables.
@@ -31,6 +34,30 @@ def make_settings(**overrides: object) -> Settings:
     return Settings(_env_file=None, **values)  # type: ignore[arg-type]
 
 
+class InMemoryRateLimiter:
+    """Test-only RateLimiter: the same fixed windows as RedisRateLimiter, kept in a Counter."""
+
+    def __init__(self, clock: Callable[[], float] = time.time) -> None:
+        self.clock = clock
+        self.counts: Counter[str] = Counter()
+
+    async def hit(
+        self, scope: str, identifier: str, *, limit: int, window_seconds: int
+    ) -> RateLimitResult:
+        index, retry_after = window_position(self.clock(), window_seconds)
+        key = f"{scope}:{identifier}:{index}"
+        self.counts[key] += 1
+        return RateLimitResult(allowed=self.counts[key] <= limit, retry_after_seconds=retry_after)
+
+
+def make_app(settings: Settings) -> FastAPI:
+    """create_app with an in-memory rate limiter: the lifespan, which creates Redis, never runs."""
+    app = create_app(settings)
+    limiter = InMemoryRateLimiter()
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    return app
+
+
 @pytest.fixture
 def settings() -> Settings:
     return make_settings()
@@ -38,7 +65,7 @@ def settings() -> Settings:
 
 @pytest.fixture
 def app(settings: Settings) -> FastAPI:
-    return create_app(settings)
+    return make_app(settings)
 
 
 @pytest.fixture

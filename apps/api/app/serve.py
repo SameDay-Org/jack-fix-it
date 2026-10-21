@@ -37,6 +37,8 @@ def main() -> None:
         port=settings.port,
         log_config=None,  # keep the JSON root handler
         access_log=False,  # RequestIdMiddleware logs requests without query strings
+        # The client IP (rate limits) comes from X-Forwarded-For only behind these proxies.
+        forwarded_allow_ips=settings.forwarded_allow_ips,
     )
     server = uvicorn.Server(config)
     if settings.host == DUAL_STACK_HOST:
