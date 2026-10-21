@@ -20,8 +20,9 @@ rules apply.
 
 ## Database
 
-- Models subclass `app.db.Base` (naming convention set); `alembic/env.py` imports every
-  `app/modules/*/models.py`.
+- Models subclass `app.db.Base` (naming convention set) and `app.db.IdTimestampsMixin`;
+  `app.db.import_models()` (used by `alembic/env.py`) imports every `app/modules/*/models.py`.
+  Table conventions (UUID keys, enums, cents, foreign keys) are in ADR 0007.
 - `uv run alembic revision --autogenerate -m "<what>"`, then read and fix the generated file.
   Money columns are integer `*_cents`. Prove `upgrade` → `downgrade` → `upgrade` locally.
 - Migrations run on Railway as the api service's pre-deploy command.
@@ -35,8 +36,15 @@ them idempotent: they can run twice.
 
 `pytest` with `asyncio_mode = auto`; `tests/conftest.py` builds the app from explicit settings
 and an `httpx` ASGI client, without a database. Replace dependencies with
-`app.dependency_overrides`. The isolated test-database fixture arrives with the first tables
-(#24). No real network calls.
+`app.dependency_overrides`. No real network calls.
+
+Tests that touch the database take the `db_session` fixture (an `AsyncSession`). The first one
+creates `<dbname>_test` next to `DATABASE_URL`'s database (e.g. `jack_test`) and migrates it to
+head; the dev database is never written. Each test runs inside a transaction that is rolled
+back afterwards, so its rows are gone in the next test, even if it called `commit()`. Tests
+without `db_session` still run without Postgres. Expect a constraint violation with
+`pytest.raises(IntegrityError)` inside `session.begin_nested()`, as `tests/test_schema_core.py`
+does.
 
 ## Commands (from apps/api)
 
