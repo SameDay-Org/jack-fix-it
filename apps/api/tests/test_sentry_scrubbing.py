@@ -194,6 +194,7 @@ def test_before_breadcrumb_strips_url_query_from_log_message() -> None:
         # A URL glued to other text is not at a token boundary; long runs stay linear.
         ("/" * 32_000, "/" * 32_000),
     ],
+    ids=["quoted", "assignment", "parenthesized", "long_run"],
 )
 def test_before_breadcrumb_message_url_boundaries(message: str, expected: str) -> None:
     assert before_breadcrumb({"type": "log", "message": message}, {})["message"] == expected
