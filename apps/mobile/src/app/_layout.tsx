@@ -8,6 +8,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { attachQueryClient, restoreSession } from "@/api";
+import { ToastHost } from "@/components/ui";
 import { SessionGate } from "@/features/auth";
 
 // The splash stays up while the stored session is restored; SessionGate hides it with the first
@@ -30,6 +31,7 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <SessionGate />
+          <ToastHost />
         </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

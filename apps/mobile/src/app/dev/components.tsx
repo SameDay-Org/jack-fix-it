@@ -1,5 +1,5 @@
 // Dev-only gallery, unreachable outside __DEV__: the sample strings below are literal on purpose.
-import { Redirect } from "expo-router";
+import { Redirect, router } from "expo-router";
 import { useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { ScrollView, Text, View } from "react-native";
 
@@ -14,6 +14,7 @@ import {
   Screen,
   Skeleton,
   StatusBadge,
+  showToast,
   type StatusTone,
 } from "@/components/ui";
 
@@ -132,6 +133,36 @@ function Gallery() {
               </View>
             </View>
           </Card>
+        </Section>
+
+        <Section title="Overlays">
+          <Button
+            label="Show sheet"
+            variant="secondary"
+            onPress={() => router.push("/dev/sheet")}
+          />
+          <Button
+            label="Show short sheet"
+            variant="secondary"
+            onPress={() => router.push("/dev/sheet-fit")}
+          />
+          <Button
+            label="Toast: neutral"
+            variant="ghost"
+            onPress={() => showToast({ message: "Your note was saved", tone: "neutral" })}
+          />
+          <Button
+            label="Toast: success"
+            variant="ghost"
+            onPress={() => showToast({ message: "Visit confirmed for Tuesday", tone: "success" })}
+          />
+          <Button
+            label="Toast: danger"
+            variant="ghost"
+            onPress={() =>
+              showToast({ message: "Could not reach the server. Try again.", tone: "danger" })
+            }
+          />
         </Section>
 
         <Section title="Glass">

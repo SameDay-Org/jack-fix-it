@@ -59,6 +59,8 @@ export const user: ApiSchema<"UserOut"> = {
   role: "customer",
   locale: "en",
   status: "active",
+  phone: null,
+  phone_verified: false,
 };
 
 /** The server's answer to register, login and refresh; `n` numbers the token pair. */

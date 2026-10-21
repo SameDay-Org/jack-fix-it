@@ -9,7 +9,8 @@
     "show": "Show",
     "hide": "Hide",
     "showPassword": "Show password",
-    "hidePassword": "Hide password"
+    "hidePassword": "Hide password",
+    "dismiss": "Dismiss"
   },
   "welcome": {
     "tagline": "Whatever happens at home, we <accent>fix</accent> it.",

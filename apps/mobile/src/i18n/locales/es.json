@@ -9,7 +9,8 @@
     "show": "Mostrar",
     "hide": "Ocultar",
     "showPassword": "Mostrar contraseña",
-    "hidePassword": "Ocultar contraseña"
+    "hidePassword": "Ocultar contraseña",
+    "dismiss": "Cerrar"
   },
   "welcome": {
     "tagline": "Pase lo que pase en casa, lo <accent>arreglamos</accent>.",

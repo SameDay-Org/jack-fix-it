@@ -94,6 +94,8 @@ async def test_register_customer_returns_tokens_and_user(
         "role": "customer",
         "locale": "en",
         "status": "active",
+        "phone": None,
+        "phone_verified": False,
     }
     assert body["token_type"] == "bearer"
     assert body["expires_in"] == 900

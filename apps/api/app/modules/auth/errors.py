@@ -1,6 +1,6 @@
 from types import MappingProxyType
 
-from app.errors import AppError, ForbiddenError, UnauthorizedError
+from app.errors import AppError, BadRequestError, ForbiddenError, UnauthorizedError
 
 
 class InvalidCredentialsError(UnauthorizedError):
@@ -37,3 +37,24 @@ class PasswordTooShortError(AppError):
     status_code = 422
     code = "validation_error"
     message = "The request is invalid."
+
+
+class InvalidPhoneNumberError(AppError):
+    """A phone outside the allowed country codes, or one Twilio cannot send to."""
+
+    status_code = 422
+    code = "validation_error"
+    message = "The request is invalid."
+
+
+class InvalidCodeError(BadRequestError):
+    """Same body for a wrong, expired or already used code."""
+
+    code = "invalid_code"
+    message = "The code is incorrect or has expired."
+
+
+class VerificationUnavailableError(AppError):
+    status_code = 503
+    code = "verification_unavailable"
+    message = "Phone verification is unavailable right now. Try again later."
