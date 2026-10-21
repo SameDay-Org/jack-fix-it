@@ -602,7 +602,7 @@
             }
           },
           "403": {
-            "description": "upload_forbidden: the caller's role cannot upload for this purpose.",
+            "description": "forbidden: not a customer or pro (agents and admins upload nothing); upload_forbidden: the caller's role cannot upload for this purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -660,6 +660,16 @@
           },
           "401": {
             "description": "invalid_token: missing, invalid or expired access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: not a customer or pro.",
             "content": {
               "application/json": {
                 "schema": {

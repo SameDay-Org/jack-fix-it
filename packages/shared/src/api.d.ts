@@ -1153,7 +1153,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description upload_forbidden: the caller's role cannot upload for this purpose. */
+            /** @description forbidden: not a customer or pro (agents and admins upload nothing); upload_forbidden: the caller's role cannot upload for this purpose. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -1197,6 +1197,15 @@ export interface operations {
             };
             /** @description invalid_token: missing, invalid or expired access token. */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: not a customer or pro. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
