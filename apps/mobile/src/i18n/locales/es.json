@@ -1,10 +1,75 @@
 {
   "brand": {
-    "name": "Jack Fix It",
-    "tagline": "Pase lo que pase en casa, lo arreglamos."
+    "name": "Jack Fix It"
   },
   "common": {
     "loading": "Cargando",
+    "back": "Atrás",
+    "continue": "Continuar",
+    "show": "Mostrar",
+    "hide": "Ocultar",
+    "showPassword": "Mostrar contraseña",
+    "hidePassword": "Ocultar contraseña",
     "dismiss": "Cerrar"
+  },
+  "welcome": {
+    "tagline": "Pase lo que pase en casa, lo <accent>arreglamos</accent>.",
+    "support": "Cuéntaselo a Jack. Nosotros nos encargamos del resto.",
+    "getStarted": "Empezar",
+    "haveAccount": "Ya tengo una cuenta",
+    "partialCleanup": "Sesión cerrada. Algunos datos no se pudieron borrar de este dispositivo."
+  },
+  "offline": {
+    "title": "No podemos conectar con Jack ahora",
+    "body": "Revisa tu conexión y vuelve a intentarlo.",
+    "retry": "Reintentar",
+    "otherAccount": "Entrar con otra cuenta"
+  },
+  "role": {
+    "title": "¿Cómo vas a usar Jack?",
+    "customerTitle": "Necesito ayuda en casa",
+    "customerDescription": "Cuéntanos qué pasó y buscamos un profesional cerca de ti.",
+    "proTitle": "Soy profesional",
+    "proDescription": "Recibe solicitudes cerca de ti y envía tus presupuestos."
+  },
+  "signUp": {
+    "title": "Crea tu cuenta",
+    "asCustomer": "Como cliente",
+    "asPro": "Como profesional",
+    "submit": "Crear cuenta"
+  },
+  "login": {
+    "title": "Hola de nuevo",
+    "submit": "Entrar"
+  },
+  "fields": {
+    "email": "Correo electrónico",
+    "password": "Contraseña",
+    "passwordHint": "Al menos {{min}} caracteres"
+  },
+  "auth": {
+    "errors": {
+      "invalidCredentials": "El correo o la contraseña no son correctos.",
+      "emailTaken": "Ya existe una cuenta con este correo.",
+      "loginInstead": "Entrar con esta cuenta",
+      "suspended": "Esta cuenta está suspendida. Contacta con soporte.",
+      "rateLimited": "Demasiados intentos. Vuelve a intentarlo en un momento.",
+      "checkFields": "Revisa los campos marcados.",
+      "offline": "Sin conexión. Revisa tu internet y vuelve a intentarlo.",
+      "generic": "Algo salió mal. Vuelve a intentarlo.",
+      "emailInvalid": "Escribe un correo electrónico válido.",
+      "passwordTooShort": "Usa al menos {{min}} caracteres."
+    }
+  },
+  "home": {
+    "welcome": "Hola,\n<email>{{email}}</email>",
+    "comingSoon": "Tu pantalla de inicio está en camino.",
+    "logOut": "Cerrar sesión"
+  },
+  "roles": {
+    "customer": "Cliente",
+    "pro": "Profesional",
+    "agent": "Agente",
+    "admin": "Administrador"
   }
 }

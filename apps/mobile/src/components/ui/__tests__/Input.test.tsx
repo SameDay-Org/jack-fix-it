@@ -1,11 +1,13 @@
 import { fireEvent, render, screen } from "@testing-library/react-native";
-import { StyleSheet } from "react-native";
+import { createRef } from "react";
+import { StyleSheet, Text } from "react-native";
 
 import { bubbleShadow } from "@/theme";
 
-import { Input } from "../Input";
+import { Input, type InputHandle } from "../Input";
 
 const field = () => screen.getByLabelText("Email");
+const bubble = () => screen.getByTestId("email-bubble");
 
 describe("Input", () => {
   it("forwards text changes", async () => {
@@ -38,30 +40,82 @@ describe("Input", () => {
   });
 
   it("focus shows the green ring and error shows the danger ring", async () => {
-    const { rerender } = await render(<Input label="Email" value="" onChangeText={jest.fn()} />);
-    expect(field().props.className).toContain("border-2 bg-white");
-    expect(field().props.className).toContain("border-transparent");
+    const { rerender } = await render(
+      <Input label="Email" value="" onChangeText={jest.fn()} testID="email" />,
+    );
+    expect(bubble().props.className).toContain("border-2 bg-white");
+    expect(bubble().props.className).toContain("border-transparent");
 
     await fireEvent(field(), "focus");
-    expect(field().props.className).toContain("border-green-700");
+    expect(bubble().props.className).toContain("border-green-700");
 
     await fireEvent(field(), "blur");
-    expect(field().props.className).toContain("border-transparent");
+    expect(bubble().props.className).toContain("border-transparent");
 
-    await rerender(<Input label="Email" value="x" onChangeText={jest.fn()} error="Required" />);
-    expect(field().props.className).toContain("border-danger");
+    await rerender(
+      <Input label="Email" value="x" onChangeText={jest.fn()} error="Required" testID="email" />,
+    );
+    expect(bubble().props.className).toContain("border-danger");
     expect(screen.getByText("Required").props.className).toContain("text-danger");
   });
 
   it("is a bubble: rounded, lifted by the shared shadow, no hairline", async () => {
-    await render(<Input label="Email" value="" onChangeText={jest.fn()} hint="Work email" />);
+    await render(
+      <Input label="Email" value="" onChangeText={jest.fn()} hint="Work email" testID="email" />,
+    );
 
-    expect(field().props.className).toContain("rounded-md");
-    expect(field().props.className.split(" ")).not.toContain("border");
-    expect(StyleSheet.flatten(field().props.style)).toMatchObject({
+    expect(bubble().props.className).toContain("rounded-md");
+    expect(bubble().props.className.split(" ")).not.toContain("border");
+    expect(StyleSheet.flatten(bubble().props.style)).toMatchObject({
       ...bubbleShadow,
       borderCurve: "continuous",
     });
     expect(screen.getByText("Work email").props.className).toContain("text-gray-500");
+  });
+
+  it("exposes the native field through ref and forwards the return key", async () => {
+    const ref = createRef<InputHandle>();
+    const onSubmitEditing = jest.fn();
+    await render(
+      <Input
+        ref={ref}
+        label="Email"
+        value=""
+        onChangeText={jest.fn()}
+        returnKeyType="next"
+        submitBehavior="submit"
+        onSubmitEditing={onSubmitEditing}
+      />,
+    );
+
+    expect(ref.current).not.toBeNull();
+    expect(field().props.returnKeyType).toBe("next");
+    expect(field().props.submitBehavior).toBe("submit");
+    await fireEvent(field(), "submitEditing");
+    expect(onSubmitEditing).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives an accessory its own cell beside the field, so the text column never overlaps it", async () => {
+    await render(
+      <Input
+        label="Email"
+        value="a very long value that would run under a fixed pad"
+        onChangeText={jest.fn()}
+        accessory={<Text>Show</Text>}
+        testID="email"
+      />,
+    );
+
+    // A flex row: the field takes the remaining width, the accessory keeps its measured width.
+    // No fixed right padding stands in for the accessory.
+    const row = bubble();
+    expect(row.props.className.split(" ")).toEqual(
+      expect.arrayContaining(["flex-row", "items-center"]),
+    );
+    expect(field().props.className.split(" ")).toContain("flex-1");
+    expect(field().props.className).not.toMatch(/pr-/);
+    expect(row.children.indexOf(field())).toBe(0);
+    expect(row.children).toHaveLength(2);
+    expect(screen.getByText("Show")).toBeTruthy();
   });
 });

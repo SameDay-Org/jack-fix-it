@@ -36,6 +36,7 @@ const SIGNED_OUT = {
   accessToken: null,
   accessTokenExpiresAt: null,
   cleanupPending: false,
+  restoreFailure: null,
 };
 
 let fetchMock: FetchMock;
@@ -179,5 +180,75 @@ describe("session", () => {
     expect(storedRefreshToken()).toBeNull();
     expect(sessionStore.getState()).toEqual(SIGNED_OUT);
     expect(callsTo(fetchMock, "/v1/auth/refresh")).toHaveLength(0);
+  });
+});
+
+describe("restoreFailure", () => {
+  const OFFLINE = { ...SIGNED_OUT, restoreFailure: "offline" };
+
+  it("is set only when a stored token exists and the server is unreachable", async () => {
+    await restoreSession(); // nothing stored: plain signed out
+    expect(sessionStore.getState()).toEqual(SIGNED_OUT);
+
+    seedRefreshToken("refresh-1");
+    fetchMock.mockRejectedValue(new TypeError("Network request failed"));
+    await restoreSession();
+    expect(sessionStore.getState()).toEqual(OFFLINE);
+    expect(storedRefreshToken()).toBe("refresh-1");
+
+    fetchMock.mockResolvedValue(errorResponse(503, "unavailable"));
+    await restoreSession();
+    expect(sessionStore.getState()).toEqual(OFFLINE);
+    expect(storedRefreshToken()).toBe("refresh-1");
+
+    // The server answered and rejected the token: not an outage, and the token goes.
+    fetchMock.mockResolvedValue(errorResponse(401, "invalid_refresh_token"));
+    await restoreSession();
+    expect(sessionStore.getState()).toEqual(SIGNED_OUT);
+    expect(storedRefreshToken()).toBeNull();
+  });
+
+  it("is cleared on success", async () => {
+    seedRefreshToken("refresh-1");
+    fetchMock.mockRejectedValue(new TypeError("Network request failed"));
+    await restoreSession();
+    expect(sessionStore.getState().restoreFailure).toBe("offline");
+
+    fetchMock.mockResolvedValue(jsonResponse(200, authResponse(2)));
+    await restoreSession();
+    expect(sessionStore.getState()).toMatchObject({
+      status: "signedIn",
+      user,
+      accessToken: "access-2",
+      restoreFailure: null,
+    });
+  });
+
+  it("try again re-runs restore with the same stored token", async () => {
+    seedRefreshToken("refresh-1");
+    fetchMock.mockRejectedValue(new TypeError("Network request failed"));
+    await restoreSession();
+    await restoreSession();
+
+    expect(callsTo(fetchMock, "/v1/auth/refresh").map(callBody)).toEqual([
+      { refresh_token: "refresh-1" },
+      { refresh_token: "refresh-1" },
+    ]);
+    expect(sessionStore.getState()).toEqual(OFFLINE);
+  });
+
+  it("use another account logs out locally even while the server is unreachable", async () => {
+    seedRefreshToken("refresh-1");
+    fetchMock.mockRejectedValue(new TypeError("Network request failed"));
+    await restoreSession();
+    expect(sessionStore.getState()).toEqual(OFFLINE);
+
+    await logout();
+
+    expect(sessionStore.getState()).toEqual(SIGNED_OUT);
+    expect(storedRefreshToken()).toBeNull();
+    expect(callsTo(fetchMock, "/v1/auth/logout").map(callBody)).toEqual([
+      { refresh_token: "refresh-1" },
+    ]);
   });
 });
