@@ -52,5 +52,6 @@ does.
 uv run python -m app.serve                       # API on HOST:PORT from .env
 uv run arq app.worker.WorkerSettings --custom-log-dict app.observability.WORKER_LOG_CONFIG
 uv run alembic upgrade head
+uv run python -m scripts.seed_categories          # inserts missing launch categories (seed_data.json); never updates a row
 uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest
 ```

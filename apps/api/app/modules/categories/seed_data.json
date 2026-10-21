@@ -1,0 +1,62 @@
+[
+  {
+    "slug": "house-cleaning",
+    "names": {
+      "en": "House Cleaning",
+      "es": "Limpieza del hogar"
+    },
+    "icon": null,
+    "requires_license": false,
+    "reference_price_cents": null,
+    "intake_questions": [],
+    "active": true
+  },
+  {
+    "slug": "handyman",
+    "names": {
+      "en": "Handyman",
+      "es": "Reparaciones generales"
+    },
+    "icon": null,
+    "requires_license": false,
+    "reference_price_cents": null,
+    "intake_questions": [],
+    "active": true
+  },
+  {
+    "slug": "painting",
+    "names": {
+      "en": "Painting",
+      "es": "Pintura"
+    },
+    "icon": null,
+    "requires_license": false,
+    "reference_price_cents": null,
+    "intake_questions": [],
+    "active": true
+  },
+  {
+    "slug": "lawn-landscaping",
+    "names": {
+      "en": "Lawn & Landscaping",
+      "es": "Jardinería y paisajismo"
+    },
+    "icon": null,
+    "requires_license": false,
+    "reference_price_cents": null,
+    "intake_questions": [],
+    "active": true
+  },
+  {
+    "slug": "moving-assembly",
+    "names": {
+      "en": "Moving & Assembly",
+      "es": "Mudanzas y montaje"
+    },
+    "icon": null,
+    "requires_license": false,
+    "reference_price_cents": null,
+    "intake_questions": [],
+    "active": true
+  }
+]
