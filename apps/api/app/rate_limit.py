@@ -4,7 +4,9 @@ A limit is checked in a FastAPI dependency, so a limited request never reaches t
 Keys are `rl:<scope>:<identifier>:<window index>`; identifiers that are PII arrive hashed.
 """
 
+import asyncio
 import hashlib
+import ipaddress
 import logging
 import math
 import time
@@ -94,17 +96,26 @@ def get_rate_limiter(request: Request) -> RateLimiter:
 
 
 async def enforce_limit(
-    limiter: RateLimiter, scope: str, identifier: str, *, limit: int, window_seconds: int
+    limiter: RateLimiter,
+    scope: str,
+    identifier: str,
+    *,
+    limit: int,
+    window_seconds: int,
+    timeout_seconds: float,
 ) -> None:
     """Raises RateLimitedError above the limit.
 
-    Fails open: when Redis is down or errors, the request goes through and the outage is
-    logged at ERROR (Sentry sees it). Availability wins over protection here; /health/ready
-    already reports Redis as unavailable.
+    Fails open: when Redis is down, errors or does not answer within `timeout_seconds`, the
+    request goes through and the outage is logged at ERROR (Sentry sees it). Availability wins
+    over protection here; /health/ready already reports Redis as unavailable.
     """
     try:
-        result = await limiter.hit(scope, identifier, limit=limit, window_seconds=window_seconds)
-    except (RedisError, OSError):
+        async with asyncio.timeout(timeout_seconds):
+            result = await limiter.hit(
+                scope, identifier, limit=limit, window_seconds=window_seconds
+            )
+    except (RedisError, OSError):  # OSError includes TimeoutError
         logger.error("rate_limit_unavailable", extra={"scope": scope})
         return
     if not result.allowed:
@@ -116,7 +127,17 @@ def client_ip(request: Request) -> str:
 
     Behind a proxy, uvicorn takes it from X-Forwarded-For, only for proxies in FORWARDED_ALLOW_IPS.
     """
-    return request.client.host if request.client else "unknown"
+    if request.client is None:
+        return "unknown"
+    host = request.client.host
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return host
+    # An IPv4 client on the dual-stack socket arrives as ::ffff:a.b.c.d: one client, one bucket.
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        return str(address.ipv4_mapped)
+    return host
 
 
 def limit_per_ip(scope: str) -> Callable[..., Awaitable[None]]:
@@ -133,6 +154,7 @@ def limit_per_ip(scope: str) -> Callable[..., Awaitable[None]]:
             client_ip(request),
             limit=settings.auth_rate_limit_requests,
             window_seconds=settings.auth_rate_limit_window_seconds,
+            timeout_seconds=settings.rate_limit_timeout_seconds,
         )
 
     return dependency

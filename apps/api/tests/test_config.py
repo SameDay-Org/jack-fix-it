@@ -106,12 +106,18 @@ def test_rate_limit_settings_defaults() -> None:
     assert settings.auth_rate_limit_requests == 10
     assert settings.auth_rate_limit_window_seconds == 60
     assert settings.login_rate_limit_per_email == 5
+    assert settings.rate_limit_timeout_seconds == 0.5
     assert settings.forwarded_allow_ips == "127.0.0.1"
 
 
 @pytest.mark.parametrize(
     "name",
-    ["auth_rate_limit_requests", "auth_rate_limit_window_seconds", "login_rate_limit_per_email"],
+    [
+        "auth_rate_limit_requests",
+        "auth_rate_limit_window_seconds",
+        "login_rate_limit_per_email",
+        "rate_limit_timeout_seconds",
+    ],
 )
 @pytest.mark.parametrize("value", [0, -1])
 def test_rate_limit_settings_must_be_positive(name: str, value: int) -> None:

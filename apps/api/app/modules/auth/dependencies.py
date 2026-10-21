@@ -76,4 +76,5 @@ async def limit_login(
         hashed_identifier(data.email),
         limit=settings.login_rate_limit_per_email,
         window_seconds=settings.auth_rate_limit_window_seconds,
+        timeout_seconds=settings.rate_limit_timeout_seconds,
     )

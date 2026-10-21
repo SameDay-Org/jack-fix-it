@@ -4,11 +4,12 @@ HOST and PORT come from settings instead of a shell command line, so Railway nee
 `$PORT` expansion in the start command.
 """
 
+import ipaddress
 import socket
 
 import uvicorn
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.observability import configure_logging
 
 DUAL_STACK_HOST = "::"
@@ -27,10 +28,29 @@ def dual_stack_socket(port: int) -> socket.socket:
     return sock
 
 
-def main() -> None:
-    settings = get_settings()
-    configure_logging(settings.log_level)
-    config = uvicorn.Config(
+def trusted_proxy_hosts(forwarded_allow_ips: str) -> str:
+    """FORWARDED_ALLOW_IPS plus the IPv4-mapped IPv6 form of every IPv4 address and network.
+
+    On the dual-stack socket an IPv4 peer appears as ::ffff:a.b.c.d, which uvicorn never
+    matches against an IPv4 entry: X-Forwarded-For would be ignored and every client would
+    share the proxy's address, and its rate-limit bucket. Other entries are kept as they are.
+    """
+    entries = [entry.strip() for entry in forwarded_allow_ips.split(",") if entry.strip()]
+    if entries == ["*"]:
+        return "*"
+    mapped: list[str] = []
+    for entry in entries:
+        try:
+            network = ipaddress.ip_network(entry)  # strict, as uvicorn parses it
+        except ValueError:
+            continue
+        if isinstance(network, ipaddress.IPv4Network):
+            mapped.append(f"::ffff:{network.network_address}/{96 + network.prefixlen}")
+    return ",".join(entries + mapped)
+
+
+def build_config(settings: Settings) -> uvicorn.Config:
+    return uvicorn.Config(
         "app.main:create_app",
         factory=True,
         host=settings.host,
@@ -38,9 +58,14 @@ def main() -> None:
         log_config=None,  # keep the JSON root handler
         access_log=False,  # RequestIdMiddleware logs requests without query strings
         # The client IP (rate limits) comes from X-Forwarded-For only behind these proxies.
-        forwarded_allow_ips=settings.forwarded_allow_ips,
+        forwarded_allow_ips=trusted_proxy_hosts(settings.forwarded_allow_ips),
     )
-    server = uvicorn.Server(config)
+
+
+def main() -> None:
+    settings = get_settings()
+    configure_logging(settings.log_level)
+    server = uvicorn.Server(build_config(settings))
     if settings.host == DUAL_STACK_HOST:
         server.run(sockets=[dual_stack_socket(settings.port)])
     else:

@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 from typing import Literal
@@ -37,6 +38,7 @@ NOW = 1_000.0
 RETRY_AFTER = "20"
 RATE_LIMITED = {"error": {"code": "rate_limited", "message": "Too many requests. Try again later."}}
 OTHER_IP = "203.0.113.7"
+TIMEOUT_SECONDS = 0.2
 
 
 @pytest.fixture
@@ -45,6 +47,7 @@ def settings() -> Settings:
         auth_rate_limit_requests=IP_LIMIT,
         login_rate_limit_per_email=EMAIL_LIMIT,
         auth_rate_limit_window_seconds=WINDOW_SECONDS,
+        rate_limit_timeout_seconds=TIMEOUT_SECONDS,
     )
 
 
@@ -314,6 +317,66 @@ async def test_redis_failure_allows_request_and_logs(
     output = "\n".join(formatter.format(r) for r in caplog.records)
     for secret in (target, hashlib.sha256(target.encode()).hexdigest(), "127.0.0.1", PASSWORD):
         assert secret not in output
+
+
+@pytest.fixture
+async def silent_redis_url() -> AsyncIterator[str]:
+    """A TCP server that accepts connections and never answers: a hung Redis."""
+    connections: list[asyncio.StreamWriter] = []
+
+    async def accept(_: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        connections.append(writer)
+
+    server = await asyncio.start_server(accept, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        yield f"redis://127.0.0.1:{port}/0"
+    finally:
+        for writer in connections:
+            writer.close()
+        server.close()
+        await server.wait_closed()
+
+
+async def test_hung_redis_fails_open_within_timeout(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    silent_redis_url: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = Redis.from_url(silent_redis_url)
+    hung = RedisRateLimiter(client)
+    app.dependency_overrides[get_rate_limiter] = lambda: hung
+
+    started = time.perf_counter()
+    try:
+        # Without the limiter's own timeout the request would wait forever; fail instead.
+        async with asyncio.timeout(10):
+            with caplog.at_level(logging.INFO):
+                response = await login(db_client, email="probe@example.com")
+    finally:
+        await client.aclose()
+    elapsed = time.perf_counter() - started
+
+    assert response.status_code == 401
+    # Two checks (IP, then email), each cut off at the timeout; the rest is one Argon2 verify.
+    assert elapsed < 2 * TIMEOUT_SECONDS + 2
+    records = [r for r in caplog.records if r.message == "rate_limit_unavailable"]
+    assert {getattr(r, "scope", None) for r in records} == {"auth_login", "auth_login_email"}
+
+
+async def test_ipv4_mapped_client_shares_the_ipv4_bucket(
+    app: FastAPI, db_client: httpx.AsyncClient, limiter: InMemoryRateLimiter
+) -> None:
+    def client_from(host: str) -> httpx.AsyncClient:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False, client=(host, 1))
+        return httpx.AsyncClient(transport=transport, base_url="http://testserver")
+
+    async with client_from(f"::ffff:{OTHER_IP}") as mapped, client_from(OTHER_IP) as plain:
+        for n in range(IP_LIMIT):
+            assert (await register(mapped, email=email(n))).status_code == 201
+
+        assert_rate_limited(await register(plain, email=email(99)))
 
 
 async def test_email_is_hashed_in_key(
