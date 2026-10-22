@@ -7,6 +7,7 @@ Create Date: 2026-10-22 03:13:40.027313
 """
 
 from collections.abc import Sequence
+from datetime import datetime
 
 import sqlalchemy as sa
 from alembic import op
@@ -21,7 +22,7 @@ depends_on: str | Sequence[str] | None = None
 DISPATCH_STATUSES = ("sent", "viewed", "declined", "quoted", "expired")
 
 
-def _timestamps() -> list[sa.Column[sa.DateTime]]:
+def _timestamps() -> list[sa.Column[datetime]]:
     return [
         sa.Column(
             "created_at",
