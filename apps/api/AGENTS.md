@@ -38,12 +38,17 @@ rules apply.
     insert with a status other than the column default. The refusal is SQLSTATE 42501, with a
     message naming the table only.
   - **The exception:** a write passes only while the transaction-local setting
-    `app.status_writer` is `state_machine`. The machines set it around their single flush and
-    reset it in a `finally`. It is `set_config(..., true)`, so it never outlives the transaction
-    on a pooled connection.
-  - **Who may set the flag:** nothing else in `app/` or `scripts/` may, and a static test fails
+    `app.status_writer` names that very row, `<table>:<row id>`. A machine first flushes
+    everything pending (the drain: an unrelated status write fails there, unauthorized), checks
+    that nothing but its locked row is pending, then sets the token around its single flush and
+    clears it in a `finally`. It is `set_config(..., true)`, so it never outlives the
+    transaction on a pooled connection, and no other row or table can ride along.
+  - **Who may set the token:** nothing else in `app/` or `scripts/` may, and a static test fails
     if anything does.
-  - **Tests** create rows in a given status with `tests/helpers.py::as_status_writer`.
+  - **Tests** create rows in a given status with `tests/helpers.py::as_status_writer`, whose
+    wildcard token `fixtures` the trigger accepts only in a database whose own setting
+    `app.status_writer_fixtures` is `on`. `tests/conftest.py` sets it on the test database; no
+    production database has it.
   - **A refusal is a bug:** it reaches the API as a 500 and is never mapped to a 4xx.
   - **SQLAdmin (#41) cannot change a status by design.** A status change is a state-machine
     action with its own endpoint.
