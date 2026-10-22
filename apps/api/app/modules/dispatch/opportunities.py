@@ -4,7 +4,8 @@ A pro sees only their own dispatches that are still active (sent or viewed) on r
 open for quotes (finding_pro, quote_ready). Anything else, another pro's included, answers the
 same 404, as does a pro without a profile. The request comes through the requests module's
 pro-safe reader (ADR 0003), so no customer, contact, street, coordinates, utm or BDC field
-ever reaches this module, and no media (#173). Opening one marks the dispatch viewed, once.
+ever reaches this module, and no media (#173); the free text comes with contact details
+masked (app.redaction). Opening one marks the dispatch viewed, once.
 Logs carry dispatch, request and pro ids only.
 """
 
@@ -83,11 +84,13 @@ class OpportunityService:
                 dispatch_id=row.id,
                 public_code=view.public_code,
                 category=categories.get(view.category_id) if view.category_id else None,
+                # Cut from the redacted text, so a cut can never split a phone in two.
                 description_excerpt=view.description[: self._config.excerpt_chars],
                 location=_location(view),
                 preferred_date=view.preferred_date,
                 sent_at=row.sent_at,
                 viewed=row.status is DispatchStatus.VIEWED,
+                text_redacted=view.description_redacted,
             )
             for row in page
             if (view := views.get(row.request_id)) is not None
@@ -124,6 +127,7 @@ class OpportunityService:
                 "service_request_id": str(view.id),
                 "pro_id": str(pro_id),
                 "first_view": first_view,
+                "text_redacted": view.text_redacted,
             },
         )
         return OpportunityDetail(
@@ -136,6 +140,7 @@ class OpportunityService:
             preferred_date=view.preferred_date,
             sent_at=dispatch.sent_at,
             viewed_at=viewed_at,
+            text_redacted=view.text_redacted,
         )
 
     async def _category_summaries(
