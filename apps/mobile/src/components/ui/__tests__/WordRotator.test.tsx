@@ -24,7 +24,7 @@ const WIDTHS = [48, 90, 70, 84];
 const SWAPS = 3; // fix → clean → mow → fix: the fourth word is never shown
 const INTERVAL = 500;
 const TRANSITION = 200;
-const LINE = tokens.fontSize.display.lineHeight * Dimensions.get("window").fontScale;
+const LINE = 52; // one display line as the native side reports it: here as if scaled by 1.3
 
 // The rotator hides itself from accessibility, so every query here opts into hidden elements.
 const HIDDEN = { includeHiddenElements: true };
@@ -78,12 +78,20 @@ beforeEach(() => {
 afterEach(() => jest.useRealTimers());
 
 describe("WordRotator", () => {
-  it("hides the rotating words from accessibility and clips to one scaled line", async () => {
+  it("hides the rotating words from accessibility and clips to one measured line", async () => {
     await renderRotator();
 
     const root = screen.getByTestId("rot", HIDDEN);
     expect(root.props.importantForAccessibility).toBe("no-hide-descendants");
     expect(root.props.accessibilityElementsHidden).toBe(true);
+    // Until the words report their size the clip is one token line tall; then it is as tall as
+    // they measured, whatever the platform made of the font scale.
+    expect(clip().props.style).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ height: tokens.fontSize.display.lineHeight, overflow: "hidden" }),
+      ]),
+    );
+    await measure();
     expect(clip().props.style).toEqual(
       expect.arrayContaining([expect.objectContaining({ height: LINE, overflow: "hidden" })]),
     );

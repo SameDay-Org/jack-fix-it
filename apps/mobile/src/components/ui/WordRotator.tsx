@@ -40,7 +40,7 @@ const MEASURE_ROW = { position: "absolute", opacity: 0, alignItems: "flex-start"
 
 export type WordRotatorProps = {
   words: readonly string[];
-  /** Type token: the words' text style, and the clip height (one line of it, at the device's font scale). */
+  /** Type token: the words' text style; the clip is one line of it, as tall as the words measure. */
   type: TypeToken;
   /** Time from one word settling to the next settling. */
   intervalMs: number;
@@ -81,9 +81,8 @@ export function WordRotator({
   onReady,
   testID,
 }: WordRotatorProps) {
-  const { fontScale, width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth } = useWindowDimensions();
   const reduceMotion = useReducedMotion();
-  const lineHeight = tokens.fontSize[type].lineHeight * fontScale;
   const textClass = cx(TEXT_CLASS[type], className);
 
   const sequence = useMemo(
@@ -98,20 +97,26 @@ export function WordRotator({
   // is measured against its parent's width, and a word measured against a narrower clip would be
   // ellipsized rather than clipped.
   const [stageWidth, setStageWidth] = useState<number>();
-  const pending = useRef(new Map<number, number>());
+  // The clip is as tall as the words measure, not the token's line height times the font scale:
+  // Android 14+ scales large type non-linearly (34 sp is still 34 sp at a 1.3 font scale while
+  // body text grows), so only the rendered height lines the clip up with the words around it.
+  const [lineHeight, setLineHeight] = useState(tokens.fontSize[type].lineHeight);
+  const pending = useRef(new Map<number, { width: number; height: number }>());
   // The run reads the latest callback without restarting when it changes.
   const onCycleRef = useRef(onCycle);
   useEffect(() => {
     onCycleRef.current = onCycle;
   }, [onCycle]);
 
-  const record = (index: number, width: number) => {
-    pending.current.set(index, width);
+  const record = (index: number, layout: { width: number; height: number }) => {
+    pending.current.set(index, layout);
     if (pending.current.size < words.length) return;
-    const all = words.map((_, i) => pending.current.get(i) ?? 0);
+    const all = words.map((_, i) => pending.current.get(i)?.width ?? 0);
+    const tallest = Math.max(...words.map((_, i) => pending.current.get(i)?.height ?? 0));
     widths.value = all;
     measured.value = true;
     setStageWidth(Math.ceil(Math.max(0, ...all)) + 1);
+    if (tallest > 0) setLineHeight(Math.ceil(tallest));
     setReady(true);
   };
 
@@ -182,7 +187,7 @@ export function WordRotator({
             key={`${index}-${word}`}
             numberOfLines={1}
             className={textClass}
-            onLayout={(event: LayoutChangeEvent) => record(index, event.nativeEvent.layout.width)}
+            onLayout={(event: LayoutChangeEvent) => record(index, event.nativeEvent.layout)}
           >
             {word}
           </Text>
