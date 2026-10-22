@@ -27,7 +27,8 @@ from tests.conftest import backend_pid, wait_until_blocked
 # up as a diff here. (from, to) -> the actor kinds allowed; every other pair is a 409.
 _BEFORE_ACCEPTANCE = ("received", "reviewing", "finding_pro", "quote_ready")
 EXPECTED_ALLOWED: dict[tuple[str, str], set[str]] = {
-    ("received", "reviewing"): {"staff"},
+    # #48: an uncategorized request goes to reviewing on its own.
+    ("received", "reviewing"): {"system", "staff"},
     ("received", "finding_pro"): {"system", "staff"},
     ("reviewing", "finding_pro"): {"system", "staff"},
     ("finding_pro", "quote_ready"): {"system"},

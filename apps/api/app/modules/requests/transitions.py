@@ -28,7 +28,8 @@ _BEFORE_ACCEPTANCE = (_S.RECEIVED, _S.REVIEWING, _S.FINDING_PRO, _S.QUOTE_READY)
 TRANSITIONS: Final[Mapping[tuple[RequestStatus, RequestStatus], frozenset[ActorKind]]] = (
     MappingProxyType(
         {
-            (_S.RECEIVED, _S.REVIEWING): frozenset({_A.STAFF}),
+            # Staff take a request for review; an uncategorized one goes on its own (#48).
+            (_S.RECEIVED, _S.REVIEWING): frozenset({_A.SYSTEM, _A.STAFF}),
             (_S.RECEIVED, _S.FINDING_PRO): frozenset({_A.SYSTEM, _A.STAFF}),
             (_S.REVIEWING, _S.FINDING_PRO): frozenset({_A.SYSTEM, _A.STAFF}),
             # The first quote arrived.
