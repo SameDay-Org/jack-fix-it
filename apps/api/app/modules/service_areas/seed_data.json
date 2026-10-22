@@ -1,0 +1,4 @@
+{
+  "note": "Launch ZIPs come from human input #9 (still open). Add entries as {region, city, state, zip_code}; the seed inserts missing ZIPs and never changes an existing row.",
+  "service_areas": []
+}

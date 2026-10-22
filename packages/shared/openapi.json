@@ -1068,6 +1068,114 @@
           }
         }
       }
+    },
+    "/v1/categories": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "List the categories",
+        "description": "Active categories, by slug. No sign-in needed: the landing page and the request flow\nshow them before login.",
+        "operationId": "list_categories_v1_categories_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CategoryOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Categories V1 Categories Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many requests from this client; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/service-areas": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "List the served areas",
+        "description": "Active service areas, grouped by region, then city, then ZIP. No sign-in needed: the\nlanding page and the request flow show them before login.",
+        "operationId": "list_service_areas_v1_service_areas_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RegionOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Service Areas V1 Service Areas Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many requests from this client; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1200,6 +1308,51 @@
         ],
         "title": "AuthResponse"
       },
+      "CategoryOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Names",
+            "description": "Display name per locale, e.g. en and es."
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon"
+          },
+          "requires_license": {
+            "type": "boolean",
+            "title": "Requires License"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "slug",
+          "names",
+          "icon",
+          "requires_license"
+        ],
+        "title": "CategoryOut"
+      },
       "CheckStatus": {
         "type": "string",
         "enum": [
@@ -1207,6 +1360,32 @@
           "fail"
         ],
         "title": "CheckStatus"
+      },
+      "CityOut": {
+        "properties": {
+          "city": {
+            "type": "string",
+            "title": "City"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "zips": {
+            "items": {
+              "$ref": "#/components/schemas/ZipOut"
+            },
+            "type": "array",
+            "title": "Zips"
+          }
+        },
+        "type": "object",
+        "required": [
+          "city",
+          "state",
+          "zips"
+        ],
+        "title": "CityOut"
       },
       "DependencyChecks": {
         "properties": {
@@ -1459,6 +1638,27 @@
           "refresh_token"
         ],
         "title": "RefreshTokenRequest"
+      },
+      "RegionOut": {
+        "properties": {
+          "region": {
+            "type": "string",
+            "title": "Region"
+          },
+          "cities": {
+            "items": {
+              "$ref": "#/components/schemas/CityOut"
+            },
+            "type": "array",
+            "title": "Cities"
+          }
+        },
+        "type": "object",
+        "required": [
+          "region",
+          "cities"
+        ],
+        "title": "RegionOut"
       },
       "RegisterRequest": {
         "properties": {
@@ -1972,6 +2172,25 @@
         "type": "object",
         "title": "UtmIn",
         "description": "Campaign attribution. Only these five keys; anything else is a 422."
+      },
+      "ZipOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "zip_code": {
+            "type": "string",
+            "title": "Zip Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "zip_code"
+        ],
+        "title": "ZipOut"
       }
     },
     "securitySchemes": {
