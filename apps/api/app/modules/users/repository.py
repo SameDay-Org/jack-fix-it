@@ -5,6 +5,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.users.models import User
+from app.modules.users.types import UserRole
 
 
 class UserRepository:
@@ -32,6 +33,9 @@ class UserRepository:
         self._session.add(user)
         await self._session.flush()
         return user
+
+    async def update_role(self, user_id: uuid.UUID, role: UserRole) -> None:
+        await self._session.execute(update(User).where(User.id == user_id).values(role=role))
 
     async def update_password_hash(self, user_id: uuid.UUID, password_hash: str) -> None:
         await self._session.execute(
