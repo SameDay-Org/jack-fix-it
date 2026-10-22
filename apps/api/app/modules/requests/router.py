@@ -77,7 +77,12 @@ _RATE_LIMITED: dict[int | str, dict[str, Any]] = {
         status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
         status.HTTP_403_FORBIDDEN: _FORBIDDEN,
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
-            "invalid_category: unknown or inactive category; invalid_media: a media key that "
+            "invalid_category: unknown or inactive category, or one whose questions cannot "
+            "be read right now (send the request without a category); "
+            "invalid_intake_answers: intake_answers do not fit the category's "
+            "intake_questions (an unknown key, a missing required one, a value of the wrong "
+            "type or out of range), or are not empty without a category; "
+            "invalid_media: a media key that "
             "is not the caller's own request_media upload, a duplicate, a key already used, "
             "or too many; validation_error: any other invalid field (past date, intake "
             "answers too large, address format, unknown fields such as urgency)."

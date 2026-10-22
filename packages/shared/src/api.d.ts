@@ -465,6 +465,35 @@ export interface components {
              */
             expires_in: number;
         };
+        /** BooleanQuestion */
+        BooleanQuestion: {
+            /**
+             * Key
+             * @description The answer's key in intake_answers; unique in the category.
+             */
+            key: string;
+            /** Required */
+            required: boolean;
+            /**
+             * Labels
+             * @description The question per locale; en and es required.
+             */
+            labels: {
+                [key: string]: string;
+            };
+            /**
+             * Help
+             * @description An optional hint per locale.
+             */
+            help?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "boolean";
+        };
         /** CategoryOut */
         CategoryOut: {
             /**
@@ -485,6 +514,11 @@ export interface components {
             icon: string | null;
             /** Requires License */
             requires_license: boolean;
+            /**
+             * Intake Questions
+             * @description What to ask the customer for this category, in order; answers go in the request's intake_answers under each key. Empty when there is nothing to ask.
+             */
+            intake_questions: (components["schemas"]["IntegerQuestion"] | components["schemas"]["SingleChoiceQuestion"] | components["schemas"]["MultiChoiceQuestion"] | components["schemas"]["BooleanQuestion"] | components["schemas"]["TextQuestion"])[];
         };
         /** CategorySummary */
         CategorySummary: {
@@ -508,6 +542,15 @@ export interface components {
          * @enum {string}
          */
         CheckStatus: "ok" | "fail";
+        /** ChoiceOption */
+        ChoiceOption: {
+            /** Value */
+            value: string;
+            /** Labels */
+            labels: {
+                [key: string]: string;
+            };
+        };
         /** CityOut */
         CityOut: {
             /** City */
@@ -551,6 +594,39 @@ export interface components {
         ErrorResponse: {
             error: components["schemas"]["ErrorDetail"];
         };
+        /** IntegerQuestion */
+        IntegerQuestion: {
+            /**
+             * Key
+             * @description The answer's key in intake_answers; unique in the category.
+             */
+            key: string;
+            /** Required */
+            required: boolean;
+            /**
+             * Labels
+             * @description The question per locale; en and es required.
+             */
+            labels: {
+                [key: string]: string;
+            };
+            /**
+             * Help
+             * @description An optional hint per locale.
+             */
+            help?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "integer";
+            /** Min */
+            min: number;
+            /** Max */
+            max: number;
+        };
         JsonValue: unknown;
         /** LivenessResponse */
         LivenessResponse: {
@@ -584,6 +660,47 @@ export interface components {
              * Format: date-time
              */
             expires_at: string;
+        };
+        /** MultiChoiceQuestion */
+        MultiChoiceQuestion: {
+            /**
+             * Key
+             * @description The answer's key in intake_answers; unique in the category.
+             */
+            key: string;
+            /** Required */
+            required: boolean;
+            /**
+             * Labels
+             * @description The question per locale; en and es required.
+             */
+            labels: {
+                [key: string]: string;
+            };
+            /**
+             * Help
+             * @description An optional hint per locale.
+             */
+            help?: {
+                [key: string]: string;
+            } | null;
+            /** Options */
+            options: components["schemas"]["ChoiceOption"][];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "multi_choice";
+            /**
+             * Min Selected
+             * @default 0
+             */
+            min_selected: number;
+            /**
+             * Max Selected
+             * @description At most this many; all options when absent.
+             */
+            max_selected?: number | null;
         };
         /** PasswordForgotRequest */
         PasswordForgotRequest: {
@@ -756,7 +873,7 @@ export interface components {
             preferred_date?: string | null;
             /**
              * Intake Answers
-             * @description Answers to the category's intake questions; a size limit applies. NUL characters and non-finite numbers are refused.
+             * @description Answers to the category's intake_questions (GET /v1/categories), by question key: an integer, an option value, a list of distinct option values, a boolean or a text, as each question's type says. Empty without a category. A size limit applies; NUL characters and non-finite numbers are refused. Text is stored trimmed.
              */
             intake_answers?: {
                 [key: string]: components["schemas"]["JsonValue"];
@@ -863,6 +980,68 @@ export interface components {
             state: string;
             /** Region */
             region: string;
+        };
+        /** SingleChoiceQuestion */
+        SingleChoiceQuestion: {
+            /**
+             * Key
+             * @description The answer's key in intake_answers; unique in the category.
+             */
+            key: string;
+            /** Required */
+            required: boolean;
+            /**
+             * Labels
+             * @description The question per locale; en and es required.
+             */
+            labels: {
+                [key: string]: string;
+            };
+            /**
+             * Help
+             * @description An optional hint per locale.
+             */
+            help?: {
+                [key: string]: string;
+            } | null;
+            /** Options */
+            options: components["schemas"]["ChoiceOption"][];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "single_choice";
+        };
+        /** TextQuestion */
+        TextQuestion: {
+            /**
+             * Key
+             * @description The answer's key in intake_answers; unique in the category.
+             */
+            key: string;
+            /** Required */
+            required: boolean;
+            /**
+             * Labels
+             * @description The question per locale; en and es required.
+             */
+            labels: {
+                [key: string]: string;
+            };
+            /**
+             * Help
+             * @description An optional hint per locale.
+             */
+            help?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "text";
+            /** Max Length */
+            max_length: number;
         };
         /**
          * UploadPurpose
@@ -1700,7 +1879,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description invalid_category: unknown or inactive category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency). */
+            /** @description invalid_category: unknown or inactive category, or one whose questions cannot be read right now (send the request without a category); invalid_intake_answers: intake_answers do not fit the category's intake_questions (an unknown key, a missing required one, a value of the wrong type or out of range), or are not empty without a category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency). */
             422: {
                 headers: {
                     [name: string]: unknown;

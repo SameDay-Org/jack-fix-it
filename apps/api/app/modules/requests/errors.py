@@ -16,6 +16,14 @@ class InvalidCategoryError(AppError):
     message = "The category is not available."
 
 
+class InvalidIntakeAnswersError(AppError):
+    """Answers that do not fit the category's questions. Never says which value failed."""
+
+    status_code = 422
+    code = "invalid_intake_answers"
+    message = "The answers to the service questions are invalid."
+
+
 class InvalidMediaError(AppError):
     """One body for every media problem, so it never says which key, or whose, failed."""
 

@@ -8,7 +8,66 @@
     "icon": null,
     "requires_license": false,
     "reference_price_cents": null,
-    "intake_questions": [],
+    "intake_questions": [
+      {
+        "key": "bedrooms",
+        "type": "integer",
+        "required": true,
+        "labels": {
+          "en": "How many bedrooms?",
+          "es": "¿Cuántas habitaciones?"
+        },
+        "min": 0,
+        "max": 10
+      },
+      {
+        "key": "bathrooms",
+        "type": "integer",
+        "required": true,
+        "labels": {
+          "en": "How many bathrooms?",
+          "es": "¿Cuántos baños?"
+        },
+        "min": 1,
+        "max": 10
+      },
+      {
+        "key": "square_feet",
+        "type": "integer",
+        "required": false,
+        "labels": {
+          "en": "Approximate size of the home (square feet)",
+          "es": "Tamaño aproximado de la vivienda (pies cuadrados)"
+        },
+        "min": 100,
+        "max": 20000
+      },
+      {
+        "key": "frequency",
+        "type": "single_choice",
+        "required": true,
+        "labels": {
+          "en": "How often do you need cleaning?",
+          "es": "¿Con qué frecuencia necesitas la limpieza?"
+        },
+        "options": [
+          {
+            "value": "one_time",
+            "labels": {
+              "en": "One time",
+              "es": "Una sola vez"
+            }
+          },
+          {
+            "value": "recurring",
+            "labels": {
+              "en": "Recurring",
+              "es": "Recurrente"
+            }
+          }
+        ]
+      }
+    ],
     "active": true
   },
   {
@@ -20,7 +79,18 @@
     "icon": null,
     "requires_license": false,
     "reference_price_cents": null,
-    "intake_questions": [],
+    "intake_questions": [
+      {
+        "key": "tasks",
+        "type": "text",
+        "required": true,
+        "labels": {
+          "en": "List every small job you need done",
+          "es": "Enumera todos los trabajos pequeños que necesitas"
+        },
+        "max_length": 1000
+      }
+    ],
     "active": true
   },
   {

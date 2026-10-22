@@ -847,7 +847,7 @@
             }
           },
           "422": {
-            "description": "invalid_category: unknown or inactive category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency).",
+            "description": "invalid_category: unknown or inactive category, or one whose questions cannot be read right now (send the request without a category); invalid_intake_answers: intake_answers do not fit the category's intake_questions (an unknown key, a missing required one, a value of the wrong type or out of range), or are not empty without a category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1430,6 +1430,57 @@
         ],
         "title": "AuthResponse"
       },
+      "BooleanQuestion": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,39}$",
+            "title": "Key",
+            "description": "The answer's key in intake_answers; unique in the category."
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Labels",
+            "description": "The question per locale; en and es required."
+          },
+          "help": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Help",
+            "description": "An optional hint per locale."
+          },
+          "type": {
+            "type": "string",
+            "const": "boolean",
+            "title": "Type"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "required",
+          "labels",
+          "type"
+        ],
+        "title": "BooleanQuestion"
+      },
       "CategoryOut": {
         "properties": {
           "id": {
@@ -1463,6 +1514,40 @@
           "requires_license": {
             "type": "boolean",
             "title": "Requires License"
+          },
+          "intake_questions": {
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/IntegerQuestion"
+                },
+                {
+                  "$ref": "#/components/schemas/SingleChoiceQuestion"
+                },
+                {
+                  "$ref": "#/components/schemas/MultiChoiceQuestion"
+                },
+                {
+                  "$ref": "#/components/schemas/BooleanQuestion"
+                },
+                {
+                  "$ref": "#/components/schemas/TextQuestion"
+                }
+              ],
+              "discriminator": {
+                "propertyName": "type",
+                "mapping": {
+                  "boolean": "#/components/schemas/BooleanQuestion",
+                  "integer": "#/components/schemas/IntegerQuestion",
+                  "multi_choice": "#/components/schemas/MultiChoiceQuestion",
+                  "single_choice": "#/components/schemas/SingleChoiceQuestion",
+                  "text": "#/components/schemas/TextQuestion"
+                }
+              }
+            },
+            "type": "array",
+            "title": "Intake Questions",
+            "description": "What to ask the customer for this category, in order; answers go in the request's intake_answers under each key. Empty when there is nothing to ask."
           }
         },
         "type": "object",
@@ -1471,7 +1556,8 @@
           "slug",
           "names",
           "icon",
-          "requires_license"
+          "requires_license",
+          "intake_questions"
         ],
         "title": "CategoryOut"
       },
@@ -1510,6 +1596,29 @@
           "fail"
         ],
         "title": "CheckStatus"
+      },
+      "ChoiceOption": {
+        "properties": {
+          "value": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,39}$",
+            "title": "Value"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Labels"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "value",
+          "labels"
+        ],
+        "title": "ChoiceOption"
       },
       "CityOut": {
         "properties": {
@@ -1617,6 +1726,67 @@
         ],
         "title": "ErrorResponse"
       },
+      "IntegerQuestion": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,39}$",
+            "title": "Key",
+            "description": "The answer's key in intake_answers; unique in the category."
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Labels",
+            "description": "The question per locale; en and es required."
+          },
+          "help": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Help",
+            "description": "An optional hint per locale."
+          },
+          "type": {
+            "type": "string",
+            "const": "integer",
+            "title": "Type"
+          },
+          "min": {
+            "type": "integer",
+            "title": "Min"
+          },
+          "max": {
+            "type": "integer",
+            "title": "Max"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "required",
+          "labels",
+          "type",
+          "min",
+          "max"
+        ],
+        "title": "IntegerQuestion"
+      },
       "JsonValue": {},
       "LivenessResponse": {
         "properties": {
@@ -1674,6 +1844,86 @@
           "expires_at"
         ],
         "title": "MediaOut"
+      },
+      "MultiChoiceQuestion": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,39}$",
+            "title": "Key",
+            "description": "The answer's key in intake_answers; unique in the category."
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Labels",
+            "description": "The question per locale; en and es required."
+          },
+          "help": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Help",
+            "description": "An optional hint per locale."
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/ChoiceOption"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 2,
+            "title": "Options"
+          },
+          "type": {
+            "type": "string",
+            "const": "multi_choice",
+            "title": "Type"
+          },
+          "min_selected": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Min Selected",
+            "default": 0
+          },
+          "max_selected": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Selected",
+            "description": "At most this many; all options when absent."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "required",
+          "labels",
+          "options",
+          "type"
+        ],
+        "title": "MultiChoiceQuestion"
       },
       "PasswordForgotRequest": {
         "properties": {
@@ -2054,7 +2304,7 @@
             },
             "type": "object",
             "title": "Intake Answers",
-            "description": "Answers to the category's intake questions; a size limit applies. NUL characters and non-finite numbers are refused."
+            "description": "Answers to the category's intake_questions (GET /v1/categories), by question key: an integer, an option value, a list of distinct option values, a boolean or a text, as each question's type says. Empty without a category. A size limit applies; NUL characters and non-finite numbers are refused. Text is stored trimmed."
           },
           "media_keys": {
             "items": {
@@ -2306,6 +2556,125 @@
           "region"
         ],
         "title": "ServiceAreaOut"
+      },
+      "SingleChoiceQuestion": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,39}$",
+            "title": "Key",
+            "description": "The answer's key in intake_answers; unique in the category."
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Labels",
+            "description": "The question per locale; en and es required."
+          },
+          "help": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Help",
+            "description": "An optional hint per locale."
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/ChoiceOption"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 2,
+            "title": "Options"
+          },
+          "type": {
+            "type": "string",
+            "const": "single_choice",
+            "title": "Type"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "required",
+          "labels",
+          "options",
+          "type"
+        ],
+        "title": "SingleChoiceQuestion"
+      },
+      "TextQuestion": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,39}$",
+            "title": "Key",
+            "description": "The answer's key in intake_answers; unique in the category."
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Labels",
+            "description": "The question per locale; en and es required."
+          },
+          "help": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Help",
+            "description": "An optional hint per locale."
+          },
+          "type": {
+            "type": "string",
+            "const": "text",
+            "title": "Type"
+          },
+          "max_length": {
+            "type": "integer",
+            "maximum": 1000.0,
+            "minimum": 1.0,
+            "title": "Max Length"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "required",
+          "labels",
+          "type",
+          "max_length"
+        ],
+        "title": "TextQuestion"
       },
       "UploadPurpose": {
         "type": "string",
