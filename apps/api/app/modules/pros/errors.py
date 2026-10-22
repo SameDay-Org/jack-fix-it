@@ -27,3 +27,11 @@ class InvalidServiceAreaError(AppError):
     status_code = 422
     code = "invalid_service_area"
     message = "The service area is not available."
+
+
+class InvalidDocumentError(AppError):
+    """A value the schema cannot check alone, such as an expiry date in the past."""
+
+    status_code = 422
+    code = "validation_error"
+    message = "The request is invalid."

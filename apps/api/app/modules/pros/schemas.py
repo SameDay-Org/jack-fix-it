@@ -1,12 +1,12 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from app.modules.addresses.schemas import NO_NUL
 from app.modules.categories.schemas import CategorySummary
-from app.modules.pros.models import ProVerificationStatus
+from app.modules.pros.models import ProDocumentStatus, ProDocumentType, ProVerificationStatus
 from app.modules.service_areas.schemas import ServiceAreaOut
 
 MAX_YEARS_OF_EXPERIENCE = 80  # the pro_profiles CHECK
@@ -51,4 +51,41 @@ class ProProfileUpdate(BaseModel):
         description=(
             "Replaces the set: active service areas, no duplicates, up to PRO_MAX_SERVICE_AREAS."
         ),
+    )
+
+
+class DocumentSubmission(BaseModel):
+    """A pro submits a document; the review fields belong to the admin (#41): sending them is
+    a 422 (extra="forbid")."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    doc_type: ProDocumentType
+    file_key: str = Field(
+        description="Key of the caller's own pro_document upload (POST /v1/uploads)."
+    )
+    expires_on: date | None = Field(default=None, description="Today or later (UTC date).")
+
+
+class DocumentOut(BaseModel):
+    id: uuid.UUID
+    doc_type: ProDocumentType
+    status: ProDocumentStatus
+    rejection_reason: str | None
+    expires_on: date | None
+    created_at: datetime
+    url: str = Field(description="Presigned GET URL of the file.")
+    expires_at: datetime = Field(description="When the URL stops working.")
+
+
+class DocumentsOut(BaseModel):
+    documents: list[DocumentOut] = Field(
+        description="The latest document of each type, superseded ones left out."
+    )
+    history: list[DocumentOut] = Field(
+        description="Older reviewed (approved or rejected) documents, newest first."
+    )
+    required_types: list[ProDocumentType]
+    missing_types: list[ProDocumentType] = Field(
+        description="Required types with no pending or approved document."
     )
