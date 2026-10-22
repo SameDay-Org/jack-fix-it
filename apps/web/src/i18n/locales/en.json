@@ -8,6 +8,33 @@
   },
   "admin": {
     "title": "Operations panel",
-    "notAvailable": "The operations panel is not available yet."
+    "login": {
+      "title": "Sign in to the panel",
+      "subtitle": "For the Jack Fix It team.",
+      "email": "Email",
+      "password": "Password",
+      "submit": "Sign in",
+      "submitting": "Signing in…",
+      "errors": {
+        "invalid_credentials": "Email or password is incorrect.",
+        "account_suspended": "This account is suspended.",
+        "rate_limited": "Too many attempts. Try again in a moment.",
+        "not_staff": "This account can't access the panel.",
+        "unavailable": "We couldn't sign you in right now. Try again in a moment."
+      }
+    },
+    "nav": {
+      "label": "Panel",
+      "home": "Home"
+    },
+    "roles": {
+      "agent": "Agent",
+      "admin": "Admin"
+    },
+    "logout": "Log out",
+    "home": {
+      "welcome": "Welcome, {{email}}",
+      "queueSoon": "The operations queue arrives soon. New requests will show up here."
+    }
   }
 }
