@@ -20,7 +20,9 @@ from app.config import Settings
 from app.integrations.storage import PresignedUpload, get_storage
 from app.modules.addresses.models import Address
 from app.modules.auth import security
+from app.modules.categories.intake import dump_questions
 from app.modules.categories.models import Category
+from app.modules.categories.service import load_seed_data
 from app.modules.requests.customer_status import REQUEST_CUSTOMER_STATUS
 from app.modules.requests.models import RequestMedia, RequestStatus, ServiceRequest
 from app.modules.service_areas.models import ServiceArea
@@ -954,6 +956,29 @@ def test_openapi_documents_invalid_intake_answers(app: FastAPI) -> None:
     operation = app.openapi()["paths"]["/v1/requests"]["post"]
 
     assert "invalid_intake_answers" in operation["responses"]["422"]["description"]
+
+
+async def test_request_with_jobs_answer_validates(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    # The seeded painting question (D8.3): required multi_choice, at least one job.
+    [painting] = [entry for entry in load_seed_data() if entry.slug == "painting"]
+    category_id = str(
+        await make_category(db_session, questions=dump_questions(painting.intake_questions))
+    )
+
+    async def answer(jobs: Any) -> httpx.Response:
+        answers = {} if jobs is None else {"jobs": jobs}
+        caller = await make_caller(db_session)  # one each: request creation is rate limited
+        return await create(db_client, caller, category_id=category_id, intake_answers=answers)
+
+    valid = await answer(["interior", "ceilings"])
+    assert valid.status_code == 201
+    assert valid.json()["intake_answers"] == {"jobs": ["interior", "ceilings"]}
+    for refused in ([], ["roofing"], ["interior", "interior"], "interior", None):
+        response = await answer(refused)
+        assert response.status_code == 422, refused
+        assert response.json() == INVALID_INTAKE_ANSWERS
 
 
 # Served ZIPs only (#46)
