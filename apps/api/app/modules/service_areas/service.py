@@ -66,6 +66,10 @@ class ServiceAreaService:
         """The ids among `ids` that exist and are active."""
         return await self._areas.active_ids(ids)
 
+    async def active_ids_for_zip(self, zip_code: str) -> set[uuid.UUID]:
+        """The active areas serving a five-digit ZIP (none when it is not served)."""
+        return await self._areas.active_ids_for_zip(zip_code)
+
     async def get_many(self, ids: Collection[uuid.UUID]) -> list[ServiceAreaOut]:
         """The areas with these ids, active or not, by ZIP."""
         return [

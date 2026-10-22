@@ -9,8 +9,10 @@ never the bio or a storage key.
 
 import logging
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +36,13 @@ from app.modules.users.types import UserAccount
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class DispatchCandidate:
+    pro_id: uuid.UUID
+    user_id: uuid.UUID
+    rating_avg: Decimal | None  # NULL until the first review
+
+
 class ProService:
     def __init__(self, session: AsyncSession) -> None:
         self._profiles = ProProfileRepository(session)
@@ -41,6 +50,16 @@ class ProService:
     async def get_profile_id_for_user(self, user_id: uuid.UUID) -> uuid.UUID | None:
         """The pro_profiles.id of a user, or None when the user has no pro profile."""
         return await self._profiles.get_id_by_user_id(user_id)
+
+    async def dispatch_candidates(
+        self, category_id: uuid.UUID, service_area_ids: Collection[uuid.UUID]
+    ) -> list[DispatchCandidate]:
+        """Profiles that may receive requests (approved, payouts enabled: context doc section
+        5) in the category and in one of the areas. The caller still checks the accounts."""
+        return [
+            DispatchCandidate(pro_id=row.id, user_id=row.user_id, rating_avg=row.rating_avg)
+            for row in await self._profiles.dispatch_candidates(category_id, service_area_ids)
+        ]
 
 
 @dataclass(frozen=True)

@@ -1,15 +1,27 @@
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.users.models import User
+from app.modules.users.types import UserRole, UserStatus
 
 
 class UserRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def active_ids_with_role(
+        self, user_ids: Collection[uuid.UUID], role: UserRole
+    ) -> set[uuid.UUID]:
+        if not user_ids:
+            return set()
+        statement = select(User.id).where(
+            User.id.in_(user_ids), User.role == role, User.status == UserStatus.ACTIVE
+        )
+        return set((await self._session.scalars(statement)).all())
 
     async def get_by_id(self, user_id: uuid.UUID) -> User | None:
         return await self._session.get(User, user_id)
