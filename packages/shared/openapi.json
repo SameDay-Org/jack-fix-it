@@ -1361,6 +1361,128 @@
         ]
       }
     },
+    "/v1/pros/me/documents": {
+      "get": {
+        "tags": [
+          "pros"
+        ],
+        "summary": "My verification documents",
+        "description": "The latest document of each type with presigned URLs, older reviewed ones, the types\nrequired (ID and insurance; a license when one of the pro's categories requires it) and\nthe ones still missing.",
+        "operationId": "list_my_documents_v1_pros_me_documents_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros have a pro profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "pros"
+        ],
+        "summary": "Submit a verification document",
+        "description": "Submits a photo ID, insurance or license for review. Upload the file first\n(POST /v1/uploads, purpose pro_document). A pending document of the same type is replaced\n(superseded); reviewed ones stay as history.",
+        "operationId": "submit_document_v1_pros_me_documents_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentSubmission"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_media: file_key is not the caller's own pro_document upload, or is already a document; validation_error: an unknown type, an expiry date in the past, or a field the review sets (status, rejection_reason, reviewed_by...).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros have a pro profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/v1/devices": {
       "put": {
         "tags": [
@@ -1984,6 +2106,148 @@
         ],
         "title": "DeviceRemoval"
       },
+      "DocumentOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "doc_type": {
+            "$ref": "#/components/schemas/ProDocumentType"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProDocumentStatus"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          },
+          "expires_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires On"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "Presigned GET URL of the file."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At",
+            "description": "When the URL stops working."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "doc_type",
+          "status",
+          "rejection_reason",
+          "expires_on",
+          "created_at",
+          "url",
+          "expires_at"
+        ],
+        "title": "DocumentOut"
+      },
+      "DocumentSubmission": {
+        "properties": {
+          "doc_type": {
+            "$ref": "#/components/schemas/ProDocumentType"
+          },
+          "file_key": {
+            "type": "string",
+            "title": "File Key",
+            "description": "Key of the caller's own pro_document upload (POST /v1/uploads)."
+          },
+          "expires_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires On",
+            "description": "Today or later (UTC date)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "doc_type",
+          "file_key"
+        ],
+        "title": "DocumentSubmission",
+        "description": "A pro submits a document; the review fields belong to the admin (#41): sending them is\na 422 (extra=\"forbid\")."
+      },
+      "DocumentsOut": {
+        "properties": {
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentOut"
+            },
+            "type": "array",
+            "title": "Documents",
+            "description": "The latest document of each type, superseded ones left out."
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentOut"
+            },
+            "type": "array",
+            "title": "History",
+            "description": "Older reviewed (approved or rejected) documents, newest first."
+          },
+          "required_types": {
+            "items": {
+              "$ref": "#/components/schemas/ProDocumentType"
+            },
+            "type": "array",
+            "title": "Required Types"
+          },
+          "missing_types": {
+            "items": {
+              "$ref": "#/components/schemas/ProDocumentType"
+            },
+            "type": "array",
+            "title": "Missing Types",
+            "description": "Required types with no pending or approved document."
+          }
+        },
+        "type": "object",
+        "required": [
+          "documents",
+          "history",
+          "required_types",
+          "missing_types"
+        ],
+        "title": "DocumentsOut"
+      },
       "DownloadUrlRequest": {
         "properties": {
           "key": {
@@ -2345,6 +2609,25 @@
           "expires_at"
         ],
         "title": "PhotoOut"
+      },
+      "ProDocumentStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "approved",
+          "rejected",
+          "superseded"
+        ],
+        "title": "ProDocumentStatus"
+      },
+      "ProDocumentType": {
+        "type": "string",
+        "enum": [
+          "id",
+          "license",
+          "insurance"
+        ],
+        "title": "ProDocumentType"
       },
       "ProProfileOut": {
         "properties": {
