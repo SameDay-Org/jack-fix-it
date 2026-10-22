@@ -4,6 +4,7 @@ POSITIVE: each input must lose the listed secrets (and be flagged). NEGATIVE: ea
 come back unchanged (and not flagged). The module docstring lists the known gaps on purpose.
 """
 
+import random
 import time
 
 import pytest
@@ -453,6 +454,9 @@ def test_a_known_street_is_masked_without_its_trailing_parts(line: str, text: st
         ("742 Evergreen Terrace Apt 4B", "742 sq ft"),
         ("742 Evergreen Terrace Apt 4B", "742 evergreens"),
         ("123 1/2 N Ocean Dr", "ocean drive"),
+        # Other words between the number and the name: a quantity, not the street.
+        ("742 Evergreen Terrace Apt 4B", "Plant 742 small evergreen shrubs"),
+        ("123 Main Street NW", "Fix 123 broken main valves"),
     ],
 )
 def test_a_known_street_needs_its_number_and_its_name(line: str, text: str) -> None:
@@ -544,6 +548,184 @@ def test_hostile_inputs_against_odd_street_lines_finish_quickly(line: str, text:
     redact_text(text[:2000], KnownValues(streets=(line,)))
 
     assert time.perf_counter() - started < 0.25
+
+
+# Round 5 review (#172): the known street became a token scan. A dotted direction without its
+# final period, ordinary repair language, generated addresses, and the worst inputs for time.
+@pytest.mark.parametrize(
+    "text", ["123 n.w main", "123 n.w. main", "123 N W main", "123 northwest main", "123 NW. Main"]
+)
+def test_a_direction_in_any_form_between_number_and_name(text: str) -> None:
+    result = redact_known(f"at {text} today", KnownValues(streets=("123 Main Street NW",)))
+
+    assert result == RedactionResult(f"at {MASK} today", True)
+
+
+ORDINARY_REPAIR_TEXT = [
+    "The main water line leaks under the kitchen sink.",
+    "Trim the evergreen trees beside the fence.",
+    "Replace 742 sq ft of flooring and 12 outlets.",
+    "Install a 120 V outlet and replace the 60W bulb.",
+    "The pressure is 123 psi and the main valve is stuck.",
+    "Replace 123 main valve washers in the commercial building.",
+    "Need 12 outlets replaced, 12 total.",
+    "Service 2 A/C units and replace their filters.",
+    "Replace the 3/4 inch fitting; pipe is 20 ft long.",
+    "Built in 2000; two rooms need painting.",
+    "One 4 by 8 sheet and six 2 by 4 boards are damaged.",
+    "Use N95 masks for sanding; no mold is visible.",
+    "The north wall is damp and the south wall is dry.",
+    "Repair the main pump w/ 2 replacement seals.",
+    "The hall is damaged, e.g. the ceiling and trim.",
+    "The total floor area is 1800 sq ft.",
+    "The 742 bus stops nearby, so parking is difficult.",
+    "Install 4 brackets with 12 screws.",
+    "The freezer reaches -10 degrees but the fridge is warm.",
+    "Please come after 5pm or before 8am.",
+]
+
+
+@pytest.mark.parametrize("text", ORDINARY_REPAIR_TEXT)
+def test_ordinary_repair_text_keeps_its_meaning(text: str) -> None:
+    known = KnownValues(streets=("742 Evergreen Terrace NW Apt 4B",))
+
+    assert redact_text(text, known) == RedactionResult(text, False)
+
+
+_NAME_WORDS = (
+    "Oak", "Maple", "Evergreen", "Ocean", "Martin", "Luther", "Vernon", "Sequoia", "Brickell",
+    "Tamiami", "Dadeland", "Palm", "Coral", "Biscayne", "Flagler", "Cedar", "Willow", "Harbor",
+)  # fmt: skip
+_SUFFIX_FORMS = ("Street", "St", "St.", "Avenue", "Ave", "Terrace", "Ter", "Blvd", "Drive", "Dr")
+_DIRECTION_FORMS = ("N", "NW", "N.W.", "South", "SE", "E", "W.", "Northwest")
+
+
+def _generated_streets(count: int) -> list[tuple[str, str, str]]:
+    """(stored line, house number, first name word): random names, suffixes and directions,
+    duplicates included, the same every run."""
+    rng = random.Random(172)  # noqa: S311 - reproducible test data, not secrets
+    streets = []
+    for _ in range(count):
+        number = str(rng.randint(1, 99_999))
+        names = rng.sample(_NAME_WORDS, rng.randint(1, 3))
+        parts = [number]
+        if rng.random() < 0.4:
+            parts.append(rng.choice(_DIRECTION_FORMS))
+        parts += names
+        parts += [rng.choice(_SUFFIX_FORMS) for _ in range(rng.randint(0, 4))]
+        if rng.random() < 0.4:
+            parts.append(rng.choice(_DIRECTION_FORMS))
+        streets.append((" ".join(parts), number, names[0]))
+    return streets
+
+
+GENERATED_STREETS = _generated_streets(200)
+
+
+def test_generated_streets_mask_number_and_name_and_nothing_less() -> None:
+    rng = random.Random(173)  # noqa: S311 - reproducible test data, not secrets
+    for line, number, name in GENERATED_STREETS:
+        known = KnownValues(streets=(line,))
+        spelled = rng.choice([name.lower(), name.upper(), name.title()])
+        joiner = rng.choice([" ", "  ", ", ", " - ", " n.w "])
+        text = f"Meet me at {number}{joiner}{spelled}{rng.choice(['', '.', ',', ' today'])}"
+
+        result = redact_known(text, known)
+
+        assert result.redacted is True, (line, text)
+        assert number not in result.text, (line, text)
+        assert name.lower() not in result.text.lower(), (line, text)
+        for alone in (f"The {spelled} one is fine.", f"Replace {number} tiles."):
+            assert redact_known(alone, known) == RedactionResult(alone, False), (line, alone)
+
+
+@pytest.mark.parametrize(
+    ("line", "text"),
+    [
+        ("100 " + " ".join(["St"] * 80), "st " * 666),
+        ("100 " + " ".join(["St"] * 80), "100 " + "st " * 660),
+        ("100 " + " ".join(["St"] * 80), "100 " * 499),
+        ("100 " + " ".join(["Main"] * 60), "100 " + "main " * 380),
+        ("100 " + " ".join(["N"] * 60) + " Main", "100 " + "n " * 940),
+        ("12 " + " ".join(_NAME_WORDS * 3) + " Apt 4B", ("12 oak apt 4b " * 150)),
+    ],
+    ids=["suffixes", "number-and-suffixes", "numbers", "names", "directions", "long-line"],
+)
+def test_long_or_repetitive_streets_finish_quickly(line: str, text: str) -> None:
+    known = KnownValues(streets=(line,))
+    text = text[:2000]
+
+    started = time.perf_counter()
+    redact_known(text, known)
+    known_seconds = time.perf_counter() - started
+    started = time.perf_counter()
+    redact_text(text, known)
+
+    assert known_seconds < 0.05
+    assert time.perf_counter() - started < 0.25
+
+
+# The scan reads word pieces and judges what stands between them: a period, a slash or an
+# apostrophe glued to the address never hides it, and never joins it to the next sentence.
+EVERGREEN = "742 Evergreen Terrace Apt 4B"
+SCANNED = [
+    (EVERGREEN, "I live at 742 Evergreen.Need help asap", "I live at {M}.Need help asap"),
+    (EVERGREEN, "742 evergreen.thx", "{M}.thx"),
+    (EVERGREEN, "at Evergreen 742.Thanks", "at {M}.Thanks"),
+    (EVERGREEN, "Dir.742 Evergreen", "Dir.{M}"),
+    (EVERGREEN, "Dir.Evergreen 742", "Dir.{M}"),
+    (EVERGREEN, "742 Evergreen/Springfield, gate code", "{M}/Springfield, gate code"),
+    (EVERGREEN, "Apt 4B/742 Evergreen please", "{M}/{M} please"),
+    (EVERGREEN, "Address: 742 Evergreen's back gate", "Address: {M}'s back gate"),
+    ("12 Elm St", f"12 Elm{CURLY}s", f"{{M}}{CURLY}s"),
+    ("123 O'Brien Rd", "123 O'Brien's yard", "{M}'s yard"),
+    ("123 Main St", "at 123 Main/Elm corner", "at {M}/Elm corner"),
+    ("123 Main St", "at 123 N.Main today", "at {M} today"),
+    ("123 Main Street NW", "at 123 N.W.Main today", "at {M} today"),
+    (EVERGREEN, "My Apt.4B has a leak", "My {M} has a leak"),
+    (EVERGREEN, "Ste.4B leaks", "{M} leaks"),
+    (EVERGREEN, "Apt: 4B has a leak", "{M} has a leak"),
+    (EVERGREEN, "Apt No. 4B has a leak", "{M} has a leak"),
+    (EVERGREEN, "apartamento 4B tiene una fuga", "{M} tiene una fuga"),
+    (EVERGREEN, "vivo en el 742 de la Evergreen, hay fuga", "vivo en el {M}, hay fuga"),
+    ("100 Avenue of the Americas", "at 100 Avenue of the Americas", "at {M}"),
+    ("100 Avenue of the Americas", "at 100 americas", "at {M}"),
+    (
+        "742 Evergreen Terrace",
+        "Address is 742 Evergreen. S wall leaks.",
+        "Address is {M}. S wall leaks.",
+    ),
+    # A stored line without a house number: its whole name and suffix.
+    ("One Infinite Loop", "at One Infinite Loop today", "at {M} today"),
+    ("Evergreen Terrace", "at Evergreen Terrace today", "at {M} today"),
+]
+
+
+@pytest.mark.parametrize(("line", "text", "expected"), SCANNED)
+def test_the_scan_reads_pieces_and_the_gaps_between_them(
+    line: str, text: str, expected: str
+) -> None:
+    result = redact_known(text, KnownValues(streets=(line,)))
+
+    assert result == RedactionResult(expected.replace("{M}", MASK), True)
+
+
+@pytest.mark.parametrize(
+    ("line", "text"),
+    [
+        ("100 Avenue of the Americas", "Replace 100 of the tiles in the bath."),
+        ("200 Main St", "Budget is about 200. Main issue is the leak."),
+        ("742 Evergreen Terrace", "Check the evergreen. 742 feet away"),
+        ("742 Evergreen Terrace Apt 2", "The living room 2 outlets are dead."),
+        ("742 Evergreen Terrace Apt 74", "Pool pH 7.4 is low."),
+        ("250 Oak St", "Lumber: oak 2.50 per foot."),
+        ("742 Oak St", "We need 1,742 oak boards."),
+        ("Evergreen Terrace", "Trim the evergreen trees."),
+        ("1 Main St", "1 e.g. main"),
+    ],
+)
+def test_the_scan_never_crosses_a_sentence_or_a_number(line: str, text: str) -> None:
+    assert redact_known(text, KnownValues(streets=(line,))) == RedactionResult(text, False)
 
 
 def test_a_unit_inside_the_street_line_is_masked_on_its_own() -> None:
