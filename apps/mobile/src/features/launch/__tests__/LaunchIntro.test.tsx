@@ -87,6 +87,11 @@ describe("LaunchIntro over the session gate", () => {
     ).toBe("no-hide-descendants");
     expect(screen.getByRole("button", { name: "Skip intro" })).toBeTruthy();
     expect(screen.getByText("Jack Fix It")).toBeTruthy();
+    // Skip floats over the frame: the hero under the intro has none, and the sentence must not
+    // move when the intro lifts.
+    const skipRow = screen.getByTestId("launch-hero-skip-row");
+    expect(skipRow.props.className).toContain("absolute");
+    expect(skipRow.props.style).toEqual({ bottom: METRICS.insets.bottom });
   });
 
   it("restoring: the gate shows the static hero under the intro, the splash stays until the intro is ready, and the intro never outlives launchMaxMs", async () => {

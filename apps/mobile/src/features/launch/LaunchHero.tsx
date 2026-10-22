@@ -19,7 +19,8 @@ type LaunchHeroProps = {
  * The launch frame: full-bleed navy, the wordmark as text (no logo yet, #8) and the headline laid
  * out as a wrapping row of words so the rolling word can be its own element while the sentence
  * wraps naturally. Screen readers get one static label with the first word; the row's children
- * are hidden from them.
+ * are hidden from them. Skip, when present, floats over the frame instead of taking space in it,
+ * so the sentence sits exactly where the static frame's does and the handoff never moves it.
  */
 export function LaunchHero({ word, skip, testID }: LaunchHeroProps) {
   const { t } = useTranslation();
@@ -29,8 +30,8 @@ export function LaunchHero({ word, skip, testID }: LaunchHeroProps) {
 
   return (
     <Screen bar="hero" edges={[]} testID={testID}>
-      <View className="flex-1 bg-navy-900" style={{ paddingBottom: bottom }}>
-        <View className="flex-1 justify-center gap-6 px-6">
+      <View className="flex-1 bg-navy-900">
+        <View className="flex-1 justify-center gap-6 px-6" style={{ paddingBottom: bottom }}>
           <View className="gap-3">
             <View className="h-1 w-12 rounded-pill bg-green-500" />
             <Text className="text-headline text-white">{t("brand.name")}</Text>
@@ -64,7 +65,11 @@ export function LaunchHero({ word, skip, testID }: LaunchHeroProps) {
           </View>
         </View>
         {skip ? (
-          <View className="flex-row justify-end px-4 pb-4">
+          <View
+            className="absolute right-0 px-4 pb-4"
+            style={{ bottom }}
+            testID={testID && `${testID}-skip-row`}
+          >
             <Button
               label={skip.label}
               variant="ghost"
