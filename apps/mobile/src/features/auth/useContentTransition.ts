@@ -1,7 +1,9 @@
-import { useEffect, useRef, type ComponentRef, type RefObject } from "react";
+import { useFocusEffect } from "expo-router";
+import { useCallback, useEffect, useRef, useState, type ComponentRef, type RefObject } from "react";
 import { BackHandler, type Text, type ViewStyle } from "react-native";
 import {
   Easing,
+  ReduceMotion,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -29,6 +31,8 @@ export type ContentTransition = {
   enter: () => void;
   /** Fades the content out, then runs `then` (the navigation). At once when not animating. */
   exit: (then: () => void) => void;
+  /** The content is leaving: it takes no taps, so nothing can navigate under the pending back. */
+  busy: boolean;
 };
 
 /**
@@ -36,6 +40,11 @@ export type ContentTransition = {
  * panel became, screen-reader focus moves to the title, and going back (the Back button or
  * Android's hardware back) fades the content out before the route pops and Welcome lowers its
  * panel. Reached any other way, the content is simply there.
+ *
+ * The content's container must set `needsOffscreenAlphaCompositing`: Android otherwise applies the
+ * fading opacity to each card and to its elevation shadow separately, and the cards turn into gray
+ * blocks mid-fade. Under Reduce Motion the fade still runs (a dissolve is the reduced motion; only
+ * the slide goes), so the destination crossfades in instead of popping.
  */
 export function useContentTransition({
   animate,
@@ -45,30 +54,35 @@ export function useContentTransition({
   const { transitionMs, slidePx } = tokens.motion;
   const visible = useSharedValue(animate ? 0 : 1);
   const entered = useRef(false);
-  const exiting = useRef(false);
+  const exitingRef = useRef(false);
+  const [busy, setBusy] = useState(false);
   // What runs after the exit. Kept in a ref: a JS function captured by the worklet callback would
   // cross to the UI thread as a remote function, and the callback only needs to say "done".
   const afterExitRef = useRef<(() => void) | null>(null);
+  const timing = {
+    duration: transitionMs,
+    easing: Easing.out(Easing.cubic),
+    reduceMotion: ReduceMotion.Never,
+  };
 
   const focusTitle = () => moveAccessibilityFocus(titleRef.current);
 
   const enter = () => {
     if (!animate || entered.current) return;
     entered.current = true;
-    visible.value = withTiming(
-      1,
-      { duration: transitionMs, easing: Easing.out(Easing.cubic) },
-      (finished) => {
-        if (finished) runOnJS(focusTitle)();
-      },
-    );
+    visible.value = withTiming(1, timing, (finished) => {
+      if (finished) runOnJS(focusTitle)();
+    });
   };
 
   const afterExit = (finished: boolean) => {
-    exiting.current = false;
+    exitingRef.current = false;
+    setBusy(false);
     const then = afterExitRef.current;
     afterExitRef.current = null;
     if (finished) then?.();
+    // Interrupted: the content comes back rather than staying invisible over live controls.
+    else visible.value = withTiming(1, timing);
   };
 
   const exit = (then: () => void) => {
@@ -76,37 +90,37 @@ export function useContentTransition({
       then();
       return;
     }
-    if (exiting.current) return;
-    exiting.current = true;
+    if (exitingRef.current) return;
+    exitingRef.current = true;
+    setBusy(true);
     afterExitRef.current = then;
-    visible.value = withTiming(
-      0,
-      { duration: transitionMs, easing: Easing.out(Easing.cubic) },
-      (finished) => {
-        runOnJS(afterExit)(finished === true);
-      },
-    );
+    visible.value = withTiming(0, timing, (finished) => {
+      runOnJS(afterExit)(finished === true);
+    });
   };
 
-  // Android's hardware back runs the same exit before popping; the listener is registered once
-  // and reads the latest `exit` through a ref.
+  // Android's hardware back runs the same exit before popping, but only while this screen is the
+  // focused one: a screen pushed on top (sign-up over Role) owns its own back. The listener reads
+  // the latest `exit` through a ref, so the focus effect keeps its identity.
   const exitRef = useRef(exit);
   useEffect(() => {
     exitRef.current = exit;
   });
-  useEffect(() => {
-    if (!animate) return;
-    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      exitRef.current(backToPrevious);
-      return true;
-    });
-    return () => subscription.remove();
-  }, [animate]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!animate) return;
+      const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+        exitRef.current(backToPrevious);
+        return true;
+      });
+      return () => subscription.remove();
+    }, [animate]),
+  );
 
   const style = useAnimatedStyle(() => ({
     opacity: visible.value,
     transform: [{ translateY: reduceMotion ? 0 : slidePx * (1 - visible.value) }],
   }));
 
-  return { style, enter, exit };
+  return { style, enter, exit, busy };
 }

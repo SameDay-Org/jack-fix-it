@@ -4,6 +4,8 @@ export { HomePlaceholderScreen } from "./HomePlaceholderScreen";
 export { deviceLocale } from "./locale";
 export { LoginScreen } from "./LoginScreen";
 export { OfflineScreen } from "./OfflineScreen";
+export { risenFromWelcome } from "./panelRoute";
+export type { PanelRouteAnimation } from "./panelRoute";
 export { RoleScreen } from "./RoleScreen";
 export { isSignUpRole } from "./roles";
 export type { SignUpRole } from "./roles";

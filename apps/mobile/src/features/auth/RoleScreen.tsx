@@ -20,7 +20,7 @@ export function RoleScreen() {
   const [role, setRole] = useState<SignUpRole | null>(null);
   const titleRef = useRef<ComponentRef<typeof Text>>(null);
   const fromWelcome = from === "welcome";
-  const { style, enter, exit } = useContentTransition({
+  const { style, enter, exit, busy } = useContentTransition({
     animate: fromWelcome,
     reduceMotion: useReducedMotion(),
     titleRef,
@@ -28,7 +28,14 @@ export function RoleScreen() {
 
   return (
     <Screen bar="light" testID="role-screen">
-      <Animated.View className="flex-1" style={style} onLayout={enter} testID="role-content">
+      <Animated.View
+        className="flex-1"
+        style={style}
+        onLayout={enter}
+        needsOffscreenAlphaCompositing
+        pointerEvents={busy ? "none" : "auto"}
+        testID="role-content"
+      >
         <ScrollView
           contentContainerClassName="flex-grow gap-6 px-4 pb-4 pt-2"
           keyboardShouldPersistTaps="handled"

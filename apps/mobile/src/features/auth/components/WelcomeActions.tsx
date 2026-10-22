@@ -54,7 +54,13 @@ export function WelcomeActions({
 
   return (
     <Animated.View
-      style={[continuousCorners, BUBBLE, { paddingBottom: bottom }, hidden && { opacity: 0 }, style]}
+      style={[
+        continuousCorners,
+        BUBBLE,
+        { paddingBottom: bottom },
+        hidden && { opacity: 0 },
+        style,
+      ]}
       pointerEvents={hidden ? "none" : "auto"}
       importantForAccessibility={hidden ? "no-hide-descendants" : "auto"}
       accessibilityElementsHidden={hidden}

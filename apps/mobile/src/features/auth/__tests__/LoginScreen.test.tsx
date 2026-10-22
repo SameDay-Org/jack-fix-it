@@ -23,6 +23,8 @@ jest.mock("@/api", () => ({ ...jest.requireActual("@/api"), login: jest.fn() }))
 jest.mock("expo-router", () => ({
   router: { push: jest.fn(), replace: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) },
   useLocalSearchParams: jest.fn(() => ({})),
+  // The focus effect (hardware back while focused) runs only where a test calls it.
+  useFocusEffect: jest.fn(),
 }));
 jest.mock("@/components/ui", () => ({
   ...jest.requireActual("@/components/ui"),

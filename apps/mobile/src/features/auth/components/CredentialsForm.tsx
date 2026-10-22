@@ -50,7 +50,7 @@ export function CredentialsForm({
   const passwordRef = useRef<InputHandle>(null);
   const titleRef = useRef<ComponentRef<typeof Text>>(null);
   const fromWelcome = from === "welcome";
-  const { style, enter, exit } = useContentTransition({
+  const { style, enter, exit, busy } = useContentTransition({
     animate: fromWelcome,
     reduceMotion: useReducedMotion(),
     titleRef,
@@ -70,6 +70,8 @@ export function CredentialsForm({
           className="flex-1"
           style={style}
           onLayout={enter}
+          needsOffscreenAlphaCompositing
+          pointerEvents={busy ? "none" : "auto"}
           testID={`${testID}-content`}
         >
           <ScrollView

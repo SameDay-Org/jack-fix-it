@@ -162,6 +162,33 @@ describe("usePanelTransition (through WelcomeScreen)", () => {
     expect(router.push).toHaveBeenCalledTimes(2);
   });
 
+  it("the actions take no taps until the panel is back down", async () => {
+    await renderWelcome();
+    await act(async () => fireEvent.press(getStarted()));
+    await advance(panelRiseMs * 1.5);
+    await refocus();
+
+    await advance(panelRiseMs / 4); // lowering: the buttons are still invisible near the top
+    await act(async () => fireEvent.press(getStarted()));
+    await advance(panelRiseMs * 2);
+    expect(router.push).toHaveBeenCalledTimes(1);
+  });
+
+  it("the status-bar strip beside the panel stays navy whichever way the bar flips", async () => {
+    await renderWelcome();
+    const strip = screen.getByTestId("welcome-bar-strip");
+    expect(strip.props.className).toContain("bg-navy-900");
+    expect(strip.props.style).toMatchObject({ top: -TOP_INSET, height: TOP_INSET });
+  });
+
+  it("the skirt tucks a corner radius under the panel, so no seam shows as they rise", async () => {
+    await renderWelcome();
+    const skirt = screen.getByTestId("welcome-actions-skirt").props.style as object[];
+    expect(skirt).toEqual(
+      expect.arrayContaining([expect.objectContaining({ bottom: -TRAVEL, height: TRAVEL + xl })]),
+    );
+  });
+
   it("reduce motion uses a crossfade only: no rise, navigate at once", async () => {
     jest.mocked(useReducedMotion).mockReturnValue(true);
     await renderWelcome();

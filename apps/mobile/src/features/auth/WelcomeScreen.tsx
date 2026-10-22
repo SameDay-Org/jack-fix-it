@@ -60,7 +60,8 @@ export function WelcomeScreen() {
   // The skirt rises with the panel and covers what the panel leaves behind, down to the bottom
   // edge. It is a sibling anchored to the container's bottom, not a child of the padded panel:
   // Yoga resolves an absolute child's percentage offsets against the content box, so a `top: 100%`
-  // skirt inside the panel ended a padding short of the screen's edge.
+  // skirt inside the panel ended a padding short of the screen's edge. Its top tucks a corner
+  // radius under the panel: two edges meeting at a fractional offset left a hairline of navy.
   const skirtStyle = useAnimatedStyle(() => ({
     backgroundColor: interpolateColor(progress.value, [0, 1], [white, page]),
     transform: [{ translateY: -travel.value * progress.value }],
@@ -73,6 +74,14 @@ export function WelcomeScreen() {
   return (
     <Screen bar={bar} edges={[]} testID="welcome-screen">
       <View className="flex-1 bg-navy-900">
+        {/* Navy under the status bar, below the panel: Screen's backdrop strip follows `bar`, and
+            its swap must never show beside the panel's top edge, in either direction. */}
+        <View
+          pointerEvents="none"
+          className="absolute left-0 right-0 bg-navy-900"
+          style={{ top: -top, height: top }}
+          testID="welcome-bar-strip"
+        />
         {/* A plain flex-1 wrapper: the hero keeps the intro's geometry, and only dims and drifts. */}
         <Animated.View className="flex-1" style={heroStyle} testID="welcome-hero">
           <BrandHero
@@ -84,7 +93,13 @@ export function WelcomeScreen() {
           pointerEvents="none"
           style={[
             skirtStyle,
-            { position: "absolute", left: 0, right: 0, bottom: -skirtHeight, height: skirtHeight },
+            {
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: -skirtHeight,
+              height: skirtHeight + xl,
+            },
           ]}
           testID="welcome-actions-skirt"
         />

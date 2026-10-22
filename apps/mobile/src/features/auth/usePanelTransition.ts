@@ -75,13 +75,24 @@ export function usePanelTransition({ reduceMotion }: Params): PanelTransition {
     settleCheck.current = null;
   };
 
-  /** Back to rest: the panel lowers (if it rose) and the actions take taps again. */
-  const rest = () => {
-    clearSettleCheck();
+  const release = () => {
     busyRef.current = false;
     setBusy(false);
-    if (progress.value > 0)
-      progress.value = withTiming(0, { duration: panelRiseMs, easing: EASING });
+  };
+
+  /**
+   * Back to rest: the panel lowers (if it rose), and the actions take taps again once it is down,
+   * not while they are still invisible near the top of the screen.
+   */
+  const rest = () => {
+    clearSettleCheck();
+    if (progress.value <= 0) {
+      release();
+      return;
+    }
+    progress.value = withTiming(0, { duration: panelRiseMs, easing: EASING }, (finished) => {
+      if (finished) runOnJS(release)();
+    });
   };
 
   const navigate = (href: Href) => {
