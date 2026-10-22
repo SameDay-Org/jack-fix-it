@@ -1,9 +1,10 @@
 import "@/i18n";
 
-import { fireEvent, screen } from "@testing-library/react-native";
+import { act, fireEvent, screen } from "@testing-library/react-native";
 import { router } from "expo-router";
 
 import { useSession } from "@/api";
+import { tokens } from "@/theme";
 
 import { WelcomeScreen } from "../WelcomeScreen";
 import { renderInSafeArea, SIGNED_OUT } from "./helpers";
@@ -11,6 +12,8 @@ import { renderInSafeArea, SIGNED_OUT } from "./helpers";
 jest.mock("@/api", () => ({ useSession: jest.fn() }));
 jest.mock("expo-router", () => ({
   router: { push: jest.fn(), replace: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) },
+  useFocusEffect: jest.fn(),
+  useNavigation: jest.fn(() => ({ isFocused: () => false })),
 }));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
@@ -19,12 +22,15 @@ jest.mock(
 );
 
 const { accessToken: _a, accessTokenExpiresAt: _b, ...SESSION_SIGNED_OUT } = SIGNED_OUT;
+const { panelRiseMs } = tokens.motion;
 
 describe("WelcomeScreen", () => {
   beforeEach(() => {
+    jest.useFakeTimers();
     jest.mocked(useSession).mockReturnValue(SESSION_SIGNED_OUT);
     jest.mocked(router.push).mockClear();
   });
+  afterEach(() => jest.useRealTimers());
 
   it("hero copy: brand, tagline with one accent word, support line; two ways in and nothing else", async () => {
     await renderInSafeArea(<WelcomeScreen />);
@@ -45,14 +51,26 @@ describe("WelcomeScreen", () => {
     expect(screen.queryByTestId("welcome-actions-partial-cleanup")).toBeNull();
   });
 
-  it("Get started goes to the role choice and the account link to login", async () => {
+  // The panel rises first (usePanelTransition.test.tsx covers the motion); the push follows.
+  it("Get started goes to the role choice and the account link to login, each after the rise", async () => {
     await renderInSafeArea(<WelcomeScreen />);
 
-    await fireEvent.press(screen.getByRole("button", { name: "Get started" }));
-    expect(router.push).toHaveBeenLastCalledWith("/(auth)/role");
+    await act(async () => fireEvent.press(screen.getByRole("button", { name: "Get started" })));
+    await act(async () => jest.advanceTimersByTime(panelRiseMs * 1.5));
+    expect(router.push).toHaveBeenLastCalledWith({
+      pathname: "/(auth)/role",
+      params: { from: "welcome" },
+    });
 
-    await fireEvent.press(screen.getByRole("button", { name: "I already have an account" }));
-    expect(router.push).toHaveBeenLastCalledWith("/(auth)/login");
+    await renderInSafeArea(<WelcomeScreen />);
+    await act(async () =>
+      fireEvent.press(screen.getAllByRole("button", { name: "I already have an account" }).at(-1)!),
+    );
+    await act(async () => jest.advanceTimersByTime(panelRiseMs * 1.5));
+    expect(router.push).toHaveBeenLastCalledWith({
+      pathname: "/(auth)/login",
+      params: { from: "welcome" },
+    });
   });
 
   it("after a sign-out that could not clear the device, says so", async () => {
