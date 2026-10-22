@@ -76,7 +76,13 @@ export function ProgressRing({
     borderTopColor: ARC,
     borderRightColor: ARC,
   };
-  const clip: ViewStyle = { position: "absolute", top: 0, width: half, height: size, overflow: "hidden" };
+  const clip: ViewStyle = {
+    position: "absolute",
+    top: 0,
+    width: half,
+    height: size,
+    overflow: "hidden",
+  };
 
   return (
     <View

@@ -5,6 +5,7 @@ import { ScrollView, Text, View } from "react-native";
 
 import { FloatingBar } from "@/components/dev/FloatingBar";
 import { HeroSample } from "@/components/dev/HeroSample";
+import { MediaUploadSample } from "@/components/dev/MediaUploadSample";
 import {
   Avatar,
   Button,
@@ -163,6 +164,10 @@ function Gallery() {
               showToast({ message: "Could not reach the server. Try again.", tone: "danger" })
             }
           />
+        </Section>
+
+        <Section title="Media upload">
+          <MediaUploadSample />
         </Section>
 
         <Section title="Glass">

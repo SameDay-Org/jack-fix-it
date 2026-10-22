@@ -12,6 +12,8 @@ export { Input } from "./Input";
 export type { InputHandle, InputProps } from "./Input";
 export { PasswordInput } from "./PasswordInput";
 export type { PasswordInputProps } from "./PasswordInput";
+export { ProgressRing } from "./ProgressRing";
+export type { ProgressRingProps } from "./ProgressRing";
 export { Screen } from "./Screen";
 export type { ScreenProps, SystemBar } from "./Screen";
 export { sheetOptions } from "./sheet";
