@@ -64,9 +64,10 @@ from app.modules.requests.schemas import (
 from app.modules.service_areas.service import ServiceAreaService
 from app.modules.uploads.schemas import UploadPurpose
 from app.modules.uploads.service import owned_upload
+from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount
 from app.queue import JobQueue
-from app.redaction import redact_contacts
+from app.redaction import KnownValues, redact_text
 
 logger = logging.getLogger(__name__)
 
@@ -324,9 +325,6 @@ def _has_nul(value: JsonValue) -> bool:
 
 # What a pro sees before a job (#49): the work, the place coarsely, never the customer.
 OPEN_FOR_QUOTES: Final = frozenset({RequestStatus.FINDING_PRO, RequestStatus.QUOTE_READY})
-# Intake answers a customer cannot type freely: numbers, booleans and option values. Every
-# other answer, a text one or one whose question is unknown, is redacted (fail closed).
-_FIXED_ANSWER_TYPES: Final = frozenset({"integer", "boolean", "single_choice", "multi_choice"})
 
 
 @dataclass(frozen=True)
@@ -336,15 +334,17 @@ class RequestForPro:
     media either: stored photos and videos carry the customer's id in their keys and their
     original metadata (GPS), so pros get sanitized copies only, with #173.
 
-    The customer's free text is redacted (app.redaction): contact details in the description
-    and in text answers are masked, so a pro cannot reach the customer before payment. The
+    The customer's free text is redacted (app.redaction): their own email, phone and street are
+    masked first in any formatting, then every contact pattern, in the description and in every
+    string of the answers (whatever the question's current type: questions are editable, so it
+    proves nothing about an old answer). A pro cannot reach the customer before payment. The
     stored text is unchanged; the customer and staff still see it as written."""
 
     id: uuid.UUID
     public_code: str
     category_id: uuid.UUID | None
     description: str  # redacted
-    intake_answers: dict[str, JsonValue]  # text answers redacted
+    intake_answers: dict[str, JsonValue]  # every string redacted
     preferred_date: date | None
     area: AddressArea
     description_redacted: bool  # something was masked in the description
@@ -361,7 +361,7 @@ class ProRequestReader:
     def __init__(self, session: AsyncSession) -> None:
         self._requests = ServiceRequestRepository(session)
         self._addresses = AddressService(session)
-        self._categories = CategoryService(session)
+        self._users = UserService(session)
 
     @staticmethod
     def open_ids() -> Select[uuid.UUID]:
@@ -377,15 +377,19 @@ class ProRequestReader:
             r for r in await self._requests.get_many(request_ids) if r.status in OPEN_FOR_QUOTES
         ]
         areas = await self._addresses.areas([r.address_id for r in rows])
-        types = await self._categories.question_types(
-            {r.category_id for r in rows if r.category_id is not None}
-        )
+        # What each customer's own details are, read once per page, for the known-value pass.
+        streets = await self._addresses.street_lines([r.address_id for r in rows])
+        contacts = await self._users.contact_points([r.customer_id for r in rows])
         views: dict[uuid.UUID, RequestForPro] = {}
         for row in rows:
-            description = redact_contacts(row.description)
-            answers, answers_redacted = _redact_answers(
-                row.intake_answers, types.get(row.category_id) if row.category_id else None
+            contact = contacts.get(row.customer_id)
+            known = KnownValues(
+                emails=(contact.email,) if contact else (),
+                phones=(contact.phone,) if contact and contact.phone else (),
+                streets=streets.get(row.address_id, ()),
             )
+            description = redact_text(row.description, known)
+            answers, answers_redacted = _redact_answers(row.intake_answers, known)
             views[row.id] = RequestForPro(
                 id=row.id,
                 public_code=row.public_code,
@@ -401,29 +405,27 @@ class ProRequestReader:
 
 
 def _redact_answers(
-    answers: Mapping[str, JsonValue], types: Mapping[str, str] | None
+    answers: Mapping[str, JsonValue], known: KnownValues
 ) -> tuple[dict[str, JsonValue], bool]:
-    """The answers with contact details masked in every one a customer could type freely."""
+    """The answers with contact details masked in every string, at any depth. Numbers and
+    booleans pass; a short option value passes the redactor unchanged."""
     redacted: dict[str, JsonValue] = {}
     masked = False
     for key, value in answers.items():
-        if types is not None and types.get(key) in _FIXED_ANSWER_TYPES:
-            redacted[key] = value
-            continue
-        redacted[key], hit = _redact_value(value)
+        redacted[key], hit = _redact_value(value, known)
         masked = masked or hit
     return redacted, masked
 
 
-def _redact_value(value: JsonValue) -> tuple[JsonValue, bool]:
+def _redact_value(value: JsonValue, known: KnownValues) -> tuple[JsonValue, bool]:
     if isinstance(value, str):
-        result = redact_contacts(value)
+        result = redact_text(value, known)
         return result.text, result.redacted
     if isinstance(value, list):
-        items = [_redact_value(item) for item in value]
+        items = [_redact_value(item, known) for item in value]
         return [item for item, _ in items], any(hit for _, hit in items)
     if isinstance(value, dict):
-        entries = {key: _redact_value(item) for key, item in value.items()}
+        entries = {key: _redact_value(item, known) for key, item in value.items()}
         return (
             {key: item for key, (item, _) in entries.items()},
             any(hit for _, hit in entries.values()),

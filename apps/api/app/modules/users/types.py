@@ -20,6 +20,14 @@ class UserStatus(StrEnum):
 
 
 @dataclass(frozen=True)
+class ContactPoints:
+    """A user's email and phone. PII: only for masking them in text (#172), never logged."""
+
+    email: str
+    phone: str | None
+
+
+@dataclass(frozen=True)
 class UserAccount:
     id: uuid.UUID
     email: str
