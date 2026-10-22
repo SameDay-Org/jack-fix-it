@@ -97,7 +97,7 @@ function CodeEntry({ digits }: { digits: string }) {
             label={t("phone.verify")}
             size="lg"
             loading={entry.verifying}
-            disabled={entry.code.length < CODE_LENGTH}
+            disabled={entry.code.length < CODE_LENGTH || entry.resending}
             onPress={() => void entry.submit()}
             testID="phone-verify"
           />

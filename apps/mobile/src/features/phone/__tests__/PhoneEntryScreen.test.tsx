@@ -1,6 +1,6 @@
 import "@/i18n";
 
-import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { AccessibilityInfo } from "react-native";
 
@@ -178,5 +178,54 @@ describe("PhoneEntryScreen", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Skip for now" }));
     expect(router.dismissTo).toHaveBeenCalledWith("/");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("a response that arrives after the user left (#178 round 1)", () => {
+  it("a late 202 after Back never opens the code step or overwrites a later flow", async () => {
+    const answer = deferred<Response>();
+    fetchMock.mockReturnValue(answer.promise);
+    const { unmount } = await renderScreen(<PhoneEntryScreen />);
+    await fireEvent.changeText(field(), DIGITS);
+    await fireEvent.press(sendButton());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    await fireEvent.press(screen.getByRole("button", { name: "Back" }));
+    await unmount();
+    phoneFlowStore.setState({ pendingNumber: "3055550123" }); // a newer flow's number
+    await act(async () => answer.resolve(jsonResponse(202)));
+
+    expect(router.push).not.toHaveBeenCalled();
+    expect(phoneFlowStore.getState().pendingNumber).toBe("3055550123");
+    expect(announce).not.toHaveBeenCalled();
+  });
+
+  it("a late failure after leaving is not announced", async () => {
+    const answer = deferred<Response>();
+    fetchMock.mockReturnValue(answer.promise);
+    const { unmount } = await renderScreen(<PhoneEntryScreen />);
+    await fireEvent.changeText(field(), DIGITS);
+    await fireEvent.press(sendButton());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    await unmount();
+    await act(async () => answer.resolve(errorResponse(429, "rate_limited")));
+
+    expect(announce).not.toHaveBeenCalled();
+    expect(router.push).not.toHaveBeenCalled();
+  });
+
+  it("leaving cancels the request in flight", async () => {
+    const answer = deferred<Response>();
+    fetchMock.mockReturnValue(answer.promise);
+    const { unmount } = await renderScreen(<PhoneEntryScreen />);
+    await fireEvent.changeText(field(), DIGITS);
+    await fireEvent.press(sendButton());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    await unmount();
+
+    expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    await act(async () => answer.resolve(jsonResponse(202)));
   });
 });

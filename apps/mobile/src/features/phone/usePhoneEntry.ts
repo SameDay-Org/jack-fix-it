@@ -9,6 +9,7 @@ import { phoneConfig } from "./config";
 import { describePhoneFailure } from "./errors";
 import { startCodeStep } from "./phoneFlow";
 import { editNationalDigits, formatNational, isValidNational, toE164 } from "./phoneNumber";
+import { useUnmountSignal } from "./useUnmountSignal";
 
 export type PhoneEntry = {
   /** What the field shows: the national number formatted as typed. */
@@ -22,7 +23,8 @@ export type PhoneEntry = {
 
 /**
  * The phone step: a US number formatted as it is typed, checked on the device, sent as E.164. The
- * number is never logged; it leaves this hook only in the request and in the flow store.
+ * number is never logged; it leaves this hook only in the request and in the flow store. Leaving
+ * the screen cancels the request, and a late answer neither opens the code step nor says anything.
  */
 export function usePhoneEntry(onSent: () => void): PhoneEntry {
   const { t } = useTranslation();
@@ -30,6 +32,7 @@ export function usePhoneEntry(onSent: () => void): PhoneEntry {
   const [digits, setDigits] = useState("");
   const [error, setError] = useState<string | null>(null);
   const send = useSendCode();
+  const unmountSignal = useUnmountSignal();
   // `isPending` is render state; the ref closes the gap between two taps in the same turn.
   const inFlight = useRef(false);
 
@@ -50,12 +53,15 @@ export function usePhoneEntry(onSent: () => void): PhoneEntry {
       fail(t("phone.errors.invalidNumber"));
       return;
     }
+    const signal = unmountSignal();
     inFlight.current = true;
     try {
-      await send.mutateAsync(toE164(countryCode, digits));
+      await send.mutateAsync({ phone: toE164(countryCode, digits), signal });
+      if (signal.aborted) return; // the user left: this flow is over
       startCodeStep(digits);
       onSent();
     } catch (failure) {
+      if (signal.aborted) return;
       // The session ended meanwhile: the gate is taking the user to welcome, nothing to say here.
       if (!(failure instanceof SessionExpiredError)) fail(t(describePhoneFailure(failure)));
     } finally {

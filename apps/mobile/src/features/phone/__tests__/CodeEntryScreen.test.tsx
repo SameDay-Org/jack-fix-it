@@ -213,3 +213,97 @@ describe("CodeEntryScreen", () => {
     expect(phoneFlowStore.getState().pendingNumber).toBeNull();
   });
 });
+
+describe("a response that arrives after the user left, or alongside a resend (#178 round 1)", () => {
+  const passResendWait = () =>
+    act(async () => jest.advanceTimersByTime(phoneConfig.resendSeconds * 1000));
+  const verifyCalls = () => fetchMock.mock.calls.filter((call) => callPath(call) === VERIFY);
+
+  it("a late verify after leaving never navigates, toasts, announces or writes the session", async () => {
+    const answer = deferred<Response>();
+    fetchMock.mockReturnValue(answer.promise);
+    const { unmount } = await renderScreen(<CodeEntryScreen />);
+    await typeCode(CODE);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    await unmount(); // Android Back removes the screen even while a request is pending
+    await act(async () => answer.resolve(jsonResponse(200, VERIFIED)));
+
+    expect(router.dismissTo).not.toHaveBeenCalled();
+    expect(showToast).not.toHaveBeenCalled();
+    expect(announce).not.toHaveBeenCalled();
+    expect(sessionStore.getState().user?.phone_verified).toBe(false);
+  });
+
+  it("a late verify failure after leaving is not announced", async () => {
+    const answer = deferred<Response>();
+    fetchMock.mockReturnValue(answer.promise);
+    const { unmount } = await renderScreen(<CodeEntryScreen />);
+    await typeCode(CODE);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    await unmount();
+    await act(async () => answer.resolve(errorResponse(400, "invalid_code")));
+
+    expect(announce).not.toHaveBeenCalled();
+  });
+
+  it("a late resend after leaving shows no toast", async () => {
+    jest.useFakeTimers();
+    const answer = deferred<Response>();
+    fetchMock.mockReturnValue(answer.promise);
+    const { unmount } = await renderScreen(<CodeEntryScreen />);
+    await passResendWait();
+    await fireEvent.press(resendButton());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    await unmount();
+    await act(async () => answer.resolve(jsonResponse(202)));
+
+    expect(showToast).not.toHaveBeenCalled();
+    expect(announce).not.toHaveBeenCalled();
+  });
+
+  it("digits typed during a resend wait for it, then verify exactly once", async () => {
+    jest.useFakeTimers();
+    const resent = deferred<Response>();
+    fetchMock.mockImplementation((url) =>
+      String(url).endsWith(SEND) ? resent.promise : Promise.resolve(jsonResponse(200, VERIFIED)),
+    );
+    await renderScreen(<CodeEntryScreen />);
+    await passResendWait();
+    await fireEvent.press(resendButton());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    await typeCode(CODE);
+
+    // Held: no verify runs next to the resend, and the button cannot start one either.
+    expect(fetchMock.mock.calls.map(callPath)).toEqual([SEND]);
+    expect(codeField().props.value).toBe(CODE);
+    expect(screen.getByTestId("phone-verify")).toBeDisabled();
+
+    await act(async () => resent.resolve(jsonResponse(202)));
+    await waitFor(() => expect(verifyCalls()).toHaveLength(1));
+    expect(callBody(verifyCalls()[0])).toEqual({ phone: E164, code: CODE });
+    await waitFor(() => expect(router.dismissTo).toHaveBeenCalledTimes(1));
+    expect(verifyCalls()).toHaveLength(1);
+  });
+
+  it("a resend cannot start while a verify is in flight", async () => {
+    jest.useFakeTimers();
+    const verified = deferred<Response>();
+    fetchMock.mockImplementation((url) =>
+      String(url).endsWith(VERIFY) ? verified.promise : Promise.resolve(jsonResponse(202)),
+    );
+    await renderScreen(<CodeEntryScreen />);
+    await passResendWait();
+    await typeCode(CODE);
+    await waitFor(() => expect(verifyCalls()).toHaveLength(1));
+
+    expect(resendButton()).toBeDisabled();
+    await fireEvent.press(resendButton());
+    expect(fetchMock.mock.calls.map(callPath)).toEqual([VERIFY]);
+
+    await act(async () => verified.resolve(jsonResponse(200, VERIFIED)));
+  });
+});

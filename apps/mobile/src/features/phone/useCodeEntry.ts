@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AccessibilityInfo } from "react-native";
 
-import { ApiError, SessionExpiredError } from "@/api";
+import { ApiError, SessionExpiredError, setSessionUser } from "@/api";
 import { showToast } from "@/components/ui";
 
 import { useSendCode, useVerifyCode } from "./api";
@@ -10,6 +10,7 @@ import { CODE_LENGTH, phoneConfig } from "./config";
 import { describePhoneFailure } from "./errors";
 import { toE164 } from "./phoneNumber";
 import { useCountdown } from "./useCountdown";
+import { useUnmountSignal } from "./useUnmountSignal";
 
 export type CodeEntry = {
   code: string;
@@ -31,6 +32,11 @@ const INVALID_CODE = "invalid_code";
  * is complete, a resend that waits `phoneConfig.resendSeconds` between codes, and errors mapped to
  * catalog text and announced. A wrong code is cleared so the next one can be typed straight away.
  * Neither the number nor the code is ever logged.
+ *
+ * One operation at a time: while a code is checked, edits are ignored and resend waits; while a
+ * resend runs, digits can be typed but are held, and once it settles a complete code is checked,
+ * once. Leaving the screen cancels whatever is in flight, and a late answer neither navigates,
+ * toasts, announces nor writes the session.
  */
 export function useCodeEntry(digits: string, onVerified: () => void): CodeEntry {
   const { t } = useTranslation();
@@ -41,8 +47,15 @@ export function useCodeEntry(digits: string, onVerified: () => void): CodeEntry 
   const verify = useVerifyCode();
   const send = useSendCode();
   const countdown = useCountdown(resendSeconds);
+  const unmountSignal = useUnmountSignal();
   const inFlight = useRef(false);
   const resendInFlight = useRef(false);
+  // The code as typed, for the check that runs when a resend settles (state would be a render late).
+  const codeNow = useRef("");
+  const keepCode = (next: string) => {
+    codeNow.current = next;
+    setCodeState(next);
+  };
 
   const fail = (message: string) => {
     setError(message);
@@ -50,16 +63,20 @@ export function useCodeEntry(digits: string, onVerified: () => void): CodeEntry 
   };
 
   const check = async (candidate: string) => {
-    if (inFlight.current || candidate.length !== CODE_LENGTH) return;
+    if (inFlight.current || resendInFlight.current || candidate.length !== CODE_LENGTH) return;
+    const signal = unmountSignal();
     inFlight.current = true;
     try {
-      await verify.mutateAsync({ phone, code: candidate });
+      const user = await verify.mutateAsync({ phone, code: candidate, signal });
+      if (signal.aborted) return; // the user left: this flow is over
+      setSessionUser(user);
       showToast({ message: t("phone.verified"), tone: "success" });
       onVerified();
     } catch (failure) {
+      if (signal.aborted) return;
       // The session ended meanwhile: the gate is taking the user to welcome, nothing to say here.
       if (failure instanceof SessionExpiredError) return;
-      if (failure instanceof ApiError && failure.code === INVALID_CODE) setCodeState("");
+      if (failure instanceof ApiError && failure.code === INVALID_CODE) keepCode("");
       fail(t(describePhoneFailure(failure)));
     } finally {
       inFlight.current = false;
@@ -68,24 +85,31 @@ export function useCodeEntry(digits: string, onVerified: () => void): CodeEntry 
 
   const setCode = (next: string) => {
     if (inFlight.current) return; // the code being checked stays as it is
-    setCodeState(next);
+    keepCode(next);
     setError(null);
-    if (next.length === CODE_LENGTH) void check(next);
+    // During a resend the digits wait; the resend checks them once it settles.
+    if (next.length === CODE_LENGTH && !resendInFlight.current) void check(next);
   };
 
   const resend = async () => {
-    if (countdown.remaining > 0 || resendInFlight.current) return;
+    if (countdown.remaining > 0 || resendInFlight.current || inFlight.current) return;
+    const signal = unmountSignal();
     resendInFlight.current = true;
+    // A new code is on its way: the field starts empty for it.
+    keepCode("");
+    setError(null);
     try {
-      await send.mutateAsync(phone);
+      await send.mutateAsync({ phone, signal });
+      if (signal.aborted) return;
       countdown.restart();
-      setCodeState("");
-      setError(null);
       showToast({ message: t("phone.codeResent"), tone: "neutral" });
     } catch (failure) {
+      if (signal.aborted) return;
       if (!(failure instanceof SessionExpiredError)) fail(t(describePhoneFailure(failure)));
     } finally {
       resendInFlight.current = false;
+      // Digits typed while the resend ran were held: a complete code is checked now, once.
+      if (!signal.aborted && codeNow.current.length === CODE_LENGTH) void check(codeNow.current);
     }
   };
 
