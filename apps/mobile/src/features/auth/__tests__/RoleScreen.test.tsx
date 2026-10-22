@@ -2,12 +2,13 @@ import "@/i18n";
 
 import { act, fireEvent, screen } from "@testing-library/react-native";
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
-import { BackHandler, Platform } from "react-native";
+import { BackHandler } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
 
 import { moveAccessibilityFocus } from "@/components/ui";
 import { tokens } from "@/theme";
 
+import { panelHandoffStore } from "../panelHandoff";
 import { RoleScreen } from "../RoleScreen";
 import { renderInSafeArea } from "./helpers";
 
@@ -16,7 +17,7 @@ jest.mock("expo-router", () => ({
   useLocalSearchParams: jest.fn(() => ({})),
   // The focus effect (hardware back while focused) runs only where a test calls it.
   useFocusEffect: jest.fn(),
-  // The stack's events: `transitionEnd` tells the content its screen has appeared.
+  // The stack's events: `transitionStart` tells the content its screen is being shown.
   useNavigation: jest.fn(() => ({ addListener: jest.fn(() => jest.fn()) })),
 }));
 jest.mock("@/components/ui", () => ({
@@ -39,9 +40,12 @@ const pro = () => screen.getByRole("radio", { name: "I'm a pro" });
 const next = () => screen.getByRole("button", { name: "Continue" });
 
 const LAYOUT = { nativeEvent: { layout: { x: 0, y: 0, width: 320, height: 600 } } };
-type ContentStyle = { opacity: number; transform?: { translateY: number }[] };
-const contentStyle = () =>
-  (screen.getByTestId("role-content").props.jestAnimatedStyle as { value: ContentStyle }).value;
+type Animated = { opacity?: number; transform?: { translateY: number }[] };
+const animated = (testID: string): Animated =>
+  (screen.getByTestId(testID).props.jestAnimatedStyle as { value: Animated }).value;
+const rootOpacity = () => animated("role-root").opacity;
+const slide = () => animated("role-content").transform?.[0].translateY;
+const backdrop = () => screen.getByTestId("system-bar-backdrop").props.className as string;
 
 /** Runs the focus effect Role registered, as the navigator does on focus; returns its blur. */
 const focus = () => {
@@ -100,41 +104,124 @@ describe("RoleScreen", () => {
 
   describe("reached from Welcome's panel", () => {
     const { transitionMs } = tokens.motion;
+    let listeners: Record<string, (event: { data: { closing: boolean } }) => void>;
+    /** The stack shows the screen (`transitionStart` comes with the native will-appear). */
+    const appear = () => act(async () => listeners.transitionStart({ data: { closing: false } }));
+    const layOut = () =>
+      act(async () => fireEvent(screen.getByTestId("role-content"), "layout", LAYOUT));
+    const advance = (ms: number) => act(async () => jest.advanceTimersByTime(ms));
+    /** Ready and the panel settled: the content is in. */
+    const enterFully = async () => {
+      await layOut();
+      await appear();
+      await advance(transitionMs * 2);
+    };
+
     beforeEach(() => {
       jest.useFakeTimers();
       jest.mocked(useLocalSearchParams).mockReturnValue({ from: "welcome" });
+      panelHandoffStore.setState({ phase: "risen", bar: "light" });
+      listeners = {};
+      jest.mocked(useNavigation).mockReturnValue({
+        addListener: jest.fn((type: string, listener: (typeof listeners)[string]) => {
+          listeners[type] = listener;
+          return jest.fn();
+        }),
+      } as never);
     });
     afterEach(() => jest.useRealTimers());
 
-    it("content enters after the panel settles, then focus moves to the title", async () => {
+    it("enters once laid out, on screen and the panel risen; then focus moves to the title", async () => {
       jest.mocked(moveAccessibilityFocus).mockClear();
       await renderInSafeArea(<RoleScreen />);
-      expect(contentStyle().opacity).toBe(0); // the page the panel became is bare for a frame
-      await act(async () => fireEvent(screen.getByTestId("role-content"), "layout", LAYOUT));
+      expect(rootOpacity()).toBe(0); // see-through over the covered panel
 
-      await act(async () => jest.advanceTimersByTime(transitionMs / 2));
-      expect(contentStyle().opacity).toBeGreaterThan(0);
-      expect(contentStyle().opacity).toBeLessThan(1);
+      await layOut();
+      await appear();
+      await advance(transitionMs / 2);
+      expect(rootOpacity()).toBeGreaterThan(0);
+      expect(rootOpacity()).toBeLessThan(1);
+      expect(slide()).toBeGreaterThan(0); // and slides up into place
 
-      await act(async () => jest.advanceTimersByTime(transitionMs));
-      expect(contentStyle().opacity).toBe(1);
+      await advance(transitionMs);
+      expect(rootOpacity()).toBe(1);
+      expect(slide()).toBe(0);
       expect(moveAccessibilityFocus).toHaveBeenCalledTimes(1);
       expect(jest.mocked(moveAccessibilityFocus).mock.calls[0][0]).toBeTruthy(); // the title node
-      expect(screen.getByRole("header", { name: "How will you use Jack?" })).toBeTruthy();
     });
 
-    it("back fades the content out before it pops", async () => {
+    it("ready early (on screen while the panel still rises): waits, then enters as it settles", async () => {
+      panelHandoffStore.setState({ phase: "rising" });
       await renderInSafeArea(<RoleScreen />);
-      await act(async () => fireEvent(screen.getByTestId("role-content"), "layout", LAYOUT));
-      await act(async () => jest.advanceTimersByTime(transitionMs * 2));
+      await layOut();
+      await appear();
+      await advance(transitionMs * 3);
+      expect(rootOpacity()).toBe(0);
+
+      await act(async () => panelHandoffStore.setState({ phase: "risen" }));
+      await advance(transitionMs / 2);
+      expect(rootOpacity()).toBeGreaterThan(0);
+      await advance(transitionMs);
+      expect(rootOpacity()).toBe(1);
+    });
+
+    it("late (the panel settled first): the covered panel holds until it is shown and laid out", async () => {
+      await renderInSafeArea(<RoleScreen />);
+      await appear();
+      await advance(transitionMs * 3);
+      expect(rootOpacity()).toBe(0);
+
+      await layOut();
+      await advance(transitionMs * 2);
+      expect(rootOpacity()).toBe(1);
+    });
+
+    it("never fades before the native screen is shown: a layout alone (prefetched) waits", async () => {
+      await renderInSafeArea(<RoleScreen />);
+      await layOut();
+      await advance(transitionMs * 5);
+      expect(rootOpacity()).toBe(0);
+
+      await act(async () => listeners.transitionStart({ data: { closing: true } })); // not ours
+      await advance(transitionMs * 2);
+      expect(rootOpacity()).toBe(0);
+    });
+
+    it("until its content is in, the status bar follows the panel's; then the page's", async () => {
+      panelHandoffStore.setState({ phase: "rising", bar: "hero" });
+      await renderInSafeArea(<RoleScreen />);
+      await layOut();
+      await appear();
+      expect(backdrop()).toContain("bg-navy-900"); // the hero's light icons, mirrored
+
+      await act(async () => panelHandoffStore.setState({ bar: "light" })); // the panel covers it
+      expect(backdrop()).toContain("bg-gray-50");
+      await act(async () => panelHandoffStore.setState({ phase: "risen" }));
+      await advance(transitionMs * 2);
+      expect(backdrop()).toContain("bg-gray-50");
+    });
+
+    it("shown again (back from sign-up), it neither re-enters nor re-announces", async () => {
+      jest.mocked(moveAccessibilityFocus).mockClear();
+      await renderInSafeArea(<RoleScreen />);
+      await enterFully();
+      await appear();
+      await advance(transitionMs * 2);
+      expect(rootOpacity()).toBe(1);
+      expect(moveAccessibilityFocus).toHaveBeenCalledTimes(1);
+    });
+
+    it("back fades the screen out over the still-covered panel before it pops", async () => {
+      await renderInSafeArea(<RoleScreen />);
+      await enterFully();
 
       await act(async () => fireEvent.press(screen.getByRole("button", { name: "Back" })));
       expect(router.back).not.toHaveBeenCalled();
-      await act(async () => jest.advanceTimersByTime(transitionMs / 2));
-      expect(contentStyle().opacity).toBeLessThan(1);
+      await advance(transitionMs / 2);
+      expect(rootOpacity()).toBeLessThan(1);
 
-      await act(async () => jest.advanceTimersByTime(transitionMs));
-      expect(contentStyle().opacity).toBe(0);
+      await advance(transitionMs);
+      expect(rootOpacity()).toBe(0);
       expect(router.back).toHaveBeenCalledTimes(1);
     });
 
@@ -144,8 +231,7 @@ describe("RoleScreen", () => {
         .spyOn(BackHandler, "addEventListener")
         .mockImplementation(() => ({ remove }));
       await renderInSafeArea(<RoleScreen />);
-      await act(async () => fireEvent(screen.getByTestId("role-content"), "layout", LAYOUT));
-      await act(async () => jest.advanceTimersByTime(transitionMs * 2));
+      await enterFully();
 
       let blur: (() => void) | void = undefined;
       await act(async () => {
@@ -159,7 +245,7 @@ describe("RoleScreen", () => {
       });
       expect(handled).toBe(true);
       expect(router.back).not.toHaveBeenCalled();
-      await act(async () => jest.advanceTimersByTime(transitionMs * 1.5));
+      await advance(transitionMs * 1.5);
       expect(router.back).toHaveBeenCalledTimes(1);
 
       // Sign-up pushed on top blurs Role: its listener goes, so sign-up's back is sign-up's.
@@ -168,92 +254,39 @@ describe("RoleScreen", () => {
       add.mockRestore();
     });
 
-    it("the content takes no taps while it leaves", async () => {
+    it("takes no taps before its content is in, nor while it leaves", async () => {
       await renderInSafeArea(<RoleScreen />);
-      await act(async () => fireEvent(screen.getByTestId("role-content"), "layout", LAYOUT));
-      await act(async () => jest.advanceTimersByTime(transitionMs * 2));
-      expect(screen.getByTestId("role-content").props.pointerEvents).toBe("auto");
+      expect(screen.getByTestId("role-root").props.pointerEvents).toBe("none");
+      await enterFully();
+      expect(screen.getByTestId("role-root").props.pointerEvents).toBe("auto");
 
       await act(async () => fireEvent.press(screen.getByRole("button", { name: "Back" })));
-      expect(screen.getByTestId("role-content").props.pointerEvents).toBe("none");
+      expect(screen.getByTestId("role-root").props.pointerEvents).toBe("none");
       await act(async () => fireEvent.press(pro()));
       expect(pro().props.accessibilityState).toMatchObject({ checked: false });
     });
 
-    it("the content fades as one layer (Android composites a fading view's children apart)", async () => {
+    it("fades as one layer (Android composites a fading view's children apart)", async () => {
       await renderInSafeArea(<RoleScreen />);
-      expect(screen.getByTestId("role-content").props.needsOffscreenAlphaCompositing).toBe(true);
+      expect(screen.getByTestId("role-root").props.needsOffscreenAlphaCompositing).toBe(true);
     });
 
-    it("under Reduce Motion the content only fades: no slide", async () => {
+    it("under Reduce Motion it only fades, a crossfade over Welcome: no slide", async () => {
       jest.mocked(useReducedMotion).mockReturnValue(true);
       await renderInSafeArea(<RoleScreen />);
-      await act(async () => fireEvent(screen.getByTestId("role-content"), "layout", LAYOUT));
-      await act(async () => jest.advanceTimersByTime(transitionMs / 2));
-      expect(contentStyle().opacity).toBeGreaterThan(0);
-      expect(contentStyle().opacity).toBeLessThan(1);
-      expect(contentStyle().transform?.[0].translateY).toBe(0);
+      await layOut();
+      await appear();
+      await advance(transitionMs / 2);
+      expect(rootOpacity()).toBeGreaterThan(0);
+      expect(rootOpacity()).toBeLessThan(1);
+      expect(slide()).toBe(0);
     });
 
-    describe("on Android, where the route appears with no stack motion", () => {
-      let listeners: Record<string, (event: { data: { closing: boolean } }) => void>;
-      beforeEach(() => {
-        jest.replaceProperty(Platform, "OS", "android");
-        listeners = {};
-        jest.mocked(useNavigation).mockReturnValue({
-          addListener: jest.fn((type: string, listener: (typeof listeners)[string]) => {
-            listeners[type] = listener;
-            return jest.fn();
-          }),
-        } as never);
-      });
-      afterEach(() => jest.restoreAllMocks());
-
-      it("the content enters once the screen has appeared, not on its first layout", async () => {
-        await renderInSafeArea(<RoleScreen />);
-        await act(async () => fireEvent(screen.getByTestId("role-content"), "layout", LAYOUT));
-        await act(async () => jest.advanceTimersByTime(transitionMs));
-        expect(contentStyle().opacity).toBe(0); // still waiting: a fade now would run unseen
-
-        await act(async () => listeners.transitionEnd({ data: { closing: false } }));
-        await act(async () => jest.advanceTimersByTime(transitionMs / 2));
-        expect(contentStyle().opacity).toBeGreaterThan(0);
-        await act(async () => jest.advanceTimersByTime(transitionMs));
-        expect(contentStyle().opacity).toBe(1);
-      });
-
-      it("if the stack never reports it, the content enters anyway after one rise", async () => {
-        const { panelRiseMs } = tokens.motion;
-        await renderInSafeArea(<RoleScreen />);
-        await act(async () => fireEvent(screen.getByTestId("role-content"), "layout", LAYOUT));
-        await act(async () => jest.advanceTimersByTime(panelRiseMs - 1));
-        expect(contentStyle().opacity).toBe(0); // the guard has not fired yet
-        await act(async () => jest.advanceTimersByTime(1 + transitionMs * 2));
-        expect(contentStyle().opacity).toBe(1);
-      });
-
-      it("ignores a closing transition, and enters and focuses the title only once", async () => {
-        jest.mocked(moveAccessibilityFocus).mockClear();
-        await renderInSafeArea(<RoleScreen />);
-        await act(async () => fireEvent(screen.getByTestId("role-content"), "layout", LAYOUT));
-        await act(async () => listeners.transitionEnd({ data: { closing: true } }));
-        await act(async () => jest.advanceTimersByTime(transitionMs));
-        expect(contentStyle().opacity).toBe(0);
-
-        await act(async () => listeners.transitionEnd({ data: { closing: false } }));
-        await act(async () => jest.advanceTimersByTime(transitionMs * 2));
-        // Back from sign-up, Role appears again: nothing re-enters, nothing is announced twice.
-        await act(async () => listeners.transitionEnd({ data: { closing: false } }));
-        await act(async () => jest.advanceTimersByTime(transitionMs * 2));
-        expect(contentStyle().opacity).toBe(1);
-        expect(moveAccessibilityFocus).toHaveBeenCalledTimes(1);
-      });
-    });
-
-    it("reached any other way, the content is simply there", async () => {
+    it("reached any other way, the screen is simply there", async () => {
       jest.mocked(useLocalSearchParams).mockReturnValue({});
       await renderInSafeArea(<RoleScreen />);
-      expect(contentStyle().opacity).toBe(1);
+      expect(rootOpacity()).toBe(1);
+      expect(backdrop()).toContain("bg-gray-50");
       await act(async () => fireEvent.press(screen.getByRole("button", { name: "Back" })));
       expect(router.back).toHaveBeenCalledTimes(1); // at once
     });

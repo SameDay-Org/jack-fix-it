@@ -1,7 +1,7 @@
 import "@/i18n";
 
 import { act, fireEvent, screen } from "@testing-library/react-native";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, useNavigation } from "expo-router";
 import { AccessibilityInfo } from "react-native";
 
 import { ApiError, login } from "@/api";
@@ -9,6 +9,7 @@ import { moveAccessibilityFocus } from "@/components/ui";
 import { tokens } from "@/theme";
 
 import { LoginScreen } from "../LoginScreen";
+import { panelHandoffStore } from "../panelHandoff";
 import { renderInSafeArea } from "./helpers";
 
 jest.mock(
@@ -84,16 +85,31 @@ describe("LoginScreen", () => {
   describe("reached from Welcome's panel", () => {
     const { transitionMs } = tokens.motion;
     const LAYOUT = { nativeEvent: { layout: { x: 0, y: 0, width: 320, height: 600 } } };
-    const contentOpacity = () =>
+    const rootOpacity = () =>
       (
-        screen.getByTestId("login-screen-content").props.jestAnimatedStyle as {
+        screen.getByTestId("login-screen-root").props.jestAnimatedStyle as {
           value: { opacity: number };
         }
       ).value.opacity;
+    let showScreen: () => void;
+    /** Laid out and shown by the stack: with the panel risen, the content enters. */
+    const ready = async () => {
+      await act(async () =>
+        fireEvent(screen.getByTestId("login-screen-content"), "layout", LAYOUT),
+      );
+      await act(async () => showScreen());
+    };
     beforeEach(() => {
       jest.useFakeTimers();
       jest.mocked(useLocalSearchParams).mockReturnValue({ from: "welcome" });
       jest.mocked(router.back).mockClear();
+      panelHandoffStore.setState({ phase: "risen", bar: "light" });
+      jest.mocked(useNavigation).mockReturnValue({
+        addListener: jest.fn((_type: string, listener: (event: object) => void) => {
+          showScreen = () => listener({ data: { closing: false } });
+          return jest.fn();
+        }),
+      } as never);
     });
     afterEach(() => {
       jest.useRealTimers();
@@ -103,30 +119,33 @@ describe("LoginScreen", () => {
     it("content enters after the panel settles, then focus moves to the title", async () => {
       jest.mocked(moveAccessibilityFocus).mockClear();
       await renderInSafeArea(<LoginScreen />);
-      expect(contentOpacity()).toBe(0);
-      await act(async () =>
-        fireEvent(screen.getByTestId("login-screen-content"), "layout", LAYOUT),
-      );
+      expect(rootOpacity()).toBe(0);
+      await ready();
 
       await act(async () => jest.advanceTimersByTime(transitionMs * 1.5));
 
-      expect(contentOpacity()).toBe(1);
+      expect(rootOpacity()).toBe(1);
       expect(moveAccessibilityFocus).toHaveBeenCalledTimes(1);
       expect(jest.mocked(moveAccessibilityFocus).mock.calls[0][0]).toBeTruthy(); // the title node
       expect(screen.getByRole("header", { name: "Welcome back" })).toBeTruthy();
     });
 
+    it("the screen fades as one layer, and takes no taps before its content is in", async () => {
+      await renderInSafeArea(<LoginScreen />);
+      const root = screen.getByTestId("login-screen-root");
+      expect(root.props.needsOffscreenAlphaCompositing).toBe(true);
+      expect(root.props.pointerEvents).toBe("none");
+    });
+
     it("back fades the content out before it pops", async () => {
       await renderInSafeArea(<LoginScreen />);
-      await act(async () =>
-        fireEvent(screen.getByTestId("login-screen-content"), "layout", LAYOUT),
-      );
+      await ready();
       await act(async () => jest.advanceTimersByTime(transitionMs * 2));
 
       await act(async () => fireEvent.press(screen.getByRole("button", { name: "Back" })));
       expect(router.back).not.toHaveBeenCalled();
       await act(async () => jest.advanceTimersByTime(transitionMs * 1.5));
-      expect(contentOpacity()).toBe(0);
+      expect(rootOpacity()).toBe(0);
       expect(router.back).toHaveBeenCalledTimes(1);
     });
   });

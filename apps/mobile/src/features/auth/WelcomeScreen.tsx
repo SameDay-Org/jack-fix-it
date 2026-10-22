@@ -20,6 +20,10 @@ const { white, "gray-50": page } = tokens.colors;
 const { xl } = tokens.radius;
 const { slidePx, panelHeroDim } = tokens.motion;
 
+// The two ways in. `from: "welcome"` gives them the panel hand-off (see `risenFromWelcome`).
+const TO_ROLE = { pathname: "/(auth)/role", params: { from: "welcome" } } as const;
+const TO_LOGIN = { pathname: "/(auth)/login", params: { from: "welcome" } } as const;
+
 /**
  * The first screen: the brand hero (the navy hero with the tagline, one lime word, and the support
  * line) and a white bubble below with the two ways in. No other action lives here until its flow
@@ -38,7 +42,10 @@ export function WelcomeScreen() {
   const { cleanupPending } = useSession();
   const words = t("launch.words", { returnObjects: true });
   const reduceMotion = useReducedMotion();
-  const { progress, travel, bar, busy, setGeometry, go } = usePanelTransition({ reduceMotion });
+  const { progress, travel, bar, busy, setGeometry, go } = usePanelTransition({
+    reduceMotion,
+    destinations: [TO_ROLE, TO_LOGIN],
+  });
   const [skirtHeight, setSkirtHeight] = useState(0);
 
   const onPanelLayout = ({ nativeEvent }: LayoutChangeEvent) => {
@@ -105,8 +112,8 @@ export function WelcomeScreen() {
         />
         <WelcomeActions
           cleanupPending={cleanupPending}
-          onGetStarted={() => go({ pathname: "/(auth)/role", params: { from: "welcome" } })}
-          onLogin={() => go({ pathname: "/(auth)/login", params: { from: "welcome" } })}
+          onGetStarted={() => go(TO_ROLE)}
+          onLogin={() => go(TO_LOGIN)}
           style={panelStyle}
           actionsStyle={actionsStyle}
           busy={busy}

@@ -2,17 +2,25 @@ import "@/i18n";
 
 import { act, fireEvent, screen } from "@testing-library/react-native";
 import { router, useFocusEffect, useNavigation } from "expo-router";
+import { Platform } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
 
 import { useSession } from "@/api";
 import { tokens } from "@/theme";
 
+import { panelHandoffStore } from "../panelHandoff";
 import { WelcomeScreen } from "../WelcomeScreen";
 import { renderInSafeArea, SIGNED_OUT } from "./helpers";
 
 jest.mock("@/api", () => ({ useSession: jest.fn() }));
 jest.mock("expo-router", () => ({
-  router: { push: jest.fn(), replace: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) },
+  router: {
+    push: jest.fn(),
+    replace: jest.fn(),
+    back: jest.fn(),
+    prefetch: jest.fn(),
+    canGoBack: jest.fn(() => true),
+  },
   useFocusEffect: jest.fn(),
   useNavigation: jest.fn(),
 }));
@@ -230,5 +238,91 @@ describe("usePanelTransition (through WelcomeScreen)", () => {
 
     await advance(panelRiseMs * 2.5); // the settle check, then the lowering
     expect(panelY()).toBeCloseTo(0, 0);
+  });
+});
+
+describe("the hand-off to the destination", () => {
+  const { launchMaxMs } = tokens.motion;
+  const TO_ROLE = { pathname: "/(auth)/role", params: { from: "welcome" } };
+  const TO_LOGIN = { pathname: "/(auth)/login", params: { from: "welcome" } };
+
+  beforeEach(() => {
+    panelHandoffStore.setState({ phase: "idle", bar: "hero" });
+    jest.mocked(router.prefetch).mockClear();
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it("publishes the panel's phase and bar: rising, the bar flipping as it covers it, then risen", async () => {
+    await renderWelcome();
+    await act(async () => fireEvent.press(getStarted()));
+    expect(panelHandoffStore.getState()).toEqual({ phase: "rising", bar: "hero" });
+
+    await advance(panelRiseMs * 1.5);
+    expect(panelHandoffStore.getState()).toEqual({ phase: "risen", bar: "light" });
+
+    await refocus(); // back: the panel lowers
+    expect(panelHandoffStore.getState().phase).toBe("idle");
+  });
+
+  it("iOS: the destination is pushed when the panel has settled", async () => {
+    await renderWelcome();
+    await act(async () => fireEvent.press(getStarted()));
+    await advance(panelRiseMs / 2);
+    expect(router.push).not.toHaveBeenCalled();
+    await advance(panelRiseMs);
+    expect(router.push).toHaveBeenCalledTimes(1);
+  });
+
+  it("Android: the destination is pushed as the rise starts, to be on screen when it settles", async () => {
+    jest.replaceProperty(Platform, "OS", "android");
+    await renderWelcome();
+    await act(async () => fireEvent.press(getStarted()));
+    expect(router.push).toHaveBeenCalledTimes(1);
+    expect(router.push).toHaveBeenCalledWith(TO_ROLE);
+    expect(panelHandoffStore.getState().phase).toBe("rising");
+
+    await advance(panelRiseMs * 1.5);
+    expect(panelY()).toBeCloseTo(-TRAVEL, 0); // the rise still runs to the top
+    expect(panelHandoffStore.getState().phase).toBe("risen");
+    expect(router.push).toHaveBeenCalledTimes(1);
+  });
+
+  it("Android: a push that throws lowers the panel that already started", async () => {
+    jest.replaceProperty(Platform, "OS", "android");
+    jest.mocked(router.push).mockImplementation(() => {
+      throw new Error("no such route");
+    });
+    await renderWelcome();
+    await act(async () => fireEvent.press(getStarted()));
+    await advance(panelRiseMs * 2);
+    expect(panelY()).toBeCloseTo(0, 0);
+    expect(panelHandoffStore.getState().phase).toBe("idle");
+  });
+
+  it("Reduce Motion: no rise, the panel counts as risen at once", async () => {
+    jest.mocked(useReducedMotion).mockReturnValue(true);
+    await renderWelcome();
+    await act(async () => fireEvent.press(getStarted()));
+    expect(panelHandoffStore.getState()).toEqual({ phase: "risen", bar: "hero" });
+    expect(router.push).toHaveBeenCalledTimes(1);
+  });
+
+  it("prefetches both ways in: after the launch intro the first time, at once later, never while busy", async () => {
+    await renderWelcome();
+
+    await refocus(); // the first focus, under the launch intro
+    expect(router.prefetch).not.toHaveBeenCalled();
+    await advance(launchMaxMs);
+    expect(jest.mocked(router.prefetch).mock.calls).toEqual([[TO_ROLE], [TO_LOGIN]]);
+
+    jest.mocked(router.prefetch).mockClear();
+    await act(async () => fireEvent.press(getStarted()));
+    await advance(panelRiseMs * 1.5);
+    expect(router.prefetch).not.toHaveBeenCalled(); // busy: rising, then covered
+
+    await refocus(); // back: the panel lowers, then the screens are built again for the next tap
+    expect(router.prefetch).not.toHaveBeenCalled();
+    await advance(panelRiseMs * 1.5);
+    expect(jest.mocked(router.prefetch).mock.calls).toEqual([[TO_ROLE], [TO_LOGIN]]);
   });
 });

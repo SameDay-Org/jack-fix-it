@@ -20,11 +20,13 @@ rules apply.
   in `src/app` (`eslint.config.js`).
 - Welcome's panel (#148): the white bubble rises into Role or Login (`usePanelTransition`,
   `src/features/auth`): a UI-thread transform over `motion.panelRiseMs`, corners and color
-  easing into the page, the hero dimming by `motion.panelHeroDim`. Pushed with
-  `from: "welcome"`, those routes take `risenFromWelcome`'s stack animation (Android `none`, iOS
-  `fade`: Android's fade dims both pages; `fade` on both under Reduce Motion), and their content enters and leaves with
-  `useContentTransition` (focus lands on the title; hardware back only while focused). Reduce
-  Motion: crossfade only.
+  easing into the page, the hero dimming by `motion.panelHeroDim`. Welcome prefetches both
+  routes at rest; pushed with `from: "welcome"`, they take `risenFromWelcome`'s options (Android:
+  a transparent modal pushed as the rise starts, so Welcome keeps painting under it both ways;
+  iOS: `fade`, pushed as it ends). `useContentTransition` hands off through `panelHandoff`: the
+  screen fades in only once laid out, shown by the stack and the panel risen, mirrors the panel's
+  status bar until then, focuses the title, and fades out before back (hardware back only while
+  focused). Reduce Motion: a crossfade over Welcome.
 - Routing (D5.3, #33): `src/app/(auth)` holds welcome, role, sign-up and login; `src/app/(app)`
   holds the signed-in screens. `SessionGate` (`src/features/auth`) is the one gate: `restoring`
   keeps the native splash, `restoreFailure: "offline"` shows the offline screen, and

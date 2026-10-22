@@ -20,58 +20,64 @@ export function RoleScreen() {
   const [role, setRole] = useState<SignUpRole | null>(null);
   const titleRef = useRef<ComponentRef<typeof Text>>(null);
   const fromWelcome = from === "welcome";
-  const { style, enter, exit, busy } = useContentTransition({
+  const { rootStyle, contentStyle, enter, exit, bar, busy } = useContentTransition({
     animate: fromWelcome,
     reduceMotion: useReducedMotion(),
     titleRef,
   });
 
   return (
-    <Screen bar="light" testID="role-screen">
-      <Animated.View
-        className="flex-1"
-        style={style}
-        onLayout={enter}
-        needsOffscreenAlphaCompositing
-        pointerEvents={busy ? "none" : "auto"}
-        testID="role-content"
-      >
-        <ScrollView
-          contentContainerClassName="flex-grow gap-6 px-4 pb-4 pt-2"
-          keyboardShouldPersistTaps="handled"
+    <Animated.View
+      className="flex-1"
+      style={rootStyle}
+      needsOffscreenAlphaCompositing
+      pointerEvents={busy ? "none" : "auto"}
+      testID="role-root"
+    >
+      <Screen bar={bar} testID="role-screen">
+        <Animated.View
+          className="flex-1"
+          style={contentStyle}
+          onLayout={enter}
+          testID="role-content"
         >
-          <BackButton beforeBack={fromWelcome ? exit : undefined} />
-          <Text ref={titleRef} accessibilityRole="header" className="text-title-1 text-navy-900">
-            {t("role.title")}
-          </Text>
-          <View accessibilityRole="radiogroup" className="gap-3" testID="role-options">
-            <ChoiceCard
-              title={t("role.customerTitle")}
-              description={t("role.customerDescription")}
-              selected={role === "customer"}
-              onPress={() => setRole("customer")}
-              testID="role-customer"
+          <ScrollView
+            contentContainerClassName="flex-grow gap-6 px-4 pb-4 pt-2"
+            keyboardShouldPersistTaps="handled"
+          >
+            <BackButton beforeBack={fromWelcome ? exit : undefined} />
+            <Text ref={titleRef} accessibilityRole="header" className="text-title-1 text-navy-900">
+              {t("role.title")}
+            </Text>
+            <View accessibilityRole="radiogroup" className="gap-3" testID="role-options">
+              <ChoiceCard
+                title={t("role.customerTitle")}
+                description={t("role.customerDescription")}
+                selected={role === "customer"}
+                onPress={() => setRole("customer")}
+                testID="role-customer"
+              />
+              <ChoiceCard
+                title={t("role.proTitle")}
+                description={t("role.proDescription")}
+                selected={role === "pro"}
+                onPress={() => setRole("pro")}
+                testID="role-pro"
+              />
+            </View>
+            <View className="flex-1" />
+            <Button
+              label={t("common.continue")}
+              size="lg"
+              disabled={role === null}
+              onPress={() => {
+                if (role) router.push({ pathname: "/(auth)/sign-up", params: { role } });
+              }}
+              testID="role-continue"
             />
-            <ChoiceCard
-              title={t("role.proTitle")}
-              description={t("role.proDescription")}
-              selected={role === "pro"}
-              onPress={() => setRole("pro")}
-              testID="role-pro"
-            />
-          </View>
-          <View className="flex-1" />
-          <Button
-            label={t("common.continue")}
-            size="lg"
-            disabled={role === null}
-            onPress={() => {
-              if (role) router.push({ pathname: "/(auth)/sign-up", params: { role } });
-            }}
-            testID="role-continue"
-          />
-        </ScrollView>
-      </Animated.View>
-    </Screen>
+          </ScrollView>
+        </Animated.View>
+      </Screen>
+    </Animated.View>
   );
 }
