@@ -132,7 +132,13 @@ async def run(argv: Sequence[str], sessions: SessionFactory, settings: Settings,
             )
             if not _confirmed(args, io, interactive):
                 raise StaffUserError("Not confirmed; nothing changed.")
-            await users.set_role(account.id, role)
+            # Atomic: the role changes only if it is still the one validated above, so a
+            # promotion that landed meanwhile is never overwritten (never a silent demotion).
+            if not await users.set_role(account.id, role, expected=account.role):
+                raise StaffUserError(
+                    f"User {account.id} changed while this ran (no longer {account.role.value}); "
+                    "nothing changed. Run the command again to see its current role."
+                )
             await session.commit()
             print(f"User {account.id} now has role {role.value}.", file=io.out)
             return 0

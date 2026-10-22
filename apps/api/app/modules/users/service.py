@@ -62,9 +62,13 @@ class UserService:
         await savepoint.commit()
         return _to_account(user)
 
-    async def set_role(self, user_id: uuid.UUID, role: UserRole) -> None:
-        """For the staff CLI only (scripts/create_staff_user.py); the caller owns the commit."""
-        await self._users.update_role(user_id, role)
+    async def set_role(self, user_id: uuid.UUID, role: UserRole, *, expected: UserRole) -> bool:
+        """For the staff CLI only (scripts/create_staff_user.py); the caller owns the commit.
+
+        Compare-and-set in one UPDATE: the role changes only if it is still `expected`, the
+        role the caller validated. False when another change landed first; nothing is written.
+        """
+        return await self._users.update_role(user_id, role, expected=expected)
 
     async def update_password_hash(self, user_id: uuid.UUID, password_hash: str) -> None:
         await self._users.update_password_hash(user_id, password_hash)

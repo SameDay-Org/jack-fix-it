@@ -1,8 +1,10 @@
 """scripts/create_staff_user.py: staff accounts from the terminal (#155)."""
 
+import asyncio
 import io
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextvars import ContextVar
 
 import pytest
 from sqlalchemy import select
@@ -11,9 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.modules.auth import security
 from app.modules.users.models import User
-from app.modules.users.types import UserRole
+from app.modules.users.service import UserService
+from app.modules.users.types import UserCredentials, UserRole
 from scripts.create_staff_user import Io, run
-from tests.conftest import make_settings
+from tests.conftest import LOCK_WAIT_DEADLINE_SECONDS, Committed, make_settings
 
 EMAIL = "Staff.Person@Example.com"
 STORED_EMAIL = "staff.person@example.com"
@@ -276,3 +279,63 @@ async def test_password_never_in_argv_or_output(
         assert PASSWORD not in output
         assert user.password_hash not in output
         assert STORED_EMAIL not in output
+
+
+@pytest.mark.parametrize("initial_role", [UserRole.CUSTOMER, UserRole.PRO])
+async def test_stale_promotion_never_demotes(
+    committed: Committed,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    initial_role: UserRole,
+) -> None:
+    # Real commits: an agent promotion reads the old role, then waits; meanwhile another run
+    # makes the account admin. The first one must not write "agent" over "admin".
+    async with committed.sessions() as session:
+        user = User(email=committed.email, role=initial_role, password_hash="unchanged-hash")
+        session.add(user)
+        await session.commit()
+        user_id = user.id
+    slow: ContextVar[bool] = ContextVar("slow", default=False)
+    stale_read = asyncio.Event()
+    release = asyncio.Event()
+    lookup = UserService.get_credentials_by_email
+
+    async def held_after_read(
+        self: UserService, email: str, *, lock: bool = False
+    ) -> UserCredentials | None:
+        credentials = await lookup(self, email, lock=lock)
+        if slow.get():
+            stale_read.set()
+            async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+                await release.wait()
+        return credentials
+
+    monkeypatch.setattr(UserService, "get_credentials_by_email", held_after_read)
+
+    async def promote(role: str, terminal: Terminal) -> int:
+        argv = ["--email", committed.email, "--role", role, "--password-env", "UNUSED"]
+        return await run([*argv, "--promote", "--yes"], committed.sessions, settings, terminal.io)
+
+    async def stale_agent(terminal: Terminal) -> int:
+        slow.set(True)
+        return await promote("agent", terminal)
+
+    stale_terminal = Terminal()
+    task = asyncio.create_task(stale_agent(stale_terminal))
+    try:
+        async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+            await stale_read.wait()
+        assert await promote("admin", Terminal()) == 0
+        release.set()
+        stale_code = await task
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert stale_code == 1
+    assert "changed while this ran" in stale_terminal.text
+    async with committed.sessions() as reader:
+        row = (
+            await reader.execute(select(User.role, User.password_hash).where(User.id == user_id))
+        ).one()
+    assert tuple(row) == (UserRole.ADMIN, "unchanged-hash")
