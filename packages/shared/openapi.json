@@ -1574,6 +1574,16 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "not_found: the caller has no pro profile yet (GET /v1/pros/me creates it).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1584,7 +1594,7 @@
           "pros"
         ],
         "summary": "Open one of my opportunities",
-        "description": "The full request with presigned media URLs. The first open records that the pro saw\nit (viewed, viewed_at); opening it again changes nothing.",
+        "description": "The full request, without its photos for now (sanitized copies come with #173). The\nfirst open records that the pro saw it (viewed, viewed_at); opening it again changes\nnothing.",
         "operationId": "open_opportunity_v1_pros_me_opportunities__dispatch_id__get",
         "security": [
           {
@@ -2685,6 +2695,36 @@
         ],
         "title": "MultiChoiceQuestion"
       },
+      "OpportunityCategory": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Names",
+            "description": "Display name per locale, e.g. en and es."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "slug",
+          "names"
+        ],
+        "title": "OpportunityCategory",
+        "description": "The request's category, as this module shows it: its own strict model, not the shared\nCategorySummary, whose extra fields would not be refused."
+      },
       "OpportunityDetail": {
         "properties": {
           "dispatch_id": {
@@ -2699,7 +2739,7 @@
           "category": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/CategorySummary"
+                "$ref": "#/components/schemas/OpportunityCategory"
               },
               {
                 "type": "null"
@@ -2732,13 +2772,6 @@
             ],
             "title": "Preferred Date"
           },
-          "media": {
-            "items": {
-              "$ref": "#/components/schemas/MediaOut"
-            },
-            "type": "array",
-            "title": "Media"
-          },
           "sent_at": {
             "type": "string",
             "format": "date-time",
@@ -2768,7 +2801,6 @@
           "intake_answers",
           "location",
           "preferred_date",
-          "media",
           "sent_at",
           "viewed_at"
         ],
@@ -2839,7 +2871,7 @@
           "category": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/CategorySummary"
+                "$ref": "#/components/schemas/OpportunityCategory"
               },
               {
                 "type": "null"
@@ -2866,10 +2898,6 @@
             ],
             "title": "Preferred Date"
           },
-          "media_count": {
-            "type": "integer",
-            "title": "Media Count"
-          },
           "sent_at": {
             "type": "string",
             "format": "date-time",
@@ -2890,7 +2918,6 @@
           "description_excerpt",
           "location",
           "preferred_date",
-          "media_count",
           "sent_at",
           "viewed"
         ],

@@ -328,7 +328,9 @@ OPEN_FOR_QUOTES: Final = frozenset({RequestStatus.FINDING_PRO, RequestStatus.QUO
 @dataclass(frozen=True)
 class RequestForPro:
     """A request as a dispatched pro may see it: no customer, contact, street, coordinates,
-    attribution (utm) or BDC fields. The area is ZIP and city until the job is paid (#49)."""
+    attribution (utm) or BDC fields. The area is ZIP and city until the job is paid (#49). No
+    media either: stored photos and videos carry the customer's id in their keys and their
+    original metadata (GPS), so pros get sanitized copies only, with #173."""
 
     id: uuid.UUID
     public_code: str
@@ -337,17 +339,14 @@ class RequestForPro:
     intake_answers: dict[str, JsonValue]
     preferred_date: date | None
     area: AddressArea
-    media_count: int
 
 
 class ProRequestReader:
     """Read-only access for the pro opportunities (#49), through this module (ADR 0003)."""
 
-    def __init__(self, session: AsyncSession, storage: Storage, media_url_ttl_seconds: int) -> None:
+    def __init__(self, session: AsyncSession) -> None:
         self._requests = ServiceRequestRepository(session)
         self._addresses = AddressService(session)
-        self._storage = storage
-        self._ttl = media_url_ttl_seconds
 
     @staticmethod
     def open_ids() -> Select[uuid.UUID]:
@@ -362,7 +361,6 @@ class ProRequestReader:
             r for r in await self._requests.get_many(request_ids) if r.status in OPEN_FOR_QUOTES
         ]
         areas = await self._addresses.areas([r.address_id for r in rows])
-        counts = await self._requests.media_counts([r.id for r in rows])
         return {
             row.id: RequestForPro(
                 id=row.id,
@@ -372,19 +370,6 @@ class ProRequestReader:
                 intake_answers=row.intake_answers,
                 preferred_date=row.preferred_date,
                 area=areas[row.address_id],
-                media_count=counts.get(row.id, 0),
             )
             for row in rows
         }
-
-    async def media(self, request_id: uuid.UUID) -> list[MediaOut]:
-        """Presigned GET URLs for the request's photos and videos, valid for the settings TTL."""
-        expires_at = datetime.now(UTC) + timedelta(seconds=self._ttl)
-        return [
-            MediaOut(
-                kind=row.kind,
-                url=self._storage.presign_get(row.file_key, self._ttl),
-                expires_at=expires_at,
-            )
-            for row in await self._requests.media_of(request_id)
-        ]

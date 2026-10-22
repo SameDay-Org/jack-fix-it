@@ -5,10 +5,12 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 
 import httpx
 import pytest
 from fastapi import FastAPI
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +19,7 @@ from app.integrations.storage import get_storage
 from app.modules.addresses.models import Address
 from app.modules.categories.models import Category
 from app.modules.dispatch.models import DispatchStatus, RequestDispatch
+from app.modules.dispatch.schemas import OpportunityDetail, OpportunityPage, OpportunitySummary
 from app.modules.pros.models import ProProfile
 from app.modules.requests.models import (
     RequestMedia,
@@ -31,7 +34,6 @@ from app.observability import JsonFormatter
 from tests.conftest import make_settings
 from tests.test_requests_api import Caller, FakeStorage, make_caller
 
-MEDIA_TTL = 123  # not the default, so the tests prove it comes from settings
 EXCERPT = 12
 LIST_DEFAULT = 2
 LIST_MAX = 10
@@ -48,7 +50,6 @@ T0 = datetime(2026, 10, 22, 12, 0, tzinfo=UTC)
 @pytest.fixture
 def settings() -> Settings:
     return make_settings(
-        download_url_ttl_seconds=MEDIA_TTL,
         opportunity_excerpt_chars=EXCERPT,
         request_list_default_limit=LIST_DEFAULT,
         request_list_max_limit=LIST_MAX,
@@ -206,7 +207,6 @@ async def test_lists_only_callers_active_dispatches(
         "description_excerpt",
         "location",
         "preferred_date",
-        "media_count",
         "sent_at",
         "viewed",
     }
@@ -258,7 +258,7 @@ async def test_other_pros_or_unknown_or_closed_dispatch_404_same_body(
     assert (await dispatch_row(db_session, others)).status is DispatchStatus.SENT
 
 
-async def test_a_pro_without_a_profile_has_no_opportunities(
+async def test_a_pro_without_a_profile_gets_404_on_both_routes(
     db_client: httpx.AsyncClient, db_session: AsyncSession, world: World, storage: FakeStorage
 ) -> None:
     newcomer = await make_caller(db_session, UserRole.PRO)
@@ -267,9 +267,10 @@ async def test_a_pro_without_a_profile_has_no_opportunities(
     listing = await db_client.get(BASE, headers=newcomer.headers)
     detail = await db_client.get(f"{BASE}/{dispatch_id}", headers=newcomer.headers)
 
-    assert listing.status_code == 200
-    assert listing.json() == {"items": [], "next_cursor": None}
-    assert detail.status_code == 404
+    # The same status and body on both routes (AC5: 403 or 404, as the detail did already).
+    for response in (listing, detail):
+        assert response.status_code == 404
+        assert response.json() == NOT_FOUND
 
 
 @pytest.mark.parametrize("role", [UserRole.CUSTOMER, UserRole.AGENT, UserRole.ADMIN])
@@ -297,7 +298,21 @@ async def test_unauthenticated_401(db_client: httpx.AsyncClient, storage: FakeSt
 async def test_response_never_contains_customer_contact_or_street(
     db_client: httpx.AsyncClient, db_session: AsyncSession, world: World, storage: FakeStorage
 ) -> None:
-    dispatch_id = await dispatch(db_session, await make_request(db_session, world), world.me)
+    # Real media attached: their keys hold the customer's id (u/<customer id>/...), and pros get
+    # no media until #173 serves sanitized copies.
+    request_id = await make_request(db_session, world)
+    db_session.add_all(
+        RequestMedia(
+            request_id=request_id,
+            kind=kind,
+            file_key=f"u/{world.customer_id}/request_media/probe-{n}{extension}",
+        )
+        for n, (kind, extension) in enumerate(
+            [(RequestMediaKind.PHOTO, ".jpg"), (RequestMediaKind.VIDEO, ".mp4")]
+        )
+    )
+    await db_session.flush()
+    dispatch_id = await dispatch(db_session, request_id, world.me)
 
     listing = await listed(db_client, world.me)
     detail = await db_client.get(f"{BASE}/{dispatch_id}", headers=world.me.caller.headers)
@@ -313,7 +328,10 @@ async def test_response_never_contains_customer_contact_or_street(
             UTM,
             NEXT_ACTION,
             str(world.customer_id),
+            world.customer_id.hex,
             str(world.agent_id),
+            "request_media",
+            "probe-0",
         ):
             assert secret not in text, secret
         keys = _keys(response.json())
@@ -321,6 +339,9 @@ async def test_response_never_contains_customer_contact_or_street(
             assert key not in keys, key
         for key in ("assigned_agent_id", "next_action", "first_contact_at", "last_contact_at"):
             assert key not in keys, key
+        for key in ("media", "media_count", "url", "file_key"):
+            assert key not in keys, key
+    assert storage.gets == []  # nothing was signed for the pro
     assert set(detail.json()) == {
         "dispatch_id",
         "public_code",
@@ -329,7 +350,6 @@ async def test_response_never_contains_customer_contact_or_street(
         "intake_answers",
         "location",
         "preferred_date",
-        "media",
         "sent_at",
         "viewed_at",
     }
@@ -344,30 +364,69 @@ def _keys(value: object) -> set[str]:
     return set()
 
 
-async def test_media_urls_presigned_with_settings_ttl(
-    db_client: httpx.AsyncClient, db_session: AsyncSession, world: World, storage: FakeStorage
+CATEGORY = {"id": str(uuid.UUID(int=7)), "slug": "plumbing", "names": {"en": "Plumbing"}}
+LOCATION = {"zip_code": "32801", "city": "Orlando"}
+SUMMARY = {
+    "dispatch_id": str(uuid.UUID(int=8)),
+    "public_code": "JF-000124",
+    "category": CATEGORY,
+    "description_excerpt": "Water leaks",
+    "location": LOCATION,
+    "preferred_date": None,
+    "sent_at": T0.isoformat(),
+    "viewed": False,
+}
+DETAIL = {
+    "dispatch_id": str(uuid.UUID(int=8)),
+    "public_code": "JF-000124",
+    "category": CATEGORY,
+    "description": "Water leaks under the sink",
+    "intake_answers": {},
+    "location": LOCATION,
+    "preferred_date": None,
+    "sent_at": T0.isoformat(),
+    "viewed_at": None,
+}
+
+
+def _with_extra(document: dict[str, object], path: tuple[str | int, ...]) -> dict[str, object]:
+    """A deep copy of `document` with a `customer_id` added at `path` (a nested object)."""
+    copy: dict[str, Any] = json.loads(json.dumps(document))
+    target: Any = copy
+    for step in path:
+        target = target[step]
+    assert isinstance(target, dict)
+    target["customer_id"] = str(uuid.uuid4())
+    return copy
+
+
+@pytest.mark.parametrize(
+    ("model", "document", "path"),
+    [
+        (OpportunitySummary, SUMMARY, ()),
+        (OpportunitySummary, SUMMARY, ("category",)),
+        (OpportunitySummary, SUMMARY, ("location",)),
+        (OpportunityPage, {"items": [SUMMARY], "next_cursor": None}, ()),
+        (OpportunityPage, {"items": [SUMMARY], "next_cursor": None}, ("items", 0)),
+        (OpportunityPage, {"items": [SUMMARY], "next_cursor": None}, ("items", 0, "category")),
+        (OpportunityPage, {"items": [SUMMARY], "next_cursor": None}, ("items", 0, "location")),
+        (OpportunityDetail, DETAIL, ()),
+        (OpportunityDetail, DETAIL, ("category",)),
+        (OpportunityDetail, DETAIL, ("location",)),
+    ],
+    ids=lambda value: "/".join(map(str, value)) if isinstance(value, tuple) else None,
+)
+def test_nested_response_models_forbid_extra_fields(
+    model: type[BaseModel], document: dict[str, object], path: tuple[str | int, ...]
 ) -> None:
-    request_id = await make_request(db_session, world)
-    keys = [f"u/{world.customer_id}/request_media/{n}.jpg" for n in range(2)]
-    db_session.add_all(
-        RequestMedia(request_id=request_id, kind=RequestMediaKind.PHOTO, file_key=key)
-        for key in keys
-    )
-    await db_session.flush()
-    dispatch_id = await dispatch(db_session, request_id, world.me)
+    model.model_validate(document)  # the fixture itself is valid
 
-    before = datetime.now(UTC)
-    detail = (await db_client.get(f"{BASE}/{dispatch_id}", headers=world.me.caller.headers)).json()
-    [item] = (await listed(db_client, world.me)).json()["items"]
+    with pytest.raises(ValidationError) as refused:
+        model.model_validate(_with_extra(document, path))
 
-    assert item["media_count"] == 2
-    assert sorted(storage.gets) == sorted((key, MEDIA_TTL) for key in keys)
-    for media in detail["media"]:
-        assert media["kind"] == "photo"
-        assert media["url"].startswith("https://storage.example.invalid/get/")
-        expires_at = datetime.fromisoformat(media["expires_at"])
-        assert before + timedelta(seconds=MEDIA_TTL - 5) <= expires_at
-        assert expires_at <= datetime.now(UTC) + timedelta(seconds=MEDIA_TTL)
+    [error] = refused.value.errors()
+    assert error["type"] == "extra_forbidden"
+    assert error["loc"] == (*path, "customer_id")
 
 
 async def test_pagination_cursor_stable(
@@ -446,5 +505,5 @@ async def test_logs_carry_ids_only(
 def test_openapi_documents_both_routes(app: FastAPI) -> None:
     paths = app.openapi()["paths"]
 
-    assert {"200", "401", "403", "422"} <= set(paths[BASE]["get"]["responses"])
+    assert {"200", "401", "403", "404", "422"} <= set(paths[BASE]["get"]["responses"])
     assert {"200", "401", "403", "404"} <= set(paths[f"{BASE}/{{dispatch_id}}"]["get"]["responses"])

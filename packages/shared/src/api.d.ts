@@ -484,8 +484,9 @@ export interface paths {
         };
         /**
          * Open one of my opportunities
-         * @description The full request with presigned media URLs. The first open records that the pro saw
-         *     it (viewed, viewed_at); opening it again changes nothing.
+         * @description The full request, without its photos for now (sanitized copies come with #173). The
+         *     first open records that the pro saw it (viewed, viewed_at); opening it again changes
+         *     nothing.
          */
         get: operations["open_opportunity_v1_pros_me_opportunities__dispatch_id__get"];
         put?: never;
@@ -949,6 +950,27 @@ export interface components {
              */
             max_selected?: number | null;
         };
+        /**
+         * OpportunityCategory
+         * @description The request's category, as this module shows it: its own strict model, not the shared
+         *     CategorySummary, whose extra fields would not be refused.
+         */
+        OpportunityCategory: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Slug */
+            slug: string;
+            /**
+             * Names
+             * @description Display name per locale, e.g. en and es.
+             */
+            names: {
+                [key: string]: string;
+            };
+        };
         /** OpportunityDetail */
         OpportunityDetail: {
             /**
@@ -958,7 +980,7 @@ export interface components {
             dispatch_id: string;
             /** Public Code */
             public_code: string;
-            category: components["schemas"]["CategorySummary"] | null;
+            category: components["schemas"]["OpportunityCategory"] | null;
             /** Description */
             description: string;
             /** Intake Answers */
@@ -968,8 +990,6 @@ export interface components {
             location: components["schemas"]["OpportunityLocation"];
             /** Preferred Date */
             preferred_date: string | null;
-            /** Media */
-            media: components["schemas"]["MediaOut"][];
             /**
              * Sent At
              * Format: date-time
@@ -1014,7 +1034,7 @@ export interface components {
              * @description The request's code, e.g. JF-000124.
              */
             public_code: string;
-            category: components["schemas"]["CategorySummary"] | null;
+            category: components["schemas"]["OpportunityCategory"] | null;
             /**
              * Description Excerpt
              * @description The start of the customer's description.
@@ -1023,8 +1043,6 @@ export interface components {
             location: components["schemas"]["OpportunityLocation"];
             /** Preferred Date */
             preferred_date: string | null;
-            /** Media Count */
-            media_count: number;
             /**
              * Sent At
              * Format: date-time
@@ -2693,6 +2711,15 @@ export interface operations {
             };
             /** @description forbidden: only pros have opportunities. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: the caller has no pro profile yet (GET /v1/pros/me creates it). */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
