@@ -5,6 +5,7 @@ worker (send_push), with an ARQ job id derived from `message_id`: the same event
 sends once. The text is resolved in the worker, in the user's locale at send time.
 """
 
+import asyncio
 import re
 import uuid
 from collections.abc import Mapping
@@ -69,17 +70,27 @@ async def enqueue_push(
     body_key: str,
     params: Mapping[str, str],
     deep_link: str,
-) -> None:
-    """Queues a push to every device of the user. Raises InvalidPushError before queuing."""
+    timeout_seconds: float,
+) -> bool:
+    """Queues a push to every device of the user. Raises InvalidPushError before queuing.
+
+    False when a job for this message id is already queued or running: that job sends it.
+    Waits at most `timeout_seconds` (PUSH_SEND_TIMEOUT_SECONDS) on Redis, then raises
+    TimeoutError; a Redis failure raises RedisError or OSError. The caller decides whether the
+    push may be lost: call it after the commit of the change it announces, and log a failure
+    (ids only) rather than fail a request that already did its work.
+    """
     request = PushRequest(user_id, message_id, title_key, body_key, dict(params), deep_link)
     request.validate()
-    await queue.enqueue_job(
-        SEND_PUSH_TASK,
-        str(user_id),
-        message_id,
-        title_key,
-        body_key,
-        dict(params),
-        deep_link,
-        _job_id=request.job_id,
-    )
+    async with asyncio.timeout(timeout_seconds):
+        job = await queue.enqueue_job(
+            SEND_PUSH_TASK,
+            str(user_id),
+            message_id,
+            title_key,
+            body_key,
+            dict(params),
+            deep_link,
+            _job_id=request.job_id,
+        )
+    return job is not None

@@ -171,6 +171,9 @@ class Settings(BaseSettings):
     push_ticket_ttl_seconds: int = Field(default=86_400, gt=0)
     # Delay before a failed send is retried, times the attempt number.
     push_retry_backoff_seconds: int = Field(default=30, gt=0)
+    # Sends of one message to one device before a retryable error (a busy Expo, a rate limit)
+    # counts as final; also the most runs ARQ gives one send_push job.
+    push_max_attempts: int = Field(default=5, gt=0)
     push_max_devices_per_user: int = Field(default=10, gt=0)
 
     @field_validator("database_url")

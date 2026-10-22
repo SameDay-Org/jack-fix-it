@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +11,13 @@ from app.modules.devices.models import Device, DevicePlatform
 class DeviceRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def lock_owner(self, user_id: uuid.UUID) -> None:
+        """Transaction-scoped lock serializing the device changes of one user."""
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"devices:{user_id}"},
+        )
 
     async def upsert(
         self, user_id: uuid.UUID, token: str, platform: DevicePlatform, now: datetime

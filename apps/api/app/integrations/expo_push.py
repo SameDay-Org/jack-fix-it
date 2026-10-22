@@ -22,10 +22,20 @@ RECEIPTS_URL: Final = "https://exp.host/--/api/v2/push/getReceipts"
 SEND_BATCH: Final = 100
 RECEIPTS_BATCH: Final = 1000
 DEVICE_NOT_REGISTERED: Final = "DeviceNotRegistered"
+# Errors on a ticket or a receipt that a later send to the same device may get past.
+RETRYABLE_ERRORS: Final = frozenset({"MessageRateExceeded"})
 
 
 class PushUnavailableError(Exception):
-    """Expo could not be reached, timed out, or answered with an error or an unreadable body."""
+    """Expo could not be reached, timed out, or answered with an error or an unreadable body.
+
+    `tickets` are Expo's answers for the leading messages, from the batches it took before the
+    failure (empty when none): those were sent, so a retry must not send them again.
+    """
+
+    def __init__(self, tickets: Sequence["Ticket"] = ()) -> None:
+        super().__init__()
+        self.tickets = list(tickets)
 
 
 @dataclass(frozen=True)
@@ -52,7 +62,8 @@ class Receipt:
 
 class PushSender(Protocol):
     async def send(self, messages: Sequence[PushMessage]) -> list[Ticket]:
-        """One ticket per message, in order. Raises PushUnavailableError."""
+        """One ticket per message, in order. Raises PushUnavailableError, which carries the
+        tickets of the messages sent before the failure."""
         ...
 
     async def get_receipts(self, ticket_ids: Sequence[str]) -> dict[str, Receipt]:
@@ -90,10 +101,13 @@ class ExpoPushSender:
                 {"to": m.to, "title": m.title, "body": m.body, "data": m.data, "sound": "default"}
                 for m in batch
             ]
-            data = await self._post(SEND_URL, payload, "send")
+            try:
+                data = await self._post(SEND_URL, payload, "send")
+            except PushUnavailableError:
+                raise PushUnavailableError(tickets) from None  # logged by _post
             if not isinstance(data, list) or len(data) != len(batch):
                 logger.error("expo_push_unexpected_response", extra={"operation": "send"})
-                raise PushUnavailableError
+                raise PushUnavailableError(tickets)
             tickets.extend(_ticket(item) for item in data)
         return tickets
 

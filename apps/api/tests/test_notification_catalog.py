@@ -1,14 +1,17 @@
 """The push copy and the deep-link allowlist (D10.3, #54)."""
 
+import asyncio
 import re
 import uuid
 
 import pytest
+from arq.connections import ArqRedis
 
 from app.modules.notifications import catalog, deep_links
 from app.modules.notifications.service import InvalidPushError, PushRequest, enqueue_push
 
 REQUEST_PATH = f"/requests/{uuid.UUID(int=1)}"
+ENQUEUE_TIMEOUT = 0.05
 
 
 def test_en_es_parity() -> None:
@@ -117,7 +120,7 @@ async def test_enqueue_push_uses_a_job_id_per_message() -> None:
     queue = FakeQueue()
     user_id = uuid.uuid4()
 
-    for _ in range(2):
+    queued = [
         await enqueue_push(
             queue,
             user_id,
@@ -126,8 +129,12 @@ async def test_enqueue_push_uses_a_job_id_per_message() -> None:
             body_key="push.test.body",
             params={"public_code": "JF-1"},
             deep_link=REQUEST_PATH,
+            timeout_seconds=ENQUEUE_TIMEOUT,
         )
+        for _ in range(2)
+    ]
 
+    assert queued == [True, False]  # the second finds the first one waiting
     assert list(queue.jobs) == ["push:test:1"]
     function, args = queue.jobs["push:test:1"]
     assert function == "send_push"
@@ -146,6 +153,33 @@ async def test_enqueue_push_validates_before_queuing() -> None:
             body_key="push.test.body",
             params={"public_code": "JF-1"},
             deep_link="https://evil.example",
+            timeout_seconds=ENQUEUE_TIMEOUT,
         )
 
     assert queue.jobs == {}
+
+
+async def test_enqueue_push_gives_up_on_a_hung_redis(silent_redis_url: str) -> None:
+    hung = ArqRedis.from_url(silent_redis_url)  # like the API's pool: no socket timeout
+    task = asyncio.create_task(
+        enqueue_push(
+            hung,
+            uuid.uuid4(),
+            message_id="test:1",
+            title_key="push.test.title",
+            body_key="push.test.body",
+            params={"public_code": "JF-1"},
+            deep_link=REQUEST_PATH,
+            timeout_seconds=ENQUEUE_TIMEOUT,
+        )
+    )
+    try:
+        # Far past the deadline, yet short: without it the call would still be waiting.
+        done, _ = await asyncio.wait({task}, timeout=100 * ENQUEUE_TIMEOUT)
+        assert task in done, "enqueue_push is still waiting on a Redis that never answers"
+        with pytest.raises(TimeoutError):
+            task.result()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await hung.aclose()

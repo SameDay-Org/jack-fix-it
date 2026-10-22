@@ -1,23 +1,36 @@
 """The push worker tasks (D10.3, #54): a fake sender, real Redis under a unique prefix, and the
 rolled-back test session. No network."""
 
+import json
 import logging
 import uuid
+from collections import Counter
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 import pytest
 from arq import Retry
+from arq.worker import Function
 from redis.asyncio import Redis
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.integrations.expo_push import PushMessage, PushUnavailableError, Receipt, Ticket
+from app.integrations.expo_push import (
+    SEND_BATCH,
+    ExpoPushSender,
+    PushMessage,
+    PushUnavailableError,
+    Receipt,
+    Ticket,
+)
 from app.modules.devices.models import Device, DevicePlatform
+from app.modules.devices.service import DeviceService
 from app.modules.notifications.push_tasks import check_push_receipts, send_push
 from app.modules.notifications.service import InvalidPushError
 from app.modules.users.models import User
@@ -25,11 +38,16 @@ from app.modules.users.types import UserRole
 from app.observability import JsonFormatter
 from app.worker import WorkerSettings, every
 from tests.conftest import make_settings
+from tests.test_notification_catalog import FakeQueue
 
 DEEP_LINK = f"/requests/{uuid.UUID(int=7)}"
 PARAMS = {"public_code": "JF-000124"}
 BACKOFF = 7  # not the default (30)
 TICKET_TTL = 3_600
+MAX_ATTEMPTS = 3  # not the default (5)
+BUSY = "ExponentPushToken[busy]"
+OK = "ExponentPushToken[ok]"
+RATE_LIMITED = "MessageRateExceeded"
 
 
 @dataclass
@@ -70,7 +88,11 @@ def sessions_of(
 
 @pytest.fixture
 def settings() -> Settings:
-    return make_settings(push_retry_backoff_seconds=BACKOFF, push_ticket_ttl_seconds=TICKET_TTL)
+    return make_settings(
+        push_retry_backoff_seconds=BACKOFF,
+        push_ticket_ttl_seconds=TICKET_TTL,
+        push_max_attempts=MAX_ATTEMPTS,
+    )
 
 
 @pytest.fixture
@@ -97,8 +119,18 @@ def sender() -> FakeSender:
 
 
 @pytest.fixture
+def queue() -> FakeQueue:
+    return FakeQueue()
+
+
+@pytest.fixture
 def ctx(
-    settings: Settings, db_session: AsyncSession, redis: Redis, prefix: str, sender: FakeSender
+    settings: Settings,
+    db_session: AsyncSession,
+    redis: Redis,
+    prefix: str,
+    sender: FakeSender,
+    queue: FakeQueue,
 ) -> dict[str, Any]:
     return {
         "settings": settings,
@@ -106,6 +138,7 @@ def ctx(
         "push_sender": sender,
         "redis": redis,
         "push_key_prefix": prefix,
+        "push_queue": queue,
         "job_try": 1,
     }
 
@@ -149,6 +182,17 @@ async def device_tokens(session: AsyncSession) -> set[str]:
     return set((await session.scalars(statement)).all())
 
 
+async def ticket_ids(redis: Redis, prefix: str) -> set[str]:
+    """The tickets waiting for a receipt."""
+    keys = [key.decode() async for key in redis.scan_iter(match=f"{prefix}:ticket:*")]
+    return {key.removeprefix(f"{prefix}:ticket:") for key in keys}
+
+
+def sent_to(sender: FakeSender) -> Counter[str]:
+    """How many times each push token was sent the message."""
+    return Counter(message.to for batch in sender.sent for message in batch)
+
+
 async def test_send_resolves_locale_and_sends_to_all_devices(
     ctx: dict[str, Any], db_session: AsyncSession, sender: FakeSender, redis: Redis, prefix: str
 ) -> None:
@@ -167,7 +211,7 @@ async def test_send_resolves_locale_and_sends_to_all_devices(
     for token in ("ExponentPushToken[m1]", "ExponentPushToken[m2]"):
         stored = await redis.get(f"{prefix}:ticket:ticket-{token}")
         assert stored is not None
-        assert stored.decode() == str(devices[token])
+        assert stored.decode() == f"{devices[token]} test:1"
         assert 0 < await redis.ttl(f"{prefix}:ticket:ticket-{token}") <= TICKET_TTL
 
 
@@ -186,7 +230,8 @@ async def test_device_not_registered_ticket_deletes_device(
         "ExponentPushToken[busy]": "MessageRateExceeded",
     }
 
-    await push(ctx, user)
+    with pytest.raises(Retry):  # for the rate-limited device only
+        await push(ctx, user)
 
     assert await device_tokens(db_session) == {"ExponentPushToken[live]", "ExponentPushToken[busy]"}
     tickets = [key async for key in redis.scan_iter(match=f"{prefix}:ticket:*")]
@@ -253,13 +298,13 @@ async def test_failed_send_is_retried_with_backoff(
 ) -> None:
     user = await make_user(db_session, "en", "ExponentPushToken[a]")
     sender.fail = PushUnavailableError()
-    ctx["job_try"] = 3
+    ctx["job_try"] = 2  # MAX_ATTEMPTS is the last: no retry after it
 
     with pytest.raises(Retry) as retry:
         await push(ctx, user)
 
-    assert retry.value.defer_score == BACKOFF * 3 * 1000  # ARQ keeps milliseconds
-    # The claim was released, so the retry sends.
+    assert retry.value.defer_score == BACKOFF * 2 * 1000  # ARQ keeps milliseconds
+    # The device is still pending, so the retry sends.
     sender.fail = None
     await push(ctx, user)
     assert len(sender.sent) == 1
@@ -311,8 +356,196 @@ async def test_logs_carry_ids_and_counts_only(
 
 
 def test_worker_registers_the_tasks_and_the_cron() -> None:
-    assert send_push in WorkerSettings.functions
+    [task] = [f for f in WorkerSettings.functions if isinstance(f, Function)]
+    assert task.coroutine is send_push
+    assert task.name == "send_push"
+    assert task.keep_result_s == 0  # a resend can queue the message's job id again
+    assert task.max_tries == Settings().push_max_attempts
     [job] = WorkerSettings.cron_jobs
     assert job.coroutine is check_push_receipts
     assert every(15) == {0, 15, 30, 45}
     assert every(60) == {0}
+
+
+async def test_rate_limited_ticket_is_retried_for_that_device_only(
+    ctx: dict[str, Any], db_session: AsyncSession, sender: FakeSender, redis: Redis, prefix: str
+) -> None:
+    user = await make_user(db_session, "en", BUSY, OK)
+    sender.errors = {BUSY: RATE_LIMITED}
+
+    with pytest.raises(Retry) as retry:
+        await push(ctx, user)
+    assert retry.value.defer_score == BACKOFF * 1000
+    assert await ticket_ids(redis, prefix) == {f"ticket-{OK}"}
+
+    sender.errors = {}
+    ctx["job_try"] = 2
+    await push(ctx, user)
+
+    assert sent_to(sender) == {BUSY: 2, OK: 1}
+    assert await ticket_ids(redis, prefix) == {f"ticket-{BUSY}", f"ticket-{OK}"}
+
+
+async def test_rate_limited_receipt_resends_to_that_device_only(
+    ctx: dict[str, Any],
+    db_session: AsyncSession,
+    sender: FakeSender,
+    queue: FakeQueue,
+    redis: Redis,
+    prefix: str,
+) -> None:
+    user = await make_user(db_session, "en", BUSY, OK)
+    await push(ctx, user)
+    sender.receipts = {
+        f"ticket-{BUSY}": Receipt(ok=False, error=RATE_LIMITED),
+        f"ticket-{OK}": Receipt(ok=True),
+    }
+
+    await check_push_receipts(ctx)
+
+    assert queue.jobs == {
+        "push:test:1": (
+            "send_push",
+            (str(user.id), "test:1", "push.test.title", "push.test.body", PARAMS, DEEP_LINK),
+        )
+    }
+    assert await ticket_ids(redis, prefix) == set()
+    await push(ctx, user)  # the worker runs the queued job
+    assert sent_to(sender) == {BUSY: 2, OK: 1}
+    assert await ticket_ids(redis, prefix) == {f"ticket-{BUSY}"}
+
+
+async def test_receipt_resend_waits_while_a_run_of_the_message_exists(
+    ctx: dict[str, Any],
+    db_session: AsyncSession,
+    sender: FakeSender,
+    queue: FakeQueue,
+    redis: Redis,
+    prefix: str,
+) -> None:
+    user = await make_user(db_session, "en", BUSY)
+    await push(ctx, user)
+    sender.receipts = {f"ticket-{BUSY}": Receipt(ok=False, error=RATE_LIMITED)}
+    queue.jobs["push:test:1"] = ("send_push", ())  # queued or running; may have read already
+
+    await check_push_receipts(ctx)
+    assert await ticket_ids(redis, prefix) == {f"ticket-{BUSY}"}  # kept for the next check
+
+    del queue.jobs["push:test:1"]  # that run ended
+    await check_push_receipts(ctx)
+    assert list(queue.jobs) == ["push:test:1"]
+    assert await ticket_ids(redis, prefix) == set()
+
+
+async def test_retryable_device_fails_after_max_attempts(
+    ctx: dict[str, Any],
+    db_session: AsyncSession,
+    sender: FakeSender,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    user = await make_user(db_session, "en", BUSY)
+    sender.errors = {BUSY: RATE_LIMITED}
+    for attempt in range(1, MAX_ATTEMPTS):
+        ctx["job_try"] = attempt
+        with pytest.raises(Retry):
+            await push(ctx, user)
+
+    ctx["job_try"] = MAX_ATTEMPTS
+    with caplog.at_level(logging.WARNING):
+        await push(ctx, user)  # no Retry: the device is done with
+    await push(ctx, user)
+
+    assert sent_to(sender) == {BUSY: MAX_ATTEMPTS}
+    [failed] = [r for r in caplog.records if r.message == "push_recipient_failed"]
+    assert failed.__dict__["attempts"] == MAX_ATTEMPTS
+    assert failed.__dict__["error"] == RATE_LIMITED
+
+
+async def test_rate_limited_receipt_after_max_attempts_fails_the_device(
+    ctx: dict[str, Any],
+    db_session: AsyncSession,
+    sender: FakeSender,
+    queue: FakeQueue,
+    redis: Redis,
+    prefix: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    user = await make_user(db_session, "en", BUSY)
+    sender.errors = {BUSY: RATE_LIMITED}
+    for attempt in range(1, MAX_ATTEMPTS):
+        ctx["job_try"] = attempt
+        with pytest.raises(Retry):
+            await push(ctx, user)
+    sender.errors = {}
+    ctx["job_try"] = MAX_ATTEMPTS
+    await push(ctx, user)  # accepted on the last send it may have
+    sender.receipts = {f"ticket-{BUSY}": Receipt(ok=False, error=RATE_LIMITED)}
+
+    with caplog.at_level(logging.WARNING):
+        await check_push_receipts(ctx)
+
+    assert queue.jobs == {}
+    assert await ticket_ids(redis, prefix) == set()
+    assert [r for r in caplog.records if r.message == "push_recipient_failed"]
+
+
+async def test_failed_later_batch_never_resends_the_accepted_one(
+    ctx: dict[str, Any], settings: Settings, db_session: AsyncSession, redis: Redis, prefix: str
+) -> None:
+    sizes: list[int] = []
+    accepted: Counter[str] = Counter()
+
+    def expo(request: httpx.Request) -> httpx.Response:
+        batch = json.loads(request.content)
+        sizes.append(len(batch))
+        if len(sizes) == 2:
+            return httpx.Response(503, json={"errors": [{"message": "temporary outage"}]})
+        accepted.update(message["to"] for message in batch)
+        data = [{"status": "ok", "id": f"ticket-{message['to']}"} for message in batch]
+        return httpx.Response(200, json={"data": data})
+
+    tokens = [f"ExponentPushToken[batch-{n}]" for n in range(SEND_BATCH + 1)]
+    ctx["settings"] = settings.model_copy(update={"push_max_devices_per_user": len(tokens)})
+    ctx["push_sender"] = ExpoPushSender(
+        access_token=None, timeout_seconds=5, transport=httpx.MockTransport(expo)
+    )
+    user = await make_user(db_session, "en", *tokens)
+
+    with pytest.raises(Retry):
+        await push(ctx, user)
+    ctx["job_try"] = 2
+    await push(ctx, user)
+
+    assert sizes == [SEND_BATCH, 1, 1]
+    assert accepted == Counter(tokens)  # each device exactly once
+    assert await ticket_ids(redis, prefix) == {f"ticket-{token}" for token in tokens}
+
+
+async def test_cleanup_failure_keeps_tickets_and_retries_the_cleanup_only(
+    ctx: dict[str, Any],
+    db_session: AsyncSession,
+    sender: FakeSender,
+    redis: Redis,
+    prefix: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await make_user(db_session, "en", "ExponentPushToken[dead]", OK)
+    sender.errors = {"ExponentPushToken[dead]": "DeviceNotRegistered"}
+    forget = DeviceService.forget
+
+    async def database_down(self: DeviceService, device_id: uuid.UUID) -> None:
+        raise SQLAlchemyError("synthetic outage")
+
+    monkeypatch.setattr(DeviceService, "forget", database_down)
+    with pytest.raises(Retry):
+        await push(ctx, user)
+    assert await ticket_ids(redis, prefix) == {f"ticket-{OK}"}
+    assert await device_tokens(db_session) == {"ExponentPushToken[dead]", OK}
+
+    monkeypatch.setattr(DeviceService, "forget", forget)
+    ctx["job_try"] = 2
+    await push(ctx, user)
+
+    assert len(sender.sent) == 1  # the retry only deleted the device
+    assert await device_tokens(db_session) == {OK}
+    assert await ticket_ids(redis, prefix) == {f"ticket-{OK}"}

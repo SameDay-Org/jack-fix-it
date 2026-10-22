@@ -66,6 +66,26 @@ async def test_chunks_by_100() -> None:
     }
 
 
+@pytest.mark.parametrize("failure", ["status", "shape"])
+async def test_a_failed_batch_carries_the_tickets_of_the_batches_before_it(failure: str) -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 2 and failure == "status":
+            return httpx.Response(503, json={"errors": [{"message": "temporary outage"}]})
+        if calls == 2:
+            return httpx.Response(200, json={"data": []})
+        return ok_tickets(request)
+
+    with pytest.raises(PushUnavailableError) as error:
+        await sender(handler).send([message(n) for n in range(250)])
+
+    assert calls == 2  # the third batch was not tried
+    assert error.value.tickets == [Ticket(id=f"id-ExponentPushToken[t{n}]") for n in range(100)]
+
+
 async def test_ticket_errors_are_kept_in_order() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(

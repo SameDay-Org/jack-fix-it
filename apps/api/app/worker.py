@@ -6,7 +6,7 @@ arq app.worker.WorkerSettings --custom-log-dict app.observability.WORKER_LOG_CON
 import logging
 from typing import Any
 
-from arq import cron
+from arq import cron, func
 from arq.connections import RedisSettings
 
 from app.config import get_settings
@@ -49,7 +49,12 @@ def every(minutes: int) -> set[int]:
 
 
 class WorkerSettings:
-    functions = (ping, send_push)
+    functions = (
+        ping,
+        # No result is kept, so a receipt that asks for a resend can queue the message's job id
+        # again once the first run is over; the tries match the sends per device.
+        func(send_push, keep_result=0, max_tries=get_settings().push_max_attempts),
+    )
     cron_jobs = (
         cron(check_push_receipts, minute=every(get_settings().push_receipt_check_minutes)),
     )

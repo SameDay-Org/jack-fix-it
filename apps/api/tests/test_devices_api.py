@@ -1,5 +1,6 @@
 """PUT and DELETE /v1/devices: the app's Expo push tokens (D10.3, #54)."""
 
+import asyncio
 import json
 import logging
 import uuid
@@ -7,16 +8,24 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
-from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import delete, select, text, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
 from app.modules.auth import security
-from app.modules.devices.models import Device
+from app.modules.devices.models import Device, DevicePlatform
+from app.modules.devices.repository import DeviceRepository
 from app.modules.users.models import User
 from app.modules.users.types import UserRole
 from app.observability import JsonFormatter
-from tests.conftest import TEST_JWT_SECRET, make_settings
+from tests.conftest import (
+    LOCK_WAIT_DEADLINE_SECONDS,
+    TEST_JWT_SECRET,
+    Committed,
+    backend_pid,
+    make_settings,
+)
+from tests.test_auth_api import register as register_account
 
 MAX_DEVICES = 3  # not the default (10), so the tests prove it comes from settings
 VALIDATION_ERROR = {"error": {"code": "validation_error", "message": "The request is invalid."}}
@@ -213,3 +222,77 @@ async def test_no_tokens_in_logs(
         "device_id",
         "dropped",
     }
+
+
+async def wait_until_blocking(sessions: async_sessionmaker[AsyncSession], *, holder: int) -> None:
+    """Returns once Postgres reports some backend waiting on a lock `holder` holds."""
+    query = text(
+        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity"
+        " WHERE CAST(:holder AS integer) = ANY(pg_blocking_pids(pid)))"
+    )
+    async with sessions() as monitor:
+        try:
+            async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+                while not await monitor.scalar(query, {"holder": holder}):
+                    pass
+        except TimeoutError:
+            pytest.fail(
+                f"no backend waited on backend {holder} within {LOCK_WAIT_DEADLINE_SECONDS} s"
+            )
+
+
+async def test_concurrent_registrations_keep_the_cap(
+    committed: Committed, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    body = (await register_account(committed.client, email=committed.email)).json()
+    user_id = uuid.UUID(body["user"]["id"])
+    headers = {"Authorization": f"Bearer {body['access_token']}"}
+    seen = datetime.now(UTC) - timedelta(days=1)
+    async with committed.sessions() as session:
+        session.add_all(
+            Device(
+                user_id=user_id,
+                expo_push_token=token(f"old-{n}"),
+                platform=DevicePlatform.IOS,
+                last_seen_at=seen,
+            )
+            for n in range(MAX_DEVICES - 1)
+        )
+        await session.commit()
+    # The first registration to prune keeps its transaction open until Postgres reports another
+    # backend waiting on a lock it holds: the second registration, at the user's lock. Without
+    # that lock the second never waits; it prunes against a snapshot missing the first's device,
+    # and both commit one device over the cap.
+    holding = False
+    keep_most_recent = DeviceRepository.keep_most_recent
+
+    async def prune_then_hold(self: DeviceRepository, owner_id: uuid.UUID, keep: int) -> int:
+        nonlocal holding
+        dropped = await keep_most_recent(self, owner_id, keep)
+        if not holding:
+            holding = True
+            await wait_until_blocking(committed.sessions, holder=await backend_pid(self._session))
+        return dropped
+
+    monkeypatch.setattr(DeviceRepository, "keep_most_recent", prune_then_hold)
+    try:
+        responses = await asyncio.gather(
+            register(committed.client, headers, token("new-1"), "android"),
+            register(committed.client, headers, token("new-2"), "android"),
+        )
+
+        assert [r.status_code for r in responses] == [204, 204]
+        async with committed.sessions() as reader:
+            tokens = set(
+                (
+                    await reader.scalars(
+                        select(Device.expo_push_token).where(Device.user_id == user_id)
+                    )
+                ).all()
+            )
+            assert len(tokens) == MAX_DEVICES
+            assert {token("new-1"), token("new-2")} <= tokens
+    finally:
+        async with committed.sessions() as session:
+            await session.execute(delete(Device).where(Device.user_id == user_id))
+            await session.commit()

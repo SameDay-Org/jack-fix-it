@@ -32,7 +32,12 @@ class DeviceService:
 
     async def register(self, user: UserAccount, data: DeviceRegistration) -> None:
         """Upserts by token (a phone that changed hands moves to the caller), then keeps only
-        the caller's most recently seen devices, and commits."""
+        the caller's most recently seen devices, and commits.
+
+        The caller's lock makes two registrations take turns, so each prunes after seeing the
+        other's device and the cap holds. Only the caller's devices need it: moving a token
+        away from another user can only lower that user's count."""
+        await self._devices.lock_owner(user.id)
         device_id = await self._devices.upsert(
             user.id, data.expo_push_token, data.platform, datetime.now(UTC)
         )
