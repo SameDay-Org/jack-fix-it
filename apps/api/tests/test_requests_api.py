@@ -23,6 +23,7 @@ from app.modules.auth import security
 from app.modules.categories.models import Category
 from app.modules.requests.customer_status import REQUEST_CUSTOMER_STATUS
 from app.modules.requests.models import RequestMedia, RequestStatus, ServiceRequest
+from app.modules.service_areas.models import ServiceArea
 from app.modules.users.models import User
 from app.modules.users.types import UserRole
 from app.observability import JsonFormatter
@@ -86,7 +87,16 @@ def settings() -> Settings:
 
 
 @pytest.fixture
-def storage(app: FastAPI) -> FakeStorage:
+async def served(db_session: AsyncSession) -> None:
+    """The fixture address's ZIP as an active service area (#46): only served ZIPs create."""
+    db_session.add(
+        ServiceArea(region="Test Region", city="Orlando", state="FL", zip_code=ADDRESS["zip_code"])
+    )
+    await db_session.flush()
+
+
+@pytest.fixture
+def storage(app: FastAPI, served: None) -> FakeStorage:
     fake = FakeStorage()
     app.dependency_overrides[get_storage] = lambda: fake
     # A fixed clock, so no test straddles two rate-limit windows.
@@ -944,3 +954,44 @@ def test_openapi_documents_invalid_intake_answers(app: FastAPI) -> None:
     operation = app.openapi()["paths"]["/v1/requests"]["post"]
 
     assert "invalid_intake_answers" in operation["responses"]["422"]["description"]
+
+
+# Served ZIPs only (#46)
+
+ZIP_NOT_SERVED = {
+    "error": {"code": "zip_not_served", "message": "This ZIP code is not served yet."}
+}
+
+
+@pytest.mark.parametrize("zip_code", ["00009", "00008"], ids=["unknown", "inactive"])
+async def test_unserved_zip_is_422_and_writes_nothing(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage, zip_code: str
+) -> None:
+    # A fixture area turned off: served only while active.
+    db_session.add(
+        ServiceArea(
+            region="Test Region", city="Testville", state="ZZ", zip_code="00008", active=False
+        )
+    )
+    await db_session.flush()
+    ana = await make_caller(db_session)
+
+    response = await create(db_client, ana, address={**ADDRESS, "zip_code": zip_code})
+
+    assert response.status_code == 422
+    assert response.json() == ZIP_NOT_SERVED
+    assert await count_rows(db_session, ServiceRequest, ServiceRequest.customer_id, ana.id) == 0
+    assert await count_rows(db_session, Address, Address.user_id, ana.id) == 0
+
+
+async def test_served_zip_plus_4_is_created(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    ana = await make_caller(db_session)
+
+    response = await create(
+        db_client, ana, address={**ADDRESS, "zip_code": f"{ADDRESS['zip_code']}-4321"}
+    )
+
+    assert response.status_code == 201
+    assert response.json()["address"]["zip_code"] == f"{ADDRESS['zip_code']}-4321"
