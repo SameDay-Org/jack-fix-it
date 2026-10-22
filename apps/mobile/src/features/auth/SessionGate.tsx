@@ -4,6 +4,7 @@ import { Text } from "react-native";
 
 import { useSession } from "@/api";
 import { LaunchHero } from "@/features/launch";
+import { tokens } from "@/theme";
 
 import { OfflineScreen } from "./OfflineScreen";
 
@@ -35,7 +36,14 @@ export function SessionGate() {
 
   const signedIn = status === "signedIn";
   return (
-    <Stack screenOptions={{ headerShown: false }}>
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        // The frame under a group while its first screen mounts: navy, like the splash and the
+        // intro over it, so a quick handoff (Reduce Motion, a fast restore) never shows white.
+        contentStyle: { backgroundColor: tokens.colors["navy-900"] },
+      }}
+    >
       <Stack.Protected guard={signedIn} redirectTo="/(auth)/welcome">
         <Stack.Screen name="(app)" />
       </Stack.Protected>

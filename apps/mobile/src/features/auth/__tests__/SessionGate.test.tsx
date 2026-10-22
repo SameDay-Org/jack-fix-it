@@ -1,13 +1,14 @@
 import "@/i18n";
 
 import { act, fireEvent, renderRouter, screen } from "expo-router/testing-library";
-import { router } from "expo-router";
+import { router, Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { createElement } from "react";
+import { type ComponentProps, createElement } from "react";
 import { Text } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { logout, restoreSession, useSession } from "@/api";
+import { tokens } from "@/theme";
 
 import { user } from "../../../api/__tests__/helpers";
 import AppLayout from "../../../app/(app)/_layout";
@@ -25,6 +26,16 @@ jest.mock("expo-splash-screen", () => ({
   hideAsync: jest.fn(async () => true),
 }));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
+// Every stack renders through a recording wrapper, so a navigator's options can be asserted.
+jest.mock("expo-router", () => {
+  const actual = jest.requireActual<typeof import("expo-router")>("expo-router");
+  const { createElement: h } = jest.requireActual<typeof import("react")>("react");
+  const Stack = Object.assign(
+    jest.fn((props: ComponentProps<typeof actual.Stack>) => h(actual.Stack, props)),
+    { Screen: actual.Stack.Screen, Protected: actual.Stack.Protected },
+  );
+  return { ...actual, Stack };
+});
 jest.mock(
   "react-native-safe-area-context",
   () => jest.requireActual("react-native-safe-area-context/jest/mock").default,
@@ -49,6 +60,7 @@ beforeEach(() => {
   jest.mocked(SplashScreen.hideAsync).mockClear();
   jest.mocked(logout).mockClear();
   jest.mocked(restoreSession).mockClear();
+  jest.mocked(Stack).mockClear();
 });
 
 describe("session gate", () => {
@@ -62,6 +74,18 @@ describe("session gate", () => {
     expect(SplashScreen.hideAsync).not.toHaveBeenCalled(); // the launch intro owns the splash
     expect(screen.queryByText("welcome stub")).toBeNull();
     expect(screen.queryByText("app stub")).toBeNull();
+  });
+
+  it("paints navy under a group while its first screen mounts", async () => {
+    session({ status: "signedOut" });
+
+    await renderRouter(routes);
+
+    // The gate's stack is the one with a content style; the groups' own stacks keep the default.
+    const options = jest.mocked(Stack).mock.calls.map(([props]) => props.screenOptions);
+    expect(options).toContainEqual(
+      expect.objectContaining({ contentStyle: { backgroundColor: tokens.colors["navy-900"] } }),
+    );
   });
 
   it("signedOut routes to welcome", async () => {
