@@ -113,14 +113,17 @@ async def world(db_session: AsyncSession) -> World:
 
 
 async def make_request(
-    session: AsyncSession, world: World, status: RequestStatus = RequestStatus.FINDING_PRO
+    session: AsyncSession,
+    world: World,
+    status: RequestStatus = RequestStatus.FINDING_PRO,
+    description: str = DESCRIPTION,
 ) -> uuid.UUID:
     # Every field a pro must never see is filled, so a leak would show.
     request = ServiceRequest(
         customer_id=world.customer_id,
         address_id=world.address_id,
         category_id=world.category_id,
-        description=DESCRIPTION,
+        description=description,
         intake_answers={"rooms": 2},
         preferred_date=date(2026, 11, 3),
         origin=RequestOrigin.APP,
@@ -209,6 +212,7 @@ async def test_lists_only_callers_active_dispatches(
         "preferred_date",
         "sent_at",
         "viewed",
+        "text_redacted",
     }
 
 
@@ -352,6 +356,7 @@ async def test_response_never_contains_customer_contact_or_street(
         "preferred_date",
         "sent_at",
         "viewed_at",
+        "text_redacted",
     }
 
 
@@ -375,6 +380,7 @@ SUMMARY = {
     "preferred_date": None,
     "sent_at": T0.isoformat(),
     "viewed": False,
+    "text_redacted": False,
 }
 DETAIL = {
     "dispatch_id": str(uuid.UUID(int=8)),
@@ -386,6 +392,7 @@ DETAIL = {
     "preferred_date": None,
     "sent_at": T0.isoformat(),
     "viewed_at": None,
+    "text_redacted": False,
 }
 
 
@@ -427,6 +434,23 @@ def test_nested_response_models_forbid_extra_fields(
     [error] = refused.value.errors()
     assert error["type"] == "extra_forbidden"
     assert error["loc"] == (*path, "customer_id")
+
+
+async def test_excerpt_is_cut_from_the_redacted_description(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: World, storage: FakeStorage
+) -> None:
+    # The phone straddles the EXCERPT cut (12 characters): cutting first would leave
+    # "Call 5555550" (7 digits), which no longer looks like a phone, and leak it.
+    description = "Call 5555550199 about the leak"
+    assert description[:EXCERPT] == "Call 5555550"
+    request_id = await make_request(db_session, world, description=description)
+    await dispatch(db_session, request_id, world.me)
+
+    [item] = (await listed(db_client, world.me)).json()["items"]
+
+    assert item["description_excerpt"] == "Call ••• abo"
+    assert not any(char.isdigit() for char in item["description_excerpt"])
+    assert item["text_redacted"] is True
 
 
 async def test_pagination_cursor_stable(

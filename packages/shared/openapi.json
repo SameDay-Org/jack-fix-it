@@ -2789,6 +2789,11 @@
             ],
             "title": "Viewed At",
             "description": "When the pro first opened it."
+          },
+          "text_redacted": {
+            "type": "boolean",
+            "title": "Text Redacted",
+            "description": "True when contact details were masked in the description or the answers (shown as \u2022\u2022\u2022): the customer is reached through the app."
           }
         },
         "additionalProperties": false,
@@ -2802,7 +2807,8 @@
           "location",
           "preferred_date",
           "sent_at",
-          "viewed_at"
+          "viewed_at",
+          "text_redacted"
         ],
         "title": "OpportunityDetail"
       },
@@ -2907,6 +2913,11 @@
             "type": "boolean",
             "title": "Viewed",
             "description": "True once the pro has opened it."
+          },
+          "text_redacted": {
+            "type": "boolean",
+            "title": "Text Redacted",
+            "description": "True when contact details were masked in the description (shown as \u2022\u2022\u2022)."
           }
         },
         "additionalProperties": false,
@@ -2919,7 +2930,8 @@
           "location",
           "preferred_date",
           "sent_at",
-          "viewed"
+          "viewed",
+          "text_redacted"
         ],
         "title": "OpportunitySummary"
       },

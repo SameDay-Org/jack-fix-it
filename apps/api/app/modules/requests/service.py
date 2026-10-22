@@ -18,7 +18,7 @@ import binascii
 import json
 import logging
 import uuid
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Final
@@ -66,6 +66,7 @@ from app.modules.uploads.schemas import UploadPurpose
 from app.modules.uploads.service import owned_upload
 from app.modules.users.types import UserAccount
 from app.queue import JobQueue
+from app.redaction import redact_contacts
 
 logger = logging.getLogger(__name__)
 
@@ -323,6 +324,9 @@ def _has_nul(value: JsonValue) -> bool:
 
 # What a pro sees before a job (#49): the work, the place coarsely, never the customer.
 OPEN_FOR_QUOTES: Final = frozenset({RequestStatus.FINDING_PRO, RequestStatus.QUOTE_READY})
+# Intake answers a customer cannot type freely: numbers, booleans and option values. Every
+# other answer, a text one or one whose question is unknown, is redacted (fail closed).
+_FIXED_ANSWER_TYPES: Final = frozenset({"integer", "boolean", "single_choice", "multi_choice"})
 
 
 @dataclass(frozen=True)
@@ -330,15 +334,25 @@ class RequestForPro:
     """A request as a dispatched pro may see it: no customer, contact, street, coordinates,
     attribution (utm) or BDC fields. The area is ZIP and city until the job is paid (#49). No
     media either: stored photos and videos carry the customer's id in their keys and their
-    original metadata (GPS), so pros get sanitized copies only, with #173."""
+    original metadata (GPS), so pros get sanitized copies only, with #173.
+
+    The customer's free text is redacted (app.redaction): contact details in the description
+    and in text answers are masked, so a pro cannot reach the customer before payment. The
+    stored text is unchanged; the customer and staff still see it as written."""
 
     id: uuid.UUID
     public_code: str
     category_id: uuid.UUID | None
-    description: str
-    intake_answers: dict[str, JsonValue]
+    description: str  # redacted
+    intake_answers: dict[str, JsonValue]  # text answers redacted
     preferred_date: date | None
     area: AddressArea
+    description_redacted: bool  # something was masked in the description
+    answers_redacted: bool  # something was masked in the answers
+
+    @property
+    def text_redacted(self) -> bool:
+        return self.description_redacted or self.answers_redacted
 
 
 class ProRequestReader:
@@ -347,6 +361,7 @@ class ProRequestReader:
     def __init__(self, session: AsyncSession) -> None:
         self._requests = ServiceRequestRepository(session)
         self._addresses = AddressService(session)
+        self._categories = CategoryService(session)
 
     @staticmethod
     def open_ids() -> Select[uuid.UUID]:
@@ -356,20 +371,61 @@ class ProRequestReader:
     async def open_views(
         self, request_ids: Collection[uuid.UUID]
     ) -> dict[uuid.UUID, RequestForPro]:
-        """The requests among `request_ids` still open for quotes, as a pro may see them."""
+        """The requests among `request_ids` still open for quotes, as a pro may see them, with
+        contact details masked in the free text (see RequestForPro)."""
         rows = [
             r for r in await self._requests.get_many(request_ids) if r.status in OPEN_FOR_QUOTES
         ]
         areas = await self._addresses.areas([r.address_id for r in rows])
-        return {
-            row.id: RequestForPro(
+        types = await self._categories.question_types(
+            {r.category_id for r in rows if r.category_id is not None}
+        )
+        views: dict[uuid.UUID, RequestForPro] = {}
+        for row in rows:
+            description = redact_contacts(row.description)
+            answers, answers_redacted = _redact_answers(
+                row.intake_answers, types.get(row.category_id) if row.category_id else None
+            )
+            views[row.id] = RequestForPro(
                 id=row.id,
                 public_code=row.public_code,
                 category_id=row.category_id,
-                description=row.description,
-                intake_answers=row.intake_answers,
+                description=description.text,
+                intake_answers=answers,
                 preferred_date=row.preferred_date,
                 area=areas[row.address_id],
+                description_redacted=description.redacted,
+                answers_redacted=answers_redacted,
             )
-            for row in rows
-        }
+        return views
+
+
+def _redact_answers(
+    answers: Mapping[str, JsonValue], types: Mapping[str, str] | None
+) -> tuple[dict[str, JsonValue], bool]:
+    """The answers with contact details masked in every one a customer could type freely."""
+    redacted: dict[str, JsonValue] = {}
+    masked = False
+    for key, value in answers.items():
+        if types is not None and types.get(key) in _FIXED_ANSWER_TYPES:
+            redacted[key] = value
+            continue
+        redacted[key], hit = _redact_value(value)
+        masked = masked or hit
+    return redacted, masked
+
+
+def _redact_value(value: JsonValue) -> tuple[JsonValue, bool]:
+    if isinstance(value, str):
+        result = redact_contacts(value)
+        return result.text, result.redacted
+    if isinstance(value, list):
+        items = [_redact_value(item) for item in value]
+        return [item for item, _ in items], any(hit for _, hit in items)
+    if isinstance(value, dict):
+        entries = {key: _redact_value(item) for key, item in value.items()}
+        return (
+            {key: item for key, (item, _) in entries.items()},
+            any(hit for _, hit in entries.values()),
+        )
+    return value, False
