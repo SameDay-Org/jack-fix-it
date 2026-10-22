@@ -1037,25 +1037,6 @@ def _standalone(text: str, tokens: list[_KnownToken], index: int) -> bool:
     return not (after == "." and following not in _KNOWN_PLACE_WORDS)
 
 
-def _beside_house(gap: str) -> bool:
-    """Next to the house number: spaces and at most one ",", "-" or "/"; a period would end a
-    sentence ("Budget is 200. Main issue...")."""
-    return gap.strip() in ("", ",", "-", "/")
-
-
-def _inside_address(gap: str) -> bool:
-    """Between two words of the address: spaces and at most one ",", "-", "/" or "."."""
-    return gap.strip() in ("", ",", "-", "/", ".")
-
-
-def _continues_street(gap: str, left_key: str, right_is_name: bool) -> bool:
-    """A further word after the name: spaces, or an abbreviation's period ("St. NW",
-    "Mt. Vernon"); never a comma ("Evergreen Terrace, north wall") nor a sentence's period
-    ("Evergreen. S wall")."""
-    stripped = gap.strip()
-    return stripped == "" or (stripped == "." and (left_key in _KNOWN_PLACE_WORDS or right_is_name))
-
-
 def _house_end(
     text: str, tokens: list[_KnownToken], index: int, street: _KnownStreet
 ) -> int | None:
@@ -1142,15 +1123,15 @@ def _find_name(
 ) -> int | None:
     """The far piece of the first name word within _KNOWN_WINDOW pieces of the house number,
     in direction `step`, across directions, suffixes, unit words, number marks and function
-    words only (and, before the number, the street's other name words)."""
+    words only (and, before the number, the street's other name words). Whatever punctuation
+    stands between pieces is ignored (#172 round 7): for the customer's own address, masking a
+    few words more across a sentence costs little, and a leak costs much ("evergreen No. 742",
+    "evergreen ter. 742", "123 n.w., main"). The distance and the exact number are the limits."""
     passable = _KNOWN_SKIPPABLE | (frozenset(street.names) if step < 0 else frozenset())
     current = house
     for _ in range(_KNOWN_WINDOW):
         candidate = current + step
         if not 0 <= candidate < len(tokens):
-            return None
-        gap = _between(text, tokens, *sorted((current, candidate)))
-        if not (_beside_house(gap) if current == house else _inside_address(gap)):
             return None
         found = _word_at(text, tokens, candidate, street.names[0], step)
         if found is not None:
@@ -1183,10 +1164,6 @@ def _extend(
         candidate = current + step
         if not 0 <= candidate < len(tokens) or tokens[candidate].key not in words:
             break
-        left, right = sorted((current, candidate))
-        gap = _between(text, tokens, left, right)
-        if not _continues_street(gap, tokens[left].key, tokens[candidate].key in street.names):
-            break
         if tokens[candidate].key in _KNOWN_PLACE_WORDS and not _standalone(text, tokens, candidate):
             break
         current = candidate
@@ -1205,19 +1182,12 @@ def _whole_name_spans(
             if current is None or current + 1 >= len(tokens):
                 current = None
                 break
-            if not _inside_address(_between(text, tokens, current, current + 1)):
-                current = None
-                break
             current = _word_at(text, tokens, current + 1, name, 1)
         if current is None:
             continue
         if street.suffixes:
             nxt = current + 1
-            if not (
-                nxt < len(tokens)
-                and tokens[nxt].key in street.suffixes
-                and _continues_street(_between(text, tokens, current, nxt), "", False)
-            ):
+            if nxt >= len(tokens) or tokens[nxt].key not in street.suffixes:
                 continue
             current = nxt
         spans.append((tokens[index].start, tokens[_extend(text, tokens, current, 1, street)].end))
