@@ -15,11 +15,23 @@ export type ScreenProps = {
   edges?: Edge[];
   /** Extra classes for the page; the background is gray-50 under a light bar, navy-900 under a hero. */
   className?: string;
+  /**
+   * Whether this screen sets the status bar style (default true). The most recently mounted
+   * StatusBar wins, so a screen that is mounted but not shown (prefetched) passes false.
+   */
+  ownsStatusBar?: boolean;
+  /**
+   * The status bar style when it is not the page's own: a screen drawn over another one that still
+   * shows at the top (a panel rising into it) mirrors that one's icons until it covers the bar.
+   */
+  statusBar?: SystemBar;
   testID?: string;
 };
 
-// The one owner of the system bar. The root layout mounts no StatusBar, so the focused screen's
-// style wins, and the backdrop strip under the bar stays outside any scrolling content: the icons
+// The one owner of the system bar. The root layout mounts no StatusBar, and the most recently
+// mounted one wins: the screen on top, as long as screens built ahead of time (prefetched) set
+// `ownsStatusBar` false until they are shown. The backdrop strip under the bar stays outside any
+// scrolling content: the icons
 // keep their contrast while content passes underneath. The strip matches what sits below it, so a
 // navy hero reads as one sheet from the very top of the screen.
 // The page itself takes the bar's color too: under a hero bar everything is navy from the very
@@ -32,12 +44,20 @@ const BAR: Record<SystemBar, { style: StatusBarStyle; backdrop: string; page: st
 
 const DEFAULT_EDGES: Edge[] = ["bottom"];
 
-export function Screen({ bar, children, edges = DEFAULT_EDGES, className, testID }: ScreenProps) {
+export function Screen({
+  bar,
+  children,
+  edges = DEFAULT_EDGES,
+  className,
+  ownsStatusBar = true,
+  statusBar = bar,
+  testID,
+}: ScreenProps) {
   const { top } = useSafeAreaInsets();
 
   return (
     <SafeAreaView edges={edges} testID={testID} className={cx("flex-1", BAR[bar].page, className)}>
-      <StatusBar style={BAR[bar].style} />
+      {ownsStatusBar ? <StatusBar style={BAR[statusBar].style} /> : null}
       <View testID="system-bar-backdrop" className={BAR[bar].backdrop} style={{ height: top }} />
       {/* The content area ends above the padded edges, so an absolutely positioned child (a
           floating bar) sits above the bottom inset without reading it. */}

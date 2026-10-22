@@ -23,6 +23,7 @@ from app.modules.quotes.models import Quote
 from app.modules.requests.models import RequestOrigin, ServiceRequest
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole
+from tests.helpers import as_status_writer
 
 LOCK_WAIT_DEADLINE_SECONDS = 5
 NOW = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
@@ -82,7 +83,9 @@ async def committed_job(test_database_url: URL) -> AsyncIterator[CommittedJob]:
             platform_fee_cents=1_500,
             tax_cents=0,
         )
-        session.add(job)
+        async with as_status_writer(session):  # the database guard (#163)
+            session.add(job)
+            await session.flush()
         await session.commit()
         ids = (customer.id, pro_user.id, profile.id, address.id, request.id, quote.id, job.id)
         account = UserAccount(

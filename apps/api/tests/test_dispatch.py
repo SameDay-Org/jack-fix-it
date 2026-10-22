@@ -30,6 +30,7 @@ from app.modules.users.types import UserRole, UserStatus
 from app.observability import JsonFormatter
 from app.worker import WorkerSettings
 from tests.conftest import backend_pid, wait_until_blocked
+from tests.helpers import as_status_writer
 
 NOW = datetime.now(UTC)
 
@@ -152,8 +153,9 @@ async def make_request(
         origin=RequestOrigin.APP,
         status=status,
     )
-    session.add(request)
-    await session.flush()
+    async with as_status_writer(session):  # the database guard (#163)
+        session.add(request)
+        await session.flush()
     return request.id
 
 
