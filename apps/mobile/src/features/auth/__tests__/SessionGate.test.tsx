@@ -70,9 +70,9 @@ describe("session gate", () => {
     await renderRouter(routes);
 
     expect(screen.getByTestId("restoring-hero")).toBeTruthy();
-    expect(screen.getByText("fix", { includeHiddenElements: true }).props.className).toContain(
-      "text-green-500",
-    );
+    expect(
+      screen.getAllByText("fix", { includeHiddenElements: true })[0].props.className,
+    ).toContain("text-green-500");
     expect(SplashScreen.hideAsync).not.toHaveBeenCalled(); // the launch intro owns the splash
     expect(screen.queryByText("welcome stub")).toBeNull();
     expect(screen.queryByText("app stub")).toBeNull();

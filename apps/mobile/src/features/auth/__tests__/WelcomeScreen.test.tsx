@@ -35,9 +35,10 @@ describe("WelcomeScreen", () => {
       screen.getByRole("header", { name: "Whatever happens at home, we fix it." }),
     ).toBeTruthy();
     // The lime word is there for the eye and hidden from the reader (the header carries the sentence).
-    expect(screen.getByText("fix", { includeHiddenElements: true }).props.className).toContain(
-      "text-green-500",
-    );
+    // (The hero's measurement row holds a hidden "fix" too; the visible one comes first.)
+    expect(
+      screen.getAllByText("fix", { includeHiddenElements: true })[0].props.className,
+    ).toContain("text-green-500");
     expect(screen.getByText("Tell Jack. We'll take care of the rest.")).toBeTruthy();
     expect(screen.getAllByRole("button")).toHaveLength(2);
     expect(screen.queryByText(/Tell Jack What Happened/i)).toBeNull();
