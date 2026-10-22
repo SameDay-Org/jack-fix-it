@@ -8,6 +8,7 @@ from app.modules.categories.router import router as categories_router
 from app.modules.requests.router import router as requests_router
 from app.modules.service_areas.router import router as service_areas_router
 from app.modules.uploads.router import router as uploads_router
+from app.modules.waitlist.router import router as waitlist_router
 
 # Documents the real 422 body (the error contract) instead of FastAPI's default schema.
 v1_router = APIRouter(
@@ -19,3 +20,4 @@ v1_router.include_router(uploads_router)
 v1_router.include_router(requests_router)
 v1_router.include_router(categories_router)
 v1_router.include_router(service_areas_router)
+v1_router.include_router(waitlist_router)

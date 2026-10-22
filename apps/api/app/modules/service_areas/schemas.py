@@ -49,3 +49,17 @@ class CityOut(BaseModel):
 class RegionOut(BaseModel):
     region: str
     cities: list[CityOut]
+
+
+# A US ZIP as people type it: 5 digits, or ZIP+4. [0-9], not \d (non-ASCII digits).
+ZIP_INPUT_PATTERN = r"^[0-9]{5}(-[0-9]{4})?$"
+
+
+def zip5(zip_code: str) -> str:
+    """The 5-digit ZIP that service areas use: ZIP+4 is served when its ZIP is."""
+    return zip_code[:5]
+
+
+class ServedCheckOut(BaseModel):
+    zip_code: str = Field(description="The 5-digit ZIP that was checked.")
+    served: bool

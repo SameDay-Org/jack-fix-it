@@ -22,3 +22,11 @@ class InvalidMediaError(AppError):
     status_code = 422
     code = "invalid_media"
     message = "The attached media is invalid."
+
+
+class ZipNotServedError(AppError):
+    """The address is outside the active service areas: the client offers the waitlist."""
+
+    status_code = 422
+    code = "zip_not_served"
+    message = "This ZIP code is not served yet."

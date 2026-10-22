@@ -11,9 +11,11 @@ from app.modules.service_areas.repository import ServiceAreaRepository
 from app.modules.service_areas.schemas import (
     CityOut,
     RegionOut,
+    ServedCheckOut,
     ServiceAreaSeed,
     ServiceAreaSeedFile,
     ZipOut,
+    zip5,
 )
 
 SEED_DATA_PATH: Final = Path(__file__).with_name("seed_data.json")
@@ -59,3 +61,10 @@ class ServiceAreaService:
             )
             for region, cities in regions.items()
         ]
+
+    async def is_served(self, zip_code: str) -> bool:
+        """True when the ZIP (5 digits or ZIP+4) is an active service area."""
+        return await self._areas.is_active_zip(zip5(zip_code))
+
+    async def check(self, zip_code: str) -> ServedCheckOut:
+        return ServedCheckOut(zip_code=zip5(zip_code), served=await self.is_served(zip_code))

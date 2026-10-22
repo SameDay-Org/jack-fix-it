@@ -34,3 +34,9 @@ class ServiceAreaRepository:
             .order_by(ServiceArea.region, ServiceArea.city, ServiceArea.zip_code)
         )
         return list((await self._session.scalars(statement)).all())
+
+    async def is_active_zip(self, zip_code: str) -> bool:
+        statement = select(ServiceArea.id).where(
+            ServiceArea.zip_code == zip_code, ServiceArea.active
+        )
+        return (await self._session.scalar(statement)) is not None

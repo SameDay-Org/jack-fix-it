@@ -378,6 +378,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/service-areas/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Is this ZIP served?
+         * @description Whether an active service area covers the ZIP. ZIP+4 is checked by its 5-digit ZIP.
+         *     No sign-in needed: the request flow and the landing page ask before login, and offer the
+         *     waitlist when the answer is no.
+         */
+        get: operations["check_zip_v1_service_areas_check_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/waitlist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Join the waitlist of an unserved ZIP
+         * @description Asks to be told when the ZIP is served. No sign-in needed (a web visitor can join); with
+         *     a valid bearer token the entry is linked to the account. The contact is used only for that
+         *     notice. Joining twice with the same contact and ZIP refreshes the entry.
+         */
+        post: operations["join_waitlist_v1_waitlist_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -743,6 +787,16 @@ export interface components {
             /** Media Count */
             media_count: number;
         };
+        /** ServedCheckOut */
+        ServedCheckOut: {
+            /**
+             * Zip Code
+             * @description The 5-digit ZIP that was checked.
+             */
+            zip_code: string;
+            /** Served */
+            served: boolean;
+        };
         /**
          * UploadPurpose
          * @enum {string}
@@ -837,6 +891,35 @@ export interface components {
             /** Content */
             content?: string | null;
         };
+        /** WaitlistJoin */
+        WaitlistJoin: {
+            /**
+             * Zip Code
+             * @description 5 digits or ZIP+4.
+             */
+            zip_code: string;
+            /** Email */
+            email?: string | null;
+            /**
+             * Phone
+             * @description E.164, with an allowed country code.
+             */
+            phone?: string | null;
+            /** Category Id */
+            category_id?: string | null;
+            /**
+             * Locale
+             * @default en
+             * @enum {string}
+             */
+            locale: "en" | "es";
+            source: components["schemas"]["WaitlistSource"];
+        };
+        /**
+         * WaitlistSource
+         * @enum {string}
+         */
+        WaitlistSource: "app" | "web";
         /** ZipOut */
         ZipOut: {
             /**
@@ -1579,7 +1662,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description invalid_category: unknown or inactive category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency). */
+            /** @description zip_not_served: the address ZIP is outside the active service areas (offer the waitlist); invalid_category: unknown or inactive category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -1727,6 +1810,99 @@ export interface operations {
                 };
             };
             /** @description rate_limited: too many requests from this client; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    check_zip_v1_service_areas_check_get: {
+        parameters: {
+            query: {
+                zip: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServedCheckOut"];
+                };
+            };
+            /** @description validation_error: not a 5-digit ZIP or ZIP+4. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many requests from this client; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    join_waitlist_v1_waitlist_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WaitlistJoin"];
+            };
+        };
+        responses: {
+            /** @description On the list; the same answer whether the contact already was. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description zip_served: the ZIP is served; create a request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description invalid_category: unknown or inactive category; validation_error: no email or phone, a bad ZIP, email or phone, or a phone outside the allowed country codes. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many requests; retry later. */
             429: {
                 headers: {
                     /** @description Seconds until the current limit window ends. */

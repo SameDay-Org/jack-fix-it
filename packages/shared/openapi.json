@@ -847,7 +847,7 @@
             }
           },
           "422": {
-            "description": "invalid_category: unknown or inactive category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency).",
+            "description": "zip_not_served: the address ZIP is outside the active service areas (offer the waitlist); invalid_category: unknown or inactive category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1175,6 +1175,136 @@
             }
           }
         }
+      }
+    },
+    "/v1/service-areas/check": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Is this ZIP served?",
+        "description": "Whether an active service area covers the ZIP. ZIP+4 is checked by its 5-digit ZIP.\nNo sign-in needed: the request flow and the landing page ask before login, and offer the\nwaitlist when the answer is no.",
+        "operationId": "check_zip_v1_service_areas_check_get",
+        "parameters": [
+          {
+            "name": "zip",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{5}(-[0-9]{4})?$",
+              "title": "Zip"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServedCheckOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: not a 5-digit ZIP or ZIP+4.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many requests from this client; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/waitlist": {
+      "post": {
+        "tags": [
+          "waitlist"
+        ],
+        "summary": "Join the waitlist of an unserved ZIP",
+        "description": "Asks to be told when the ZIP is served. No sign-in needed (a web visitor can join); with\na valid bearer token the entry is linked to the account. The contact is used only for that\nnotice. Joining twice with the same contact and ZIP refreshes the entry.",
+        "operationId": "join_waitlist_v1_waitlist_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WaitlistJoin"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "On the list; the same answer whether the contact already was."
+          },
+          "422": {
+            "description": "invalid_category: unknown or inactive category; validation_error: no email or phone, a bad ZIP, email or phone, or a phone outside the allowed country codes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "zip_served: the ZIP is served; create a request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many requests; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     }
   },
@@ -1961,6 +2091,25 @@
         ],
         "title": "RequestSummary"
       },
+      "ServedCheckOut": {
+        "properties": {
+          "zip_code": {
+            "type": "string",
+            "title": "Zip Code",
+            "description": "The 5-digit ZIP that was checked."
+          },
+          "served": {
+            "type": "boolean",
+            "title": "Served"
+          }
+        },
+        "type": "object",
+        "required": [
+          "zip_code",
+          "served"
+        ],
+        "title": "ServedCheckOut"
+      },
       "UploadPurpose": {
         "type": "string",
         "enum": [
@@ -2172,6 +2321,80 @@
         "type": "object",
         "title": "UtmIn",
         "description": "Campaign attribution. Only these five keys; anything else is a 422."
+      },
+      "WaitlistJoin": {
+        "properties": {
+          "zip_code": {
+            "type": "string",
+            "pattern": "^[0-9]{5}(-[0-9]{4})?$",
+            "title": "Zip Code",
+            "description": "5 digits or ZIP+4."
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "email"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\+[1-9][0-9]{7,14}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone",
+            "description": "E.164, with an allowed country code."
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "en",
+              "es"
+            ],
+            "title": "Locale",
+            "default": "en"
+          },
+          "source": {
+            "$ref": "#/components/schemas/WaitlistSource"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "zip_code",
+          "source"
+        ],
+        "title": "WaitlistJoin"
+      },
+      "WaitlistSource": {
+        "type": "string",
+        "enum": [
+          "app",
+          "web"
+        ],
+        "title": "WaitlistSource"
       },
       "ZipOut": {
         "properties": {

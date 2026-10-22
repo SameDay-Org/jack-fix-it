@@ -147,6 +147,9 @@ class Settings(BaseSettings):
     request_create_window_seconds: int = Field(default=3_600, gt=0)
     request_list_default_limit: int = Field(default=20, gt=0)
     request_list_max_limit: int = Field(default=50, gt=0)
+    # Waitlist (D8.3, #46): joins per client IP and per contact (email or phone, hashed), per
+    # AUTH_RATE_LIMIT_WINDOW_SECONDS.
+    waitlist_join_limit: int = Field(default=5, gt=0)
 
     @field_validator("database_url")
     @classmethod
