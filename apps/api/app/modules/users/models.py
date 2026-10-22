@@ -26,3 +26,7 @@ class User(IdTimestampsMixin, Base):
     status: Mapped[UserStatus] = mapped_column(
         str_enum(UserStatus, "user_status"), server_default=UserStatus.ACTIVE.value, index=True
     )
+    # PII (#165): validated by users.names.PersonName; NULL for accounts created before names,
+    # and set together. Never logged.
+    first_name: Mapped[str | None] = mapped_column(String(60))
+    last_name: Mapped[str | None] = mapped_column(String(60))

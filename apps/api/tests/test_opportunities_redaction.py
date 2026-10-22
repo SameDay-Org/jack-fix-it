@@ -390,14 +390,18 @@ async def test_a_street_of_repeated_suffixes_does_not_slow_a_read(
         street="100 " + " ".join(["St"] * 25),
     )
 
-    started = time.perf_counter()
-    response = await db_client.get(
-        BASE if route == "list" else f"{BASE}/{dispatch_id}", headers=pro.caller.headers
-    )
-    elapsed = time.perf_counter() - started
+    # The best of three reads: a busy test machine can stall one read; backtracking would make
+    # every read take seconds.
+    timings = []
+    for _ in range(3):
+        started = time.perf_counter()
+        response = await db_client.get(
+            BASE if route == "list" else f"{BASE}/{dispatch_id}", headers=pro.caller.headers
+        )
+        timings.append(time.perf_counter() - started)
+        assert response.status_code == 200, response.text
 
-    assert response.status_code == 200, response.text
-    assert elapsed < 0.25, f"{source}/{route}: {elapsed:.3f} s"
+    assert min(timings) < 0.25, f"{source}/{route}: {min(timings):.3f} s"
 
 
 @pytest.mark.parametrize(("line", "text", "number", "name"), glue_sample(30))
