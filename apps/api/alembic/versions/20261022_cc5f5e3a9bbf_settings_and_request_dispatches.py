@@ -66,6 +66,8 @@ def upgrade() -> None:
         sa.Column("status", sa.String(length=32), server_default="sent", nullable=False),
         sa.Column("sent_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("responded_at", sa.DateTime(timezone=True), nullable=True),
+        # First opened by the pro (#49).
+        sa.Column("viewed_at", sa.DateTime(timezone=True), nullable=True),
         *_timestamps(),
         sa.CheckConstraint(
             f"status IN ({', '.join(repr(status) for status in DISPATCH_STATUSES)})",

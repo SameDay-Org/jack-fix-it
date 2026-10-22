@@ -4,12 +4,13 @@ The caller owns the transaction: these methods flush and never commit.
 """
 
 import uuid
+from collections.abc import Collection
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.addresses.models import Address
 from app.modules.addresses.repository import AddressRepository
-from app.modules.addresses.schemas import AddressIn, AddressOut
+from app.modules.addresses.schemas import AddressArea, AddressIn, AddressOut
 
 
 class AddressService:
@@ -29,6 +30,13 @@ class AddressService:
             )
         )
         return address.id
+
+    async def areas(self, address_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, AddressArea]:
+        """ZIP and city per address, without the street (pros before a job, #49)."""
+        return {
+            address_id: AddressArea(zip_code=zip_code, city=city)
+            for address_id, zip_code, city in await self._addresses.areas(address_ids)
+        }
 
     async def get(self, address_id: uuid.UUID) -> AddressOut | None:
         address = await self._addresses.get_by_id(address_id)

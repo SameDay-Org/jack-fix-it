@@ -160,6 +160,8 @@ class Settings(BaseSettings):
     request_create_window_seconds: int = Field(default=3_600, gt=0)
     request_list_default_limit: int = Field(default=20, gt=0)
     request_list_max_limit: int = Field(default=50, gt=0)
+    # Characters of a request's description shown in a pro's opportunities list (#49).
+    opportunity_excerpt_chars: int = Field(default=160, gt=0)
     # Pro profile (D6.1, #36): the most categories and service areas one pro may list.
     pro_max_categories: int = Field(default=5, gt=0)
     pro_max_service_areas: int = Field(default=50, gt=0)

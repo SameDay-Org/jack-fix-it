@@ -18,17 +18,21 @@ import binascii
 import json
 import logging
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from typing import Final
 
 from pydantic import JsonValue
 from redis.exceptions import RedisError
+from sqlalchemy import Select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.errors import NotFoundError
 from app.integrations.storage import Storage
+from app.modules.addresses.schemas import AddressArea
 from app.modules.addresses.service import AddressService
 from app.modules.auth.permissions import ensure_owner
 from app.modules.categories.service import CategoryService
@@ -43,6 +47,7 @@ from app.modules.requests.models import (
     RequestMedia,
     RequestMediaKind,
     RequestOrigin,
+    RequestStatus,
     ServiceRequest,
 )
 from app.modules.requests.repository import ServiceRequestRepository
@@ -277,3 +282,72 @@ def _has_nul(value: JsonValue) -> bool:
     if isinstance(value, list):
         return any(_has_nul(item) for item in value)
     return False
+
+
+# What a pro sees before a job (#49): the work, the place coarsely, never the customer.
+OPEN_FOR_QUOTES: Final = frozenset({RequestStatus.FINDING_PRO, RequestStatus.QUOTE_READY})
+
+
+@dataclass(frozen=True)
+class RequestForPro:
+    """A request as a dispatched pro may see it: no customer, contact, street, coordinates,
+    attribution (utm) or BDC fields. The area is ZIP and city until Cesar decides (#49)."""
+
+    id: uuid.UUID
+    public_code: str
+    category_id: uuid.UUID | None
+    description: str
+    intake_answers: dict[str, JsonValue]
+    preferred_date: date | None
+    area: AddressArea
+    media_count: int
+
+
+class ProRequestReader:
+    """Read-only access for the pro opportunities (#49), through this module (ADR 0003)."""
+
+    def __init__(self, session: AsyncSession, storage: Storage, media_url_ttl_seconds: int) -> None:
+        self._requests = ServiceRequestRepository(session)
+        self._addresses = AddressService(session)
+        self._storage = storage
+        self._ttl = media_url_ttl_seconds
+
+    @staticmethod
+    def open_ids() -> Select[uuid.UUID]:
+        """The requests pros can still quote on (finding_pro, quote_ready), as a subquery."""
+        return ServiceRequestRepository.ids_with_status(OPEN_FOR_QUOTES)
+
+    async def open_views(
+        self, request_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, RequestForPro]:
+        """The requests among `request_ids` still open for quotes, as a pro may see them."""
+        rows = [
+            r for r in await self._requests.get_many(request_ids) if r.status in OPEN_FOR_QUOTES
+        ]
+        areas = await self._addresses.areas([r.address_id for r in rows])
+        counts = await self._requests.media_counts([r.id for r in rows])
+        return {
+            row.id: RequestForPro(
+                id=row.id,
+                public_code=row.public_code,
+                category_id=row.category_id,
+                description=row.description,
+                intake_answers=row.intake_answers,
+                preferred_date=row.preferred_date,
+                area=areas[row.address_id],
+                media_count=counts.get(row.id, 0),
+            )
+            for row in rows
+        }
+
+    async def media(self, request_id: uuid.UUID) -> list[MediaOut]:
+        """Presigned GET URLs for the request's photos and videos, valid for the settings TTL."""
+        expires_at = datetime.now(UTC) + timedelta(seconds=self._ttl)
+        return [
+            MediaOut(
+                kind=row.kind,
+                url=self._storage.presign_get(row.file_key, self._ttl),
+                expires_at=expires_at,
+            )
+            for row in await self._requests.media_of(request_id)
+        ]
