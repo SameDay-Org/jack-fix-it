@@ -24,6 +24,7 @@ import { timingSafeEqual } from "node:crypto";
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import type { NextRequest } from "next/server";
 import { cache } from "react";
 
 import type { components } from "@jack/shared";
@@ -40,6 +41,7 @@ export const REFRESH_COOKIE = "jfi_rt";
 // while a refresh that becomes due later, once the token expires, still happens.
 export const REFRESHED_COOKIE = "jfi_rf";
 export const SESSION_COOKIE = "jfi_sid";
+const SESSION_COOKIES = [ACCESS_COOKIE, REFRESH_COOKIE, REFRESHED_COOKIE, SESSION_COOKIE];
 export const PANEL_PATH = "/admin";
 export const LOGIN_PATH = "/admin/login";
 export const REFRESH_PATH = "/admin/session/refresh";
@@ -136,7 +138,7 @@ export async function startSession(tokens: AuthResponse): Promise<void> {
 /** Removes every session cookie. Only callable from a server action or a route handler. */
 export async function clearSession(): Promise<void> {
   const jar = await cookies();
-  for (const name of [ACCESS_COOKIE, REFRESH_COOKIE, REFRESHED_COOKIE, SESSION_COOKIE]) {
+  for (const name of SESSION_COOKIES) {
     jar.delete({ name, path: PANEL_PATH });
   }
 }
@@ -148,6 +150,16 @@ export async function clearSession(): Promise<void> {
 export function fromThisSite(request: Request): boolean {
   const site = request.headers.get("sec-fetch-site");
   return site === null || site === "same-origin" || site === "none";
+}
+
+/**
+ * True when a session route may change the session: the request comes from this site
+ * (`fromThisSite`) and carries a session cookie of its own. A navigation from another site
+ * never carries the Strict cookies, so this holds even in a browser that sends no
+ * Sec-Fetch-Site (Safari before 16.4): with nothing to clear, nothing is cleared (#158 V1).
+ */
+export function mayChangeSession(request: NextRequest): boolean {
+  return fromThisSite(request) && SESSION_COOKIES.some((name) => request.cookies.has(name));
 }
 
 /** Revokes the session's refresh token on the API, best effort: it never throws. */

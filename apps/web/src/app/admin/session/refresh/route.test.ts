@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { FakeCookieJar, RedirectSignal } from "@/lib/test-helpers";
+import { auth, bound, FakeCookieJar, MARKER, RedirectSignal, routeFetch } from "@/lib/test-helpers";
 
 const { jar } = vi.hoisted(() => ({ jar: { current: null as unknown } }));
 
@@ -15,7 +15,13 @@ vi.mock("next/navigation", async () => {
   };
 });
 
-import { ACCESS_COOKIE, LOGIN_PATH, PANEL_PATH, REFRESH_COOKIE } from "@/lib/session";
+import {
+  ACCESS_COOKIE,
+  LOGIN_PATH,
+  PANEL_PATH,
+  REFRESH_COOKIE,
+  SESSION_COOKIE,
+} from "@/lib/session";
 
 import { GET } from "./route";
 
@@ -37,8 +43,12 @@ afterEach(() => {
   fetchMock.mockReset();
 });
 
+/** The request carries exactly the cookies in the jar (what the browser sent). */
 async function visit(site: string | null): Promise<string> {
-  const headers = site === null ? undefined : { "sec-fetch-site": site };
+  const headers = new Headers();
+  if (site !== null) headers.set("sec-fetch-site", site);
+  const sent = [...cookies.values].map(([name, value]) => `${name}=${value}`).join("; ");
+  if (sent) headers.set("cookie", sent);
   const request = new NextRequest("http://web.test.invalid/admin/session/refresh", { headers });
   try {
     await GET(request);
@@ -76,4 +86,18 @@ describe("GET /admin/session/refresh", () => {
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );
+
+  it("an old browser that sends the session cookies still refreshes (no Sec-Fetch-Site)", async () => {
+    cookies.reset({
+      [SESSION_COOKIE]: MARKER,
+      [ACCESS_COOKIE]: bound("at-1"),
+      [REFRESH_COOKIE]: bound("rt-1"),
+    });
+    fetchMock.mockImplementation(
+      routeFetch({ "/v1/auth/refresh": () => Response.json(auth("agent")) }),
+    );
+
+    expect(await visit(null)).toBe(PANEL_PATH);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

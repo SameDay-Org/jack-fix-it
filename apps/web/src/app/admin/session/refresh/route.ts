@@ -1,7 +1,13 @@
 import { redirect } from "next/navigation";
 import type { NextRequest } from "next/server";
 
-import { fromThisSite, PANEL_PATH, refreshStaffSession } from "@/lib/session";
+import {
+  fromThisSite,
+  LOGIN_PATH,
+  mayChangeSession,
+  PANEL_PATH,
+  refreshStaffSession,
+} from "@/lib/session";
 
 // Reached by a redirect from requireStaff() when the access token is missing or refused. It
 // refreshes once and rotates both cookies (only a route handler may write them), then returns
@@ -10,5 +16,6 @@ import { fromThisSite, PANEL_PATH, refreshStaffSession } from "@/lib/session";
 // it can neither refresh nor delete the browser's session.
 export async function GET(request: NextRequest): Promise<never> {
   if (!fromThisSite(request)) redirect(PANEL_PATH);
+  if (!mayChangeSession(request)) redirect(LOGIN_PATH); // no session cookie: nothing to do
   redirect(await refreshStaffSession());
 }
