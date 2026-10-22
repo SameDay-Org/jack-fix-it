@@ -23,6 +23,10 @@ from pydantic import (
 # Locales every category must name and every question must label; others may be added.
 REQUIRED_LOCALES: Final = ("en", "es")
 KEY_PATTERN: Final = r"^[a-z][a-z0-9_]{0,39}$"
+# An option's illustration bundled in the app (#166): a key, never a URL or markup.
+ICON_PATTERN: Final = r"^[a-z0-9]+(-[a-z0-9]+)*$"
+ICON_MAX_LENGTH: Final = 40
+OPTION_DESCRIPTION_MAX_LENGTH: Final = 160
 TEXT_MAX_LENGTH: Final = 1000
 MAX_OPTIONS: Final = 20
 
@@ -37,6 +41,15 @@ def require_locales(texts: dict[str, str]) -> dict[str, str]:
 
 
 Localized = Annotated[dict[str, str], AfterValidator(require_locales)]
+
+
+def _short(texts: dict[str, str]) -> dict[str, str]:
+    if any(len(text) > OPTION_DESCRIPTION_MAX_LENGTH for text in texts.values()):
+        raise ValueError(f"at most {OPTION_DESCRIPTION_MAX_LENGTH} characters per locale")
+    return texts
+
+
+ShortLocalized = Annotated[Localized, AfterValidator(_short)]
 
 
 class InvalidAnswerError(ValueError):
@@ -74,7 +87,18 @@ class IntegerQuestion(_Question):
 
 class ChoiceOption(_Strict):
     value: Key
-    labels: Localized
+    labels: Localized = Field(description="The option's name per locale; en and es required.")
+    description: ShortLocalized | None = Field(
+        default=None,
+        description="What the option covers, per locale; en and es required, at most 160 "
+        "characters each.",
+    )
+    icon: str | None = Field(
+        default=None,
+        pattern=ICON_PATTERN,
+        max_length=ICON_MAX_LENGTH,
+        description="Key of an illustration the app bundles, e.g. paint-interior. Never a URL.",
+    )
 
 
 class _ChoiceQuestion(_Question):

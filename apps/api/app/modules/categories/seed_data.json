@@ -102,7 +102,108 @@
     "icon": null,
     "requires_license": false,
     "reference_price_cents": null,
-    "intake_questions": [],
+    "intake_questions": [
+      {
+        "key": "jobs",
+        "type": "multi_choice",
+        "required": true,
+        "labels": {
+          "en": "Which jobs do you need?",
+          "es": "¿Qué trabajos necesitas?"
+        },
+        "help": {
+          "en": "Pick all that apply, then tell us the details in your description.",
+          "es": "Elige todas las que apliquen y cuéntanos los detalles en tu descripción."
+        },
+        "options": [
+          {
+            "value": "interior",
+            "labels": {
+              "en": "Interior painting",
+              "es": "Pintura interior"
+            },
+            "description": {
+              "en": "Walls in one or more rooms",
+              "es": "Paredes de una o varias habitaciones"
+            },
+            "icon": "paint-interior"
+          },
+          {
+            "value": "ceilings",
+            "labels": {
+              "en": "Ceilings",
+              "es": "Techos"
+            },
+            "description": {
+              "en": "Flat or textured ceilings",
+              "es": "Techos lisos o con textura"
+            },
+            "icon": "paint-ceiling"
+          },
+          {
+            "value": "doors_trim",
+            "labels": {
+              "en": "Doors and trim",
+              "es": "Puertas y molduras"
+            },
+            "description": {
+              "en": "Doors, baseboards and window frames",
+              "es": "Puertas, zócalos y marcos de ventanas"
+            },
+            "icon": "paint-trim"
+          },
+          {
+            "value": "cabinets",
+            "labels": {
+              "en": "Cabinets",
+              "es": "Gabinetes"
+            },
+            "description": {
+              "en": "Kitchen or bathroom cabinets",
+              "es": "Gabinetes de cocina o baño"
+            },
+            "icon": "paint-cabinets"
+          },
+          {
+            "value": "exterior",
+            "labels": {
+              "en": "Exterior painting",
+              "es": "Pintura exterior"
+            },
+            "description": {
+              "en": "Outside walls, eaves and shutters",
+              "es": "Paredes exteriores, aleros y contraventanas"
+            },
+            "icon": "paint-exterior"
+          },
+          {
+            "value": "fence_deck",
+            "labels": {
+              "en": "Fence or deck",
+              "es": "Cerca o terraza"
+            },
+            "description": {
+              "en": "Paint or stain for fences and decks",
+              "es": "Pintura o tinte para cercas y terrazas"
+            },
+            "icon": "paint-fence"
+          },
+          {
+            "value": "touch_ups",
+            "labels": {
+              "en": "Touch-ups",
+              "es": "Retoques"
+            },
+            "description": {
+              "en": "Small areas, patches and marks",
+              "es": "Áreas pequeñas, parches y marcas"
+            },
+            "icon": "paint-touchup"
+          }
+        ],
+        "min_selected": 1
+      }
+    ],
     "active": true
   },
   {
@@ -114,7 +215,96 @@
     "icon": null,
     "requires_license": false,
     "reference_price_cents": null,
-    "intake_questions": [],
+    "intake_questions": [
+      {
+        "key": "jobs",
+        "type": "multi_choice",
+        "required": true,
+        "labels": {
+          "en": "Which jobs do you need?",
+          "es": "¿Qué trabajos necesitas?"
+        },
+        "help": {
+          "en": "Pick all that apply, then tell us the details in your description.",
+          "es": "Elige todas las que apliquen y cuéntanos los detalles en tu descripción."
+        },
+        "options": [
+          {
+            "value": "mowing",
+            "labels": {
+              "en": "Lawn mowing",
+              "es": "Corte de césped"
+            },
+            "description": {
+              "en": "Mowing, edging and blowing",
+              "es": "Corte, bordes y soplado"
+            },
+            "icon": "lawn-mow"
+          },
+          {
+            "value": "hedges",
+            "labels": {
+              "en": "Hedges and shrubs",
+              "es": "Setos y arbustos"
+            },
+            "description": {
+              "en": "Trimming and shaping",
+              "es": "Poda y forma"
+            },
+            "icon": "lawn-hedge"
+          },
+          {
+            "value": "cleanup",
+            "labels": {
+              "en": "Yard cleanup",
+              "es": "Limpieza del jardín"
+            },
+            "description": {
+              "en": "Leaves, branches and debris hauled away",
+              "es": "Hojas, ramas y escombros retirados"
+            },
+            "icon": "lawn-cleanup"
+          },
+          {
+            "value": "beds_mulch",
+            "labels": {
+              "en": "Beds and mulch",
+              "es": "Canteros y mantillo"
+            },
+            "description": {
+              "en": "Weeding and fresh mulch",
+              "es": "Deshierbe y mantillo nuevo"
+            },
+            "icon": "lawn-mulch"
+          },
+          {
+            "value": "planting",
+            "labels": {
+              "en": "Planting",
+              "es": "Plantación"
+            },
+            "description": {
+              "en": "Flowers, shrubs and small plants",
+              "es": "Flores, arbustos y plantas pequeñas"
+            },
+            "icon": "lawn-plant"
+          },
+          {
+            "value": "sod",
+            "labels": {
+              "en": "Sod",
+              "es": "Césped en rollo"
+            },
+            "description": {
+              "en": "New grass laid in an area",
+              "es": "Césped nuevo en un área"
+            },
+            "icon": "lawn-sod"
+          }
+        ],
+        "min_selected": 1
+      }
+    ],
     "active": true
   },
   {
@@ -126,7 +316,96 @@
     "icon": null,
     "requires_license": false,
     "reference_price_cents": null,
-    "intake_questions": [],
+    "intake_questions": [
+      {
+        "key": "jobs",
+        "type": "multi_choice",
+        "required": true,
+        "labels": {
+          "en": "Which jobs do you need?",
+          "es": "¿Qué trabajos necesitas?"
+        },
+        "help": {
+          "en": "Pick all that apply, then tell us the details in your description.",
+          "es": "Elige todas las que apliquen y cuéntanos los detalles en tu descripción."
+        },
+        "options": [
+          {
+            "value": "furniture_assembly",
+            "labels": {
+              "en": "Furniture assembly",
+              "es": "Armado de muebles"
+            },
+            "description": {
+              "en": "Beds, desks, shelves and more",
+              "es": "Camas, escritorios, estantes y más"
+            },
+            "icon": "assembly-furniture"
+          },
+          {
+            "value": "tv_mounting",
+            "labels": {
+              "en": "TV mounting",
+              "es": "Montaje de TV"
+            },
+            "description": {
+              "en": "A TV on the wall, cables tidied",
+              "es": "TV en la pared y cables ordenados"
+            },
+            "icon": "assembly-tv"
+          },
+          {
+            "value": "wall_hanging",
+            "labels": {
+              "en": "Hanging",
+              "es": "Colgar objetos"
+            },
+            "description": {
+              "en": "Shelves, mirrors, art and curtains",
+              "es": "Estantes, espejos, cuadros y cortinas"
+            },
+            "icon": "assembly-hang"
+          },
+          {
+            "value": "loading",
+            "labels": {
+              "en": "Loading and unloading",
+              "es": "Carga y descarga"
+            },
+            "description": {
+              "en": "Help with a truck or container",
+              "es": "Ayuda con un camión o contenedor"
+            },
+            "icon": "moving-load"
+          },
+          {
+            "value": "in_home_move",
+            "labels": {
+              "en": "Moving inside the home",
+              "es": "Mover dentro de casa"
+            },
+            "description": {
+              "en": "Furniture moved between rooms",
+              "es": "Muebles entre habitaciones"
+            },
+            "icon": "moving-rearrange"
+          },
+          {
+            "value": "packing",
+            "labels": {
+              "en": "Packing",
+              "es": "Empaque"
+            },
+            "description": {
+              "en": "Boxing up items for a move",
+              "es": "Empacar cosas para una mudanza"
+            },
+            "icon": "moving-pack"
+          }
+        ],
+        "min_selected": 1
+      }
+    ],
     "active": true
   }
 ]

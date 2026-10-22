@@ -1857,7 +1857,37 @@
               "type": "string"
             },
             "type": "object",
-            "title": "Labels"
+            "title": "Labels",
+            "description": "The option's name per locale; en and es required."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "What the option covers, per locale; en and es required, at most 160 characters each."
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40,
+                "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon",
+            "description": "Key of an illustration the app bundles, e.g. paint-interior. Never a URL."
           }
         },
         "additionalProperties": false,
