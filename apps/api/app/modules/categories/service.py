@@ -96,16 +96,6 @@ class CategoryService:
             for row in await self._categories.get_many(ids)
         ]
 
-    async def question_types(self, ids: Collection[uuid.UUID]) -> dict[uuid.UUID, dict[str, str]]:
-        """Each category's question types by key, active or not. A category whose questions do
-        not parse is left out (and logged), so a caller treats its answers as of unknown type."""
-        types: dict[uuid.UUID, dict[str, str]] = {}
-        for row in await self._categories.get_many(ids):
-            questions = _parse_questions(row)
-            if questions is not None:
-                types[row.id] = {question.key: question.type for question in questions}
-        return types
-
     async def any_requires_license(self, ids: Collection[uuid.UUID]) -> bool:
         """True when at least one of these categories requires a license (active or not)."""
         return await self._categories.any_requires_license(ids)

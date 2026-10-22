@@ -38,6 +38,16 @@ class AddressService:
             for address_id, zip_code, city in await self._addresses.areas(address_ids)
         }
 
+    async def street_lines(
+        self, address_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, tuple[str, ...]]:
+        """The street line and, when set, the unit line per address. Only for masking the
+        customer's own street in text shown to pros (#172); never returned to a pro."""
+        return {
+            address_id: (line1, line2) if line2 else (line1,)
+            for address_id, line1, line2 in await self._addresses.street_lines(address_ids)
+        }
+
     async def get(self, address_id: uuid.UUID) -> AddressOut | None:
         address = await self._addresses.get_by_id(address_id)
         if address is None:
