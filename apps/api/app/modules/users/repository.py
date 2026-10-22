@@ -28,6 +28,16 @@ class UserRepository:
         result = await self._session.scalars(statement)
         return result.one_or_none()
 
+    async def get_by_id_for_update(self, user_id: uuid.UUID) -> User | None:
+        """FOR NO KEY UPDATE until the transaction ends, read as last committed."""
+        statement = (
+            select(User)
+            .where(User.id == user_id)
+            .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
     async def add(self, user: User) -> User:
         """Inserts the user now (flush), so a unique violation surfaces here."""
         self._session.add(user)

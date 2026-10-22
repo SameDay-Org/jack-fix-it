@@ -22,6 +22,7 @@ from app.modules.auth.phone_service import PhoneVerificationService
 from app.modules.auth.schemas import (
     AuthResponse,
     LoginRequest,
+    MeUpdateRequest,
     PasswordForgotRequest,
     PasswordResetRequest,
     PhoneSendRequest,
@@ -154,6 +155,30 @@ async def logout(
 async def me(user: CurrentUser) -> UserOut:
     """The caller's own account."""
     return UserOut.model_validate(user)
+
+
+@router.patch(
+    "/me",
+    response_model=UserOut,
+    summary="Update the current user",
+    responses={
+        status.HTTP_401_UNAUTHORIZED: _error(
+            "invalid_token: missing, invalid or expired access token."
+        ),
+        status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
+            "validation_error: an invalid or null name, another field, an empty body, or one "
+            "name while the other is not stored yet."
+        ),
+    },
+)
+async def update_me(
+    data: MeUpdateRequest,
+    user: CurrentUser,
+    auth: Annotated[AuthService, Depends(get_auth_service)],
+) -> UserOut:
+    """Sets the caller's own first and last name (#165). Both are required together while
+    they are not stored; afterwards either may change alone."""
+    return await auth.update_me(user, data)
 
 
 _UNAUTHORIZED = _error("invalid_token: missing, invalid or expired access token.")

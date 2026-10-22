@@ -29,6 +29,9 @@ class UserAccount:
     # E.164; set together with phone_verified_at when verified by SMS code (#26).
     phone: str | None = None
     phone_verified_at: datetime | None = None
+    # PII (#165): both set or both None. Never logged.
+    first_name: str | None = None
+    last_name: str | None = None
 
 
 @dataclass(frozen=True)

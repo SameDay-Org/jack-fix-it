@@ -149,7 +149,12 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update the current user
+         * @description Sets the caller's own first and last name (#165). Both are required together while
+         *     they are not stored; afterwards either may change alone.
+         */
+        patch: operations["update_me_v1_auth_me_patch"];
         trace?: never;
     };
     "/v1/auth/phone/send": {
@@ -697,6 +702,22 @@ export interface components {
             /** Password */
             password: string;
         };
+        /**
+         * MeUpdateRequest
+         * @description PATCH /v1/auth/me: the caller's own names. Omit a field to keep it; null is refused.
+         */
+        MeUpdateRequest: {
+            /**
+             * First Name
+             * @description 1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. Both or neither.
+             */
+            first_name?: string | null;
+            /**
+             * Last Name
+             * @description 1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. Both or neither.
+             */
+            last_name?: string | null;
+        };
         /** MediaOut */
         MediaOut: {
             kind: components["schemas"]["RequestMediaKind"];
@@ -908,6 +929,16 @@ export interface components {
              * @enum {string}
              */
             locale: "en" | "es";
+            /**
+             * First Name
+             * @description 1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. Both or neither.
+             */
+            first_name?: string | null;
+            /**
+             * Last Name
+             * @description 1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. Both or neither.
+             */
+            last_name?: string | null;
         };
         /** RequestCreate */
         RequestCreate: {
@@ -1160,6 +1191,16 @@ export interface components {
             phone: string | null;
             /** Phone Verified */
             phone_verified: boolean;
+            /**
+             * First Name
+             * @description Null for accounts created before names.
+             */
+            first_name: string | null;
+            /**
+             * Last Name
+             * @description Null for accounts created before names.
+             */
+            last_name: string | null;
         };
         /**
          * UserRole
@@ -1493,6 +1534,48 @@ export interface operations {
                 };
             };
             /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_me_v1_auth_me_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MeUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired access token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: an invalid or null name, another field, an empty body, or one name while the other is not stored yet. */
             422: {
                 headers: {
                     [name: string]: unknown;
