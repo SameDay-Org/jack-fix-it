@@ -38,6 +38,11 @@ export type InputProps = PassthroughProps & {
   invalid?: boolean;
   disabled?: boolean;
   /**
+   * Fixed text at the field's left end that is part of the value but not typed (a calling code
+   * such as `+1`). Read before the field by screen readers.
+   */
+  prefix?: string;
+  /**
    * A control at the field's right end (a show/hide toggle). It gets its own cell in the bubble's
    * row, so the text column is whatever width remains: nothing overlaps at any font scale.
    */
@@ -62,6 +67,7 @@ export function Input({
   error,
   invalid = false,
   disabled = false,
+  prefix,
   accessory,
   ref,
   className,
@@ -85,6 +91,11 @@ export function Input({
           disabled && "opacity-50",
         )}
       >
+        {prefix ? (
+          <Text className="pl-4 text-body text-gray-500" testID={testID && `${testID}-prefix`}>
+            {prefix}
+          </Text>
+        ) : null}
         <TextInput
           {...textInputProps}
           ref={ref}
@@ -97,7 +108,7 @@ export function Input({
           onFocus={focus}
           onBlur={blur}
           testID={testID}
-          className="min-h-12 flex-1 px-4 text-body text-navy-900"
+          className={cx("min-h-12 flex-1 text-body text-navy-900", prefix ? "pl-2 pr-4" : "px-4")}
         />
         {accessory ? <View className="pr-1">{accessory}</View> : null}
       </View>

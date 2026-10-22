@@ -170,6 +170,17 @@ async function signIn<P extends SignInPath>(path: P, body: PostBody<P>): Promise
   }
 }
 
+/**
+ * Replaces the signed-in user with a fresher copy from the server (after a phone verification).
+ * Applied only to the same account while it is still signed in: a response that lands after a
+ * sign-out or another sign-in is dropped.
+ */
+export function setSessionUser(user: SessionUser): void {
+  const state = sessionStore.getState();
+  if (state.status !== "signedIn" || state.user?.id !== user.id) return;
+  sessionStore.setState({ user });
+}
+
 export function register(body: PostBody<"/v1/auth/register">): Promise<void> {
   return signIn("/v1/auth/register", body);
 }

@@ -63,7 +63,32 @@
   "home": {
     "welcome": "Hola,\n<email>{{email}}</email>",
     "comingSoon": "Tu pantalla de inicio está en camino.",
-    "logOut": "Cerrar sesión"
+    "logOut": "Cerrar sesión",
+    "verifyPhone": "Verifica tu teléfono",
+    "phone": "Teléfono",
+    "phoneVerified": "Verificado"
+  },
+  "phone": {
+    "title": "Verifica tu teléfono",
+    "subtitle": "Te enviaremos un código de {{length}} dígitos por SMS a este número.",
+    "numberLabel": "Número de teléfono",
+    "send": "Enviar código",
+    "skip": "Omitir por ahora",
+    "codeTitle": "Escribe el código",
+    "codeSubtitle": "Lo enviamos al {{phone}}.",
+    "codeLabel": "Código de verificación",
+    "verify": "Verificar",
+    "resend": "Reenviar código",
+    "resendIn": "Reenviar código en {{seconds}} s",
+    "codeResent": "Te enviamos un código nuevo.",
+    "changeNumber": "Cambiar número",
+    "verified": "Teléfono verificado",
+    "errors": {
+      "invalidNumber": "Escribe un número de teléfono de EE. UU. válido, de 10 dígitos.",
+      "invalidCode": "Ese código no es correcto. Revísalo y vuelve a intentarlo.",
+      "numberUnavailable": "Este número no se puede usar. Prueba con otro.",
+      "serviceUnavailable": "No pudimos enviar ni comprobar el código ahora. Vuelve a intentarlo pronto."
+    }
   },
   "roles": {
     "customer": "Cliente",

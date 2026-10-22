@@ -11,8 +11,10 @@ import { logout, restoreSession, useSession } from "@/api";
 import { tokens } from "@/theme";
 
 import { user } from "../../../api/__tests__/helpers";
-import AppLayout from "../../../app/(app)/_layout";
+import AppLayout, { unstable_settings as appSettings } from "../../../app/(app)/_layout";
+import { phoneFlowStore } from "../../phone/phoneFlow";
 import AuthLayout, { unstable_settings } from "../../../app/(auth)/_layout";
+import { HomePlaceholderScreen } from "../HomePlaceholderScreen";
 import { SessionGate } from "../SessionGate";
 import { METRICS, SIGNED_OUT } from "./helpers";
 
@@ -52,8 +54,9 @@ const routes = {
     createElement(SafeAreaProvider, { initialMetrics: METRICS }, createElement(SessionGate)),
   "(auth)/_layout": { default: AuthLayout, unstable_settings },
   "(auth)/welcome": () => <Text>welcome stub</Text>,
-  "(app)/_layout": AppLayout,
+  "(app)/_layout": { default: AppLayout, unstable_settings: appSettings },
   "(app)/index": () => <Text>app stub</Text>,
+  "(app)/verify-phone/index": () => <Text>phone step stub</Text>,
 };
 
 beforeEach(() => {
@@ -61,6 +64,7 @@ beforeEach(() => {
   jest.mocked(logout).mockClear();
   jest.mocked(restoreSession).mockClear();
   jest.mocked(Stack).mockClear();
+  phoneFlowStore.setState({ pendingNumber: null, offeredAfterSignUp: false });
 });
 
 describe("session gate", () => {
@@ -106,6 +110,36 @@ describe("session gate", () => {
 
     expect(result.getPathname()).toBe("/");
     expect(screen.getByText("app stub")).toBeTruthy();
+  });
+
+  it("a sign-up opens the phone step over home, so Skip and Back end on home", async () => {
+    phoneFlowStore.setState({ offeredAfterSignUp: true });
+    session({ status: "signedIn", user });
+
+    // Signed in while on an auth screen: the auth guard sends the session home, and home opens
+    // the phone step over itself.
+    const result = await renderRouter(
+      { ...routes, "(app)/index": HomePlaceholderScreen },
+      { initialUrl: "/welcome" },
+    );
+
+    expect(result.getPathname()).toBe("/verify-phone");
+    expect(result.getSearchParams()).toEqual({ from: "sign-up" });
+    expect(screen.getByText("phone step stub")).toBeTruthy();
+
+    await act(async () => phoneFlowStore.setState({ offeredAfterSignUp: false })); // shown once
+    await act(async () => router.back());
+    expect(result.getPathname()).toBe("/");
+    expect(screen.getByRole("button", { name: "Verify your phone" })).toBeTruthy();
+  });
+
+  it("any other sign-in lands on home", async () => {
+    session({ status: "signedIn", user });
+
+    const result = await renderRouter(routes, { initialUrl: "/welcome" });
+
+    expect(result.getPathname()).toBe("/");
+    expect(screen.queryByText("phone step stub")).toBeNull();
   });
 
   it("deep link to app while signed out lands on welcome", async () => {
