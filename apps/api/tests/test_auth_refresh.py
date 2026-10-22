@@ -10,20 +10,26 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import jwt
 import pytest
-from sqlalchemy import select, update
+from pydantic import SecretStr, ValidationError
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import Settings
+from app.config import AppEnv, Settings
 from app.modules.auth import security
 from app.modules.auth.models import RefreshToken
 from app.modules.auth.repository import RefreshTokenRepository
+from app.modules.auth.service import AuthConfig
 from app.modules.users.models import User
 from app.modules.users.service import UserService
 from app.modules.users.types import UserStatus
 from app.observability import JsonFormatter
 from tests.conftest import (
     LOCK_WAIT_DEADLINE_SECONDS,
+    TEST_EMAIL_SETTINGS,
     TEST_JWT_SECRET,
+    TEST_RATE_LIMIT_SETTINGS,
+    TEST_STORAGE_SETTINGS,
+    TEST_TWILIO_SETTINGS,
     Committed,
     backend_pid,
     make_settings,
@@ -44,7 +50,11 @@ INVALID_REFRESH_TOKEN = {
 
 @pytest.fixture
 def settings() -> Settings:
-    return make_settings(refresh_token_ttl_seconds=REFRESH_TTL_SECONDS)
+    # Grace window off: these tests present a rotated token right away to prove theft
+    # detection (#116). The grace window (#152) has its own tests below, with it on.
+    return make_settings(
+        refresh_token_ttl_seconds=REFRESH_TTL_SECONDS, refresh_reuse_grace_seconds=0
+    )
 
 
 async def refresh(client: httpx.AsyncClient, token: str) -> httpx.Response:
@@ -492,3 +502,306 @@ async def test_responses_never_contain_token_hash(
         if response.status_code != 200:
             assert token_a not in response.text
             assert token_b not in response.text
+
+
+# Grace window (#152): a retried refresh after a lost response gets the same successor.
+
+GRACE_SECONDS = 60  # not the default (30), so the tests prove it comes from the setting
+GRACE_ON = [
+    make_settings(
+        refresh_token_ttl_seconds=REFRESH_TTL_SECONDS, refresh_reuse_grace_seconds=GRACE_SECONDS
+    )
+]
+# Fixture values only.
+ROTATION_KEY_A = "test-rotation-key-a-not-real-0123456789"
+ROTATION_KEY_B = "test-rotation-key-b-not-real-0123456789"
+
+
+async def family_count(session: AsyncSession, family_id: uuid.UUID) -> int:
+    statement = (
+        select(func.count()).select_from(RefreshToken).where(RefreshToken.family_id == family_id)
+    )
+    return (await session.scalar(statement)) or 0
+
+
+async def rotated_before_grace(session: AsyncSession, token: str) -> None:
+    """Moves the rotation of `token` just outside the grace window, without waiting."""
+    await session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.token_hash == token_hash(token))
+        .values(revoked_at=datetime.now(UTC) - timedelta(seconds=GRACE_SECONDS + 1))
+    )
+
+
+@pytest.mark.parametrize("settings", GRACE_ON)
+async def test_retry_within_grace_returns_same_successor(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    first = (await register(db_client)).json()["refresh_token"]
+    rotated = (await refresh(db_client, first)).json()
+    successor_row = await get_row(db_session, rotated["refresh_token"])
+    expires_at = successor_row.expires_at
+
+    with caplog.at_level(logging.INFO):
+        retried = await refresh(db_client, first)
+
+    assert retried.status_code == 200
+    assert retried.json()["refresh_token"] == rotated["refresh_token"]
+    assert retried.json()["access_token"] != rotated["access_token"]
+    assert (await me(db_client, retried.json()["access_token"])).status_code == 200
+    # No new row, no new expiry; the successor is still the live token of the family.
+    assert await family_count(db_session, successor_row.family_id) == 2
+    successor_row = await get_row(db_session, rotated["refresh_token"])
+    assert successor_row.expires_at == expires_at
+    assert successor_row.revoked_at is None
+    [record] = [r for r in caplog.records if r.message == "auth_refresh_grace_replay"]
+    payload = json.loads(JsonFormatter().format(record))
+    assert set(payload) - {"timestamp", "level", "logger", "message", "request_id"} == {
+        "user_id",
+        "family_id",
+    }
+    assert not [r for r in caplog.records if r.message == "auth_refresh_reuse_detected"]
+    # The successor keeps working normally.
+    assert (await refresh(db_client, rotated["refresh_token"])).status_code == 200
+
+
+@pytest.mark.parametrize("settings", GRACE_ON)
+async def test_retry_after_grace_revokes_family(
+    db_client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    first = (await register(db_client)).json()["refresh_token"]
+    successor = (await refresh(db_client, first)).json()["refresh_token"]
+    await rotated_before_grace(db_session, first)
+
+    assert_invalid_refresh_token(await refresh(db_client, first))
+
+    assert (await get_row(db_session, successor)).revoked_at is not None
+    assert_invalid_refresh_token(await refresh(db_client, successor))
+
+
+@pytest.mark.parametrize("settings", GRACE_ON)
+async def test_retry_after_successor_used_revokes_family(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    first = (await register(db_client)).json()["refresh_token"]
+    second = (await refresh(db_client, first)).json()["refresh_token"]
+    third = (await refresh(db_client, second)).json()["refresh_token"]
+
+    with caplog.at_level(logging.INFO):
+        assert_invalid_refresh_token(await refresh(db_client, first))
+
+    assert (await get_row(db_session, third)).revoked_at is not None
+    assert [r for r in caplog.records if r.message == "auth_refresh_reuse_detected"]
+    assert not [r for r in caplog.records if r.message == "auth_refresh_grace_replay"]
+
+
+@pytest.mark.parametrize("settings", GRACE_ON)
+async def test_retry_after_logout_is_401(db_client: httpx.AsyncClient) -> None:
+    first = (await register(db_client)).json()["refresh_token"]
+    successor = (await refresh(db_client, first)).json()["refresh_token"]
+    assert (await logout(db_client, successor)).status_code == 204
+
+    assert_invalid_refresh_token(await refresh(db_client, first))
+    # A token revoked by logout itself (replaced_by_id NULL) has no successor either.
+    other = (await login(db_client)).json()["refresh_token"]
+    assert (await logout(db_client, other)).status_code == 204
+    assert_invalid_refresh_token(await refresh(db_client, other))
+
+
+@pytest.mark.parametrize("settings", GRACE_ON)
+async def test_retry_after_password_reset_is_401(
+    db_client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    registered = (await register(db_client)).json()
+    first = registered["refresh_token"]
+    await refresh(db_client, first)
+    # What a successful password reset does to the sessions (#27).
+    await RefreshTokenRepository(db_session).revoke_all_for_user(
+        uuid.UUID(registered["user"]["id"]), datetime.now(UTC)
+    )
+
+    assert_invalid_refresh_token(await refresh(db_client, first))
+
+
+@pytest.mark.parametrize("settings", GRACE_ON)
+@pytest.mark.parametrize("already_rotated", [True, False], ids=["retries", "first_refreshes"])
+async def test_concurrent_retries_within_grace_both_get_same_successor(
+    committed: Committed, monkeypatch: pytest.MonkeyPatch, already_rotated: bool
+) -> None:
+    # Two refreshes of one token at once. The first to get the family lock keeps its
+    # transaction open until Postgres reports the other waiting on it, so they truly overlap;
+    # the lock serializes them, and both get the same successor.
+    client = committed.client
+    token = (await register(client, email=committed.email)).json()["refresh_token"]
+    expected = None
+    if already_rotated:
+        expected = (await refresh(client, token)).json()["refresh_token"]
+    pids: list[int] = []
+    both_known = asyncio.Barrier(2)
+    first_holder = asyncio.Event()
+    read_for_update = RefreshTokenRepository.get_by_hash_for_update
+
+    async def read_concurrently(self: RefreshTokenRepository, hashed: str) -> RefreshToken | None:
+        own_pid = await backend_pid(self._session)
+        pids.append(own_pid)
+        async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+            await both_known.wait()
+        row = await read_for_update(self, hashed)
+        if not first_holder.is_set():
+            first_holder.set()
+            [other_pid] = [pid for pid in pids if pid != own_pid]
+            await wait_until_blocked(committed.sessions, waiter=other_pid, holder=own_pid)
+        return row
+
+    monkeypatch.setattr(RefreshTokenRepository, "get_by_hash_for_update", read_concurrently)
+
+    responses = await asyncio.gather(refresh(client, token), refresh(client, token))
+
+    assert [response.status_code for response in responses] == [200, 200]
+    successors = {response.json()["refresh_token"] for response in responses}
+    assert len(successors) == 1
+    if expected is not None:
+        assert successors == {expected}
+    rows = await committed_family(committed, token)
+    assert len(rows) == 2
+    assert sum(row.revoked_at is None for row in rows) == 1
+
+
+def test_successor_is_deterministic_and_secret_dependent() -> None:
+    token = security.new_refresh_token()
+
+    successor = security.successor_refresh_token(token, ROTATION_KEY_A)
+
+    assert successor == security.successor_refresh_token(token, ROTATION_KEY_A)
+    assert successor != security.successor_refresh_token(token, ROTATION_KEY_B)
+    assert successor != security.successor_refresh_token(token + "x", ROTATION_KEY_A)
+    assert successor != token
+    # The same length class as a random token: 32 bytes, base64url without padding.
+    assert len(successor) == len(token) == 43
+    assert set(successor) <= set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        make_settings(
+            refresh_token_ttl_seconds=REFRESH_TTL_SECONDS,
+            refresh_reuse_grace_seconds=GRACE_SECONDS,
+            refresh_rotation_secret=ROTATION_KEY_A,
+        )
+    ],
+)
+async def test_rotation_uses_the_configured_secret(db_client: httpx.AsyncClient) -> None:
+    first = (await register(db_client)).json()["refresh_token"]
+
+    successor = (await refresh(db_client, first)).json()["refresh_token"]
+
+    assert successor == security.successor_refresh_token(first, ROTATION_KEY_A)
+    assert successor != security.successor_refresh_token(first, security.DEVELOPMENT_ROTATION_KEY)
+
+
+@pytest.mark.parametrize("settings", GRACE_ON)
+async def test_first_token_of_family_is_random(
+    db_client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    issued: list[str] = []
+    random_token = security.new_refresh_token
+
+    def spy() -> str:
+        issued.append(random_token())
+        return issued[-1]
+
+    monkeypatch.setattr(security, "new_refresh_token", spy)
+
+    registered = (await register(db_client)).json()["refresh_token"]
+    logged_in = (await login(db_client)).json()["refresh_token"]
+    rotated = (await refresh(db_client, logged_in)).json()["refresh_token"]
+
+    # Login and registration take a random token; a rotation derives its successor instead.
+    assert issued == [registered, logged_in]
+    assert registered != logged_in
+    assert rotated == security.successor_refresh_token(logged_in, security.DEVELOPMENT_ROTATION_KEY)
+
+
+@pytest.mark.parametrize("app_env", ["staging", "production"])
+def test_secret_required_when_deployed(app_env: AppEnv) -> None:
+    deployed: dict[str, object] = {
+        "app_env": app_env,
+        "jwt_secret": "s" * 32,
+        **TEST_STORAGE_SETTINGS,
+        **TEST_TWILIO_SETTINGS,
+        **TEST_RATE_LIMIT_SETTINGS,
+        **TEST_EMAIL_SETTINGS,
+    }
+    short = "r" * 31
+
+    for value in (None, "", short):
+        with pytest.raises(ValidationError, match="REFRESH_ROTATION_SECRET") as error:
+            make_settings(**deployed, refresh_rotation_secret=value)
+        assert short not in str(error.value)
+    settings = make_settings(**deployed, refresh_rotation_secret=ROTATION_KEY_A)
+    assert AuthConfig.from_settings(settings).refresh_rotation_key == ROTATION_KEY_A
+    # A hand-built Settings that skips validation must not reach the development key either.
+    unvalidated = Settings.model_construct(
+        app_env=app_env, jwt_secret=SecretStr("s" * 32), refresh_rotation_secret=None
+    )
+    with pytest.raises(RuntimeError, match="REFRESH_ROTATION_SECRET"):
+        AuthConfig.from_settings(unvalidated)
+
+
+@pytest.mark.parametrize("app_env", ["development", "test"])
+def test_development_key_only_without_secret(app_env: str) -> None:
+    unset = AuthConfig.from_settings(make_settings(app_env=app_env))
+    configured = AuthConfig.from_settings(
+        make_settings(app_env=app_env, refresh_rotation_secret=ROTATION_KEY_A)
+    )
+
+    assert unset.refresh_rotation_key == security.DEVELOPMENT_ROTATION_KEY
+    assert configured.refresh_rotation_key == ROTATION_KEY_A
+    assert ROTATION_KEY_A not in repr(make_settings(refresh_rotation_secret=ROTATION_KEY_A))
+
+
+@pytest.mark.parametrize("settings", GRACE_ON)
+async def test_no_tokens_in_logs(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.DEBUG):
+        first = (await register(db_client)).json()["refresh_token"]
+        second = (await refresh(db_client, first)).json()["refresh_token"]
+        await refresh(db_client, first)  # grace replay
+        third = (await refresh(db_client, second)).json()["refresh_token"]
+        await refresh(db_client, first)  # reuse: the family is revoked
+
+    output = "\n".join(JsonFormatter().format(record) for record in caplog.records)
+    for token in (first, second, third):
+        assert token not in output
+        assert token_hash(token) not in output
+    messages = {record.message for record in caplog.records}
+    assert {"auth_refresh_grace_replay", "auth_refresh_reuse_detected"} <= messages
+
+
+@pytest.mark.parametrize("settings", GRACE_ON)
+@pytest.mark.parametrize("case", ["successor_expired", "user_suspended", "successor_not_derived"])
+async def test_no_replay_without_a_live_rederivable_successor(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, case: str
+) -> None:
+    registered = (await register(db_client)).json()
+    first = registered["refresh_token"]
+    successor = (await refresh(db_client, first)).json()["refresh_token"]
+    if case == "successor_expired":
+        await db_session.execute(
+            update(RefreshToken)
+            .where(RefreshToken.token_hash == token_hash(successor))
+            .values(expires_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
+    elif case == "user_suspended":
+        await set_status(db_session, EMAIL, UserStatus.SUSPENDED)
+    else:
+        # A successor issued before #152 was random: the old token cannot re-derive it.
+        await db_session.execute(
+            update(RefreshToken)
+            .where(RefreshToken.token_hash == token_hash(successor))
+            .values(token_hash=token_hash(security.new_refresh_token()))
+        )
+
+    assert_invalid_refresh_token(await refresh(db_client, first))

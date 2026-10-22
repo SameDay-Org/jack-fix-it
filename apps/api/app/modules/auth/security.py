@@ -3,7 +3,9 @@
 Argon2 calls are CPU-bound (tens of ms); async callers run them in a worker thread.
 """
 
+import base64
 import hashlib
+import hmac
 import secrets
 import uuid
 from dataclasses import dataclass
@@ -18,6 +20,9 @@ from app.modules.users.types import UserRole
 
 JWT_ALGORITHM: Final = "HS256"
 ACCESS_TOKEN_TYPE: Final = "access"  # noqa: S105 - the typ claim value, not a secret
+# Not a secret: the rotation key development and test runs use when REFRESH_ROTATION_SECRET
+# is unset. Settings refuses to start staging or production without the real one (#152).
+DEVELOPMENT_ROTATION_KEY: Final = "jack-fix-it-development-refresh-rotation-key-not-secret"
 
 # argon2-cffi defaults: Argon2id with the library's recommended cost.
 PASSWORD_HASHER = PasswordHasher()
@@ -99,6 +104,19 @@ def decode_access_token(token: str, *, secret: str) -> AccessTokenClaims:
 def new_refresh_token() -> str:
     """An opaque token for the client. Only its hash is stored."""
     return secrets.token_urlsafe(32)
+
+
+def successor_refresh_token(token: str, rotation_key: str) -> str:
+    """The token a rotation of `token` issues (#152): base64url of HMAC-SHA256 under the rotation
+    key, 43 characters like new_refresh_token.
+
+    Deterministic, so a retried refresh can be answered with the same successor while only its
+    hash is stored; unguessable without the key. Only a rotation uses it: the first token of a
+    family (login, registration) is random.
+    """
+    message = b"rotate:" + token.encode("utf-8", "surrogatepass")
+    digest = hmac.new(rotation_key.encode(), message, hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
 
 
 def hash_refresh_token(token: str) -> str:

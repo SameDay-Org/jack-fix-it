@@ -1,5 +1,5 @@
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -32,3 +32,19 @@ class CategoryRepository:
     async def is_active(self, category_id: uuid.UUID) -> bool:
         statement = select(Category.id).where(Category.id == category_id, Category.active)
         return (await self._session.scalar(statement)) is not None
+
+    async def list_active(self) -> list[Category]:
+        statement = select(Category).where(Category.active).order_by(Category.slug)
+        return list((await self._session.scalars(statement)).all())
+
+    async def active_ids(self, ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+        if not ids:
+            return set()
+        statement = select(Category.id).where(Category.id.in_(ids), Category.active)
+        return set((await self._session.scalars(statement)).all())
+
+    async def get_many(self, ids: Collection[uuid.UUID]) -> list[Category]:
+        if not ids:
+            return []
+        statement = select(Category).where(Category.id.in_(ids)).order_by(Category.slug)
+        return list((await self._session.scalars(statement)).all())

@@ -1,3 +1,4 @@
+import uuid
 from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
@@ -38,3 +39,14 @@ class CategorySeedCatalog(RootModel[list[CategorySeed]]):
         if duplicates:
             raise ValueError(f"duplicate slugs: {', '.join(duplicates)}")
         return self
+
+
+class CategorySummary(BaseModel):
+    id: uuid.UUID
+    slug: str
+    names: dict[str, str] = Field(description="Display name per locale, e.g. en and es.")
+
+
+class CategoryOut(CategorySummary):
+    icon: str | None
+    requires_license: bool

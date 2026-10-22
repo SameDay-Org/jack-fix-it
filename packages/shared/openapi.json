@@ -1068,6 +1068,236 @@
           }
         }
       }
+    },
+    "/v1/categories": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "List the categories",
+        "description": "Active categories, by slug. No sign-in needed: the landing page and the request flow\nshow them before login.",
+        "operationId": "list_categories_v1_categories_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CategoryOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Categories V1 Categories Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many requests from this client; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/service-areas": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "List the served areas",
+        "description": "Active service areas, grouped by region, then city, then ZIP. No sign-in needed: the\nlanding page and the request flow show them before login.",
+        "operationId": "list_service_areas_v1_service_areas_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RegionOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Service Areas V1 Service Areas Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many requests from this client; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pros/me": {
+      "get": {
+        "tags": [
+          "pros"
+        ],
+        "summary": "Get my pro profile",
+        "description": "The caller's own profile, with a presigned URL for the photo. The first call creates an\nempty profile, pending verification.",
+        "operationId": "get_my_profile_v1_pros_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProProfileOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros have a pro profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "pros"
+        ],
+        "summary": "Edit my pro profile",
+        "description": "Changes only the fields sent, in one transaction. category_ids and service_area_ids\nreplace the whole set. Upload the photo first (POST /v1/uploads, purpose profile_photo).",
+        "operationId": "update_my_profile_v1_pros_me_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProProfileUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProProfileOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_media: photo_key is not the caller's own profile_photo upload; invalid_category / invalid_service_area: an unknown or inactive id; validation_error: any other invalid field (duplicates or too many ids, bio length, years out of range, fields the platform sets such as verification_status).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros have a pro profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -1200,6 +1430,79 @@
         ],
         "title": "AuthResponse"
       },
+      "CategoryOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Names",
+            "description": "Display name per locale, e.g. en and es."
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon"
+          },
+          "requires_license": {
+            "type": "boolean",
+            "title": "Requires License"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "slug",
+          "names",
+          "icon",
+          "requires_license"
+        ],
+        "title": "CategoryOut"
+      },
+      "CategorySummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Names",
+            "description": "Display name per locale, e.g. en and es."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "slug",
+          "names"
+        ],
+        "title": "CategorySummary"
+      },
       "CheckStatus": {
         "type": "string",
         "enum": [
@@ -1207,6 +1510,32 @@
           "fail"
         ],
         "title": "CheckStatus"
+      },
+      "CityOut": {
+        "properties": {
+          "city": {
+            "type": "string",
+            "title": "City"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "zips": {
+            "items": {
+              "$ref": "#/components/schemas/ZipOut"
+            },
+            "type": "array",
+            "title": "Zips"
+          }
+        },
+        "type": "object",
+        "required": [
+          "city",
+          "state",
+          "zips"
+        ],
+        "title": "CityOut"
       },
       "DependencyChecks": {
         "properties": {
@@ -1425,6 +1754,168 @@
         ],
         "title": "PhoneVerifyRequest"
       },
+      "PhotoOut": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "Presigned GET URL."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "expires_at"
+        ],
+        "title": "PhotoOut"
+      },
+      "ProProfileOut": {
+        "properties": {
+          "bio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bio"
+          },
+          "years_of_experience": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Years Of Experience"
+          },
+          "photo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhotoOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verification_status": {
+            "$ref": "#/components/schemas/ProVerificationStatus"
+          },
+          "payouts_enabled": {
+            "type": "boolean",
+            "title": "Payouts Enabled"
+          },
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/CategorySummary"
+            },
+            "type": "array",
+            "title": "Categories"
+          },
+          "service_areas": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceAreaOut"
+            },
+            "type": "array",
+            "title": "Service Areas"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bio",
+          "years_of_experience",
+          "photo",
+          "verification_status",
+          "payouts_enabled",
+          "categories",
+          "service_areas"
+        ],
+        "title": "ProProfileOut"
+      },
+      "ProProfileUpdate": {
+        "properties": {
+          "bio": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000,
+                "pattern": "^[^\\x00]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bio",
+            "description": "An empty string or null clears it."
+          },
+          "years_of_experience": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 80.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Years Of Experience"
+          },
+          "photo_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Key",
+            "description": "Key of the caller's own profile_photo upload (POST /v1/uploads); null clears."
+          },
+          "category_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Category Ids",
+            "description": "Replaces the set: active categories, no duplicates, up to PRO_MAX_CATEGORIES."
+          },
+          "service_area_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Service Area Ids",
+            "description": "Replaces the set: active service areas, no duplicates, up to PRO_MAX_SERVICE_AREAS."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ProProfileUpdate",
+        "description": "Only the fields sent change. Verification, payouts, rating and job count are set by the\nplatform: sending them is a 422 (extra=\"forbid\")."
+      },
+      "ProVerificationStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "approved",
+          "rejected"
+        ],
+        "title": "ProVerificationStatus"
+      },
       "ReadinessResponse": {
         "properties": {
           "status": {
@@ -1459,6 +1950,27 @@
           "refresh_token"
         ],
         "title": "RefreshTokenRequest"
+      },
+      "RegionOut": {
+        "properties": {
+          "region": {
+            "type": "string",
+            "title": "Region"
+          },
+          "cities": {
+            "items": {
+              "$ref": "#/components/schemas/CityOut"
+            },
+            "type": "array",
+            "title": "Cities"
+          }
+        },
+        "type": "object",
+        "required": [
+          "region",
+          "cities"
+        ],
+        "title": "RegionOut"
       },
       "RegisterRequest": {
         "properties": {
@@ -1761,6 +2273,40 @@
         ],
         "title": "RequestSummary"
       },
+      "ServiceAreaOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "zip_code": {
+            "type": "string",
+            "title": "Zip Code"
+          },
+          "city": {
+            "type": "string",
+            "title": "City"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "region": {
+            "type": "string",
+            "title": "Region"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "zip_code",
+          "city",
+          "state",
+          "region"
+        ],
+        "title": "ServiceAreaOut"
+      },
       "UploadPurpose": {
         "type": "string",
         "enum": [
@@ -1972,6 +2518,25 @@
         "type": "object",
         "title": "UtmIn",
         "description": "Campaign attribution. Only these five keys; anything else is a 422."
+      },
+      "ZipOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "zip_code": {
+            "type": "string",
+            "title": "Zip Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "zip_code"
+        ],
+        "title": "ZipOut"
       }
     },
     "securitySchemes": {
