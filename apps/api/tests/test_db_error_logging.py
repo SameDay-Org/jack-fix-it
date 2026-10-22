@@ -196,13 +196,6 @@ async def test_a_library_logging_a_database_error_as_an_argument_logs_its_summar
     assert CANARY in record.getMessage()  # what would have been logged
 
     logged = JsonFormatter().format(record)
-    crumb = before_breadcrumb(
-        {"category": "arq.worker", "message": record.getMessage()}, {"log_record": record}
-    )
-    event = before_send(
-        {"logentry": {"message": record.msg, "formatted": record.getMessage(), "params": []}},
-        {"log_record": record},
-    )
 
     assert_no_sql(logged)
     payload = json.loads(logged)
@@ -213,18 +206,49 @@ async def test_a_library_logging_a_database_error_as_an_argument_logs_its_summar
         "ProgrammingError: error_class=ProgrammingError sqlstate=42501 "
         f"table=service_requests reason={GUARD_MESSAGE}"
     )
-    assert crumb is not None
-    assert_no_sql(json.dumps(crumb, default=str))
-    assert_no_sql(json.dumps(event, default=str))
 
 
-def test_sql_breadcrumbs_lose_their_statement() -> None:
+async def test_a_logged_database_error_reaches_sentry_without_sql(
+    sentry_transport: MemoryTransport, db_session: AsyncSession, rows: Rows
+) -> None:
+    init_sentry(make_settings(sentry_dsn=TEST_DSN))
+    statement = literal_status_write_in(rows)
+    error = await refused(db_session, lambda: db_session.execute(statement))
+    # Not "arq.worker": Sentry's ARQ integration ignores that logger and captures the job's
+    # exception instead (the exception path above). Any other library may log one this way.
+    library_log = logging.getLogger("some.library")
+
+    # Through Sentry's logging integration: as an argument, as ARQ does, and as the message.
+    library_log.warning("%s: %s", "job:sanitize", error)  # a breadcrumb
+    library_log.error("%s failed, %s: %s", "job:sanitize", type(error).__name__, error)
+    library_log.error(error, exc_info=error)
+    sentry_sdk.flush()
+
+    payloads = _payloads(sentry_transport)
+    events = [json.loads(p) for p in payloads if '"logentry"' in p]
+    assert len(events) == 2
+    assert_no_sql("\n".join(payloads))
+    crumbs = [c for event in events for c in event.get("breadcrumbs", {}).get("values", [])]
+    assert any(c.get("category") == "some.library" for c in crumbs)
+
+
+def test_a_database_error_logged_as_the_message_logs_its_summary() -> None:
+    statement = "UPDATE x SET y='" + CANARY + "'"  # noqa: S608 - test data
+    error = DBAPIError(statement, None, Exception("driver"))
+    record = logging.LogRecord("app", logging.ERROR, __file__, 1, error, None, None)
+
+    logged = json.loads(JsonFormatter().format(record))
+
+    assert logged["message"] == "DBAPIError(error_class=DBAPIError)"
+
+
+def test_sql_breadcrumbs_lose_their_statement_and_data() -> None:
     statement = "UPDATE users SET email='" + EMAIL_CANARY + "'"  # noqa: S608 - test data
-    crumb = {"category": "query", "message": statement}
+    data = {"db.params": [EMAIL_CANARY], "db.cursor": f"<cursor {statement[:30]}>"}
 
-    kept = before_breadcrumb({**crumb, "data": {"db.params": [EMAIL_CANARY]}}, {})
+    kept = before_breadcrumb({"category": "query", "message": statement, "data": data}, {})
 
-    assert kept == {"category": "query", "data": {}}
+    assert kept == {"category": "query"}
 
 
 def test_the_summary_follows_the_exception_chain() -> None:
@@ -252,6 +276,16 @@ def test_the_summary_follows_the_exception_chain() -> None:
     pending = summary_of(PendingRollbackError(f"rolled back [SQL: {statement}]"))
     assert pending is not None
     assert_no_sql(pending.describe())
+    # An exception group's members, at any depth, as a traceback prints them.
+    group = BaseExceptionGroup("tasks", [ValueError("other"), BaseExceptionGroup("in", [caused])])
+    assert summary_of(group) == summary
+    # The outer error keeps its class name, not its text (which may repeat the statement).
+    record = logging.LogRecord(
+        "app", logging.ERROR, __file__, 1, "x", None, (RuntimeError, caused, caused.__traceback__)
+    )
+    logged = json.loads(JsonFormatter().format(record))["exception"]
+    assert logged.endswith("RuntimeError (from DBAPIError): error_class=DBAPIError")
+    assert_no_sql(logged)
 
 
 def test_other_errors_keep_their_text_and_traceback() -> None:

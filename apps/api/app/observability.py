@@ -48,13 +48,17 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
     def formatException(self, ei: Any) -> str:  # noqa: N802 - logging.Formatter's name
-        """A database error keeps its stack but not its text: the summary replaces it."""
+        """A database error keeps its stack but not its text: the summary replaces it. So does
+        an error caused by one, whose own text may repeat it."""
         _, error, tb = ei
         summary = summary_of(error)
         if summary is None:
             return super().formatException(ei)
+        name = type(error).__name__
+        if name != summary.error_class:
+            name = f"{name} (from {summary.error_class})"
         lines = ["Traceback (most recent call last):\n", *traceback.format_tb(tb)]
-        return "".join(lines) + f"{summary.error_class}: {summary.describe()}"
+        return "".join(lines) + f"{name}: {summary.describe()}"
 
 
 def configure_logging(level: str) -> None:
@@ -227,14 +231,12 @@ def before_breadcrumb(crumb: Breadcrumb, hint: BreadcrumbHint) -> Breadcrumb:
     Also from URLs in a breadcrumb's message and in the text values of its data, e.g. a
     library's log line, or its `extra`, naming a request URL. The SQL breadcrumbs the
     SQLAlchemy and asyncpg integrations record keep their timing but lose the statement and
-    any parameters: a statement can hold literals (#174). A log line naming a database error
-    gets its safe message.
+    their data (parameters, the cursor's repr): a statement can hold literals (#174). A log
+    line naming a database error gets its safe message.
     """
     if crumb.get("category") == "query":
         crumb.pop("message", None)
-        query_data = crumb.get("data")
-        if isinstance(query_data, dict):
-            query_data.pop("db.params", None)
+        crumb.pop("data", None)
         return crumb
     record = hint.get("log_record")
     if isinstance(record, logging.LogRecord):

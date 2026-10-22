@@ -19,7 +19,7 @@ from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
 GUARD_SQLSTATE: Final = "42501"
 _GUARD_MESSAGE: Final = re.compile(r"the status of (\w+) changes only through its state machine")
-_MAX_CHAIN: Final = 10
+_MAX_EXCEPTIONS: Final = 50
 
 
 @dataclass(frozen=True)
@@ -54,20 +54,22 @@ class DatabaseErrorSummary:
 
 
 def database_error_in(exc: BaseException) -> SQLAlchemyError | None:
-    """The SQLAlchemy error in `exc`'s chain, followed the way a traceback prints it (every
-    __cause__, and __context__ unless suppressed by `raise ... from None`)."""
-    current: BaseException | None = exc
-    for _ in range(_MAX_CHAIN):
-        if current is None:
+    """The first SQLAlchemy error among the exceptions a traceback of `exc` would print: its
+    __cause__, its __context__ unless suppressed by `raise ... from None`, and the members of
+    an exception group, at any depth (bounded)."""
+    pending = [exc]
+    for _ in range(_MAX_EXCEPTIONS):
+        if not pending:
             return None
+        current = pending.pop(0)
         if isinstance(current, SQLAlchemyError):
             return current
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(current.exceptions)
         if current.__cause__ is not None:
-            current = current.__cause__
-        elif current.__suppress_context__:
-            return None
-        else:
-            current = current.__context__
+            pending.append(current.__cause__)
+        elif current.__context__ is not None and not current.__suppress_context__:
+            pending.append(current.__context__)
     return None
 
 
@@ -97,9 +99,11 @@ def summary_of(value: object) -> DatabaseErrorSummary | None:
 
 
 def safe_message(record: logging.LogRecord) -> str:
-    """`record.getMessage()`, with each database error among its arguments replaced by its
-    summary. A library can log one as an argument: ARQ logs "%s failed, %s: %s" with the
-    exception last."""
+    """`record.getMessage()`, with a database error logged as the message, or among its
+    arguments, replaced by its summary. A library can log one as an argument: ARQ logs
+    "%s failed, %s: %s" with the exception last."""
+    if summary_of(record.msg) is not None:
+        return str(_safe_arg(record.msg))
     args = record.args
     if isinstance(args, tuple) and any(summary_of(arg) for arg in args):
         return str(record.msg) % tuple(_safe_arg(arg) for arg in args)
