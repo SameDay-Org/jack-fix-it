@@ -404,6 +404,34 @@ export interface paths {
         patch: operations["update_my_profile_v1_pros_me_patch"];
         trace?: never;
     };
+    "/v1/pros/me/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My verification documents
+         * @description The latest document of each type with presigned URLs, older reviewed ones, the types
+         *     required (ID and insurance; a license when one of the pro's categories requires it) and
+         *     the ones still missing.
+         */
+        get: operations["list_my_documents_v1_pros_me_documents_get"];
+        put?: never;
+        /**
+         * Submit a verification document
+         * @description Submits a photo ID, insurance or license for review. Upload the file first
+         *     (POST /v1/uploads, purpose pro_document). A pending document of the same type is replaced
+         *     (superseded); reviewed ones stay as history.
+         */
+        post: operations["submit_document_v1_pros_me_documents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -521,6 +549,74 @@ export interface components {
         DependencyChecks: {
             database: components["schemas"]["CheckStatus"];
             redis: components["schemas"]["CheckStatus"];
+        };
+        /** DocumentOut */
+        DocumentOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            doc_type: components["schemas"]["ProDocumentType"];
+            status: components["schemas"]["ProDocumentStatus"];
+            /** Rejection Reason */
+            rejection_reason: string | null;
+            /** Expires On */
+            expires_on: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Url
+             * @description Presigned GET URL of the file.
+             */
+            url: string;
+            /**
+             * Expires At
+             * Format: date-time
+             * @description When the URL stops working.
+             */
+            expires_at: string;
+        };
+        /**
+         * DocumentSubmission
+         * @description A pro submits a document; the review fields belong to the admin (#41): sending them is
+         *     a 422 (extra="forbid").
+         */
+        DocumentSubmission: {
+            doc_type: components["schemas"]["ProDocumentType"];
+            /**
+             * File Key
+             * @description Key of the caller's own pro_document upload (POST /v1/uploads).
+             */
+            file_key: string;
+            /**
+             * Expires On
+             * @description Today or later (UTC date).
+             */
+            expires_on?: string | null;
+        };
+        /** DocumentsOut */
+        DocumentsOut: {
+            /**
+             * Documents
+             * @description The latest document of each type, superseded ones left out.
+             */
+            documents: components["schemas"]["DocumentOut"][];
+            /**
+             * History
+             * @description Older reviewed (approved or rejected) documents, newest first.
+             */
+            history: components["schemas"]["DocumentOut"][];
+            /** Required Types */
+            required_types: components["schemas"]["ProDocumentType"][];
+            /**
+             * Missing Types
+             * @description Required types with no pending or approved document.
+             */
+            missing_types: components["schemas"]["ProDocumentType"][];
         };
         /** DownloadUrlRequest */
         DownloadUrlRequest: {
@@ -645,6 +741,16 @@ export interface components {
              */
             expires_at: string;
         };
+        /**
+         * ProDocumentStatus
+         * @enum {string}
+         */
+        ProDocumentStatus: "pending" | "approved" | "rejected" | "superseded";
+        /**
+         * ProDocumentType
+         * @enum {string}
+         */
+        ProDocumentType: "id" | "license" | "insurance";
         /** ProProfileOut */
         ProProfileOut: {
             /** Bio */
@@ -1948,6 +2054,104 @@ export interface operations {
                 };
             };
             /** @description invalid_media: photo_key is not the caller's own profile_photo upload; invalid_category / invalid_service_area: an unknown or inactive id; validation_error: any other invalid field (duplicates or too many ids, bio length, years out of range, fields the platform sets such as verification_status). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_my_documents_v1_pros_me_documents_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentsOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have a pro profile. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    submit_document_v1_pros_me_documents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentSubmission"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have a pro profile. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description invalid_media: file_key is not the caller's own pro_document upload, or is already a document; validation_error: an unknown type, an expiry date in the past, or a field the review sets (status, rejection_reason, reviewed_by...). */
             422: {
                 headers: {
                     [name: string]: unknown;
