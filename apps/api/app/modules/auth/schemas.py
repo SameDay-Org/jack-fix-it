@@ -1,8 +1,17 @@
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import AfterValidator, BaseModel, BeforeValidator, EmailStr, Field
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    EmailStr,
+    Field,
+    model_validator,
+)
 
 from app.config import PASSWORD_MAX_LENGTH
+from app.modules.users.names import NAME_MAX_LENGTH, PersonName
 from app.modules.users.schemas import UserOut
 from app.modules.users.types import UserRole
 
@@ -22,6 +31,12 @@ NormalizedEmail = Annotated[
 ]
 
 
+_NAME_RULES = (
+    f"1 to {NAME_MAX_LENGTH} characters after trimming (inner spaces collapsed): letters, "
+    "spaces, hyphens, apostrophes and periods. Both or neither."
+)
+
+
 class RegisterRequest(BaseModel):
     email: NormalizedEmail
     password: str = Field(
@@ -34,6 +49,32 @@ class RegisterRequest(BaseModel):
     # Staff accounts (agent, admin) are never self-registered.
     role: Literal[UserRole.CUSTOMER, UserRole.PRO]
     locale: Literal["en", "es"] = "en"
+    # Optional for now, so the current app keeps working; required in a follow-up (#165).
+    first_name: PersonName | None = Field(default=None, description=_NAME_RULES)
+    last_name: PersonName | None = Field(default=None, description=_NAME_RULES)
+
+    @model_validator(mode="after")
+    def _both_names_or_neither(self) -> Self:
+        if (self.first_name is None) != (self.last_name is None):
+            raise ValueError("first_name and last_name go together")
+        return self
+
+
+class MeUpdateRequest(BaseModel):
+    """PATCH /v1/auth/me: the caller's own names. Omit a field to keep it; null is refused."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    first_name: PersonName | None = Field(default=None, description=_NAME_RULES)
+    last_name: PersonName | None = Field(default=None, description=_NAME_RULES)
+
+    @model_validator(mode="after")
+    def _something_to_set(self) -> Self:
+        if not self.model_fields_set:
+            raise ValueError("nothing to change")
+        if any(getattr(self, name) is None for name in self.model_fields_set):
+            raise ValueError("a name cannot be null")
+        return self
 
 
 class LoginRequest(BaseModel):

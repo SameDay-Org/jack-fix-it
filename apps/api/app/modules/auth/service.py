@@ -24,7 +24,12 @@ from app.modules.auth.errors import (
 )
 from app.modules.auth.models import RefreshToken
 from app.modules.auth.repository import RefreshTokenRepository
-from app.modules.auth.schemas import AuthResponse, LoginRequest, RegisterRequest
+from app.modules.auth.schemas import (
+    AuthResponse,
+    LoginRequest,
+    MeUpdateRequest,
+    RegisterRequest,
+)
 from app.modules.users.schemas import UserOut
 from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount, UserStatus
@@ -76,9 +81,22 @@ class AuthService:
             raise PasswordTooShortError
         password_hash = await asyncio.to_thread(security.hash_password, data.password)
         user = await self._users.create_user(
-            email=data.email, password_hash=password_hash, role=data.role, locale=data.locale
+            email=data.email,
+            password_hash=password_hash,
+            role=data.role,
+            locale=data.locale,
+            first_name=data.first_name,
+            last_name=data.last_name,
         )
         return await self._start_session(user)
+
+    async def update_me(self, user: UserAccount, data: MeUpdateRequest) -> UserOut:
+        """Sets the caller's own names and commits. Names are never logged."""
+        account = await self._users.update_names(
+            user.id, first_name=data.first_name, last_name=data.last_name
+        )
+        await self._session.commit()
+        return UserOut.model_validate(account)
 
     async def login(self, data: LoginRequest) -> AuthResponse:
         credentials = await self._users.get_credentials_by_email(data.email)

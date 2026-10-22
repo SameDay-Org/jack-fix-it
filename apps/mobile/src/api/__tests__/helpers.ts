@@ -67,6 +67,8 @@ export const user: ApiSchema<"UserOut"> = {
   status: "active",
   phone: null,
   phone_verified: false,
+  first_name: null,
+  last_name: null,
 };
 
 /** The server's answer to register, login and refresh; `n` numbers the token pair. */
