@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from app.redaction import MASK, redact_contacts
+from app.redaction import MASK, KnownValues, redact_contacts, redact_known, redact_text
 
 POSITIVE: list[tuple[str, list[str]]] = [
     # Emails: plain, spaced, spelled out (EN and ES), bracketed.
@@ -131,7 +131,6 @@ NEGATIVE: list[str] = [
     "need it by 10/24",
     "between 2015 and 2020",
     "a 3 way switch",
-    "2 new drive belts",
     "fix 2 doors on the way out",
     "about 5.5 ft, e.g. the hall",
     "the sink leaks.So I called",
@@ -159,8 +158,6 @@ NEGATIVE: list[str] = [
     "We moved into this 40 year old place",
     "Cut a 12 inch circle in the drywall",
     "Need it done by 10 am either way",
-    "Replace 10 basketball court lights, 400W each.",
-    "Replace 12 new drive belts on the 2 attic fans.",
     "10 ft terrace",
     "We are 2 blocks off Bird Rd, the AC is a 2018 Trane 2.5 ton.",
     "come @5pm please",
@@ -222,7 +219,36 @@ POSITIVE += [
     ("Apartado Postal 1234", ["1234"]),
 ]
 
+# Round 3 review (#172): ordinary formats that slipped through.
+POSITIVE += [
+    ("Call 305-555-0199 in the afternoon about the sink.", ["305-555-0199", "0199"]),
+    ("+1 305 555 0199 in the morning", ["305 555 0199"]),
+    ("3055550199 in advance", ["3055550199"]),
+    ("Email _jane@example.com about the leak.", ["_jane", "example.com"]),
+    ("__x@y.co", ["__x"]),
+    ("+tag@example.com", ["+tag", "example.com"]),
+    ("The leaking kitchen sink is at 2000 ocean drive.", ["2000 ocean"]),
+    ("My address is 45 ocean drive.", ["45 ocean"]),
+    ("12 nw 3rd st", ["12 nw"]),
+]
+
+# Phrases masked on purpose although they are not addresses: a house number, one to three words
+# and a street suffix is always treated as an address (round 3 review: case and year-like
+# numbers must never authorize exposure). Hiding a few words is the safe side.
+KNOWN_FALSE_POSITIVES: list[str] = [
+    "2 new drive belts",
+    "Replace 10 basketball court lights, 400W each.",
+    "Replace 12 new drive belts on the 2 attic fans.",
+]
+
 NEGATIVE += [
+    "12 in",
+    "3.5 in",
+    "10 in x 12 in",
+    "2x4 8 ft",
+    "built in 2000",
+    "2000 sq ft",
+    "in 1998 we",
     "Need 2 Hunter ceiling fans installed. Way too hot upstairs with 9 ft ceilings.",
     "I got 3 quotes already. Dr. Perez next door recommended you for the roof.",
     "Install 3 LED pendant lights over the kitchen island, 12'x14' kitchen.",
@@ -326,6 +352,62 @@ def test_redacting_twice_changes_nothing_more() -> None:
     assert twice.redacted is False
 
 
+@pytest.mark.parametrize("text", KNOWN_FALSE_POSITIVES)
+def test_known_false_positives_stay_masked(text: str) -> None:
+    assert redact_contacts(text).redacted is True
+
+
+# The known-value pass: the customer's own details, whatever the formatting.
+KNOWN = KnownValues(
+    emails=("Jane.Doe77@Example.com",),
+    phones=("+13055550199",),
+    streets=("742 Evergreen Terrace", "Apt 4B"),
+)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "call (305)555 0199",
+        "call 305..555..0199",
+        "call 305 - 555 - 01 99",
+        "call +1 305/555/0199",
+        "call 3 0 5 5 5 5 0 1 9 9",
+        "call 001 305 555 0199",
+        "call 1-305-5550199",
+        "write JANE.DOE77@EXAMPLE.COM",
+        "write jane.doe77 at example dot com",
+        "my handle is jane.doe77",
+        "come to 742 evergreen",
+        "come to 742 Evergreen Ter",
+        "come to Evergreen Terrace 742",
+        "apt 4-b, upstairs",
+    ],
+)
+def test_known_values_are_masked_in_any_format(text: str) -> None:
+    result = redact_known(text, KNOWN)
+
+    assert result.redacted is True
+    for secret in ("0199", "01 99", "jane", "evergreen", "742", "4-b"):
+        assert secret not in result.text.lower(), secret
+
+
+def test_known_values_leave_other_text_alone() -> None:
+    text = "The 742 bus stops near 5 units; call after 5pm, 3 bedrooms."
+
+    assert redact_known(text, KNOWN) == redact_known(text, KnownValues())
+    assert redact_known(text, KNOWN).redacted is False
+
+
+def test_redact_text_runs_both_passes() -> None:
+    result = redact_text(
+        "742 evergreen ter, or bob@x.co", KnownValues(streets=("742 Evergreen Ter",))
+    )
+
+    assert result.text == f"{MASK}, or {MASK}"
+    assert result.redacted is True
+
+
 HOSTILE: list[str] = [
     # Long runs of near-matches, each about 2,000 characters (the description limit). Found
     # slow (seconds to minutes) by the adversarial sweep before the patterns were anchored.
@@ -354,8 +436,20 @@ HOSTILE: list[str] = [
 
 @pytest.mark.parametrize("text", HOSTILE, ids=[f"{t[:12]}x{len(t)}" for t in HOSTILE])
 def test_hostile_inputs_finish_quickly(text: str) -> None:
+    # Both passes, with known values that look like the hostile runs.
     assert len(text) <= 2100
     started = time.perf_counter()
-    redact_contacts(text)
+    redact_text(text, KNOWN)
+
+    assert time.perf_counter() - started < 0.25
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["3 0 5 " * 333, "742 " * 500, "evergreen " * 200, "3-0-5-" * 333, "jane.doe77 at " * 140],
+)
+def test_hostile_inputs_against_the_known_values_finish_quickly(text: str) -> None:
+    started = time.perf_counter()
+    redact_text(text, KNOWN)
 
     assert time.perf_counter() - started < 0.25

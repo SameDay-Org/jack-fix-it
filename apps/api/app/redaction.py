@@ -115,7 +115,7 @@ _PROVIDERS: Final = (
 )
 _START: Final = r"(?<![\w.%+@-])"  # never start inside a word or a dotted chain
 # Possessive, so a long dotted chain is never re-split; Unicode letters too ("josé.pérez").
-_LOCAL: Final = r"[^\W_][\w.%+-]*+"
+_LOCAL: Final = r"[\w+][\w.%+-]*+"  # any valid start: "_jane", "__x", "+tag"
 _AT: Final = r"(?:\s*@\s*|\s*[(\[{<]\s*(?:at|arroba)\s*[)\]}>]\s*|\s+(?:at|arroba|en)\s+)"
 _STRONG_AT: Final = r"(?:\s*@\s*|\s*[(\[{<]\s*(?:at|arroba)\s*[)\]}>]\s*|\s+arroba\s+)"
 _SPELLED_DOT: Final = r"(?:\.|\s*[(\[{<]\s*(?:dot|punto)\s*[)\]}>]\s*|\s+(?:dot|punto)\s+)"
@@ -365,8 +365,16 @@ UNIT_OR_BOX: Final = re.compile(
     _FLAGS,
 )
 
-# A measure right after a digit run: the run is a quantity, not a phone.
-_UNIT_AFTER: Final = re.compile(rf"\s*(?:{_NOT_NAMES})\b", _FLAGS)
+# A measure right after a digit run: the run is a quantity, not a phone. Only unambiguous
+# measure words count; "in" only after a short number ("3.5 in", "10 in x 12 in"), since after
+# a phone it is prose ("call 305-555-0199 in the afternoon").
+_MEASURE_AFTER: Final = re.compile(
+    r"\s*(?:(?P<inch>in)\b|(?:ft|feet|foot|sq|sqft|square|inch(?:es)?|yd|yards?|gal(?:lons?)?|"
+    r"lbs?|pounds?|amps?|volts?|watts?|kw|hp|seer2?|btu|tons?|mm|cm|metros?|pies|"
+    r"pulgadas?|galones)\b)",
+    _FLAGS,
+)
+_SHORT_NUMBER: Final = re.compile(r"\d{1,4}(?:[./]\d{1,3})?")
 
 _Replace = Callable[[re.Match[str]], str | None]  # None keeps the match as it is
 
@@ -531,15 +539,17 @@ def _mask_street(match: re.Match[str]) -> str | None:
         return None
     if _has_bare_function_word(words):
         return None
-    number = re.match(r"\d+", match.group("number"))
-    digits = number.group(0) if number else ""
+    # A house number, one to three name words and a suffix is an address whatever its case or
+    # whether the number looks like a year ("2000 ocean drive", "45 ocean drive"): privacy wins
+    # over the few phrases that read the same ("12 new drive belts"). Only a longer phrase
+    # before an everyday-noun suffix needs a capitalized street name or a 3-digit number.
     suffix = match.group("suffix")
-    if suffix.lower() in _COMMON_NOUNS:
-        year = len(digits) == 4 and digits[:2] in ("19", "20")
-        if len(digits) < 3 or year:
-            named = bool(words) and suffix[:1].isupper() and words[-1][:1].isupper()
-            if not named or any(re.fullmatch(_FUNCTION_WORDS, w, _FLAGS) for w in words):
-                return None
+    if len(words) > 3 and suffix.lower() in _COMMON_NOUNS:
+        number = re.match(r"\d+", match.group("number"))
+        digits = number.group(0) if number else ""
+        named = suffix[:1].isupper() and words[-1][:1].isupper()
+        if len(digits) < 3 and not named:
+            return None
     return MASK
 
 
@@ -565,7 +575,10 @@ def _phones(match: re.Match[str]) -> str | None:
         return run
     # A measure after the run ("100 / 200 / 1500 sq ft"): a window that ends the run is a
     # quantity, not a phone. Earlier windows still count ("call 305-555-0199. 3 bedrooms").
-    quantity = _UNIT_AFTER.match(match.string, match.end()) is not None
+    measure = _MEASURE_AFTER.match(match.string, match.end())
+    quantity = measure is not None and (
+        measure.group("inch") is None or _SHORT_NUMBER.fullmatch(run) is not None
+    )
     groups = list(_GROUP.finditer(run))
     digits = [group.group(0) for group in groups]
     spans: list[tuple[int, int]] = []
@@ -702,3 +715,160 @@ _STEPS: Final[tuple[tuple[re.Pattern[str], _Replace], ...]] = (
     (SPANISH_STREET, _mask),
     (UNIT_OR_BOX, _mask),
 )
+
+
+# --- Known values ----------------------------------------------------------------------------
+# Patterns cannot foresee every way people write a contact, so the values known for a request
+# (the customer's account email and phone, the address lines) are masked first, whatever their
+# formatting. Each pattern is built from one value, with bounded gaps, so it stays linear.
+
+_KNOWN_AT: Final = r"(?:\s*@\s*|\s*[(\[{<]\s*(?:at|arroba)\s*[)\]}>]\s*|\s+(?:at|arroba)\s+)"
+_KNOWN_DOT: Final = r"(?:\s*\.\s*|\s*[(\[{<]\s*(?:dot|punto)\s*[)\]}>]\s*|\s+(?:dot|punto)\s+)"
+_PHONE_GAP: Final = r"[^\d]{0,3}"  # up to three non-digits between two digits of the number
+# A street suffix and its usual abbreviations, and the directions, for the known street.
+_SUFFIX_GROUPS: Final = (
+    ("street", "st", "str"),
+    ("avenue", "ave", "av"),
+    ("road", "rd"),
+    ("drive", "dr", "drv"),
+    ("boulevard", "blvd", "boul"),
+    ("lane", "ln"),
+    ("court", "ct"),
+    ("place", "pl"),
+    ("terrace", "ter", "terr"),
+    ("way", "wy"),
+    ("circle", "cir"),
+    ("highway", "hwy"),
+    ("parkway", "pkwy"),
+    ("trail", "trl"),
+    ("cove", "cv"),
+    ("loop", "lp"),
+    ("point", "pt"),
+    ("square", "sq"),
+    ("plaza", "plz"),
+    ("causeway", "cswy"),
+    ("expressway", "expy"),
+)
+_DIRECTION_GROUPS: Final = (
+    ("n", "north"),
+    ("s", "south"),
+    ("e", "east"),
+    ("w", "west"),
+    ("ne", "northeast"),
+    ("nw", "northwest"),
+    ("se", "southeast"),
+    ("sw", "southwest"),
+)
+_HOUSE: Final = re.compile(r"\d{1,6}[a-z]?(?:-[a-z0-9]+)?", _FLAGS)
+
+
+@dataclass(frozen=True)
+class KnownValues:
+    """A customer's own contact details for one request, masked before the patterns run. PII:
+    never logged or returned."""
+
+    emails: tuple[str, ...] = ()
+    phones: tuple[str, ...] = ()
+    streets: tuple[str, ...] = ()  # the address lines: the street (line1) and the unit (line2)
+
+
+def redact_known(text: str, known: KnownValues) -> RedactionResult:
+    """`text` with the known values masked, in any spacing, case or punctuation."""
+    cleaned = _clean(text)
+    masked = 0
+    for pattern in _known_patterns(known):
+        cleaned, count = _substitute(pattern, _mask, cleaned)
+        masked += count
+    return RedactionResult(cleaned, masked > 0)
+
+
+def redact_text(text: str, known: KnownValues) -> RedactionResult:
+    """Both passes: the known values first, then every pattern of redact_contacts."""
+    first = redact_known(text, known)
+    second = redact_contacts(first.text)
+    return RedactionResult(second.text, first.redacted or second.redacted)
+
+
+def _known_patterns(known: KnownValues) -> list[re.Pattern[str]]:
+    sources = [
+        *(_email_pattern(email) for email in known.emails),
+        *(_phone_pattern(phone) for phone in known.phones),
+    ]
+    for index, line in enumerate(known.streets):
+        sources += _street_patterns(line) if index == 0 else [_unit_pattern(line)]
+    return [re.compile(source, _FLAGS) for source in sources if source]
+
+
+def _email_pattern(email: str) -> str | None:
+    email = email.strip()
+    if email.count("@") != 1:
+        return None
+    local, domain = email.split("@")
+
+    def dotted(part: str) -> str:
+        return _KNOWN_DOT.join(re.escape(piece) for piece in part.split(".") if piece)
+
+    full = rf"(?<![\w.+-]){dotted(local)}{_KNOWN_AT}{dotted(domain)}(?![\w-])"
+    # The local part alone, when it is handle-shaped ("juan.perez77"), names the address too.
+    if re.search(r"[\d._]", local) and len(local) >= 5:
+        return rf"{full}|(?<![\w.+-]){re.escape(local)}(?![\w-])"
+    return full
+
+
+def _phone_pattern(phone: str) -> str | None:
+    digits = re.sub(r"\D", "", phone)
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    if len(digits) < 7:
+        return None
+    # An opening bracket belongs to the number: "(305)555-0199".
+    core = r"[(\[]?" + _PHONE_GAP.join(digits)
+    if len(digits) == 10:  # a US number: +1, 1, 001 or 011 may come first
+        prefix = rf"(?:(?:(?:\+|00|011)\s*)?1{_PHONE_GAP})?"
+    else:
+        prefix = r"(?:(?:\+|00|011)\s*)?"
+    return rf"(?<!\d){prefix}{core}(?!\d)"
+
+
+def _group_of(word: str, groups: tuple[tuple[str, ...], ...]) -> tuple[str, ...] | None:
+    lower = word.lower().rstrip(".")
+    return next((group for group in groups if lower in group), None)
+
+
+def _word_pattern(word: str) -> str:
+    directions = _group_of(word, _DIRECTION_GROUPS)
+    if directions is not None:
+        return "(?:" + "|".join(rf"{re.escape(v)}\.?" for v in directions) + r"|[nsew]\.\s?[ew]\.)"
+    return re.escape(word.rstrip("."))
+
+
+def _street_patterns(line: str) -> list[str]:
+    """The street as written, case- and space-flexible, with its suffix in any form or none,
+    and in either order ("742 Evergreen Terrace", "Evergreen Ter 742")."""
+    tokens = line.replace(",", " ").split()
+    number = tokens[0] if tokens and _HOUSE.fullmatch(tokens[0]) else None
+    rest = tokens[1:] if number else tokens
+    suffixes = _group_of(rest[-1], _SUFFIX_GROUPS) if rest else None
+    name = rest[:-1] if suffixes else rest
+    if not name or (number is None and len(rest) < 2):
+        return []
+    name_pattern = r"\s+".join(_word_pattern(word) for word in name)
+    suffix = (
+        r"(?:\s+(?:" + "|".join(re.escape(v) for v in suffixes) + r")\b\.?)?" if suffixes else ""
+    )
+    if number is None:
+        return [rf"\b{name_pattern}{suffix}(?![\w-])"]
+    house = re.escape(number)
+    return [
+        rf"\b{house}\s*,?\s+{name_pattern}{suffix}(?![\w-])",
+        rf"\b{name_pattern}{suffix}\s*,?\s*(?:#|no\.?|n[oº°]\.?|n[uú]mero)?\s*{house}(?![\w-])",
+    ]
+
+
+def _unit_pattern(line: str) -> str | None:
+    """The unit line ("Apt 4B"), in any spacing or punctuation, when it says enough to matter."""
+    # Letters and digits apart, so "4B" also matches "4-B" or "4 B".
+    tokens = re.findall(r"[^\W\d_]+|\d+", line)
+    if len("".join(tokens)) < 2:
+        return None
+    return r"(?<![\w-])" + r"[\s.,#-]*".join(re.escape(token) for token in tokens) + r"(?![\w-])"

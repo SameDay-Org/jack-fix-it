@@ -15,6 +15,7 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.storage import get_storage
+from app.modules.categories.intake import INTAKE_QUESTIONS
 from app.modules.categories.models import Category
 from app.modules.jobs.service import SYSTEM
 from app.modules.requests.state_machine import RequestStateMachine, RequestStatus
@@ -83,11 +84,15 @@ async def dispatched(
     *,
     description: str = "Repair the leaking kitchen sink.",
     answers: dict[str, Any] | None = None,
+    email: str = EMAIL,
+    phone: str = PHONE,
+    street: str = STREET,
 ) -> tuple[Caller, Pro, uuid.UUID, uuid.UUID, uuid.UUID]:
-    """A request created through the API, moved to finding_pro and dispatched to a new pro."""
+    """A request created through the API, moved to finding_pro and dispatched to a new pro.
+    The customer's account holds `email` and `phone`; the request's address is `street`."""
     customer = await make_caller(session)
     await session.execute(
-        update(User).where(User.id == customer.id).values(email=EMAIL, phone=PHONE)
+        update(User).where(User.id == customer.id).values(email=email, phone=phone)
     )
     category_id = await make_category(session, questions=QUESTIONS)
     response = await create(
@@ -96,6 +101,7 @@ async def dispatched(
         category_id=str(category_id),
         description=description,
         intake_answers=answers or {},
+        address=dict(ADDRESS, line1=street),
     )
     assert response.status_code == 201, response.text
     request_id = uuid.UUID(response.json()["id"])
@@ -133,7 +139,7 @@ async def test_description_contacts_masked_in_the_detail(
 
     assert_no_canary(detail)
     body = detail.json()
-    assert body["description"] == f"{MASK}; call {MASK}; repair the sink at {MASK}."
+    assert body["description"] == f"{MASK}; call {MASK}; repair the sink at {MASK}, {MASK}."
     assert body["text_redacted"] is True
 
 
@@ -149,7 +155,7 @@ async def test_text_answer_contacts_masked_and_other_answers_unchanged(
     assert_no_canary(detail)
     body = detail.json()
     assert body["intake_answers"] == {
-        "notes": f"{MASK}; call {MASK}; repair the sink at {MASK}.",
+        "notes": f"{MASK}; call {MASK}; repair the sink at {MASK}, {MASK}.",
         "rooms": 3,
         "size": "large",
         "pets": True,
@@ -205,3 +211,121 @@ async def test_the_customer_still_sees_their_own_text_as_written(
     assert own.status_code == 200
     assert own.json()["description"] == CONTACT_TEXT
     assert own.json()["intake_answers"]["notes"] == CONTACT_TEXT
+
+
+# Round 3 review (#172): ordinary contact formats, with the customer's own account email and
+# phone and the request's own street matching the text, through all three pro paths.
+ROUND3_CASES = [
+    # (name, text, secret, account email, account phone, request street)
+    (
+        "phone-in-afternoon",
+        "Call 305-555-0199 in the afternoon about the broken kitchen sink.",
+        "305-555-0199",
+        "test@example.invalid",
+        "+13055550199",
+        STREET,
+    ),
+    (
+        "underscore-email",
+        "Email _jane@example.com about the leaking kitchen sink.",
+        "_jane@example.com",
+        "_jane@example.com",
+        "+13055550199",
+        STREET,
+    ),
+    (
+        "lowercase-street",
+        "The leaking kitchen sink is at 2000 ocean drive.",
+        "2000 ocean drive",
+        "test@example.invalid",
+        "+13055550199",
+        "2000 ocean drive",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("name", "text", "secret", "email", "phone", "street"),
+    ROUND3_CASES,
+    ids=[case[0] for case in ROUND3_CASES],
+)
+@pytest.mark.parametrize(
+    ("source", "route"), [("description", "list"), ("description", "detail"), ("intake", "detail")]
+)
+async def test_ordinary_contacts_never_reach_a_pro(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    name: str,
+    text: str,
+    secret: str,
+    email: str,
+    phone: str,
+    street: str,
+    source: str,
+    route: str,
+) -> None:
+    _, pro, _, dispatch_id, _ = await dispatched(
+        db_client,
+        db_session,
+        description=text if source == "description" else "Repair the leaking kitchen sink.",
+        answers={"notes": text} if source == "intake" else None,
+        email=email,
+        phone=phone,
+        street=street,
+    )
+
+    response = await db_client.get(
+        BASE if route == "list" else f"{BASE}/{dispatch_id}", headers=pro.caller.headers
+    )
+
+    assert response.status_code == 200, response.text
+    assert secret not in response.text, f"{name} leaked through {source}/{route}"
+    body = response.json()
+    flagged = body["items"][0]["text_redacted"] if route == "list" else body["text_redacted"]
+    assert flagged is True
+
+
+@pytest.mark.parametrize("new_type", ["integer", "boolean", "single_choice"])
+async def test_a_changed_question_type_keeps_the_old_text_answer_private(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage, new_type: str
+) -> None:
+    # Questions are editable: the current type proves nothing about an answer given before.
+    _, pro, _, dispatch_id, category_id = await dispatched(
+        db_client, db_session, answers={"notes": EMAIL}
+    )
+    changed: dict[str, Any] = {
+        "key": "notes", "type": new_type, "required": False, "labels": labels("Notes"),
+    }  # fmt: skip
+    if new_type == "integer":
+        changed.update(min=1, max=6)
+    if new_type == "single_choice":
+        changed["options"] = [option("small"), option("large")]
+    INTAKE_QUESTIONS.validate_python([changed])
+    await db_session.execute(
+        update(Category).where(Category.id == category_id).values(intake_questions=[changed])
+    )
+
+    detail = await db_client.get(f"{BASE}/{dispatch_id}", headers=pro.caller.headers)
+
+    assert_no_canary(detail)
+    assert detail.json()["text_redacted"] is True
+
+
+async def test_the_customers_own_details_are_masked_in_any_format(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    # The known-value pass: the account phone written five odd ways, the email in mixed case,
+    # and the street in lowercase without its suffix.
+    text = (
+        "Call 3o5 or (305)555 0199, 305..555..0199, 305 - 555 - 01 99, +1 305/555/0199 or "
+        "3 0 5 5 5 5 0 1 9 9. Mail PRIVACY-Canary@Example.Invalid. I am at 742 evergreen."
+    )
+    _, pro, _, dispatch_id, _ = await dispatched(db_client, db_session, description=text)
+
+    detail = await db_client.get(f"{BASE}/{dispatch_id}", headers=pro.caller.headers)
+
+    assert_no_canary(detail)
+    description = detail.json()["description"]
+    for secret in ("0199", "01 99", "privacy", "evergreen", "742"):
+        assert secret not in description.lower(), secret
