@@ -1,9 +1,9 @@
 import "@/i18n";
 
-import { act, fireEvent, renderRouter, screen } from "expo-router/testing-library";
+import { act, fireEvent, renderRouter, screen, within } from "expo-router/testing-library";
 import * as SplashScreen from "expo-splash-screen";
 import { createElement, useCallback, useState } from "react";
-import { Text } from "react-native";
+import { StyleSheet, Text } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { useSession } from "@/api";
@@ -61,6 +61,23 @@ const routes = {
 };
 
 const { launchMinMs, launchMaxMs } = tokens.motion;
+const HIDDEN = { includeHiddenElements: true };
+
+/** The intro's opacity: under the Reanimated mock the animated style is a plain style. */
+const introOpacity = () =>
+  StyleSheet.flatten(screen.getByTestId("launch-intro").props.style).opacity;
+
+/** Lays out the rotator's hidden measurement row, as the native side would. */
+async function measureWords() {
+  const row = within(screen.getByTestId("launch-rotator-measure", HIDDEN));
+  await act(async () => {
+    for (const word of ["fix", "clean", "paint", "mow", "move"]) {
+      fireEvent(row.getByText(word, HIDDEN), "layout", {
+        nativeEvent: { layout: { width: 40, height: 40, x: 0, y: 0 } },
+      });
+    }
+  });
+}
 
 /** The minimum run elapses; with the session resolved the intro exits (at once, under the mock). */
 async function finishIntro() {
@@ -81,10 +98,9 @@ describe("LaunchIntro over the session gate", () => {
     expect(screen.getByTestId("launch-intro")).toBeTruthy();
     const headline = screen.getByTestId("launch-hero-headline");
     expect(headline.props.accessibilityLabel).toBe("Whatever happens at home, we fix it.");
-    expect(
-      screen.getByTestId("launch-rotator", { includeHiddenElements: true }).props
-        .importantForAccessibility,
-    ).toBe("no-hide-descendants");
+    expect(screen.getByTestId("launch-rotator", HIDDEN).props.importantForAccessibility).toBe(
+      "no-hide-descendants",
+    );
     expect(screen.getByRole("button", { name: "Skip intro" })).toBeTruthy();
     expect(screen.getByText("Jack Fix It")).toBeTruthy();
     // Skip floats over the frame: the hero under the intro has none, and the sentence must not
@@ -92,6 +108,19 @@ describe("LaunchIntro over the session gate", () => {
     const skipRow = screen.getByTestId("launch-hero-skip-row");
     expect(skipRow.props.className).toContain("absolute");
     expect(skipRow.props.style).toEqual({ bottom: METRICS.insets.bottom });
+  });
+
+  it("paints nothing and keeps the splash until every word is measured, then shows and lifts it", async () => {
+    session({ status: "signedOut" });
+    await renderRouter(routes);
+
+    expect(introOpacity()).toBe(0);
+    expect(SplashScreen.hideAsync).not.toHaveBeenCalled();
+
+    await measureWords();
+
+    expect(introOpacity()).toBe(1);
+    expect(SplashScreen.hideAsync).toHaveBeenCalledTimes(1);
   });
 
   it("restoring: the gate shows the static hero under the intro, the splash stays until the intro is ready, and the intro never outlives launchMaxMs", async () => {
