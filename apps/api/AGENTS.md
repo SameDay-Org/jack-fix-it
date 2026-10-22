@@ -32,6 +32,33 @@ rules apply.
 - `uv run alembic revision --autogenerate -m "<what>"`, then read and fix the generated file.
   Money columns are integer `*_cents`. Prove `upgrade` → `downgrade` → `upgrade` locally.
 - Migrations run on Railway as the api service's pre-deploy command.
+- **Status guard (#163).** Request and job statuses change only through `RequestStateMachine`
+  and `JobStateMachine`, and the database enforces it.
+  - **The trigger:** triggers on `service_requests` and `jobs` refuse any status change, and any
+    insert with a status other than the column default. The refusal is SQLSTATE 42501, with a
+    message naming the table only.
+  - **The exception:** a write passes only while the transaction-local setting
+    `app.status_writer` names that very row, `<table>:<row id>`. A machine first flushes
+    everything pending (the drain: an unrelated status write fails there, unauthorized), checks
+    that nothing but its locked row is pending, then sets the token around its single flush and
+    clears it in a `finally`. It is `set_config(..., true)`, so it never outlives the
+    transaction on a pooled connection, and no other row or table can ride along.
+  - **Who may set the token:** nothing else in `app/` or `scripts/` may, and a static test fails
+    if anything does.
+  - **Tests** create rows in a given status with `tests/helpers.py::as_status_writer`, whose
+    wildcard token `fixtures` the trigger accepts only in a database whose own setting
+    `app.status_writer_fixtures` is `on`. `tests/conftest.py` sets it on the test database; no
+    production database has it.
+  - **What it protects against:** accidents, meaning app code, scripts and raw SQL that write a
+    status without going through a machine. It is not a security boundary. Any connection, of
+    any role, can set both settings for its own session (`set_config`), so a client that wants
+    to forge the token can. The static test is what keeps app code from naming them.
+  - **A refusal is a bug:** it reaches the API as a 500 and is never mapped to a 4xx. The logs
+    get `status_guard_refused` with the table name and a sanitized `unhandled_error`. Like every
+    database error, it is logged as a summary only (`app/db_errors.py`): never the statement,
+    the parameters or the driver's message, which can hold SQL literals.
+  - **SQLAdmin (#41) cannot change a status by design.** A status change is a state-machine
+    action with its own endpoint.
 
 ## Worker
 

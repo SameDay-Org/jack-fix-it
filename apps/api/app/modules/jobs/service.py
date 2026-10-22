@@ -13,11 +13,15 @@ change a job together with its own rows (payments, photos, disputes) atomically.
 """
 
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Final
 
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError, PendingRollbackError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.errors import ForbiddenError, NotFoundError
@@ -29,6 +33,47 @@ from app.modules.pros.service import ProService
 from app.modules.users.types import UserAccount, UserRole
 
 STATUS_CHANGED: Final = "status_changed"
+
+
+# The database guard (#163): triggers on service_requests and jobs refuse a status change unless
+# this transaction's app.status_writer names that very row ('<table>:<id>'). Only the state
+# machines set it, around their own write (the static guard flags it anywhere else).
+@asynccontextmanager
+async def _status_writer(session: AsyncSession, job: Job) -> AsyncIterator[None]:
+    """Lets the block change this one job's status past the database guard.
+
+    The token names the row, so the trigger refuses any other row or table that the block's
+    flush might carry; and the unit of work must hold nothing but this job when the window
+    opens (transition() drains it first), so that flush writes this row alone. The token is
+    local to the transaction (is_local), so it never reaches another one on a pooled
+    connection, and it is cleared when the block ends, even when it fails. If the failure
+    aborted the transaction, it cannot be cleared here, but it goes with that transaction's
+    rollback."""
+    _require_clean(session, job)
+    # Only here: the static guard allows this flag in this function alone (ALLOW_LIST).
+    set_writer = text("SELECT set_config('app.status_writer', :value, true)")
+    await session.execute(set_writer, {"value": f"{Job.__tablename__}:{job.id}"})
+    try:
+        yield
+    finally:
+        try:
+            await session.execute(set_writer, {"value": ""})
+        except PendingRollbackError:
+            pass  # the flush failed: the transaction, and the flag with it, will roll back
+        except DBAPIError as error:
+            if getattr(error.orig, "sqlstate", None) != _IN_FAILED_TRANSACTION:
+                raise
+
+
+def _require_clean(session: AsyncSession, job: Job) -> None:
+    """Nothing but the target job may be pending when its status window opens."""
+    pending = [row for row in session.dirty if row is not job and session.is_modified(row)]
+    if session.new or session.deleted or pending:
+        raise RuntimeError("pending writes in the unit of work when a status window opens")
+
+
+# Postgres refuses every statement in a transaction that already failed.
+_IN_FAILED_TRANSACTION: Final = "25P02"
 
 
 @dataclass(frozen=True)
@@ -55,6 +100,7 @@ _ENTRY_TIMESTAMPS: Final = {
 
 class JobStateMachine:
     def __init__(self, session: AsyncSession, pros: ProService) -> None:
+        self._session = session
         self._jobs = JobRepository(session)
         self._pros = pros
 
@@ -70,6 +116,10 @@ class JobStateMachine:
     ) -> JobStatus:
         """Moves the job to `to` and returns its new status. It returns a value, not the ORM
         row, so no caller holds a Job whose status it could write past the table."""
+        # Drain the unit of work first, outside any window: a pending status write anywhere
+        # (this job included) hits the database guard here, unauthorized, instead of riding
+        # along with this transition's flush or being taken for its starting status.
+        await self._session.flush()
         job = await self._jobs.get_for_update(job_id)
         if job is None:
             raise NotFoundError
@@ -85,7 +135,9 @@ class JobStateMachine:
         timestamp = _ENTRY_TIMESTAMPS.get(to)
         if timestamp is not None and getattr(job, timestamp) is None:
             setattr(job, timestamp, now)
-        job.status = to
+        async with _status_writer(self._session, job):
+            job.status = to
+            await self._session.flush()
         await self._jobs.add_event(
             JobEvent(
                 job_id=job.id,
