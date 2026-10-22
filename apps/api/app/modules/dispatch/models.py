@@ -31,3 +31,5 @@ class RequestDispatch(IdTimestampsMixin, Base):
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     # When the pro answered (viewed, declined or quoted); response time = responded_at - sent_at.
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When the pro first opened it (#49).
+    viewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

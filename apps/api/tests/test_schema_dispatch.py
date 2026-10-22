@@ -54,6 +54,7 @@ async def test_dispatch_status_defaults_to_sent(
 
     assert row.status is DispatchStatus.SENT
     assert row.responded_at is None
+    assert row.viewed_at is None  # set on the pro's first open (#49)
 
 
 async def test_dispatch_status_check(
