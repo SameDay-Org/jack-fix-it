@@ -1022,6 +1022,11 @@ export interface components {
              * @description When the pro first opened it.
              */
             viewed_at: string | null;
+            /**
+             * Text Redacted
+             * @description True when contact details were masked in the description or the answers (shown as •••): the customer is reached through the app.
+             */
+            text_redacted: boolean;
         };
         /**
          * OpportunityLocation
@@ -1075,6 +1080,11 @@ export interface components {
              * @description True once the pro has opened it.
              */
             viewed: boolean;
+            /**
+             * Text Redacted
+             * @description True when contact details were masked in the description (shown as •••).
+             */
+            text_redacted: boolean;
         };
         /** PasswordForgotRequest */
         PasswordForgotRequest: {

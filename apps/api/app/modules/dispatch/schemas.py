@@ -1,7 +1,8 @@
 """What a pro sees of the requests dispatched to them (D9.2, #49).
 
 Every schema here, nested ones included, forbids extra fields and lists what it shows: never
-the customer (id, email, phone), the street, coordinates, utm or the BDC's fields. No media
+the customer (id, email, phone), the street, coordinates, utm or the BDC's fields. The
+customer's free text arrives with contact details masked (app.redaction). No media
 yet: pros get sanitized photos with #173 (stored ones carry the customer's id and GPS data).
 """
 
@@ -41,6 +42,9 @@ class OpportunitySummary(_Out):
     preferred_date: date | None
     sent_at: datetime
     viewed: bool = Field(description="True once the pro has opened it.")
+    text_redacted: bool = Field(
+        description="True when contact details were masked in the description (shown as •••)."
+    )
 
 
 class OpportunityPage(_Out):
@@ -58,3 +62,7 @@ class OpportunityDetail(_Out):
     preferred_date: date | None
     sent_at: datetime
     viewed_at: datetime | None = Field(description="When the pro first opened it.")
+    text_redacted: bool = Field(
+        description="True when contact details were masked in the description or the answers "
+        "(shown as •••): the customer is reached through the app."
+    )
