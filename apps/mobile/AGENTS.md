@@ -22,7 +22,7 @@ rules apply.
   `src/features/auth`): a UI-thread transform over `motion.panelRiseMs`, corners and color
   easing into the page, the hero dimming by `motion.panelHeroDim`. Pushed with
   `from: "welcome"`, those routes take `risenFromWelcome`'s stack animation (Android `none`, iOS
-  `fade`: Android's fade dims both pages), and their content enters and leaves with
+  `fade`: Android's fade dims both pages; `fade` on both under Reduce Motion), and their content enters and leaves with
   `useContentTransition` (focus lands on the title; hardware back only while focused). Reduce
   Motion: crossfade only.
 - Routing (D5.3, #33): `src/app/(auth)` holds welcome, role, sign-up and login; `src/app/(app)`
