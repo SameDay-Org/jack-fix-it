@@ -378,6 +378,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/pros/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get my pro profile
+         * @description The caller's own profile, with a presigned URL for the photo. The first call creates an
+         *     empty profile, pending verification.
+         */
+        get: operations["get_my_profile_v1_pros_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit my pro profile
+         * @description Changes only the fields sent, in one transaction. category_ids and service_area_ids
+         *     replace the whole set. Upload the photo first (POST /v1/uploads, purpose profile_photo).
+         */
+        patch: operations["update_my_profile_v1_pros_me_patch"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -459,6 +485,23 @@ export interface components {
             icon: string | null;
             /** Requires License */
             requires_license: boolean;
+        };
+        /** CategorySummary */
+        CategorySummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Slug */
+            slug: string;
+            /**
+             * Names
+             * @description Display name per locale, e.g. en and es.
+             */
+            names: {
+                [key: string]: string;
+            };
         };
         /**
          * CheckStatus
@@ -589,6 +632,68 @@ export interface components {
              */
             code: string;
         };
+        /** PhotoOut */
+        PhotoOut: {
+            /**
+             * Url
+             * @description Presigned GET URL.
+             */
+            url: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
+        /** ProProfileOut */
+        ProProfileOut: {
+            /** Bio */
+            bio: string | null;
+            /** Years Of Experience */
+            years_of_experience: number | null;
+            photo: components["schemas"]["PhotoOut"] | null;
+            verification_status: components["schemas"]["ProVerificationStatus"];
+            /** Payouts Enabled */
+            payouts_enabled: boolean;
+            /** Categories */
+            categories: components["schemas"]["CategorySummary"][];
+            /** Service Areas */
+            service_areas: components["schemas"]["ServiceAreaOut"][];
+        };
+        /**
+         * ProProfileUpdate
+         * @description Only the fields sent change. Verification, payouts, rating and job count are set by the
+         *     platform: sending them is a 422 (extra="forbid").
+         */
+        ProProfileUpdate: {
+            /**
+             * Bio
+             * @description An empty string or null clears it.
+             */
+            bio?: string | null;
+            /** Years Of Experience */
+            years_of_experience?: number | null;
+            /**
+             * Photo Key
+             * @description Key of the caller's own profile_photo upload (POST /v1/uploads); null clears.
+             */
+            photo_key?: string | null;
+            /**
+             * Category Ids
+             * @description Replaces the set: active categories, no duplicates, up to PRO_MAX_CATEGORIES.
+             */
+            category_ids?: string[];
+            /**
+             * Service Area Ids
+             * @description Replaces the set: active service areas, no duplicates, up to PRO_MAX_SERVICE_AREAS.
+             */
+            service_area_ids?: string[];
+        };
+        /**
+         * ProVerificationStatus
+         * @enum {string}
+         */
+        ProVerificationStatus: "pending" | "approved" | "rejected";
         /** ReadinessResponse */
         ReadinessResponse: {
             /**
@@ -742,6 +847,22 @@ export interface components {
             created_at: string;
             /** Media Count */
             media_count: number;
+        };
+        /** ServiceAreaOut */
+        ServiceAreaOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Zip Code */
+            zip_code: string;
+            /** City */
+            city: string;
+            /** State */
+            state: string;
+            /** Region */
+            region: string;
         };
         /**
          * UploadPurpose
@@ -1731,6 +1852,104 @@ export interface operations {
                 headers: {
                     /** @description Seconds until the current limit window ends. */
                     "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_my_profile_v1_pros_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProProfileOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have a pro profile. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_my_profile_v1_pros_me_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProProfileUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProProfileOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have a pro profile. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description invalid_media: photo_key is not the caller's own profile_photo upload; invalid_category / invalid_service_area: an unknown or inactive id; validation_error: any other invalid field (duplicates or too many ids, bio length, years out of range, fields the platform sets such as verification_status). */
+            422: {
+                headers: {
                     [name: string]: unknown;
                 };
                 content: {
