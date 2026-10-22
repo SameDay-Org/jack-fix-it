@@ -3,22 +3,24 @@
 import json
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.integrations.storage import get_storage
 from app.modules.categories.models import Category
-from app.modules.pros.models import ProDocument, ProDocumentStatus
+from app.modules.pros.models import ProDocument, ProDocumentStatus, ProProfile
 from app.modules.users.types import UserRole
 from app.observability import JsonFormatter
-from tests.conftest import make_settings
+from tests.conftest import Committed, make_settings
+from tests.test_auth_api import register
 from tests.test_pros_profile_api import Caller, FakeStorage, make_caller, make_categories, patch_me
 
 URL_TTL = 90  # not the default (300), so the tests prove it comes from the setting
@@ -200,6 +202,42 @@ async def test_reused_key_422(
     assert row.status is ProDocumentStatus.PENDING
 
 
+async def test_reused_key_same_type_rolls_back_the_supersede(
+    committed: Committed, storage: FakeStorage
+) -> None:
+    # Real sessions and commits: a retry of the pending ID's type supersedes it before the
+    # insert fails on the reused key, so only a rollback of the whole transaction keeps it.
+    body = (await register(committed.client, email=committed.email, role="pro")).json()
+    pro = Caller(
+        id=uuid.UUID(body["user"]["id"]),
+        headers={"Authorization": f"Bearer {body['access_token']}"},
+    )
+    key = doc_key(pro)
+    try:
+        first = await submit(committed.client, pro, "id", key)
+        assert first.status_code == 201
+
+        again = await submit(committed.client, pro, "id", key)
+
+        assert again.status_code == 422
+        assert again.json() == INVALID_MEDIA
+        listed = await listing(committed.client, pro)
+        assert [(d["id"], d["status"]) for d in listed["documents"]] == [
+            (first.json()["id"], "pending")
+        ]
+        async with committed.sessions() as reader:
+            statement = select(ProDocument.status).where(
+                ProDocument.id == uuid.UUID(first.json()["id"])
+            )
+            assert await reader.scalar(statement) is ProDocumentStatus.PENDING
+    finally:
+        async with committed.sessions() as session:
+            profile_ids = select(ProProfile.id).where(ProProfile.user_id == pro.id)
+            await session.execute(delete(ProDocument).where(ProDocument.pro_id.in_(profile_ids)))
+            await session.execute(delete(ProProfile).where(ProProfile.user_id == pro.id))
+            await session.commit()
+
+
 async def test_past_expiry_422(
     db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
 ) -> None:
@@ -266,14 +304,61 @@ async def test_customer_agent_admin_403(
         assert response.json()["error"]["code"] == "forbidden"
 
 
+@dataclass(frozen=True)
+class Documents:
+    current: set[str]  # document ids
+    history: list[str]
+    keys: set[str]
+
+
+async def documents_with_history(
+    client: httpx.AsyncClient, session: AsyncSession, pro: Caller
+) -> Documents:
+    """A pending ID, plus an approved insurance renewed by a pending one: the approved one is
+    history. Submitting creates the pro's profile."""
+    keys = [doc_key(pro) for _ in range(3)]
+    approved = (await submit(client, pro, "insurance", keys[0])).json()
+    await session.execute(
+        update(ProDocument)
+        .where(ProDocument.id == uuid.UUID(approved["id"]))
+        .values(status="approved", created_at=datetime(2026, 1, 1, tzinfo=UTC))
+    )
+    renewed = (await submit(client, pro, "insurance", keys[1])).json()
+    id_doc = (await submit(client, pro, "id", keys[2])).json()
+    return Documents({renewed["id"], id_doc["id"]}, [approved["id"]], set(keys))
+
+
 async def test_each_pro_sees_only_their_documents(
     db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
 ) -> None:
-    ana = await make_caller(db_session)
-    bruno = await make_caller(db_session)
-    await submit(db_client, ana, "id")
+    # Both pros have a profile and documents of the same types, so only the owner filter
+    # keeps them apart, in `documents` and in `history`.
+    ana, bruno = await make_caller(db_session), await make_caller(db_session)
+    owned = {
+        ana.id: await documents_with_history(db_client, db_session, ana),
+        bruno.id: await documents_with_history(db_client, db_session, bruno),
+    }
 
-    assert (await listing(db_client, bruno))["documents"] == []
+    for pro in (ana, bruno):
+        listed = await listing(db_client, pro)
+        mine = owned[pro.id]
+        assert {d["id"] for d in listed["documents"]} == mine.current
+        assert [d["id"] for d in listed["history"]] == mine.history
+        assert {d["url"] for d in listed["documents"] + listed["history"]} == {
+            f"https://storage.example.invalid/get/{key}?sig=fake" for key in mine.keys
+        }
+    assert owned[ana.id].keys.isdisjoint(owned[bruno.id].keys)
+
+    # Bruno cannot submit Ana's upload, and her documents stay as they were.
+    before = {row.id: row.status for row in await documents_of(db_session)}
+    for key in owned[ana.id].keys:
+        stolen = await submit(db_client, bruno, "id", key)
+        assert stolen.status_code == 422
+        assert stolen.json() == INVALID_MEDIA
+    assert {row.id: row.status for row in await documents_of(db_session)} == before
+    listed = await listing(db_client, ana)
+    assert {d["id"] for d in listed["documents"]} == owned[ana.id].current
+    assert [d["id"] for d in listed["history"]] == owned[ana.id].history
 
 
 async def test_presigned_urls_use_settings_ttl(
@@ -319,7 +404,5 @@ async def test_no_pii_in_logs(
 
 
 async def documents_of(session: AsyncSession) -> list[ProDocument]:
-    from sqlalchemy import select
-
     statement = select(ProDocument).execution_options(populate_existing=True)
     return list((await session.scalars(statement)).all())
