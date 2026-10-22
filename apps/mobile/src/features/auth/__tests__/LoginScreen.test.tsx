@@ -9,7 +9,7 @@ import { moveAccessibilityFocus } from "@/components/ui";
 import { tokens } from "@/theme";
 
 import { LoginScreen } from "../LoginScreen";
-import { panelHandoffStore } from "../panelHandoff";
+import { createPanelHandoff, type PanelHandoff } from "../panelHandoff";
 import { renderInSafeArea } from "./helpers";
 
 jest.mock(
@@ -46,7 +46,13 @@ async function fillAndSubmit(address: string, secret: string) {
   await fireEvent.press(screen.getByRole("button", { name: "Log in" }));
 }
 
+let handoff: PanelHandoff = createPanelHandoff();
+
 describe("LoginScreen", () => {
+  beforeEach(() => {
+    handoff = createPanelHandoff();
+  });
+
   beforeEach(() => {
     jest.mocked(login).mockReset();
     jest.spyOn(AccessibilityInfo, "announceForAccessibility").mockImplementation(() => undefined);
@@ -58,7 +64,7 @@ describe("LoginScreen", () => {
     [429, "rate_limited", "Too many attempts. Try again in a moment."],
   ])("maps %s %s to its message", async (status, code, message) => {
     jest.mocked(login).mockRejectedValue(new ApiError(status, code));
-    await renderInSafeArea(<LoginScreen />);
+    await renderInSafeArea(<LoginScreen />, handoff);
 
     await fillAndSubmit("maria@example.com", "correct horse battery");
 
@@ -69,7 +75,7 @@ describe("LoginScreen", () => {
 
   it("submits the normalized email with the current-password autofill intent and no reset link", async () => {
     jest.mocked(login).mockResolvedValue(undefined);
-    await renderInSafeArea(<LoginScreen />);
+    await renderInSafeArea(<LoginScreen />, handoff);
 
     expect(screen.getByLabelText("Password").props.textContentType).toBe("password");
     expect(screen.getByLabelText("Password").props.autoComplete).toBe("current-password");
@@ -104,7 +110,7 @@ describe("LoginScreen", () => {
       jest.useFakeTimers();
       jest.mocked(useLocalSearchParams).mockReturnValue({ from: "welcome" });
       jest.mocked(router.back).mockClear();
-      panelHandoffStore.setState({ phase: "risen", bar: "light" });
+      handoff.store.setState({ phase: "risen", bar: "light" });
       jest.mocked(useNavigation).mockReturnValue({
         addListener: jest.fn((_type: string, listener: (event: object) => void) => {
           showScreen = () => listener({ data: { closing: false } });
@@ -119,7 +125,7 @@ describe("LoginScreen", () => {
 
     it("content enters after the panel settles, then focus moves to the title", async () => {
       jest.mocked(moveAccessibilityFocus).mockClear();
-      await renderInSafeArea(<LoginScreen />);
+      await renderInSafeArea(<LoginScreen />, handoff);
       expect(rootOpacity()).toBe(0);
       await ready();
 
@@ -132,14 +138,14 @@ describe("LoginScreen", () => {
     });
 
     it("the screen fades as one layer, and takes no taps before its content is in", async () => {
-      await renderInSafeArea(<LoginScreen />);
+      await renderInSafeArea(<LoginScreen />, handoff);
       const root = screen.getByTestId("login-screen-root");
       expect(root.props.needsOffscreenAlphaCompositing).toBe(true);
       expect(root.props.pointerEvents).toBe("none");
     });
 
     it("back fades the content out before it pops", async () => {
-      await renderInSafeArea(<LoginScreen />);
+      await renderInSafeArea(<LoginScreen />, handoff);
       await ready();
       await act(async () => jest.advanceTimersByTime(transitionMs * 2));
 

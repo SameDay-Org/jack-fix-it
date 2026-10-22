@@ -17,13 +17,7 @@ import { moveAccessibilityFocus, type SystemBar } from "@/components/ui";
 import { tokens } from "@/theme";
 
 import { backToPrevious } from "./components/BackButton";
-import {
-  CONTENT_FROM,
-  panelHandoffStore,
-  panelProgress,
-  panelTravel,
-  usePanelHandoff,
-} from "./panelHandoff";
+import { CONTENT_FROM, usePanelHandoff, usePanelHandoffContext } from "./panelHandoff";
 import { pushesUnderRise } from "./panelRoute";
 
 type Params = {
@@ -80,6 +74,11 @@ export function useContentTransition({
   const focused = useIsFocused();
   const navigation = useNavigation<NativeStackNavigationProp<ParamListBase>>();
   const { bar: panelBar, phase } = usePanelHandoff();
+  const {
+    store: handoffStore,
+    progress: panelProgress,
+    travel: panelTravel,
+  } = usePanelHandoffContext();
   const visible = useSharedValue(animate ? 0 : 1);
   const entered = useRef(false);
   const laidOut = useRef(false);
@@ -124,7 +123,7 @@ export function useContentTransition({
     if (!animate || entered.current || exitingRef.current) return;
     // Riding the panel, the screen shows with it (its opacity follows the panel); otherwise it
     // waits for the panel to settle.
-    const panelSettled = ridesPanel || panelHandoffStore.getState().phase !== "rising";
+    const panelSettled = ridesPanel || handoffStore.getState().phase !== "rising";
     if (!laidOut.current || !panelSettled) return;
     if (appearing.current) {
       start();
@@ -183,8 +182,8 @@ export function useContentTransition({
   useEffect(() => clearAppearGuard, []);
   useEffect(() => {
     if (!animate) return;
-    return panelHandoffStore.subscribe(() => tryStartRef.current());
-  }, [animate]);
+    return handoffStore.subscribe(() => tryStartRef.current());
+  }, [animate, handoffStore]);
   // On screen: the stack is showing it (`transitionStart` comes with the native will-appear). A
   // React commit or even a layout event is earlier than that; a fade started on them ran while the
   // native screen was not attached yet, and the content popped in.

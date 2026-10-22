@@ -23,7 +23,8 @@ rules apply.
   easing into the page, the hero dimming by `motion.panelHeroDim`. Welcome prefetches both
   routes at rest; pushed with `from: "welcome"`, they take `risenFromWelcome`'s options (Android:
   a transparent modal pushed as the rise starts, so Welcome keeps painting under it both ways;
-  iOS: `fade`, pushed as it ends). `useContentTransition` hands off through `panelHandoff`: the
+  iOS: `fade`, pushed as it ends). `useContentTransition` hands off through `panelHandoff` (scoped to the `(auth)` layout by
+  `PanelHandoffProvider`, so a sign-in takes it away and the next Welcome starts at rest): the
   screen fades in only once laid out, shown by the stack and the panel risen, mirrors the panel's
   status bar until then, focuses the title, and fades out before back (hardware back only while
   focused). Reduce Motion: a crossfade over Welcome.

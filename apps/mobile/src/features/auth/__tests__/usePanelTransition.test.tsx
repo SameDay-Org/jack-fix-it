@@ -8,7 +8,7 @@ import { useReducedMotion } from "react-native-reanimated";
 import { useSession } from "@/api";
 import { tokens } from "@/theme";
 
-import { panelHandoffStore, panelProgress, panelTravel } from "../panelHandoff";
+import { createPanelHandoff, type PanelHandoff } from "../panelHandoff";
 import { WelcomeScreen } from "../WelcomeScreen";
 import { renderInSafeArea, SIGNED_OUT } from "./helpers";
 
@@ -64,9 +64,11 @@ const getStarted = () =>
   screen.getByRole("button", { name: "Get started", includeHiddenElements: true });
 const advance = (ms: number) => act(async () => jest.advanceTimersByTime(ms));
 
+let handoff: PanelHandoff;
+
 /** Renders Welcome and lays the panel out, as the native side would. */
 async function renderWelcome() {
-  await renderInSafeArea(<WelcomeScreen />);
+  await renderInSafeArea(<WelcomeScreen />, handoff);
   await act(async () => {
     fireEvent(screen.getByTestId("welcome-actions", { includeHiddenElements: true }), "layout", {
       nativeEvent: { layout: { x: 0, y: RESTING_TOP, width: 320, height: 184 } },
@@ -83,9 +85,8 @@ const refocus = () =>
 
 beforeEach(() => {
   jest.useFakeTimers();
-  // Shared with the destination at module level: every test starts with the panel at rest.
-  panelProgress.value = 0;
-  panelTravel.value = 0;
+  // Every test is a new auth flow, with its own hand-off at rest.
+  handoff = createPanelHandoff();
   jest.mocked(useSession).mockReturnValue(SESSION_SIGNED_OUT);
   jest.mocked(useReducedMotion).mockReturnValue(false);
   jest.mocked(router.push).mockReset();
@@ -269,7 +270,6 @@ describe("the hand-off to the destination", () => {
   const TO_LOGIN = { pathname: "/(auth)/login", params: { from: "welcome" } };
 
   beforeEach(() => {
-    panelHandoffStore.setState({ phase: "idle", bar: "hero" });
     jest.mocked(router.prefetch).mockClear();
   });
   afterEach(() => jest.restoreAllMocks());
@@ -277,25 +277,25 @@ describe("the hand-off to the destination", () => {
   it("publishes the panel's phase and bar: rising, the bar flipping as it covers it, then risen", async () => {
     await renderWelcome();
     await act(async () => fireEvent.press(getStarted()));
-    expect(panelHandoffStore.getState()).toEqual({ phase: "rising", bar: "hero" });
+    expect(handoff.store.getState()).toEqual({ phase: "rising", bar: "hero" });
 
     // Nearly settled: once the panel covers the status bar, the destination may start.
     await advance(panelRiseMs / 2);
-    expect(panelHandoffStore.getState().phase).toBe("rising");
+    expect(handoff.store.getState().phase).toBe("rising");
     let progressAtHandoff = 0;
-    const unsubscribe = panelHandoffStore.subscribe((state) => {
+    const unsubscribe = handoff.store.subscribe((state) => {
       if (state.phase === "risen" && progressAtHandoff === 0)
         progressAtHandoff = -panelY() / TRAVEL;
     });
 
     await advance(panelRiseMs * 1.5);
     unsubscribe();
-    expect(panelHandoffStore.getState()).toEqual({ phase: "risen", bar: "light" });
+    expect(handoff.store.getState()).toEqual({ phase: "risen", bar: "light" });
     expect(progressAtHandoff).toBeGreaterThan(0.95); // the strip covered, not the last frame
     expect(progressAtHandoff).toBeLessThan(1);
 
     await refocus(); // back: the panel lowers
-    expect(panelHandoffStore.getState().phase).toBe("idle");
+    expect(handoff.store.getState().phase).toBe("idle");
   });
 
   it("covered, Welcome leaves the accessibility tree; back at rest, it returns", async () => {
@@ -332,11 +332,11 @@ describe("the hand-off to the destination", () => {
     await act(async () => fireEvent.press(getStarted()));
     expect(router.push).toHaveBeenCalledTimes(1);
     expect(router.push).toHaveBeenCalledWith(TO_ROLE);
-    expect(panelHandoffStore.getState().phase).toBe("rising");
+    expect(handoff.store.getState().phase).toBe("rising");
 
     await advance(panelRiseMs * 1.5);
     expect(panelY()).toBeCloseTo(-TRAVEL, 0); // the rise still runs to the top
-    expect(panelHandoffStore.getState().phase).toBe("risen");
+    expect(handoff.store.getState().phase).toBe("risen");
     expect(router.push).toHaveBeenCalledTimes(1);
   });
 
@@ -349,14 +349,14 @@ describe("the hand-off to the destination", () => {
     await act(async () => fireEvent.press(getStarted()));
     await advance(panelRiseMs * 2);
     expect(panelY()).toBeCloseTo(0, 0);
-    expect(panelHandoffStore.getState().phase).toBe("idle");
+    expect(handoff.store.getState().phase).toBe("idle");
   });
 
   it("Reduce Motion: no rise, the panel counts as risen at once", async () => {
     jest.mocked(useReducedMotion).mockReturnValue(true);
     await renderWelcome();
     await act(async () => fireEvent.press(getStarted()));
-    expect(panelHandoffStore.getState()).toEqual({ phase: "risen", bar: "hero" });
+    expect(handoff.store.getState()).toEqual({ phase: "risen", bar: "hero" });
     expect(router.push).toHaveBeenCalledTimes(1);
   });
 
@@ -378,5 +378,75 @@ describe("the hand-off to the destination", () => {
     await advance(panelRiseMs * 1.5);
     // Login is still prefetched: building it anew would throw it away and rebuild it.
     expect(jest.mocked(router.prefetch).mock.calls).toEqual([[TO_ROLE]]);
+  });
+});
+
+describe("a sign-in leaves the auth flow without going back (#175 round 2)", () => {
+  const atRest = () => ({
+    panelY: panelY() + 0, // -0 (translateY -travel * 0) reads as 0
+    radius: animated("welcome-actions").borderTopLeftRadius,
+    heroOpacity: animated("welcome-hero").opacity,
+    progress: handoff.progress.value,
+    phase: handoff.store.getState().phase,
+    bar: handoff.store.getState().bar,
+  });
+  const REST = { panelY: 0, radius: xl, heroOpacity: 1, progress: 0, phase: "idle", bar: "hero" };
+  const riseToLogin = async () => {
+    await act(async () =>
+      fireEvent.press(
+        screen.getByRole("button", {
+          name: "I already have an account",
+          includeHiddenElements: true,
+        }),
+      ),
+    );
+    await advance(panelRiseMs * 2);
+    expect(panelY()).toBeCloseTo(-TRAVEL, 0); // risen, and nothing brings it back down
+  };
+  afterEach(() => jest.restoreAllMocks());
+
+  it.each(["android", "ios"])(
+    "%s: the next flow's Welcome starts at rest, with its actions on screen",
+    async (platform) => {
+      jest.replaceProperty(Platform, "OS", platform as "android" | "ios");
+      await renderWelcome();
+      await riseToLogin();
+
+      await screen.unmount(); // the (auth) group goes with its hand-off: no back, no refocus
+      handoff = createPanelHandoff(); // a sign-out mounts a new group, with a new hand-off
+      await renderWelcome();
+      await advance(panelRiseMs * 3);
+
+      expect(atRest()).toEqual(REST);
+      expect(screen.getByRole("button", { name: "Get started" })).toBeTruthy(); // reachable
+    },
+  );
+
+  it.each(["android", "ios"])(
+    "%s: even on the same hand-off, a new Welcome resets it to rest",
+    async (platform) => {
+      jest.replaceProperty(Platform, "OS", platform as "android" | "ios");
+      await renderWelcome();
+      await riseToLogin();
+
+      await screen.unmount();
+      await renderWelcome(); // same `handoff`: what a leak would look like
+      await advance(panelRiseMs * 3);
+
+      expect(atRest()).toEqual(REST);
+    },
+  );
+
+  it("a completion from before the remount changes nothing", async () => {
+    await renderWelcome(); // iOS: the push waits for the rise's completion
+    await act(async () => fireEvent.press(getStarted()));
+    await advance(panelRiseMs / 2);
+
+    await screen.unmount(); // mid-rise
+    await renderWelcome();
+    await advance(panelRiseMs * 3); // the old rise's time runs out
+
+    expect(router.push).not.toHaveBeenCalled();
+    expect(atRest()).toEqual(REST);
   });
 });

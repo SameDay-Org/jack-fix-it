@@ -2,7 +2,7 @@ import { Stack } from "expo-router";
 import type { ComponentProps } from "react";
 import { Platform } from "react-native";
 
-import { risenFromWelcome } from "@/features/auth";
+import { PanelHandoffProvider, risenFromWelcome } from "@/features/auth";
 
 // Welcome is where the group lands, including when the signed-in group redirects here.
 export const unstable_settings = { anchor: "welcome" };
@@ -20,10 +20,14 @@ const byOrigin = ({ params }: { params?: object }) =>
   (params as { from?: string } | undefined)?.from;
 
 export default function AuthLayout() {
+  // The panel hand-off lives as long as this group: a sign-in removes it, and the next Welcome
+  // starts from a new one at rest.
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="role" options={afterPanelRise} getId={byOrigin} />
-      <Stack.Screen name="login" options={afterPanelRise} getId={byOrigin} />
-    </Stack>
+    <PanelHandoffProvider>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="role" options={afterPanelRise} getId={byOrigin} />
+        <Stack.Screen name="login" options={afterPanelRise} getId={byOrigin} />
+      </Stack>
+    </PanelHandoffProvider>
   );
 }

@@ -15,7 +15,7 @@ import { useReducedMotion } from "react-native-reanimated";
 import { moveAccessibilityFocus } from "@/components/ui";
 import { tokens } from "@/theme";
 
-import { panelHandoffStore, panelProgress, panelTravel } from "../panelHandoff";
+import { createPanelHandoff, type PanelHandoff } from "../panelHandoff";
 import { RoleScreen } from "../RoleScreen";
 import { renderInSafeArea } from "./helpers";
 
@@ -64,8 +64,11 @@ const focus = () => {
   return effect();
 };
 
+let handoff: PanelHandoff;
+
 describe("RoleScreen", () => {
   beforeEach(() => {
+    handoff = createPanelHandoff();
     jest.mocked(router.push).mockClear();
     jest.mocked(router.back).mockClear();
     jest.mocked(useLocalSearchParams).mockReturnValue({});
@@ -75,7 +78,7 @@ describe("RoleScreen", () => {
   });
 
   it("continue is disabled until a role is chosen, then carries it to sign-up", async () => {
-    await renderInSafeArea(<RoleScreen />);
+    await renderInSafeArea(<RoleScreen />, handoff);
 
     expect(next().props.accessibilityState).toMatchObject({ disabled: true });
     await fireEvent.press(next());
@@ -92,7 +95,7 @@ describe("RoleScreen", () => {
   });
 
   it("radio semantics: a radiogroup with one checked card at a time", async () => {
-    await renderInSafeArea(<RoleScreen />);
+    await renderInSafeArea(<RoleScreen />, handoff);
 
     expect(screen.getByTestId("role-options").props.accessibilityRole).toBe("radiogroup");
     expect(customer().props.accessibilityState).toMatchObject({ checked: false });
@@ -108,7 +111,7 @@ describe("RoleScreen", () => {
   });
 
   it("back returns to the previous step", async () => {
-    await renderInSafeArea(<RoleScreen />);
+    await renderInSafeArea(<RoleScreen />, handoff);
 
     await fireEvent.press(screen.getByRole("button", { name: "Back" }));
 
@@ -133,7 +136,7 @@ describe("RoleScreen", () => {
     beforeEach(() => {
       jest.useFakeTimers();
       jest.mocked(useLocalSearchParams).mockReturnValue({ from: "welcome" });
-      panelHandoffStore.setState({ phase: "risen", bar: "light" });
+      handoff.store.setState({ phase: "risen", bar: "light" });
       listeners = {};
       jest.mocked(useNavigation).mockReturnValue({
         addListener: jest.fn((type: string, listener: (typeof listeners)[string]) => {
@@ -149,7 +152,7 @@ describe("RoleScreen", () => {
 
     it("enters once laid out, on screen and the panel risen; then focus moves to the title", async () => {
       jest.mocked(moveAccessibilityFocus).mockClear();
-      await renderInSafeArea(<RoleScreen />);
+      await renderInSafeArea(<RoleScreen />, handoff);
       expect(rootOpacity()).toBe(0); // see-through over the covered panel
 
       await layOut();
@@ -167,14 +170,14 @@ describe("RoleScreen", () => {
     });
 
     it("ready early (on screen while the panel still rises): waits, then enters as it settles", async () => {
-      panelHandoffStore.setState({ phase: "rising" });
-      await renderInSafeArea(<RoleScreen />);
+      handoff.store.setState({ phase: "rising" });
+      await renderInSafeArea(<RoleScreen />, handoff);
       await layOut();
       await appear();
       await advance(transitionMs * 3);
       expect(rootOpacity()).toBe(0);
 
-      await act(async () => panelHandoffStore.setState({ phase: "risen" }));
+      await act(async () => handoff.store.setState({ phase: "risen" }));
       await advance(transitionMs / 2);
       expect(rootOpacity()).toBeGreaterThan(0);
       await advance(transitionMs);
@@ -182,7 +185,7 @@ describe("RoleScreen", () => {
     });
 
     it("late (the panel settled first): the covered panel holds until it is shown and laid out", async () => {
-      await renderInSafeArea(<RoleScreen />);
+      await renderInSafeArea(<RoleScreen />, handoff);
       await appear();
       await advance(transitionMs * 3);
       expect(rootOpacity()).toBe(0);
@@ -194,7 +197,7 @@ describe("RoleScreen", () => {
 
     it("never fades before the native screen is shown: a layout alone (prefetched) waits", async () => {
       jest.mocked(useIsFocused).mockReturnValue(false); // prefetched, not pushed
-      await renderInSafeArea(<RoleScreen />);
+      await renderInSafeArea(<RoleScreen />, handoff);
       await layOut();
       await advance(transitionMs * 5);
       expect(rootOpacity()).toBe(0);
@@ -205,15 +208,15 @@ describe("RoleScreen", () => {
     });
 
     it("until its content is in, the status bar follows the panel's; then the page's", async () => {
-      panelHandoffStore.setState({ phase: "rising", bar: "hero" });
-      await renderInSafeArea(<RoleScreen />);
+      handoff.store.setState({ phase: "rising", bar: "hero" });
+      await renderInSafeArea(<RoleScreen />, handoff);
       await layOut();
       await appear();
       expect(statusBarStyle()).toBe("light"); // the hero's light icons, mirrored
 
-      await act(async () => panelHandoffStore.setState({ bar: "light" })); // the panel covers it
+      await act(async () => handoff.store.setState({ bar: "light" })); // the panel covers it
       expect(statusBarStyle()).toBe("dark");
-      await act(async () => panelHandoffStore.setState({ phase: "risen" }));
+      await act(async () => handoff.store.setState({ phase: "risen" }));
       await advance(transitionMs * 2);
       expect(statusBarStyle()).toBe("dark");
       expect(backdrop()).toContain("bg-gray-50"); // the page never took the hero's navy
@@ -221,7 +224,7 @@ describe("RoleScreen", () => {
 
     it("shown again (back from sign-up), it neither re-enters nor re-announces", async () => {
       jest.mocked(moveAccessibilityFocus).mockClear();
-      await renderInSafeArea(<RoleScreen />);
+      await renderInSafeArea(<RoleScreen />, handoff);
       await enterFully();
       await appear();
       await advance(transitionMs * 2);
@@ -230,7 +233,7 @@ describe("RoleScreen", () => {
     });
 
     it("back fades the screen out over the still-covered panel before it pops", async () => {
-      await renderInSafeArea(<RoleScreen />);
+      await renderInSafeArea(<RoleScreen />, handoff);
       await enterFully();
 
       await act(async () => fireEvent.press(screen.getByRole("button", { name: "Back" })));
@@ -248,7 +251,7 @@ describe("RoleScreen", () => {
       const add = jest
         .spyOn(BackHandler, "addEventListener")
         .mockImplementation(() => ({ remove }));
-      await renderInSafeArea(<RoleScreen />);
+      await renderInSafeArea(<RoleScreen />, handoff);
       await enterFully();
 
       let blur: (() => void) | void = undefined;
@@ -273,7 +276,7 @@ describe("RoleScreen", () => {
     });
 
     it("takes no taps before its content is in, nor while it leaves", async () => {
-      await renderInSafeArea(<RoleScreen />);
+      await renderInSafeArea(<RoleScreen />, handoff);
       expect(screen.getByTestId("role-root").props.pointerEvents).toBe("none");
       await enterFully();
       expect(screen.getByTestId("role-root").props.pointerEvents).toBe("auto");
@@ -285,13 +288,13 @@ describe("RoleScreen", () => {
     });
 
     it("fades as one layer (Android composites a fading view's children apart)", async () => {
-      await renderInSafeArea(<RoleScreen />);
+      await renderInSafeArea(<RoleScreen />, handoff);
       expect(screen.getByTestId("role-root").props.needsOffscreenAlphaCompositing).toBe(true);
     });
 
     it("under Reduce Motion it only fades, a crossfade over Welcome: no slide", async () => {
       jest.mocked(useReducedMotion).mockReturnValue(true);
-      await renderInSafeArea(<RoleScreen />);
+      await renderInSafeArea(<RoleScreen />, handoff);
       await layOut();
       await appear();
       await advance(transitionMs / 2);
@@ -302,18 +305,18 @@ describe("RoleScreen", () => {
 
     it("while prefetched (not focused) it sets no status bar, so it cannot override the shown screen", async () => {
       jest.mocked(useIsFocused).mockReturnValue(false);
-      await renderInSafeArea(<RoleScreen />);
+      await renderInSafeArea(<RoleScreen />, handoff);
       expect(StatusBar).not.toHaveBeenCalled();
 
       jest.mocked(useIsFocused).mockReturnValue(true);
-      await renderInSafeArea(<RoleScreen />);
+      await renderInSafeArea(<RoleScreen />, handoff);
       expect(StatusBar).toHaveBeenCalled();
     });
 
     it("under Reduce Motion the page keeps its color through the exit (no navy page fading out)", async () => {
       jest.mocked(useReducedMotion).mockReturnValue(true);
-      panelHandoffStore.setState({ phase: "risen", bar: "hero" }); // no rise: the hero's bar
-      await renderInSafeArea(<RoleScreen />);
+      handoff.store.setState({ phase: "risen", bar: "hero" }); // no rise: the hero's bar
+      await renderInSafeArea(<RoleScreen />, handoff);
       await enterFully();
       expect(backdrop()).toContain("bg-gray-50");
 
@@ -327,8 +330,8 @@ describe("RoleScreen", () => {
       const add = jest.spyOn(BackHandler, "addEventListener").mockImplementation(() => ({
         remove: jest.fn(),
       }));
-      panelHandoffStore.setState({ phase: "rising" });
-      await renderInSafeArea(<RoleScreen />);
+      handoff.store.setState({ phase: "rising" });
+      await renderInSafeArea(<RoleScreen />, handoff);
       await layOut();
       await appear();
       await act(async () => {
@@ -339,7 +342,7 @@ describe("RoleScreen", () => {
         onBack();
       });
 
-      await act(async () => panelHandoffStore.setState({ phase: "risen" })); // mid-exit
+      await act(async () => handoff.store.setState({ phase: "risen" })); // mid-exit
       await advance(transitionMs * 2);
       expect(rootOpacity()).toBe(0);
       expect(router.back).toHaveBeenCalledTimes(1);
@@ -348,7 +351,7 @@ describe("RoleScreen", () => {
 
     it("pushed but never reported shown by the stack: enters after one more rise, not before", async () => {
       const { panelRiseMs } = tokens.motion;
-      await renderInSafeArea(<RoleScreen />);
+      await renderInSafeArea(<RoleScreen />, handoff);
       await layOut();
       await advance(panelRiseMs - 1);
       expect(rootOpacity()).toBe(0);
@@ -359,7 +362,7 @@ describe("RoleScreen", () => {
     it("prefetched (not focused), it waits for the stack however long it takes", async () => {
       jest.mocked(useIsFocused).mockReturnValue(false);
       const { panelRiseMs } = tokens.motion;
-      await renderInSafeArea(<RoleScreen />);
+      await renderInSafeArea(<RoleScreen />, handoff);
       await layOut();
       await advance(panelRiseMs * 5);
       expect(rootOpacity()).toBe(0);
@@ -369,10 +372,10 @@ describe("RoleScreen", () => {
       jest.replaceProperty(Platform, "OS", "android");
       const { xl } = tokens.radius;
       const TRAVEL = 464;
-      panelTravel.value = TRAVEL;
-      panelProgress.value = 0.25;
-      panelHandoffStore.setState({ phase: "rising", bar: "hero" });
-      await renderInSafeArea(<RoleScreen />);
+      handoff.travel.value = TRAVEL;
+      handoff.progress.value = 0.25;
+      handoff.store.setState({ phase: "rising", bar: "hero" });
+      await renderInSafeArea(<RoleScreen />, handoff);
       await layOut();
       await appear();
       await advance(transitionMs * 2); // on screen and ready, under the rising panel
@@ -392,26 +395,24 @@ describe("RoleScreen", () => {
       expect(backdrop()).toContain("bg-gray-50"); // but the page riding the panel is the page
 
       await act(async () => {
-        panelProgress.value = 0.75;
+        handoff.progress.value = 0.75;
       });
       expect(root().opacity).toBeCloseTo(0.5, 5);
       expect(root().transform[0].translateY).toBeCloseTo(TRAVEL * 0.25, 5);
 
       await act(async () => {
-        panelProgress.value = 1;
-        panelHandoffStore.setState({ phase: "risen", bar: "light" });
+        handoff.progress.value = 1;
+        handoff.store.setState({ phase: "risen", bar: "light" });
       });
       expect(root().opacity).toBe(1);
       expect(root().transform[0].translateY).toBe(0);
       expect(root().borderTopLeftRadius).toBe(0);
       expect(statusBarStyle()).toBe("dark");
-      panelProgress.value = 0;
-      panelTravel.value = 0;
     });
 
     it("reached any other way, the screen is simply there", async () => {
       jest.mocked(useLocalSearchParams).mockReturnValue({});
-      await renderInSafeArea(<RoleScreen />);
+      await renderInSafeArea(<RoleScreen />, handoff);
       expect(rootOpacity()).toBe(1);
       expect(backdrop()).toContain("bg-gray-50");
       await act(async () => fireEvent.press(screen.getByRole("button", { name: "Back" })));

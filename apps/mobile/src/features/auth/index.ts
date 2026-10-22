@@ -4,6 +4,8 @@ export { HomePlaceholderScreen } from "./HomePlaceholderScreen";
 export { deviceLocale } from "./locale";
 export { LoginScreen } from "./LoginScreen";
 export { OfflineScreen } from "./OfflineScreen";
+export { createPanelHandoff, PanelHandoffProvider } from "./panelHandoff";
+export type { PanelHandoff } from "./panelHandoff";
 export { risenFromWelcome } from "./panelRoute";
 export type { PanelRouteOptions } from "./panelRoute";
 export { RoleScreen } from "./RoleScreen";

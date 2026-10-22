@@ -2,6 +2,7 @@ import { router, useFocusEffect, useNavigation, type Href } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 import {
+  cancelAnimation,
   Easing,
   runOnJS,
   useAnimatedReaction,
@@ -13,13 +14,7 @@ import {
 import type { SystemBar } from "@/components/ui";
 import { tokens } from "@/theme";
 
-import {
-  panelHandoffStore,
-  panelProgress,
-  panelTravel,
-  setPanelBar,
-  setRisePhase,
-} from "./panelHandoff";
+import { usePanelHandoffContext, type RisePhase } from "./panelHandoff";
 import { pushesUnderRise } from "./panelRoute";
 
 export type PanelGeometry = {
@@ -72,18 +67,24 @@ export type PanelTransition = {
 export function usePanelTransition({ reduceMotion, destinations }: Params): PanelTransition {
   const { panelRiseMs, launchMaxMs } = tokens.motion;
   const navigation = useNavigation();
-  // Module-level, so the destination can ride the same values (see `panelHandoff`).
-  const progress = panelProgress;
-  const travel = panelTravel;
+  // The auth flow's hand-off (see `panelHandoff`): the destination rides the same values.
+  const { store, progress, travel, setProgress, setTravel } = usePanelHandoffContext();
+  const setRisePhase = (phase: RisePhase) => store.setState({ phase });
+  const setPanelBar = (next: SystemBar) => store.setState({ bar: next });
   const flipAt = useSharedValue(1);
   const [bar, setBar] = useState<SystemBar>("hero");
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const settleCheck = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Every rise and every lowering is a new generation: a completion from an older one (a rise
+  // replaced by a back, a screen gone meanwhile) changes nothing.
+  const generation = useRef(0);
+  const mounted = useRef(true);
+  const isCurrent = (startedIn: number) => mounted.current && startedIn === generation.current;
 
   const setGeometry = ({ restingTop, topInset }: PanelGeometry) => {
     const distance = restingTop + topInset;
-    travel.value = distance;
+    setTravel(distance);
     flipAt.value = distance > 0 ? (restingTop + topInset / 2) / distance : 1;
   };
 
@@ -94,7 +95,7 @@ export function usePanelTransition({ reduceMotion, destinations }: Params): Pane
     // Covering the status bar is the panel nearly settled: the rest of the ease is its last few
     // dp. The destination may start its content now, so it arrives as the panel lands rather than
     // a frame or two after.
-    if (covered && panelHandoffStore.getState().phase === "rising") setRisePhase("risen");
+    if (covered && store.getState().phase === "rising") setRisePhase("risen");
   };
 
   useAnimatedReaction(
@@ -119,7 +120,8 @@ export function usePanelTransition({ reduceMotion, destinations }: Params): Pane
   const lastDestination = useRef<Href | null>(null);
   const prefetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const release = () => {
+  const release = (startedIn: number) => {
+    if (!isCurrent(startedIn)) return;
     busyRef.current = false;
     setBusy(false);
     if (lastDestination.current) router.prefetch(lastDestination.current);
@@ -133,12 +135,15 @@ export function usePanelTransition({ reduceMotion, destinations }: Params): Pane
   const rest = () => {
     clearSettleCheck();
     setRisePhase("idle");
+    const startedIn = ++generation.current;
     // Always assigned, even when the panel reads 0: a rise started in this same turn (a push that
     // threw right away) is not on the UI thread yet, and this replaces it. At 0 already, it ends
     // at once.
-    progress.value = withTiming(0, { duration: panelRiseMs, easing: EASING }, (finished) => {
-      if (finished) runOnJS(release)();
-    });
+    setProgress(
+      withTiming(0, { duration: panelRiseMs, easing: EASING }, (finished) => {
+        if (finished) runOnJS(release)(startedIn);
+      }),
+    );
   };
 
   const navigate = (href: Href) => {
@@ -151,12 +156,13 @@ export function usePanelTransition({ reduceMotion, destinations }: Params): Pane
     // A push that leaves Welcome focused did nothing (no such route, an interrupted
     // navigation): the panel must not stay up over a screen the user cannot use.
     settleCheck.current = setTimeout(() => {
-      if (navigation.isFocused()) rest();
+      if (mounted.current && navigation.isFocused()) rest();
     }, panelRiseMs);
   };
 
   /** The panel covers the screen: the destination may show its content; on iOS, push it now. */
-  const risen = (pushNow: Href | null) => {
+  const risen = (pushNow: Href | null, startedIn: number) => {
+    if (!isCurrent(startedIn)) return;
     setRisePhase("risen");
     if (pushNow) navigate(pushNow);
   };
@@ -167,8 +173,9 @@ export function usePanelTransition({ reduceMotion, destinations }: Params): Pane
     setBusy(true);
     lastDestination.current = href;
     setPanelBar("hero"); // at rest: the hero's light icons, until the panel covers the bar
+    const startedIn = ++generation.current;
     if (reduceMotion) {
-      risen(href);
+      risen(href, startedIn);
       return;
     }
     setRisePhase("rising");
@@ -176,9 +183,11 @@ export function usePanelTransition({ reduceMotion, destinations }: Params): Pane
     // The completion callback is passed to withTiming directly so the Babel plugin makes it a
     // worklet (through a helper it would stay a JS function and fail on the UI thread). It eases
     // out over the token's duration: a deterministic end, so the hand-off follows on time.
-    progress.value = withTiming(1, { duration: panelRiseMs, easing: EASING }, (finished) => {
-      if (finished) runOnJS(risen)(under ? null : href);
-    });
+    setProgress(
+      withTiming(1, { duration: panelRiseMs, easing: EASING }, (finished) => {
+        if (finished) runOnJS(risen)(under ? null : href, startedIn);
+      }),
+    );
     // After the rise has started, so a push that throws lowers a panel that is already moving.
     if (under) navigate(href);
   };
@@ -208,13 +217,19 @@ export function usePanelTransition({ reduceMotion, destinations }: Params): Pane
     }, [launchMaxMs]),
   );
 
-  useEffect(
-    () => () => {
+  // A new Welcome starts at rest, whatever the hand-off held, and leaves nothing running behind it.
+  useEffect(() => {
+    mounted.current = true;
+    setProgress(0);
+    store.setState({ phase: "idle", bar: "hero" });
+    return () => {
+      mounted.current = false;
+      generation.current += 1;
+      cancelAnimation(progress);
       clearSettleCheck();
       if (prefetchTimer.current) clearTimeout(prefetchTimer.current);
-    },
-    [],
-  );
+    };
+  }, [progress, setProgress, store]);
 
   return { progress, travel, bar, busy, setGeometry, go };
 }
