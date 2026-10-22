@@ -10,8 +10,8 @@ from pathlib import Path
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import URL, bindparam, delete, select, text, update
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy import URL, bindparam, delete, func, select, text, update
+from sqlalchemy.exc import DBAPIError, PendingRollbackError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.db import Base
@@ -26,6 +26,7 @@ from app.modules.requests.state_machine import RequestStateMachine
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole
 from app.observability import JsonFormatter
+from tests.helpers import FIXTURES_TOKEN, as_status_writer
 from tests.test_schema_requests_jobs import add, make_job, make_quote
 
 REFUSED = "42501"  # insufficient_privilege: the trigger's refusal
@@ -258,8 +259,12 @@ async def test_flag_cleared_even_when_flush_fails(
 ) -> None:
     flush = AsyncSession.flush
     request_id = rows.request.id  # a savepoint rollback expires the objects
+    seen: list[str] = []  # the token at each flush: the drain's, then the window's
 
     async def failing_flush(self: AsyncSession, *args: object, **kwargs: object) -> None:
+        seen.append(await flag(self))
+        if len(seen) == 1:
+            return await flush(self)  # the drain, before the window
         raise RuntimeError("synthetic failure inside the flag's window")
 
     # 1. A failure that leaves the transaction usable: the flag is cleared in the finally.
@@ -269,11 +274,14 @@ async def test_flag_cleared_even_when_flush_fails(
         await RequestStateMachine(db_session).transition(
             request_id, RequestStatus.REVIEWING, rows.agent
         )
+    assert seen == ["", f"service_requests:{request_id}"]  # the failure was inside the window
     assert await flag(db_session) == ""
     await savepoint.rollback()
 
     # 2. A database failure that aborts the transaction: the flag goes with the rollback.
     async def aborting_flush(self: AsyncSession, *args: object, **kwargs: object) -> None:
+        if await flag(self) == "":
+            return await flush(self)  # the drain, before the window
         await self.execute(text("SELECT 1 / 0"))
 
     monkeypatch.setattr(AsyncSession, "flush", aborting_flush)
@@ -400,11 +408,12 @@ async def test_flag_does_not_leak_after_commit_or_rollback(committed: Committed)
         await session.commit()
     await next_write_refused()
 
-    # Even a flag left set by a transaction that ended is gone in the next one.
+    # Even a token for this very row, left set by a transaction that ended, is gone in the next.
+    token = f"service_requests:{committed.request_id}"
     for end in ("commit", "rollback"):
         async with committed.sessions() as session:
             await session.execute(
-                text("SELECT set_config('app.status_writer', 'state_machine', true)")
+                text("SELECT set_config('app.status_writer', :token, true)"), {"token": token}
             )
             await getattr(session, end)()
         await next_write_refused()
@@ -452,3 +461,221 @@ async def test_refusal_reaching_the_api_is_a_500_naming_the_table_only(
     assert "the status of service_requests changes only through its state machine" in logged
     assert str(committed.request_id) not in logged
     assert "cancelled" not in logged
+
+
+# Row-scoped tokens and the drain (#174 review round 1): a machine's window authorizes its own
+# row only. Unrelated pending writes, deferred with no_autoflush (an ordinary unit-of-work
+# pattern), never ride along with its flush.
+
+PENDING_DESCRIPTION = "Pending direct insert (#174 review)"
+_BAD_STATUS = {"request": RequestStatus.ACCEPTED, "job": JobStatus.PAID_OUT}
+_MODEL: dict[str, type[ServiceRequest] | type[Job]] = {"request": ServiceRequest, "job": Job}
+
+
+async def transition(session: AsyncSession, rows: Rows, machine: str) -> None:
+    """A valid transition by one of the machines, on `rows`."""
+    if machine == "request":
+        await RequestStateMachine(session).transition(
+            rows.request.id, RequestStatus.REVIEWING, rows.agent
+        )
+    else:
+        await JobStateMachine(session, ProService(session)).transition(
+            rows.job.id, JobStatus.ON_THE_WAY, rows.pro
+        )
+
+
+async def status_of(session: AsyncSession, kind: str, row_id: uuid.UUID) -> str:
+    model = _MODEL[kind]
+    statement = select(model.status).where(model.id == row_id)
+    value = await session.scalar(statement.execution_options(populate_existing=True))
+    assert value is not None
+    return str(value)
+
+
+@pytest.mark.parametrize("machine", ["request", "job"])
+@pytest.mark.parametrize("victim_kind", ["request", "job"])
+async def test_unrelated_dirty_status_is_refused_and_stays_unchanged(
+    db_session: AsyncSession, machine: str, victim_kind: str
+) -> None:
+    authorized, victim = await build(db_session), await build(db_session)
+    row = victim.request if victim_kind == "request" else victim.job
+    row_id, original = row.id, str(row.status)
+
+    savepoint = await db_session.begin_nested()
+
+    async def ride_along() -> None:
+        with db_session.no_autoflush:
+            row.status = _BAD_STATUS[victim_kind]  # type: ignore[assignment]  # either model
+            await transition(db_session, authorized, machine)
+
+    with pytest.raises(DBAPIError) as error:
+        await ride_along()
+    await savepoint.rollback()
+
+    assert getattr(error.value.orig, "sqlstate", None) == REFUSED
+    assert await status_of(db_session, victim_kind, row_id) == original
+
+
+@pytest.mark.parametrize("machine", ["request", "job"])
+async def test_unrelated_nondefault_insert_is_refused_and_not_inserted(
+    db_session: AsyncSession, machine: str
+) -> None:
+    authorized = await build(db_session)
+    pending = ServiceRequest(
+        customer_id=authorized.request.customer_id,
+        address_id=authorized.request.address_id,
+        description=PENDING_DESCRIPTION,
+        origin=RequestOrigin.APP,
+        status=RequestStatus.ACCEPTED,
+    )
+
+    savepoint = await db_session.begin_nested()
+
+    async def ride_along() -> None:
+        with db_session.no_autoflush:
+            db_session.add(pending)
+            await transition(db_session, authorized, machine)
+
+    with pytest.raises(DBAPIError) as error:
+        await ride_along()
+    await savepoint.rollback()
+
+    assert getattr(error.value.orig, "sqlstate", None) == REFUSED
+    inserted = select(func.count()).where(ServiceRequest.description == PENDING_DESCRIPTION)
+    assert await db_session.scalar(inserted) == 0
+
+
+@pytest.mark.parametrize("machine", ["request", "job"])
+async def test_a_pending_status_on_the_target_row_is_refused_not_taken_as_its_start(
+    db_session: AsyncSession, rows: Rows, machine: str
+) -> None:
+    # The drain refuses it before the machine reads the row; without the drain the row lock
+    # would reload the row and drop the pending write in silence, or start from it.
+    target = rows.request if machine == "request" else rows.job
+    target_id, original = target.id, str(target.status)
+
+    savepoint = await db_session.begin_nested()
+
+    async def ride_along() -> None:
+        with db_session.no_autoflush:
+            target.status = _BAD_STATUS[machine]  # type: ignore[assignment]  # either model
+            await transition(db_session, rows, machine)
+
+    with pytest.raises(DBAPIError) as error:
+        await ride_along()
+    await savepoint.rollback()
+
+    assert getattr(error.value.orig, "sqlstate", None) == REFUSED
+    assert await status_of(db_session, machine, target_id) == original
+
+
+async def test_refused_ride_along_changes_nothing_even_if_the_caller_commits(
+    committed: Committed,
+) -> None:
+    async with committed.sessions() as session:
+        request = await session.get(ServiceRequest, committed.request_id)
+        assert request is not None
+        victim = ServiceRequest(
+            customer_id=request.customer_id,
+            address_id=request.address_id,
+            description="Ride-along victim (#174 review)",
+            origin=RequestOrigin.APP,
+        )
+        await add(session, victim)
+        await session.commit()
+        victim_id = victim.id
+    try:
+        async with committed.sessions() as session:
+            victim_row = await session.get(ServiceRequest, victim_id)
+            assert victim_row is not None
+
+            async def ride_along() -> None:
+                with session.no_autoflush:
+                    victim_row.status = RequestStatus.ACCEPTED
+                    await RequestStateMachine(session).transition(
+                        committed.request_id, RequestStatus.REVIEWING, committed.agent
+                    )
+
+            with pytest.raises(DBAPIError):
+                await ride_along()
+            # A caller that swallows the error and commits: the failed transaction cannot.
+            with pytest.raises((PendingRollbackError, DBAPIError)):
+                await session.commit()
+            await session.rollback()
+
+        async with committed.sessions() as reader:
+            statuses = {
+                row_id: await reader.scalar(
+                    select(ServiceRequest.status).where(ServiceRequest.id == row_id)
+                )
+                for row_id in (victim_id, committed.request_id)
+            }
+        assert statuses == {
+            victim_id: RequestStatus.RECEIVED,
+            committed.request_id: RequestStatus.RECEIVED,
+        }
+    finally:
+        async with committed.sessions() as session:
+            await session.execute(delete(ServiceRequest).where(ServiceRequest.id == victim_id))
+            await session.commit()
+
+
+async def test_a_row_token_authorizes_that_row_only(db_session: AsyncSession) -> None:
+    mine, other = await build(db_session), await build(db_session)
+    token = f"service_requests:{mine.request.id}"
+    await db_session.execute(
+        text("SELECT set_config('app.status_writer', :token, true)"), {"token": token}
+    )
+
+    def set_status(
+        model: type[ServiceRequest] | type[Job], row_id: uuid.UUID
+    ) -> Callable[[], Awaitable[object]]:
+        statement = update(model).where(model.id == row_id).values(status="cancelled")
+        return lambda: db_session.execute(statement)
+
+    await refused(db_session, set_status(ServiceRequest, other.request.id))
+    await refused(db_session, set_status(Job, mine.job.id))
+    await set_status(ServiceRequest, mine.request.id)()
+
+    assert await status_of(db_session, "request", mine.request.id) == RequestStatus.CANCELLED
+
+
+async def test_the_old_plain_flag_authorizes_nothing(db_session: AsyncSession, rows: Rows) -> None:
+    await db_session.execute(text("SELECT set_config('app.status_writer', 'state_machine', true)"))
+
+    await refused(
+        db_session,
+        lambda: db_session.execute(
+            update(ServiceRequest)
+            .where(ServiceRequest.id == rows.request.id)
+            .values(status="cancelled")
+        ),
+    )
+
+
+async def test_the_fixtures_token_works_only_in_the_test_database(
+    db_session: AsyncSession, rows: Rows
+) -> None:
+    write = (
+        update(ServiceRequest).where(ServiceRequest.id == rows.request.id).values(status="expired")
+    )
+
+    async def with_fixtures_token() -> None:
+        async with as_status_writer(db_session):
+            await db_session.execute(write)
+
+    # A database without the setting (any production one) refuses the wildcard.
+    await db_session.execute(text("SELECT set_config('app.status_writer_fixtures', 'off', true)"))
+    await refused(db_session, with_fixtures_token)
+    # The test database has it (conftest), and the wildcard then works.
+    await db_session.execute(text("SELECT set_config('app.status_writer_fixtures', 'on', true)"))
+    await with_fixtures_token()
+    assert await status_of(db_session, "request", rows.request.id) == RequestStatus.EXPIRED
+
+
+def test_the_machines_never_use_the_fixtures_token() -> None:
+    for machine in ("app/modules/jobs/service.py", "app/modules/requests/state_machine.py"):
+        source = (API_DIR / machine).read_text(encoding="utf-8")
+        assert "status_writer_fixtures" not in source, machine
+        assert f'"{FIXTURES_TOKEN}"' not in source, machine
+        assert f"'{FIXTURES_TOKEN}'" not in source, machine

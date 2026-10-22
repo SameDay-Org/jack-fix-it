@@ -23,16 +23,28 @@ GUARDED = {"service_requests": "received", "jobs": "scheduled"}
 
 def upgrade() -> None:
     # The database guard (#163): request and job statuses change only through the state
-    # machines (AGENTS.md), whatever Python path issues the write. The machines set the
-    # transaction-local flag app.status_writer = 'state_machine' around their own write; any
-    # other status change, or an insert with a status other than the default, is refused with
-    # SQLSTATE 42501 and a message naming the table only.
+    # machines (AGENTS.md), whatever Python path issues the write. A machine sets the
+    # transaction-local token app.status_writer = '<table>:<row id>' around its own write, so
+    # the token authorizes that one row of that one table: any other status change, or an
+    # insert with a status other than the default, is refused with SQLSTATE 42501 and a message
+    # naming the table only.
+    #
+    # Test fixtures create rows in a given status with the token 'fixtures'. The trigger accepts
+    # it only in a database whose own setting app.status_writer_fixtures is 'on', which the
+    # test suite sets on its test database (tests/conftest.py); no production database has it,
+    # and no production code may name app.status_writer (a static test).
     op.execute(
         """
         CREATE FUNCTION enforce_status_writer() RETURNS trigger
         LANGUAGE plpgsql AS $$
+        DECLARE
+            writer text := coalesce(current_setting('app.status_writer', true), '');
         BEGIN
-            IF coalesce(current_setting('app.status_writer', true), '') = 'state_machine' THEN
+            IF writer = TG_TABLE_NAME || ':' || NEW.id::text THEN
+                RETURN NEW;
+            END IF;
+            IF writer = 'fixtures'
+                AND coalesce(current_setting('app.status_writer_fixtures', true), '') = 'on' THEN
                 RETURN NEW;
             END IF;
             -- An insert trigger passes the table's default status as its argument.
