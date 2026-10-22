@@ -114,7 +114,7 @@ describe("LaunchIntro over the session gate", () => {
     expect(skipRow.props.style).toEqual({ bottom: METRICS.insets.bottom });
   });
 
-  it("paints nothing and keeps the splash until every word is measured, then shows and lifts it", async () => {
+  it("keeps the splash and paints nothing until every word is measured, then lifts it", async () => {
     session({ status: "signedOut" });
     await renderRouter(routes);
 
@@ -123,7 +123,8 @@ describe("LaunchIntro over the session gate", () => {
 
     await measureWords();
 
-    expect(introOpacity()).toBe(1);
+    // The gate itself is a shared value on the UI thread, which this mock cannot replay;
+    // LaunchIntroVisibility.test.tsx reads the live style with the real Reanimated.
     expect(SplashScreen.hideAsync).toHaveBeenCalledTimes(1);
   });
 

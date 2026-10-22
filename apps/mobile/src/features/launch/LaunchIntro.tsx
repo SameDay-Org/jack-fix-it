@@ -49,13 +49,15 @@ export function LaunchIntro({ onReady, onDone }: LaunchIntroProps) {
   // The splash lifts when the first frame is final, or at the latest when the intro must end.
   // Until then the intro paints nothing: the native splash normally covers that frame, but a dev
   // client does not hold it, and what sits under the intro is the same navy (the gate's static
-  // hero, or its navy frame), so the words never show before they are measured.
+  // hero, or its navy frame), so the words never show before they are measured. The gate is a
+  // shared value, not state: a state dependency re-initializes the animated style on the
+  // re-render, which blanked the intro for a frame or two on the device.
   const readyRef = useRef(false);
-  const [shown, setShown] = useState(false);
+  const shown = useSharedValue(0);
   const ready = () => {
     if (readyRef.current) return;
     readyRef.current = true;
-    setShown(true);
+    shown.value = 1;
     onReady();
   };
   useEffect(() => {
@@ -77,7 +79,7 @@ export function LaunchIntro({ onReady, onDone }: LaunchIntroProps) {
   }, [exit, launchExitMs, onDone, phase]);
 
   const exitStyle = useAnimatedStyle(() => ({
-    opacity: shown ? 1 - exit.value : 0,
+    opacity: shown.value * (1 - exit.value),
     transform: [{ scale: reduceMotion ? 1 : 1 + (launchExitScale - 1) * exit.value }],
   }));
 
