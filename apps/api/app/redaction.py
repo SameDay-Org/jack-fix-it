@@ -777,6 +777,12 @@ _KNOWN_CANONICAL: Final[dict[str, str]] = {
 _KNOWN_SUFFIXES: Final = frozenset(group[0] for group in _SUFFIX_GROUPS)
 _KNOWN_DIRECTIONS: Final = frozenset(group[0] for group in _DIRECTION_GROUPS)
 _KNOWN_PLACE_WORDS: Final = _KNOWN_SUFFIXES | _KNOWN_DIRECTIONS
+# Every form of a direction or suffix as typed ("northwest", "nw", "terrace", "ter"), to find
+# them glued to a name word: "nwmain", "evergreenter" (#172 round 8). Single letters are left
+# out: "evergreens" is a plural, not "evergreen" + "s".
+_KNOWN_FORMS: Final = frozenset(form for form in _KNOWN_CANONICAL if len(form) >= 2)
+# The longest piece searched for glued words: a few words, never a whole run of text.
+_KNOWN_MAX_GLUED: Final = 40
 _KNOWN_UNIT_WORDS: Final = frozenset(
     {"apartment", "apartamento", "apto", "apt", "departamento", "depto", "unidad", "unit",
      "suite", "ste", "lot", "bldg"}
@@ -1025,29 +1031,86 @@ def _is_apostrophe(gap: str) -> bool:
     return len(gap) == 1 and gap in _APOSTROPHES
 
 
-def _standalone(text: str, tokens: list[_KnownToken], index: int) -> bool:
-    """A direction or suffix piece that is a word of its own: not the "w" of "w/", the "e" of
-    "e.g." or the "s" of "Evergreen's"."""
+def _standalone(text: str, tokens: list[_KnownToken], index: int, street: _KnownStreet) -> bool:
+    """A direction or suffix piece that is a word of the address. Glued to the next piece by
+    punctuation alone ("ter.742", "nw/main", "n.w"), it is when that piece belongs to the
+    address too (a direction, a suffix, a name word, the house number, "#"); otherwise it is
+    part of something else: the "w" of "w/2", the "e" of "e.g.", the "n" of "n/a". Before a
+    space, a slash makes it "w/" ("w/ 2 seals"). After an apostrophe it is the "s" of
+    "Evergreen's"."""
     if index > 0 and _is_apostrophe(_between(text, tokens, index - 1, index)):
         return False
-    after = text[tokens[index].end : tokens[index + 1].start if index + 1 < len(tokens) else None]
-    if after.startswith("/") or _is_apostrophe(after):
+    end = tokens[index + 1].start if index + 1 < len(tokens) else len(text)
+    after = text[tokens[index].end : end]
+    glued = after.split(maxsplit=1)[0] if after and not after[0].isspace() else ""
+    if not glued:
+        return True
+    if any(_is_apostrophe(char) for char in glued):
         return False
-    following = tokens[index + 1].key if index + 1 < len(tokens) else ""
-    return not (after == "." and following not in _KNOWN_PLACE_WORDS)
+    if glued == after and index + 1 < len(tokens):  # punctuation alone up to the next piece
+        return _address_piece(tokens[index + 1].key, street)
+    return "/" not in glued
+
+
+def _joinable(street: _KnownStreet) -> frozenset[str]:
+    """The pieces an address word may be glued to by punctuation alone."""
+    house: set[str] = set()
+    if street.house is not None:
+        house.add(street.house)
+        if street.letter:
+            house.add(street.house + street.letter)
+    return _KNOWN_PLACE_WORDS | frozenset(street.names) | frozenset(house) | {"#"}
+
+
+def _address_piece(key: str, street: _KnownStreet) -> bool:
+    """A piece of the street: a word of it, its house number, "#", or its words glued together
+    ("stnw", "lutherking", "oceanblvd")."""
+    return (
+        key in _joinable(street)
+        or _splits_into(key, _KNOWN_FORMS | frozenset(street.names))
+        or _glued_name(key, street)
+    )
+
+
+def _splits_into(text: str, words: frozenset[str]) -> bool:
+    """`text` is empty, or a run of `words` with nothing between them ("stnw" is st + nw)."""
+    if len(text) > _KNOWN_MAX_GLUED:
+        return False
+    reachable = [True] + [False] * len(text)
+    for end in range(1, len(text) + 1):
+        reachable[end] = any(reachable[start] and text[start:end] in words for start in range(end))
+    return reachable[len(text)]
+
+
+def _glued_name(key: str, street: _KnownStreet) -> bool:
+    """A piece holding the first name word with directions or suffixes glued before it, and the
+    street's further words glued after it ("nwmain", "evergreenter", "martinluther")."""
+    name = street.names[0]
+    if key == name or len(key) > _KNOWN_MAX_GLUED:
+        return False
+    after_words = frozenset(street.names) | _KNOWN_FORMS
+    start = key.find(name)
+    while start != -1:
+        before, after = key[:start], key[start + len(name) :]
+        if _splits_into(before, _KNOWN_FORMS) and _splits_into(after, after_words):
+            return True
+        start = key.find(name, start + 1)
+    return False
 
 
 def _house_end(
     text: str, tokens: list[_KnownToken], index: int, street: _KnownStreet
 ) -> int | None:
     """The last piece of the street's house number when it starts at `index`; None when the
-    piece is not that number, or is part of a decimal or a thousands group ("2.50", "1,742")."""
+    piece is not that number, or is joined to another digit by a period, a comma or a slash
+    ("742.5", "1,742", "742/12"): the only guard on the number. Letters and punctuation next
+    to it are fine ("ter.742", "#742", "No.742")."""
     assert street.house is not None  # noqa: S101 - only called for a street with a number
     key = tokens[index].key
     for neighbour in (index - 1, index + 1):
         if 0 <= neighbour < len(tokens) and tokens[neighbour].key.isdigit():
             left, right = sorted((index, neighbour))
-            if _between(text, tokens, left, right) in (".", ","):
+            if _between(text, tokens, left, right) in (".", ",", "/"):  # 742.5, 1,742, 742/12
                 return None
     if street.letter and key == street.house + street.letter:
         return index
@@ -1091,6 +1154,22 @@ def _word_at(text: str, tokens: list[_KnownToken], index: int, word: str, step: 
             return None
         current = nxt
     return None
+
+
+def _apostrophe_run(text: str, tokens: list[_KnownToken], index: int, step: int) -> tuple[str, int]:
+    """The pieces joined by apostrophes from `index` in direction `step` ("o'brienrd"), as one
+    key, and the far piece."""
+    key, current = tokens[index].key, index
+    for _ in range(3):
+        nxt = current + step
+        if not 0 <= nxt < len(tokens):
+            break
+        left, right = sorted((current, nxt))
+        if not _is_apostrophe(_between(text, tokens, left, right)):
+            break
+        key = key + tokens[nxt].key if step > 0 else tokens[nxt].key + key
+        current = nxt
+    return key, current
 
 
 def _street_spans(
@@ -1137,6 +1216,9 @@ def _find_name(
         if found is not None:
             return found
         key = tokens[candidate].key
+        glued_key, far = _apostrophe_run(text, tokens, candidate, step)
+        if _glued_name(glued_key, street):  # "evergreenter", "nwmain", "o'brienrd"
+            return far
         # A direction glued to the name by a period ("123 N.Main") is still a direction.
         glued_to_name = (
             step > 0
@@ -1144,10 +1226,13 @@ def _find_name(
             and _between(text, tokens, candidate, candidate + 1) == "."
             and tokens[candidate + 1].key == street.names[0]
         )
-        if key not in passable or (
+        # Words glued together: "stnw"; before the number, the other names too ("lutherking").
+        glue_words = _KNOWN_FORMS | (frozenset(street.names) if step < 0 else frozenset())
+        glued_forms = key not in passable and _splits_into(key, glue_words)
+        if (key not in passable and not glued_forms) or (
             key in _KNOWN_PLACE_WORDS
             and not glued_to_name
-            and not _standalone(text, tokens, candidate)
+            and not _standalone(text, tokens, candidate, street)
         ):
             return None
         current = candidate
@@ -1164,7 +1249,9 @@ def _extend(
         candidate = current + step
         if not 0 <= candidate < len(tokens) or tokens[candidate].key not in words:
             break
-        if tokens[candidate].key in _KNOWN_PLACE_WORDS and not _standalone(text, tokens, candidate):
+        if tokens[candidate].key in _KNOWN_PLACE_WORDS and not _standalone(
+            text, tokens, candidate, street
+        ):
             break
         current = candidate
     return current
@@ -1199,6 +1286,10 @@ def _unit_spans(text: str, tokens: list[_KnownToken], unit: str) -> list[tuple[i
     4B"): alone, an id is an everyday number or word ("12 outlets", "2 A/C")."""
     spans: list[tuple[int, int]] = []
     for index, token in enumerate(tokens):
+        glued_word = next((w for w in _KNOWN_UNIT_WORDS if token.key == w + unit), None)
+        if glued_word is not None:  # "apt4b"
+            spans.append((token.start, token.end))
+            continue
         if token.key not in _KNOWN_UNIT_WORDS and token.key != "#":
             continue
         first = index + 1

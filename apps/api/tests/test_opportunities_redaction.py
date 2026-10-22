@@ -26,6 +26,7 @@ from app.queue import get_job_queue
 from app.rate_limit import get_rate_limiter
 from app.redaction import MASK
 from tests.conftest import InMemoryRateLimiter
+from tests.glue_variants import glue_sample
 from tests.test_intake_questions import labels, option
 from tests.test_opportunities_api import BASE, Pro, dispatch, make_pro
 from tests.test_requests_api import (
@@ -264,6 +265,31 @@ ROUND4_CASES = [
         "+13055550199",
         "742 Evergreen Terrace Apt 4B",
     ),
+    # Round 7 review: punctuation glued to the house number.
+    (
+        "suffix-period-glued",
+        "Repair the leaking kitchen sink at evergreen ter.742.",
+        "ter.742",
+        "test@example.invalid",
+        "+13055550199",
+        "742 Evergreen Terrace",
+    ),
+    (
+        "street-period-glued",
+        "Repair the leaking kitchen sink at main st.123.",
+        "st.123",
+        "test@example.invalid",
+        "+13055550199",
+        "123 Main Street",
+    ),
+    (
+        "direction-period-glued",
+        "Repair the leaking kitchen sink at main nw.123.",
+        "nw.123",
+        "test@example.invalid",
+        "+13055550199",
+        "123 Main Street NW",
+    ),
     # Round 6 review: abbreviation punctuation between the number and the name.
     (
         "number-mark-period",
@@ -372,6 +398,49 @@ async def test_a_street_of_repeated_suffixes_does_not_slow_a_read(
 
     assert response.status_code == 200, response.text
     assert elapsed < 0.25, f"{source}/{route}: {elapsed:.3f} s"
+
+
+@pytest.mark.parametrize(("line", "text", "number", "name"), glue_sample(30))
+@pytest.mark.parametrize(
+    ("source", "route"), [("description", "list"), ("description", "detail"), ("intake", "detail")]
+)
+async def test_glue_variants_never_reach_a_pro(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    line: str,
+    text: str,
+    number: str,
+    name: str,
+    source: str,
+    route: str,
+) -> None:
+    # A seeded sample of the glue variants (tests/glue_variants.py), end to end.
+    _, pro, _, dispatch_id, _ = await dispatched(
+        db_client,
+        db_session,
+        description=text if source == "description" else "Repair the leaking kitchen sink.",
+        answers={"notes": text} if source == "intake" else None,
+        street=line,
+    )
+
+    response = await db_client.get(
+        BASE if route == "list" else f"{BASE}/{dispatch_id}", headers=pro.caller.headers
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    item = body["items"][0] if route == "list" else body
+    shown = (
+        item["description_excerpt"]
+        if route == "list"
+        else item["description"]
+        if source == "description"
+        else item["intake_answers"]["notes"]
+    ).lower()
+    assert number not in shown, shown
+    assert name.replace("'", "") not in shown.replace("'", ""), shown
+    assert item["text_redacted"] is True
 
 
 @pytest.mark.parametrize("new_type", ["integer", "boolean", "single_choice"])
