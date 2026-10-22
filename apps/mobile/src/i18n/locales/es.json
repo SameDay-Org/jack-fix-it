@@ -13,7 +13,6 @@
     "dismiss": "Cerrar"
   },
   "welcome": {
-    "tagline": "Pase lo que pase en casa, lo <accent>arreglamos</accent>.",
     "support": "Cuéntaselo a Jack. Nosotros nos encargamos del resto.",
     "getStarted": "Empezar",
     "haveAccount": "Ya tengo una cuenta",
@@ -71,5 +70,10 @@
     "pro": "Profesional",
     "agent": "Agente",
     "admin": "Administrador"
+  },
+  "launch": {
+    "headline": "Pase lo que pase en casa, lo {{word}}.",
+    "words": ["arreglamos", "limpiamos", "pintamos", "podamos", "mudamos"],
+    "skip": "Saltar introducción"
   }
 }

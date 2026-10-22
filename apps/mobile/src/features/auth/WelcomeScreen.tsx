@@ -1,68 +1,37 @@
 import { router } from "expo-router";
-import { Trans, useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useSession } from "@/api";
-import { Button, Screen } from "@/components/ui";
-import { continuousCorners } from "@/theme";
+import { Screen } from "@/components/ui";
+import { BrandHero } from "@/features/launch/BrandHero";
+
+import { WelcomeActions } from "./components/WelcomeActions";
 
 /**
- * The first screen: the navy hero with the tagline (one lime word, per the brief) and the support
- * line, and a white bubble below with the two ways in. No other action lives here until its flow
- * exists. The bubble pads the bottom inset itself, so the Screen pads no edge.
+ * The first screen: the brand hero (the navy hero with the tagline, one lime word, and the support
+ * line) and a white bubble below with the two ways in. No other action lives here until its flow
+ * exists. The bubble pads the bottom inset itself, so the Screen pads no edge. The hero is the one
+ * the launch intro draws, so the intro fades into this screen as one sentence.
  */
 export function WelcomeScreen() {
   const { t } = useTranslation();
-  const { bottom } = useSafeAreaInsets();
   const { cleanupPending } = useSession();
+  const words = t("launch.words", { returnObjects: true });
 
   return (
     <Screen bar="hero" edges={[]} testID="welcome-screen">
       <View className="flex-1 bg-navy-900">
-        <View className="flex-1 justify-center gap-6 px-6">
-          <View className="gap-3">
-            <View className="h-1 w-12 rounded-pill bg-green-500" />
-            <Text className="text-headline text-white">{t("brand.name")}</Text>
-          </View>
-          <Text className="text-display text-white" testID="welcome-tagline">
-            <Trans
-              i18nKey="welcome.tagline"
-              components={{ accent: <Text className="text-green-500" /> }}
-            />
-          </Text>
-          <Text className="text-body text-white">{t("welcome.support")}</Text>
-        </View>
-        <View
-          className="rounded-t-xl bg-white"
-          style={[continuousCorners, { paddingBottom: bottom }]}
+        <BrandHero
+          word={<Text className="text-display text-green-500">{words[0]}</Text>}
+          testID="welcome-headline"
+        />
+        <WelcomeActions
+          cleanupPending={cleanupPending}
+          onGetStarted={() => router.push("/(auth)/role")}
+          onLogin={() => router.push("/(auth)/login")}
           testID="welcome-actions"
-        >
-          <View className="gap-3 px-4 pb-4 pt-6">
-            {cleanupPending ? (
-              <Text
-                accessibilityRole="alert"
-                accessibilityLiveRegion="polite"
-                className="text-callout text-gray-500"
-                testID="welcome-partial-cleanup"
-              >
-                {t("welcome.partialCleanup")}
-              </Text>
-            ) : null}
-            <Button
-              label={t("welcome.getStarted")}
-              size="lg"
-              onPress={() => router.push("/(auth)/role")}
-              testID="welcome-get-started"
-            />
-            <Button
-              label={t("welcome.haveAccount")}
-              variant="ghost"
-              onPress={() => router.push("/(auth)/login")}
-              testID="welcome-login"
-            />
-          </View>
-        </View>
+        />
       </View>
     </Screen>
   );
