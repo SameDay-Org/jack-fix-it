@@ -28,6 +28,11 @@ export type CodeInputProps = {
 
 const RING = { rest: "border-transparent", active: "border-green-700", error: "border-danger" };
 
+// What the field draws: nothing visible. Not "transparent": on Android, Fabric reads a color of 0
+// (which is what "transparent" becomes) as "no color set" and the field drew its text, selection
+// and underline in the default colors over the cells. One step of alpha (1/255) is not 0.
+const UNSEEN = "#00000001";
+
 /**
  * A one-time code as a row of bubble cells. One native field sits transparent over the cells and
  * takes every keystroke, paste and autofill, so the system's code suggestions work as for any
@@ -105,8 +110,8 @@ export function CodeInput({
           autoFocus={autoFocus}
           editable={!disabled}
           caretHidden
-          selectionColor="transparent"
-          underlineColorAndroid="transparent"
+          selectionColor={UNSEEN}
+          underlineColorAndroid={UNSEEN}
           accessibilityLabel={label}
           accessibilityHint={error}
           accessibilityState={{ disabled }}
@@ -127,5 +132,5 @@ export function CodeInput({
 }
 
 const styles = StyleSheet.create({
-  invisibleText: { color: "transparent", backgroundColor: "transparent" },
+  invisibleText: { color: UNSEEN, backgroundColor: UNSEEN },
 });

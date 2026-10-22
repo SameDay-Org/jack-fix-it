@@ -1,7 +1,8 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { KeyboardAvoidingView, Platform, ScrollView, Text, View } from "react-native";
+import { KeyboardAvoidingView, ScrollView, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button, Input, Screen } from "@/components/ui";
 import { BackButton } from "@/features/auth/components/BackButton";
@@ -17,6 +18,7 @@ import { usePhoneEntry } from "./usePhoneEntry";
  */
 export function PhoneEntryScreen() {
   const { t } = useTranslation();
+  const { top } = useSafeAreaInsets();
   const { from } = useLocalSearchParams<{ from?: string }>();
   const afterSignUp = from === "sign-up";
   const entry = usePhoneEntry(() => router.push("/verify-phone/code"));
@@ -29,7 +31,11 @@ export function PhoneEntryScreen() {
   return (
     <Screen bar="light" testID="phone-entry-screen">
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        // Padding on both platforms: Android 15 draws edge to edge and no longer resizes the
+        // window for the keyboard, so the actions would sit under it. It measures itself from
+        // the content area, which `Screen` starts below the status bar: the offset adds that back.
+        behavior="padding"
+        keyboardVerticalOffset={top}
         className="flex-1"
       >
         <ScrollView
