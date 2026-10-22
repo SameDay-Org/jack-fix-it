@@ -1,13 +1,21 @@
-"""Categories: the catalog of services. Its launch content is data (seed_data.json)."""
+"""Categories: the catalog of services. Its launch content is data (seed_data.json).
 
+A category's intake questions are stored JSON an admin may edit, so every read parses them;
+questions that do not parse are logged by category id (never the JSON) and treated as broken.
+"""
+
+import logging
 import uuid
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.categories.intake import INTAKE_QUESTIONS, IntakeQuestion
+from app.modules.categories.models import Category
 from app.modules.categories.repository import CategoryRepository
 from app.modules.categories.schemas import (
     CategoryOut,
@@ -17,6 +25,12 @@ from app.modules.categories.schemas import (
 )
 
 SEED_DATA_PATH: Final = Path(__file__).with_name("seed_data.json")
+
+logger = logging.getLogger(__name__)
+
+
+class BrokenIntakeQuestionsError(Exception):
+    """The category's stored questions do not parse: nothing can be checked against them."""
 
 
 @dataclass(frozen=True)
@@ -41,12 +55,20 @@ class CategoryService:
         await self._session.commit()
         return SeedResult(inserted=len(inserted), skipped=len(entries) - len(inserted))
 
-    async def is_active(self, category_id: uuid.UUID) -> bool:
-        """True when the category exists and is offered (active)."""
-        return await self._categories.is_active(category_id)
+    async def intake_questions(self, category_id: uuid.UUID) -> list[IntakeQuestion] | None:
+        """The questions of an active category; None when it is unknown or inactive. Raises
+        BrokenIntakeQuestionsError when its stored questions do not parse."""
+        row = await self._categories.get_active(category_id)
+        if row is None:
+            return None
+        questions = _parse_questions(row)
+        if questions is None:
+            raise BrokenIntakeQuestionsError
+        return questions
 
     async def list_active(self) -> list[CategoryOut]:
-        """The categories offered now, by slug."""
+        """The categories offered now, by slug. One whose questions do not parse is still
+        listed, asking nothing; requests for it are refused until an admin fixes them."""
         return [
             CategoryOut(
                 id=row.id,
@@ -54,6 +76,7 @@ class CategoryService:
                 names=row.names,
                 icon=row.icon,
                 requires_license=row.requires_license,
+                intake_questions=_parse_questions(row) or [],
             )
             for row in await self._categories.list_active()
         ]
@@ -68,3 +91,12 @@ class CategoryService:
             CategorySummary(id=row.id, slug=row.slug, names=row.names)
             for row in await self._categories.get_many(ids)
         ]
+
+
+def _parse_questions(row: Category) -> list[IntakeQuestion] | None:
+    try:
+        return INTAKE_QUESTIONS.validate_python(row.intake_questions)
+    except ValidationError:
+        # The error text echoes the stored JSON: the category id only.
+        logger.error("category_intake_invalid", extra={"category_id": str(row.id)})
+        return None

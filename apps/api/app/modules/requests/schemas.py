@@ -37,8 +37,11 @@ class RequestCreate(BaseModel):
     intake_answers: dict[str, JsonValue] = Field(
         default_factory=dict,
         description=(
-            "Answers to the category's intake questions; a size limit applies. NUL "
-            "characters and non-finite numbers are refused."
+            "Answers to the category's intake_questions (GET /v1/categories), by question "
+            "key: an integer, an option value, a list of distinct option values, a boolean "
+            "or a text, as each question's type says. Empty without a category. A size limit "
+            "applies; NUL characters and non-finite numbers are refused. Text is stored "
+            "trimmed."
         ),
     )
     # No per-key length bound: an overlong key fails KEY_PATTERN and answers invalid_media.

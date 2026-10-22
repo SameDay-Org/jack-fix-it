@@ -12,10 +12,14 @@
   },
   "dependencies": {
     "@jack/shared": "workspace:*",
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
     "i18next": "26.4.7",
+    "lucide-react": "1.61.0",
     "next": "16.4.2",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "tailwind-merge": "3.7.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.3.3",
