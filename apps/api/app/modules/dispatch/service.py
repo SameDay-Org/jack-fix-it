@@ -109,6 +109,21 @@ class ProDispatch:
         return self.status in ACTIVE
 
 
+@dataclass(frozen=True)
+class NewDispatch:
+    """A dispatch a run created: what the new request push needs after the commit (#55)."""
+
+    id: uuid.UUID
+    pro_user_id: uuid.UUID
+    public_code: str
+
+
+@dataclass(frozen=True)
+class DispatchResult:
+    outcome: DispatchOutcome
+    new: tuple[NewDispatch, ...] = ()  # only when SENT
+
+
 class DispatchService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -116,7 +131,12 @@ class DispatchService:
         self._requests = RequestStateMachine(session)
 
     async def dispatch_request(self, request_id: uuid.UUID) -> DispatchOutcome:
-        """Dispatches one request in the caller's transaction (flushes, never commits). Also
+        """dispatch(), the outcome only."""
+        return (await self.dispatch(request_id)).outcome
+
+    async def dispatch(self, request_id: uuid.UUID) -> DispatchResult:
+        """Dispatches one request in the caller's transaction (flushes, never commits), and
+        returns the dispatches it created, for the caller to announce once it commits. Also
         what the BDC runs again after classifying a request (#82) that dispatch took to
         reviewing: it has no rows yet. A request with rows is never dispatched again, including
         one the BDC pulled back from finding_pro; what a re-dispatch does with the old rows is
@@ -144,18 +164,21 @@ class DispatchService:
                 event="dispatch_no_eligible_pros",
             )
         now = datetime.now(UTC)
-        await self._dispatches.add_many(
-            [
-                RequestDispatch(request_id=request.id, pro_id=pro_id, sent_at=now)
-                for pro_id in chosen
-            ]
-        )
+        rows = [
+            RequestDispatch(request_id=request.id, pro_id=candidate.pro_id, sent_at=now)
+            for candidate in chosen
+        ]
+        await self._dispatches.add_many(rows)
         await self._requests.transition(request.id, RequestStatus.FINDING_PRO, SYSTEM)
-        return self._done(DispatchOutcome.SENT, {**extra, "count": len(chosen)})
+        new = tuple(
+            NewDispatch(row.id, candidate.user_id, request.public_code)
+            for row, candidate in zip(rows, chosen, strict=True)
+        )
+        return self._done(DispatchOutcome.SENT, {**extra, "count": len(chosen)}, new=new)
 
     async def _eligible_ranked(
         self, category_id: uuid.UUID, address_id: uuid.UUID
-    ) -> list[uuid.UUID]:
+    ) -> list[DispatchCandidate]:
         address = await AddressService(self._session).get(address_id)
         if address is None:  # pragma: no cover - the foreign key guarantees it
             return []
@@ -166,14 +189,19 @@ class DispatchService:
         )
         candidates = [c for c in candidates if c.user_id in active]
         history = await self._dispatches.history([c.pro_id for c in candidates])
-        return rank(candidates, history)
+        by_id = {c.pro_id: c for c in candidates}
+        return [by_id[pro_id] for pro_id in rank(candidates, history)]
 
     @staticmethod
     def _done(
-        outcome: DispatchOutcome, extra: Mapping[str, object], *, event: str = "dispatch_done"
-    ) -> DispatchOutcome:
+        outcome: DispatchOutcome,
+        extra: Mapping[str, object],
+        *,
+        event: str = "dispatch_done",
+        new: tuple[NewDispatch, ...] = (),
+    ) -> DispatchResult:
         logger.info(event, extra={**extra, "outcome": str(outcome)})
-        return outcome
+        return DispatchResult(outcome, new)
 
     async def pro_dispatch(self, dispatch_id: uuid.UUID, pro_id: uuid.UUID) -> ProDispatch | None:
         """The pro's own dispatch in any status; None for another pro's or an unknown id."""

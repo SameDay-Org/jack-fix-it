@@ -10,6 +10,8 @@ lock, so two quotes on one request take turns) it checks, in this order:
 - the amount and the duration are within the platform's caps, when set: else 422.
 Then, in the caller's transaction: the quote (pending, expires_at = now + TTL), the dispatch
 marked quoted, and the first quote moves the request from finding_pro to quote_ready (SYSTEM).
+Once that commits, the customer gets a new quote push (#55); a push that cannot be queued is
+logged, never undone.
 The amount is the pro's own price in cents, stored as given; fees are #58.
 Logs carry ids only: never the scope text or the amount.
 """
@@ -25,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.errors import NotFoundError
 from app.modules.dispatch.service import DispatchService
 from app.modules.jobs.service import SYSTEM
+from app.modules.notifications.events import push_new_quote
 from app.modules.pros.service import ProService
 from app.modules.quotes.errors import NotQuotableError, QuoteExistsError, QuoteOutOfBoundsError
 from app.modules.quotes.models import Quote
@@ -34,6 +37,7 @@ from app.modules.requests.state_machine import RequestStateMachine, RequestStatu
 from app.modules.settings.errors import SettingNotConfiguredError
 from app.modules.settings.service import QUOTE_TTL_HOURS, SettingsService
 from app.modules.users.types import UserAccount
+from app.queue import JobQueue
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +45,12 @@ _OPEN_FOR_QUOTES: Final = frozenset({RequestStatus.FINDING_PRO, RequestStatus.QU
 
 
 class QuoteService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self, session: AsyncSession, queue: JobQueue, enqueue_timeout_seconds: float
+    ) -> None:
         self._session = session
+        self._queue = queue
+        self._enqueue_timeout = enqueue_timeout_seconds
         self._quotes = QuoteRepository(session)
         self._dispatches = DispatchService(session)
         self._requests = RequestStateMachine(session)
@@ -107,6 +115,14 @@ class QuoteService:
                 "pro_id": str(pro_id),
                 "first_quote": first,
             },
+        )
+        await push_new_quote(
+            self._queue,
+            customer_id=request.customer_id,
+            quote_id=quote.id,
+            request_id=request.id,
+            public_code=request.public_code,
+            timeout_seconds=self._enqueue_timeout,
         )
         return QuoteOut.model_validate(quote, from_attributes=True)
 

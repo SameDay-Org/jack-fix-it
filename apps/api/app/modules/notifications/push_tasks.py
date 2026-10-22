@@ -9,7 +9,9 @@ per message id at a time (job id `push:<message id>`), so two runs of a message 
 Expo's verdicts clean up devices: DeviceNotRegistered, on the ticket or later on the receipt,
 deletes the device. A send's outcome is stored before that cleanup, and a cleanup that fails is
 retried on its own, without sending. Every Redis and HTTP call has a timeout. Logs carry user
-and device ids, Expo error codes and counts only.
+and device ids, Expo error codes and counts only. Only an active user is sent to (#55): like
+the devices and the locale, the status is read when the message runs, so a user suspended after
+an event was queued gets nothing.
 
 Expo has no idempotency key, so a device is never left plain pending once it may have been sent
 to: before the HTTP call its state becomes `in_flight` (if that write fails, nothing is sent and
@@ -55,6 +57,7 @@ from app.modules.devices.service import DeviceService, PushTarget
 from app.modules.notifications import catalog
 from app.modules.notifications.service import InvalidPushError, PushRequest, enqueue_push
 from app.modules.users.service import UserService
+from app.modules.users.types import UserStatus
 from app.queue import JobQueue
 
 logger = logging.getLogger(__name__)
@@ -519,6 +522,9 @@ async def _targets_and_locale(deps: PushDeps, user_id: uuid.UUID) -> tuple[list[
         user = await UserService(session).get_by_id(user_id)
         if user is None:
             return [], catalog.DEFAULT_LOCALE
+        if user.status is not UserStatus.ACTIVE:
+            logger.info("push_user_not_active", extra={"user_id": str(user_id)})
+            return [], user.locale
         targets = await DeviceService(session, deps.max_devices_per_user).targets_for(user_id)
         return targets, user.locale
 

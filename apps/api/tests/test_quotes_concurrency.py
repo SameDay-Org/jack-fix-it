@@ -26,6 +26,7 @@ from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole
 from tests.conftest import backend_pid, wait_until_blocked
 from tests.test_quotes_api import TTL_HOURS, body, quotes_of, status_of
+from tests.test_requests_api import ENQUEUE_TIMEOUT, RecordingQueue
 
 
 @dataclass(frozen=True)
@@ -137,11 +138,12 @@ async def test_concurrent_first_quotes_from_two_pros_transition_once(
         monkeypatch.setattr(QuoteRepository, "add", add_then_hold)
         data = QuoteCreate.model_validate(body())
         (pro_a, _, dispatch_a), (pro_b, _, dispatch_b) = committed.pros
+        queue = RecordingQueue()
 
         with caplog.at_level(logging.INFO):
             results = await asyncio.gather(
-                QuoteService(first).submit(pro_a, dispatch_a, data),
-                QuoteService(second).submit(pro_b, dispatch_b, data),
+                QuoteService(first, queue, ENQUEUE_TIMEOUT).submit(pro_a, dispatch_a, data),
+                QuoteService(second, queue, ENQUEUE_TIMEOUT).submit(pro_b, dispatch_b, data),
             )
 
     assert [result.status for result in results] == [QuoteStatus.PENDING, QuoteStatus.PENDING]

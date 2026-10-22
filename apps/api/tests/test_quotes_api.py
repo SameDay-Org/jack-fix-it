@@ -1,5 +1,7 @@
 """POST /v1/pros/me/opportunities/{dispatch_id}/quote: fixed-price quotes (D9.3, #50)."""
 
+import asyncio
+import json
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -8,6 +10,7 @@ from typing import Any
 import httpx
 import pytest
 from fastapi import FastAPI
+from redis.exceptions import RedisError
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,7 +27,9 @@ from app.modules.settings.models import Setting
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole
 from app.observability import JsonFormatter
+from app.queue import get_job_queue
 from tests.conftest import make_settings
+from tests.test_dispatch import record_commits
 from tests.test_opportunities_api import (
     NOT_FOUND,
     Pro,
@@ -34,14 +39,23 @@ from tests.test_opportunities_api import (
     dispatch_row,
     make_request,
 )
-from tests.test_requests_api import FakeStorage, make_caller
+from tests.test_requests_api import ENQUEUE_TIMEOUT, FakeStorage, RecordingQueue, make_caller
 
 TTL_HOURS = 36  # not the seeded 48, so the tests prove the value is read
 
 
 @pytest.fixture
 def settings() -> Settings:
-    return make_settings()
+    # A short enqueue bound, so a hung Redis ends the new quote push quickly.
+    return make_settings(job_enqueue_timeout_seconds=ENQUEUE_TIMEOUT)
+
+
+@pytest.fixture(autouse=True)
+def queue(app: FastAPI) -> RecordingQueue:
+    """The new quote push's queue (#55): recorded, never Redis."""
+    recorder = RecordingQueue()
+    app.dependency_overrides[get_job_queue] = lambda: recorder
+    return recorder
 
 
 @pytest.fixture
@@ -445,7 +459,9 @@ async def test_all_writes_roll_back_together(
     savepoint = await db_session.begin_nested()  # the request's transaction
     data = QuoteCreate.model_validate(body())
     with pytest.raises(RuntimeError):
-        await QuoteService(db_session).submit(actor, dispatch_id, data)
+        await QuoteService(db_session, RecordingQueue(), ENQUEUE_TIMEOUT).submit(
+            actor, dispatch_id, data
+        )
     await savepoint.rollback()
 
     assert await quotes_of(db_session, request_id) == []
@@ -482,3 +498,89 @@ def test_openapi_documents_the_route_and_errors(app: Any) -> None:
     assert {"201", "401", "403", "404", "409", "422", "503"} <= set(operation["responses"])
     assert "quote_exists" in operation["responses"]["409"]["description"]
     assert "not_configured" in operation["responses"]["503"]["description"]
+
+
+# New quote push (D10.4, #55)
+
+
+async def public_code_of(session: AsyncSession, request_id: uuid.UUID) -> str:
+    code = await session.scalar(
+        select(ServiceRequest.public_code).where(ServiceRequest.id == request_id)
+    )
+    assert code is not None
+    return code
+
+
+async def test_quote_enqueues_push_to_customer_after_commit(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    queue: RecordingQueue,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request_id = await make_request(db_session, world)
+    dispatch_id = await dispatch(db_session, request_id, world.me)
+    code = await public_code_of(db_session, request_id)
+    record_commits(monkeypatch)
+
+    response = await quote(db_client, world.me, dispatch_id)
+    again = await quote(db_client, world.me, dispatch_id)
+
+    assert response.status_code == 201
+    quote_id = response.json()["id"]
+    assert queue.jobs == {
+        f"push:quote:{quote_id}": (
+            "send_push",
+            (
+                str(world.customer_id),
+                f"quote:{quote_id}",
+                "push.new_quote.title",
+                "push.new_quote.body",
+                {"public_code": code},
+                f"/requests/{request_id}",
+            ),
+        )
+    }
+    assert queue.before == ["commit"]  # queued after the quote's commit, once
+    # A refused quote (409 quote_exists) commits nothing and announces nothing.
+    assert again.status_code == 409
+    assert len(queue.before) == 1
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [RecordingQueue(failure=RedisError("down")), RecordingQueue(hang=True)],
+    ids=["redis_error", "timeout"],
+)
+async def test_enqueue_failure_or_timeout_does_not_fail_quote(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    broken: RecordingQueue,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app.dependency_overrides[get_job_queue] = lambda: broken
+    request_id = await make_request(db_session, world)
+    dispatch_id = await dispatch(db_session, request_id, world.me)
+    code = await public_code_of(db_session, request_id)
+
+    with caplog.at_level(logging.DEBUG):
+        response = await asyncio.wait_for(quote(db_client, world.me, dispatch_id), timeout=5)
+
+    assert response.status_code == 201
+    assert len(await quotes_of(db_session, request_id)) == 1
+    assert await status_of(db_session, request_id) is RequestStatus.QUOTE_READY
+    assert (await dispatch_row(db_session, dispatch_id)).status is DispatchStatus.QUOTED
+    # Logged with ids only: the customer and the message (the event's kind and id).
+    [record] = [r for r in caplog.records if r.message == "push_enqueue_failed"]
+    payload = json.loads(JsonFormatter().format(record))
+    assert set(payload) - {"timestamp", "level", "logger", "message", "request_id"} == {
+        "user_id",
+        "message_id",
+    }
+    assert payload["user_id"] == str(world.customer_id)
+    assert payload["message_id"] == f"quote:{response.json()['id']}"
+    output = "\n".join(JsonFormatter().format(r) for r in caplog.records)
+    for secret in (code, "probe-scope-text", str(AMOUNT)):
+        assert secret not in output
