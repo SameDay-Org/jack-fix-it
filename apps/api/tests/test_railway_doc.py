@@ -21,6 +21,7 @@ from tests.conftest import (
     TEST_EMAIL_SETTINGS,
     TEST_JWT_SECRET,
     TEST_RATE_LIMIT_SETTINGS,
+    TEST_REFRESH_SETTINGS,
     TEST_STORAGE_SETTINGS,
     TEST_TWILIO_SETTINGS,
 )
@@ -38,6 +39,7 @@ COMPLETE: dict[str, object] = {
     **TEST_STORAGE_SETTINGS,
     **TEST_TWILIO_SETTINGS,
     **TEST_RATE_LIMIT_SETTINGS,
+    **TEST_REFRESH_SETTINGS,
     **TEST_EMAIL_SETTINGS,
 }
 ROW = re.compile(r"^\|\s*`([A-Z0-9_]+)`\s*\|(.*)\|\s*$")

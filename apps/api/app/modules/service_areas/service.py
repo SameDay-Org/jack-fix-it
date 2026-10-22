@@ -1,6 +1,7 @@
 """Service areas: the only way other modules read where Jack Fix It works (ADR 0003)."""
 
-from collections.abc import Sequence
+import uuid
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -11,6 +12,7 @@ from app.modules.service_areas.repository import ServiceAreaRepository
 from app.modules.service_areas.schemas import (
     CityOut,
     RegionOut,
+    ServiceAreaOut,
     ServiceAreaSeed,
     ServiceAreaSeedFile,
     ZipOut,
@@ -58,4 +60,21 @@ class ServiceAreaService:
                 ],
             )
             for region, cities in regions.items()
+        ]
+
+    async def active_ids(self, ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+        """The ids among `ids` that exist and are active."""
+        return await self._areas.active_ids(ids)
+
+    async def get_many(self, ids: Collection[uuid.UUID]) -> list[ServiceAreaOut]:
+        """The areas with these ids, active or not, by ZIP."""
+        return [
+            ServiceAreaOut(
+                id=area.id,
+                zip_code=area.zip_code,
+                city=area.city,
+                state=area.state,
+                region=area.region,
+            )
+            for area in await self._areas.get_many(ids)
         ]
