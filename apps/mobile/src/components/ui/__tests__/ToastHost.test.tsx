@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react-native";
-import { AccessibilityInfo } from "react-native";
+import { AccessibilityInfo, Keyboard, Platform, type KeyboardEvent } from "react-native";
 import { useReducedMotion, withTiming } from "react-native-reanimated";
+
+import { SafeAreaInsetsContext } from "react-native-safe-area-context";
 
 import { tokens } from "@/theme";
 
@@ -109,5 +111,55 @@ describe("ToastHost", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Dismiss" }));
 
     expect(toastStore.getState().current).toBeNull();
+  });
+
+  describe("with the keyboard up", () => {
+    const BOTTOM_INSET = 34;
+    const KEYBOARD_HEIGHT = 300;
+    const handlers = new Map<string, (event: KeyboardEvent) => void>();
+    const keyboard = (name: string, height: number) =>
+      act(() => handlers.get(name)?.({ endCoordinates: { height } } as unknown as KeyboardEvent));
+    const lift = () => screen.getByTestId("toast-host").props.style.paddingBottom;
+
+    beforeEach(() => {
+      handlers.clear();
+      jest.spyOn(Keyboard, "addListener").mockImplementation((name, handler) => {
+        handlers.set(name, handler as (event: KeyboardEvent) => void);
+        return { remove: () => handlers.delete(name) } as ReturnType<typeof Keyboard.addListener>;
+      });
+    });
+    afterEach(() => jest.restoreAllMocks());
+
+    const renderWithInset = () =>
+      render(
+        <SafeAreaInsetsContext.Provider value={{ top: 0, right: 0, bottom: BOTTOM_INSET, left: 0 }}>
+          <ToastHost />
+        </SafeAreaInsetsContext.Provider>,
+      );
+
+    it("android: rises by the keyboard plus the bars it leaves out, and back down", async () => {
+      jest.replaceProperty(Platform, "OS", "android");
+      await renderWithInset();
+      await act(() => showToast({ message: "We sent a new code.", tone: "neutral" }));
+      expect(lift()).toBe(BOTTOM_INSET);
+
+      await keyboard("keyboardDidShow", KEYBOARD_HEIGHT);
+      expect(lift()).toBe(KEYBOARD_HEIGHT + BOTTOM_INSET);
+
+      await keyboard("keyboardDidHide", 0);
+      expect(lift()).toBe(BOTTOM_INSET);
+    });
+
+    it("ios: rises by the keyboard, which already covers the home indicator", async () => {
+      jest.replaceProperty(Platform, "OS", "ios");
+      await renderWithInset();
+      await act(() => showToast({ message: "We sent a new code.", tone: "neutral" }));
+
+      await keyboard("keyboardWillShow", KEYBOARD_HEIGHT);
+      expect(lift()).toBe(KEYBOARD_HEIGHT);
+
+      await keyboard("keyboardWillHide", 0);
+      expect(lift()).toBe(BOTTOM_INSET);
+    });
   });
 });
