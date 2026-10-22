@@ -44,29 +44,31 @@ environment as **shared variables** referenced from both services, so the two ne
 
 ### api
 
-| Variable                     | Value                                                                    | Secret          | Source     |
-| ---------------------------- | ------------------------------------------------------------------------ | --------------- | ---------- |
-| `APP_ENV`                    | `staging` or `production`                                                | no              | D3.1 (#22) |
-| `LOG_LEVEL`                  | `INFO`                                                                   | no              | D3.1 (#22) |
-| `PORT`                       | `8000` (set it explicitly so web can reference it)                       | no              | D3.1 (#22) |
-| `DATABASE_URL`               | `${{Postgres.DATABASE_URL}}` (normalized to asyncpg by the app)          | yes (reference) | D3.1 (#22) |
-| `REDIS_URL`                  | `${{Redis.REDIS_URL}}`                                                   | yes (reference) | D3.1 (#22) |
-| `CORS_ORIGINS`               | empty until a browser calls the API directly                             | no              | D3.1 (#22) |
-| `SENTRY_DSN`                 | per environment                                                          | no              | D3.1 (#22) |
-| `FORWARDED_ALLOW_IPS`        | the addresses Railway's proxy connects from; confirm at first setup      | no              | D4.4 (#28) |
-| `RATE_LIMIT_TIMEOUT_SECONDS` | optional; `0.5` by default                                               | no              | D4.4 (#28) |
-| `JWT_SECRET`                 | required; random, at least 32 characters                                 | yes             | D4.2 (#25) |
-| `RATE_LIMIT_KEY_SECRET`      | required; random, at least 32 characters, one per environment            | yes             | #137       |
-| `TWILIO_ACCOUNT_SID`         | required                                                                 | no              | D4.3 (#26) |
-| `TWILIO_AUTH_TOKEN`          | required                                                                 | yes             | D4.3 (#26) |
-| `TWILIO_VERIFY_SERVICE_SID`  | required                                                                 | no              | D4.3 (#26) |
-| `RESEND_API_KEY`             | required                                                                 | yes             | D4.3 (#27) |
-| `EMAIL_FROM`                 | required; e.g. `Jack Fix It <no-reply@…>` on a domain verified in Resend | no              | D4.3 (#27) |
-| `S3_ENDPOINT_URL`            | required                                                                 | no              | D6.2 (#35) |
-| `S3_BUCKET`                  | required                                                                 | no              | D6.2 (#35) |
-| `S3_ACCESS_KEY_ID`           | required                                                                 | yes             | D6.2 (#35) |
-| `S3_SECRET_ACCESS_KEY`       | required                                                                 | yes             | D6.2 (#35) |
-| `S3_REGION`                  | `auto` (the default) for Cloudflare R2                                   | no              | D6.2 (#35) |
+| Variable                      | Value                                                                    | Secret          | Source     |
+| ----------------------------- | ------------------------------------------------------------------------ | --------------- | ---------- |
+| `APP_ENV`                     | `staging` or `production`                                                | no              | D3.1 (#22) |
+| `LOG_LEVEL`                   | `INFO`                                                                   | no              | D3.1 (#22) |
+| `PORT`                        | `8000` (set it explicitly so web can reference it)                       | no              | D3.1 (#22) |
+| `DATABASE_URL`                | `${{Postgres.DATABASE_URL}}` (normalized to asyncpg by the app)          | yes (reference) | D3.1 (#22) |
+| `REDIS_URL`                   | `${{Redis.REDIS_URL}}`                                                   | yes (reference) | D3.1 (#22) |
+| `CORS_ORIGINS`                | empty until a browser calls the API directly                             | no              | D3.1 (#22) |
+| `SENTRY_DSN`                  | per environment                                                          | no              | D3.1 (#22) |
+| `FORWARDED_ALLOW_IPS`         | the addresses Railway's proxy connects from; confirm at first setup      | no              | D4.4 (#28) |
+| `RATE_LIMIT_TIMEOUT_SECONDS`  | optional; `0.5` by default                                               | no              | D4.4 (#28) |
+| `JWT_SECRET`                  | required; random, at least 32 characters                                 | yes             | D4.2 (#25) |
+| `RATE_LIMIT_KEY_SECRET`       | required; random, at least 32 characters, one per environment            | yes             | #137       |
+| `REFRESH_ROTATION_SECRET`     | required; random, at least 32 characters, one per environment            | yes             | #152       |
+| `REFRESH_REUSE_GRACE_SECONDS` | optional; `30` by default                                                | no              | #152       |
+| `TWILIO_ACCOUNT_SID`          | required                                                                 | no              | D4.3 (#26) |
+| `TWILIO_AUTH_TOKEN`           | required                                                                 | yes             | D4.3 (#26) |
+| `TWILIO_VERIFY_SERVICE_SID`   | required                                                                 | no              | D4.3 (#26) |
+| `RESEND_API_KEY`              | required                                                                 | yes             | D4.3 (#27) |
+| `EMAIL_FROM`                  | required; e.g. `Jack Fix It <no-reply@…>` on a domain verified in Resend | no              | D4.3 (#27) |
+| `S3_ENDPOINT_URL`             | required                                                                 | no              | D6.2 (#35) |
+| `S3_BUCKET`                   | required                                                                 | no              | D6.2 (#35) |
+| `S3_ACCESS_KEY_ID`            | required                                                                 | yes             | D6.2 (#35) |
+| `S3_SECRET_ACCESS_KEY`        | required                                                                 | yes             | D6.2 (#35) |
+| `S3_REGION`                   | `auto` (the default) for Cloudflare R2                                   | no              | D6.2 (#35) |
 
 "Required" means the API refuses to start in staging and production without it (the settings
 validators in `apps/api/app/config.py`). Every other setting has a working default; the
@@ -81,34 +83,38 @@ The worker builds the same settings when `app/worker.py` is imported, so the sam
 stop it: without every required variable it crash-loops under its `ALWAYS` restart policy and
 never logs `worker_started`. Use the same values as api.
 
-| Variable                    | Value                        | Secret          | Source     |
-| --------------------------- | ---------------------------- | --------------- | ---------- |
-| `APP_ENV`                   | same as api                  | no              | D3.1 (#22) |
-| `LOG_LEVEL`                 | same as api                  | no              | D3.1 (#22) |
-| `DATABASE_URL`              | `${{Postgres.DATABASE_URL}}` | yes (reference) | D3.1 (#22) |
-| `REDIS_URL`                 | `${{Redis.REDIS_URL}}`       | yes (reference) | D3.1 (#22) |
-| `SENTRY_DSN`                | same as api                  | no              | D3.1 (#22) |
-| `JWT_SECRET`                | same as api                  | yes             | D4.2 (#25) |
-| `RATE_LIMIT_KEY_SECRET`     | same as api                  | yes             | #137       |
-| `TWILIO_ACCOUNT_SID`        | same as api                  | no              | D4.3 (#26) |
-| `TWILIO_AUTH_TOKEN`         | same as api                  | yes             | D4.3 (#26) |
-| `TWILIO_VERIFY_SERVICE_SID` | same as api                  | no              | D4.3 (#26) |
-| `RESEND_API_KEY`            | same as api                  | yes             | D4.3 (#27) |
-| `EMAIL_FROM`                | same as api                  | no              | D4.3 (#27) |
-| `S3_ENDPOINT_URL`           | same as api                  | no              | D6.2 (#35) |
-| `S3_BUCKET`                 | same as api                  | no              | D6.2 (#35) |
-| `S3_ACCESS_KEY_ID`          | same as api                  | yes             | D6.2 (#35) |
-| `S3_SECRET_ACCESS_KEY`      | same as api                  | yes             | D6.2 (#35) |
+| Variable                    | Value                                                      | Secret          | Source      |
+| --------------------------- | ---------------------------------------------------------- | --------------- | ----------- |
+| `APP_ENV`                   | same as api                                                | no              | D3.1 (#22)  |
+| `LOG_LEVEL`                 | same as api                                                | no              | D3.1 (#22)  |
+| `DATABASE_URL`              | `${{Postgres.DATABASE_URL}}`                               | yes (reference) | D3.1 (#22)  |
+| `REDIS_URL`                 | `${{Redis.REDIS_URL}}`                                     | yes (reference) | D3.1 (#22)  |
+| `SENTRY_DSN`                | same as api                                                | no              | D3.1 (#22)  |
+| `JWT_SECRET`                | same as api                                                | yes             | D4.2 (#25)  |
+| `RATE_LIMIT_KEY_SECRET`     | same as api                                                | yes             | #137        |
+| `REFRESH_ROTATION_SECRET`   | same as api                                                | yes             | #152        |
+| `TWILIO_ACCOUNT_SID`        | same as api                                                | no              | D4.3 (#26)  |
+| `TWILIO_AUTH_TOKEN`         | same as api                                                | yes             | D4.3 (#26)  |
+| `TWILIO_VERIFY_SERVICE_SID` | same as api                                                | no              | D4.3 (#26)  |
+| `RESEND_API_KEY`            | same as api                                                | yes             | D4.3 (#27)  |
+| `EMAIL_FROM`                | same as api                                                | no              | D4.3 (#27)  |
+| `S3_ENDPOINT_URL`           | same as api                                                | no              | D6.2 (#35)  |
+| `S3_BUCKET`                 | same as api                                                | no              | D6.2 (#35)  |
+| `S3_ACCESS_KEY_ID`          | same as api                                                | yes             | D6.2 (#35)  |
+| `S3_SECRET_ACCESS_KEY`      | same as api                                                | yes             | D6.2 (#35)  |
+| `EXPO_ACCESS_TOKEN`         | optional; set it only if Expo enhanced push security is on | yes             | D10.3 (#54) |
 
 `apps/api/tests/test_railway_doc.py` fails when a setting that staging or production requires
 is missing from either table, so this list cannot fall behind `app/config.py`.
 
 ### web
 
-| Variable           | Value                                                    | Secret | Source     |
-| ------------------ | -------------------------------------------------------- | ------ | ---------- |
-| `APP_ENV`          | `staging` or `production` (only production is indexable) | no     | D3.1 (#22) |
-| `API_INTERNAL_URL` | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}`   | no     | D3.1 (#22) |
+| Variable                    | Value                                                                                                            | Secret | Source      |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------ | ----------- |
+| `APP_ENV`                   | `staging` or `production` (only production is indexable)                                                         | no     | D3.1 (#22)  |
+| `API_INTERNAL_URL`          | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}`                                                           | no     | D3.1 (#22)  |
+| `REFRESH_TOKEN_TTL_SECONDS` | the api's refresh token lifetime (2592000 unless the api sets another); the panel's session cookie lasts as long | no     | D16.1 (#80) |
+| `API_TIMEOUT_MS`            | `5000`: the longest wait on the api for one call, body included                                                  | no     | D16.1 (#80) |
 
 The web server calls the API over the private network; browsers and the mobile app use the
 api's public domain.
@@ -177,3 +183,8 @@ Confirm the exact dashboard steps on the first drill and update this section.
 5. Generate public domains for api and web in staging; keep production private until D20.
 6. For Sentinel: a project token scoped to the staging environment, and a GitHub token limited
    to issues and pull requests.
+7. After the first deploy of each environment, create the first admin from a shell on the api
+   service: `uv run python -m scripts.create_staff_user` (it asks for the email and the role,
+   and the password twice without echoing it). Public registration never creates staff
+   accounts (#155). For a scripted setup: `--email … --role admin --password-env NAME`, with
+   the password only in that environment variable.

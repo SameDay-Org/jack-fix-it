@@ -1,4 +1,4 @@
-"""Schema of waitlist_entries (D8.3, #46, ADR 0007)."""
+"""Schema of waitlist_entries (D8.4, #46, ADR 0007)."""
 
 import uuid
 

@@ -1,4 +1,4 @@
-"""POST /v1/waitlist: out-of-area contacts (D8.3, #46)."""
+"""POST /v1/waitlist: out-of-area contacts (D8.4, #46)."""
 
 import logging
 import uuid

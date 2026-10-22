@@ -35,6 +35,14 @@ class ServiceAreaSeedFile(BaseModel):
         return self
 
 
+class ServiceAreaOut(BaseModel):
+    id: uuid.UUID
+    zip_code: str
+    city: str
+    state: str
+    region: str
+
+
 class ZipOut(BaseModel):
     id: uuid.UUID
     zip_code: str

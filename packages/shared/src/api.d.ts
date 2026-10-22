@@ -400,6 +400,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/pros/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get my pro profile
+         * @description The caller's own profile, with a presigned URL for the photo. The first call creates an
+         *     empty profile, pending verification.
+         */
+        get: operations["get_my_profile_v1_pros_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit my pro profile
+         * @description Changes only the fields sent, in one transaction. category_ids and service_area_ids
+         *     replace the whole set. Upload the photo first (POST /v1/uploads, purpose profile_photo).
+         */
+        patch: operations["update_my_profile_v1_pros_me_patch"];
+        trace?: never;
+    };
+    "/v1/devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Register this device for pushes
+         * @description Registers the app's Expo push token for the caller; call it at every start.
+         *
+         *     A token already registered to someone else (the phone changed hands) moves to the caller.
+         *     Past PUSH_MAX_DEVICES_PER_USER, the caller's least recently seen device is dropped.
+         */
+        put: operations["register_device_v1_devices_put"];
+        post?: never;
+        /**
+         * Stop pushes to this device
+         * @description Removes the caller's token; the app calls it on logout. The token travels in the body,
+         *     never in the path, because paths are logged.
+         */
+        delete: operations["unregister_device_v1_devices_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/waitlist": {
         parameters: {
             query?: never;
@@ -483,6 +537,35 @@ export interface components {
              */
             expires_in: number;
         };
+        /** BooleanQuestion */
+        BooleanQuestion: {
+            /**
+             * Key
+             * @description The answer's key in intake_answers; unique in the category.
+             */
+            key: string;
+            /** Required */
+            required: boolean;
+            /**
+             * Labels
+             * @description The question per locale; en and es required.
+             */
+            labels: {
+                [key: string]: string;
+            };
+            /**
+             * Help
+             * @description An optional hint per locale.
+             */
+            help?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "boolean";
+        };
         /** CategoryOut */
         CategoryOut: {
             /**
@@ -503,12 +586,43 @@ export interface components {
             icon: string | null;
             /** Requires License */
             requires_license: boolean;
+            /**
+             * Intake Questions
+             * @description What to ask the customer for this category, in order; answers go in the request's intake_answers under each key. Empty when there is nothing to ask.
+             */
+            intake_questions: (components["schemas"]["IntegerQuestion"] | components["schemas"]["SingleChoiceQuestion"] | components["schemas"]["MultiChoiceQuestion"] | components["schemas"]["BooleanQuestion"] | components["schemas"]["TextQuestion"])[];
+        };
+        /** CategorySummary */
+        CategorySummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Slug */
+            slug: string;
+            /**
+             * Names
+             * @description Display name per locale, e.g. en and es.
+             */
+            names: {
+                [key: string]: string;
+            };
         };
         /**
          * CheckStatus
          * @enum {string}
          */
         CheckStatus: "ok" | "fail";
+        /** ChoiceOption */
+        ChoiceOption: {
+            /** Value */
+            value: string;
+            /** Labels */
+            labels: {
+                [key: string]: string;
+            };
+        };
         /** CityOut */
         CityOut: {
             /** City */
@@ -522,6 +636,28 @@ export interface components {
         DependencyChecks: {
             database: components["schemas"]["CheckStatus"];
             redis: components["schemas"]["CheckStatus"];
+        };
+        /**
+         * DevicePlatform
+         * @enum {string}
+         */
+        DevicePlatform: "ios" | "android";
+        /** DeviceRegistration */
+        DeviceRegistration: {
+            /**
+             * Expo Push Token
+             * @description The Expo push token.
+             */
+            expo_push_token: string;
+            platform: components["schemas"]["DevicePlatform"];
+        };
+        /** DeviceRemoval */
+        DeviceRemoval: {
+            /**
+             * Expo Push Token
+             * @description The Expo push token.
+             */
+            expo_push_token: string;
         };
         /** DownloadUrlRequest */
         DownloadUrlRequest: {
@@ -551,6 +687,39 @@ export interface components {
         /** ErrorResponse */
         ErrorResponse: {
             error: components["schemas"]["ErrorDetail"];
+        };
+        /** IntegerQuestion */
+        IntegerQuestion: {
+            /**
+             * Key
+             * @description The answer's key in intake_answers; unique in the category.
+             */
+            key: string;
+            /** Required */
+            required: boolean;
+            /**
+             * Labels
+             * @description The question per locale; en and es required.
+             */
+            labels: {
+                [key: string]: string;
+            };
+            /**
+             * Help
+             * @description An optional hint per locale.
+             */
+            help?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "integer";
+            /** Min */
+            min: number;
+            /** Max */
+            max: number;
         };
         JsonValue: unknown;
         /** LivenessResponse */
@@ -585,6 +754,47 @@ export interface components {
              * Format: date-time
              */
             expires_at: string;
+        };
+        /** MultiChoiceQuestion */
+        MultiChoiceQuestion: {
+            /**
+             * Key
+             * @description The answer's key in intake_answers; unique in the category.
+             */
+            key: string;
+            /** Required */
+            required: boolean;
+            /**
+             * Labels
+             * @description The question per locale; en and es required.
+             */
+            labels: {
+                [key: string]: string;
+            };
+            /**
+             * Help
+             * @description An optional hint per locale.
+             */
+            help?: {
+                [key: string]: string;
+            } | null;
+            /** Options */
+            options: components["schemas"]["ChoiceOption"][];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "multi_choice";
+            /**
+             * Min Selected
+             * @default 0
+             */
+            min_selected: number;
+            /**
+             * Max Selected
+             * @description At most this many; all options when absent.
+             */
+            max_selected?: number | null;
         };
         /** PasswordForgotRequest */
         PasswordForgotRequest: {
@@ -633,6 +843,68 @@ export interface components {
              */
             code: string;
         };
+        /** PhotoOut */
+        PhotoOut: {
+            /**
+             * Url
+             * @description Presigned GET URL.
+             */
+            url: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
+        /** ProProfileOut */
+        ProProfileOut: {
+            /** Bio */
+            bio: string | null;
+            /** Years Of Experience */
+            years_of_experience: number | null;
+            photo: components["schemas"]["PhotoOut"] | null;
+            verification_status: components["schemas"]["ProVerificationStatus"];
+            /** Payouts Enabled */
+            payouts_enabled: boolean;
+            /** Categories */
+            categories: components["schemas"]["CategorySummary"][];
+            /** Service Areas */
+            service_areas: components["schemas"]["ServiceAreaOut"][];
+        };
+        /**
+         * ProProfileUpdate
+         * @description Only the fields sent change. Verification, payouts, rating and job count are set by the
+         *     platform: sending them is a 422 (extra="forbid").
+         */
+        ProProfileUpdate: {
+            /**
+             * Bio
+             * @description An empty string or null clears it.
+             */
+            bio?: string | null;
+            /** Years Of Experience */
+            years_of_experience?: number | null;
+            /**
+             * Photo Key
+             * @description Key of the caller's own profile_photo upload (POST /v1/uploads); null clears.
+             */
+            photo_key?: string | null;
+            /**
+             * Category Ids
+             * @description Replaces the set: active categories, no duplicates, up to PRO_MAX_CATEGORIES.
+             */
+            category_ids?: string[];
+            /**
+             * Service Area Ids
+             * @description Replaces the set: active service areas, no duplicates, up to PRO_MAX_SERVICE_AREAS.
+             */
+            service_area_ids?: string[];
+        };
+        /**
+         * ProVerificationStatus
+         * @enum {string}
+         */
+        ProVerificationStatus: "pending" | "approved" | "rejected";
         /** ReadinessResponse */
         ReadinessResponse: {
             /**
@@ -695,7 +967,7 @@ export interface components {
             preferred_date?: string | null;
             /**
              * Intake Answers
-             * @description Answers to the category's intake questions; a size limit applies. NUL characters and non-finite numbers are refused.
+             * @description Answers to the category's intake_questions (GET /v1/categories), by question key: an integer, an option value, a list of distinct option values, a boolean or a text, as each question's type says. Empty without a category. A size limit applies; NUL characters and non-finite numbers are refused. Text is stored trimmed.
              */
             intake_answers?: {
                 [key: string]: components["schemas"]["JsonValue"];
@@ -796,6 +1068,84 @@ export interface components {
             zip_code: string;
             /** Served */
             served: boolean;
+        };
+        /** ServiceAreaOut */
+        ServiceAreaOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Zip Code */
+            zip_code: string;
+            /** City */
+            city: string;
+            /** State */
+            state: string;
+            /** Region */
+            region: string;
+        };
+        /** SingleChoiceQuestion */
+        SingleChoiceQuestion: {
+            /**
+             * Key
+             * @description The answer's key in intake_answers; unique in the category.
+             */
+            key: string;
+            /** Required */
+            required: boolean;
+            /**
+             * Labels
+             * @description The question per locale; en and es required.
+             */
+            labels: {
+                [key: string]: string;
+            };
+            /**
+             * Help
+             * @description An optional hint per locale.
+             */
+            help?: {
+                [key: string]: string;
+            } | null;
+            /** Options */
+            options: components["schemas"]["ChoiceOption"][];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "single_choice";
+        };
+        /** TextQuestion */
+        TextQuestion: {
+            /**
+             * Key
+             * @description The answer's key in intake_answers; unique in the category.
+             */
+            key: string;
+            /** Required */
+            required: boolean;
+            /**
+             * Labels
+             * @description The question per locale; en and es required.
+             */
+            labels: {
+                [key: string]: string;
+            };
+            /**
+             * Help
+             * @description An optional hint per locale.
+             */
+            help?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "text";
+            /** Max Length */
+            max_length: number;
         };
         /**
          * UploadPurpose
@@ -1662,7 +2012,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description zip_not_served: the address ZIP is outside the active service areas (offer the waitlist); invalid_category: unknown or inactive category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency). */
+            /** @description zip_not_served: the address ZIP is outside the active service areas (offer the waitlist); invalid_category: unknown or inactive category, or one whose questions cannot be read right now (send the request without a category); invalid_intake_answers: intake_answers do not fit the category's intake_questions (an unknown key, a missing required one, a value of the wrong type or out of range), or are not empty without a category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -1856,6 +2206,202 @@ export interface operations {
                 headers: {
                     /** @description Seconds until the current limit window ends. */
                     "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_my_profile_v1_pros_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProProfileOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have a pro profile. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_my_profile_v1_pros_me_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProProfileUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProProfileOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have a pro profile. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description invalid_media: photo_key is not the caller's own profile_photo upload; invalid_category / invalid_service_area: an unknown or inactive id; validation_error: any other invalid field (duplicates or too many ids, bio length, years out of range, fields the platform sets such as verification_status). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    register_device_v1_devices_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceRegistration"];
+            };
+        };
+        responses: {
+            /** @description Registered. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros receive pushes. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: not an Expo push token, or an unknown platform. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    unregister_device_v1_devices_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceRemoval"];
+            };
+        };
+        responses: {
+            /** @description Always, whether or not the token was registered to the caller. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros receive pushes. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: not an Expo push token, or an unknown platform. */
+            422: {
+                headers: {
                     [name: string]: unknown;
                 };
                 content: {

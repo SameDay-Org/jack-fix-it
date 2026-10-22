@@ -1,4 +1,4 @@
-"""GET /v1/service-areas/check: is a ZIP served? (D8.3, #46)."""
+"""GET /v1/service-areas/check: is a ZIP served? (D8.4, #46)."""
 
 import httpx
 import pytest

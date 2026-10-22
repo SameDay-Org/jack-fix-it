@@ -1,7 +1,7 @@
 """waitlist_entries
 
 Revision ID: 9072864e3137
-Revises: 9b4694b6c884
+Revises: e50611b29dde
 Create Date: 2026-10-21 23:44:58.666794
 
 """
@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "9072864e3137"
-down_revision: str | Sequence[str] | None = "9b4694b6c884"
+down_revision: str | Sequence[str] | None = "e50611b29dde"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

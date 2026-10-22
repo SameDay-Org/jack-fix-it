@@ -5,6 +5,7 @@ next one. A spent token presented again means it leaked, so its whole family is 
 """
 
 import asyncio
+import hmac
 import logging
 import uuid
 from dataclasses import dataclass
@@ -12,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import Settings
+from app.config import REFRESH_ROTATION_SECRET_REQUIRED_IN, Settings
 from app.modules.auth import security
 from app.modules.auth.errors import (
     AccountSuspendedError,
@@ -37,6 +38,8 @@ class AuthConfig:
     access_token_ttl_seconds: int
     refresh_token_ttl_seconds: int
     password_min_length: int
+    refresh_rotation_key: str
+    refresh_reuse_grace_seconds: int
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "AuthConfig":
@@ -44,11 +47,20 @@ class AuthConfig:
         # one is a server misconfiguration: a generic, logged 500, never a client error.
         if settings.jwt_secret is None:
             raise RuntimeError("JWT_SECRET is not set; auth endpoints are unavailable")
+        if settings.refresh_rotation_secret is not None:
+            rotation_key = settings.refresh_rotation_secret.get_secret_value()
+        elif settings.app_env in REFRESH_ROTATION_SECRET_REQUIRED_IN:
+            # Settings already refuses this; a hand-built Settings must not reach the fallback.
+            raise RuntimeError("REFRESH_ROTATION_SECRET is not set")
+        else:
+            rotation_key = security.DEVELOPMENT_ROTATION_KEY
         return cls(
             jwt_secret=settings.jwt_secret.get_secret_value(),
             access_token_ttl_seconds=settings.access_token_ttl_seconds,
             refresh_token_ttl_seconds=settings.refresh_token_ttl_seconds,
             password_min_length=settings.password_min_length,
+            refresh_rotation_key=rotation_key,
+            refresh_reuse_grace_seconds=settings.refresh_reuse_grace_seconds,
         )
 
 
@@ -96,7 +108,13 @@ class AuthService:
         return await self._start_session(user)
 
     async def refresh(self, refresh_token: str) -> AuthResponse:
-        """Rotates the refresh token: the old one is spent, a new one joins its family."""
+        """Rotates the refresh token: the old one is spent, its successor joins the family.
+
+        The successor is derived from the old token (successor_refresh_token), so presenting the
+        old token again within REFRESH_REUSE_GRACE_SECONDS, while the successor is still unused,
+        returns that same successor: the app retried after losing the response (#152). Any other
+        reuse of a rotated token is theft, and the family is revoked.
+        """
         now = datetime.now(UTC)
         token = await self._refresh_tokens.get_by_hash_for_update(
             security.hash_refresh_token(refresh_token)
@@ -105,6 +123,9 @@ class AuthService:
             raise InvalidRefreshTokenError
         if token.revoked_at is not None:
             if token.replaced_by_id is not None:
+                replay = await self._grace_replay(token, refresh_token, now)
+                if replay is not None:
+                    return replay
                 # Already rotated, so a copy leaked: the owner or a thief holds the newest token.
                 logger.warning(
                     "auth_refresh_reuse_detected",
@@ -118,11 +139,42 @@ class AuthService:
         if user is None or user.status is not UserStatus.ACTIVE:
             await self._revoke_family(token.family_id, now)
             raise InvalidRefreshTokenError
-        new_refresh_token = security.new_refresh_token()
+        new_refresh_token = security.successor_refresh_token(
+            refresh_token, self._config.refresh_rotation_key
+        )
         replacement = await self._add_refresh_token(user, token.family_id, new_refresh_token, now)
         token.revoked_at = now
         token.replaced_by_id = replacement.id
         return await self._issue_tokens(user, new_refresh_token, now)
+
+    async def _grace_replay(
+        self, token: RefreshToken, presented: str, now: datetime
+    ) -> AuthResponse | None:
+        """The same successor again, if `token` was rotated within the grace window and that
+        successor is still unused and unexpired; None otherwise (the caller treats it as reuse).
+
+        The family lock taken by get_by_hash_for_update serializes concurrent retries. No row is
+        created and no expiry changes: the client simply gets back what it lost.
+        """
+        grace = self._config.refresh_reuse_grace_seconds
+        if token.revoked_at is None or token.replaced_by_id is None or grace <= 0:
+            return None
+        if now - token.revoked_at > timedelta(seconds=grace):
+            return None
+        successor = await self._refresh_tokens.get_by_id(token.replaced_by_id)
+        if successor is None or successor.revoked_at is not None or successor.expires_at <= now:
+            return None
+        raw = security.successor_refresh_token(presented, self._config.refresh_rotation_key)
+        if not hmac.compare_digest(security.hash_refresh_token(raw), successor.token_hash):
+            return None  # a successor issued before #152 was random: it cannot be re-derived
+        user = await self._users.get_by_id(token.user_id)
+        if user is None or user.status is not UserStatus.ACTIVE:
+            return None
+        logger.info(
+            "auth_refresh_grace_replay",
+            extra={"user_id": str(token.user_id), "family_id": str(token.family_id)},
+        )
+        return await self._issue_tokens(user, raw, now)
 
     async def logout(self, refresh_token: str) -> None:
         """Revokes the session of a known token. An unknown token is ignored, without a sign."""

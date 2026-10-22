@@ -1,4 +1,5 @@
-from collections.abc import Sequence
+import uuid
+from collections.abc import Collection, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -32,6 +33,20 @@ class ServiceAreaRepository:
             select(ServiceArea)
             .where(ServiceArea.active)
             .order_by(ServiceArea.region, ServiceArea.city, ServiceArea.zip_code)
+        )
+        return list((await self._session.scalars(statement)).all())
+
+    async def active_ids(self, ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+        if not ids:
+            return set()
+        statement = select(ServiceArea.id).where(ServiceArea.id.in_(ids), ServiceArea.active)
+        return set((await self._session.scalars(statement)).all())
+
+    async def get_many(self, ids: Collection[uuid.UUID]) -> list[ServiceArea]:
+        if not ids:
+            return []
+        statement = (
+            select(ServiceArea).where(ServiceArea.id.in_(ids)).order_by(ServiceArea.zip_code)
         )
         return list((await self._session.scalars(statement)).all())
 

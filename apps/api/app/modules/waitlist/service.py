@@ -1,4 +1,4 @@
-"""Waitlist: people outside the served area who want to hear when it opens (D8.3, #46).
+"""Waitlist: people outside the served area who want to hear when it opens (D8.4, #46).
 
 join() answers the same whether the contact was already on the list or not: one entry per
 contact per ZIP, refreshed in place. The contact is kept only for the "your area is open"
