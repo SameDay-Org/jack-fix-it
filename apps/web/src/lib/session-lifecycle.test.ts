@@ -71,7 +71,11 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 function expireAfter(seconds: number): void {
   for (const call of cookies.sets) {
     const maxAge = call.options.maxAge;
-    if (typeof maxAge === "number" && maxAge <= seconds && cookies.get(call.name)?.value === call.value) {
+    if (
+      typeof maxAge === "number" &&
+      maxAge <= seconds &&
+      cookies.get(call.name)?.value === call.value
+    ) {
       cookies.values.delete(call.name);
     }
   }
@@ -96,7 +100,9 @@ describe("the session marker (only login sets it)", () => {
 
   it("a refresh never sets it", async () => {
     cookies.reset(SIGNED_IN);
-    fetchMock.mockImplementation(routeFetch({ "/v1/auth/refresh": () => Response.json(auth("agent")) }));
+    fetchMock.mockImplementation(
+      routeFetch({ "/v1/auth/refresh": () => Response.json(auth("agent")) }),
+    );
 
     expect(await refreshStaffSession()).toBe(PANEL_PATH);
     expect(cookies.sets.map((call) => call.name)).not.toContain(SESSION_COOKIE);
