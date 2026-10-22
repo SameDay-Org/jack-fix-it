@@ -13,6 +13,8 @@ type LaunchHeroProps = {
   word: ReactNode;
   /** Optional skip control, bottom right. */
   skip?: { label: string; onPress: () => void };
+  /** Called once, when the hero's headline rows are laid out natively. */
+  onLaidOut?: () => void;
   testID?: string;
 };
 
@@ -24,14 +26,14 @@ const noop = () => undefined;
  * takes its space, so the sentence sits exactly where Welcome's does and the exit fades one
  * headline into the same headline. Skip, when present, floats over the frame.
  */
-export function LaunchHero({ word, skip, testID }: LaunchHeroProps) {
+export function LaunchHero({ word, skip, onLaidOut, testID }: LaunchHeroProps) {
   const { bottom } = useSafeAreaInsets();
   const { cleanupPending } = useSession();
 
   return (
     <Screen bar="hero" edges={[]} testID={testID}>
       <View className="flex-1 bg-navy-900">
-        <BrandHero word={word} testID={testID && `${testID}-headline`} />
+        <BrandHero word={word} onLaidOut={onLaidOut} testID={testID && `${testID}-headline`} />
         <WelcomeActions
           hidden
           cleanupPending={cleanupPending}

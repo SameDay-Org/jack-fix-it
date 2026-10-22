@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Text, useWindowDimensions, View, type LayoutChangeEvent } from "react-native";
 
@@ -9,7 +9,12 @@ import { layoutLines, splitHeadline, type HeadlineToken } from "./headline";
 type BrandHeroProps = {
   /** The headline's rolling word: a `WordRotator`, or a plain green word for a static frame. */
   word: ReactNode;
-  /** The headline's test id; its lines take `-line-N`, the word slot `-word`, the gauge `-gauge`. */
+  /** Called once, when the headline's rows are laid out natively: the hero's first final frame. */
+  onLaidOut?: () => void;
+  /**
+   * The headline's test id; its lines take `-line-N`, the word slot `-word`, the gauge `-gauge`,
+   * the whole hero `-frame`.
+   */
   testID?: string;
 };
 
@@ -18,6 +23,18 @@ const GAUGE_PAIR = "x x";
 const GAUGE_SINGLE = "xx";
 
 type Sizes = Record<string, { width: number; height: number }>;
+
+// Measurements outlive the instance: the gate's hero, the intro's and Welcome's draw the same words
+// at the same size, so the second and third lay their lines out on their first commit instead of
+// measuring (transparent) for a frame of their own. Keyed by language, window width and font scale.
+const measuredSizes = new Map<string, Sizes>();
+const measuredRowWidths = new Map<string, number>();
+
+/** Forgets the measurements shared across heroes; tests render many, at different widths. */
+export function resetHeroMeasurementsForTests() {
+  measuredSizes.clear();
+  measuredRowWidths.clear();
+}
 
 /**
  * The brand hero Welcome, the launch intro and the gate's restoring frame all draw: the wordmark
@@ -32,23 +49,38 @@ type Sizes = Record<string, { width: number; height: number }>;
  * while the words after the slot still follow the word's width as it rolls. Screen readers get one
  * static label with the first word and nothing else.
  */
-export function BrandHero({ word, testID }: BrandHeroProps) {
-  const { t } = useTranslation();
-  const { width: windowWidth } = useWindowDimensions();
+export function BrandHero({ word, onLaidOut, testID }: BrandHeroProps) {
+  const { t, i18n } = useTranslation();
+  const { width: windowWidth, fontScale } = useWindowDimensions();
   const words = t("launch.words", { returnObjects: true });
   const parts = splitHeadline((placeholder) => t("launch.headline", { word: placeholder }));
-  const [sizes, setSizes] = useState<Sizes>({});
-  const [rowWidth, setRowWidth] = useState<number>();
+  const cacheKey = `${i18n.language}:${windowWidth}:${fontScale}`;
+  const [sizes, setSizes] = useState<Sizes>(() => measuredSizes.get(cacheKey) ?? {});
+  const [rowWidth, setRowWidth] = useState<number | undefined>(() =>
+    measuredRowWidths.get(cacheKey),
+  );
 
   const record = (key: string) => (event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;
-    setSizes((current) =>
-      current[key]?.width === width && current[key]?.height === height
-        ? current
-        : { ...current, [key]: { width, height } },
-    );
+    setSizes((current) => {
+      if (current[key]?.width === width && current[key]?.height === height) return current;
+      const next = { ...current, [key]: { width, height } };
+      measuredSizes.set(cacheKey, next);
+      return next;
+    });
   };
-  const onRowLayout = ({ nativeEvent }: LayoutChangeEvent) => setRowWidth(nativeEvent.layout.width);
+  const onRowLayout = ({ nativeEvent }: LayoutChangeEvent) => {
+    measuredRowWidths.set(cacheKey, nativeEvent.layout.width);
+    setRowWidth(nativeEvent.layout.width);
+  };
+  // Reported from the first row's own layout event, not from the commit that renders it: on a slow
+  // device the native mount trails the commit, and a flag set from JS would be early.
+  const laidOutRef = useRef(false);
+  const onFirstLineLayout = () => {
+    if (laidOutRef.current) return;
+    laidOutRef.current = true;
+    onLaidOut?.();
+  };
 
   const widthOf = (text: string) => sizes[text]?.width;
   const space =
@@ -106,8 +138,14 @@ export function BrandHero({ word, testID }: BrandHeroProps) {
     item.kind === "slot" ? slot : piece(item.text, `w${index}`);
   const measured = [...parts.before, ...parts.after, ...glued, ...words, GAUGE_PAIR, GAUGE_SINGLE];
 
+  // Transparent until the lines are laid out, in the same commit as the lines: the wrapping
+  // fallback below is never painted, so the hero never shows a layout it then jumps away from.
   return (
-    <View className="flex-1 justify-center gap-6 px-6">
+    <View
+      className="flex-1 justify-center gap-6 px-6"
+      style={{ opacity: lines ? 1 : 0 }}
+      testID={testID && `${testID}-frame`}
+    >
       <View className="gap-3">
         <View className="h-1 w-12 rounded-pill bg-green-500" />
         <Text className="text-headline text-white">{t("brand.name")}</Text>
@@ -125,13 +163,15 @@ export function BrandHero({ word, testID }: BrandHeroProps) {
               key={`l${index}`}
               className="flex-row items-end"
               style={{ columnGap: space, height: lineHeight }}
+              onLayout={index === 0 ? onFirstLineLayout : undefined}
               testID={testID && `${testID}-line-${index}`}
             >
               {line.map(token)}
             </View>
           ))
         ) : (
-          // Until everything is measured (one frame, under the splash or the intro): the row wraps.
+          // Until everything is measured: a wrapping row, transparent (see above), that gives the
+          // header its width and about its height.
           <View
             className="flex-row flex-wrap items-end"
             style={{ columnGap: tokens.fontSize.display.size / 4 }}

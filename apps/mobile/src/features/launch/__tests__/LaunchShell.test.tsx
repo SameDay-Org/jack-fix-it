@@ -1,6 +1,6 @@
 import "@/i18n";
 
-import { act, fireEvent, renderRouter, screen, within } from "expo-router/testing-library";
+import { act, fireEvent, renderRouter, screen } from "expo-router/testing-library";
 import * as SplashScreen from "expo-splash-screen";
 import { createElement } from "react";
 import { Text } from "react-native";
@@ -13,8 +13,10 @@ import { user } from "../../../api/__tests__/helpers";
 import AppLayout from "../../../app/(app)/_layout";
 import AuthLayout, { unstable_settings } from "../../../app/(auth)/_layout";
 import { METRICS, SIGNED_OUT } from "../../auth/__tests__/helpers";
+import { resetHeroMeasurementsForTests } from "../BrandHero";
 import { LaunchShell } from "../LaunchShell";
 import { resetSplashForTests } from "../splash";
+import { layOutHero, measureRotatorWords } from "./helpers";
 
 // The session as a tiny store the test can change under a mounted tree (a restore resolving).
 type Session = ReturnType<typeof import("@/api").useSession>;
@@ -67,16 +69,10 @@ const routes = {
 const { launchMinMs, launchMaxMs } = tokens.motion;
 const HIDDEN = { includeHiddenElements: true };
 
-/** Lays out the rotator's hidden measurement row, as the native side would: the first frame is final. */
+/** Measures the rotator's words and lays the hero's rows out, as the native side would: the first frame is final. */
 async function measureWords() {
-  const row = within(screen.getByTestId("launch-rotator-measure", HIDDEN));
-  await act(async () => {
-    for (const word of ["fix", "clean", "paint", "mow", "move"]) {
-      fireEvent(row.getByText(word, HIDDEN), "layout", {
-        nativeEvent: { layout: { width: 40, height: 40, x: 0, y: 0 } },
-      });
-    }
-  });
+  await measureRotatorWords();
+  await layOutHero();
 }
 
 /** Measured, then the minimum elapses (the run settles at once under the mock): a resolved session exits. */
@@ -88,6 +84,7 @@ async function finishIntro() {
 beforeEach(() => {
   jest.useFakeTimers();
   resetSplashForTests();
+  resetHeroMeasurementsForTests();
   jest.mocked(SplashScreen.hideAsync).mockClear();
   reduceMotion().mockReturnValue(false);
   mockSession.current = SESSION_SIGNED_OUT;

@@ -116,9 +116,12 @@ describe("WordRotator", () => {
       expect(measureRow.getByText(text, HIDDEN).props.numberOfLines).toBe(1);
     }
 
-    // Once measured, the words' stage is as wide as the widest word (plus rounding slack), so a
-    // word is never ellipsized by a clip that is narrower than it: the clip clips, nothing else.
-    expect(screen.getByTestId("rot-stage", HIDDEN).props.style).toMatchObject({ width: undefined });
+    // Until measured the stage is the window's width, so the first word is drawn the moment the
+    // clip opens; once measured it is as wide as the widest word (plus rounding slack), so a word
+    // is never ellipsized by a clip that is narrower than it: the clip clips, nothing else.
+    expect(screen.getByTestId("rot-stage", HIDDEN).props.style).toMatchObject({
+      width: Dimensions.get("window").width,
+    });
     await measure();
     expect(screen.getByTestId("rot-stage", HIDDEN).props.style).toMatchObject({
       position: "absolute",

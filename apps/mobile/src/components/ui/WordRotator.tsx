@@ -98,7 +98,9 @@ export function WordRotator({
   const [ready, setReady] = useState(false);
   // The words sit on a stage wide enough for the widest of them: an absolute child with an inset
   // is measured against its parent's width, and a word measured against a narrower clip would be
-  // ellipsized rather than clipped.
+  // ellipsized rather than clipped. Until they are measured the stage is the window's width, so the
+  // first word is drawn the moment the clip opens (a UI-thread value) with no React commit in
+  // between: a commit mounts late on a slow device, and the slot showed empty for a frame.
   const [stageWidth, setStageWidth] = useState<number>();
   // The clip is as tall as the words measure, not the token's line height times the font scale:
   // Android 14+ scales large type non-linearly (34 sp is still 34 sp at a 1.3 font scale while
@@ -169,7 +171,13 @@ export function WordRotator({
         testID={testID && `${testID}-clip`}
       >
         <View
-          style={{ position: "absolute", left: 0, top: 0, width: stageWidth, height: lineHeight }}
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: stageWidth ?? windowWidth,
+            height: lineHeight,
+          }}
           testID={testID && `${testID}-stage`}
         >
           {words.map((word, index) => (

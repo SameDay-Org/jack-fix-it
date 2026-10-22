@@ -18,7 +18,7 @@ import { LaunchHero } from "./LaunchHero";
 import { useLaunchIntro } from "./useLaunchIntro";
 
 type LaunchIntroProps = {
-  /** The first frame is final (every word measured): the moment to lift the native splash. */
+  /** The first frame is final (hero rows laid out, every word measured): lift the native splash. */
   onReady: () => void;
   /** The exit finished; the caller unmounts the intro. */
   onDone: () => void;
@@ -40,19 +40,30 @@ export function LaunchIntro({ onReady, onDone }: LaunchIntroProps) {
   const { wordSwapIntervalMs, wordSwapTransitionMs, launchSwaps, launchExitMs } = tokens.motion;
 
   // The splash lifts when the first frame is final (the shell also lifts it on exit and, at the
-  // latest, at launchMaxMs, whatever happens here).
-  // Until then the intro paints nothing: the native splash normally covers that frame, but a dev
-  // client does not hold it, and what sits under the intro is the same navy (the gate's static
-  // hero, or its navy frame), so the words never show before they are measured. The gate is a
-  // shared value, not state: a state dependency re-initializes the animated style on the
-  // re-render, which blanked the intro for a frame or two on the device.
+  // latest, at launchMaxMs, whatever happens here). Final means two things, each reported from the
+  // native side: the hero's headline rows are laid out (not its wrapping fallback) and every
+  // rotator word is measured. Until then the intro paints nothing: the native splash normally
+  // covers that frame, but a dev client does not hold it, and what sits under the intro is the
+  // same navy (the gate's static hero, or its navy frame). The gate is a shared value, not state:
+  // a state dependency re-initializes the animated style on the re-render, which blanked the
+  // intro for a frame or two on the device.
   const readyRef = useRef(false);
+  const heroLaidOutRef = useRef(false);
+  const wordsMeasuredRef = useRef(false);
   const shown = useSharedValue(0);
   const ready = () => {
-    if (readyRef.current) return;
+    if (readyRef.current || !heroLaidOutRef.current || !wordsMeasuredRef.current) return;
     readyRef.current = true;
     shown.value = 1;
     onReady();
+  };
+  const heroLaidOut = () => {
+    heroLaidOutRef.current = true;
+    ready();
+  };
+  const wordsMeasured = () => {
+    wordsMeasuredRef.current = true;
+    ready();
   };
 
   const exit = useSharedValue(0);
@@ -95,6 +106,7 @@ export function LaunchIntro({ onReady, onDone }: LaunchIntroProps) {
         <LaunchHero
           testID="launch-hero"
           skip={{ label: t("launch.skip"), onPress: skip }}
+          onLaidOut={heroLaidOut}
           word={
             <WordRotator
               words={words}
@@ -105,7 +117,7 @@ export function LaunchIntro({ onReady, onDone }: LaunchIntroProps) {
               swaps={launchSwaps}
               stopAt={0}
               onRunEnd={runEnd}
-              onReady={ready}
+              onReady={wordsMeasured}
               testID="launch-rotator"
             />
           }
