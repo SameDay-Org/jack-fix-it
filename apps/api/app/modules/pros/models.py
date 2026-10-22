@@ -1,8 +1,20 @@
 import uuid
+from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 
-from sqlalchemy import CheckConstraint, ForeignKey, Numeric, String, Text, UniqueConstraint, false
+from sqlalchemy import (
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    false,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, IdTimestampsMixin, str_enum
@@ -59,3 +71,40 @@ class ProServiceArea(IdTimestampsMixin, Base):
 
     pro_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("pro_profiles.id"), index=True)
     service_area_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("service_areas.id"), index=True)
+
+
+class ProDocumentType(StrEnum):
+    ID = "id"
+    LICENSE = "license"
+    INSURANCE = "insurance"
+
+
+class ProDocumentStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    # Replaced by a newer submission of the same type before review.
+    SUPERSEDED = "superseded"
+
+
+class ProDocument(IdTimestampsMixin, Base):
+    """A verification document a pro submits (D6.3, #37); the admin reviews it (#41)."""
+
+    __tablename__ = "pro_documents"
+    __table_args__ = (Index("ix_pro_documents_pro_id_doc_type", "pro_id", "doc_type"),)
+
+    pro_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("pro_profiles.id"), index=True)
+    doc_type: Mapped[ProDocumentType] = mapped_column(
+        str_enum(ProDocumentType, "pro_document_type")
+    )
+    # A storage key, never a URL; one uploaded file is one document.
+    file_key: Mapped[str] = mapped_column(String(256), unique=True)
+    status: Mapped[ProDocumentStatus] = mapped_column(
+        str_enum(ProDocumentStatus, "pro_document_status"),
+        server_default=ProDocumentStatus.PENDING.value,
+        index=True,
+    )
+    rejection_reason: Mapped[str | None] = mapped_column(Text)
+    expires_on: Mapped[date | None] = mapped_column(Date)
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), index=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

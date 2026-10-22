@@ -1,7 +1,7 @@
 """settings and request_dispatches
 
 Revision ID: cc5f5e3a9bbf
-Revises: 9072864e3137
+Revises: 3bc9012ebd6d
 Create Date: 2026-10-22 03:13:40.027313
 
 """
@@ -15,7 +15,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "cc5f5e3a9bbf"
-down_revision: str | Sequence[str] | None = "9072864e3137"
+down_revision: str | Sequence[str] | None = "3bc9012ebd6d"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
