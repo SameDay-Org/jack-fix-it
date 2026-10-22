@@ -81,12 +81,15 @@ options={sheetOptions([0.5, 0.95])} />`, or `"fitToContents"`), rendering `Sheet
   GPS never leave the phone; videos go as they are, checked against
   `EXPO_PUBLIC_UPLOAD_MAX_VIDEO_BYTES`. `uploadMedia` (`src/api/upload.ts`) asks
   `POST /v1/uploads` for a URL signed for the exact type and size, then PUTs the bytes (XHR, for
-  progress) to exactly that URL with exactly its headers and never the bearer token; one retry on
+  progress) to exactly that URL with exactly its headers and never the bearer token. Bytes stay
+  native: a photo is read as a native Blob, a video (size known from the picker) streams from
+  disk as `{ uri }`; never `fetch(uri).blob()`, which copies through base64 into JavaScript; one retry on
   a network failure, with a fresh URL if it expired; `UploadRejectedError` (403/422) and
   `UploadFailedError` (storage refusal, network, or past `EXPO_PUBLIC_UPLOAD_TIMEOUT_MS` plus the
   file's time at `EXPO_PUBLIC_UPLOAD_MIN_BYTES_PER_SECOND`). `MediaPicker`
   renders the list and asks "Camera or library" in `MediaSourceSheet`, a sheet route in the
-  caller's stack; `ProgressRing` (kit) draws progress without SVG. Local uploads need an
+  caller's stack; `ProgressRing` (kit) draws progress without SVG. Dev demo: `jackfixit://dev/media`
+  (signed-in customer). Local uploads need an
   S3-compatible server on the host; docker-compose has none, see the commands below.
 - Strings: `src/i18n/locales/{en,es}.json` through `useTranslation()`; the device language
   picks the catalog, English is the fallback.
