@@ -13,7 +13,7 @@ import sentry_sdk
 from sentry_sdk.types import Breadcrumb, BreadcrumbHint, Event, Hint
 
 from app.config import Settings
-from app.db_errors import safe_message, summary_of
+from app.db_errors import record_summary, safe_message, summary_of
 
 request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
 
@@ -190,10 +190,13 @@ def _without_database_text(event: Event, hint: Hint) -> None:
                 value["value"] = summary.describe()
     record = hint.get("log_record")
     logentry = event.get("logentry")
-    if isinstance(record, logging.LogRecord) and isinstance(logentry, dict):
+    if (
+        isinstance(record, logging.LogRecord)
+        and isinstance(logentry, dict)
+        and record_summary(record) is not None
+    ):
         message = safe_message(record)
-        if message != record.getMessage():
-            logentry.update(message=message, formatted=message, params=[])
+        logentry.update(message=message, formatted=message, params=[])
 
 
 def before_send(event: Event, hint: Hint) -> Event:
@@ -239,10 +242,12 @@ def before_breadcrumb(crumb: Breadcrumb, hint: BreadcrumbHint) -> Breadcrumb:
         crumb.pop("data", None)
         return crumb
     record = hint.get("log_record")
-    if isinstance(record, logging.LogRecord):
-        safe = safe_message(record)
-        if safe != record.getMessage():
-            crumb["message"] = safe
+    if isinstance(record, logging.LogRecord) and (summary := record_summary(record)):
+        # A log line carrying a database error: its message and its data (the record's
+        # extras) give way to the summary; a later event would carry them as a breadcrumb.
+        crumb["message"] = safe_message(record)
+        crumb["data"] = dict(summary.as_extra())
+        return crumb
     message = crumb.get("message")
     if isinstance(message, str):
         crumb["message"] = _without_url_queries(message)

@@ -5,6 +5,7 @@ written into the SQL, or quoted back by the driver, would reach the logs. Real d
 triggers. The bound-parameter case is test_status_writer_guard.py's API test.
 """
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -30,7 +31,9 @@ __all__ = ["committed", "rows", "sentry_transport"]  # fixtures, used by name
 # Built into the SQL at run time, as a buggy writer would: no source line below holds them.
 CANARY = "PRIVATE-ROW-CANARY privacy174@example.invalid"
 EMAIL_CANARY = "dup-canary-174@example.invalid"
-SECRETS = ("PRIVATE-ROW-CANARY", "privacy174", "dup-canary-174")
+# A value the driver quotes back in its message (22P02: invalid input syntax for type uuid).
+RUNTIME_CANARY = "runtime-" + "only-private174@example.invalid"
+SECRETS = ("PRIVATE-ROW-CANARY", "privacy174", "dup-canary-174", "only-private174")
 # Pieces of the statements below: none may be logged. (Sentry adds source lines around each
 # frame, so no frame's neighbourhood holds them: the statements are built here, far above.)
 STATEMENT_PARTS = ("status='cancelled'", "status='accepted'", "email='", "next_action='", "[SQL:")
@@ -59,6 +62,38 @@ def literal_duplicate_email(committed: Committed) -> Any:
         f"UPDATE users SET email='{EMAIL_CANARY}' WHERE id IN ('{committed.agent.id}', "  # noqa: S608 - literal SQL is what this test is about
         f"(SELECT customer_id FROM service_requests WHERE id='{committed.request_id}'))"
     )
+
+
+def invalid_uuid_cast() -> Any:
+    return text("SELECT CAST('" + RUNTIME_CANARY + "' AS uuid)")
+
+
+async def quoting_error(session: AsyncSession) -> DBAPIError:
+    """A real database error whose driver message quotes the canary back."""
+    with pytest.raises(DBAPIError) as caught:
+        async with session.begin_nested():
+            await session.execute(invalid_uuid_cast())
+    assert getattr(caught.value.orig, "sqlstate", None) == "22P02"
+    assert RUNTIME_CANARY in str(caught.value.orig)
+    return caught.value
+
+
+def report_failed_future(error: BaseException) -> None:
+    """How asyncio reports a failed future nobody awaited: its default handler logs a message
+    already rendered with the future's repr, which holds the error's text."""
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    future.set_exception(error)
+    try:
+        loop.default_exception_handler(
+            {
+                "message": "Future exception was never retrieved",
+                "exception": error,
+                "future": future,
+            }
+        )
+    finally:
+        future.exception()  # retrieved: no second report when it is collected
 
 
 def add_route(app: FastAPI, committed: Committed, statement: Any) -> str:
@@ -199,8 +234,12 @@ async def test_a_library_logging_a_database_error_as_an_argument_logs_its_summar
 
     assert_no_sql(logged)
     payload = json.loads(logged)
-    assert payload["message"].startswith("  0.25s ! job:sanitize failed, ProgrammingError: ")
-    assert "sqlstate=42501" in payload["message"]
+    # Nothing of the message survives, not even the job reference: an argument next to the
+    # error can be a runtime value.
+    assert payload["message"] == (
+        "arq.worker: ProgrammingError(error_class=ProgrammingError sqlstate=42501 "
+        f"table=service_requests reason={GUARD_MESSAGE})"
+    )
     assert payload["exception"].startswith("Traceback (most recent call last):")
     assert payload["exception"].endswith(
         "ProgrammingError: error_class=ProgrammingError sqlstate=42501 "
@@ -239,7 +278,7 @@ def test_a_database_error_logged_as_the_message_logs_its_summary() -> None:
 
     logged = json.loads(JsonFormatter().format(record))
 
-    assert logged["message"] == "DBAPIError(error_class=DBAPIError)"
+    assert logged["message"] == "app: DBAPIError(error_class=DBAPIError)"
 
 
 def test_sql_breadcrumbs_lose_their_statement_and_data() -> None:
@@ -299,3 +338,101 @@ def test_other_errors_keep_their_text_and_traceback() -> None:
     assert json.loads(JsonFormatter().format(record))["exception"].endswith(
         "RuntimeError: probe failure"
     )
+
+
+# Round 3 review (#174): a record whose exc_info is a database error, with its message already
+# rendered (asyncio) or a runtime argument next to it, keeps nothing of either.
+
+
+async def test_asyncio_failed_future_with_a_database_error_logs_only_its_summary(
+    db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    error = await quoting_error(db_session)
+
+    with caplog.at_level(logging.ERROR, logger="asyncio"):
+        report_failed_future(error)
+
+    [record] = [r for r in caplog.records if r.name == "asyncio"]
+    assert RUNTIME_CANARY in record.getMessage()  # what would have been logged
+    payload = json.loads(JsonFormatter().format(record))
+    assert_no_sql(json.dumps(payload))
+    assert payload["message"].startswith(
+        "asyncio: DBAPIError(error_class=DBAPIError sqlstate=22P02"
+    )
+    assert "sqlstate=22P02" in payload["exception"]
+
+
+async def test_logger_exception_with_a_runtime_argument_logs_only_the_summary(
+    db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    error = await quoting_error(db_session)
+
+    with caplog.at_level(logging.ERROR, logger="some.library"):
+        try:
+            raise error
+        except DBAPIError:
+            logging.getLogger("some.library").exception("lookup for %s failed", RUNTIME_CANARY)
+
+    [record] = [r for r in caplog.records if r.name == "some.library"]
+    payload = json.loads(JsonFormatter().format(record))
+    assert_no_sql(json.dumps(payload))
+    assert payload["message"].startswith("some.library: DBAPIError(")
+
+
+async def test_asyncio_database_error_sentry_event_has_no_driver_literal(
+    sentry_transport: MemoryTransport, db_session: AsyncSession
+) -> None:
+    init_sentry(make_settings(sentry_dsn=TEST_DSN))
+    sentry_sdk.get_isolation_scope().clear_breadcrumbs()
+    error = await quoting_error(db_session)
+
+    report_failed_future(error)
+    sentry_sdk.flush()
+
+    events = [json.loads(p) for p in _payloads(sentry_transport) if '"logentry"' in p]
+    assert events, "the logging integration captured no event"
+    assert_no_sql("\n".join(_payloads(sentry_transport)))
+    for event in events:
+        assert event["logentry"]["formatted"].startswith("asyncio: DBAPIError(")
+        assert event["logentry"]["params"] == []
+
+
+async def test_a_later_event_carries_no_database_text_in_its_breadcrumbs(
+    sentry_transport: MemoryTransport, db_session: AsyncSession
+) -> None:
+    init_sentry(make_settings(sentry_dsn=TEST_DSN))
+    sentry_sdk.get_isolation_scope().clear_breadcrumbs()
+    error = await quoting_error(db_session)
+
+    report_failed_future(error)
+    sentry_sdk.capture_message("later diagnostic, no database")
+    sentry_sdk.flush()
+
+    events = [json.loads(p) for p in _payloads(sentry_transport)]
+    [later] = [e for e in events if e.get("message") == "later diagnostic, no database"]
+    assert_no_sql(json.dumps(later))
+    [crumb] = [c for c in later["breadcrumbs"]["values"] if c.get("category") == "asyncio"]
+    assert crumb["message"].startswith("asyncio: DBAPIError(")
+    assert crumb["data"] == {"error_class": "DBAPIError", "sqlstate": "22P02"}
+
+
+def test_a_record_without_a_database_error_keeps_its_message_and_arguments() -> None:
+    error = ValueError("invalid task configuration")
+    record = logging.LogRecord(
+        "some.library",
+        logging.ERROR,
+        __file__,
+        1,
+        "task %s failed",
+        ("174",),
+        (ValueError, error, None),
+    )
+    crumb = before_breadcrumb(
+        {"category": "some.library", "message": "task 174 failed"}, {"log_record": record}
+    )
+
+    payload = json.loads(JsonFormatter().format(record))
+
+    assert payload["message"] == "task 174 failed"
+    assert payload["exception"].endswith("ValueError: invalid task configuration")
+    assert crumb["message"] == "task 174 failed"
