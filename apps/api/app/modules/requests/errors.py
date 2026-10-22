@@ -1,4 +1,4 @@
-from app.errors import AppError
+from app.errors import AppError, ConflictError
 
 
 class InvalidRequestError(AppError):
@@ -38,3 +38,11 @@ class ZipNotServedError(AppError):
     status_code = 422
     code = "zip_not_served"
     message = "This ZIP code is not served yet."
+
+
+class InvalidTransitionError(ConflictError):
+    """The request's current status has no edge to the requested one (also for a terminal
+    status). The same code as the jobs' error: one invalid_transition for every state machine."""
+
+    code = "invalid_transition"
+    message = "The request cannot move to that status from its current one."
