@@ -120,15 +120,25 @@ describe("ToastHost", () => {
     const keyboard = (name: string, height: number) =>
       act(() => handlers.get(name)?.({ endCoordinates: { height } } as unknown as KeyboardEvent));
     const lift = () => screen.getByTestId("toast-host").props.style.paddingBottom;
+    const onPlatform = (os: "android" | "ios") => {
+      platform = jest.replaceProperty(Platform, "OS", os);
+    };
+    // Restored one by one: restoreAllMocks would also take down the file's `announce` spy.
+    let keyboardSpy: jest.SpiedFunction<typeof Keyboard.addListener>;
+    let platform: jest.ReplaceProperty<typeof Platform.OS> | undefined;
 
     beforeEach(() => {
       handlers.clear();
-      jest.spyOn(Keyboard, "addListener").mockImplementation((name, handler) => {
+      keyboardSpy = jest.spyOn(Keyboard, "addListener").mockImplementation((name, handler) => {
         handlers.set(name, handler as (event: KeyboardEvent) => void);
         return { remove: () => handlers.delete(name) } as ReturnType<typeof Keyboard.addListener>;
       });
     });
-    afterEach(() => jest.restoreAllMocks());
+    afterEach(() => {
+      keyboardSpy.mockRestore();
+      platform?.restore();
+      platform = undefined;
+    });
 
     const renderWithInset = () =>
       render(
@@ -138,7 +148,7 @@ describe("ToastHost", () => {
       );
 
     it("android: rises by the keyboard plus the bars it leaves out, and back down", async () => {
-      jest.replaceProperty(Platform, "OS", "android");
+      onPlatform("android");
       await renderWithInset();
       await act(() => showToast({ message: "We sent a new code.", tone: "neutral" }));
       expect(lift()).toBe(BOTTOM_INSET);
@@ -151,7 +161,7 @@ describe("ToastHost", () => {
     });
 
     it("ios: rises by the keyboard, which already covers the home indicator", async () => {
-      jest.replaceProperty(Platform, "OS", "ios");
+      onPlatform("ios");
       await renderWithInset();
       await act(() => showToast({ message: "We sent a new code.", tone: "neutral" }));
 

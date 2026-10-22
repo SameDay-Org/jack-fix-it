@@ -31,9 +31,10 @@ export function PhoneEntryScreen() {
   return (
     <Screen bar="light" testID="phone-entry-screen">
       <KeyboardAvoidingView
-        // Padding on both platforms: Android 15 draws edge to edge and no longer resizes the
-        // window for the keyboard, so the actions would sit under it. It measures itself from
-        // the content area, which `Screen` starts below the status bar: the offset adds that back.
+        // Padding on both platforms: the app draws edge to edge on Android, where the window
+        // no longer resizes for the keyboard, so the actions would sit under it. It measures
+        // itself from the content area, which `Screen` starts below the status bar: the offset
+        // adds that back.
         behavior="padding"
         keyboardVerticalOffset={top}
         className="flex-1"
