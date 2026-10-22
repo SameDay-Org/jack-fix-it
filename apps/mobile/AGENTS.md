@@ -29,6 +29,13 @@ rules apply.
   `Stack.Protected` guards send `signedIn` to `(app)` and everyone else to `(auth)/welcome`,
   deep links included. Routes stay thin: screens, form hooks and error mapping live in
   `src/features/auth`, and screen tests live there too (never under `src/app`).
+- Launch intro (D18, #147): every start draws `LaunchIntro` (`src/features/launch`) over the
+  gate: the navy hero with `WordRotator` (`src/components/ui`) rolling the headline's verb on
+  the UI thread, width tweened so the sentence never jumps, one static screen-reader label, tap
+  to skip, crossfade under Reduce Motion. It lifts the native splash (plain navy-900, set in
+  `app.config.ts`, a dev-build change) when its first frame is final, runs for one word cycle
+  (`motion.launchMinMs`) and never past `motion.launchMaxMs`; the gate shows the static hero
+  while restoring. Timings are `motion.*` tokens.
 - Liquid Glass: only through `GlassSurface` (`src/components/ui`): `tone` light | dark,
   `shape` pill | xl | lg, `interactive`. Native `GlassView` on iOS 26+ when
   `isLiquidGlassAvailable()` and Reduce Transparency is off (live, `useReduceTransparency`);

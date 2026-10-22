@@ -26,5 +26,7 @@ export { dismissToast, showToast, useToast } from "./toast";
 export type { Toast, ToastTone } from "./toast";
 export { ToastHost } from "./ToastHost";
 export { useReduceTransparency } from "./useReduceTransparency";
+export { WordRotator } from "./WordRotator";
+export type { WordRotatorProps } from "./WordRotator";
 export type { ReduceTransparency } from "./useReduceTransparency";
 export { moveAccessibilityFocus } from "./focus";

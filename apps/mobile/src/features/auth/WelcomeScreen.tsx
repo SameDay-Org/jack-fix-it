@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Trans, useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import { Text, View, type LayoutChangeEvent } from "react-native";
 import Animated, {
   interpolateColor,
@@ -9,9 +9,11 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useSession } from "@/api";
-import { Button, Screen } from "@/components/ui";
-import { continuousCorners, tokens } from "@/theme";
+import { Screen } from "@/components/ui";
+import { BrandHero } from "@/features/launch/BrandHero";
+import { tokens } from "@/theme";
 
+import { WelcomeActions } from "./components/WelcomeActions";
 import { usePanelTransition } from "./usePanelTransition";
 
 const { white, "gray-50": page } = tokens.colors;
@@ -19,20 +21,22 @@ const { xl } = tokens.radius;
 const { slidePx, panelHeroDim } = tokens.motion;
 
 /**
- * The first screen: the navy hero with the tagline (one lime word, per the brief) and the support
- * line, and a white bubble below with the two ways in. No other action lives here until its flow
- * exists. The bubble pads the bottom inset itself, so the Screen pads no edge.
+ * The first screen: the brand hero (the navy hero with the tagline, one lime word, and the support
+ * line) and a white bubble below with the two ways in. No other action lives here until its flow
+ * exists. The bubble pads the bottom inset itself, so the Screen pads no edge. The hero is the one
+ * the launch intro draws, so the intro fades into this screen as one sentence.
  *
- * Tapping a way in makes the bubble rise into the next screen: it slides up to the top of the
- * screen (a skirt below it keeps the area it leaves covered), its top corners square off and it
+ * Tapping a way in makes the bubble rise into the next screen (#148): it slides up to the top of
+ * the screen (a skirt below it keeps the area it leaves covered), its top corners square off and it
  * takes the page color while the actions fade and the hero dims and drifts up; the destination
  * then fades in exactly where the panel ended. The bubble keeps its place in the layout, so the
- * hero's geometry is the same as before the motion.
+ * hero's geometry is the intro's at rest and through the motion.
  */
 export function WelcomeScreen() {
   const { t } = useTranslation();
-  const { top, bottom } = useSafeAreaInsets();
+  const { top } = useSafeAreaInsets();
   const { cleanupPending } = useSession();
+  const words = t("launch.words", { returnObjects: true });
   const reduceMotion = useReducedMotion();
   const { progress, travel, bar, busy, setGeometry, go } = usePanelTransition({ reduceMotion });
   const [skirtHeight, setSkirtHeight] = useState(0);
@@ -69,22 +73,12 @@ export function WelcomeScreen() {
   return (
     <Screen bar={bar} edges={[]} testID="welcome-screen">
       <View className="flex-1 bg-navy-900">
-        <Animated.View
-          className="flex-1 justify-center gap-6 px-6"
-          style={heroStyle}
-          testID="welcome-hero"
-        >
-          <View className="gap-3">
-            <View className="h-1 w-12 rounded-pill bg-green-500" />
-            <Text className="text-headline text-white">{t("brand.name")}</Text>
-          </View>
-          <Text className="text-display text-white" testID="welcome-tagline">
-            <Trans
-              i18nKey="welcome.tagline"
-              components={{ accent: <Text className="text-green-500" /> }}
-            />
-          </Text>
-          <Text className="text-body text-white">{t("welcome.support")}</Text>
+        {/* A plain flex-1 wrapper: the hero keeps the intro's geometry, and only dims and drifts. */}
+        <Animated.View className="flex-1" style={heroStyle} testID="welcome-hero">
+          <BrandHero
+            word={<Text className="text-display text-green-500">{words[0]}</Text>}
+            testID="welcome-headline"
+          />
         </Animated.View>
         <Animated.View
           pointerEvents="none"
@@ -94,40 +88,16 @@ export function WelcomeScreen() {
           ]}
           testID="welcome-actions-skirt"
         />
-        <Animated.View
-          style={[continuousCorners, panelStyle, { paddingBottom: bottom }]}
+        <WelcomeActions
+          cleanupPending={cleanupPending}
+          onGetStarted={() => go({ pathname: "/(auth)/role", params: { from: "welcome" } })}
+          onLogin={() => go({ pathname: "/(auth)/login", params: { from: "welcome" } })}
+          style={panelStyle}
+          actionsStyle={actionsStyle}
+          busy={busy}
           onLayout={onPanelLayout}
           testID="welcome-actions"
-        >
-          <Animated.View
-            className="gap-3 px-4 pb-4 pt-6"
-            style={actionsStyle}
-            pointerEvents={busy ? "none" : "auto"}
-          >
-            {cleanupPending ? (
-              <Text
-                accessibilityRole="alert"
-                accessibilityLiveRegion="polite"
-                className="text-callout text-gray-500"
-                testID="welcome-partial-cleanup"
-              >
-                {t("welcome.partialCleanup")}
-              </Text>
-            ) : null}
-            <Button
-              label={t("welcome.getStarted")}
-              size="lg"
-              onPress={() => go({ pathname: "/(auth)/role", params: { from: "welcome" } })}
-              testID="welcome-get-started"
-            />
-            <Button
-              label={t("welcome.haveAccount")}
-              variant="ghost"
-              onPress={() => go({ pathname: "/(auth)/login", params: { from: "welcome" } })}
-              testID="welcome-login"
-            />
-          </Animated.View>
-        </Animated.View>
+        />
       </View>
     </Screen>
   );

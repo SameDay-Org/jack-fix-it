@@ -1,32 +1,51 @@
 import { Stack } from "expo-router";
-import * as SplashScreen from "expo-splash-screen";
-import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
+import { Text } from "react-native";
 
 import { useSession } from "@/api";
+// The deep path, not the barrel: the launch shell imports this feature, and the barrel would close
+// a require cycle (launch -> auth -> launch) that Metro warns about.
+import { LaunchHero } from "@/features/launch/LaunchHero";
+import { tokens } from "@/theme";
 
 import { OfflineScreen } from "./OfflineScreen";
 
 /**
- * The one place that turns the session status into what the app shows. `restoring` keeps the
- * native splash the root layout holds; the first real screen hides it. A restore that could not
- * reach the server shows the offline screen instead of asking for a login the device may not
- * need. Signed in goes to `(app)`, everyone else to `(auth)`, deep links included: a protected
- * group redirects to the other group's entry.
+ * The one place that turns the session status into what the app shows. While the session is
+ * `restoring` it shows the static launch frame, the same navy hero the intro draws over it, so a
+ * slow restore never shows a blank. A restore that could not reach the server shows the offline
+ * screen instead of asking for a login the device may not need. Signed in goes to `(app)`,
+ * everyone else to `(auth)`, deep links included: a protected group redirects to the other
+ * group's entry.
  */
 export function SessionGate() {
+  const { t } = useTranslation();
   const { status, restoreFailure } = useSession();
-  const ready = status !== "restoring";
 
-  useEffect(() => {
-    if (ready) void SplashScreen.hideAsync();
-  }, [ready]);
-
-  if (!ready) return null;
+  if (status === "restoring") {
+    return (
+      <LaunchHero
+        testID="restoring-hero"
+        word={
+          <Text className="text-display text-green-500">
+            {t("launch.words", { returnObjects: true })[0]}
+          </Text>
+        }
+      />
+    );
+  }
   if (restoreFailure === "offline") return <OfflineScreen />;
 
   const signedIn = status === "signedIn";
   return (
-    <Stack screenOptions={{ headerShown: false }}>
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        // The frame under a group while its first screen mounts: navy, like the splash and the
+        // intro over it, so a quick handoff (Reduce Motion, a fast restore) never shows white.
+        contentStyle: { backgroundColor: tokens.colors["navy-900"] },
+      }}
+    >
       <Stack.Protected guard={signedIn} redirectTo="/(auth)/welcome">
         <Stack.Screen name="(app)" />
       </Stack.Protected>
