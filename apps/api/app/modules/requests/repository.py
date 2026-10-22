@@ -26,6 +26,18 @@ class ServiceRequestRepository:
     async def get(self, request_id: uuid.UUID) -> ServiceRequest | None:
         return await self._session.get(ServiceRequest, request_id)
 
+    async def get_for_update(self, request_id: uuid.UUID) -> ServiceRequest | None:
+        """The request, locked until the transaction ends, so transitions on it run one at a
+        time. populate_existing: a waiter gets the row as the transaction that held the lock
+        left it."""
+        statement = (
+            select(ServiceRequest)
+            .where(ServiceRequest.id == request_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
     async def media_of(self, request_id: uuid.UUID) -> list[RequestMedia]:
         statement = (
             select(RequestMedia)

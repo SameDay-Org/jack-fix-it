@@ -67,7 +67,9 @@ class JobStateMachine:
         lat: Decimal | None = None,
         lng: Decimal | None = None,
         event_type: str = STATUS_CHANGED,
-    ) -> Job:
+    ) -> JobStatus:
+        """Moves the job to `to` and returns its new status. It returns a value, not the ORM
+        row, so no caller holds a Job whose status it could write past the table."""
         job = await self._jobs.get_for_update(job_id)
         if job is None:
             raise NotFoundError
@@ -95,7 +97,7 @@ class JobStateMachine:
                 lng=lng,
             )
         )
-        return job
+        return to
 
     async def _actor_kind(self, job: Job, actor: UserAccount | SystemActor) -> ActorKind | None:
         """The actor's kind for this job. 404 for a customer or pro who is not the job's own."""
