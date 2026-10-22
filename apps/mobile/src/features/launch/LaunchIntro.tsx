@@ -26,8 +26,8 @@ type LaunchIntroProps = {
 
 /**
  * The branded start of every launch, drawn over the session gate: the navy hero with the rolling
- * word, then a short fade (and a slight scale-up, unless Reduce Motion) into whatever the gate
- * shows. Tapping anywhere skips it.
+ * word, then a short fade into whatever the gate shows, which for Welcome and the restoring frame
+ * is the same hero. Tapping anywhere skips it.
  */
 export function LaunchIntro({ onReady, onDone }: LaunchIntroProps) {
   const { t } = useTranslation();
@@ -37,8 +37,7 @@ export function LaunchIntro({ onReady, onDone }: LaunchIntroProps) {
   const runEnd = useCallback(() => setRunDone(true), []);
   const { phase, skip } = useLaunchIntro({ status, reduceMotion, runDone });
   const words = t("launch.words", { returnObjects: true });
-  const { wordSwapIntervalMs, wordSwapTransitionMs, launchSwaps, launchExitMs, launchExitScale } =
-    tokens.motion;
+  const { wordSwapIntervalMs, wordSwapTransitionMs, launchSwaps, launchExitMs } = tokens.motion;
 
   // The splash lifts when the first frame is final (the shell also lifts it on exit and, at the
   // latest, at launchMaxMs, whatever happens here).
@@ -68,9 +67,10 @@ export function LaunchIntro({ onReady, onDone }: LaunchIntroProps) {
     );
   }, [exit, launchExitMs, onDone, phase]);
 
+  // A fade only: the intro's last frame is Welcome's own hero (or the gate's), so any scale would
+  // draw the same sentence twice, slightly apart, while it fades.
   const exitStyle = useAnimatedStyle(() => ({
     opacity: shown.value * (1 - exit.value),
-    transform: [{ scale: reduceMotion ? 1 : 1 + (launchExitScale - 1) * exit.value }],
   }));
 
   return (
