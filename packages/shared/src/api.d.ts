@@ -378,6 +378,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/service-areas/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Is this ZIP served?
+         * @description Whether an active service area covers the ZIP. ZIP+4 is checked by its 5-digit ZIP.
+         *     No sign-in needed: the request flow and the landing page ask before login, and offer the
+         *     waitlist when the answer is no.
+         */
+        get: operations["check_zip_v1_service_areas_check_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pros/me": {
         parameters: {
             query?: never;
@@ -404,6 +426,34 @@ export interface paths {
         patch: operations["update_my_profile_v1_pros_me_patch"];
         trace?: never;
     };
+    "/v1/pros/me/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My verification documents
+         * @description The latest document of each type with presigned URLs, older reviewed ones, the types
+         *     required (ID and insurance; a license when one of the pro's categories requires it) and
+         *     the ones still missing.
+         */
+        get: operations["list_my_documents_v1_pros_me_documents_get"];
+        put?: never;
+        /**
+         * Submit a verification document
+         * @description Submits a photo ID, insurance or license for review. Upload the file first
+         *     (POST /v1/uploads, purpose pro_document). A pending document of the same type is replaced
+         *     (superseded); reviewed ones stay as history.
+         */
+        post: operations["submit_document_v1_pros_me_documents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/devices": {
         parameters: {
             query?: never;
@@ -427,6 +477,28 @@ export interface paths {
          *     never in the path, because paths are logged.
          */
         delete: operations["unregister_device_v1_devices_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/waitlist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Join the waitlist of an unserved ZIP
+         * @description Asks to be told when the ZIP is served. No sign-in needed (a web visitor can join); with
+         *     a valid bearer token the entry is linked to the account. The contact is used only for that
+         *     notice. Joining twice with the same contact and ZIP refreshes the entry.
+         */
+        post: operations["join_waitlist_v1_waitlist_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -574,10 +646,25 @@ export interface components {
         ChoiceOption: {
             /** Value */
             value: string;
-            /** Labels */
+            /**
+             * Labels
+             * @description The option's name per locale; en and es required.
+             */
             labels: {
                 [key: string]: string;
             };
+            /**
+             * Description
+             * @description What the option covers, per locale; en and es required, at most 160 characters each.
+             */
+            description?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Icon
+             * @description Key of an illustration the app bundles, e.g. paint-interior. Never a URL.
+             */
+            icon?: string | null;
         };
         /** CityOut */
         CityOut: {
@@ -614,6 +701,74 @@ export interface components {
              * @description The Expo push token.
              */
             expo_push_token: string;
+        };
+        /** DocumentOut */
+        DocumentOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            doc_type: components["schemas"]["ProDocumentType"];
+            status: components["schemas"]["ProDocumentStatus"];
+            /** Rejection Reason */
+            rejection_reason: string | null;
+            /** Expires On */
+            expires_on: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Url
+             * @description Presigned GET URL of the file.
+             */
+            url: string;
+            /**
+             * Expires At
+             * Format: date-time
+             * @description When the URL stops working.
+             */
+            expires_at: string;
+        };
+        /**
+         * DocumentSubmission
+         * @description A pro submits a document; the review fields belong to the admin (#41): sending them is
+         *     a 422 (extra="forbid").
+         */
+        DocumentSubmission: {
+            doc_type: components["schemas"]["ProDocumentType"];
+            /**
+             * File Key
+             * @description Key of the caller's own pro_document upload (POST /v1/uploads).
+             */
+            file_key: string;
+            /**
+             * Expires On
+             * @description Today or later (UTC date).
+             */
+            expires_on?: string | null;
+        };
+        /** DocumentsOut */
+        DocumentsOut: {
+            /**
+             * Documents
+             * @description The latest document of each type, superseded ones left out.
+             */
+            documents: components["schemas"]["DocumentOut"][];
+            /**
+             * History
+             * @description Older reviewed (approved or rejected) documents, newest first.
+             */
+            history: components["schemas"]["DocumentOut"][];
+            /** Required Types */
+            required_types: components["schemas"]["ProDocumentType"][];
+            /**
+             * Missing Types
+             * @description Required types with no pending or approved document.
+             */
+            missing_types: components["schemas"]["ProDocumentType"][];
         };
         /** DownloadUrlRequest */
         DownloadUrlRequest: {
@@ -812,6 +967,16 @@ export interface components {
              */
             expires_at: string;
         };
+        /**
+         * ProDocumentStatus
+         * @enum {string}
+         */
+        ProDocumentStatus: "pending" | "approved" | "rejected" | "superseded";
+        /**
+         * ProDocumentType
+         * @enum {string}
+         */
+        ProDocumentType: "id" | "license" | "insurance";
         /** ProProfileOut */
         ProProfileOut: {
             /** Bio */
@@ -1015,6 +1180,16 @@ export interface components {
             /** Media Count */
             media_count: number;
         };
+        /** ServedCheckOut */
+        ServedCheckOut: {
+            /**
+             * Zip Code
+             * @description The 5-digit ZIP that was checked.
+             */
+            zip_code: string;
+            /** Served */
+            served: boolean;
+        };
         /** ServiceAreaOut */
         ServiceAreaOut: {
             /**
@@ -1187,6 +1362,35 @@ export interface components {
             /** Content */
             content?: string | null;
         };
+        /** WaitlistJoin */
+        WaitlistJoin: {
+            /**
+             * Zip Code
+             * @description 5 digits or ZIP+4.
+             */
+            zip_code: string;
+            /** Email */
+            email?: string | null;
+            /**
+             * Phone
+             * @description E.164, with an allowed country code.
+             */
+            phone?: string | null;
+            /** Category Id */
+            category_id?: string | null;
+            /**
+             * Locale
+             * @default en
+             * @enum {string}
+             */
+            locale: "en" | "es";
+            source: components["schemas"]["WaitlistSource"];
+        };
+        /**
+         * WaitlistSource
+         * @enum {string}
+         */
+        WaitlistSource: "app" | "web";
         /** ZipOut */
         ZipOut: {
             /**
@@ -1929,7 +2133,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description invalid_category: unknown or inactive category, or one whose questions cannot be read right now (send the request without a category); invalid_intake_answers: intake_answers do not fit the category's intake_questions (an unknown key, a missing required one, a value of the wrong type or out of range), or are not empty without a category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency). */
+            /** @description zip_not_served: the address ZIP is outside the active service areas (offer the waitlist); invalid_category: unknown or inactive category, or one whose questions cannot be read right now (send the request without a category); invalid_intake_answers: intake_answers do not fit the category's intake_questions (an unknown key, a missing required one, a value of the wrong type or out of range), or are not empty without a category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -2089,6 +2293,48 @@ export interface operations {
             };
         };
     };
+    check_zip_v1_service_areas_check_get: {
+        parameters: {
+            query: {
+                zip: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServedCheckOut"];
+                };
+            };
+            /** @description validation_error: not a 5-digit ZIP or ZIP+4. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many requests from this client; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_my_profile_v1_pros_me_get: {
         parameters: {
             query?: never;
@@ -2177,6 +2423,104 @@ export interface operations {
                 };
             };
             /** @description invalid_media: photo_key is not the caller's own profile_photo upload; invalid_category / invalid_service_area: an unknown or inactive id; validation_error: any other invalid field (duplicates or too many ids, bio length, years out of range, fields the platform sets such as verification_status). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_my_documents_v1_pros_me_documents_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentsOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have a pro profile. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    submit_document_v1_pros_me_documents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentSubmission"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have a pro profile. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description invalid_media: file_key is not the caller's own pro_document upload, or is already a document; validation_error: an unknown type, an expiry date in the past, or a field the review sets (status, rejection_reason, reviewed_by...). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -2277,6 +2621,57 @@ export interface operations {
             /** @description validation_error: not an Expo push token, or an unknown platform. */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    join_waitlist_v1_waitlist_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WaitlistJoin"];
+            };
+        };
+        responses: {
+            /** @description On the list; the same answer whether the contact already was. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description zip_served: the ZIP is served; create a request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description invalid_category: unknown or inactive category; validation_error: no email or phone, a bad ZIP, email or phone, or a phone outside the allowed country codes. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many requests; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {

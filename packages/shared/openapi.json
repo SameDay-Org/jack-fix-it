@@ -847,7 +847,7 @@
             }
           },
           "422": {
-            "description": "invalid_category: unknown or inactive category, or one whose questions cannot be read right now (send the request without a category); invalid_intake_answers: intake_answers do not fit the category's intake_questions (an unknown key, a missing required one, a value of the wrong type or out of range), or are not empty without a category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency).",
+            "description": "zip_not_served: the address ZIP is outside the active service areas (offer the waitlist); invalid_category: unknown or inactive category, or one whose questions cannot be read right now (send the request without a category); invalid_intake_answers: intake_answers do not fit the category's intake_questions (an unknown key, a missing required one, a value of the wrong type or out of range), or are not empty without a category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1177,6 +1177,68 @@
         }
       }
     },
+    "/v1/service-areas/check": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Is this ZIP served?",
+        "description": "Whether an active service area covers the ZIP. ZIP+4 is checked by its 5-digit ZIP.\nNo sign-in needed: the request flow and the landing page ask before login, and offer the\nwaitlist when the answer is no.",
+        "operationId": "check_zip_v1_service_areas_check_get",
+        "parameters": [
+          {
+            "name": "zip",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{5}(-[0-9]{4})?$",
+              "title": "Zip"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServedCheckOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: not a 5-digit ZIP or ZIP+4.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many requests from this client; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/pros/me": {
       "get": {
         "tags": [
@@ -1263,6 +1325,128 @@
           },
           "422": {
             "description": "invalid_media: photo_key is not the caller's own profile_photo upload; invalid_category / invalid_service_area: an unknown or inactive id; validation_error: any other invalid field (duplicates or too many ids, bio length, years out of range, fields the platform sets such as verification_status).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros have a pro profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/pros/me/documents": {
+      "get": {
+        "tags": [
+          "pros"
+        ],
+        "summary": "My verification documents",
+        "description": "The latest document of each type with presigned URLs, older reviewed ones, the types\nrequired (ID and insurance; a license when one of the pro's categories requires it) and\nthe ones still missing.",
+        "operationId": "list_my_documents_v1_pros_me_documents_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros have a pro profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "pros"
+        ],
+        "summary": "Submit a verification document",
+        "description": "Submits a photo ID, insurance or license for review. Upload the file first\n(POST /v1/uploads, purpose pro_document). A pending document of the same type is replaced\n(superseded); reviewed ones stay as history.",
+        "operationId": "submit_document_v1_pros_me_documents_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentSubmission"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_media: file_key is not the caller's own pro_document upload, or is already a document; validation_error: an unknown type, an expiry date in the past, or a field the review sets (status, rejection_reason, reviewed_by...).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1401,6 +1585,74 @@
           },
           "403": {
             "description": "forbidden: only customers and pros receive pushes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/waitlist": {
+      "post": {
+        "tags": [
+          "waitlist"
+        ],
+        "summary": "Join the waitlist of an unserved ZIP",
+        "description": "Asks to be told when the ZIP is served. No sign-in needed (a web visitor can join); with\na valid bearer token the entry is linked to the account. The contact is used only for that\nnotice. Joining twice with the same contact and ZIP refreshes the entry.",
+        "operationId": "join_waitlist_v1_waitlist_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WaitlistJoin"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "On the list; the same answer whether the contact already was."
+          },
+          "422": {
+            "description": "invalid_category: unknown or inactive category; validation_error: no email or phone, a bad ZIP, email or phone, or a phone outside the allowed country codes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "zip_served: the ZIP is served; create a request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many requests; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -1727,7 +1979,37 @@
               "type": "string"
             },
             "type": "object",
-            "title": "Labels"
+            "title": "Labels",
+            "description": "The option's name per locale; en and es required."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "What the option covers, per locale; en and es required, at most 160 characters each."
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40,
+                "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon",
+            "description": "Key of an illustration the app bundles, e.g. paint-interior. Never a URL."
           }
         },
         "additionalProperties": false,
@@ -1823,6 +2105,148 @@
           "expo_push_token"
         ],
         "title": "DeviceRemoval"
+      },
+      "DocumentOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "doc_type": {
+            "$ref": "#/components/schemas/ProDocumentType"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProDocumentStatus"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          },
+          "expires_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires On"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "Presigned GET URL of the file."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At",
+            "description": "When the URL stops working."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "doc_type",
+          "status",
+          "rejection_reason",
+          "expires_on",
+          "created_at",
+          "url",
+          "expires_at"
+        ],
+        "title": "DocumentOut"
+      },
+      "DocumentSubmission": {
+        "properties": {
+          "doc_type": {
+            "$ref": "#/components/schemas/ProDocumentType"
+          },
+          "file_key": {
+            "type": "string",
+            "title": "File Key",
+            "description": "Key of the caller's own pro_document upload (POST /v1/uploads)."
+          },
+          "expires_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires On",
+            "description": "Today or later (UTC date)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "doc_type",
+          "file_key"
+        ],
+        "title": "DocumentSubmission",
+        "description": "A pro submits a document; the review fields belong to the admin (#41): sending them is\na 422 (extra=\"forbid\")."
+      },
+      "DocumentsOut": {
+        "properties": {
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentOut"
+            },
+            "type": "array",
+            "title": "Documents",
+            "description": "The latest document of each type, superseded ones left out."
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentOut"
+            },
+            "type": "array",
+            "title": "History",
+            "description": "Older reviewed (approved or rejected) documents, newest first."
+          },
+          "required_types": {
+            "items": {
+              "$ref": "#/components/schemas/ProDocumentType"
+            },
+            "type": "array",
+            "title": "Required Types"
+          },
+          "missing_types": {
+            "items": {
+              "$ref": "#/components/schemas/ProDocumentType"
+            },
+            "type": "array",
+            "title": "Missing Types",
+            "description": "Required types with no pending or approved document."
+          }
+        },
+        "type": "object",
+        "required": [
+          "documents",
+          "history",
+          "required_types",
+          "missing_types"
+        ],
+        "title": "DocumentsOut"
       },
       "DownloadUrlRequest": {
         "properties": {
@@ -2185,6 +2609,25 @@
           "expires_at"
         ],
         "title": "PhotoOut"
+      },
+      "ProDocumentStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "approved",
+          "rejected",
+          "superseded"
+        ],
+        "title": "ProDocumentStatus"
+      },
+      "ProDocumentType": {
+        "type": "string",
+        "enum": [
+          "id",
+          "license",
+          "insurance"
+        ],
+        "title": "ProDocumentType"
       },
       "ProProfileOut": {
         "properties": {
@@ -2685,6 +3128,25 @@
         ],
         "title": "RequestSummary"
       },
+      "ServedCheckOut": {
+        "properties": {
+          "zip_code": {
+            "type": "string",
+            "title": "Zip Code",
+            "description": "The 5-digit ZIP that was checked."
+          },
+          "served": {
+            "type": "boolean",
+            "title": "Served"
+          }
+        },
+        "type": "object",
+        "required": [
+          "zip_code",
+          "served"
+        ],
+        "title": "ServedCheckOut"
+      },
       "ServiceAreaOut": {
         "properties": {
           "id": {
@@ -3049,6 +3511,80 @@
         "type": "object",
         "title": "UtmIn",
         "description": "Campaign attribution. Only these five keys; anything else is a 422."
+      },
+      "WaitlistJoin": {
+        "properties": {
+          "zip_code": {
+            "type": "string",
+            "pattern": "^[0-9]{5}(-[0-9]{4})?$",
+            "title": "Zip Code",
+            "description": "5 digits or ZIP+4."
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "email"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\+[1-9][0-9]{7,14}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone",
+            "description": "E.164, with an allowed country code."
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "en",
+              "es"
+            ],
+            "title": "Locale",
+            "default": "en"
+          },
+          "source": {
+            "$ref": "#/components/schemas/WaitlistSource"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "zip_code",
+          "source"
+        ],
+        "title": "WaitlistJoin"
+      },
+      "WaitlistSource": {
+        "type": "string",
+        "enum": [
+          "app",
+          "web"
+        ],
+        "title": "WaitlistSource"
       },
       "ZipOut": {
         "properties": {

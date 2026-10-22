@@ -1,7 +1,7 @@
 """status writer triggers
 
 Revision ID: 4eb1fd67455e
-Revises: e50611b29dde
+Revises: cc5f5e3a9bbf
 Create Date: 2026-10-22 21:33:51.539802
 
 """
@@ -12,7 +12,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "4eb1fd67455e"
-down_revision: str | Sequence[str] | None = "e50611b29dde"
+down_revision: str | Sequence[str] | None = "cc5f5e3a9bbf"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

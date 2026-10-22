@@ -188,3 +188,13 @@ Confirm the exact dashboard steps on the first drill and update this section.
    and the password twice without echoing it). Public registration never creates staff
    accounts (#155). For a scripted setup: `--email … --role admin --password-env NAME`, with
    the password only in that environment variable.
+8. Seed the launch data from a shell on the api service, after each first deploy and again
+   whenever a seed file changes: `uv run python -m scripts.seed_categories` and
+   `uv run python -m scripts.seed_service_areas`. Both are safe to re-run, because they insert
+   what is missing and never update a row. Without the service areas, every request is refused
+   with `zip_not_served`. The areas are South Florida with Broward active (#9). The sources and
+   the rebuild steps are in `apps/api/app/modules/service_areas/SOURCES.md`.
+   - **Switching a county on later** (Miami-Dade or Palm Beach): use the admin (#41), or run
+     SQL. Example: `UPDATE service_areas SET active = true WHERE zip_code IN (...)` with that
+     county's ZIPs from `seed_data.json`. Editing `active` in the file does nothing to rows that
+     already exist.

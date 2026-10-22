@@ -19,6 +19,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Final
 
 from sqlalchemy import text
@@ -62,6 +63,9 @@ async def _status_writer(session: AsyncSession) -> AsyncIterator[None]:
 
 # Postgres refuses every statement in a transaction that already failed.
 _IN_FAILED_TRANSACTION: Final = "25P02"
+# The statuses are part of this service's interface: other modules take RequestStatus from here,
+# never from requests.models (ADR 0003).
+__all__ = ["LockedRequest", "RequestStateMachine", "RequestStatus"]
 
 _ACTOR_KIND_BY_ROLE: Final = {
     UserRole.CUSTOMER: ActorKind.CUSTOMER,
@@ -71,10 +75,29 @@ _ACTOR_KIND_BY_ROLE: Final = {
 }
 
 
+@dataclass(frozen=True)
+class LockedRequest:
+    """What a caller deciding a transition needs, read under the row lock."""
+
+    id: uuid.UUID
+    status: RequestStatus
+    category_id: uuid.UUID | None
+    address_id: uuid.UUID
+
+
 class RequestStateMachine:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._requests = ServiceRequestRepository(session)
+
+    async def lock(self, request_id: uuid.UUID) -> LockedRequest | None:
+        """Locks the request until the transaction ends, for a caller that decides what to do
+        from its state (dispatch, #48), then transitions in the same transaction. Runs of two
+        such callers on one request take turns. None for an unknown request."""
+        request = await self._requests.get_for_update(request_id)
+        if request is None:
+            return None
+        return LockedRequest(request.id, request.status, request.category_id, request.address_id)
 
     async def transition(
         self, request_id: uuid.UUID, to: RequestStatus, actor: UserAccount | SystemActor
