@@ -163,6 +163,7 @@ describe("prepareMedia", () => {
       uri: video.uri,
       contentType: "video/mp4",
       kind: "video",
+      sizeBytes: 1024, // passed on, so the upload streams the file instead of reading it
     });
     await expect(prepareMedia(video, CONFIG)).resolves.toMatchObject({
       contentType: "video/quicktime",

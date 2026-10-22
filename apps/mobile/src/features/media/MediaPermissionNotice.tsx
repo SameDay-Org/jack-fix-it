@@ -32,14 +32,15 @@ export function MediaPermissionNotice({ onDismiss }: MediaPermissionNoticeProps)
           <Text className="text-headline text-navy-900">{title}</Text>
           <Text className="text-callout text-gray-500">{body}</Text>
         </View>
-        <View className="flex-row flex-wrap justify-end gap-2">
-          <Button label={t("media.permission.notNow")} variant="ghost" onPress={onDismiss} />
+        {/* Stacked: side by side, the two labels wrap unevenly on a narrow phone or at a large font. */}
+        <View className="gap-1">
           <Button
             label={t("media.permission.openSettings")}
             variant="secondary"
             onPress={openSettings}
             testID="media-open-settings"
           />
+          <Button label={t("media.permission.notNow")} variant="ghost" onPress={onDismiss} />
         </View>
       </View>
     </Card>

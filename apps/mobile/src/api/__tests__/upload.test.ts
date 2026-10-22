@@ -31,9 +31,16 @@ const ticket = (n: number, expiresInMs = HOUR_MS): ApiSchema<"UploadResponse"> =
   expires_at: new Date(Date.now() + expiresInMs).toISOString(),
 });
 
-/** A stand-in for React Native's XMLHttpRequest: records the request, the test settles it. */
+/**
+ * A stand-in for React Native's XMLHttpRequest. A GET reads the local file and answers on its own
+ * with `fileBlob`; a PUT is recorded in `instances` and the test settles it.
+ */
 class FakeXhr {
   static instances: FakeXhr[] = [];
+  static reads: FakeXhr[] = [];
+  static fileBlob: Blob | null = null;
+  responseType = "";
+  response: unknown = null;
   method = "";
   url = "";
   headers: Record<string, string> = {};
@@ -47,18 +54,20 @@ class FakeXhr {
   ontimeout: (() => void) | null = null;
   onabort: (() => void) | null = null;
 
-  constructor() {
-    FakeXhr.instances.push(this);
-  }
   open(method: string, url: string) {
     this.method = method;
     this.url = url;
+    (method === "GET" ? FakeXhr.reads : FakeXhr.instances).push(this);
   }
   setRequestHeader(name: string, value: string) {
     this.headers[name] = value;
   }
-  send(body: unknown) {
+  send(body?: unknown) {
     this.body = body;
+    if (this.method !== "GET") return;
+    this.status = 200;
+    this.response = FakeXhr.fileBlob;
+    queueMicrotask(() => this.onload?.());
   }
   abort() {
     this.aborted = true;
@@ -100,6 +109,8 @@ const start = (options: Partial<UploadMediaOptions> = {}) =>
 
 beforeEach(() => {
   FakeXhr.instances = [];
+  FakeXhr.reads = [];
+  FakeXhr.fileBlob = BLOB;
   globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest;
   tickets = [ticket(1), ticket(2)];
   fetchMock = installFetchMock();
@@ -161,11 +172,34 @@ describe("uploadMedia", () => {
 
     xhr.respond(200);
     await upload;
-    // One API call (the URL) and one file read; the storage only ever sees the XHR above.
+    // One native file read (a Blob, never a copy through JavaScript) and one API call; the storage
+    // only ever sees the PUT above.
+    expect(FakeXhr.reads.map((read) => [read.url, read.responseType])).toEqual([
+      [FILE_URI, "blob"],
+    ]);
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      FILE_URI,
       expect.stringContaining("/v1/uploads"),
     ]);
+  });
+
+  it("a file of known size streams from disk: no read, its size signed, the file itself sent", async () => {
+    const video = {
+      uri: "file:///cache/ImagePicker/clip.mp4",
+      contentType: "video/mp4",
+      sizeBytes: 82_280_682,
+    };
+    const upload = start({ file: video });
+    await flush();
+
+    expect(FakeXhr.reads).toHaveLength(0);
+    expect(callBody(callsTo(fetchMock, "/v1/uploads")[0])).toMatchObject({
+      content_type: "video/mp4",
+      size_bytes: 82_280_682,
+    });
+    expect(lastXhr().body).toEqual({ uri: video.uri });
+
+    lastXhr().respond(200);
+    await expect(upload).resolves.toEqual({ key: ticket(1).key });
   });
 
   it("reports progress from 0 to 1", async () => {
@@ -175,10 +209,11 @@ describe("uploadMedia", () => {
 
     lastXhr().progress(FILE_SIZE / 4, FILE_SIZE);
     lastXhr().progress(FILE_SIZE, FILE_SIZE);
+    lastXhr().progress(FILE_SIZE * 1.95, FILE_SIZE); // Android over-counts sent bytes at times
     lastXhr().respond(200);
     await upload;
 
-    expect(onProgress.mock.calls.map(([fraction]) => fraction)).toEqual([0, 0.25, 1, 1]);
+    expect(onProgress.mock.calls.map(([fraction]) => fraction)).toEqual([0, 0.25, 1, 1, 1]);
   });
 
   it.each([
@@ -286,7 +321,16 @@ describe("uploadMedia", () => {
     await expect(
       start({ file: { uri: "https://elsewhere.invalid/photo.jpg", contentType: "image/jpeg" } }),
     ).rejects.toThrow(/files on this device/);
+    expect(FakeXhr.reads).toHaveLength(0);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("a file that cannot be read asks for no URL", async () => {
+    FakeXhr.fileBlob = null;
+
+    await expect(start()).rejects.toThrow(/could not be read/);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(FakeXhr.instances).toHaveLength(0);
   });
 
   it("outside development, refuses to send the file to a plain http URL", async () => {

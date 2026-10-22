@@ -15,8 +15,16 @@ export type PickedMedia = {
   fileSize?: number;
 };
 
-/** A file ready for `uploadMedia`: the type its bytes really are. */
-export type PreparedMedia = { uri: string; contentType: string; kind: MediaKind };
+/**
+ * A file ready for `uploadMedia`: the type its bytes really are, and for a video the size the
+ * picker gave, so the upload streams it from disk instead of reading it into memory.
+ */
+export type PreparedMedia = {
+  uri: string;
+  contentType: string;
+  kind: MediaKind;
+  sizeBytes?: number;
+};
 
 const JPEG = "image/jpeg";
 // The video types the API accepts for request media, and the extensions that stand for them.
@@ -42,7 +50,7 @@ export async function prepareMedia(
   if (picked.fileSize !== undefined && picked.fileSize > config.videoMaxBytes) {
     throw new MediaTooLargeError(config.videoMaxBytes);
   }
-  return { uri: picked.uri, contentType, kind: "video" };
+  return { uri: picked.uri, contentType, kind: "video", sizeBytes: picked.fileSize };
 }
 
 function videoContentType({ mimeType, uri }: PickedMedia): string {

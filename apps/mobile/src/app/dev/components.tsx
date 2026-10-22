@@ -5,7 +5,6 @@ import { ScrollView, Text, View } from "react-native";
 
 import { FloatingBar } from "@/components/dev/FloatingBar";
 import { HeroSample } from "@/components/dev/HeroSample";
-import { MediaUploadSample } from "@/components/dev/MediaUploadSample";
 import {
   Avatar,
   Button,
@@ -167,7 +166,11 @@ function Gallery() {
         </Section>
 
         <Section title="Media upload">
-          <MediaUploadSample />
+          <Button
+            label="Open the media demo"
+            variant="secondary"
+            onPress={() => router.push("/dev/media")}
+          />
         </Section>
 
         <Section title="Glass">

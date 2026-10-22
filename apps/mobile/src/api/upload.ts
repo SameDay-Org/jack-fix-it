@@ -13,7 +13,17 @@ export type UploadFile = {
   uri: string;
   /** What the bytes are, e.g. `image/jpeg`; it is signed into the URL with the size. */
   contentType: string;
+  /**
+   * The file's exact size in bytes, when already known (a picked video). The file then streams
+   * from disk during the PUT and is never loaded into memory; without it the bytes are read once,
+   * natively, to measure them (fine for a compressed photo). A wrong size is refused by the
+   * storage, since the size is signed.
+   */
+  sizeBytes?: number;
 };
+
+/** What the PUT sends: a native Blob already read, or the file itself, streamed from disk. */
+type UploadBody = { send: Blob | { uri: string }; size: number };
 
 export type UploadMediaOptions = {
   purpose: UploadPurpose;
@@ -47,8 +57,8 @@ export async function uploadMedia({
   onProgress,
   signal,
 }: UploadMediaOptions): Promise<{ key: string }> {
-  const body = await readLocalFile(file.uri, signal);
-  // The size the URL is signed for is the size of the bytes about to be sent, by construction.
+  const body = await uploadBody(file, signal);
+  // The size the URL is signed for is the size of the bytes about to be sent.
   const requestTicket = () => createUpload(purpose, file.contentType, body.size, signal);
 
   let ticket = await requestTicket();
@@ -63,12 +73,42 @@ export async function uploadMedia({
   return { key: ticket.key };
 }
 
-/** The file's bytes, read through the same native layer as any request; nothing leaves the device. */
-async function readLocalFile(uri: string, signal: AbortSignal | undefined): Promise<Blob> {
-  if (!LOCAL_FILE.test(uri)) throw new Error("uploadMedia reads files on this device only");
+async function uploadBody(file: UploadFile, signal: AbortSignal | undefined): Promise<UploadBody> {
+  if (!LOCAL_FILE.test(file.uri)) throw new Error("uploadMedia reads files on this device only");
   throwIfAborted(signal);
-  const response = await fetch(uri, { signal });
-  return response.blob();
+  if (file.sizeBytes !== undefined) return { send: { uri: file.uri }, size: file.sizeBytes };
+  const blob = await readLocalFile(file.uri, signal);
+  return { send: blob, size: blob.size };
+}
+
+/**
+ * The file's bytes as a native Blob, read with XMLHttpRequest (`responseType: "blob"`): the bytes
+ * stay in the native blob store from the read to the PUT. `fetch(uri).blob()` would copy them
+ * through base64 into JavaScript, which a 100 MB video cannot afford. Nothing leaves the device.
+ */
+function readLocalFile(uri: string, signal: AbortSignal | undefined): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const cancel = () => xhr.abort();
+    const settle = (outcome: () => void) => {
+      signal?.removeEventListener("abort", cancel);
+      outcome();
+    };
+
+    xhr.open("GET", uri);
+    xhr.responseType = "blob";
+    xhr.onload = () =>
+      settle(() => {
+        const blob = xhr.response as Blob | null;
+        if (blob && blob.size > 0) resolve(blob);
+        else reject(new Error("The file could not be read"));
+      });
+    xhr.onerror = () => settle(() => reject(new Error("The file could not be read")));
+    xhr.onabort = () => settle(() => reject(abortError(signal)));
+
+    signal?.addEventListener("abort", cancel, { once: true });
+    xhr.send();
+  });
 }
 
 async function createUpload(
@@ -116,7 +156,7 @@ function storageUrl(ticket: UploadTicket): string {
  */
 function putToStorage(
   ticket: UploadTicket,
-  body: Blob,
+  body: UploadBody,
   onProgress: ((fraction: number) => void) | undefined,
   signal: AbortSignal | undefined,
 ): Promise<void> {
@@ -136,7 +176,10 @@ function putToStorage(
     for (const [name, value] of Object.entries(ticket.headers)) xhr.setRequestHeader(name, value);
     xhr.timeout = uploadTimeoutFor(body.size);
     xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable && event.total > 0) onProgress?.(event.loaded / event.total);
+      // Android can count more bytes sent than the body holds (seen at 195%): a share stays a share.
+      if (event.lengthComputable && event.total > 0) {
+        onProgress?.(Math.min(1, event.loaded / event.total));
+      }
     };
     xhr.onload = () =>
       settle(() => {
@@ -153,6 +196,7 @@ function putToStorage(
 
     signal?.addEventListener("abort", cancel, { once: true });
     onProgress?.(0);
-    xhr.send(body);
+    // React Native's XHR also takes `{ uri }`: the native side streams the file as the body.
+    xhr.send(body.send as unknown as XMLHttpRequestBodyInit);
   });
 }
