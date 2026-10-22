@@ -119,6 +119,7 @@ describe("LaunchShell: the intro over the gate", () => {
 
     expect(screen.getAllByRole("header")).toHaveLength(1); // the intro's sentence only
     expect(screen.getByRole("button", { name: "Skip intro" })).toBeTruthy();
+    expect(screen.getByTestId("launch-intro-tap").props.importantForAccessibility).toBe("no");
     expect(screen.queryByText("welcome stub")).toBeNull(); // there, but not for a screen reader
     expect(screen.getByText("welcome stub", HIDDEN)).toBeTruthy();
 

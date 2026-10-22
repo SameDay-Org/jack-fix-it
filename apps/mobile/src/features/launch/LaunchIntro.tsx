@@ -79,7 +79,15 @@ export function LaunchIntro({ onReady, onDone }: LaunchIntroProps) {
       pointerEvents={phase === "exiting" ? "none" : "auto"}
       testID="launch-intro"
     >
-      <Pressable accessible={false} onPress={skip} className="flex-1">
+      {/* The tap-anywhere layer is not an accessibility node of its own: a clickable view that is
+          "auto" gets its children's text as a description and TalkBack would read the hero twice. */}
+      <Pressable
+        accessible={false}
+        importantForAccessibility="no"
+        onPress={skip}
+        className="flex-1"
+        testID="launch-intro-tap"
+      >
         <LaunchHero
           testID="launch-hero"
           skip={{ label: t("launch.skip"), onPress: skip }}

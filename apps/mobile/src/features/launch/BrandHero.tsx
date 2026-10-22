@@ -28,7 +28,8 @@ type Gauge = { pair?: number; single?: number };
  * The headline is a wrapping row of words so the rolling word can be its own element. The gap
  * between words is the font's own space, measured from two hidden texts ("x x" minus "xx"), so
  * the row breaks lines where one Text with spaces would. Screen readers get one static label
- * with the first word; the row's children are hidden from them.
+ * with the first word and nothing else: the words are not important for accessibility and the
+ * word slot hides its descendants, so the sentence is announced once, whatever rolls inside it.
  */
 export function BrandHero({ word, testID }: BrandHeroProps) {
   const { t } = useTranslation();
@@ -61,17 +62,30 @@ export function BrandHero({ word, testID }: BrandHeroProps) {
         testID={testID}
       >
         {parts.before.map((piece, index) => (
-          <Text key={`b${index}`} className={WORD_CLASS}>
+          <Text key={`b${index}`} className={WORD_CLASS} importantForAccessibility="no">
             {piece}
           </Text>
         ))}
-        <View className="flex-row items-end">
-          {parts.attachedBefore ? <Text className={WORD_CLASS}>{parts.attachedBefore}</Text> : null}
+        <View
+          className="flex-row items-end"
+          importantForAccessibility="no-hide-descendants"
+          accessibilityElementsHidden
+          testID={testID && `${testID}-word`}
+        >
+          {parts.attachedBefore ? (
+            <Text className={WORD_CLASS} importantForAccessibility="no">
+              {parts.attachedBefore}
+            </Text>
+          ) : null}
           {word}
-          {parts.attachedAfter ? <Text className={WORD_CLASS}>{parts.attachedAfter}</Text> : null}
+          {parts.attachedAfter ? (
+            <Text className={WORD_CLASS} importantForAccessibility="no">
+              {parts.attachedAfter}
+            </Text>
+          ) : null}
         </View>
         {parts.after.map((piece, index) => (
-          <Text key={`a${index}`} className={WORD_CLASS}>
+          <Text key={`a${index}`} className={WORD_CLASS} importantForAccessibility="no">
             {piece}
           </Text>
         ))}

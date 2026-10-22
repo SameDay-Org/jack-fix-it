@@ -19,9 +19,19 @@ describe("BrandHero", () => {
     expect(
       screen.getByRole("header", { name: "Whatever happens at home, we fix it." }),
     ).toBeTruthy();
-    expect(within(headline()).getByTestId("word")).toBeTruthy();
+    expect(within(headline()).getByTestId("word", HIDDEN)).toBeTruthy();
     expect(screen.getByText("Tell Jack. We'll take care of the rest.")).toBeTruthy();
     expect(screen.getAllByRole("header")).toHaveLength(1);
+    // The sentence is announced once: the words are not accessibility nodes, and the word slot
+    // hides whatever rolls inside it.
+    for (const piece of ["Whatever", "happens", "at", "home,", "we", "it."]) {
+      expect(screen.getByText(piece, HIDDEN).props.importantForAccessibility).toBe("no");
+    }
+    expect(screen.getByTestId("hero-word", HIDDEN).props.importantForAccessibility).toBe(
+      "no-hide-descendants",
+    );
+    expect(screen.queryByText("fix")).toBeNull(); // hidden from the reader, there for the eye
+    expect(screen.getByText("fix", HIDDEN)).toBeTruthy();
   });
 
   it("spaces the words by the font's own space, measured; a type-based guess until then", async () => {
