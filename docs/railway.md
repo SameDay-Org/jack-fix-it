@@ -38,25 +38,72 @@ reference variables so they follow that service automatically. Secret values nev
 repo; their names are listed, commented, in `apps/api/.env.example` with the task that adds
 them.
 
-**api**
+Secret means the value is a credential: it lives only in Railway, never in the repo, and only
+a human sets or changes it. Values the api and worker share are easiest to set once per
+environment as **shared variables** referenced from both services, so the two never drift apart.
 
-| Variable       | Value                                                           |
-| -------------- | --------------------------------------------------------------- |
-| `APP_ENV`      | `staging` or `production`                                       |
-| `LOG_LEVEL`    | `INFO`                                                          |
-| `PORT`         | `8000` (set it explicitly so web can reference it)              |
-| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` (normalized to asyncpg by the app) |
-| `REDIS_URL`    | `${{Redis.REDIS_URL}}`                                          |
-| `CORS_ORIGINS` | empty until a browser calls the API directly                    |
-| `SENTRY_DSN`   | per environment                                                 |
+### api
+
+| Variable                     | Value                                                                    | Secret          | Source     |
+| ---------------------------- | ------------------------------------------------------------------------ | --------------- | ---------- |
+| `APP_ENV`                    | `staging` or `production`                                                | no              | D3.1 (#22) |
+| `LOG_LEVEL`                  | `INFO`                                                                   | no              | D3.1 (#22) |
+| `PORT`                       | `8000` (set it explicitly so web can reference it)                       | no              | D3.1 (#22) |
+| `DATABASE_URL`               | `${{Postgres.DATABASE_URL}}` (normalized to asyncpg by the app)          | yes (reference) | D3.1 (#22) |
+| `REDIS_URL`                  | `${{Redis.REDIS_URL}}`                                                   | yes (reference) | D3.1 (#22) |
+| `CORS_ORIGINS`               | empty until a browser calls the API directly                             | no              | D3.1 (#22) |
+| `SENTRY_DSN`                 | per environment                                                          | no              | D3.1 (#22) |
+| `FORWARDED_ALLOW_IPS`        | the addresses Railway's proxy connects from; confirm at first setup      | no              | D4.4 (#28) |
+| `RATE_LIMIT_TIMEOUT_SECONDS` | optional; `0.5` by default                                               | no              | D4.4 (#28) |
+| `JWT_SECRET`                 | required; random, at least 32 characters                                 | yes             | D4.2 (#25) |
+| `RATE_LIMIT_KEY_SECRET`      | required; random, at least 32 characters, one per environment            | yes             | #137       |
+| `TWILIO_ACCOUNT_SID`         | required                                                                 | no              | D4.3 (#26) |
+| `TWILIO_AUTH_TOKEN`          | required                                                                 | yes             | D4.3 (#26) |
+| `TWILIO_VERIFY_SERVICE_SID`  | required                                                                 | no              | D4.3 (#26) |
+| `RESEND_API_KEY`             | required                                                                 | yes             | D4.3 (#27) |
+| `EMAIL_FROM`                 | required; e.g. `Jack Fix It <no-reply@…>` on a domain verified in Resend | no              | D4.3 (#27) |
+| `S3_ENDPOINT_URL`            | required                                                                 | no              | D6.2 (#35) |
+| `S3_BUCKET`                  | required                                                                 | no              | D6.2 (#35) |
+| `S3_ACCESS_KEY_ID`           | required                                                                 | yes             | D6.2 (#35) |
+| `S3_SECRET_ACCESS_KEY`       | required                                                                 | yes             | D6.2 (#35) |
+| `S3_REGION`                  | `auto` (the default) for Cloudflare R2                                   | no              | D6.2 (#35) |
+
+"Required" means the API refuses to start in staging and production without it (the settings
+validators in `apps/api/app/config.py`). Every other setting has a working default; the
+non-secret ones are listed in `apps/api/.env.example`.
 
 Leave `HOST` unset: the default `::` listens on IPv6 (private network) and IPv4 (public proxy
 and healthcheck) on one socket.
 
-**worker**: `APP_ENV`, `LOG_LEVEL`, `DATABASE_URL`, `REDIS_URL`, `SENTRY_DSN`, same values as
-api.
+### worker
 
-**web**
+The worker builds the same settings when `app/worker.py` is imported, so the same validators
+stop it: without every required variable it crash-loops under its `ALWAYS` restart policy and
+never logs `worker_started`. Use the same values as api.
+
+| Variable                    | Value                        | Secret          | Source     |
+| --------------------------- | ---------------------------- | --------------- | ---------- |
+| `APP_ENV`                   | same as api                  | no              | D3.1 (#22) |
+| `LOG_LEVEL`                 | same as api                  | no              | D3.1 (#22) |
+| `DATABASE_URL`              | `${{Postgres.DATABASE_URL}}` | yes (reference) | D3.1 (#22) |
+| `REDIS_URL`                 | `${{Redis.REDIS_URL}}`       | yes (reference) | D3.1 (#22) |
+| `SENTRY_DSN`                | same as api                  | no              | D3.1 (#22) |
+| `JWT_SECRET`                | same as api                  | yes             | D4.2 (#25) |
+| `RATE_LIMIT_KEY_SECRET`     | same as api                  | yes             | #137       |
+| `TWILIO_ACCOUNT_SID`        | same as api                  | no              | D4.3 (#26) |
+| `TWILIO_AUTH_TOKEN`         | same as api                  | yes             | D4.3 (#26) |
+| `TWILIO_VERIFY_SERVICE_SID` | same as api                  | no              | D4.3 (#26) |
+| `RESEND_API_KEY`            | same as api                  | yes             | D4.3 (#27) |
+| `EMAIL_FROM`                | same as api                  | no              | D4.3 (#27) |
+| `S3_ENDPOINT_URL`           | same as api                  | no              | D6.2 (#35) |
+| `S3_BUCKET`                 | same as api                  | no              | D6.2 (#35) |
+| `S3_ACCESS_KEY_ID`          | same as api                  | yes             | D6.2 (#35) |
+| `S3_SECRET_ACCESS_KEY`      | same as api                  | yes             | D6.2 (#35) |
+
+`apps/api/tests/test_railway_doc.py` fails when a setting that staging or production requires
+is missing from either table, so this list cannot fall behind `app/config.py`.
+
+### web
 
 | Variable           | Value                                                    |
 | ------------------ | -------------------------------------------------------- |
