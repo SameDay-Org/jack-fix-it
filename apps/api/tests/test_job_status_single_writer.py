@@ -184,6 +184,17 @@ def _sets_status(call: ast.Call) -> bool:
     return False
 
 
+# What runs a statement with bulk parameters, on an AsyncSession or a connection.
+_EXECUTORS = frozenset({"execute", "scalars", "scalar", "stream", "stream_scalars"})
+
+
+def _argument(call: ast.Call, position: int, keyword: str) -> ast.expr | None:
+    """The call's argument at `position`, or the one passed as `keyword=`."""
+    if len(call.args) > position:
+        return call.args[position]
+    return next((k.value for k in call.keywords if k.arg == keyword), None)
+
+
 def status_writes(
     source: str, path: str, target: StatusModel = JOBS, *, attributes: bool = True
 ) -> list[str]:
@@ -246,9 +257,18 @@ def status_writes(
             ):
                 found.append(line)
         # ORM bulk UPDATE by primary key: execute(update(Job), [{"id": ..., "status": ...}]),
-        # also through a name bound to the statement. The parameters are opaque here.
-        if name == "execute" and len(node.args) >= 2 and scanner.is_model_statement(node.args[0]):
-            found.append(line)
+        # also through a name bound to the statement. The parameters are opaque here. Any
+        # executor, on a session or a connection, with the statement and the parameters given
+        # by position or by keyword (review round 2, Vault V1).
+        if name in _EXECUTORS:
+            statement = _argument(node, 0, "statement")
+            params = _argument(node, 1, "params")
+            if (
+                statement is not None
+                and params is not None
+                and scanner.is_model_statement(statement)
+            ):
+                found.append(line)
     return [f"{path}:{line}" for line in sorted(set(found))]
 
 
@@ -414,6 +434,43 @@ PLANTED = {
         "jobs = sa.table('jobs', sa.column('id'), sa.column('status'))\n"
         "statement = sa.update(jobs).values(status='paid_out')\n"
     ),
+    # Review round 2 (Vault V1): bulk parameters by keyword, and other executors.
+    "execute_params_keyword": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "async def f(session, connection, rows) -> None:\n"
+        "    await session.execute(update(Job), params=rows)\n"
+    ),
+    "execute_statement_and_params_keywords": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "async def f(session, connection, rows) -> None:\n"
+        "    await session.execute(statement=update(Job), params=rows)\n"
+    ),
+    "scalars_bulk": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "async def f(session, connection, rows) -> None:\n"
+        "    await session.scalars(update(Job).returning(Job.id), rows)\n"
+    ),
+    "scalar_params_keyword": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "async def f(session, connection, rows) -> None:\n"
+        "    await session.scalar(update(Job), params=rows)\n"
+    ),
+    "stream_bulk": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "async def f(session, connection, rows) -> None:\n"
+        "    await session.stream(update(Job), rows)\n"
+    ),
+    "connection_execute": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "async def f(session, connection, rows) -> None:\n"
+        "    await connection.execute(update(Job), params=rows)\n"
+    ),
     "named_bulk_execute": (
         "from sqlalchemy import update\n"
         "from app.modules.jobs.models import Job\n"
@@ -529,6 +586,20 @@ def test_guard_detects_a_planted_assignment(name: str) -> None:
             "from app.modules.users.models import User\n"
             "statement = User.__table__.update().values(status='suspended')\n"
         ),
+        # Review round 2: an executor with parameters that runs a read, and a DML statement
+        # with no bulk parameters, are not bulk status writes.
+        (
+            "from sqlalchemy import select\n"
+            "from app.modules.jobs.models import Job\n"
+            "async def f(session, rows) -> None:\n"
+            "    await session.execute(select(Job), params=rows)\n"
+        ),
+        (
+            "from sqlalchemy import update\n"
+            "from app.modules.jobs.models import Job\n"
+            "async def f(session) -> None:\n"
+            "    await session.scalars(statement=update(Job).values(started_at=None))\n"
+        ),
     ],
     ids=[
         "read",
@@ -543,6 +614,8 @@ def test_guard_detects_a_planted_assignment(name: str) -> None:
         "table_method_other_column",
         "table_method_delete",
         "other_table_method",
+        "read_with_params",
+        "update_without_bulk_params",
     ],
 )
 def test_guard_ignores_reads_and_other_writes(source: str) -> None:

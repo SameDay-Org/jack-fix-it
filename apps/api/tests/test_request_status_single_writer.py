@@ -75,6 +75,43 @@ PLANTED = {
         "async def f(session, rows) -> None:\n"
         "    await session.execute(update(ServiceRequest), rows)\n"
     ),
+    # Review round 2 (Vault V1): bulk parameters by keyword, and other executors.
+    "execute_params_keyword": (
+        "from sqlalchemy import update\n"
+        "from app.modules.requests.models import ServiceRequest\n"
+        "async def f(session, connection, rows) -> None:\n"
+        "    await session.execute(update(ServiceRequest), params=rows)\n"
+    ),
+    "execute_statement_and_params_keywords": (
+        "from sqlalchemy import update\n"
+        "from app.modules.requests.models import ServiceRequest\n"
+        "async def f(session, connection, rows) -> None:\n"
+        "    await session.execute(statement=update(ServiceRequest), params=rows)\n"
+    ),
+    "scalars_bulk": (
+        "from sqlalchemy import update\n"
+        "from app.modules.requests.models import ServiceRequest\n"
+        "async def f(session, connection, rows) -> None:\n"
+        "    await session.scalars(update(ServiceRequest).returning(ServiceRequest.id), rows)\n"
+    ),
+    "scalar_params_keyword": (
+        "from sqlalchemy import update\n"
+        "from app.modules.requests.models import ServiceRequest\n"
+        "async def f(session, connection, rows) -> None:\n"
+        "    await session.scalar(update(ServiceRequest), params=rows)\n"
+    ),
+    "stream_bulk": (
+        "from sqlalchemy import update\n"
+        "from app.modules.requests.models import ServiceRequest\n"
+        "async def f(session, connection, rows) -> None:\n"
+        "    await session.stream(update(ServiceRequest), rows)\n"
+    ),
+    "connection_execute": (
+        "from sqlalchemy import update\n"
+        "from app.modules.requests.models import ServiceRequest\n"
+        "async def f(session, connection, rows) -> None:\n"
+        "    await connection.execute(update(ServiceRequest), params=rows)\n"
+    ),
     "raw_sql": "statement = 'UPDATE service_requests SET status = :s WHERE id = :id'\n",
 }
 
