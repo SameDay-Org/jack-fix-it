@@ -1,4 +1,4 @@
-from app.errors import AppError
+from app.errors import AppError, ConflictError
 
 
 class InvalidRequestError(AppError):
@@ -30,3 +30,11 @@ class InvalidMediaError(AppError):
     status_code = 422
     code = "invalid_media"
     message = "The attached media is invalid."
+
+
+class InvalidTransitionError(ConflictError):
+    """The request's current status has no edge to the requested one (also for a terminal
+    status). The same code as the jobs' error: one invalid_transition for every state machine."""
+
+    code = "invalid_transition"
+    message = "The request cannot move to that status from its current one."
