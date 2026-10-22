@@ -4,6 +4,7 @@ import json
 import logging
 import string
 import sys
+import traceback
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any, Final
@@ -12,6 +13,7 @@ import sentry_sdk
 from sentry_sdk.types import Breadcrumb, BreadcrumbHint, Event, Hint
 
 from app.config import Settings
+from app.db_errors import safe_message, summary_of
 
 request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
 
@@ -33,7 +35,7 @@ class JsonFormatter(logging.Formatter):
             "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": safe_message(record),
         }
         request_id = getattr(record, "request_id", None) or request_id_var.get()
         if request_id:
@@ -44,6 +46,15 @@ class JsonFormatter(logging.Formatter):
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         return json.dumps(payload, default=str)
+
+    def formatException(self, ei: Any) -> str:  # noqa: N802 - logging.Formatter's name
+        """A database error keeps its stack but not its text: the summary replaces it."""
+        _, error, tb = ei
+        summary = summary_of(error)
+        if summary is None:
+            return super().formatException(ei)
+        lines = ["Traceback (most recent call last):\n", *traceback.format_tb(tb)]
+        return "".join(lines) + f"{summary.error_class}: {summary.describe()}"
 
 
 def configure_logging(level: str) -> None:
@@ -160,11 +171,34 @@ def _without_url_queries(text: str) -> str:
     return "".join(parts)
 
 
+def _without_database_text(event: Event, hint: Hint) -> None:
+    """A database error's text can hold SQL literals (#174): each exception in the chain gets
+    the error's summary as its value, and a log line naming the error gets its safe message.
+    Frame locals are already off (include_local_variables=False)."""
+    exc_info = hint.get("exc_info")
+    error = exc_info[1] if isinstance(exc_info, tuple) and len(exc_info) == 3 else None
+    summary = summary_of(error)
+    exception = event.get("exception")
+    values = exception.get("values") if isinstance(exception, dict) else None
+    if summary is not None and isinstance(values, list):
+        for value in values:
+            if isinstance(value, dict):
+                value["value"] = summary.describe()
+    record = hint.get("log_record")
+    logentry = event.get("logentry")
+    if isinstance(record, logging.LogRecord) and isinstance(logentry, dict):
+        message = safe_message(record)
+        if message != record.getMessage():
+            logentry.update(message=message, formatted=message, params=[])
+
+
 def before_send(event: Event, hint: Hint) -> Event:
-    """Sentry hook: drops the query string from the request URL, its Referer and the transaction.
+    """Sentry hook: drops the query string from the request URL, its Referer and the transaction,
+    and a database error's text.
 
     Keeps the path and every other field. Fields of an unexpected shape are left as they are.
     """
+    _without_database_text(event, hint)
     request = event.get("request")
     if isinstance(request, dict):
         request.pop("query_string", None)
@@ -191,8 +225,22 @@ def before_breadcrumb(crumb: Breadcrumb, hint: BreadcrumbHint) -> Breadcrumb:
     """Sentry hook: drops the query string from HTTP and navigation breadcrumbs.
 
     Also from URLs in a breadcrumb's message and in the text values of its data, e.g. a
-    library's log line, or its `extra`, naming a request URL.
+    library's log line, or its `extra`, naming a request URL. The SQL breadcrumbs the
+    SQLAlchemy and asyncpg integrations record keep their timing but lose the statement and
+    any parameters: a statement can hold literals (#174). A log line naming a database error
+    gets its safe message.
     """
+    if crumb.get("category") == "query":
+        crumb.pop("message", None)
+        query_data = crumb.get("data")
+        if isinstance(query_data, dict):
+            query_data.pop("db.params", None)
+        return crumb
+    record = hint.get("log_record")
+    if isinstance(record, logging.LogRecord):
+        safe = safe_message(record)
+        if safe != record.getMessage():
+            crumb["message"] = safe
     message = crumb.get("message")
     if isinstance(message, str):
         crumb["message"] = _without_url_queries(message)

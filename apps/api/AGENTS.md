@@ -49,7 +49,14 @@ rules apply.
     wildcard token `fixtures` the trigger accepts only in a database whose own setting
     `app.status_writer_fixtures` is `on`. `tests/conftest.py` sets it on the test database; no
     production database has it.
-  - **A refusal is a bug:** it reaches the API as a 500 and is never mapped to a 4xx.
+  - **What it protects against:** accidents, meaning app code, scripts and raw SQL that write a
+    status without going through a machine. It is not a security boundary. Any connection, of
+    any role, can set both settings for its own session (`set_config`), so a client that wants
+    to forge the token can. The static test is what keeps app code from naming them.
+  - **A refusal is a bug:** it reaches the API as a 500 and is never mapped to a 4xx. The logs
+    get `status_guard_refused` with the table name and a sanitized `unhandled_error`. Like every
+    database error, it is logged as a summary only (`app/db_errors.py`): never the statement,
+    the parameters or the driver's message, which can hold SQL literals.
   - **SQLAdmin (#41) cannot change a status by design.** A status change is a state-machine
     action with its own endpoint.
 

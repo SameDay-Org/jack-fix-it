@@ -33,6 +33,10 @@ def upgrade() -> None:
     # it only in a database whose own setting app.status_writer_fixtures is 'on', which the
     # test suite sets on its test database (tests/conftest.py); no production database has it,
     # and no production code may name app.status_writer (a static test).
+    #
+    # The guard stops accidents; it is not a security boundary. Any connection, of any role, may
+    # set both settings for its own session with set_config, so a client that wants to forge
+    # the token can. The static test is what keeps app code from doing so.
     op.execute(
         """
         CREATE FUNCTION enforce_status_writer() RETURNS trigger
