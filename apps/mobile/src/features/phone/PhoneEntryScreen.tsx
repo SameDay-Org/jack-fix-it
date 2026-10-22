@@ -8,7 +8,7 @@ import { Button, Input, Screen } from "@/components/ui";
 import { BackButton } from "@/features/auth/components/BackButton";
 
 import { CODE_LENGTH, phoneConfig } from "./config";
-import { leavePhoneFlow, withdrawPhoneStepOffer } from "./phoneFlow";
+import { forgetPendingNumber, leavePhoneFlow, withdrawPhoneStepOffer } from "./phoneFlow";
 import { usePhoneEntry } from "./usePhoneEntry";
 
 /**
@@ -27,6 +27,10 @@ export function PhoneEntryScreen() {
   useEffect(() => {
     if (afterSignUp) withdrawPhoneStepOffer();
   }, [afterSignUp]);
+
+  // Leaving the flow from here (Back, sign-out) forgets any number a code was sent to, even if the
+  // code step never opened. The code step forgets it too when it goes.
+  useEffect(() => forgetPendingNumber, []);
 
   return (
     <Screen bar="light" testID="phone-entry-screen">

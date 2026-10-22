@@ -181,6 +181,20 @@ describe("PhoneEntryScreen", () => {
   });
 });
 
+describe("the number a code was sent to ends with the flow (#178 Vault round 1)", () => {
+  it("leaving the phone step forgets it, even if the code step never opened", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(202));
+    const { unmount } = await renderScreen(<PhoneEntryScreen />);
+    await fireEvent.changeText(field(), DIGITS);
+    await fireEvent.press(sendButton());
+    await waitFor(() => expect(phoneFlowStore.getState().pendingNumber).toBe(DIGITS));
+
+    await unmount(); // Back out of the flow, or a sign-out taking the signed-in screens away
+
+    expect(phoneFlowStore.getState().pendingNumber).toBeNull();
+  });
+});
+
 describe("a response that arrives after the user left (#178 round 1)", () => {
   it("a late 202 after Back never opens the code step or overwrites a later flow", async () => {
     const answer = deferred<Response>();

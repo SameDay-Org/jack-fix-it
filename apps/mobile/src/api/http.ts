@@ -120,8 +120,12 @@ export async function sendRequest<T>(
 
   if (response.status === 204) return undefined as T;
   if (!response.ok) throw new ApiError(response.status, await readErrorCode(response));
-  // An accepted request answers 202 with an empty body (the contract types it `undefined`); a 202
-  // that does carry JSON is parsed like any other.
-  if (response.status === ACCEPTED) return (await response.json().catch(() => undefined)) as T;
+  // An accepted request answers 202 with an empty body (the contract types it `undefined`). A 202
+  // that carries anything else must be JSON like any other answer: a malformed body is an error,
+  // never a silent acceptance.
+  if (response.status === ACCEPTED) {
+    const text = await response.text();
+    return (text === "" ? undefined : JSON.parse(text)) as T;
+  }
   return (await response.json()) as T;
 }

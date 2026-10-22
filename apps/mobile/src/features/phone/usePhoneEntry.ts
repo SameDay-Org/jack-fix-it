@@ -4,7 +4,7 @@ import { AccessibilityInfo } from "react-native";
 
 import { SessionExpiredError } from "@/api";
 
-import { useSendCode } from "./api";
+import { sendCode } from "./api";
 import { phoneConfig } from "./config";
 import { describePhoneFailure } from "./errors";
 import { startCodeStep } from "./phoneFlow";
@@ -31,9 +31,9 @@ export function usePhoneEntry(onSent: () => void): PhoneEntry {
   const { countryCode } = phoneConfig;
   const [digits, setDigits] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const send = useSendCode();
+  const [sending, setSending] = useState(false);
   const unmountSignal = useUnmountSignal();
-  // `isPending` is render state; the ref closes the gap between two taps in the same turn.
+  // `sending` is render state; the ref closes the gap between two taps in the same turn.
   const inFlight = useRef(false);
 
   const text = formatNational(digits);
@@ -55,8 +55,9 @@ export function usePhoneEntry(onSent: () => void): PhoneEntry {
     }
     const signal = unmountSignal();
     inFlight.current = true;
+    setSending(true);
     try {
-      await send.mutateAsync({ phone: toE164(countryCode, digits), signal });
+      await sendCode(toE164(countryCode, digits), signal);
       if (signal.aborted) return; // the user left: this flow is over
       startCodeStep(digits);
       onSent();
@@ -66,8 +67,9 @@ export function usePhoneEntry(onSent: () => void): PhoneEntry {
       if (!(failure instanceof SessionExpiredError)) fail(t(describePhoneFailure(failure)));
     } finally {
       inFlight.current = false;
+      if (!signal.aborted) setSending(false);
     }
   };
 
-  return { text, setText, error, sending: send.isPending, submit };
+  return { text, setText, error, sending, submit };
 }

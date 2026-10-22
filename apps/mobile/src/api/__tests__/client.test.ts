@@ -66,6 +66,48 @@ describe("apiGet / apiPost", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("a 202 whose body is not empty and not JSON is a malformed answer, not an acceptance", async () => {
+    fetchMock.mockResolvedValue({
+      status: 202,
+      ok: true,
+      text: async () => "{broken",
+      json: async () => {
+        throw new SyntaxError("invalid JSON");
+      },
+    } as unknown as Response);
+
+    await expect(apiPost("/v1/auth/phone/send", { phone: "+13055550123" })).rejects.toBeInstanceOf(
+      SyntaxError,
+    );
+  });
+
+  it("malformed JSON on a 200 is rejected too", async () => {
+    fetchMock.mockResolvedValue({
+      status: 200,
+      ok: true,
+      text: async () => "{broken",
+      json: async () => {
+        throw new SyntaxError("invalid JSON");
+      },
+    } as unknown as Response);
+
+    await expect(apiGet("/health")).rejects.toBeInstanceOf(SyntaxError);
+  });
+
+  it.each([400, 409, 429, 500])(
+    "an empty %i is an ApiError, never an acceptance",
+    async (status) => {
+      fetchMock.mockResolvedValue(jsonResponse(status));
+
+      await expect(apiPost("/v1/auth/phone/send", { phone: "+13055550123" })).rejects.toMatchObject(
+        {
+          name: "ApiError",
+          status,
+        },
+      );
+    },
+  );
+
   it("parses a 202 that does carry JSON", async () => {
     fetchMock.mockResolvedValue(jsonResponse(202, { status: "ok" }));
 
