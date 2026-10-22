@@ -847,7 +847,7 @@
             }
           },
           "422": {
-            "description": "invalid_category: unknown or inactive category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency).",
+            "description": "zip_not_served: the address ZIP is outside the active service areas (offer the waitlist); invalid_category: unknown or inactive category, or one whose questions cannot be read right now (send the request without a category); invalid_intake_answers: intake_answers do not fit the category's intake_questions (an unknown key, a missing required one, a value of the wrong type or out of range), or are not empty without a category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1068,6 +1068,484 @@
           }
         }
       }
+    },
+    "/v1/categories": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "List the categories",
+        "description": "Active categories, by slug. No sign-in needed: the landing page and the request flow\nshow them before login.",
+        "operationId": "list_categories_v1_categories_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CategoryOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Categories V1 Categories Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many requests from this client; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/service-areas": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "List the served areas",
+        "description": "Active service areas, grouped by region, then city, then ZIP. No sign-in needed: the\nlanding page and the request flow show them before login.",
+        "operationId": "list_service_areas_v1_service_areas_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RegionOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Service Areas V1 Service Areas Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many requests from this client; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/service-areas/check": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Is this ZIP served?",
+        "description": "Whether an active service area covers the ZIP. ZIP+4 is checked by its 5-digit ZIP.\nNo sign-in needed: the request flow and the landing page ask before login, and offer the\nwaitlist when the answer is no.",
+        "operationId": "check_zip_v1_service_areas_check_get",
+        "parameters": [
+          {
+            "name": "zip",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{5}(-[0-9]{4})?$",
+              "title": "Zip"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServedCheckOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: not a 5-digit ZIP or ZIP+4.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many requests from this client; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pros/me": {
+      "get": {
+        "tags": [
+          "pros"
+        ],
+        "summary": "Get my pro profile",
+        "description": "The caller's own profile, with a presigned URL for the photo. The first call creates an\nempty profile, pending verification.",
+        "operationId": "get_my_profile_v1_pros_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProProfileOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros have a pro profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "pros"
+        ],
+        "summary": "Edit my pro profile",
+        "description": "Changes only the fields sent, in one transaction. category_ids and service_area_ids\nreplace the whole set. Upload the photo first (POST /v1/uploads, purpose profile_photo).",
+        "operationId": "update_my_profile_v1_pros_me_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProProfileUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProProfileOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_media: photo_key is not the caller's own profile_photo upload; invalid_category / invalid_service_area: an unknown or inactive id; validation_error: any other invalid field (duplicates or too many ids, bio length, years out of range, fields the platform sets such as verification_status).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros have a pro profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/devices": {
+      "put": {
+        "tags": [
+          "devices"
+        ],
+        "summary": "Register this device for pushes",
+        "description": "Registers the app's Expo push token for the caller; call it at every start.\n\nA token already registered to someone else (the phone changed hands) moves to the caller.\nPast PUSH_MAX_DEVICES_PER_USER, the caller's least recently seen device is dropped.",
+        "operationId": "register_device_v1_devices_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceRegistration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Registered."
+          },
+          "422": {
+            "description": "validation_error: not an Expo push token, or an unknown platform.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers and pros receive pushes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "devices"
+        ],
+        "summary": "Stop pushes to this device",
+        "description": "Removes the caller's token; the app calls it on logout. The token travels in the body,\nnever in the path, because paths are logged.",
+        "operationId": "unregister_device_v1_devices_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceRemoval"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Always, whether or not the token was registered to the caller."
+          },
+          "422": {
+            "description": "validation_error: not an Expo push token, or an unknown platform.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers and pros receive pushes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/waitlist": {
+      "post": {
+        "tags": [
+          "waitlist"
+        ],
+        "summary": "Join the waitlist of an unserved ZIP",
+        "description": "Asks to be told when the ZIP is served. No sign-in needed (a web visitor can join); with\na valid bearer token the entry is linked to the account. The contact is used only for that\nnotice. Joining twice with the same contact and ZIP refreshes the entry.",
+        "operationId": "join_waitlist_v1_waitlist_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WaitlistJoin"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "On the list; the same answer whether the contact already was."
+          },
+          "422": {
+            "description": "invalid_category: unknown or inactive category; validation_error: no email or phone, a bad ZIP, email or phone, or a phone outside the allowed country codes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "zip_served: the ZIP is served; create a request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many requests; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -1200,6 +1678,165 @@
         ],
         "title": "AuthResponse"
       },
+      "BooleanQuestion": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,39}$",
+            "title": "Key",
+            "description": "The answer's key in intake_answers; unique in the category."
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Labels",
+            "description": "The question per locale; en and es required."
+          },
+          "help": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Help",
+            "description": "An optional hint per locale."
+          },
+          "type": {
+            "type": "string",
+            "const": "boolean",
+            "title": "Type"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "required",
+          "labels",
+          "type"
+        ],
+        "title": "BooleanQuestion"
+      },
+      "CategoryOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Names",
+            "description": "Display name per locale, e.g. en and es."
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon"
+          },
+          "requires_license": {
+            "type": "boolean",
+            "title": "Requires License"
+          },
+          "intake_questions": {
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/IntegerQuestion"
+                },
+                {
+                  "$ref": "#/components/schemas/SingleChoiceQuestion"
+                },
+                {
+                  "$ref": "#/components/schemas/MultiChoiceQuestion"
+                },
+                {
+                  "$ref": "#/components/schemas/BooleanQuestion"
+                },
+                {
+                  "$ref": "#/components/schemas/TextQuestion"
+                }
+              ],
+              "discriminator": {
+                "propertyName": "type",
+                "mapping": {
+                  "boolean": "#/components/schemas/BooleanQuestion",
+                  "integer": "#/components/schemas/IntegerQuestion",
+                  "multi_choice": "#/components/schemas/MultiChoiceQuestion",
+                  "single_choice": "#/components/schemas/SingleChoiceQuestion",
+                  "text": "#/components/schemas/TextQuestion"
+                }
+              }
+            },
+            "type": "array",
+            "title": "Intake Questions",
+            "description": "What to ask the customer for this category, in order; answers go in the request's intake_answers under each key. Empty when there is nothing to ask."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "slug",
+          "names",
+          "icon",
+          "requires_license",
+          "intake_questions"
+        ],
+        "title": "CategoryOut"
+      },
+      "CategorySummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Names",
+            "description": "Display name per locale, e.g. en and es."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "slug",
+          "names"
+        ],
+        "title": "CategorySummary"
+      },
       "CheckStatus": {
         "type": "string",
         "enum": [
@@ -1207,6 +1844,55 @@
           "fail"
         ],
         "title": "CheckStatus"
+      },
+      "ChoiceOption": {
+        "properties": {
+          "value": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,39}$",
+            "title": "Value"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Labels"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "value",
+          "labels"
+        ],
+        "title": "ChoiceOption"
+      },
+      "CityOut": {
+        "properties": {
+          "city": {
+            "type": "string",
+            "title": "City"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "zips": {
+            "items": {
+              "$ref": "#/components/schemas/ZipOut"
+            },
+            "type": "array",
+            "title": "Zips"
+          }
+        },
+        "type": "object",
+        "required": [
+          "city",
+          "state",
+          "zips"
+        ],
+        "title": "CityOut"
       },
       "DependencyChecks": {
         "properties": {
@@ -1223,6 +1909,50 @@
           "redis"
         ],
         "title": "DependencyChecks"
+      },
+      "DevicePlatform": {
+        "type": "string",
+        "enum": [
+          "ios",
+          "android"
+        ],
+        "title": "DevicePlatform"
+      },
+      "DeviceRegistration": {
+        "properties": {
+          "expo_push_token": {
+            "type": "string",
+            "pattern": "^Expo(nent)?PushToken\\[[A-Za-z0-9_-]{1,200}\\]$",
+            "title": "Expo Push Token",
+            "description": "The Expo push token."
+          },
+          "platform": {
+            "$ref": "#/components/schemas/DevicePlatform"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expo_push_token",
+          "platform"
+        ],
+        "title": "DeviceRegistration"
+      },
+      "DeviceRemoval": {
+        "properties": {
+          "expo_push_token": {
+            "type": "string",
+            "pattern": "^Expo(nent)?PushToken\\[[A-Za-z0-9_-]{1,200}\\]$",
+            "title": "Expo Push Token",
+            "description": "The Expo push token."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expo_push_token"
+        ],
+        "title": "DeviceRemoval"
       },
       "DownloadUrlRequest": {
         "properties": {
@@ -1288,6 +2018,67 @@
         ],
         "title": "ErrorResponse"
       },
+      "IntegerQuestion": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,39}$",
+            "title": "Key",
+            "description": "The answer's key in intake_answers; unique in the category."
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Labels",
+            "description": "The question per locale; en and es required."
+          },
+          "help": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Help",
+            "description": "An optional hint per locale."
+          },
+          "type": {
+            "type": "string",
+            "const": "integer",
+            "title": "Type"
+          },
+          "min": {
+            "type": "integer",
+            "title": "Min"
+          },
+          "max": {
+            "type": "integer",
+            "title": "Max"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "required",
+          "labels",
+          "type",
+          "min",
+          "max"
+        ],
+        "title": "IntegerQuestion"
+      },
       "JsonValue": {},
       "LivenessResponse": {
         "properties": {
@@ -1345,6 +2136,86 @@
           "expires_at"
         ],
         "title": "MediaOut"
+      },
+      "MultiChoiceQuestion": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,39}$",
+            "title": "Key",
+            "description": "The answer's key in intake_answers; unique in the category."
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Labels",
+            "description": "The question per locale; en and es required."
+          },
+          "help": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Help",
+            "description": "An optional hint per locale."
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/ChoiceOption"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 2,
+            "title": "Options"
+          },
+          "type": {
+            "type": "string",
+            "const": "multi_choice",
+            "title": "Type"
+          },
+          "min_selected": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Min Selected",
+            "default": 0
+          },
+          "max_selected": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Selected",
+            "description": "At most this many; all options when absent."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "required",
+          "labels",
+          "options",
+          "type"
+        ],
+        "title": "MultiChoiceQuestion"
       },
       "PasswordForgotRequest": {
         "properties": {
@@ -1425,6 +2296,168 @@
         ],
         "title": "PhoneVerifyRequest"
       },
+      "PhotoOut": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "Presigned GET URL."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "expires_at"
+        ],
+        "title": "PhotoOut"
+      },
+      "ProProfileOut": {
+        "properties": {
+          "bio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bio"
+          },
+          "years_of_experience": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Years Of Experience"
+          },
+          "photo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhotoOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verification_status": {
+            "$ref": "#/components/schemas/ProVerificationStatus"
+          },
+          "payouts_enabled": {
+            "type": "boolean",
+            "title": "Payouts Enabled"
+          },
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/CategorySummary"
+            },
+            "type": "array",
+            "title": "Categories"
+          },
+          "service_areas": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceAreaOut"
+            },
+            "type": "array",
+            "title": "Service Areas"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bio",
+          "years_of_experience",
+          "photo",
+          "verification_status",
+          "payouts_enabled",
+          "categories",
+          "service_areas"
+        ],
+        "title": "ProProfileOut"
+      },
+      "ProProfileUpdate": {
+        "properties": {
+          "bio": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000,
+                "pattern": "^[^\\x00]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bio",
+            "description": "An empty string or null clears it."
+          },
+          "years_of_experience": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 80.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Years Of Experience"
+          },
+          "photo_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Key",
+            "description": "Key of the caller's own profile_photo upload (POST /v1/uploads); null clears."
+          },
+          "category_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Category Ids",
+            "description": "Replaces the set: active categories, no duplicates, up to PRO_MAX_CATEGORIES."
+          },
+          "service_area_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Service Area Ids",
+            "description": "Replaces the set: active service areas, no duplicates, up to PRO_MAX_SERVICE_AREAS."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ProProfileUpdate",
+        "description": "Only the fields sent change. Verification, payouts, rating and job count are set by the\nplatform: sending them is a 422 (extra=\"forbid\")."
+      },
+      "ProVerificationStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "approved",
+          "rejected"
+        ],
+        "title": "ProVerificationStatus"
+      },
       "ReadinessResponse": {
         "properties": {
           "status": {
@@ -1459,6 +2492,27 @@
           "refresh_token"
         ],
         "title": "RefreshTokenRequest"
+      },
+      "RegionOut": {
+        "properties": {
+          "region": {
+            "type": "string",
+            "title": "Region"
+          },
+          "cities": {
+            "items": {
+              "$ref": "#/components/schemas/CityOut"
+            },
+            "type": "array",
+            "title": "Cities"
+          }
+        },
+        "type": "object",
+        "required": [
+          "region",
+          "cities"
+        ],
+        "title": "RegionOut"
       },
       "RegisterRequest": {
         "properties": {
@@ -1542,7 +2596,7 @@
             },
             "type": "object",
             "title": "Intake Answers",
-            "description": "Answers to the category's intake questions; a size limit applies. NUL characters and non-finite numbers are refused."
+            "description": "Answers to the category's intake_questions (GET /v1/categories), by question key: an integer, an option value, a list of distinct option values, a boolean or a text, as each question's type says. Empty without a category. A size limit applies; NUL characters and non-finite numbers are refused. Text is stored trimmed."
           },
           "media_keys": {
             "items": {
@@ -1761,6 +2815,178 @@
         ],
         "title": "RequestSummary"
       },
+      "ServedCheckOut": {
+        "properties": {
+          "zip_code": {
+            "type": "string",
+            "title": "Zip Code",
+            "description": "The 5-digit ZIP that was checked."
+          },
+          "served": {
+            "type": "boolean",
+            "title": "Served"
+          }
+        },
+        "type": "object",
+        "required": [
+          "zip_code",
+          "served"
+        ],
+        "title": "ServedCheckOut"
+      },
+      "ServiceAreaOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "zip_code": {
+            "type": "string",
+            "title": "Zip Code"
+          },
+          "city": {
+            "type": "string",
+            "title": "City"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "region": {
+            "type": "string",
+            "title": "Region"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "zip_code",
+          "city",
+          "state",
+          "region"
+        ],
+        "title": "ServiceAreaOut"
+      },
+      "SingleChoiceQuestion": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,39}$",
+            "title": "Key",
+            "description": "The answer's key in intake_answers; unique in the category."
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Labels",
+            "description": "The question per locale; en and es required."
+          },
+          "help": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Help",
+            "description": "An optional hint per locale."
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/ChoiceOption"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 2,
+            "title": "Options"
+          },
+          "type": {
+            "type": "string",
+            "const": "single_choice",
+            "title": "Type"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "required",
+          "labels",
+          "options",
+          "type"
+        ],
+        "title": "SingleChoiceQuestion"
+      },
+      "TextQuestion": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,39}$",
+            "title": "Key",
+            "description": "The answer's key in intake_answers; unique in the category."
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Labels",
+            "description": "The question per locale; en and es required."
+          },
+          "help": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Help",
+            "description": "An optional hint per locale."
+          },
+          "type": {
+            "type": "string",
+            "const": "text",
+            "title": "Type"
+          },
+          "max_length": {
+            "type": "integer",
+            "maximum": 1000.0,
+            "minimum": 1.0,
+            "title": "Max Length"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "required",
+          "labels",
+          "type",
+          "max_length"
+        ],
+        "title": "TextQuestion"
+      },
       "UploadPurpose": {
         "type": "string",
         "enum": [
@@ -1972,6 +3198,99 @@
         "type": "object",
         "title": "UtmIn",
         "description": "Campaign attribution. Only these five keys; anything else is a 422."
+      },
+      "WaitlistJoin": {
+        "properties": {
+          "zip_code": {
+            "type": "string",
+            "pattern": "^[0-9]{5}(-[0-9]{4})?$",
+            "title": "Zip Code",
+            "description": "5 digits or ZIP+4."
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "email"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\+[1-9][0-9]{7,14}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone",
+            "description": "E.164, with an allowed country code."
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "en",
+              "es"
+            ],
+            "title": "Locale",
+            "default": "en"
+          },
+          "source": {
+            "$ref": "#/components/schemas/WaitlistSource"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "zip_code",
+          "source"
+        ],
+        "title": "WaitlistJoin"
+      },
+      "WaitlistSource": {
+        "type": "string",
+        "enum": [
+          "app",
+          "web"
+        ],
+        "title": "WaitlistSource"
+      },
+      "ZipOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "zip_code": {
+            "type": "string",
+            "title": "Zip Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "zip_code"
+        ],
+        "title": "ZipOut"
       }
     },
     "securitySchemes": {

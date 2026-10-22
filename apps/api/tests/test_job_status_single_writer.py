@@ -11,38 +11,98 @@ An AST scan of app/ flags, outside STATUS_WRITERS:
 - `Job(status=...)` and `Job(**anything)`;
 - raw SQL that updates the status of the jobs table (quoted or schema-qualified too).
 
-Request statuses also change only through a state machine (AGENTS.md). A module that gets its
-own state machine for another model's `status` is added to STATUS_WRITERS, with the reason.
+Review rounds 3 and 4 (Cesar's decisions): the scanner guards how a statement on the model is
+BUILT, not which executor runs it, and strictly: any construction of `update(Job)`,
+`Job.__table__.update()` / `<table>.update()`, `insert(...)` or `delete(...)` on the model is
+flagged wherever it happens, whatever its values (a literal `.values()` still takes columns
+from execution parameters, and a statement travels through helpers, lists and run_sync the
+scanner cannot follow). A legitimate construction gets an ALLOW_LIST entry (file, function,
+rule, reason), reviewed like code; a stale entry fails a test. Also flagged:
+`setattr(<x>, <not a literal>, ...)`, `bulk_update_mappings` / `bulk_insert_mappings` of the
+model and any `bulk_save_objects`, raw SQL inserting a status, and, as a second net, any call
+receiving a statement on the model together with execution parameters (a second positional
+argument, `params=` or `parameters=`). The database-level guard is #163.
+
+Request statuses also change only through a state machine (AGENTS.md): the same scanner,
+pointed at ServiceRequest, guards them in test_request_status_single_writer.py. A module that
+gets its own state machine for another model's `status` is added to STATUS_WRITERS, with the
+reason; the other model's DML is still checked in it.
 """
 
 import ast
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
 STATE_MACHINE = APP_DIR / "modules" / "jobs" / "service.py"
+REQUEST_STATE_MACHINE = APP_DIR / "modules" / "requests" / "state_machine.py"
 # The only files allowed to write a `.status`, each with its reason.
 STATUS_WRITERS = {
     STATE_MACHINE: "JobStateMachine, the single writer of jobs.status",
+    REQUEST_STATE_MACHINE: "RequestStateMachine, the single writer of service_requests.status",
 }
-JOBS_MODELS = "app.modules.jobs.models"
-_RAW_SQL_STATUS_UPDATE = re.compile(
-    r"update\s+(?:\"?\w+\"?\.)?\"?jobs\"?\s.*\bset\b.*\bstatus\b", re.I | re.S
+
+
+# Reviewed exceptions: (file under apps/api, function, rule) -> reason. Keep it short.
+ALLOW_LIST: dict[tuple[str, str, str], str] = {
+    ("app/modules/jobs/service.py", "transition", "setattr_dynamic"): (
+        "sets the entry timestamp named in _ENTRY_TIMESTAMPS (started_at, completed_at, "
+        "confirmed_at) on the job it locked; never status"
+    ),
+}
+
+
+@dataclass(frozen=True)
+class StatusModel:
+    """A model whose status only its state machine writes: its class, package and table."""
+
+    model: str
+    package: str
+    table: str
+    state_machine: Path
+
+    @property
+    def models_module(self) -> str:
+        return f"{self.package}.models"
+
+    @property
+    def raw_sql_update(self) -> re.Pattern[str]:
+        return re.compile(
+            rf"update\s+(?:\"?\w+\"?\.)?\"?{self.table}\"?\s.*\bset\b.*\bstatus\b", re.I | re.S
+        )
+
+    @property
+    def raw_sql_insert(self) -> re.Pattern[str]:
+        return re.compile(
+            rf"insert\s+into\s+(?:\"?\w+\"?\.)?\"?{self.table}\"?\s*\(.*\bstatus\b",
+            re.I | re.S,
+        )
+
+
+JOBS = StatusModel(
+    model="Job", package="app.modules.jobs", table="jobs", state_machine=STATE_MACHINE
+)
+REQUESTS = StatusModel(
+    model="ServiceRequest",
+    package="app.modules.requests",
+    table="service_requests",
+    state_machine=REQUEST_STATE_MACHINE,
 )
 
 
-def _job_names(tree: ast.Module) -> tuple[set[str], set[str]]:
-    """Local names bound to the Job model, and to the jobs models module."""
-    classes, modules = {"Job"}, set()
+def _model_names(tree: ast.Module, target: StatusModel) -> tuple[set[str], set[str]]:
+    """Local names bound to the model class, and to its models module."""
+    classes, modules = {target.model}, set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == JOBS_MODELS:
-            classes |= {a.asname or a.name for a in node.names if a.name == "Job"}
-        elif isinstance(node, ast.ImportFrom) and node.module == "app.modules.jobs":
+        if isinstance(node, ast.ImportFrom) and node.module == target.models_module:
+            classes |= {a.asname or a.name for a in node.names if a.name == target.model}
+        elif isinstance(node, ast.ImportFrom) and node.module == target.package:
             modules |= {a.asname or a.name for a in node.names if a.name == "models"}
         elif isinstance(node, ast.Import):
-            modules |= {a.asname or a.name for a in node.names if a.name == JOBS_MODELS}
+            modules |= {a.asname or a.name for a in node.names if a.name == target.models_module}
     return classes, modules
 
 
@@ -75,11 +135,12 @@ def _assignments(tree: ast.Module) -> list[tuple[list[ast.expr], ast.expr]]:
 
 
 class _Scanner:
-    """Knows which local names stand for the Job model or table, or a statement on it."""
+    """Knows which local names stand for the target model or table, or a statement on it."""
 
-    def __init__(self, tree: ast.Module) -> None:
-        self.job_classes, self.job_modules = _job_names(tree)
-        self.job_statements: set[str] = set()
+    def __init__(self, tree: ast.Module, target: StatusModel) -> None:
+        self.target = target
+        self.model_classes, self.model_modules = _model_names(tree, target)
+        self.model_statements: set[str] = set()
         # Bind names until nothing changes: `t = Job.__table__`, `s = update(t)`, `s = s.where()`.
         assignments = _assignments(tree)
         changed = True
@@ -89,51 +150,52 @@ class _Scanner:
                 names = {t.id for t in targets if isinstance(t, ast.Name)}
                 if len(targets) != 1 or not names:
                     continue
-                if self.is_job(value) and not names <= self.job_classes:
-                    self.job_classes |= names
+                if self.is_model(value) and not names <= self.model_classes:
+                    self.model_classes |= names
                     changed = True
-                elif self.is_job_statement(value) and not names <= self.job_statements:
-                    self.job_statements |= names
+                elif self.is_model_statement(value) and not names <= self.model_statements:
+                    self.model_statements |= names
                     changed = True
 
-    def is_job(self, node: ast.expr) -> bool:
-        """Job, an alias of it, models.Job, Job.__table__, or a Table/table named "jobs"."""
+    def is_model(self, node: ast.expr) -> bool:
+        """The model (Job), an alias, models.Job, Job.__table__, or a Table/table of its
+        table name ("jobs")."""
         if isinstance(node, ast.Name):
-            return node.id in self.job_classes
+            return node.id in self.model_classes
         if isinstance(node, ast.Attribute):
-            if node.attr == "Job":
+            if node.attr == self.target.model:
                 return True
             if node.attr == "__table__":
-                return self.is_job(node.value)
+                return self.is_model(node.value)
         return (
             isinstance(node, ast.Call)
             and _called_name(node) in ("Table", "table")
             and bool(node.args)
             and isinstance(node.args[0], ast.Constant)
-            and node.args[0].value == "jobs"
+            and node.args[0].value == self.target.table
         )
 
-    def is_job_statement(self, node: ast.AST) -> bool:
+    def is_model_statement(self, node: ast.AST) -> bool:
         """A DML statement on the jobs table, or a name bound to one, anywhere in a call chain.
 
         Function forms: `update(Job)`, `insert(Job.__table__)`. Table method forms:
         `Job.__table__.update()`, `jobs.insert()`, `table("jobs").delete()`, for any receiver
-        is_job() recognizes.
+        is_model() recognizes.
         """
         while isinstance(node, ast.Call | ast.Attribute | ast.Name):
             if isinstance(node, ast.Name):
-                return node.id in self.job_statements
-            if isinstance(node, ast.Call) and self._is_job_dml(node):
+                return node.id in self.model_statements
+            if isinstance(node, ast.Call) and self.is_model_dml(node):
                 return True
             node = node.func if isinstance(node, ast.Call) else node.value
         return False
 
-    def _is_job_dml(self, call: ast.Call) -> bool:
+    def is_model_dml(self, call: ast.Call) -> bool:
         if _called_name(call) not in ("update", "insert", "delete"):
             return False
-        if any(self.is_job(arg) for arg in call.args):
+        if any(self.is_model(arg) for arg in call.args):
             return True
-        return isinstance(call.func, ast.Attribute) and self.is_job(call.func.value)
+        return isinstance(call.func, ast.Attribute) and self.is_model(call.func.value)
 
 
 def _is_status_key(key: ast.expr | None) -> bool:
@@ -156,11 +218,31 @@ def _sets_status(call: ast.Call) -> bool:
     return False
 
 
-def status_writes(source: str, path: str) -> list[str]:
-    """Every place in `source` that writes a status, as "path:line"."""
+# Keywords that carry execution parameters: AsyncSession's params=, a connection's parameters=.
+_PARAMETER_KEYWORDS = frozenset({"params", "parameters"})
+
+
+def _carries_parameters(call: ast.Call) -> bool:
+    """A call given execution parameters: a second positional argument, or params=/parameters=."""
+    return len(call.args) >= 2 or any(k.arg in _PARAMETER_KEYWORDS for k in call.keywords)
+
+
+def status_writes(
+    source: str, path: str, target: StatusModel = JOBS, *, attributes: bool = True
+) -> list[str]:
+    """Every place in `source` that writes a status, as "path:line". `attributes=False` leaves
+    out `<x>.status = ...` and setattr, which fit any model, to check only `target`'s DML."""
+    lines = {line for line, _ in findings(source, target, attributes=attributes)}
+    return [f"{path}:{line}" for line in sorted(lines)]
+
+
+def findings(
+    source: str, target: StatusModel = JOBS, *, attributes: bool = True
+) -> list[tuple[int, str]]:
+    """(line, rule) for every status write in `source`."""
     tree = ast.parse(source)
-    scanner = _Scanner(tree)
-    found: list[int] = []
+    scanner = _Scanner(tree, target)
+    found: list[tuple[int, str]] = []
     for node in ast.walk(tree):
         line = getattr(node, "lineno", 0)
         targets: list[ast.expr] = []
@@ -173,38 +255,50 @@ def status_writes(source: str, path: str) -> list[str]:
                 node.target if isinstance(node, ast.For | ast.AsyncFor) else node.optional_vars
             )
             targets = _assigned_names(loop_target) if loop_target is not None else []
-        if any(isinstance(t, ast.Attribute) and t.attr == "status" for t in targets):
-            found.append(line)
+        if attributes and any(isinstance(t, ast.Attribute) and t.attr == "status" for t in targets):
+            found.append((line, "attribute"))
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if _RAW_SQL_STATUS_UPDATE.search(node.value):
-                found.append(line)
+            if target.raw_sql_update.search(node.value) or target.raw_sql_insert.search(node.value):
+                found.append((line, "raw_sql"))
             continue
         if not isinstance(node, ast.Call):
             continue
         name = _called_name(node)
-        if (
-            name == "setattr"
-            and len(node.args) >= 2
-            and isinstance(node.args[1], ast.Constant)
-            and node.args[1].value == "status"
-        ):
-            found.append(line)
-        if scanner.is_job(node.func) and any(
+        if attributes and name == "setattr" and len(node.args) >= 2:
+            attribute = node.args[1]
+            if not isinstance(attribute, ast.Constant):
+                found.append((line, "setattr_dynamic"))
+            elif attribute.value == "status":
+                found.append((line, "setattr"))
+        if scanner.is_model(node.func) and any(
             keyword.arg in ("status", None) for keyword in node.keywords
         ):
-            found.append(line)
+            found.append((line, "constructor"))
+        if name in ("update", "insert", "delete") and scanner.is_model_dml(node):
+            found.append((line, f"{name}_construction"))
+        if name in ("bulk_update_mappings", "bulk_insert_mappings") and any(
+            scanner.is_model(arg) for arg in node.args[:1]
+        ):
+            found.append((line, "bulk_mappings"))
+        if name == "bulk_save_objects":
+            found.append((line, "bulk_save_objects"))
+        statements = [*node.args, *(k.value for k in node.keywords)]
+        if _carries_parameters(node) and any(
+            scanner.is_model_statement(argument) for argument in statements
+        ):
+            found.append((line, "statement_with_parameters"))
         receiver = node.func.value if isinstance(node.func, ast.Attribute) else None
         if (
             name == "values"
             and receiver is not None
-            and scanner.is_job_statement(receiver)
+            and scanner.is_model_statement(receiver)
             and _sets_status(node)
         ):
-            found.append(line)
+            found.append((line, "values"))
         if (
             name == "on_conflict_do_update"
             and receiver is not None
-            and scanner.is_job_statement(receiver)
+            and scanner.is_model_statement(receiver)
         ):
             set_ = next((k.value for k in node.keywords if k.arg == "set_"), None)
             if (
@@ -212,21 +306,88 @@ def status_writes(source: str, path: str) -> list[str]:
                 or not isinstance(set_, ast.Dict)
                 or any(key is None or _is_status_key(key) for key in set_.keys)
             ):
-                found.append(line)
-        # ORM bulk UPDATE by primary key: execute(update(Job), [{"id": ..., "status": ...}]),
-        # also through a name bound to the statement. The parameters are opaque here.
-        if name == "execute" and len(node.args) >= 2 and scanner.is_job_statement(node.args[0]):
-            found.append(line)
-    return [f"{path}:{line}" for line in sorted(set(found))]
+                found.append((line, "on_conflict"))
+    return found
+
+
+def _loads_for_update(value: ast.expr) -> bool:
+    """`await self.<repository>.get_for_update(...)`: the row a state machine just locked."""
+    return (
+        isinstance(value, ast.Await)
+        and isinstance(value.value, ast.Call)
+        and isinstance(value.value.func, ast.Attribute)
+        and value.value.func.attr == "get_for_update"
+        and isinstance(value.value.func.value, ast.Attribute)
+        and isinstance(value.value.func.value.value, ast.Name)
+        and value.value.func.value.value.id == "self"
+    )
+
+
+def own_status_writes(source: str) -> set[int]:
+    """The lines of a state machine's own write: `<row>.status = ...` inside its `transition`
+    method, where `<row>` was bound there from `await self.<repository>.get_for_update(...)`.
+    Nothing else in the file is exempt: not setattr, not another row, not another function."""
+    lines: set[int] = set()
+    for function in ast.walk(ast.parse(source)):
+        if not isinstance(function, ast.AsyncFunctionDef) or function.name != "transition":
+            continue
+        rows = {
+            node.targets[0].id
+            for node in ast.walk(function)
+            if isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and _loads_for_update(node.value)
+        }
+        for node in ast.walk(function):
+            if (
+                isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(target := node.targets[0], ast.Attribute)
+                and target.attr == "status"
+                and isinstance(target.value, ast.Name)
+                and target.value.id in rows
+            ):
+                lines.add(node.lineno)
+    return lines
+
+
+def _functions_by_line(source: str) -> dict[int, str]:
+    """The innermost function around each line."""
+    names: dict[int, str] = {}
+    functions = [
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    ]
+    # Outer functions first, so inner ones overwrite their lines.
+    for function in sorted(functions, key=lambda f: (f.lineno, -(f.end_lineno or f.lineno))):
+        for line in range(function.lineno, (function.end_lineno or function.lineno) + 1):
+            names[line] = function.name
+    return names
+
+
+def guarded_writes(path: Path, source: str, target: StatusModel = JOBS) -> list[str]:
+    """The status writes the guard reports in one app file, as "path:line". Every file is
+    scanned, the state machines' too; only each machine's own write is exempt, plus the
+    reviewed ALLOW_LIST entries. `.status =` fits any model, so both guards exempt both
+    machines' own writes, and nothing more."""
+    relative = path.relative_to(APP_DIR.parent).as_posix()
+    own = own_status_writes(source) if path in STATUS_WRITERS else set()
+    functions = _functions_by_line(source)
+    lines = {
+        line
+        for line, rule in findings(source, target)
+        if not (rule == "attribute" and line in own)
+        and (relative, functions.get(line, ""), rule) not in ALLOW_LIST
+    }
+    return [f"{relative}:{line}" for line in sorted(lines)]
 
 
 def test_no_status_assignment_outside_state_machine() -> None:
     writes: list[str] = []
     for path in sorted(APP_DIR.rglob("*.py")):
-        if path in STATUS_WRITERS:
-            continue
-        relative = path.relative_to(APP_DIR.parent).as_posix()
-        writes += status_writes(path.read_text(encoding="utf-8"), relative)
+        writes += guarded_writes(path, path.read_text(encoding="utf-8"))
 
     assert writes == [], f"jobs.status may only change in JobStateMachine: {writes}"
 
@@ -331,6 +492,51 @@ PLANTED = {
         "jobs = sa.table('jobs', sa.column('id'), sa.column('status'))\n"
         "statement = sa.update(jobs).values(status='paid_out')\n"
     ),
+    # Review round 2 (Vault V1): bulk parameters by keyword, and other executors.
+    "execute_params_keyword": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "async def f(session, connection, rows) -> None:\n"
+        "    await session.execute(update(Job), params=rows)\n"
+    ),
+    "execute_statement_and_params_keywords": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "async def f(session, connection, rows) -> None:\n"
+        "    await session.execute(statement=update(Job), params=rows)\n"
+    ),
+    "scalars_bulk": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "async def f(session, connection, rows) -> None:\n"
+        "    await session.scalars(update(Job).returning(Job.id), rows)\n"
+    ),
+    "scalar_params_keyword": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "async def f(session, connection, rows) -> None:\n"
+        "    await session.scalar(update(Job), params=rows)\n"
+    ),
+    "stream_bulk": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "async def f(session, connection, rows) -> None:\n"
+        "    await session.stream(update(Job), rows)\n"
+    ),
+    "connection_execute": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "async def f(session, connection, rows) -> None:\n"
+        "    await connection.execute(update(Job), params=rows)\n"
+    ),
+    # Review round 3: a bare update gets its SET clause where it is run, so its later
+    # .values() through a variable no longer makes it safe; it was allowed before round 3.
+    "bare_update_values_later": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "statement = update(Job).where(Job.id == 1)\n"
+        "statement = statement.values(started_at=None)\n"
+    ),
     "named_bulk_execute": (
         "from sqlalchemy import update\n"
         "from app.modules.jobs.models import Job\n"
@@ -414,9 +620,6 @@ def test_guard_detects_a_planted_assignment(name: str) -> None:
         # Filtering on it in a query is fine.
         "from sqlalchemy import select\nfrom app.modules.jobs.models import Job\n"
         "statement = select(Job).where(Job.status == 'confirmed')\n",
-        # Updating other columns of a job is not a status write.
-        "from sqlalchemy import update\nfrom app.modules.jobs.models import Job\n"
-        "statement = update(Job).where(Job.id == 1).values(started_at=None)\n",
         # Creating a job with the default status.
         "from app.modules.jobs.models import Job\njob = Job(request_id=1, quote_id=2)\n",
         # Raw SQL on another table, or reading jobs.
@@ -424,43 +627,116 @@ def test_guard_detects_a_planted_assignment(name: str) -> None:
         "statement = 'SELECT status FROM jobs WHERE id = :id'\n",
         (
             "from sqlalchemy import update\n"
-            "from app.modules.jobs.models import Job\n"
-            "statement = update(Job).where(Job.id == 1)\n"
-            "statement = statement.values(started_at=None)\n"
-        ),
-        (
-            "from sqlalchemy import update\n"
             "from app.modules.users.models import User\n"
             "statement = update(User.__table__).values(locale='es')\n"
         ),
         ("def f(job, values) -> None:\n    job.started_at, job.completed_at = values\n"),
         (
-            "from app.modules.jobs.models import Job\n"
-            "statement = Job.__table__.update().where(Job.id == 1).values(started_at=None)\n"
-        ),
-        (
-            "from app.modules.jobs.models import Job\n"
-            "statement = Job.__table__.delete().where(Job.id == 1)\n"
-        ),
-        (
             "from app.modules.users.models import User\n"
             "statement = User.__table__.update().values(status='suspended')\n"
+        ),
+        # Review round 2: an executor with parameters that runs a read is not a write.
+        (
+            "from sqlalchemy import select\n"
+            "from app.modules.jobs.models import Job\n"
+            "async def f(session, rows) -> None:\n"
+            "    await session.execute(select(Job), params=rows)\n"
         ),
     ],
     ids=[
         "read",
         "query_filter",
-        "other_columns",
         "default_status",
         "other_table",
         "select",
-        "other_columns_reassigned",
         "other_table_object",
         "tuple_without_status",
-        "table_method_other_column",
-        "table_method_delete",
         "other_table_method",
+        "read_with_params",
     ],
 )
 def test_guard_ignores_reads_and_other_writes(source: str) -> None:
     assert status_writes(source, "allowed.py") == []
+
+
+# Review round 4 (Cesar: strict). These were allowed until round 3: every construction of an
+# update, insert or delete on the model is flagged now, whatever its values, because a literal
+# .values() still takes columns from execution parameters where the statement ends up.
+STRICT_SINCE_ROUND_4 = {
+    "other_columns": (
+        "from sqlalchemy import update\nfrom app.modules.jobs.models import Job\n"
+        "statement = update(Job).where(Job.id == 1).values(started_at=None)\n"
+    ),
+    "table_method_other_column": (
+        "from app.modules.jobs.models import Job\n"
+        "statement = Job.__table__.update().where(Job.id == 1).values(started_at=None)\n"
+    ),
+    "table_method_delete": (
+        "from app.modules.jobs.models import Job\n"
+        "statement = Job.__table__.delete().where(Job.id == 1)\n"
+    ),
+    "update_without_bulk_params": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "async def f(session) -> None:\n"
+        "    await session.scalars(statement=update(Job).values(started_at=None))\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("name", STRICT_SINCE_ROUND_4)
+def test_any_construction_on_the_model_is_flagged(name: str) -> None:
+    assert status_writes(STRICT_SINCE_ROUND_4[name], f"strict_{name}.py") != []
+
+
+def test_allow_list_has_no_stale_entries() -> None:
+    # Each entry must still match a construction the scanner flags in that function.
+    for (relative, function, rule), reason in ALLOW_LIST.items():
+        source = (APP_DIR.parent / relative).read_text(encoding="utf-8")
+        functions = _functions_by_line(source)
+        matches = [
+            line
+            for target in (JOBS, REQUESTS)
+            for line, found_rule in findings(source, target)
+            if found_rule == rule and functions.get(line) == function
+        ]
+        assert matches, f"stale ALLOW_LIST entry {relative}::{function} ({rule}): {reason}"
+
+
+# Review round 1 (#162): the state machines' files are scanned too; only each one's own write
+# in its transition method is exempt.
+
+
+def planted(path: Path, body: str) -> str:
+    """`path`'s real source with a function appended that runs `body`."""
+    return (
+        path.read_text(encoding="utf-8")
+        + "\n\nasync def planted(machine, job, request, job_id, to, actor) -> None:\n    "
+        + body.replace("\n", "\n    ")
+        + "\n"
+    )
+
+
+FOREIGN_JOB_WRITES = {
+    "attribute": "job.status = 'refunded'",
+    "setattr": "setattr(job, 'status', 'refunded')",
+    "after_transition": "job = await machine.transition(job_id, to, actor)\njob.status = to",
+}
+
+
+@pytest.mark.parametrize("body", FOREIGN_JOB_WRITES.values(), ids=list(FOREIGN_JOB_WRITES))
+def test_a_job_status_write_in_the_request_machine_is_caught(body: str) -> None:
+    assert guarded_writes(REQUEST_STATE_MACHINE, planted(REQUEST_STATE_MACHINE, body)) != []
+
+
+@pytest.mark.parametrize("body", FOREIGN_JOB_WRITES.values(), ids=list(FOREIGN_JOB_WRITES))
+def test_a_second_write_in_the_jobs_machine_is_caught(body: str) -> None:
+    # Outside transition(), or on another row than the one it locked: not the exempt write.
+    assert guarded_writes(STATE_MACHINE, planted(STATE_MACHINE, body)) != []
+
+
+def test_each_state_machine_has_exactly_one_exempt_write() -> None:
+    for path in STATUS_WRITERS:
+        source = path.read_text(encoding="utf-8")
+        assert len(own_status_writes(source)) == 1, path
+        assert guarded_writes(path, source) == []

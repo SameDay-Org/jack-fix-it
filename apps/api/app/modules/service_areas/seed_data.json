@@ -1,0 +1,1485 @@
+{
+  "note": "South Florida launch areas (#9), built on 2026-10-22 by scripts/build_service_area_seed.py from GeoNames US.zip and the Census 2020 ZCTA-to-county relationship file; sources and rule in SOURCES.md. Contains data from GeoNames, CC BY 4.0. The seed inserts missing ZIPs and never changes an existing row: switch a county on in the admin or with SQL (docs/railway.md).",
+  "service_areas": [
+    {
+      "region": "South Florida",
+      "city": "Dania",
+      "state": "FL",
+      "zip_code": "33004",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Hallandale",
+      "state": "FL",
+      "zip_code": "33009",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Hialeah",
+      "state": "FL",
+      "zip_code": "33010",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Hialeah",
+      "state": "FL",
+      "zip_code": "33012",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Hialeah",
+      "state": "FL",
+      "zip_code": "33013",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Hialeah",
+      "state": "FL",
+      "zip_code": "33014",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Hialeah",
+      "state": "FL",
+      "zip_code": "33015",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Hialeah",
+      "state": "FL",
+      "zip_code": "33016",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Hialeah",
+      "state": "FL",
+      "zip_code": "33018",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Hollywood",
+      "state": "FL",
+      "zip_code": "33019",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Hollywood",
+      "state": "FL",
+      "zip_code": "33020",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Hollywood",
+      "state": "FL",
+      "zip_code": "33021",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Hollywood",
+      "state": "FL",
+      "zip_code": "33022",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Hollywood",
+      "state": "FL",
+      "zip_code": "33023",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Hollywood",
+      "state": "FL",
+      "zip_code": "33024",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Hollywood",
+      "state": "FL",
+      "zip_code": "33025",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Hollywood",
+      "state": "FL",
+      "zip_code": "33026",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Hollywood",
+      "state": "FL",
+      "zip_code": "33027",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Pembroke Pines",
+      "state": "FL",
+      "zip_code": "33028",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Hollywood",
+      "state": "FL",
+      "zip_code": "33029",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Homestead",
+      "state": "FL",
+      "zip_code": "33030",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Homestead",
+      "state": "FL",
+      "zip_code": "33031",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Homestead",
+      "state": "FL",
+      "zip_code": "33032",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Homestead",
+      "state": "FL",
+      "zip_code": "33033",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Homestead",
+      "state": "FL",
+      "zip_code": "33034",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Homestead",
+      "state": "FL",
+      "zip_code": "33035",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Homestead",
+      "state": "FL",
+      "zip_code": "33039",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Opa Locka",
+      "state": "FL",
+      "zip_code": "33054",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Opa Locka",
+      "state": "FL",
+      "zip_code": "33055",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami Gardens",
+      "state": "FL",
+      "zip_code": "33056",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Pompano Beach",
+      "state": "FL",
+      "zip_code": "33060",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Pompano Beach",
+      "state": "FL",
+      "zip_code": "33062",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Pompano Beach",
+      "state": "FL",
+      "zip_code": "33063",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Pompano Beach",
+      "state": "FL",
+      "zip_code": "33064",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Pompano Beach",
+      "state": "FL",
+      "zip_code": "33065",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Pompano Beach",
+      "state": "FL",
+      "zip_code": "33066",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Pompano Beach",
+      "state": "FL",
+      "zip_code": "33067",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Pompano Beach",
+      "state": "FL",
+      "zip_code": "33068",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Pompano Beach",
+      "state": "FL",
+      "zip_code": "33069",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Pompano Beach",
+      "state": "FL",
+      "zip_code": "33071",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Pompano Beach",
+      "state": "FL",
+      "zip_code": "33073",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Pompano Beach",
+      "state": "FL",
+      "zip_code": "33076",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33101",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami Beach",
+      "state": "FL",
+      "zip_code": "33109",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33122",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33125",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33126",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33127",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33128",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33129",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33130",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33131",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33132",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33133",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33134",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33135",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33136",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33137",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33138",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami Beach",
+      "state": "FL",
+      "zip_code": "33139",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami Beach",
+      "state": "FL",
+      "zip_code": "33140",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami Beach",
+      "state": "FL",
+      "zip_code": "33141",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33142",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33143",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33144",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33145",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33146",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33147",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Key Biscayne",
+      "state": "FL",
+      "zip_code": "33149",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33150",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami Beach",
+      "state": "FL",
+      "zip_code": "33154",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33155",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33156",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33157",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33158",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "North Miami Beach",
+      "state": "FL",
+      "zip_code": "33160",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33161",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33162",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33165",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33166",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33167",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33168",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33169",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33170",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33172",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33173",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33174",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33175",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33176",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33177",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33178",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33179",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33180",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33181",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33182",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33183",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33184",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33185",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33186",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33187",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33189",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33190",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33193",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33194",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Miami",
+      "state": "FL",
+      "zip_code": "33196",
+      "county": "Miami-Dade",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33301",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33304",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33305",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33306",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33308",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33309",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33311",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33312",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33313",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33314",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33315",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33316",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33317",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33319",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33321",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33322",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33323",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33324",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33325",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33326",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33327",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33328",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33330",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33331",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33332",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33334",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Fort Lauderdale",
+      "state": "FL",
+      "zip_code": "33351",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Plantation",
+      "state": "FL",
+      "zip_code": "33388",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "West Palm Beach",
+      "state": "FL",
+      "zip_code": "33401",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "West Palm Beach",
+      "state": "FL",
+      "zip_code": "33403",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "West Palm Beach",
+      "state": "FL",
+      "zip_code": "33404",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "West Palm Beach",
+      "state": "FL",
+      "zip_code": "33405",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "West Palm Beach",
+      "state": "FL",
+      "zip_code": "33406",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "West Palm Beach",
+      "state": "FL",
+      "zip_code": "33407",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "North Palm Beach",
+      "state": "FL",
+      "zip_code": "33408",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "West Palm Beach",
+      "state": "FL",
+      "zip_code": "33409",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Palm Beach Gardens",
+      "state": "FL",
+      "zip_code": "33410",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "West Palm Beach",
+      "state": "FL",
+      "zip_code": "33411",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "West Palm Beach",
+      "state": "FL",
+      "zip_code": "33412",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "West Palm Beach",
+      "state": "FL",
+      "zip_code": "33413",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Wellington",
+      "state": "FL",
+      "zip_code": "33414",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "West Palm Beach",
+      "state": "FL",
+      "zip_code": "33415",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "West Palm Beach",
+      "state": "FL",
+      "zip_code": "33417",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Palm Beach Gardens",
+      "state": "FL",
+      "zip_code": "33418",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Boynton Beach",
+      "state": "FL",
+      "zip_code": "33426",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Boca Raton",
+      "state": "FL",
+      "zip_code": "33428",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Belle Glade",
+      "state": "FL",
+      "zip_code": "33430",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Boca Raton",
+      "state": "FL",
+      "zip_code": "33431",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Boca Raton",
+      "state": "FL",
+      "zip_code": "33432",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Boca Raton",
+      "state": "FL",
+      "zip_code": "33433",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Boca Raton",
+      "state": "FL",
+      "zip_code": "33434",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Boynton Beach",
+      "state": "FL",
+      "zip_code": "33435",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Boynton Beach",
+      "state": "FL",
+      "zip_code": "33436",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Boynton Beach",
+      "state": "FL",
+      "zip_code": "33437",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Deerfield Beach",
+      "state": "FL",
+      "zip_code": "33441",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Deerfield Beach",
+      "state": "FL",
+      "zip_code": "33442",
+      "county": "Broward",
+      "active": true
+    },
+    {
+      "region": "South Florida",
+      "city": "Delray Beach",
+      "state": "FL",
+      "zip_code": "33444",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Delray Beach",
+      "state": "FL",
+      "zip_code": "33445",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Delray Beach",
+      "state": "FL",
+      "zip_code": "33446",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Lake Worth",
+      "state": "FL",
+      "zip_code": "33449",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Jupiter",
+      "state": "FL",
+      "zip_code": "33458",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Lake Worth",
+      "state": "FL",
+      "zip_code": "33460",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Lake Worth",
+      "state": "FL",
+      "zip_code": "33461",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Lake Worth",
+      "state": "FL",
+      "zip_code": "33462",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Lake Worth",
+      "state": "FL",
+      "zip_code": "33463",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Lake Worth",
+      "state": "FL",
+      "zip_code": "33467",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Loxahatchee",
+      "state": "FL",
+      "zip_code": "33470",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Boynton Beach",
+      "state": "FL",
+      "zip_code": "33472",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Boynton Beach",
+      "state": "FL",
+      "zip_code": "33473",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Pahokee",
+      "state": "FL",
+      "zip_code": "33476",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Jupiter",
+      "state": "FL",
+      "zip_code": "33477",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Jupiter",
+      "state": "FL",
+      "zip_code": "33478",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Palm Beach",
+      "state": "FL",
+      "zip_code": "33480",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Delray Beach",
+      "state": "FL",
+      "zip_code": "33483",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Delray Beach",
+      "state": "FL",
+      "zip_code": "33484",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Boca Raton",
+      "state": "FL",
+      "zip_code": "33486",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Boca Raton",
+      "state": "FL",
+      "zip_code": "33487",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "South Bay",
+      "state": "FL",
+      "zip_code": "33493",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Boca Raton",
+      "state": "FL",
+      "zip_code": "33496",
+      "county": "Palm Beach",
+      "active": false
+    },
+    {
+      "region": "South Florida",
+      "city": "Boca Raton",
+      "state": "FL",
+      "zip_code": "33498",
+      "county": "Palm Beach",
+      "active": false
+    }
+  ]
+}

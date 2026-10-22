@@ -34,6 +34,15 @@ PUBLIC_ROUTES: Final[frozenset[tuple[str, str]]] = frozenset(
         # credential, and both routes are rate-limited per IP and per email.
         ("POST", "/v1/auth/password/forgot"),
         ("POST", "/v1/auth/password/reset"),
+        # The catalog: the landing page and the request flow show categories and served areas
+        # before anyone signs in. Read-only, active rows only, rate-limited per IP.
+        ("GET", "/v1/categories"),
+        ("GET", "/v1/service-areas"),
+        # Served or not: the request flow and the landing page ask before login (#46).
+        ("GET", "/v1/service-areas/check"),
+        # Out of the served area, a web visitor joins the waitlist without an account; a valid
+        # bearer, if sent, links the entry to the user. Rate-limited per IP and per contact.
+        ("POST", "/v1/waitlist"),
     }
 )
 

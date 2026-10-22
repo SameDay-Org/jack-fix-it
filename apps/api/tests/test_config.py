@@ -5,6 +5,7 @@ from app.config import normalize_database_url
 from tests.conftest import (
     TEST_EMAIL_SETTINGS,
     TEST_RATE_LIMIT_SETTINGS,
+    TEST_REFRESH_SETTINGS,
     TEST_STORAGE_SETTINGS,
     TEST_TWILIO_SETTINGS,
     make_settings,
@@ -79,6 +80,7 @@ def test_jwt_secret_required_in_staging_and_production(app_env: str) -> None:
         **TEST_STORAGE_SETTINGS,
         **TEST_TWILIO_SETTINGS,
         **TEST_RATE_LIMIT_SETTINGS,
+        **TEST_REFRESH_SETTINGS,
         **TEST_EMAIL_SETTINGS,
     )
     assert settings.jwt_secret is not None
@@ -111,7 +113,9 @@ def test_secret_required_in_staging_and_production(app_env: str) -> None:
     # The error names the variable but never prints its value.
     assert short not in str(too_short.value)
     assert "32 characters" in str(missing.value)
-    settings = make_settings(**deployed, **TEST_RATE_LIMIT_SETTINGS, **TEST_EMAIL_SETTINGS)
+    settings = make_settings(
+        **deployed, **TEST_RATE_LIMIT_SETTINGS, **TEST_REFRESH_SETTINGS, **TEST_EMAIL_SETTINGS
+    )
     assert settings.rate_limit_key_secret is not None
 
 
@@ -209,6 +213,7 @@ def test_s3_settings_required_in_staging_and_production(app_env: str, missing: s
         **TEST_STORAGE_SETTINGS,
         **TEST_TWILIO_SETTINGS,
         **TEST_RATE_LIMIT_SETTINGS,
+        **TEST_REFRESH_SETTINGS,
         **TEST_EMAIL_SETTINGS,
     )
     assert settings.s3_bucket == TEST_STORAGE_SETTINGS["s3_bucket"]
@@ -275,6 +280,7 @@ def test_twilio_settings_required_in_staging_and_production(app_env: str, missin
         **TEST_TWILIO_SETTINGS,
         **TEST_STORAGE_SETTINGS,
         **TEST_RATE_LIMIT_SETTINGS,
+        **TEST_REFRESH_SETTINGS,
         **TEST_EMAIL_SETTINGS,
     )
     assert settings.twilio_verify_service_sid == TEST_TWILIO_SETTINGS["twilio_verify_service_sid"]
@@ -335,6 +341,7 @@ def test_resend_settings_required_in_staging_and_production(app_env: str, missin
         **TEST_STORAGE_SETTINGS,
         **TEST_TWILIO_SETTINGS,
         **TEST_RATE_LIMIT_SETTINGS,
+        **TEST_REFRESH_SETTINGS,
         **TEST_EMAIL_SETTINGS,
     }
 

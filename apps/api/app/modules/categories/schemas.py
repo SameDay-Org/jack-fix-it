@@ -1,9 +1,9 @@
+import uuid
 from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
 
-# Locales every category must name (the names_en_es CHECK); others may be added later.
-REQUIRED_LOCALES = ("en", "es")
+from app.modules.categories.intake import REQUIRED_LOCALES, IntakeQuestion, IntakeQuestions
 
 
 class CategorySeed(BaseModel):
@@ -16,7 +16,7 @@ class CategorySeed(BaseModel):
     icon: str | None = Field(default=None, max_length=64)
     requires_license: bool
     reference_price_cents: int | None = Field(default=None, ge=0)
-    intake_questions: list[dict[str, object]] = Field(default_factory=list)
+    intake_questions: IntakeQuestions = Field(default_factory=list)
     active: bool
 
     @field_validator("names")
@@ -38,3 +38,20 @@ class CategorySeedCatalog(RootModel[list[CategorySeed]]):
         if duplicates:
             raise ValueError(f"duplicate slugs: {', '.join(duplicates)}")
         return self
+
+
+class CategorySummary(BaseModel):
+    id: uuid.UUID
+    slug: str
+    names: dict[str, str] = Field(description="Display name per locale, e.g. en and es.")
+
+
+class CategoryOut(CategorySummary):
+    icon: str | None
+    requires_license: bool
+    intake_questions: list[IntakeQuestion] = Field(
+        description=(
+            "What to ask the customer for this category, in order; answers go in the "
+            "request's intake_answers under each key. Empty when there is nothing to ask."
+        )
+    )

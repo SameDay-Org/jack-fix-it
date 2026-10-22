@@ -27,12 +27,15 @@ from app.errors import NotFoundError
 from app.integrations.storage import Storage
 from app.modules.addresses.service import AddressService
 from app.modules.auth.permissions import ensure_owner
-from app.modules.categories.service import CategoryService
+from app.modules.categories.intake import InvalidAnswersError, validate_answers
+from app.modules.categories.service import BrokenIntakeQuestionsError, CategoryService
 from app.modules.requests.customer_status import REQUEST_CUSTOMER_STATUS
 from app.modules.requests.errors import (
     InvalidCategoryError,
+    InvalidIntakeAnswersError,
     InvalidMediaError,
     InvalidRequestError,
+    ZipNotServedError,
 )
 from app.modules.requests.models import (
     RequestMedia,
@@ -48,6 +51,7 @@ from app.modules.requests.schemas import (
     RequestPage,
     RequestSummary,
 )
+from app.modules.service_areas.service import ServiceAreaService
 from app.modules.uploads.schemas import UploadPurpose
 from app.modules.uploads.service import owned_upload
 from app.modules.users.types import UserAccount
@@ -80,6 +84,7 @@ class ServiceRequestService:
         session: AsyncSession,
         addresses: AddressService,
         categories: CategoryService,
+        service_areas: ServiceAreaService,
         storage: Storage,
         config: RequestConfig,
     ) -> None:
@@ -87,6 +92,7 @@ class ServiceRequestService:
         self._requests = ServiceRequestRepository(session)
         self._addresses = addresses
         self._categories = categories
+        self._service_areas = service_areas
         self._storage = storage
         self._config = config
 
@@ -95,8 +101,9 @@ class ServiceRequestService:
             raise InvalidRequestError
         if _intake_size(data.intake_answers) > self._config.intake_max_bytes:
             raise InvalidRequestError
-        if data.category_id is not None and not await self._categories.is_active(data.category_id):
-            raise InvalidCategoryError
+        if not await self._service_areas.is_served(data.address.zip_code):
+            raise ZipNotServedError
+        intake_answers = await self._intake_answers(data.category_id, data.intake_answers)
         media_kinds = self._media_kinds(user, data.media_keys)
 
         savepoint = await self._session.begin_nested()
@@ -108,7 +115,7 @@ class ServiceRequestService:
                     category_id=data.category_id,
                     address_id=address_id,
                     description=data.description,
-                    intake_answers=data.intake_answers,
+                    intake_answers=intake_answers,
                     preferred_date=data.preferred_date,
                     language=user.locale,
                     origin=RequestOrigin.APP,
@@ -169,6 +176,36 @@ class ServiceRequestService:
         ]
         next_cursor = _encode_cursor(page[-1]) if more and page else None
         return RequestPage(items=items, next_cursor=next_cursor)
+
+    async def _intake_answers(
+        self, category_id: uuid.UUID | None, answers: dict[str, JsonValue]
+    ) -> dict[str, JsonValue]:
+        """The answers checked against the category's questions, normalized. Without a
+        category there is nothing to answer (the BDC classifies the request)."""
+        if category_id is None:
+            if answers:
+                logger.info("intake_answers_invalid", extra={"failed": [], "unknown": len(answers)})
+                raise InvalidIntakeAnswersError
+            return {}
+        try:
+            questions = await self._categories.intake_questions(category_id)
+        except BrokenIntakeQuestionsError:
+            raise InvalidCategoryError from None  # logged by the category service
+        if questions is None:
+            raise InvalidCategoryError
+        try:
+            return validate_answers(questions, answers)
+        except InvalidAnswersError as error:
+            # Question keys come from the category; the caller's unknown keys are only counted.
+            logger.info(
+                "intake_answers_invalid",
+                extra={
+                    "category_id": str(category_id),
+                    "failed": error.failed,
+                    "unknown": error.unknown,
+                },
+            )
+            raise InvalidIntakeAnswersError from None
 
     def _media_kinds(
         self, user: UserAccount, keys: list[str]
