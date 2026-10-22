@@ -1,7 +1,7 @@
 """pro_documents
 
 Revision ID: 3bc9012ebd6d
-Revises: 2167b98c0780
+Revises: 9072864e3137
 Create Date: 2026-10-22 00:12:42.864569
 
 """
@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "3bc9012ebd6d"
-down_revision: str | Sequence[str] | None = "2167b98c0780"
+down_revision: str | Sequence[str] | None = "9072864e3137"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -160,6 +160,24 @@ class Settings(BaseSettings):
     # Pro profile (D6.1, #36): the most categories and service areas one pro may list.
     pro_max_categories: int = Field(default=5, gt=0)
     pro_max_service_areas: int = Field(default=50, gt=0)
+    # Push notifications through Expo (D10.3, #54). The access token is optional everywhere:
+    # Expo accepts unauthenticated sends unless the project turns on enhanced security.
+    expo_access_token: SecretStr | None = None
+    # Longest wait on Expo or Redis for one push operation.
+    push_send_timeout_seconds: float = Field(default=5.0, gt=0)
+    # How often the worker asks Expo for delivery receipts (a cron, in minutes of the hour).
+    push_receipt_check_minutes: int = Field(default=15, ge=1, le=60)
+    # How long a sent ticket waits for its receipt; Expo keeps receipts for about a day.
+    push_ticket_ttl_seconds: int = Field(default=86_400, gt=0)
+    # Delay before a failed send is retried, times the attempt number.
+    push_retry_backoff_seconds: int = Field(default=30, gt=0)
+    # Sends of one message to one device before a retryable error (a busy Expo, a rate limit)
+    # counts as final; also the most runs ARQ gives one send_push job.
+    push_max_attempts: int = Field(default=5, gt=0)
+    push_max_devices_per_user: int = Field(default=10, gt=0)
+    # Waitlist (D8.4, #46): joins per client IP and per contact (email or phone, hashed), per
+    # AUTH_RATE_LIMIT_WINDOW_SECONDS.
+    waitlist_join_limit: int = Field(default=5, gt=0)
 
     @field_validator("database_url")
     @classmethod
@@ -204,6 +222,7 @@ class Settings(BaseSettings):
         "refresh_rotation_secret",
         "resend_api_key",
         "email_from",
+        "expo_access_token",
         mode="before",
     )
     @classmethod

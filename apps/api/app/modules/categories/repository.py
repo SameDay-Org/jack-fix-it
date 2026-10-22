@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.categories.intake import dump_questions
 from app.modules.categories.models import Category
 from app.modules.categories.schemas import CategorySeed
 
@@ -23,15 +24,21 @@ class CategoryRepository:
             return []
         statement = (
             insert(Category)
-            .values([entry.model_dump() for entry in entries])
+            .values(
+                [
+                    entry.model_dump()
+                    | {"intake_questions": dump_questions(entry.intake_questions)}
+                    for entry in entries
+                ]
+            )
             .on_conflict_do_nothing(index_elements=[Category.slug])
             .returning(Category.slug)
         )
         return list((await self._session.scalars(statement)).all())
 
-    async def is_active(self, category_id: uuid.UUID) -> bool:
-        statement = select(Category.id).where(Category.id == category_id, Category.active)
-        return (await self._session.scalar(statement)) is not None
+    async def get_active(self, category_id: uuid.UUID) -> Category | None:
+        statement = select(Category).where(Category.id == category_id, Category.active)
+        return (await self._session.scalars(statement)).one_or_none()
 
     async def list_active(self) -> list[Category]:
         statement = select(Category).where(Category.active).order_by(Category.slug)

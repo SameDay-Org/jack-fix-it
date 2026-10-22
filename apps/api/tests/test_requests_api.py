@@ -20,14 +20,18 @@ from app.config import Settings
 from app.integrations.storage import PresignedUpload, get_storage
 from app.modules.addresses.models import Address
 from app.modules.auth import security
+from app.modules.categories.intake import dump_questions
 from app.modules.categories.models import Category
+from app.modules.categories.service import load_seed_data
 from app.modules.requests.customer_status import REQUEST_CUSTOMER_STATUS
 from app.modules.requests.models import RequestMedia, RequestStatus, ServiceRequest
+from app.modules.service_areas.models import ServiceArea
 from app.modules.users.models import User
 from app.modules.users.types import UserRole
 from app.observability import JsonFormatter
 from app.rate_limit import get_rate_limiter
 from tests.conftest import TEST_JWT_SECRET, InMemoryRateLimiter, make_settings
+from tests.test_intake_questions import FIXTURE_QUESTIONS, labels
 
 GLOSSARY = Path(__file__).resolve().parents[3] / "docs" / "glossary.md"
 # Distinct from the defaults, so the tests prove the values come from settings.
@@ -46,6 +50,14 @@ INVALID_CATEGORY = {
     "error": {"code": "invalid_category", "message": "The category is not available."}
 }
 VALIDATION_ERROR = {"error": {"code": "validation_error", "message": "The request is invalid."}}
+INVALID_INTAKE_ANSWERS = {
+    "error": {
+        "code": "invalid_intake_answers",
+        "message": "The answers to the service questions are invalid.",
+    }
+}
+# The required answers of FIXTURE_QUESTIONS.
+REQUIRED_ANSWERS: dict[str, Any] = {"rooms": 2, "size": "small"}
 FORBIDDEN = {"error": {"code": "forbidden", "message": "You do not have access to this resource."}}
 NOT_FOUND = {"error": {"code": "not_found", "message": "Resource not found."}}
 
@@ -77,7 +89,16 @@ def settings() -> Settings:
 
 
 @pytest.fixture
-def storage(app: FastAPI) -> FakeStorage:
+async def served(db_session: AsyncSession) -> None:
+    """The fixture address's ZIP as an active service area (#46): only served ZIPs create."""
+    db_session.add(
+        ServiceArea(region="Test Region", city="Orlando", state="FL", zip_code=ADDRESS["zip_code"])
+    )
+    await db_session.flush()
+
+
+@pytest.fixture
+def storage(app: FastAPI, served: None) -> FakeStorage:
     fake = FakeStorage()
     app.dependency_overrides[get_storage] = lambda: fake
     # A fixed clock, so no test straddles two rate-limit windows.
@@ -112,9 +133,16 @@ async def make_caller(
     return Caller(id=user.id, headers={"Authorization": f"Bearer {token}"})
 
 
-async def make_category(session: AsyncSession, active: bool = True) -> uuid.UUID:
+async def make_category(
+    session: AsyncSession,
+    active: bool = True,
+    questions: list[dict[str, Any]] | None = None,
+) -> uuid.UUID:
     category = Category(
-        slug=f"test-{uuid.uuid4().hex[:8]}", names={"en": "Test", "es": "Prueba"}, active=active
+        slug=f"test-{uuid.uuid4().hex[:8]}",
+        names={"en": "Test", "es": "Prueba"},
+        active=active,
+        intake_questions=questions or [],
     )
     session.add(category)
     await session.flush()
@@ -145,7 +173,7 @@ async def test_customer_creates_request_with_address_media_and_gets_public_code(
     db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
 ) -> None:
     ana = await make_caller(db_session)
-    category_id = await make_category(db_session)
+    category_id = await make_category(db_session, questions=FIXTURE_QUESTIONS)
     photo, video = ana.media_key(".jpg"), ana.media_key(".mp4")
     tomorrow = (datetime.now(UTC).date() + timedelta(days=1)).isoformat()
 
@@ -155,7 +183,7 @@ async def test_customer_creates_request_with_address_media_and_gets_public_code(
         category_id=str(category_id),
         address={**ADDRESS, "line2": "Apt 2", "zip_code": "32801-1234"},
         preferred_date=tomorrow,
-        intake_answers={"rooms": 2, "pets": True},
+        intake_answers={"rooms": 2, "size": "large", "pets": True},
         media_keys=[photo, video],
     )
 
@@ -168,7 +196,7 @@ async def test_customer_creates_request_with_address_media_and_gets_public_code(
     assert out["description"] == DESCRIPTION
     assert out["address"] == {**ADDRESS, "line2": "Apt 2", "zip_code": "32801-1234"}
     assert out["preferred_date"] == tomorrow
-    assert out["intake_answers"] == {"rooms": 2, "pets": True}
+    assert out["intake_answers"] == {"rooms": 2, "size": "large", "pets": True}
     # Media of one request share created_at, so their order is not the upload order.
     assert sorted(m["kind"] for m in out["media"]) == ["photo", "video"]
     # The address belongs to the caller.
@@ -314,10 +342,15 @@ async def test_intake_answers_size_limit(
     db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
 ) -> None:
     ana = await make_caller(db_session)
+    notes = {"key": "notes", "type": "text", "required": False, "labels": labels("Notes"),
+             "max_length": 1000}  # fmt: skip
+    category_id = str(await make_category(db_session, questions=[notes]))
 
-    too_big = await create(db_client, ana, intake_answers={"notes": "x" * INTAKE_MAX_BYTES})
-    fits = await create(db_client, ana, intake_answers={"notes": "x" * 50})
-    not_an_object = await create(db_client, ana, intake_answers=["a", "b"])
+    too_big = await create(
+        db_client, ana, category_id=category_id, intake_answers={"notes": "x" * INTAKE_MAX_BYTES}
+    )
+    fits = await create(db_client, ana, category_id=category_id, intake_answers={"notes": "x" * 50})
+    not_an_object = await create(db_client, ana, category_id=category_id, intake_answers=["a", "b"])
 
     assert too_big.status_code == 422
     assert too_big.json() == VALIDATION_ERROR
@@ -754,3 +787,236 @@ def test_customer_status_mapping_is_total_and_uses_glossary_keys() -> None:
     assert len(keys) == 11
     assert {status.value: REQUEST_CUSTOMER_STATUS[status] for status in RequestStatus} == expected
     assert set(REQUEST_CUSTOMER_STATUS.values()) <= keys
+
+
+# Intake answers (D8.3, #44), against FIXTURE_QUESTIONS: one question of each type.
+
+
+async def create_with_answers(
+    client: httpx.AsyncClient, session: AsyncSession, answers: dict[str, Any]
+) -> httpx.Response:
+    caller = await make_caller(session)
+    category_id = await make_category(session, questions=FIXTURE_QUESTIONS)
+    return await create(client, caller, category_id=str(category_id), intake_answers=answers)
+
+
+async def test_valid_answers_stored_normalized(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    answers = {
+        "rooms": 6,
+        "size": "large",
+        "extras": ["windows", "oven"],
+        "pets": False,
+        "notes": "  ring the bell  ",
+    }
+
+    response = await create_with_answers(db_client, db_session, answers)
+    required_only = await create_with_answers(db_client, db_session, REQUIRED_ANSWERS)
+
+    assert response.status_code == 201
+    stored = {**answers, "notes": "ring the bell"}
+    assert response.json()["intake_answers"] == stored
+    row = await db_session.get(ServiceRequest, uuid.UUID(response.json()["id"]))
+    assert row is not None
+    assert row.intake_answers == stored
+    assert required_only.status_code == 201
+    assert required_only.json()["intake_answers"] == REQUIRED_ANSWERS
+
+
+async def assert_refused(
+    client: httpx.AsyncClient, session: AsyncSession, answers: dict[str, Any]
+) -> None:
+    before = await session.scalar(select(func.count()).select_from(ServiceRequest))
+
+    response = await create_with_answers(client, session, answers)
+
+    assert response.status_code == 422
+    assert response.json() == INVALID_INTAKE_ANSWERS
+    # Refused before any write.
+    assert await session.scalar(select(func.count()).select_from(ServiceRequest)) == before
+
+
+@pytest.mark.parametrize("missing", ["rooms", "size"])
+async def test_missing_required_422(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage, missing: str
+) -> None:
+    answers = {k: v for k, v in REQUIRED_ANSWERS.items() if k != missing}
+    await assert_refused(db_client, db_session, answers)
+
+
+async def test_unknown_key_422(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    await assert_refused(db_client, db_session, {**REQUIRED_ANSWERS, "garage": True})
+
+
+@pytest.mark.parametrize("value", [0, 7, True, 2.0, "2", None], ids=repr)
+async def test_integer_out_of_range_or_bool_or_float_422(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage, value: Any
+) -> None:
+    await assert_refused(db_client, db_session, {**REQUIRED_ANSWERS, "rooms": value})
+
+
+@pytest.mark.parametrize("value", ["medium", "Small", ["small"], 1], ids=repr)
+async def test_choice_not_in_options_422(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage, value: Any
+) -> None:
+    await assert_refused(db_client, db_session, {**REQUIRED_ANSWERS, "size": value})
+
+
+@pytest.mark.parametrize(
+    "value",
+    [["oven", "oven"], [], ["oven", "fridge", "windows"], ["dishwasher"], "oven", [1]],
+    ids=["duplicate", "below_min", "above_max", "not_an_option", "not_a_list", "not_text"],
+)
+async def test_multi_choice_duplicates_or_count_422(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage, value: Any
+) -> None:
+    await assert_refused(db_client, db_session, {**REQUIRED_ANSWERS, "extras": value})
+
+
+@pytest.mark.parametrize("value", ["   ", "x" * 21, 5, ["x"]], ids=repr)
+async def test_text_blank_or_too_long_422(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage, value: Any
+) -> None:
+    await assert_refused(db_client, db_session, {**REQUIRED_ANSWERS, "notes": value})
+
+
+async def test_boolean_must_be_a_boolean_422(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    await assert_refused(db_client, db_session, {**REQUIRED_ANSWERS, "pets": "yes"})
+
+
+async def test_answers_without_category_422(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    ana = await make_caller(db_session)
+
+    response = await create(db_client, ana, intake_answers={"rooms": 2})
+    empty = await create(db_client, ana, intake_answers={})
+
+    assert response.status_code == 422
+    assert response.json() == INVALID_INTAKE_ANSWERS
+    assert empty.status_code == 201
+
+
+async def test_broken_category_questions_422_invalid_category(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ana = await make_caller(db_session)
+    broken = await make_category(db_session, questions=[{"key": "rooms", "type": "number"}])
+
+    with caplog.at_level(logging.INFO):
+        response = await create(
+            db_client, ana, category_id=str(broken), intake_answers={"rooms": 2}
+        )
+    without_category = await create(db_client, ana)
+
+    assert response.status_code == 422
+    assert response.json() == INVALID_CATEGORY
+    assert await count_rows(db_session, ServiceRequest, ServiceRequest.customer_id, ana.id) == 1
+    [record] = [r for r in caplog.records if r.message == "category_intake_invalid"]
+    assert record.__dict__["category_id"] == str(broken)
+    # The customer can still send it without a category: the BDC classifies it.
+    assert without_category.status_code == 201
+
+
+async def test_error_body_and_logs_never_echo_values(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    answers = {
+        "rooms": "probe-value-rooms",
+        "size": "small",
+        "notes": "probe-value-notes-too-long",
+        "probe_key_unknown": "probe-value-unknown",
+    }
+
+    with caplog.at_level(logging.DEBUG):
+        response = await create_with_answers(db_client, db_session, answers)
+
+    assert response.status_code == 422
+    assert response.json() == INVALID_INTAKE_ANSWERS
+    [record] = [r for r in caplog.records if r.message == "intake_answers_invalid"]
+    assert record.__dict__["failed"] == ["rooms", "notes"]
+    assert record.__dict__["unknown"] == 1
+    output = "\n".join(JsonFormatter().format(r) for r in caplog.records)
+    assert "probe" not in output
+    assert "probe" not in response.text
+
+
+def test_openapi_documents_invalid_intake_answers(app: FastAPI) -> None:
+    operation = app.openapi()["paths"]["/v1/requests"]["post"]
+
+    assert "invalid_intake_answers" in operation["responses"]["422"]["description"]
+
+
+async def test_request_with_jobs_answer_validates(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    # The seeded painting question (D8.3): required multi_choice, at least one job.
+    [painting] = [entry for entry in load_seed_data() if entry.slug == "painting"]
+    category_id = str(
+        await make_category(db_session, questions=dump_questions(painting.intake_questions))
+    )
+
+    async def answer(jobs: Any) -> httpx.Response:
+        answers = {} if jobs is None else {"jobs": jobs}
+        caller = await make_caller(db_session)  # one each: request creation is rate limited
+        return await create(db_client, caller, category_id=category_id, intake_answers=answers)
+
+    valid = await answer(["interior", "ceilings"])
+    assert valid.status_code == 201
+    assert valid.json()["intake_answers"] == {"jobs": ["interior", "ceilings"]}
+    for refused in ([], ["roofing"], ["interior", "interior"], "interior", None):
+        response = await answer(refused)
+        assert response.status_code == 422, refused
+        assert response.json() == INVALID_INTAKE_ANSWERS
+
+
+# Served ZIPs only (#46)
+
+ZIP_NOT_SERVED = {
+    "error": {"code": "zip_not_served", "message": "This ZIP code is not served yet."}
+}
+
+
+@pytest.mark.parametrize("zip_code", ["00009", "00008"], ids=["unknown", "inactive"])
+async def test_unserved_zip_is_422_and_writes_nothing(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage, zip_code: str
+) -> None:
+    # A fixture area turned off: served only while active.
+    db_session.add(
+        ServiceArea(
+            region="Test Region", city="Testville", state="ZZ", zip_code="00008", active=False
+        )
+    )
+    await db_session.flush()
+    ana = await make_caller(db_session)
+
+    response = await create(db_client, ana, address={**ADDRESS, "zip_code": zip_code})
+
+    assert response.status_code == 422
+    assert response.json() == ZIP_NOT_SERVED
+    assert await count_rows(db_session, ServiceRequest, ServiceRequest.customer_id, ana.id) == 0
+    assert await count_rows(db_session, Address, Address.user_id, ana.id) == 0
+
+
+async def test_served_zip_plus_4_is_created(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    ana = await make_caller(db_session)
+
+    response = await create(
+        db_client, ana, address={**ADDRESS, "zip_code": f"{ADDRESS['zip_code']}-4321"}
+    )
+
+    assert response.status_code == 201
+    assert response.json()["address"]["zip_code"] == f"{ADDRESS['zip_code']}-4321"

@@ -41,6 +41,19 @@ status directly: the backend state machine (D12.1, #60) changes them and writes 
 | `expired`     | Closed without an accepted quote because it ran out of time.             |
 | `cancelled`   | Cancelled by either side before a job exists.                            |
 
+Request transitions and who may make each one live in
+`apps/api/app/modules/requests/transitions.py` (D12.1, #160): `RequestStateMachine` applies them
+and answers 409 `invalid_transition` otherwise. The terminal states are `expired` and
+`cancelled`. Cesar approved four more edges on 2026-10-22:
+
+- `quote_ready → finding_pro` (system): every quote was withdrawn or expired before the
+  request's own deadline, so the request goes back out.
+- `accepted → quote_ready` (system): the payment failed (#61); the customer can retry or pick
+  another quote.
+- `accepted → cancelled` (the customer who owns it, or staff): abandoned before paying; no money
+  has moved.
+- `finding_pro → reviewing` (staff): the BDC pulls the request back to reclassify it.
+
 What the customer sees for a request, decided 2026-10-21 by Cesar. The mapping lives in
 `apps/api/app/modules/requests/customer_status.py` and the API returns it as `customer_status`.
 Once the request is paid, the job's status takes over (see the job mapping below).

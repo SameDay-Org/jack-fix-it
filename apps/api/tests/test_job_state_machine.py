@@ -272,6 +272,18 @@ async def test_every_transition_writes_one_event_with_actor_and_location(
     assert (await reload(db_session, job)).status is JobStatus.PAID_OUT
 
 
+async def test_transition_returns_the_new_status_not_the_row(
+    db_session: AsyncSession, world: World
+) -> None:
+    # #162: callers get a value, so none holds a Job whose status it could write directly.
+    job = await make_job(db_session, world, JobStatus.COMPLETED)
+
+    result = await machine(db_session).transition(job.id, JobStatus.CONFIRMED, SYSTEM)
+
+    assert result is JobStatus.CONFIRMED
+    assert not isinstance(result, Job)
+
+
 async def test_system_actor_has_null_actor_id(db_session: AsyncSession, world: World) -> None:
     job = await make_job(db_session, world, JobStatus.COMPLETED)
 

@@ -378,6 +378,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/service-areas/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Is this ZIP served?
+         * @description Whether an active service area covers the ZIP. ZIP+4 is checked by its 5-digit ZIP.
+         *     No sign-in needed: the request flow and the landing page ask before login, and offer the
+         *     waitlist when the answer is no.
+         */
+        get: operations["check_zip_v1_service_areas_check_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pros/me": {
         parameters: {
             query?: never;
@@ -426,6 +448,56 @@ export interface paths {
          *     (superseded); reviewed ones stay as history.
          */
         post: operations["submit_document_v1_pros_me_documents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Register this device for pushes
+         * @description Registers the app's Expo push token for the caller; call it at every start.
+         *
+         *     A token already registered to someone else (the phone changed hands) moves to the caller.
+         *     Past PUSH_MAX_DEVICES_PER_USER, the caller's least recently seen device is dropped.
+         */
+        put: operations["register_device_v1_devices_put"];
+        post?: never;
+        /**
+         * Stop pushes to this device
+         * @description Removes the caller's token; the app calls it on logout. The token travels in the body,
+         *     never in the path, because paths are logged.
+         */
+        delete: operations["unregister_device_v1_devices_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/waitlist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Join the waitlist of an unserved ZIP
+         * @description Asks to be told when the ZIP is served. No sign-in needed (a web visitor can join); with
+         *     a valid bearer token the entry is linked to the account. The contact is used only for that
+         *     notice. Joining twice with the same contact and ZIP refreshes the entry.
+         */
+        post: operations["join_waitlist_v1_waitlist_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -493,6 +565,35 @@ export interface components {
              */
             expires_in: number;
         };
+        /** BooleanQuestion */
+        BooleanQuestion: {
+            /**
+             * Key
+             * @description The answer's key in intake_answers; unique in the category.
+             */
+            key: string;
+            /** Required */
+            required: boolean;
+            /**
+             * Labels
+             * @description The question per locale; en and es required.
+             */
+            labels: {
+                [key: string]: string;
+            };
+            /**
+             * Help
+             * @description An optional hint per locale.
+             */
+            help?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "boolean";
+        };
         /** CategoryOut */
         CategoryOut: {
             /**
@@ -513,6 +614,11 @@ export interface components {
             icon: string | null;
             /** Requires License */
             requires_license: boolean;
+            /**
+             * Intake Questions
+             * @description What to ask the customer for this category, in order; answers go in the request's intake_answers under each key. Empty when there is nothing to ask.
+             */
+            intake_questions: (components["schemas"]["IntegerQuestion"] | components["schemas"]["SingleChoiceQuestion"] | components["schemas"]["MultiChoiceQuestion"] | components["schemas"]["BooleanQuestion"] | components["schemas"]["TextQuestion"])[];
         };
         /** CategorySummary */
         CategorySummary: {
@@ -536,6 +642,30 @@ export interface components {
          * @enum {string}
          */
         CheckStatus: "ok" | "fail";
+        /** ChoiceOption */
+        ChoiceOption: {
+            /** Value */
+            value: string;
+            /**
+             * Labels
+             * @description The option's name per locale; en and es required.
+             */
+            labels: {
+                [key: string]: string;
+            };
+            /**
+             * Description
+             * @description What the option covers, per locale; en and es required, at most 160 characters each.
+             */
+            description?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Icon
+             * @description Key of an illustration the app bundles, e.g. paint-interior. Never a URL.
+             */
+            icon?: string | null;
+        };
         /** CityOut */
         CityOut: {
             /** City */
@@ -549,6 +679,28 @@ export interface components {
         DependencyChecks: {
             database: components["schemas"]["CheckStatus"];
             redis: components["schemas"]["CheckStatus"];
+        };
+        /**
+         * DevicePlatform
+         * @enum {string}
+         */
+        DevicePlatform: "ios" | "android";
+        /** DeviceRegistration */
+        DeviceRegistration: {
+            /**
+             * Expo Push Token
+             * @description The Expo push token.
+             */
+            expo_push_token: string;
+            platform: components["schemas"]["DevicePlatform"];
+        };
+        /** DeviceRemoval */
+        DeviceRemoval: {
+            /**
+             * Expo Push Token
+             * @description The Expo push token.
+             */
+            expo_push_token: string;
         };
         /** DocumentOut */
         DocumentOut: {
@@ -647,6 +799,39 @@ export interface components {
         ErrorResponse: {
             error: components["schemas"]["ErrorDetail"];
         };
+        /** IntegerQuestion */
+        IntegerQuestion: {
+            /**
+             * Key
+             * @description The answer's key in intake_answers; unique in the category.
+             */
+            key: string;
+            /** Required */
+            required: boolean;
+            /**
+             * Labels
+             * @description The question per locale; en and es required.
+             */
+            labels: {
+                [key: string]: string;
+            };
+            /**
+             * Help
+             * @description An optional hint per locale.
+             */
+            help?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "integer";
+            /** Min */
+            min: number;
+            /** Max */
+            max: number;
+        };
         JsonValue: unknown;
         /** LivenessResponse */
         LivenessResponse: {
@@ -680,6 +865,47 @@ export interface components {
              * Format: date-time
              */
             expires_at: string;
+        };
+        /** MultiChoiceQuestion */
+        MultiChoiceQuestion: {
+            /**
+             * Key
+             * @description The answer's key in intake_answers; unique in the category.
+             */
+            key: string;
+            /** Required */
+            required: boolean;
+            /**
+             * Labels
+             * @description The question per locale; en and es required.
+             */
+            labels: {
+                [key: string]: string;
+            };
+            /**
+             * Help
+             * @description An optional hint per locale.
+             */
+            help?: {
+                [key: string]: string;
+            } | null;
+            /** Options */
+            options: components["schemas"]["ChoiceOption"][];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "multi_choice";
+            /**
+             * Min Selected
+             * @default 0
+             */
+            min_selected: number;
+            /**
+             * Max Selected
+             * @description At most this many; all options when absent.
+             */
+            max_selected?: number | null;
         };
         /** PasswordForgotRequest */
         PasswordForgotRequest: {
@@ -862,7 +1088,7 @@ export interface components {
             preferred_date?: string | null;
             /**
              * Intake Answers
-             * @description Answers to the category's intake questions; a size limit applies. NUL characters and non-finite numbers are refused.
+             * @description Answers to the category's intake_questions (GET /v1/categories), by question key: an integer, an option value, a list of distinct option values, a boolean or a text, as each question's type says. Empty without a category. A size limit applies; NUL characters and non-finite numbers are refused. Text is stored trimmed.
              */
             intake_answers?: {
                 [key: string]: components["schemas"]["JsonValue"];
@@ -954,6 +1180,16 @@ export interface components {
             /** Media Count */
             media_count: number;
         };
+        /** ServedCheckOut */
+        ServedCheckOut: {
+            /**
+             * Zip Code
+             * @description The 5-digit ZIP that was checked.
+             */
+            zip_code: string;
+            /** Served */
+            served: boolean;
+        };
         /** ServiceAreaOut */
         ServiceAreaOut: {
             /**
@@ -969,6 +1205,68 @@ export interface components {
             state: string;
             /** Region */
             region: string;
+        };
+        /** SingleChoiceQuestion */
+        SingleChoiceQuestion: {
+            /**
+             * Key
+             * @description The answer's key in intake_answers; unique in the category.
+             */
+            key: string;
+            /** Required */
+            required: boolean;
+            /**
+             * Labels
+             * @description The question per locale; en and es required.
+             */
+            labels: {
+                [key: string]: string;
+            };
+            /**
+             * Help
+             * @description An optional hint per locale.
+             */
+            help?: {
+                [key: string]: string;
+            } | null;
+            /** Options */
+            options: components["schemas"]["ChoiceOption"][];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "single_choice";
+        };
+        /** TextQuestion */
+        TextQuestion: {
+            /**
+             * Key
+             * @description The answer's key in intake_answers; unique in the category.
+             */
+            key: string;
+            /** Required */
+            required: boolean;
+            /**
+             * Labels
+             * @description The question per locale; en and es required.
+             */
+            labels: {
+                [key: string]: string;
+            };
+            /**
+             * Help
+             * @description An optional hint per locale.
+             */
+            help?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "text";
+            /** Max Length */
+            max_length: number;
         };
         /**
          * UploadPurpose
@@ -1064,6 +1362,35 @@ export interface components {
             /** Content */
             content?: string | null;
         };
+        /** WaitlistJoin */
+        WaitlistJoin: {
+            /**
+             * Zip Code
+             * @description 5 digits or ZIP+4.
+             */
+            zip_code: string;
+            /** Email */
+            email?: string | null;
+            /**
+             * Phone
+             * @description E.164, with an allowed country code.
+             */
+            phone?: string | null;
+            /** Category Id */
+            category_id?: string | null;
+            /**
+             * Locale
+             * @default en
+             * @enum {string}
+             */
+            locale: "en" | "es";
+            source: components["schemas"]["WaitlistSource"];
+        };
+        /**
+         * WaitlistSource
+         * @enum {string}
+         */
+        WaitlistSource: "app" | "web";
         /** ZipOut */
         ZipOut: {
             /**
@@ -1806,7 +2133,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description invalid_category: unknown or inactive category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency). */
+            /** @description zip_not_served: the address ZIP is outside the active service areas (offer the waitlist); invalid_category: unknown or inactive category, or one whose questions cannot be read right now (send the request without a category); invalid_intake_answers: intake_answers do not fit the category's intake_questions (an unknown key, a missing required one, a value of the wrong type or out of range), or are not empty without a category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -1945,6 +2272,48 @@ export interface operations {
                 };
             };
             /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many requests from this client; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    check_zip_v1_service_areas_check_get: {
+        parameters: {
+            query: {
+                zip: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServedCheckOut"];
+                };
+            };
+            /** @description validation_error: not a 5-digit ZIP or ZIP+4. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -2154,6 +2523,155 @@ export interface operations {
             /** @description invalid_media: file_key is not the caller's own pro_document upload, or is already a document; validation_error: an unknown type, an expiry date in the past, or a field the review sets (status, rejection_reason, reviewed_by...). */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    register_device_v1_devices_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceRegistration"];
+            };
+        };
+        responses: {
+            /** @description Registered. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros receive pushes. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: not an Expo push token, or an unknown platform. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    unregister_device_v1_devices_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceRemoval"];
+            };
+        };
+        responses: {
+            /** @description Always, whether or not the token was registered to the caller. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros receive pushes. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: not an Expo push token, or an unknown platform. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    join_waitlist_v1_waitlist_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WaitlistJoin"];
+            };
+        };
+        responses: {
+            /** @description On the list; the same answer whether the contact already was. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description zip_served: the ZIP is served; create a request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description invalid_category: unknown or inactive category; validation_error: no email or phone, a bad ZIP, email or phone, or a phone outside the allowed country codes. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many requests; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {

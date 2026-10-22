@@ -1,8 +1,8 @@
 """Seed the served areas: `uv run python -m scripts.seed_service_areas` from apps/api.
 
 Idempotent: inserts the ZIPs of app/modules/service_areas/seed_data.json that are missing and
-never changes an existing row, so it is safe to run on every deploy. The file is empty until
-the launch ZIP list arrives (#9).
+never changes an existing row, so it is safe to run on every deploy. The file holds South
+Florida, with Broward active (#9); scripts/build_service_area_seed.py rebuilds it.
 """
 
 import asyncio
