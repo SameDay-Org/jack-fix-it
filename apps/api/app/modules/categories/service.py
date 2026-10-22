@@ -55,6 +55,10 @@ class CategoryService:
         await self._session.commit()
         return SeedResult(inserted=len(inserted), skipped=len(entries) - len(inserted))
 
+    async def is_active(self, category_id: uuid.UUID) -> bool:
+        """True when the category exists and is offered (active)."""
+        return await self._categories.get_active(category_id) is not None
+
     async def intake_questions(self, category_id: uuid.UUID) -> list[IntakeQuestion] | None:
         """The questions of an active category; None when it is unknown or inactive. Raises
         BrokenIntakeQuestionsError when its stored questions do not parse."""

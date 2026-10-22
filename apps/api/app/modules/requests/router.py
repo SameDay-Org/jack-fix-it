@@ -13,6 +13,7 @@ from app.modules.auth.permissions import CustomerUser
 from app.modules.categories.service import CategoryService
 from app.modules.requests.schemas import RequestCreate, RequestOut, RequestPage
 from app.modules.requests.service import RequestConfig, ServiceRequestService
+from app.modules.service_areas.service import ServiceAreaService
 from app.rate_limit import RateLimiter, enforce_limit, get_rate_limiter
 
 router = APIRouter(prefix="/requests", tags=["requests"])
@@ -31,6 +32,7 @@ def get_request_service(
         session,
         AddressService(session),
         CategoryService(session),
+        ServiceAreaService(session),
         storage,
         RequestConfig.from_settings(settings),
     )
@@ -77,6 +79,8 @@ _RATE_LIMITED: dict[int | str, dict[str, Any]] = {
         status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
         status.HTTP_403_FORBIDDEN: _FORBIDDEN,
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
+            "zip_not_served: the address ZIP is outside the active service areas (offer the "
+            "waitlist); "
             "invalid_category: unknown or inactive category, or one whose questions cannot "
             "be read right now (send the request without a category); "
             "invalid_intake_answers: intake_answers do not fit the category's "

@@ -1,8 +1,9 @@
 """The request state machine's rules: the single source of truth (D12.1 requests, #160).
 
-From docs/glossary.md "Internal request states". RequestStateMachine (state_machine.py) applies
-them; nothing else changes service_requests.status or duplicates this table. Edges the glossary
-leaves open are listed on #160 for Cesar and stay refused until he decides.
+From docs/glossary.md "Internal request states", plus the four edges Cesar approved on
+2026-10-22 (#160 follow-up). RequestStateMachine (state_machine.py) applies them; nothing else
+changes service_requests.status or duplicates this table. `expired` and `cancelled` are the
+terminal states; `accepted` is not (payment failed, or cancelled before paying).
 """
 
 from collections.abc import Mapping
@@ -42,11 +43,19 @@ TRANSITIONS: Final[Mapping[tuple[RequestStatus, RequestStatus], frozenset[ActorK
                 (status, _S.CANCELLED): frozenset({_A.CUSTOMER, _A.STAFF})
                 for status in _BEFORE_ACCEPTANCE
             },
+            # Every quote was withdrawn or expired before the request's own deadline: back out.
+            (_S.QUOTE_READY, _S.FINDING_PRO): frozenset({_A.SYSTEM}),
+            # The payment failed (#61): the customer can retry or pick another quote.
+            (_S.ACCEPTED, _S.QUOTE_READY): frozenset({_A.SYSTEM}),
+            # The customer abandons before paying, or staff close it: no money has moved.
+            (_S.ACCEPTED, _S.CANCELLED): frozenset({_A.CUSTOMER, _A.STAFF}),
+            # The BDC pulls the request back to reclassify it.
+            (_S.FINDING_PRO, _S.REVIEWING): frozenset({_A.STAFF}),
         }
     )
 )
 
-# States with no way out.
+# States with no way out: expired and cancelled.
 TERMINAL_STATES: Final = frozenset(
     status for status in RequestStatus if not any(source is status for source, _ in TRANSITIONS)
 )

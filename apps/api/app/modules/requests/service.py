@@ -35,6 +35,7 @@ from app.modules.requests.errors import (
     InvalidIntakeAnswersError,
     InvalidMediaError,
     InvalidRequestError,
+    ZipNotServedError,
 )
 from app.modules.requests.models import (
     RequestMedia,
@@ -50,6 +51,7 @@ from app.modules.requests.schemas import (
     RequestPage,
     RequestSummary,
 )
+from app.modules.service_areas.service import ServiceAreaService
 from app.modules.uploads.schemas import UploadPurpose
 from app.modules.uploads.service import owned_upload
 from app.modules.users.types import UserAccount
@@ -82,6 +84,7 @@ class ServiceRequestService:
         session: AsyncSession,
         addresses: AddressService,
         categories: CategoryService,
+        service_areas: ServiceAreaService,
         storage: Storage,
         config: RequestConfig,
     ) -> None:
@@ -89,6 +92,7 @@ class ServiceRequestService:
         self._requests = ServiceRequestRepository(session)
         self._addresses = addresses
         self._categories = categories
+        self._service_areas = service_areas
         self._storage = storage
         self._config = config
 
@@ -97,6 +101,8 @@ class ServiceRequestService:
             raise InvalidRequestError
         if _intake_size(data.intake_answers) > self._config.intake_max_bytes:
             raise InvalidRequestError
+        if not await self._service_areas.is_served(data.address.zip_code):
+            raise ZipNotServedError
         intake_answers = await self._intake_answers(data.category_id, data.intake_answers)
         media_kinds = self._media_kinds(user, data.media_keys)
 
