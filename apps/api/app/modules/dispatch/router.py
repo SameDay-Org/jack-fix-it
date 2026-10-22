@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_app_settings
 from app.db import get_session
 from app.errors import ErrorResponse
-from app.integrations.storage import Storage, get_storage
 from app.modules.auth.permissions import ProUser
 from app.modules.dispatch.opportunities import OpportunityConfig, OpportunityService
 from app.modules.dispatch.schemas import OpportunityDetail, OpportunityPage
@@ -21,10 +20,9 @@ def _error(description: str) -> dict[str, Any]:
 
 def get_opportunity_service(
     session: Annotated[AsyncSession, Depends(get_session)],
-    storage: Annotated[Storage, Depends(get_storage)],
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> OpportunityService:
-    return OpportunityService(session, storage, OpportunityConfig.from_settings(settings))
+    return OpportunityService(session, OpportunityConfig.from_settings(settings))
 
 
 _ACCESS: dict[int | str, dict[str, Any]] = {
@@ -39,6 +37,9 @@ _ACCESS: dict[int | str, dict[str, Any]] = {
     summary="List my opportunities",
     responses={
         **_ACCESS,
+        status.HTTP_404_NOT_FOUND: _error(
+            "not_found: the caller has no pro profile yet (GET /v1/pros/me creates it)."
+        ),
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error("validation_error: a malformed cursor."),
     },
 )
@@ -70,6 +71,7 @@ async def open_opportunity(
     user: ProUser,
     opportunities: Annotated[OpportunityService, Depends(get_opportunity_service)],
 ) -> OpportunityDetail:
-    """The full request with presigned media URLs. The first open records that the pro saw
-    it (viewed, viewed_at); opening it again changes nothing."""
+    """The full request, without its photos for now (sanitized copies come with #173). The
+    first open records that the pro saw it (viewed, viewed_at); opening it again changes
+    nothing."""
     return await opportunities.open_own(user, dispatch_id)

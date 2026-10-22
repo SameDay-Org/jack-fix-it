@@ -2,9 +2,10 @@
 
 A pro sees only their own dispatches that are still active (sent or viewed) on requests still
 open for quotes (finding_pro, quote_ready). Anything else, another pro's included, answers the
-same 404. The request comes through the requests module's pro-safe reader (ADR 0003), so no
-customer, contact, street, coordinates, utm or BDC field ever reaches this module. Opening one
-marks the dispatch viewed, once. Logs carry dispatch, request and pro ids only.
+same 404, as does a pro without a profile. The request comes through the requests module's
+pro-safe reader (ADR 0003), so no customer, contact, street, coordinates, utm or BDC field
+ever reaches this module, and no media (#173). Opening one marks the dispatch viewed, once.
+Logs carry dispatch, request and pro ids only.
 """
 
 import base64
@@ -19,12 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.errors import NotFoundError
-from app.integrations.storage import Storage
-from app.modules.categories.schemas import CategorySummary
 from app.modules.categories.service import CategoryService
 from app.modules.dispatch.models import DispatchStatus, RequestDispatch
 from app.modules.dispatch.repository import DispatchRepository
 from app.modules.dispatch.schemas import (
+    OpportunityCategory,
     OpportunityDetail,
     OpportunityLocation,
     OpportunityPage,
@@ -43,7 +43,6 @@ class OpportunityConfig:
     excerpt_chars: int
     list_default_limit: int
     list_max_limit: int
-    media_url_ttl_seconds: int
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "OpportunityConfig":
@@ -51,15 +50,14 @@ class OpportunityConfig:
             excerpt_chars=settings.opportunity_excerpt_chars,
             list_default_limit=settings.request_list_default_limit,
             list_max_limit=settings.request_list_max_limit,
-            media_url_ttl_seconds=settings.download_url_ttl_seconds,
         )
 
 
 class OpportunityService:
-    def __init__(self, session: AsyncSession, storage: Storage, config: OpportunityConfig) -> None:
+    def __init__(self, session: AsyncSession, config: OpportunityConfig) -> None:
         self._session = session
         self._dispatches = DispatchRepository(session)
-        self._requests = ProRequestReader(session, storage, config.media_url_ttl_seconds)
+        self._requests = ProRequestReader(session)
         self._categories = CategoryService(session)
         self._pros = ProService(session)
         self._config = config
@@ -67,12 +65,13 @@ class OpportunityService:
     async def list_own(
         self, user: UserAccount, limit: int | None, cursor: str | None
     ) -> OpportunityPage:
-        """Newest dispatch first. `limit` above the maximum is capped, not refused."""
+        """Newest dispatch first. `limit` above the maximum is capped, not refused. The
+        detail's 404 for a pro without a profile (GET /v1/pros/me creates it, #154)."""
         size = min(limit or self._config.list_default_limit, self._config.list_max_limit)
         before = _decode_cursor(cursor) if cursor else None
         pro_id = await self._pros.get_profile_id_for_user(user.id)
         if pro_id is None:  # no profile yet: nothing was ever dispatched to it
-            return OpportunityPage(items=[], next_cursor=None)
+            raise NotFoundError
         rows = await self._dispatches.page_for_pro(
             pro_id, ProRequestReader.open_ids(), size + 1, before
         )
@@ -87,7 +86,6 @@ class OpportunityService:
                 description_excerpt=view.description[: self._config.excerpt_chars],
                 location=_location(view),
                 preferred_date=view.preferred_date,
-                media_count=view.media_count,
                 sent_at=row.sent_at,
                 viewed=row.status is DispatchStatus.VIEWED,
             )
@@ -136,16 +134,18 @@ class OpportunityService:
             intake_answers=view.intake_answers,
             location=_location(view),
             preferred_date=view.preferred_date,
-            media=await self._requests.media(view.id),
             sent_at=dispatch.sent_at,
             viewed_at=viewed_at,
         )
 
     async def _category_summaries(
         self, views: Iterable[RequestForPro]
-    ) -> dict[uuid.UUID, CategorySummary]:
+    ) -> dict[uuid.UUID, OpportunityCategory]:
         ids = {view.category_id for view in views if view.category_id is not None}
-        return {summary.id: summary for summary in await self._categories.summaries(ids)}
+        return {
+            summary.id: OpportunityCategory(id=summary.id, slug=summary.slug, names=summary.names)
+            for summary in await self._categories.summaries(ids)
+        }
 
 
 def _location(view: RequestForPro) -> OpportunityLocation:
