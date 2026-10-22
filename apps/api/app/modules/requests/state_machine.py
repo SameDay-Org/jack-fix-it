@@ -17,8 +17,12 @@ a request together with its own rows (a quote, a job) atomically.
 
 import logging
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Final
 
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError, PendingRollbackError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.errors import ForbiddenError, NotFoundError
@@ -30,6 +34,34 @@ from app.modules.requests.transitions import TRANSITIONS, ActorKind
 from app.modules.users.types import UserAccount, UserRole
 
 logger = logging.getLogger(__name__)
+
+
+# The database guard (#163): triggers on service_requests and jobs refuse a status change unless
+# this transaction set app.status_writer to 'state_machine'. Only the state machines set it,
+# around their own write (the static guard flags it anywhere else).
+@asynccontextmanager
+async def _status_writer(session: AsyncSession) -> AsyncIterator[None]:
+    """Lets the block change a status past the database guard. The flag is local to the
+    transaction (is_local), so it never reaches another one on a pooled connection, and it is
+    cleared when the block ends, even when it fails. If the failure aborted the transaction, it
+    cannot be cleared here, but it goes with that transaction's rollback."""
+    # Only here: the static guard allows this flag in this function alone (ALLOW_LIST).
+    set_writer = text("SELECT set_config('app.status_writer', :value, true)")
+    await session.execute(set_writer, {"value": "state_machine"})
+    try:
+        yield
+    finally:
+        try:
+            await session.execute(set_writer, {"value": ""})
+        except PendingRollbackError:
+            pass  # the flush failed: the transaction, and the flag with it, will roll back
+        except DBAPIError as error:
+            if getattr(error.orig, "sqlstate", None) != _IN_FAILED_TRANSACTION:
+                raise
+
+
+# Postgres refuses every statement in a transaction that already failed.
+_IN_FAILED_TRANSACTION: Final = "25P02"
 
 _ACTOR_KIND_BY_ROLE: Final = {
     UserRole.CUSTOMER: ActorKind.CUSTOMER,
@@ -61,8 +93,9 @@ class RequestStateMachine:
             raise ForbiddenError
 
         from_status = request.status
-        request.status = to
-        await self._session.flush()
+        async with _status_writer(self._session):
+            request.status = to
+            await self._session.flush()
         logger.info(
             "request_status_changed",
             extra={

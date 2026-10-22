@@ -22,6 +22,7 @@ from app.modules.quotes.models import Quote
 from app.modules.requests.models import RequestOrigin, ServiceRequest
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole, UserStatus
+from tests.helpers import as_status_writer
 
 GLOSSARY = Path(__file__).resolve().parents[3] / "docs" / "glossary.md"
 NOW = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
@@ -151,8 +152,9 @@ async def make_job(session: AsyncSession, world: World, status: JobStatus, **fie
         tax_cents=0,
         **fields,
     )
-    session.add(job)
-    await session.flush()
+    async with as_status_writer(session):  # the database guard (#163)
+        session.add(job)
+        await session.flush()
     return job
 
 
