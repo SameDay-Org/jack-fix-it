@@ -21,6 +21,7 @@ Logs carry ids, statuses and counts only.
 import logging
 import uuid
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Final
@@ -28,8 +29,8 @@ from typing import Final
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.addresses.service import AddressService
-from app.modules.dispatch.models import RequestDispatch
-from app.modules.dispatch.repository import DispatchRepository, ProHistory
+from app.modules.dispatch.models import DispatchStatus, RequestDispatch
+from app.modules.dispatch.repository import ACTIVE, DispatchRepository, ProHistory
 from app.modules.jobs.service import SYSTEM
 from app.modules.pros.service import DispatchCandidate, ProService
 from app.modules.requests.state_machine import RequestStateMachine, RequestStatus
@@ -93,6 +94,20 @@ def rank(
         )
 
     return [candidate.pro_id for candidate in sorted(candidates, key=key)]
+
+
+@dataclass(frozen=True)
+class ProDispatch:
+    """A pro's own dispatch, as quoting needs it (#50)."""
+
+    id: uuid.UUID
+    request_id: uuid.UUID
+    status: DispatchStatus
+
+    @property
+    def active(self) -> bool:
+        """Still the pro's to act on: sent or viewed (not declined, quoted or expired)."""
+        return self.status in ACTIVE
 
 
 class DispatchService:
@@ -159,3 +174,13 @@ class DispatchService:
     ) -> DispatchOutcome:
         logger.info(event, extra={**extra, "outcome": str(outcome)})
         return outcome
+
+    async def pro_dispatch(self, dispatch_id: uuid.UUID, pro_id: uuid.UUID) -> ProDispatch | None:
+        """The pro's own dispatch in any status; None for another pro's or an unknown id."""
+        row = await self._dispatches.get_for_pro(dispatch_id, pro_id)
+        return ProDispatch(row.id, row.request_id, row.status) if row is not None else None
+
+    async def mark_quoted(self, dispatch_id: uuid.UUID, now: datetime) -> bool:
+        """The pro answered with a quote: sent or viewed -> quoted, responded_at = now, in the
+        caller's transaction. False when the dispatch was no longer active."""
+        return await self._dispatches.mark_quoted(dispatch_id, now)
