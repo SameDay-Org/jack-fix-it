@@ -72,6 +72,21 @@ options={sheetOptions([0.5, 0.95])} />`, or `"fitToContents"`), rendering `Sheet
   stored token rejects with `LocalCleanupError` and sets `cleanupPending`; restore retries the
   delete and never signs in from that entry. Cancelled callers send nothing, even after a shared
   refresh. Never log a token. ESLint rejects `fetch` and `expo-secure-store` outside `src/api`.
+- Media (D6.2, #130): `useMediaUpload({ purpose })` (`src/features/media`) picks from the
+  camera (photos only, after `requestCameraPermissionsAsync`; refused shows
+  `MediaPermissionNotice` with "Open settings") or the system photo picker (no permission;
+  videos only for `request_media`), prepares each file and uploads it, one at a time, keeping
+  items with status, progress, key, retry and remove. `prepareMedia` always re-encodes images as
+  JPEG (long edge `EXPO_PUBLIC_IMAGE_MAX_EDGE`, quality `EXPO_PUBLIC_IMAGE_QUALITY`), so EXIF and
+  GPS never leave the phone; videos go as they are, checked against
+  `EXPO_PUBLIC_UPLOAD_MAX_VIDEO_BYTES`. `uploadMedia` (`src/api/upload.ts`) asks
+  `POST /v1/uploads` for a URL signed for the exact type and size, then PUTs the bytes (XHR, for
+  progress) to exactly that URL with exactly its headers and never the bearer token; one retry on
+  a network failure, with a fresh URL if it expired; `UploadRejectedError` (403/422) and
+  `UploadFailedError` (storage refusal, network, `EXPO_PUBLIC_UPLOAD_TIMEOUT_MS`). `MediaPicker`
+  renders the list and asks "Camera or library" in `MediaSourceSheet`, a sheet route in the
+  caller's stack; `ProgressRing` (kit) draws progress without SVG. Local uploads need an
+  S3-compatible server on the host; docker-compose has none, see the commands below.
 - Strings: `src/i18n/locales/{en,es}.json` through `useTranslation()`; the device language
   picks the catalog, English is the fallback.
 - Config: `app.config.ts` reads `APP_VARIANT` (development, preview, production) to suffix the
@@ -92,6 +107,12 @@ pnpm --filter @jack/mobile typecheck
 pnpm --filter @jack/mobile lint
 pnpm --filter @jack/mobile test        # jest-expo; jest.setup.ts warms RN's lazy components first (#140)
 pnpm --filter @jack/mobile exec expo export --platform android --output-dir dist-ci   # bundle check
+
+# Local uploads (#130): an S3-compatible server on the host and a bucket (any S3 client), then
+# the API's untracked .env: S3_ENDPOINT_URL=http://10.0.2.2:9000 (the host as the emulator dials
+# it; the URL is signed for that host), S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY,
+# S3_REGION=us-east-1.
+docker run -d -p 9000:9000 -e RUSTFS_ACCESS_KEY=<key> -e RUSTFS_SECRET_KEY=<secret> rustfs/rustfs
 ```
 
 ## Mobile craft bar
