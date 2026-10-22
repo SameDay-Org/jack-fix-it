@@ -28,6 +28,7 @@ from app.modules.requests.models import (
     ServiceRequest,
 )
 from app.modules.users.models import User, UserRole
+from tests.helpers import as_status_writer
 from tests.test_schema_core import assert_rejected
 
 import_models()
@@ -237,12 +238,14 @@ async def test_status_checks_reject_unknown_values(
 ) -> None:
     ids = await row_ids(db_session, world)
 
-    with pytest.raises(IntegrityError):
-        await db_session.execute(
-            # Table and column names come from ENUM_COLUMNS, never from input.
-            text(f"UPDATE {table} SET {column} = 'not_a_state' WHERE id = :id"),  # noqa: S608
-            {"id": ids[table]},
-        )
+    # Past the database guard (#163): this probes the CHECK, not the trigger.
+    async with as_status_writer(db_session):
+        with pytest.raises(IntegrityError):
+            await db_session.execute(
+                # Table and column names come from ENUM_COLUMNS, never from input.
+                text(f"UPDATE {table} SET {column} = 'not_a_state' WHERE id = :id"),  # noqa: S608
+                {"id": ids[table]},
+            )
 
 
 @pytest.mark.parametrize(("table", "column", "enum"), ENUM_COLUMNS, ids=ENUM_IDS)
@@ -252,11 +255,12 @@ async def test_status_checks_accept_every_value(
     # The migration's CHECKs are written by hand; every StrEnum member must pass them.
     ids = await row_ids(db_session, world)
 
-    for member in enum:
-        await db_session.execute(
-            text(f"UPDATE {table} SET {column} = :value WHERE id = :id"),  # noqa: S608
-            {"value": member.value, "id": ids[table]},
-        )
+    async with as_status_writer(db_session):  # past the database guard (#163)
+        for member in enum:
+            await db_session.execute(
+                text(f"UPDATE {table} SET {column} = :value WHERE id = :id"),  # noqa: S608
+                {"value": member.value, "id": ids[table]},
+            )
 
 
 # quotes and jobs
