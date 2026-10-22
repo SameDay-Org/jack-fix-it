@@ -61,6 +61,7 @@ from app.modules.requests.schemas import (
     RequestPage,
     RequestSummary,
 )
+from app.modules.service_areas.schemas import zip5
 from app.modules.service_areas.service import ServiceAreaService
 from app.modules.uploads.schemas import UploadPurpose
 from app.modules.uploads.service import owned_upload
@@ -330,7 +331,8 @@ OPEN_FOR_QUOTES: Final = frozenset({RequestStatus.FINDING_PRO, RequestStatus.QUO
 @dataclass(frozen=True)
 class RequestForPro:
     """A request as a dispatched pro may see it: no customer, contact, street, coordinates,
-    attribution (utm) or BDC fields. The area is ZIP and city until the job is paid (#49). No
+    attribution (utm) or BDC fields. The area is the ZIP and its service area's canonical city
+    until the job is paid (#49), never the city the customer typed (#172). No
     media either: stored photos and videos carry the customer's id in their keys and their
     original metadata (GPS), so pros get sanitized copies only, with #173.
 
@@ -362,6 +364,7 @@ class ProRequestReader:
         self._requests = ServiceRequestRepository(session)
         self._addresses = AddressService(session)
         self._users = UserService(session)
+        self._service_areas = ServiceAreaService(session)
 
     @staticmethod
     def open_ids() -> Select[uuid.UUID]:
@@ -376,7 +379,8 @@ class ProRequestReader:
         rows = [
             r for r in await self._requests.get_many(request_ids) if r.status in OPEN_FOR_QUOTES
         ]
-        areas = await self._addresses.areas([r.address_id for r in rows])
+        zip_codes = await self._addresses.zip_codes([r.address_id for r in rows])
+        cities = await self._service_areas.canonical_cities(zip_codes.values())
         # What each customer's own details are, read once per page, for the known-value pass.
         streets = await self._addresses.street_lines([r.address_id for r in rows])
         contacts = await self._users.contact_points([r.customer_id for r in rows])
@@ -397,11 +401,23 @@ class ProRequestReader:
                 description=description.text,
                 intake_answers=answers,
                 preferred_date=row.preferred_date,
-                area=areas[row.address_id],
+                area=self._area(row.id, zip_codes[row.address_id], cities),
                 description_redacted=description.redacted,
                 answers_redacted=answers_redacted,
             )
         return views
+
+    @staticmethod
+    def _area(request_id: uuid.UUID, zip_code: str, cities: Mapping[str, str]) -> AddressArea:
+        """The 5-digit ZIP and its service area's city; no city when the area is gone (an
+        inactive or deleted ZIP), never the customer's own text."""
+        zip_code = zip5(zip_code)
+        city = cities.get(zip_code)
+        if city is None:
+            logger.warning(
+                "opportunity_city_missing", extra={"service_request_id": str(request_id)}
+            )
+        return AddressArea(zip_code=zip_code, city=city)
 
 
 def _redact_answers(

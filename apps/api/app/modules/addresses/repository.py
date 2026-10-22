@@ -19,14 +19,12 @@ class AddressRepository:
     async def get_by_id(self, address_id: uuid.UUID) -> Address | None:
         return await self._session.get(Address, address_id)
 
-    async def areas(self, address_ids: Collection[uuid.UUID]) -> list[tuple[uuid.UUID, str, str]]:
-        """(id, zip_code, city) only: the street is never loaded."""
+    async def zip_codes(self, address_ids: Collection[uuid.UUID]) -> list[tuple[uuid.UUID, str]]:
+        """(id, zip_code) only: neither the street nor the city the customer typed is loaded."""
         if not address_ids:
             return []
-        statement = select(Address.id, Address.zip_code, Address.city).where(
-            Address.id.in_(address_ids)
-        )
-        return [(row[0], row[1], row[2]) for row in (await self._session.execute(statement)).all()]
+        statement = select(Address.id, Address.zip_code).where(Address.id.in_(address_ids))
+        return [(row[0], row[1]) for row in (await self._session.execute(statement)).all()]
 
     async def street_lines(
         self, address_ids: Collection[uuid.UUID]

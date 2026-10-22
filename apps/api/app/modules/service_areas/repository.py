@@ -56,6 +56,15 @@ class ServiceAreaRepository:
         )
         return list((await self._session.scalars(statement)).all())
 
+    async def active_cities(self, zip_codes: Collection[str]) -> dict[str, str]:
+        """The city of each active area among `zip_codes` (5 digits each)."""
+        if not zip_codes:
+            return {}
+        statement = select(ServiceArea.zip_code, ServiceArea.city).where(
+            ServiceArea.zip_code.in_(zip_codes), ServiceArea.active
+        )
+        return {zip_code: city for zip_code, city in (await self._session.execute(statement)).all()}
+
     async def is_active_zip(self, zip_code: str) -> bool:
         statement = select(ServiceArea.id).where(
             ServiceArea.zip_code == zip_code, ServiceArea.active
