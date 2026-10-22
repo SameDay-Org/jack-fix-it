@@ -32,6 +32,21 @@ rules apply.
 - `uv run alembic revision --autogenerate -m "<what>"`, then read and fix the generated file.
   Money columns are integer `*_cents`. Prove `upgrade` → `downgrade` → `upgrade` locally.
 - Migrations run on Railway as the api service's pre-deploy command.
+- **Status guard (#163).** Request and job statuses change only through `RequestStateMachine`
+  and `JobStateMachine`, and the database enforces it.
+  - **The trigger:** triggers on `service_requests` and `jobs` refuse any status change, and any
+    insert with a status other than the column default. The refusal is SQLSTATE 42501, with a
+    message naming the table only.
+  - **The exception:** a write passes only while the transaction-local setting
+    `app.status_writer` is `state_machine`. The machines set it around their single flush and
+    reset it in a `finally`. It is `set_config(..., true)`, so it never outlives the transaction
+    on a pooled connection.
+  - **Who may set the flag:** nothing else in `app/` or `scripts/` may, and a static test fails
+    if anything does.
+  - **Tests** create rows in a given status with `tests/helpers.py::as_status_writer`.
+  - **A refusal is a bug:** it reaches the API as a 500 and is never mapped to a 4xx.
+  - **SQLAdmin (#41) cannot change a status by design.** A status change is a state-machine
+    action with its own endpoint.
 
 ## Worker
 

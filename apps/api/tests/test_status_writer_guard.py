@@ -1,15 +1,20 @@
 """The database guard (#163): request and job statuses change only through the state machines,
 whatever Python path issues the write. Real database, real triggers."""
 
+import logging
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
 
+import httpx
 import pytest
+from fastapi import FastAPI
 from sqlalchemy import URL, bindparam, delete, select, text, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.db import Base
 from app.modules.addresses.models import Address
 from app.modules.categories.models import Category
 from app.modules.jobs.models import Job, JobStatus
@@ -20,9 +25,11 @@ from app.modules.requests.models import RequestOrigin, RequestStatus, ServiceReq
 from app.modules.requests.state_machine import RequestStateMachine
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole
+from app.observability import JsonFormatter
 from tests.test_schema_requests_jobs import add, make_job, make_quote
 
 REFUSED = "42501"  # insufficient_privilege: the trigger's refusal
+API_DIR = Path(__file__).resolve().parents[1]
 
 
 @dataclass(frozen=True)
@@ -97,6 +104,8 @@ async def flag(session: AsyncSession) -> str:
 
 
 async def test_direct_orm_status_update_refused(db_session: AsyncSession, rows: Rows) -> None:
+    request_id = rows.request.id  # a savepoint rollback expires the objects
+
     async def request_write() -> None:
         rows.request.status = RequestStatus.ACCEPTED
         await db_session.flush()
@@ -111,7 +120,7 @@ async def test_direct_orm_status_update_refused(db_session: AsyncSession, rows: 
     # The message names the table, never row data.
     assert "service_requests" in str(request_error.orig)
     assert "jobs" in str(job_error.orig)
-    assert str(rows.request.id) not in str(request_error.orig)
+    assert str(request_id) not in str(request_error.orig)
 
 
 @pytest.mark.parametrize("model", ["requests", "jobs"])
@@ -127,7 +136,7 @@ async def test_core_update_and_raw_sql_status_update_refused(
         table_model, row_id, status = ServiceRequest, rows.request.id, "accepted"
     else:
         table_model, row_id, status = Job, rows.job.id, "paid_out"
-    table = table_model.__table__
+    table = Base.metadata.tables[table_model.__tablename__]
 
     async def write() -> None:
         if form == "core_values":
@@ -248,6 +257,7 @@ async def test_flag_cleared_even_when_flush_fails(
     db_session: AsyncSession, rows: Rows, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     flush = AsyncSession.flush
+    request_id = rows.request.id  # a savepoint rollback expires the objects
 
     async def failing_flush(self: AsyncSession, *args: object, **kwargs: object) -> None:
         raise RuntimeError("synthetic failure inside the flag's window")
@@ -257,7 +267,7 @@ async def test_flag_cleared_even_when_flush_fails(
     savepoint = await db_session.begin_nested()
     with pytest.raises(RuntimeError):
         await RequestStateMachine(db_session).transition(
-            rows.request.id, RequestStatus.REVIEWING, rows.agent
+            request_id, RequestStatus.REVIEWING, rows.agent
         )
     assert await flag(db_session) == ""
     await savepoint.rollback()
@@ -270,7 +280,7 @@ async def test_flag_cleared_even_when_flush_fails(
     savepoint = await db_session.begin_nested()
     with pytest.raises(DBAPIError):
         await RequestStateMachine(db_session).transition(
-            rows.request.id, RequestStatus.REVIEWING, rows.agent
+            request_id, RequestStatus.REVIEWING, rows.agent
         )
     await savepoint.rollback()
     monkeypatch.setattr(AsyncSession, "flush", flush)
@@ -333,7 +343,10 @@ class Committed:
 
 @pytest.fixture
 async def committed(test_database_url: URL) -> AsyncIterator[Committed]:
-    engine = create_async_engine(test_database_url, pool_size=1, max_overflow=0)
+    # hide_parameters as in production (app.db), so the log check sees what production logs.
+    engine = create_async_engine(
+        test_database_url, pool_size=1, max_overflow=0, hide_parameters=True
+    )
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     tag = uuid.uuid4().hex[:8]
     async with sessions() as session:
@@ -395,3 +408,47 @@ async def test_flag_does_not_leak_after_commit_or_rollback(committed: Committed)
             )
             await getattr(session, end)()
         await next_write_refused()
+
+
+def test_flag_appears_only_in_the_machines_and_this_migration() -> None:
+    """The AST guard (test_job_status_single_writer) covers app/; this also covers scripts/ and
+    alembic/. Tests set the flag through tests/helpers.py::as_status_writer."""
+    found = {
+        path.relative_to(API_DIR).as_posix()
+        for folder in ("app", "scripts", "alembic")
+        for path in (API_DIR / folder).rglob("*.py")
+        if "app.status_writer" in path.read_text(encoding="utf-8")
+    }
+
+    assert found == {
+        "app/modules/jobs/service.py",
+        "app/modules/requests/state_machine.py",
+        "alembic/versions/20261022_4eb1fd67455e_status_writer_triggers.py",
+    }
+
+
+async def test_refusal_reaching_the_api_is_a_500_naming_the_table_only(
+    app: FastAPI, committed: Committed, caplog: pytest.LogCaptureFixture
+) -> None:
+    # No endpoint changes a status yet; this test-only route stands in for a buggy one.
+    @app.post("/test-only/direct-status-write")
+    async def direct_status_write() -> None:
+        async with committed.sessions() as session:
+            await session.execute(
+                update(ServiceRequest)
+                .where(ServiceRequest.id == committed.request_id)
+                .values(status="cancelled")
+            )
+
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    with caplog.at_level(logging.DEBUG):
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            response = await client.post("/test-only/direct-status-write")
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "internal_error"
+    [record] = [r for r in caplog.records if r.message == "unhandled_error"]
+    logged = JsonFormatter().format(record)
+    assert "the status of service_requests changes only through its state machine" in logged
+    assert str(committed.request_id) not in logged
+    assert "cancelled" not in logged
