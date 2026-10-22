@@ -17,6 +17,7 @@ from app.redaction import (
     redact_known,
     redact_text,
 )
+from tests.glue_variants import all_glue_cases
 
 POSITIVE: list[tuple[str, list[str]]] = [
     # Emails: plain, spaced, spelled out (EN and ES), bracketed.
@@ -649,8 +650,19 @@ def test_generated_streets_mask_number_and_name_and_nothing_less() -> None:
         ("100 " + " ".join(["Main"] * 60), "100 " + "main " * 380),
         ("100 " + " ".join(["N"] * 60) + " Main", "100 " + "n " * 940),
         ("12 " + " ".join(_NAME_WORDS * 3) + " Apt 4B", ("12 oak apt 4b " * 150)),
+        ("100 " + " ".join(["St"] * 80), ("100 " + "st" * 20 + " ") * 45),
+        ("100 N Main", ("100 n." + "nw" * 19 + " ") * 45),
     ],
-    ids=["suffixes", "number-and-suffixes", "numbers", "names", "directions", "long-line"],
+    ids=[
+        "suffixes",
+        "number-and-suffixes",
+        "numbers",
+        "names",
+        "directions",
+        "long-line",
+        "glued-suffixes",
+        "glued-directions",
+    ],
 )
 def test_long_or_repetitive_streets_finish_quickly(line: str, text: str) -> None:
     known = KnownValues(streets=(line,))
@@ -787,6 +799,58 @@ def test_the_known_street_is_masked_across_a_sentence_by_design(
     result = redact_known(text, KnownValues(streets=(line,)))
 
     assert result == RedactionResult(expected.replace("{M}", MASK), True)
+
+
+# Round 7 review (#172): punctuation glued to the house number ("ter.742"). Every glue variant
+# of 7 stored streets, number first and name first, is masked.
+def test_every_glue_variant_of_the_known_street_is_masked() -> None:
+    cases = all_glue_cases()
+    leaks = []
+    for line, text, number, name in cases:
+        result = redact_known(text, KnownValues(streets=(line,)))
+        lowered = result.text.lower()
+        unquoted = lowered.replace("'", "")
+        if not result.redacted or number in lowered or name.replace("'", "") in unquoted:
+            leaks.append((line, text, result.text))
+
+    assert len(cases) > 3000
+    assert leaks == []
+
+
+@pytest.mark.parametrize(
+    ("line", "text"),
+    [
+        ("742 Evergreen Terrace", "742.5 sq ft of evergreen"),
+        ("742 Evergreen Terrace", "1,742 sq ft of evergreen"),
+        ("742 Evergreen Terrace", "742/12 evergreen"),
+        ("742 Evergreen Terrace", "evergreen 742/12"),
+        ("742 Evergreen Terrace", "evergreen 12/742"),
+        ("742 Evergreen Terrace", "evergreen 1.742"),
+        ("742 Evergreen Terrace", "the main water line"),
+        ("742 Evergreen Terrace", "evergreen trees"),
+        ("742 Evergreen Terrace", "742 evergreens"),
+    ],
+)
+def test_a_number_joined_to_another_digit_is_never_the_house(line: str, text: str) -> None:
+    assert redact_known(text, KnownValues(streets=(line,))) == RedactionResult(text, False)
+
+
+@pytest.mark.parametrize(
+    ("line", "text"),
+    [
+        ("742 Evergreen Terrace", "at evergreen ter.742."),
+        ("123 Main Street", "at main st.123."),
+        ("123 Main Street NW", "at main nw.123."),
+        ("742 Evergreen Terrace", "at evergreen w/742."),
+        ("742 Evergreen Terrace Apt 4B", "ring apt4b."),
+    ],
+)
+def test_punctuation_glued_to_the_number_never_hides_the_street(line: str, text: str) -> None:
+    result = redact_known(text, KnownValues(streets=(line,)))
+
+    assert result.redacted is True
+    for secret in ("742", "123", "4b"):
+        assert secret not in result.text.lower(), secret
 
 
 def test_a_unit_inside_the_street_line_is_masked_on_its_own() -> None:
