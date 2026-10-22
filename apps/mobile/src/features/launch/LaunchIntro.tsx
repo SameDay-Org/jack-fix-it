@@ -37,16 +37,11 @@ export function LaunchIntro({ onReady, onDone }: LaunchIntroProps) {
   const runEnd = useCallback(() => setRunDone(true), []);
   const { phase, skip } = useLaunchIntro({ status, reduceMotion, runDone });
   const words = t("launch.words", { returnObjects: true });
-  const {
-    wordSwapIntervalMs,
-    wordSwapTransitionMs,
-    launchSwaps,
-    launchExitMs,
-    launchExitScale,
-    launchMaxMs,
-  } = tokens.motion;
+  const { wordSwapIntervalMs, wordSwapTransitionMs, launchSwaps, launchExitMs, launchExitScale } =
+    tokens.motion;
 
-  // The splash lifts when the first frame is final, or at the latest when the intro must end.
+  // The splash lifts when the first frame is final (the shell also lifts it on exit and, at the
+  // latest, at launchMaxMs, whatever happens here).
   // Until then the intro paints nothing: the native splash normally covers that frame, but a dev
   // client does not hold it, and what sits under the intro is the same navy (the gate's static
   // hero, or its navy frame), so the words never show before they are measured. The gate is a
@@ -60,11 +55,6 @@ export function LaunchIntro({ onReady, onDone }: LaunchIntroProps) {
     shown.value = 1;
     onReady();
   };
-  useEffect(() => {
-    const id = setTimeout(ready, launchMaxMs);
-    return () => clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- a one-shot fallback
-  }, []);
 
   const exit = useSharedValue(0);
   useEffect(() => {

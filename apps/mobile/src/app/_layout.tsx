@@ -3,23 +3,21 @@ import "@/i18n";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as SplashScreen from "expo-splash-screen";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { attachQueryClient, restoreSession } from "@/api";
-import { ToastHost } from "@/components/ui";
-import { SessionGate } from "@/features/auth";
-import { LaunchIntro } from "@/features/launch";
+import { LaunchShell } from "@/features/launch";
 
 // The native splash (plain navy, app.config.ts) stays up until the launch intro's first frame is
-// final, so the handoff is one navy surface into the next; nothing flashes in between.
+// final, so the handoff is one navy surface into the next; nothing flashes in between. LaunchShell
+// releases it on every path, at the latest at motion.launchMaxMs.
 void SplashScreen.preventAutoHideAsync();
 
 // The status bar is owned per screen by `Screen` (src/components/ui); the root mounts none.
 export default function RootLayout() {
   const [queryClient] = useState(() => new QueryClient());
-  const [introShown, setIntroShown] = useState(true);
 
   // Once per app start: the session clears this cache on sign-out, and rebuilds itself from the
   // stored refresh token. SessionGate routes by the resulting status, under the intro.
@@ -28,16 +26,11 @@ export default function RootLayout() {
     void restoreSession();
   }, [queryClient]);
 
-  const liftSplash = useCallback(() => void SplashScreen.hideAsync(), []);
-  const endIntro = useCallback(() => setIntroShown(false), []);
-
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
-          <SessionGate />
-          <ToastHost />
-          {introShown ? <LaunchIntro onReady={liftSplash} onDone={endIntro} /> : null}
+          <LaunchShell />
         </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
