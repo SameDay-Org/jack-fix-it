@@ -11,7 +11,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import violated_constraint
-from app.modules.users.errors import EmailAlreadyRegisteredError, PhoneUnavailableError
+from app.modules.users.errors import (
+    EmailAlreadyRegisteredError,
+    NamesIncompleteError,
+    PhoneUnavailableError,
+)
 from app.modules.users.models import User
 from app.modules.users.repository import UserRepository
 from app.modules.users.types import UserAccount, UserCredentials, UserRole, UserStatus
@@ -49,15 +53,26 @@ class UserService:
         return UserCredentials(account=_to_account(user), password_hash=user.password_hash)
 
     async def create_user(
-        self, *, email: str, password_hash: str, role: UserRole, locale: str
+        self,
+        *,
+        email: str,
+        password_hash: str,
+        role: UserRole,
+        locale: str,
+        first_name: str | None = None,
+        last_name: str | None = None,
     ) -> UserAccount:
-        """Inserts an active user. A taken email, even from a concurrent request, is a 409."""
+        """Inserts an active user. A taken email, even from a concurrent request, is a 409.
+
+        The names are validated PersonName values, both or neither (callers check)."""
         user = User(
             email=email,
             password_hash=password_hash,
             role=role,
             locale=locale,
             status=UserStatus.ACTIVE,
+            first_name=first_name,
+            last_name=last_name,
         )
         savepoint = await self._session.begin_nested()
         try:
@@ -77,6 +92,25 @@ class UserService:
         role the caller validated. False when another change landed first; nothing is written.
         """
         return await self._users.update_role(user_id, role, expected=expected)
+
+    async def update_names(
+        self, user_id: uuid.UUID, *, first_name: str | None, last_name: str | None
+    ) -> UserAccount:
+        """Sets the given names (None keeps the stored one); the caller owns the commit.
+
+        Locks the row, so the check below sees what is committed: a name may change alone only
+        when the other is already stored. NamesIncompleteError (422) otherwise.
+        """
+        user = await self._users.get_by_id_for_update(user_id)
+        if user is None:
+            raise LookupError("user not found")
+        first = first_name if first_name is not None else user.first_name
+        last = last_name if last_name is not None else user.last_name
+        if first is None or last is None:
+            raise NamesIncompleteError
+        user.first_name, user.last_name = first, last
+        await self._session.flush()
+        return _to_account(user)
 
     async def update_password_hash(self, user_id: uuid.UUID, password_hash: str) -> None:
         await self._users.update_password_hash(user_id, password_hash)
@@ -119,4 +153,6 @@ def _to_account(user: User) -> UserAccount:
         status=user.status,
         phone=user.phone,
         phone_verified_at=user.phone_verified_at,
+        first_name=user.first_name,
+        last_name=user.last_name,
     )

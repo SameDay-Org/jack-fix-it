@@ -17,6 +17,8 @@ class UserOut(BaseModel):
     status: UserStatus
     phone: str | None = Field(description="E.164, set once verified by SMS code.")
     phone_verified: bool
+    first_name: str | None = Field(description="Null for accounts created before names.")
+    last_name: str | None = Field(description="Null for accounts created before names.")
 
     @model_validator(mode="before")
     @classmethod
@@ -30,5 +32,7 @@ class UserOut(BaseModel):
                 "status": data.status,
                 "phone": data.phone,
                 "phone_verified": data.phone_verified_at is not None,
+                "first_name": data.first_name,
+                "last_name": data.last_name,
             }
         return data
