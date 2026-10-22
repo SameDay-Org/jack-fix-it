@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -19,6 +19,7 @@ from app.integrations.storage import PresignedUpload, get_storage
 from app.modules.auth import security
 from app.modules.categories.models import Category
 from app.modules.pros.models import ProCategory, ProProfile
+from app.modules.pros.repository import ProProfileRepository
 from app.modules.service_areas.models import ServiceArea
 from app.modules.users.models import User
 from app.modules.users.types import UserRole
@@ -528,3 +529,61 @@ async def test_a_category_turned_off_stays_on_the_profile(
     profile = (await get_me(db_client, pro)).json()
 
     assert [c["id"] for c in profile["categories"]] == [str(category.id)]
+
+
+@pytest.mark.parametrize("existing", [False, True], ids=["absent_profile", "existing_profile"])
+async def test_patch_is_one_transaction_on_database_failure(
+    committed: Committed,
+    storage: FakeStorage,
+    monkeypatch: pytest.MonkeyPatch,
+    existing: bool,
+) -> None:
+    # Real connections and commits: a database error after the bio and the categories were
+    # flushed must leave nothing behind, not even the profile the PATCH created.
+    body = (await register(committed.client, email=committed.email, role="pro")).json()
+    headers = {"Authorization": f"Bearer {body['access_token']}"}
+    user_id = uuid.UUID(body["user"]["id"])
+    async with committed.sessions() as session:
+        [category] = await make_categories(session, f"test-tx-{uuid.uuid4().hex[:8]}")
+        [area] = await make_areas(session, uuid.uuid4().hex[:5])
+        await session.commit()
+    try:
+        if existing:
+            assert (
+                await patch_me(committed.client, _caller(user_id, headers), bio="Original")
+            ).status_code == 200
+
+        async def fail_midway(self: ProProfileRepository, pro_id: uuid.UUID, ids: object) -> None:
+            await self._session.execute(text("SELECT 1 / 0"))
+
+        monkeypatch.setattr(ProProfileRepository, "replace_service_areas", fail_midway)
+        response = await patch_me(
+            committed.client,
+            _caller(user_id, headers),
+            bio="Changed",
+            category_ids=[str(category.id)],
+            service_area_ids=[str(area.id)],
+        )
+
+        assert response.status_code == 500
+        async with committed.sessions() as reader:
+            profile = await reader.scalar(select(ProProfile).where(ProProfile.user_id == user_id))
+            if not existing:
+                assert profile is None
+            else:
+                assert profile is not None
+                assert profile.bio == "Original"
+                pairs = select(func.count()).select_from(ProCategory)
+                assert await reader.scalar(pairs.where(ProCategory.pro_id == profile.id)) == 0
+    finally:
+        async with committed.sessions() as session:
+            profile_ids = select(ProProfile.id).where(ProProfile.user_id == user_id)
+            await session.execute(delete(ProCategory).where(ProCategory.pro_id.in_(profile_ids)))
+            await session.execute(delete(ProProfile).where(ProProfile.user_id == user_id))
+            await session.execute(delete(Category).where(Category.id == category.id))
+            await session.execute(delete(ServiceArea).where(ServiceArea.id == area.id))
+            await session.commit()
+
+
+def _caller(user_id: uuid.UUID, headers: dict[str, str]) -> Caller:
+    return Caller(id=user_id, headers=headers)

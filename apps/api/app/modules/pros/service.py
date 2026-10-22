@@ -76,7 +76,12 @@ class ProProfileService:
 
     async def get_own(self, user: UserAccount) -> ProProfileOut:
         """The caller's profile, created empty (pending) on the first call."""
-        return await self._out(await self._ensure(user, lock=False))
+        created, profile = await self._ensure(user, lock=False)
+        if created:
+            # A read that creates: the new profile is persisted on its own.
+            await self._session.commit()
+            logger.info("pro_profile_created", extra={"user_id": str(user.id)})
+        return await self._out(profile)
 
     async def update_own(self, user: UserAccount, data: ProProfileUpdate) -> ProProfileOut:
         fields = data.model_fields_set
@@ -95,7 +100,9 @@ class ProProfileService:
             if await self._service_areas.active_ids(areas) != areas:
                 raise InvalidServiceAreaError
 
-        profile = await self._ensure(user, lock=True)
+        # One transaction from here: the profile's creation (when absent), the row lock and
+        # every edit commit together, or none of them does.
+        created, profile = await self._ensure(user, lock=True)
         if "bio" in fields:
             profile.bio = data.bio or None  # an empty string clears it
         if "years_of_experience" in fields:
@@ -107,20 +114,25 @@ class ProProfileService:
         if "service_area_ids" in fields:
             await self._profiles.replace_service_areas(profile.id, data.service_area_ids)
         await self._session.commit()
+        if created:
+            logger.info("pro_profile_created", extra={"user_id": str(user.id)})
         logger.info(
             "pro_profile_updated", extra={"user_id": str(user.id), "fields": sorted(fields)}
         )
         return await self._out(profile)
 
-    async def _ensure(self, user: UserAccount, *, lock: bool) -> ProProfile:
-        """The caller's profile, created first if missing; `lock` holds it for an edit."""
-        if await self._profiles.insert_if_missing(user.id):
-            await self._session.commit()
-            logger.info("pro_profile_created", extra={"user_id": str(user.id)})
+    async def _ensure(self, user: UserAccount, *, lock: bool) -> tuple[bool, ProProfile]:
+        """(created, profile): the caller's profile, inserted first if missing, in the current
+        transaction; the caller commits. `lock` holds the row for an edit.
+
+        INSERT ... ON CONFLICT DO NOTHING keeps two first calls race-safe: the second waits for
+        the first's transaction, then finds its row (or inserts, if the first rolled back).
+        """
+        created = await self._profiles.insert_if_missing(user.id)
         profile = await self._profiles.get_by_user_id(user.id, lock=lock)
-        if profile is None:  # pragma: no cover - the row was just ensured and is never deleted
+        if profile is None:  # pragma: no cover - the row was just ensured in this transaction
             raise RuntimeError("pro profile missing after insert")
-        return profile
+        return created, profile
 
     @staticmethod
     def _unique_within(ids: list[uuid.UUID], limit: int) -> set[uuid.UUID]:
