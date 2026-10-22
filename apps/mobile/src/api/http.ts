@@ -52,11 +52,15 @@ function resolveUrl(path: string): URL {
   return url;
 }
 
+/** The error a cancelled caller gets back: its signal's reason, or a plain `AbortError`. */
+export function abortError(signal: AbortSignal | undefined): unknown {
+  const { reason } = (signal ?? {}) as { reason?: unknown };
+  return reason ?? Object.assign(new Error("The request was cancelled"), { name: "AbortError" });
+}
+
 /** Rethrows a caller's cancellation, so nothing is sent on behalf of a request it gave up on. */
 export function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (!signal?.aborted) return;
-  const { reason } = signal as { reason?: unknown };
-  throw reason ?? Object.assign(new Error("The request was cancelled"), { name: "AbortError" });
+  if (signal?.aborted) throw abortError(signal);
 }
 
 async function readErrorCode(response: Response): Promise<string | undefined> {

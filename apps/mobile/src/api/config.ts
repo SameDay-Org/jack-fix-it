@@ -2,16 +2,20 @@
 export type ApiConfig = {
   readonly baseUrl: URL;
   readonly timeoutMs: number;
+  /** How long one file's PUT to storage may take, in milliseconds; files are far bigger than API calls. */
+  readonly uploadTimeoutMs: number;
   /** The server's minimum password length, for the sign-up hint; the server stays the authority. */
   readonly passwordMinLength: number;
 };
 
 export const DEFAULT_TIMEOUT_MS = 15_000;
+export const DEFAULT_UPLOAD_TIMEOUT_MS = 120_000;
 export const DEFAULT_PASSWORD_MIN_LENGTH = 10;
 
 type RawConfig = {
   url: string | undefined;
   timeoutMs: string | undefined;
+  uploadTimeoutMs?: string | undefined;
   passwordMinLength?: string | undefined;
   dev: boolean;
 };
@@ -26,7 +30,13 @@ function positiveInteger(raw: string | undefined, fallback: number, name: string
 }
 
 /** Validates the raw environment values. Pure, so tests can cover every branch. */
-export function readApiConfig({ url, timeoutMs, passwordMinLength, dev }: RawConfig): ApiConfig {
+export function readApiConfig({
+  url,
+  timeoutMs,
+  uploadTimeoutMs,
+  passwordMinLength,
+  dev,
+}: RawConfig): ApiConfig {
   if (!url) throw new Error("EXPO_PUBLIC_API_URL is not set; see apps/mobile/.env.example");
 
   let baseUrl: URL;
@@ -46,6 +56,11 @@ export function readApiConfig({ url, timeoutMs, passwordMinLength, dev }: RawCon
   return {
     baseUrl,
     timeoutMs: positiveInteger(timeoutMs, DEFAULT_TIMEOUT_MS, "EXPO_PUBLIC_API_TIMEOUT_MS"),
+    uploadTimeoutMs: positiveInteger(
+      uploadTimeoutMs,
+      DEFAULT_UPLOAD_TIMEOUT_MS,
+      "EXPO_PUBLIC_UPLOAD_TIMEOUT_MS",
+    ),
     passwordMinLength: positiveInteger(
       passwordMinLength,
       DEFAULT_PASSWORD_MIN_LENGTH,
@@ -59,6 +74,7 @@ export function readApiConfig({ url, timeoutMs, passwordMinLength, dev }: RawCon
 export const apiConfig: ApiConfig = readApiConfig({
   url: process.env.EXPO_PUBLIC_API_URL,
   timeoutMs: process.env.EXPO_PUBLIC_API_TIMEOUT_MS,
+  uploadTimeoutMs: process.env.EXPO_PUBLIC_UPLOAD_TIMEOUT_MS,
   passwordMinLength: process.env.EXPO_PUBLIC_PASSWORD_MIN_LENGTH,
   dev: __DEV__,
 });
