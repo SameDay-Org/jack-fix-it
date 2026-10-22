@@ -63,6 +63,11 @@ def parse_country_codes(value: str) -> list[str]:
     return [code.strip() for code in value.split(",") if code.strip()]
 
 
+def parse_codecs(value: str) -> list[str]:
+    """Split a CSV of ffmpeg codec names such as "h264,hevc"; ignore blanks and case."""
+    return [codec.strip().lower() for codec in value.split(",") if codec.strip()]
+
+
 def parse_cors_origins(value: str) -> list[str]:
     """Split a CSV of origins; ignore blanks and trailing slashes."""
     return [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
@@ -160,6 +165,23 @@ class Settings(BaseSettings):
     request_create_window_seconds: int = Field(default=3_600, gt=0)
     request_list_default_limit: int = Field(default=20, gt=0)
     request_list_max_limit: int = Field(default=50, gt=0)
+    # Privacy-safe copies of request photos and videos (#173), made by the worker. Runs one
+    # sanitize job gets, the delay before a retry, the longest one ffmpeg remux may take, the
+    # most pixels an image may decode to (more is a decompression bomb: the file fails), the
+    # re-encode quality of JPEG and WebP copies, and the ffmpeg binary.
+    media_sanitize_max_tries: int = Field(default=5, gt=0)
+    media_sanitize_retry_seconds: int = Field(default=30, gt=0)
+    media_sanitize_timeout_seconds: float = Field(default=120.0, gt=0)
+    media_max_image_pixels: int = Field(default=50_000_000, gt=0)
+    media_jpeg_quality: int = Field(default=85, ge=1, le=95)
+    ffmpeg_path: str = Field(default="ffmpeg", min_length=1)
+    ffprobe_path: str = Field(default="ffprobe", min_length=1)
+    # The only video and audio codecs a safe copy may carry (CSV of ffmpeg codec names): a remux
+    # copies the streams as they are, and an image codec (MJPEG, PNG) keeps its EXIF.
+    media_video_codecs: Annotated[list[str], NoDecode] = Field(default=["h264", "hevc"])
+    media_audio_codecs: Annotated[list[str], NoDecode] = Field(default=["aac", "mp3", "opus"])
+    # The longest one sanitize job may run (every media of one request), past which ARQ stops it.
+    media_sanitize_job_timeout_seconds: int = Field(default=1_800, gt=0)
     # Pro profile (D6.1, #36): the most categories and service areas one pro may list.
     pro_max_categories: int = Field(default=5, gt=0)
     pro_max_service_areas: int = Field(default=50, gt=0)
@@ -198,6 +220,11 @@ class Settings(BaseSettings):
         if "*" in value:
             raise ValueError("CORS_ORIGINS must list explicit origins, not '*'")
         return value
+
+    @field_validator("media_video_codecs", "media_audio_codecs", mode="before")
+    @classmethod
+    def _split_codecs(cls, value: object) -> object:
+        return parse_codecs(value) if isinstance(value, str) else value
 
     @field_validator("phone_allowed_country_codes", mode="before")
     @classmethod

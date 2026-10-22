@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy import func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.requests.models import RequestMedia, ServiceRequest
+from app.modules.requests.models import MediaSafeStatus, RequestMedia, ServiceRequest
 
 
 class ServiceRequestRepository:
@@ -45,6 +45,28 @@ class ServiceRequestRepository:
             .order_by(RequestMedia.created_at, RequestMedia.id)
         )
         return list((await self._session.scalars(statement)).all())
+
+    async def pending_media(self, request_id: uuid.UUID) -> list[RequestMedia]:
+        """The request's media still without a safe copy (#173)."""
+        statement = (
+            select(RequestMedia)
+            .where(
+                RequestMedia.request_id == request_id,
+                RequestMedia.safe_status == MediaSafeStatus.PENDING,
+            )
+            .order_by(RequestMedia.created_at, RequestMedia.id)
+        )
+        return list((await self._session.scalars(statement)).all())
+
+    async def media_for_update(self, media_id: uuid.UUID) -> RequestMedia | None:
+        """One media row, locked until the transaction ends, as the last writer left it."""
+        statement = (
+            select(RequestMedia)
+            .where(RequestMedia.id == media_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
 
     async def page_of_customer(
         self,

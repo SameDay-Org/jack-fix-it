@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.addresses.models import Address
 from app.modules.requests.models import (
+    MediaSafeStatus,
     RequestMedia,
     RequestMediaKind,
     RequestOrigin,
@@ -74,3 +75,49 @@ async def test_file_key_unique(db_session: AsyncSession, request_id: uuid.UUID) 
 
 async def test_request_must_exist(db_session: AsyncSession) -> None:
     await assert_rejected(db_session, media(uuid.uuid4(), "u/a/request_media/orphan.jpg"))
+
+
+# The privacy-safe copy (#173)
+
+
+async def test_a_new_media_row_is_pending_with_no_safe_copy(
+    db_session: AsyncSession, request_id: uuid.UUID
+) -> None:
+    row = media(request_id, "u/a/request_media/safe-default.jpg")
+    db_session.add(row)
+    await db_session.flush()
+    await db_session.refresh(row)
+
+    assert (row.safe_status, row.safe_key, row.safe_content_type) == (
+        MediaSafeStatus.PENDING,
+        None,
+        None,
+    )
+
+
+async def test_safe_status_check_accepts_every_value_and_rejects_others(
+    db_session: AsyncSession, request_id: uuid.UUID
+) -> None:
+    db_session.add(media(request_id, "u/a/request_media/safe-check.jpg"))
+    await db_session.flush()
+
+    for status in MediaSafeStatus:
+        await db_session.execute(
+            text("UPDATE request_media SET safe_status = :status"), {"status": status.value}
+        )
+    with pytest.raises(IntegrityError):
+        await db_session.execute(text("UPDATE request_media SET safe_status = 'served'"))
+
+
+async def test_a_safe_key_belongs_to_one_media_row(
+    db_session: AsyncSession, request_id: uuid.UUID
+) -> None:
+    first = media(request_id, "u/a/request_media/safe-1.jpg")
+    second = media(request_id, "u/a/request_media/safe-2.jpg")
+    first.safe_key = second.safe_key = "m/" + "0" * 32 + ".jpg"
+    db_session.add(first)
+    await db_session.flush()
+
+    db_session.add(second)
+    with pytest.raises(IntegrityError):
+        await db_session.flush()

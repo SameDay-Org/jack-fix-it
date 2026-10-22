@@ -363,7 +363,9 @@ async def test_logs_carry_ids_and_counts_only(
 
 
 def test_worker_registers_the_tasks_and_the_cron() -> None:
-    [task] = [f for f in WorkerSettings.functions if isinstance(f, Function)]
+    [task] = [
+        f for f in WorkerSettings.functions if isinstance(f, Function) and f.name == "send_push"
+    ]
     assert task.coroutine is send_push
     assert task.name == "send_push"
     assert task.keep_result_s == 0  # a resend can queue the message's job id again

@@ -75,6 +75,14 @@ class RequestMediaKind(StrEnum):
     VIDEO = "video"
 
 
+class MediaSafeStatus(StrEnum):
+    """The privacy-safe copy of a request's photo or video (#173)."""
+
+    PENDING = "pending"  # not made yet
+    READY = "ready"  # safe_key holds it
+    FAILED = "failed"  # the file could not be made safe: it is never served
+
+
 class RequestMedia(IdTimestampsMixin, Base):
     """A photo or video the customer uploaded (#35) and attached to a request."""
 
@@ -84,3 +92,13 @@ class RequestMedia(IdTimestampsMixin, Base):
     kind: Mapped[RequestMediaKind] = mapped_column(str_enum(RequestMediaKind, "request_media_kind"))
     # The storage key (u/<user_id>/request_media/...); one file belongs to one request.
     file_key: Mapped[str] = mapped_column(String(256), unique=True)
+    # The privacy-safe copy the worker makes (#173): metadata stripped (EXIF, GPS, XMP, video
+    # tags), under an opaque key (m/<32 hex><ext>) with no user id. Only it is ever shown to a
+    # pro (part 2); the customer's own views keep the original.
+    safe_key: Mapped[str | None] = mapped_column(String(256), unique=True)
+    safe_status: Mapped[MediaSafeStatus] = mapped_column(
+        str_enum(MediaSafeStatus, "media_safe_status"),
+        server_default=MediaSafeStatus.PENDING.value,
+        index=True,
+    )
+    safe_content_type: Mapped[str | None] = mapped_column(String(64))
