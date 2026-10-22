@@ -36,8 +36,13 @@ EXPECTED_ALLOWED: dict[tuple[str, str], set[str]] = {
     ("finding_pro", "expired"): {"system"},
     ("quote_ready", "expired"): {"system"},
     **{(src, "cancelled"): {"customer", "staff"} for src in _BEFORE_ACCEPTANCE},
+    # Approved by Cesar on 2026-10-22 (#160 follow-up).
+    ("quote_ready", "finding_pro"): {"system"},
+    ("accepted", "quote_ready"): {"system"},
+    ("accepted", "cancelled"): {"customer", "staff"},
+    ("finding_pro", "reviewing"): {"staff"},
 }
-EXPECTED_TERMINAL = {"accepted", "expired", "cancelled"}
+EXPECTED_TERMINAL = {"expired", "cancelled"}
 # Who acts for each kind: the request's own customer, both staff roles, the workers.
 ACTORS_OF_KIND = {"customer": ["customer"], "staff": ["agent", "admin"], "system": ["system"]}
 KIND_ACTORS = ["customer", "agent", "admin", "system"]
@@ -153,6 +158,11 @@ async def attempt(
 # The table
 
 
+def test_table_has_fifteen_edges() -> None:
+    # 11 from #160, plus the 4 Cesar approved on 2026-10-22.
+    assert len(EXPECTED_ALLOWED) == len(TRANSITIONS) == 15
+
+
 def test_table_is_the_glossarys() -> None:
     table = {(s.value, d.value): {k.value for k in kinds} for (s, d), kinds in TRANSITIONS.items()}
 
@@ -225,16 +235,23 @@ async def test_other_customer_is_404_before_409(db_session: AsyncSession, world:
     open_request = await make_request(
         db_session, world.customer.id, world.address_id, RequestStatus.QUOTE_READY
     )
+    accepted = await make_request(
+        db_session, world.customer.id, world.address_id, RequestStatus.ACCEPTED
+    )
     closed = await make_request(
         db_session, world.customer.id, world.address_id, RequestStatus.CANCELLED
     )
 
     # An allowed edge, a terminal status and an unknown id all answer the same 404.
     assert await attempt(db_session, open_request.id, "accepted", world.other_customer) == 404
+    assert await attempt(db_session, accepted.id, "cancelled", world.other_customer) == 404
+    # The other customer's 404 comes before the 409 of an edge accepted does not have.
+    assert await attempt(db_session, accepted.id, "received", world.other_customer) == 404
     assert await attempt(db_session, closed.id, "received", world.other_customer) == 404
     assert await attempt(db_session, uuid.uuid4(), "cancelled", world.customer) == 404
     assert await attempt(db_session, uuid.uuid4(), "cancelled", SYSTEM) == 404
     assert await status_of(db_session, open_request.id) is RequestStatus.QUOTE_READY
+    assert await status_of(db_session, accepted.id) is RequestStatus.ACCEPTED
 
 
 @pytest.mark.parametrize(
@@ -248,6 +265,24 @@ async def test_pro_actor_is_403(db_session: AsyncSession, world: World, src: str
 
     assert await attempt(db_session, request.id, dst, world.pro) == 403
     assert await status_of(db_session, request.id) is RequestStatus(src)
+
+
+@pytest.mark.parametrize("dst", STATES)
+async def test_accepted_has_exactly_two_exits(
+    db_session: AsyncSession, world: World, dst: str
+) -> None:
+    # Back to quote_ready when the payment fails (#61, system); cancelled before paying.
+    exits = {"quote_ready": "system", "cancelled": "customer"}
+    request = await make_request(
+        db_session, world.customer.id, world.address_id, RequestStatus.ACCEPTED
+    )
+
+    expected = 200 if dst in exits else 409
+    actor = world.actor(exits.get(dst, "admin"))
+    assert await attempt(db_session, request.id, dst, actor) == expected
+    assert await status_of(db_session, request.id) is RequestStatus(
+        dst if dst in exits else "accepted"
+    )
 
 
 @pytest.mark.parametrize("terminal", sorted(EXPECTED_TERMINAL))
@@ -296,7 +331,7 @@ async def test_log_carries_ids_and_statuses_only(
         await RequestStateMachine(db_session).transition(
             request.id, RequestStatus.ACCEPTED, world.customer
         )
-        await attempt(db_session, request.id, "cancelled", world.customer)  # refused: no log
+        await attempt(db_session, request.id, "received", world.customer)  # refused: no log
 
     [record] = [r for r in caplog.records if r.message == "request_status_changed"]
     fields = {
