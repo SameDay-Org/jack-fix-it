@@ -98,23 +98,31 @@ def summary_of(value: object) -> DatabaseErrorSummary | None:
     return summarize(error) if error is not None else None
 
 
-def safe_message(record: logging.LogRecord) -> str:
-    """`record.getMessage()`, with a database error logged as the message, or among its
-    arguments, replaced by its summary. A library can log one as an argument: ARQ logs
-    "%s failed, %s: %s" with the exception last."""
-    if summary_of(record.msg) is not None:
-        return str(_safe_arg(record.msg))
+def record_summary(record: logging.LogRecord) -> DatabaseErrorSummary | None:
+    """The summary when a log record carries a database error anywhere: as its exc_info (or
+    in that exception's chain), as its message, or among its arguments."""
+    exc_info = record.exc_info
+    if isinstance(exc_info, tuple) and len(exc_info) == 3:
+        summary = summary_of(exc_info[1])
+        if summary is not None:
+            return summary
     args = record.args
-    if isinstance(args, tuple) and any(summary_of(arg) for arg in args):
-        return str(record.msg) % tuple(_safe_arg(arg) for arg in args)
-    if isinstance(args, Mapping) and any(summary_of(arg) for arg in args.values()):
-        return str(record.msg) % {key: _safe_arg(arg) for key, arg in args.items()}
-    return record.getMessage()
+    values = args.values() if isinstance(args, Mapping) else args if isinstance(args, tuple) else ()
+    return next(
+        (summary for value in (record.msg, *values) if (summary := summary_of(value))), None
+    )
 
 
-def _safe_arg(value: object) -> object:
-    summary = summary_of(value)
-    return f"{summary.error_class}({summary.describe()})" if summary else value
+def safe_message(record: logging.LogRecord) -> str:
+    """`record.getMessage()`, or, when the record carries a database error, the logger's name
+    and the error's summary alone. Nothing of the record's message or arguments is kept: a
+    message can arrive already rendered with the error's text in it (asyncio logs "Future
+    exception was never retrieved" with the future's repr), and an argument next to the
+    error can be a runtime value."""
+    summary = record_summary(record)
+    if summary is None:
+        return record.getMessage()
+    return f"{record.name}: {summary.error_class}({summary.describe()})"
 
 
 def _text(value: object) -> str | None:
