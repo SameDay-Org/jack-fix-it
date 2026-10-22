@@ -13,7 +13,6 @@
     "dismiss": "Dismiss"
   },
   "welcome": {
-    "tagline": "Whatever happens at home, we <accent>fix</accent> it.",
     "support": "Tell Jack. We'll take care of the rest.",
     "getStarted": "Get started",
     "haveAccount": "I already have an account",
@@ -71,5 +70,10 @@
     "pro": "Pro",
     "agent": "Agent",
     "admin": "Admin"
+  },
+  "launch": {
+    "headline": "Whatever happens at home, we {{word}} it.",
+    "words": ["fix", "clean", "paint", "mow", "move"],
+    "skip": "Skip intro"
   }
 }

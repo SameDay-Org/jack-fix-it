@@ -43,6 +43,23 @@ describe("Screen", () => {
     expect(screen.getByText("Body")).toBeTruthy();
   });
 
+  it("the page under a hero bar is navy at its very first layer (a hero fading over a hero stays navy)", async () => {
+    await renderScreen(
+      <Screen bar="hero" testID="hero-screen">
+        <Text>Body</Text>
+      </Screen>,
+    );
+    expect(screen.getByTestId("hero-screen").props.className).toContain("bg-navy-900");
+    expect(screen.getByTestId("hero-screen").props.className).not.toContain("bg-gray-50");
+
+    await renderScreen(
+      <Screen bar="light" testID="light-screen">
+        <Text>Body</Text>
+      </Screen>,
+    );
+    expect(screen.getByTestId("light-screen").props.className).toContain("bg-gray-50");
+  });
+
   it("light bar: dark status icons over a gray-50 backdrop", async () => {
     await renderScreen(
       <Screen bar="light">
