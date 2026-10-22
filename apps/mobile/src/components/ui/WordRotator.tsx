@@ -54,6 +54,8 @@ export type WordRotatorProps = {
   stopAt?: number;
   /** Called with the new index each time a word settles. */
   onCycle?: (index: number) => void;
+  /** Called once the run has settled on its last word; at once when there is nothing to run. */
+  onRunEnd?: () => void;
   /** Called once every word is measured and the first frame is final; good moment to lift a splash. */
   onReady?: () => void;
   testID?: string;
@@ -78,6 +80,7 @@ export function WordRotator({
   swaps,
   stopAt = 0,
   onCycle,
+  onRunEnd,
   onReady,
   testID,
 }: WordRotatorProps) {
@@ -102,11 +105,13 @@ export function WordRotator({
   // body text grows), so only the rendered height lines the clip up with the words around it.
   const [lineHeight, setLineHeight] = useState(tokens.fontSize[type].lineHeight);
   const pending = useRef(new Map<number, { width: number; height: number }>());
-  // The run reads the latest callback without restarting when it changes.
+  // The run reads the latest callbacks without restarting when they change.
   const onCycleRef = useRef(onCycle);
+  const onRunEndRef = useRef(onRunEnd);
   useEffect(() => {
     onCycleRef.current = onCycle;
-  }, [onCycle]);
+    onRunEndRef.current = onRunEnd;
+  }, [onCycle, onRunEnd]);
 
   const record = (index: number, layout: { width: number; height: number }) => {
     pending.current.set(index, layout);
@@ -125,7 +130,11 @@ export function WordRotator({
     if (!ready) return;
     onReady?.();
     const steps = sequence.length - 1;
-    if (steps < 1 || words.length < 2) return;
+    const end = () => onRunEndRef.current?.();
+    if (steps < 1 || words.length < 2) {
+      end();
+      return;
+    }
     const easing = Easing.out(Easing.cubic);
     const hold = Math.max(intervalMs - transitionMs, 0);
     const settle = (index: number) => onCycleRef.current?.(index);
@@ -134,7 +143,9 @@ export function WordRotator({
         withDelay(
           hold,
           withTiming(k + 1, { duration: transitionMs, easing }, (finished) => {
-            if (finished) runOnJS(settle)(sequence[k + 1]);
+            if (!finished) return;
+            runOnJS(settle)(sequence[k + 1]);
+            if (k === steps - 1) runOnJS(end)();
           }),
         ),
       ),

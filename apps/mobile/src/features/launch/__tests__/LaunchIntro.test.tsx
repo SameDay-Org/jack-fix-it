@@ -79,8 +79,12 @@ async function measureWords() {
   });
 }
 
-/** The minimum run elapses; with the session resolved the intro exits (at once, under the mock). */
+/**
+ * The words are measured (under the mock the run then settles at once) and the minimum elapses;
+ * with the session resolved the intro exits (at once, under the mock).
+ */
 async function finishIntro() {
+  await measureWords();
   await act(async () => jest.advanceTimersByTime(launchMinMs + 1));
 }
 

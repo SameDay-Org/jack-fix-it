@@ -148,8 +148,10 @@ describe("WordRotator", () => {
 
   it("cycles words in order and ends on stopAt, animating the clip width between words", async () => {
     const onCycle = jest.fn();
-    await renderRotator({ onCycle, stopAt: 0 });
+    const onRunEnd = jest.fn();
+    await renderRotator({ onCycle, onRunEnd, stopAt: 0 });
     await measure();
+    expect(onRunEnd).not.toHaveBeenCalled();
     expect(animated(clip()).width).toBe(WIDTHS[0]);
     expect(animated(word(0)).opacity).toBe(1);
     expect(animated(word(1)).opacity).toBe(0);
@@ -165,11 +167,31 @@ describe("WordRotator", () => {
     expect(animated(word(0)).opacity).toBe(0);
     expect(onCycle.mock.calls).toEqual([[1]]);
 
-    await advance(INTERVAL * 2);
+    await advance(INTERVAL * 2 - TRANSITION / 2);
+    expect(onRunEnd).not.toHaveBeenCalled(); // the last swap is still rolling
+
+    await advance(TRANSITION / 2);
     expect(animated(clip()).width).toBe(WIDTHS[0]);
     expect(animated(word(0)).opacity).toBe(1);
     expect(animated(word(3)).opacity).toBe(0); // never shown
     expect(onCycle.mock.calls).toEqual([[1], [2], [0]]);
+    expect(onRunEnd).toHaveBeenCalledTimes(1); // settled on stopAt: the run is over
+  });
+
+  it("a single word has no run: it reports the end as soon as it is measured", async () => {
+    const onRunEnd = jest.fn();
+    await renderRotator({ words: ["fix"], onRunEnd });
+    expect(onRunEnd).not.toHaveBeenCalled();
+
+    const row = screen.getByTestId("rot-measure", HIDDEN);
+    await act(async () => {
+      fireEvent(within(row).getByText("fix", HIDDEN), "layout", {
+        nativeEvent: { layout: { width: WIDTHS[0], height: LINE, x: 0, y: 0 } },
+      });
+    });
+
+    expect(onRunEnd).toHaveBeenCalledTimes(1);
+    expect(withSequence).not.toHaveBeenCalled();
   });
 
   it("slides: a waiting word sits one line below the clip, ready to roll in", async () => {

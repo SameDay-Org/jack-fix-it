@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Pressable, StyleSheet } from "react-native";
 import Animated, {
@@ -33,7 +33,9 @@ export function LaunchIntro({ onReady, onDone }: LaunchIntroProps) {
   const { t } = useTranslation();
   const { status } = useSession();
   const reduceMotion = useReducedMotion();
-  const { phase, skip } = useLaunchIntro({ status, reduceMotion });
+  const [runDone, setRunDone] = useState(false);
+  const runEnd = useCallback(() => setRunDone(true), []);
+  const { phase, skip } = useLaunchIntro({ status, reduceMotion, runDone });
   const words = t("launch.words", { returnObjects: true });
   const {
     wordSwapIntervalMs,
@@ -98,6 +100,7 @@ export function LaunchIntro({ onReady, onDone }: LaunchIntroProps) {
               transitionMs={wordSwapTransitionMs}
               swaps={launchSwaps}
               stopAt={0}
+              onRunEnd={runEnd}
               onReady={ready}
               testID="launch-rotator"
             />
