@@ -574,10 +574,25 @@ export interface components {
         ChoiceOption: {
             /** Value */
             value: string;
-            /** Labels */
+            /**
+             * Labels
+             * @description The option's name per locale; en and es required.
+             */
             labels: {
                 [key: string]: string;
             };
+            /**
+             * Description
+             * @description What the option covers, per locale; en and es required, at most 160 characters each.
+             */
+            description?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Icon
+             * @description Key of an illustration the app bundles, e.g. paint-interior. Never a URL.
+             */
+            icon?: string | null;
         };
         /** CityOut */
         CityOut: {
