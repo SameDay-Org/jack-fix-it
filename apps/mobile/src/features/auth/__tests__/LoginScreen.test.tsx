@@ -1,9 +1,12 @@
 import "@/i18n";
 
-import { fireEvent, screen } from "@testing-library/react-native";
+import { act, fireEvent, screen } from "@testing-library/react-native";
+import { router, useLocalSearchParams } from "expo-router";
 import { AccessibilityInfo } from "react-native";
 
 import { ApiError, login } from "@/api";
+import { moveAccessibilityFocus } from "@/components/ui";
+import { tokens } from "@/theme";
 
 import { LoginScreen } from "../LoginScreen";
 import { renderInSafeArea } from "./helpers";
@@ -19,6 +22,11 @@ jest.mock(
 jest.mock("@/api", () => ({ ...jest.requireActual("@/api"), login: jest.fn() }));
 jest.mock("expo-router", () => ({
   router: { push: jest.fn(), replace: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) },
+  useLocalSearchParams: jest.fn(() => ({})),
+}));
+jest.mock("@/components/ui", () => ({
+  ...jest.requireActual("@/components/ui"),
+  moveAccessibilityFocus: jest.fn(),
 }));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
@@ -66,6 +74,56 @@ describe("LoginScreen", () => {
     expect(login).toHaveBeenCalledWith({
       email: "maria@example.com",
       password: "correct horse battery",
+    });
+  });
+
+  describe("reached from Welcome's panel", () => {
+    const { transitionMs } = tokens.motion;
+    const LAYOUT = { nativeEvent: { layout: { x: 0, y: 0, width: 320, height: 600 } } };
+    const contentOpacity = () =>
+      (
+        screen.getByTestId("login-screen-content").props.jestAnimatedStyle as {
+          value: { opacity: number };
+        }
+      ).value.opacity;
+    beforeEach(() => {
+      jest.useFakeTimers();
+      jest.mocked(useLocalSearchParams).mockReturnValue({ from: "welcome" });
+      jest.mocked(router.back).mockClear();
+    });
+    afterEach(() => {
+      jest.useRealTimers();
+      jest.mocked(useLocalSearchParams).mockReturnValue({});
+    });
+
+    it("content enters after the panel settles, then focus moves to the title", async () => {
+      jest.mocked(moveAccessibilityFocus).mockClear();
+      await renderInSafeArea(<LoginScreen />);
+      expect(contentOpacity()).toBe(0);
+      await act(async () =>
+        fireEvent(screen.getByTestId("login-screen-content"), "layout", LAYOUT),
+      );
+
+      await act(async () => jest.advanceTimersByTime(transitionMs * 1.5));
+
+      expect(contentOpacity()).toBe(1);
+      expect(moveAccessibilityFocus).toHaveBeenCalledTimes(1);
+      expect(jest.mocked(moveAccessibilityFocus).mock.calls[0][0]).toBeTruthy(); // the title node
+      expect(screen.getByRole("header", { name: "Welcome back" })).toBeTruthy();
+    });
+
+    it("back fades the content out before it pops", async () => {
+      await renderInSafeArea(<LoginScreen />);
+      await act(async () =>
+        fireEvent(screen.getByTestId("login-screen-content"), "layout", LAYOUT),
+      );
+      await act(async () => jest.advanceTimersByTime(transitionMs * 2));
+
+      await act(async () => fireEvent.press(screen.getByRole("button", { name: "Back" })));
+      expect(router.back).not.toHaveBeenCalled();
+      await act(async () => jest.advanceTimersByTime(transitionMs * 1.5));
+      expect(contentOpacity()).toBe(0);
+      expect(router.back).toHaveBeenCalledTimes(1);
     });
   });
 });

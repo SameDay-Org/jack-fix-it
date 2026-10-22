@@ -27,3 +27,4 @@ export type { Toast, ToastTone } from "./toast";
 export { ToastHost } from "./ToastHost";
 export { useReduceTransparency } from "./useReduceTransparency";
 export type { ReduceTransparency } from "./useReduceTransparency";
+export { moveAccessibilityFocus } from "./focus";

@@ -1,0 +1,207 @@
+import "@/i18n";
+
+import { act, fireEvent, screen } from "@testing-library/react-native";
+import { router, useFocusEffect, useNavigation } from "expo-router";
+import { useReducedMotion } from "react-native-reanimated";
+
+import { useSession } from "@/api";
+import { tokens } from "@/theme";
+
+import { WelcomeScreen } from "../WelcomeScreen";
+import { renderInSafeArea, SIGNED_OUT } from "./helpers";
+
+jest.mock("@/api", () => ({ useSession: jest.fn() }));
+jest.mock("expo-router", () => ({
+  router: { push: jest.fn(), replace: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) },
+  useFocusEffect: jest.fn(),
+  useNavigation: jest.fn(),
+}));
+jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
+jest.mock(
+  "react-native-safe-area-context",
+  () => jest.requireActual("react-native-safe-area-context/jest/mock").default,
+);
+jest.mock("react-native-reanimated", () => {
+  const actual =
+    jest.requireActual<typeof import("react-native-reanimated")>("react-native-reanimated");
+  return { __esModule: true, ...actual, useReducedMotion: jest.fn(() => false) };
+});
+// Real Reanimated otherwise: the live animated styles sit on the host elements (`jestAnimatedStyle`).
+
+const { accessToken: _a, accessTokenExpiresAt: _b, ...SESSION_SIGNED_OUT } = SIGNED_OUT;
+const { panelRiseMs, slidePx, panelHeroDim } = tokens.motion;
+const { xl } = tokens.radius;
+const RESTING_TOP = 440; // the panel's top edge inside the content area, as laid out on the emulator
+const TOP_INSET = 24; // helpers' METRICS status bar
+const TRAVEL = RESTING_TOP + TOP_INSET;
+
+type Animated = {
+  opacity?: number;
+  borderTopLeftRadius?: number;
+  backgroundColor?: string;
+  transform?: { translateY: number }[];
+};
+const animated = (testID: string): Animated =>
+  (screen.getByTestId(testID).props.jestAnimatedStyle as { value: Animated }).value;
+const panelY = () => animated("welcome-actions").transform?.[0].translateY ?? 0;
+const backdrop = () => screen.getByTestId("system-bar-backdrop").props.className as string;
+const getStarted = () => screen.getByRole("button", { name: "Get started" });
+const advance = (ms: number) => act(async () => jest.advanceTimersByTime(ms));
+
+/** Renders Welcome and lays the panel out, as the native side would. */
+async function renderWelcome() {
+  await renderInSafeArea(<WelcomeScreen />);
+  await act(async () => {
+    fireEvent(screen.getByTestId("welcome-actions"), "layout", {
+      nativeEvent: { layout: { x: 0, y: RESTING_TOP, width: 320, height: 184 } },
+    });
+  });
+}
+
+/** The focus callback Welcome registered: what runs when it is focused again after a back. */
+const refocus = () =>
+  act(async () => {
+    const [effect] = jest.mocked(useFocusEffect).mock.calls.at(-1) as [() => void];
+    effect();
+  });
+
+beforeEach(() => {
+  jest.useFakeTimers();
+  jest.mocked(useSession).mockReturnValue(SESSION_SIGNED_OUT);
+  jest.mocked(useReducedMotion).mockReturnValue(false);
+  jest.mocked(router.push).mockReset();
+  jest.mocked(useFocusEffect).mockClear();
+  // The push normally moves focus away; a test that wants a push that did nothing says so.
+  jest.mocked(useNavigation).mockReturnValue({ isFocused: () => false } as never);
+});
+afterEach(() => jest.useRealTimers());
+
+describe("usePanelTransition (through WelcomeScreen)", () => {
+  it("the tokens pace one purposeful motion", () => {
+    expect(panelRiseMs).toBeGreaterThanOrEqual(350);
+    expect(panelRiseMs).toBeLessThanOrEqual(450);
+    expect(panelHeroDim).toBeGreaterThan(0);
+    expect(panelHeroDim).toBeLessThan(1);
+  });
+
+  it("forward runs the rise then navigates once", async () => {
+    await renderWelcome();
+    expect(panelY()).toBeCloseTo(0, 5);
+    expect(animated("welcome-actions").borderTopLeftRadius).toBe(xl);
+    expect(backdrop()).toContain("bg-navy-900");
+
+    await act(async () => fireEvent.press(getStarted()));
+    expect(router.push).not.toHaveBeenCalled(); // the rise comes first
+
+    await advance(panelRiseMs / 2);
+    const midway = panelY();
+    expect(midway).toBeLessThan(0);
+    expect(midway).toBeGreaterThan(-TRAVEL);
+    expect(animated("welcome-actions").borderTopLeftRadius).toBeLessThan(xl);
+    expect(animated("welcome-hero").opacity).toBeLessThan(1); // dims and parallaxes
+    expect(animated("welcome-hero").transform?.[0].translateY).toBeLessThan(0);
+
+    await advance(panelRiseMs);
+    expect(panelY()).toBeCloseTo(-TRAVEL, 0);
+    expect(animated("welcome-actions").borderTopLeftRadius).toBeCloseTo(0, 0);
+    expect(animated("welcome-hero").opacity).toBeCloseTo(panelHeroDim, 1);
+    expect(animated("welcome-hero").transform?.[0].translateY).toBeCloseTo(-slidePx, 0);
+    expect(backdrop()).toContain("bg-gray-50"); // the bar flipped as the panel covered it
+    expect(router.push).toHaveBeenCalledTimes(1);
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/(auth)/role",
+      params: { from: "welcome" },
+    });
+  });
+
+  it("the account link rises the same way into login", async () => {
+    await renderWelcome();
+    await act(async () =>
+      fireEvent.press(screen.getByRole("button", { name: "I already have an account" })),
+    );
+    await advance(panelRiseMs * 1.5);
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/(auth)/login",
+      params: { from: "welcome" },
+    });
+  });
+
+  it("a second tap during the animation is ignored", async () => {
+    await renderWelcome();
+    await act(async () => fireEvent.press(getStarted()));
+    await advance(panelRiseMs / 3);
+    await act(async () => fireEvent.press(getStarted()));
+    await act(async () =>
+      fireEvent.press(screen.getByRole("button", { name: "I already have an account" })),
+    );
+    await advance(panelRiseMs * 1.5);
+
+    expect(router.push).toHaveBeenCalledTimes(1);
+    expect(router.push).toHaveBeenCalledWith(expect.objectContaining({ pathname: "/(auth)/role" }));
+  });
+
+  it("back runs the reverse and restores the hero", async () => {
+    await renderWelcome();
+    await act(async () => fireEvent.press(getStarted()));
+    await advance(panelRiseMs * 1.5);
+    expect(panelY()).toBeCloseTo(-TRAVEL, 0);
+
+    await refocus(); // the destination went away: Welcome is focused again
+    await advance(panelRiseMs / 2);
+    expect(panelY()).toBeGreaterThan(-TRAVEL);
+    await advance(panelRiseMs);
+
+    expect(panelY()).toBeCloseTo(0, 0);
+    expect(animated("welcome-actions").borderTopLeftRadius).toBeCloseTo(xl, 0);
+    expect(animated("welcome-hero").opacity).toBeCloseTo(1, 1);
+    expect(animated("welcome-hero").transform?.[0].translateY).toBeCloseTo(0, 0);
+    expect(backdrop()).toContain("bg-navy-900");
+
+    await act(async () => fireEvent.press(getStarted())); // and it takes taps again
+    await advance(panelRiseMs * 1.5);
+    expect(router.push).toHaveBeenCalledTimes(2);
+  });
+
+  it("reduce motion uses a crossfade only: no rise, navigate at once", async () => {
+    jest.mocked(useReducedMotion).mockReturnValue(true);
+    await renderWelcome();
+
+    await act(async () => fireEvent.press(getStarted()));
+
+    expect(router.push).toHaveBeenCalledTimes(1);
+    await advance(panelRiseMs);
+    expect(panelY()).toBeCloseTo(0, 5);
+    expect(animated("welcome-hero").opacity).toBe(1);
+    expect(backdrop()).toContain("bg-navy-900");
+  });
+
+  it("navigation failure returns the panel to rest", async () => {
+    jest.mocked(router.push).mockImplementation(() => {
+      throw new Error("no such route");
+    });
+    await renderWelcome();
+    await act(async () => fireEvent.press(getStarted()));
+    await advance(panelRiseMs * 1.5);
+    expect(router.push).toHaveBeenCalledTimes(1);
+
+    await advance(panelRiseMs * 1.5); // the panel came back down
+    expect(panelY()).toBeCloseTo(0, 0);
+    expect(backdrop()).toContain("bg-navy-900");
+
+    await act(async () => fireEvent.press(getStarted())); // and the user can try again
+    await advance(panelRiseMs * 1.5);
+    expect(router.push).toHaveBeenCalledTimes(2);
+  });
+
+  it("a push that leaves Welcome focused lowers the panel too", async () => {
+    jest.mocked(useNavigation).mockReturnValue({ isFocused: () => true } as never);
+    await renderWelcome();
+    await act(async () => fireEvent.press(getStarted()));
+    await advance(panelRiseMs * 1.5);
+    expect(router.push).toHaveBeenCalledTimes(1);
+    expect(panelY()).toBeCloseTo(-TRAVEL, 0);
+
+    await advance(panelRiseMs * 2.5); // the settle check, then the lowering
+    expect(panelY()).toBeCloseTo(0, 0);
+  });
+});
