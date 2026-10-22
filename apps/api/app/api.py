@@ -5,8 +5,8 @@ from fastapi import APIRouter
 from app.errors import ErrorResponse
 from app.modules.auth.router import router as auth_router
 from app.modules.categories.router import router as categories_router
-from app.modules.pros.router import router as pros_router
 from app.modules.devices.router import router as devices_router
+from app.modules.pros.router import router as pros_router
 from app.modules.requests.router import router as requests_router
 from app.modules.service_areas.router import router as service_areas_router
 from app.modules.uploads.router import router as uploads_router
