@@ -1,12 +1,15 @@
 import uuid
 from collections.abc import Collection, Sequence
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.pros.models import (
     ProCategory,
+    ProDocument,
+    ProDocumentStatus,
+    ProDocumentType,
     ProProfile,
     ProServiceArea,
     ProVerificationStatus,
@@ -78,3 +81,40 @@ class ProProfileRepository:
         await self._session.execute(delete(ProServiceArea).where(ProServiceArea.pro_id == pro_id))
         self._session.add_all(ProServiceArea(pro_id=pro_id, service_area_id=i) for i in ids)
         await self._session.flush()
+
+
+class ProDocumentRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def supersede_pending(self, pro_id: uuid.UUID, doc_type: ProDocumentType) -> int:
+        """Marks the pending documents of this type superseded; returns how many."""
+        result = await self._session.execute(
+            update(ProDocument)
+            .where(
+                ProDocument.pro_id == pro_id,
+                ProDocument.doc_type == doc_type,
+                ProDocument.status == ProDocumentStatus.PENDING,
+            )
+            .values(status=ProDocumentStatus.SUPERSEDED, updated_at=func.now())
+        )
+        return int(result.rowcount)  # type: ignore[attr-defined]  # CursorResult of an UPDATE
+
+    async def add(self, document: ProDocument) -> ProDocument:
+        """Inserts now (flush), so a reused file key surfaces here as a unique violation."""
+        self._session.add(document)
+        await self._session.flush()
+        await self._session.refresh(document)
+        return document
+
+    async def current_of(self, pro_id: uuid.UUID) -> list[ProDocument]:
+        """The pro's documents except superseded ones, newest first."""
+        statement = (
+            select(ProDocument)
+            .where(
+                ProDocument.pro_id == pro_id,
+                ProDocument.status != ProDocumentStatus.SUPERSEDED,
+            )
+            .order_by(ProDocument.created_at.desc(), ProDocument.id.desc())
+        )
+        return list((await self._session.scalars(statement)).all())
