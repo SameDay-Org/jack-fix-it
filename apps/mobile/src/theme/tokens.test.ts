@@ -180,12 +180,12 @@ describe("theme tokens", () => {
   });
 
   it.each(Object.entries(VARIANT))(
-    "button labels keep AA at rest and pressed: %s",
-    (_variant, { fill, label }) => {
+    "button labels keep AA at rest and pressed on their surfaces: %s",
+    (_variant, { fill, label, on }) => {
       for (const state of ["rest", "pressed"] as const) {
         const text = paintOf(label[state], "text");
         expect(text).toBeDefined();
-        for (const surface of LIGHT_SURFACES) {
+        for (const surface of on ?? LIGHT_SURFACES) {
           expect(
             paintedContrast(text!, paintOf(fill[state], "bg"), surface),
           ).toBeGreaterThanOrEqual(AA_TEXT);

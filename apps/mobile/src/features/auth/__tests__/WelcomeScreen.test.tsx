@@ -30,14 +30,19 @@ describe("WelcomeScreen", () => {
     await renderInSafeArea(<WelcomeScreen />);
 
     expect(screen.getByText("Jack Fix It")).toBeTruthy();
-    expect(screen.getByTestId("welcome-tagline")).toHaveTextContent(
-      "Whatever happens at home, we fix it.",
-    );
-    expect(screen.getByText("fix").props.className).toContain("text-green-500");
+    // The same hero the launch intro draws: one accessible sentence, the lime word in place.
+    expect(
+      screen.getByRole("header", { name: "Whatever happens at home, we fix it." }),
+    ).toBeTruthy();
+    // The lime word is there for the eye and hidden from the reader (the header carries the sentence).
+    // (The hero's measurement row holds a hidden "fix" too; the visible one comes first.)
+    expect(
+      screen.getAllByText("fix", { includeHiddenElements: true })[0].props.className,
+    ).toContain("text-green-500");
     expect(screen.getByText("Tell Jack. We'll take care of the rest.")).toBeTruthy();
     expect(screen.getAllByRole("button")).toHaveLength(2);
     expect(screen.queryByText(/Tell Jack What Happened/i)).toBeNull();
-    expect(screen.queryByTestId("welcome-partial-cleanup")).toBeNull();
+    expect(screen.queryByTestId("welcome-actions-partial-cleanup")).toBeNull();
   });
 
   it("Get started goes to the role choice and the account link to login", async () => {
