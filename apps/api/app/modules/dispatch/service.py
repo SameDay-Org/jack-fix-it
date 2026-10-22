@@ -1,6 +1,6 @@
 """Dispatch (D9.1, #48): sends a categorized request to up to N eligible pros.
 
-`dispatch_request` locks the request (the state machine's row lock), then by its status:
+`dispatch` locks the request (the state machine's row lock), then by its status:
 - received without a category: to reviewing (SYSTEM), for the BDC to classify; no dispatch;
 - received or reviewing with a category: the eligible pros, best ranked first, up to
   `dispatch_max_pros` (settings); one request_dispatches row each and the move to finding_pro,
@@ -129,10 +129,6 @@ class DispatchService:
         self._session = session
         self._dispatches = DispatchRepository(session)
         self._requests = RequestStateMachine(session)
-
-    async def dispatch_request(self, request_id: uuid.UUID) -> DispatchOutcome:
-        """dispatch(), the outcome only."""
-        return (await self.dispatch(request_id)).outcome
 
     async def dispatch(self, request_id: uuid.UUID) -> DispatchResult:
         """Dispatches one request in the caller's transaction (flushes, never commits), and

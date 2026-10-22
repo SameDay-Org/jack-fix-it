@@ -359,6 +359,8 @@ async def test_suspended_user_gets_no_push(
     assert sender.sent == []
     [record] = [r for r in caplog.records if r.message == "push_user_not_active"]
     assert record.__dict__["user_id"] == str(user.id)
+    # It stops there: no "no devices" or "already sent", which would misread the run.
+    assert {r.message for r in caplog.records} & {"push_no_devices", "push_already_sent"} == set()
     # The same user, active again, is sent a new message: only the status stopped it.
     user.status = UserStatus.ACTIVE
     await db_session.flush()

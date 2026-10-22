@@ -305,7 +305,12 @@ async def send_push(
     attempt = int(ctx.get("job_try", 1))
     try:
         recipients = await deps.store.delivery(message_id)
-        targets, locale = await _targets_and_locale(deps, request.user_id)
+        resolved = await _targets_and_locale(deps, request.user_id)
+        if resolved is None:
+            # Not active (#55): nothing is sent on this run or any later one of the message.
+            logger.info("push_user_not_active", extra=extra)
+            return
+        targets, locale = resolved
         if recipients is None:
             recipients = await deps.store.start(request, [t.device_id for t in targets])
         # In flight when an earlier run ended without storing the outcome: maybe delivered.
@@ -516,15 +521,17 @@ async def _resend(deps: PushDeps, ticket_id: str, ref: TicketRef) -> bool:
         return True
 
 
-async def _targets_and_locale(deps: PushDeps, user_id: uuid.UUID) -> tuple[list[PushTarget], str]:
+async def _targets_and_locale(
+    deps: PushDeps, user_id: uuid.UUID
+) -> tuple[list[PushTarget], str] | None:
+    """The user's devices and locale; None when the user is not active (suspended)."""
     # The session closes before Expo is called: no connection waits on the network.
     async with deps.sessions() as session:
         user = await UserService(session).get_by_id(user_id)
         if user is None:
             return [], catalog.DEFAULT_LOCALE
         if user.status is not UserStatus.ACTIVE:
-            logger.info("push_user_not_active", extra={"user_id": str(user_id)})
-            return [], user.locale
+            return None
         targets = await DeviceService(session, deps.max_devices_per_user).targets_for(user_id)
         return targets, user.locale
 
