@@ -9,7 +9,11 @@ from typing import Final
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.categories.repository import CategoryRepository
-from app.modules.categories.schemas import CategorySeed, CategorySeedCatalog
+from app.modules.categories.schemas import (
+    CategoryOut,
+    CategorySeed,
+    CategorySeedCatalog,
+)
 
 SEED_DATA_PATH: Final = Path(__file__).with_name("seed_data.json")
 
@@ -39,3 +43,16 @@ class CategoryService:
     async def is_active(self, category_id: uuid.UUID) -> bool:
         """True when the category exists and is offered (active)."""
         return await self._categories.is_active(category_id)
+
+    async def list_active(self) -> list[CategoryOut]:
+        """The categories offered now, by slug."""
+        return [
+            CategoryOut(
+                id=row.id,
+                slug=row.slug,
+                names=row.names,
+                icon=row.icon,
+                requires_license=row.requires_license,
+            )
+            for row in await self._categories.list_active()
+        ]

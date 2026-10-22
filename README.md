@@ -36,6 +36,7 @@ cd apps/api
 cp .env.example .env
 uv run alembic upgrade head
 uv run python -m scripts.seed_categories   # launch categories; safe to re-run
+uv run python -m scripts.seed_service_areas   # served ZIPs (empty until #9); safe to re-run
 uv run python -m app.serve
 uv run arq app.worker.WorkerSettings --custom-log-dict app.observability.WORKER_LOG_CONFIG   # worker, second terminal
 ```
