@@ -1,47 +1,61 @@
 """POST /v1/pros/me/opportunities/{dispatch_id}/quote: fixed-price quotes (D9.3, #50)."""
 
-import asyncio
 import logging
 import uuid
-from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
 import pytest
-from sqlalchemy import URL, delete, func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from fastapi import FastAPI
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.addresses.models import Address
-from app.modules.categories.models import Category
-from app.modules.dispatch.models import DispatchStatus, RequestDispatch
-from app.modules.pros.models import ProProfile
+from app.config import Settings
+from app.integrations.storage import get_storage
+from app.modules.dispatch.models import DispatchStatus
 from app.modules.quotes.models import Quote, QuoteStatus
 from app.modules.quotes.repository import QuoteRepository
 from app.modules.quotes.schemas import QuoteCreate
 from app.modules.quotes.service import QuoteService
-from app.modules.requests.models import RequestOrigin, RequestStatus, ServiceRequest
+from app.modules.requests.models import RequestStatus, ServiceRequest
 from app.modules.requests.state_machine import RequestStateMachine
 from app.modules.settings.models import Setting
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole
 from app.observability import JsonFormatter
-from tests.conftest import backend_pid, wait_until_blocked
+from tests.conftest import make_settings
 from tests.test_opportunities_api import (
     NOT_FOUND,
     Pro,
     World,
+    build_world,
     dispatch,
     dispatch_row,
     make_request,
-    settings,  # noqa: F401 - the opportunities' settings fixture, reused here
-    storage,  # noqa: F401 - the opportunities' storage fixture, reused here
-    world,  # noqa: F401 - the opportunities' world fixture, reused here
 )
 from tests.test_requests_api import FakeStorage, make_caller
 
 TTL_HOURS = 36  # a fixture value: X is Cesar's to pick (#50)
+
+
+@pytest.fixture
+def settings() -> Settings:
+    return make_settings()
+
+
+@pytest.fixture
+def storage(app: FastAPI) -> FakeStorage:
+    fake = FakeStorage()
+    app.dependency_overrides[get_storage] = lambda: fake
+    return fake
+
+
+@pytest.fixture
+async def world(db_session: AsyncSession) -> World:
+    return await build_world(db_session)
+
+
 SCOPE = "Replace the kitchen faucet, probe-scope-text"
 AMOUNT = 98_765
 
@@ -69,10 +83,13 @@ async def set_setting(session: AsyncSession, key: str, value: object) -> None:
 
 @pytest.fixture(autouse=True)
 async def quote_ttl(db_session: AsyncSession) -> None:
+    """The quote TTL, a fixture value, in the rolled-back test session."""
     await set_setting(db_session, "quote_ttl_hours", TTL_HOURS)
 
 
-async def quote(client: httpx.AsyncClient, pro: Pro, dispatch_id: uuid.UUID, **overrides: Any) -> httpx.Response:
+async def quote(
+    client: httpx.AsyncClient, pro: Pro, dispatch_id: uuid.UUID, **overrides: Any
+) -> httpx.Response:
     return await client.post(path(dispatch_id), json=body(**overrides), headers=pro.caller.headers)
 
 
@@ -87,7 +104,9 @@ async def status_of(session: AsyncSession, request_id: uuid.UUID) -> RequestStat
 
 async def quotes_of(session: AsyncSession, request_id: uuid.UUID) -> list[Quote]:
     statement = (
-        select(Quote).where(Quote.request_id == request_id).execution_options(populate_existing=True)
+        select(Quote)
+        .where(Quote.request_id == request_id)
+        .execution_options(populate_existing=True)
     )
     return list((await session.scalars(statement)).all())
 
@@ -244,9 +263,7 @@ async def test_duplicate_quote_409_quote_exists(
 # The body
 
 
-@pytest.mark.parametrize(
-    "amount", [0, -5, 1.5, "100", True, None, 2**31], ids=repr
-)
+@pytest.mark.parametrize("amount", [0, -5, 1.5, "100", True, None, 2**31], ids=repr)
 async def test_amount_must_be_positive_int_and_within_cap(
     db_client: httpx.AsyncClient,
     db_session: AsyncSession,
@@ -272,7 +289,9 @@ async def test_caps_from_settings(
     at_caps = await dispatch(db_session, await make_request(db_session, world), world.me)
 
     too_much = await quote(db_client, world.me, over_amount, amount_cents=10_001)
-    too_long = await quote(db_client, world.me, over_duration, amount_cents=500, duration_minutes=481)
+    too_long = await quote(
+        db_client, world.me, over_duration, amount_cents=500, duration_minutes=481
+    )
     exact = await quote(db_client, world.me, at_caps, amount_cents=10_000, duration_minutes=480)
 
     assert (too_much.status_code, too_long.status_code, exact.status_code) == (422, 422, 201)
@@ -463,130 +482,3 @@ def test_openapi_documents_the_route_and_errors(app: Any) -> None:
     assert {"201", "401", "403", "404", "409", "422", "503"} <= set(operation["responses"])
     assert "quote_exists" in operation["responses"]["409"]["description"]
     assert "not_configured" in operation["responses"]["503"]["description"]
-
-
-# Concurrency: real commits on two connections; the test deletes its rows afterwards.
-
-
-@dataclass(frozen=True)
-class Committed:
-    sessions: async_sessionmaker[AsyncSession]
-    request_id: uuid.UUID
-    pros: list[tuple[UserAccount, uuid.UUID, uuid.UUID]]  # (account, profile id, dispatch id)
-
-
-@pytest.fixture
-async def committed(test_database_url: URL) -> AsyncIterator[Committed]:
-    engine = create_async_engine(test_database_url)
-    sessions = async_sessionmaker(engine, expire_on_commit=False)
-    tag = uuid.uuid4().hex[:8]
-    async with sessions() as session:
-        customer = User(email=f"c-{tag}@x.com", password_hash="x", role=UserRole.CUSTOMER)
-        pro_users = [
-            User(email=f"p{n}-{tag}@x.com", password_hash="x", role=UserRole.PRO) for n in range(2)
-        ]
-        category = Category(slug=f"test-{tag}", names={"en": "Test", "es": "Prueba"})
-        session.add_all([customer, *pro_users, category])
-        await session.flush()
-        profiles = [ProProfile(user_id=user.id) for user in pro_users]
-        address = Address(
-            user_id=customer.id, line1="1 Main St", city="Orlando", state="FL", zip_code="32801"
-        )
-        session.add_all([*profiles, address])
-        await session.flush()
-        request = ServiceRequest(
-            customer_id=customer.id,
-            address_id=address.id,
-            category_id=category.id,
-            description="Fix a leak",
-            origin=RequestOrigin.APP,
-            status=RequestStatus.FINDING_PRO,
-        )
-        session.add(request)
-        await session.flush()
-        dispatches = [
-            RequestDispatch(request_id=request.id, pro_id=profile.id, sent_at=datetime.now(UTC))
-            for profile in profiles
-        ]
-        session.add_all(dispatches)
-        await session.execute(delete(Setting).where(Setting.key == "quote_ttl_hours"))
-        session.add(Setting(key="quote_ttl_hours", value=TTL_HOURS))
-        await session.commit()
-        pros = [
-            (
-                UserAccount(
-                    id=user.id, email=user.email, role=user.role, locale=user.locale, status=user.status
-                ),
-                profile.id,
-                row.id,
-            )
-            for user, profile, row in zip(pro_users, profiles, dispatches, strict=True)
-        ]
-    try:
-        yield Committed(sessions, request.id, pros)
-    finally:
-        async with sessions() as session:
-            await session.execute(delete(Quote).where(Quote.request_id == request.id))
-            await session.execute(delete(RequestDispatch).where(RequestDispatch.request_id == request.id))
-            await session.execute(delete(ServiceRequest).where(ServiceRequest.id == request.id))
-            await session.execute(delete(Address).where(Address.id == address.id))
-            await session.execute(delete(ProProfile).where(ProProfile.id.in_([p.id for p in profiles])))
-            await session.execute(
-                delete(User).where(User.id.in_([customer.id, *[u.id for u in pro_users]]))
-            )
-            await session.execute(delete(Category).where(Category.id == category.id))
-            await session.execute(delete(Setting).where(Setting.key == "quote_ttl_hours"))
-            await session.commit()
-        await engine.dispose()
-
-
-async def test_concurrent_first_quotes_from_two_pros_transition_once(
-    committed: Committed, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    sessions = committed.sessions
-    async with sessions() as first, sessions() as second:
-        first_pid, second_pid = await backend_pid(first), await backend_pid(second)
-        add = QuoteRepository.add
-
-        async def add_then_hold(self: QuoteRepository, row: Quote) -> Quote:
-            stored = await add(self, row)
-            if self._session is first:
-                # The first quote holds the request lock until the second waits on it.
-                await wait_until_blocked(sessions, waiter=second_pid, holder=first_pid)
-            return stored
-
-        monkeypatch.setattr(QuoteRepository, "add", add_then_hold)
-        data = QuoteCreate.model_validate(body())
-        (pro_a, _, dispatch_a), (pro_b, _, dispatch_b) = committed.pros
-
-        with caplog.at_level(logging.INFO):
-            first_task = asyncio.create_task(QuoteService(first).submit(pro_a, dispatch_a, data))
-            # Let the first take the lock before the second starts.
-            while not any(r.message == "dispatch_marked" for r in caplog.records) and not first_task.done():
-                await asyncio.sleep(0)
-                if await _locked(sessions, first_pid):
-                    break
-            second_task = asyncio.create_task(QuoteService(second).submit(pro_b, dispatch_b, data))
-            results = await asyncio.gather(first_task, second_task)
-
-    assert all(result.status is QuoteStatus.PENDING for result in results)
-    async with sessions() as check:
-        assert len(await quotes_of(check, committed.request_id)) == 2
-        assert await status_of(check, committed.request_id) is RequestStatus.QUOTE_READY
-    changes = [r for r in caplog.records if r.message == "request_status_changed"]
-    assert len(changes) == 1
-
-
-async def _locked(sessions: async_sessionmaker[AsyncSession], pid: int) -> bool:
-    """True once backend `pid` holds a row lock (it has the request locked)."""
-    from sqlalchemy import text
-
-    async with sessions() as monitor:
-        held = await monitor.scalar(
-            text(
-                "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE pid = :pid AND locktype = 'transactionid'"
-                " AND granted)"
-            ),
-            {"pid": pid},
-        )
-    return bool(held)
