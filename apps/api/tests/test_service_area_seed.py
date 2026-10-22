@@ -1,6 +1,7 @@
-"""The idempotent seed of the served areas (D6.1, #36). The launch file is empty until #9."""
+"""The idempotent seed of the served areas (D6.1, #36) and its launch file (#9)."""
 
 import json
+from collections import Counter
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
@@ -45,11 +46,37 @@ async def area_count(session: AsyncSession) -> int:
     return (await session.scalar(select(func.count()).select_from(ServiceArea))) or 0
 
 
-def test_launch_file_is_empty_until_the_zip_list_arrives() -> None:
-    raw = json.loads(SEED_DATA_PATH.read_text(encoding="utf-8"))
+# The launch file (#9): South Florida, Broward active. Rough per-county ZIP counts, so a
+# broken rebuild (a renamed column, a dropped county) fails loudly instead of seeding garbage.
+LAUNCH_REGION = "South Florida"
+LAUNCH_ACTIVE_COUNTY = "Broward"
+LAUNCH_COUNT_RANGES = {"Broward": (50, 70), "Miami-Dade": (70, 110), "Palm Beach": (50, 80)}
 
-    assert load_seed_data() == []
+
+def test_launch_file_is_south_florida_with_broward_active() -> None:
+    areas = load_seed_data()  # the schema checks 5 ASCII digits and ZIP uniqueness
+
+    zips = [area.zip_code for area in areas]
+    assert zips == sorted(set(zips))
+    assert all(len(zip_code) == 5 and zip_code.isdigit() for zip_code in zips)
+    for area in areas:
+        assert area.region == LAUNCH_REGION
+        assert area.city.strip()
+        assert area.state == "FL"
+        assert area.county in LAUNCH_COUNT_RANGES
+        assert area.active == (area.county == LAUNCH_ACTIVE_COUNTY)
+    counts = Counter(area.county for area in areas)
+    for county, (low, high) in LAUNCH_COUNT_RANGES.items():
+        assert low <= counts[county] <= high, f"{county}: {counts[county]} ZIPs"
+
+
+def test_launch_file_names_its_sources() -> None:
+    raw = json.loads(SEED_DATA_PATH.read_text(encoding="utf-8"))
+    sources = SEED_DATA_PATH.with_name("SOURCES.md").read_text(encoding="utf-8")
+
     assert "#9" in raw["note"]
+    for text in (raw["note"], sources):
+        assert "Contains data from GeoNames, CC BY 4.0" in text
 
 
 async def test_empty_file_is_a_no_op(db_session: AsyncSession, tmp_path: Path) -> None:
@@ -76,6 +103,22 @@ async def test_seed_inserts_missing_only(db_session: AsyncSession, tmp_path: Pat
         {"region": r.region, "city": r.city, "state": r.state, "zip_code": r.zip_code} for r in rows
     ] == ENTRIES
     assert all(row.active for row in rows)
+
+
+async def test_seed_keeps_inactive_entries_off_and_county_out_of_the_row(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    entries = [
+        {**ENTRIES[0], "county": "Test County", "active": True},
+        {**ENTRIES[1], "county": "Later County", "active": False},
+    ]
+
+    result = await seed_service_areas.seed(sessions_of(db_session), seed_file(tmp_path, entries))
+
+    rows = (await db_session.scalars(select(ServiceArea).order_by(ServiceArea.zip_code))).all()
+    assert result == SeedResult(inserted=2, skipped=0)
+    assert [(row.zip_code, row.active) for row in rows] == [("00001", True), ("00002", False)]
+    assert not hasattr(ServiceArea, "county")
 
 
 async def test_seed_never_overwrites(db_session: AsyncSession, tmp_path: Path) -> None:
