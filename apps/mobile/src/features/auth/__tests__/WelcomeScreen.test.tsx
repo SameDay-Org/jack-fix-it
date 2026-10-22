@@ -30,14 +30,15 @@ describe("WelcomeScreen", () => {
     await renderInSafeArea(<WelcomeScreen />);
 
     expect(screen.getByText("Jack Fix It")).toBeTruthy();
-    expect(screen.getByTestId("welcome-tagline")).toHaveTextContent(
-      "Whatever happens at home, we fix it.",
-    );
+    // The same hero the launch intro draws: one accessible sentence, the lime word in place.
+    expect(
+      screen.getByRole("header", { name: "Whatever happens at home, we fix it." }),
+    ).toBeTruthy();
     expect(screen.getByText("fix").props.className).toContain("text-green-500");
     expect(screen.getByText("Tell Jack. We'll take care of the rest.")).toBeTruthy();
     expect(screen.getAllByRole("button")).toHaveLength(2);
     expect(screen.queryByText(/Tell Jack What Happened/i)).toBeNull();
-    expect(screen.queryByTestId("welcome-partial-cleanup")).toBeNull();
+    expect(screen.queryByTestId("welcome-actions-partial-cleanup")).toBeNull();
   });
 
   it("Get started goes to the role choice and the account link to login", async () => {
