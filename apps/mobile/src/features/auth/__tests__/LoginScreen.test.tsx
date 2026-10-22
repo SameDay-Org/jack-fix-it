@@ -26,6 +26,7 @@ jest.mock("expo-router", () => ({
   useLocalSearchParams: jest.fn(() => ({})),
   // The focus effect (hardware back while focused) runs only where a test calls it.
   useFocusEffect: jest.fn(),
+  useIsFocused: jest.fn(() => true),
   // The stack's events: `transitionEnd` tells the content its screen has appeared.
   useNavigation: jest.fn(() => ({ addListener: jest.fn(() => jest.fn()) })),
 }));

@@ -307,7 +307,7 @@ describe("the hand-off to the destination", () => {
     expect(router.push).toHaveBeenCalledTimes(1);
   });
 
-  it("prefetches both ways in: after the launch intro the first time, at once later, never while busy", async () => {
+  it("prefetches both ways in after the launch intro; after a round trip, only the one used", async () => {
     await renderWelcome();
 
     await refocus(); // the first focus, under the launch intro
@@ -320,9 +320,10 @@ describe("the hand-off to the destination", () => {
     await advance(panelRiseMs * 1.5);
     expect(router.prefetch).not.toHaveBeenCalled(); // busy: rising, then covered
 
-    await refocus(); // back: the panel lowers, then the screens are built again for the next tap
+    await refocus(); // back: the panel lowers, then the screen it used is built again
     expect(router.prefetch).not.toHaveBeenCalled();
     await advance(panelRiseMs * 1.5);
-    expect(jest.mocked(router.prefetch).mock.calls).toEqual([[TO_ROLE], [TO_LOGIN]]);
+    // Login is still prefetched: building it anew would throw it away and rebuild it.
+    expect(jest.mocked(router.prefetch).mock.calls).toEqual([[TO_ROLE]]);
   });
 });

@@ -103,12 +103,16 @@ export function usePanelTransition({ reduceMotion, destinations }: Params): Pane
     for (const href of destinations) router.prefetch(href);
   };
   const firstFocus = useRef(true);
+  // The destination the last rise went to: the only one a return to rest has to build again (the
+  // other is still prefetched, and prefetching it anew would rebuild it from scratch).
+  const lastDestination = useRef<Href | null>(null);
   const prefetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const release = () => {
     busyRef.current = false;
     setBusy(false);
-    prefetch();
+    if (lastDestination.current) router.prefetch(lastDestination.current);
+    lastDestination.current = null;
   };
 
   /**
@@ -150,6 +154,7 @@ export function usePanelTransition({ reduceMotion, destinations }: Params): Pane
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
+    lastDestination.current = href;
     setPanelBar("hero"); // at rest: the hero's light icons, until the panel covers the bar
     if (reduceMotion) {
       risen(href);

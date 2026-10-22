@@ -1,4 +1,4 @@
-import { useFocusEffect, useNavigation } from "expo-router";
+import { useFocusEffect, useIsFocused, useNavigation } from "expo-router";
 import type { NativeStackNavigationProp } from "expo-router/native-stack";
 import type { ParamListBase } from "expo-router/react-navigation";
 import { useCallback, useEffect, useRef, useState, type ComponentRef, type RefObject } from "react";
@@ -38,6 +38,8 @@ export type ContentTransition = {
   exit: (then: () => void) => void;
   /** The system bar to show: the panel's until the content is in, then the page's. */
   bar: SystemBar;
+  /** Whether the screen sets the status bar: only while focused (not while prefetched). */
+  ownsStatusBar: boolean;
   /** Not in yet, or leaving: the screen takes no taps. */
   busy: boolean;
 };
@@ -61,13 +63,16 @@ export function useContentTransition({
   reduceMotion,
   titleRef,
 }: Params): ContentTransition {
-  const { transitionMs, slidePx } = tokens.motion;
+  const { transitionMs, slidePx, panelRiseMs } = tokens.motion;
+  const focused = useIsFocused();
   const navigation = useNavigation<NativeStackNavigationProp<ParamListBase>>();
   const { bar: panelBar } = usePanelHandoff();
   const visible = useSharedValue(animate ? 0 : 1);
   const entered = useRef(false);
   const laidOut = useRef(false);
   const appearing = useRef(false);
+  const focusedRef = useRef(focused);
+  const appearGuard = useRef<ReturnType<typeof setTimeout> | null>(null);
   const exitingRef = useRef(false);
   const [shown, setShown] = useState(!animate);
   const [exiting, setExiting] = useState(false);
@@ -83,19 +88,41 @@ export function useContentTransition({
 
   const focusTitle = () => moveAccessibilityFocus(titleRef.current);
 
+  const clearAppearGuard = () => {
+    if (appearGuard.current) clearTimeout(appearGuard.current);
+    appearGuard.current = null;
+  };
+
   const start = () => {
     if (entered.current) return;
     entered.current = true;
+    clearAppearGuard();
     setShown(true);
     visible.value = withTiming(1, timing, (finished) => {
       if (finished) runOnJS(focusTitle)();
     });
   };
 
-  /** Enters once laid out and on screen, unless the panel is still on its way up. */
+  /**
+   * Enters once laid out and on screen, unless the panel is still on its way up or the screen is
+   * already leaving (a back during the rise must not be undone by the panel settling).
+   */
   const tryStart = () => {
-    const ready = laidOut.current && appearing.current;
-    if (animate && ready && panelHandoffStore.getState().phase !== "rising") start();
+    if (!animate || entered.current || exitingRef.current) return;
+    const panelSettled = panelHandoffStore.getState().phase !== "rising";
+    if (!laidOut.current || !panelSettled) return;
+    if (appearing.current) {
+      start();
+      return;
+    }
+    // Pushed (focused) but the stack never reported it shown, as when the app was paused during
+    // the push: enter after one more rise rather than stay invisible.
+    if (focusedRef.current && !appearGuard.current) {
+      appearGuard.current = setTimeout(() => {
+        appearing.current = true;
+        tryStartRef.current();
+      }, panelRiseMs);
+    }
   };
 
   const enter = () => {
@@ -135,6 +162,11 @@ export function useContentTransition({
     tryStartRef.current = tryStart;
   });
   useEffect(() => {
+    focusedRef.current = focused;
+    if (focused) tryStartRef.current();
+  }, [focused]);
+  useEffect(() => clearAppearGuard, []);
+  useEffect(() => {
     if (!animate) return;
     return panelHandoffStore.subscribe(() => tryStartRef.current());
   }, [animate]);
@@ -143,11 +175,17 @@ export function useContentTransition({
   // native screen was not attached yet, and the content popped in.
   useEffect(() => {
     if (!animate) return;
-    return navigation.addListener("transitionStart", ({ data }) => {
+    const shownByStack = ({ data }: { data: { closing: boolean } }) => {
       if (data.closing) return;
       appearing.current = true;
       tryStartRef.current();
-    });
+    };
+    const offStart = navigation.addListener("transitionStart", shownByStack);
+    const offEnd = navigation.addListener("transitionEnd", shownByStack); // a second chance
+    return () => {
+      offStart();
+      offEnd();
+    };
   }, [animate, navigation]);
 
   // Android's hardware back runs the same exit before popping, but only while this screen is the
@@ -173,13 +211,15 @@ export function useContentTransition({
     transform: [{ translateY: reduceMotion ? 0 : slidePx * (1 - visible.value) }],
   }));
 
-  const settled = shown && !exiting;
   return {
     rootStyle,
     contentStyle,
     enter,
     exit,
-    bar: !animate || settled ? "light" : panelBar,
-    busy: animate && !settled,
+    // Once shown, the page keeps its color through the exit: under Reduce Motion the panel's bar
+    // is still the hero's, and a navy page fading out was the empty-navy frame of #175.
+    bar: !animate || shown ? "light" : panelBar,
+    ownsStatusBar: !animate || focused,
+    busy: animate && (!shown || exiting),
   };
 }

@@ -1,3 +1,5 @@
+import { tokens } from "@/theme";
+
 import { pushesUnderRise, risenFromWelcome } from "../panelRoute";
 
 describe("risenFromWelcome", () => {
@@ -10,7 +12,11 @@ describe("risenFromWelcome", () => {
   });
 
   it("iOS: the top screen's fade, pushed when the rise ends, so the edge swipe keeps working", () => {
-    expect(risenFromWelcome({ from: "welcome" }, "ios")).toEqual({ animation: "fade" });
+    expect(risenFromWelcome({ from: "welcome" }, "ios")).toEqual({
+      animation: "fade",
+      // The card is the panel's page color, so its fades never show the navigator's own gray.
+      contentStyle: { backgroundColor: tokens.colors["gray-50"] },
+    });
     expect(pushesUnderRise("ios")).toBe(false);
   });
 

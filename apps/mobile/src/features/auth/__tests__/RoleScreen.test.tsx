@@ -1,7 +1,14 @@
 import "@/i18n";
 
 import { act, fireEvent, screen } from "@testing-library/react-native";
-import { router, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
+import {
+  router,
+  useFocusEffect,
+  useIsFocused,
+  useLocalSearchParams,
+  useNavigation,
+} from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import { BackHandler } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
 
@@ -19,12 +26,13 @@ jest.mock("expo-router", () => ({
   useFocusEffect: jest.fn(),
   // The stack's events: `transitionStart` tells the content its screen is being shown.
   useNavigation: jest.fn(() => ({ addListener: jest.fn(() => jest.fn()) })),
+  useIsFocused: jest.fn(() => true),
 }));
 jest.mock("@/components/ui", () => ({
   ...jest.requireActual("@/components/ui"),
   moveAccessibilityFocus: jest.fn(),
 }));
-jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
+jest.mock("expo-status-bar", () => ({ StatusBar: jest.fn(() => null) }));
 jest.mock("react-native-reanimated", () => {
   const actual =
     jest.requireActual<typeof import("react-native-reanimated")>("react-native-reanimated");
@@ -59,6 +67,8 @@ describe("RoleScreen", () => {
     jest.mocked(router.back).mockClear();
     jest.mocked(useLocalSearchParams).mockReturnValue({});
     jest.mocked(useReducedMotion).mockReturnValue(false);
+    jest.mocked(useIsFocused).mockReturnValue(true);
+    jest.mocked(StatusBar).mockClear();
   });
 
   it("continue is disabled until a role is chosen, then carries it to sign-up", async () => {
@@ -177,6 +187,7 @@ describe("RoleScreen", () => {
     });
 
     it("never fades before the native screen is shown: a layout alone (prefetched) waits", async () => {
+      jest.mocked(useIsFocused).mockReturnValue(false); // prefetched, not pushed
       await renderInSafeArea(<RoleScreen />);
       await layOut();
       await advance(transitionMs * 5);
@@ -280,6 +291,71 @@ describe("RoleScreen", () => {
       expect(rootOpacity()).toBeGreaterThan(0);
       expect(rootOpacity()).toBeLessThan(1);
       expect(slide()).toBe(0);
+    });
+
+    it("while prefetched (not focused) it sets no status bar, so it cannot override the shown screen", async () => {
+      jest.mocked(useIsFocused).mockReturnValue(false);
+      await renderInSafeArea(<RoleScreen />);
+      expect(StatusBar).not.toHaveBeenCalled();
+
+      jest.mocked(useIsFocused).mockReturnValue(true);
+      await renderInSafeArea(<RoleScreen />);
+      expect(StatusBar).toHaveBeenCalled();
+    });
+
+    it("under Reduce Motion the page keeps its color through the exit (no navy page fading out)", async () => {
+      jest.mocked(useReducedMotion).mockReturnValue(true);
+      panelHandoffStore.setState({ phase: "risen", bar: "hero" }); // no rise: the hero's bar
+      await renderInSafeArea(<RoleScreen />);
+      await enterFully();
+      expect(backdrop()).toContain("bg-gray-50");
+
+      await act(async () => fireEvent.press(screen.getByRole("button", { name: "Back" })));
+      await advance(transitionMs / 2);
+      expect(rootOpacity()).toBeLessThan(1);
+      expect(backdrop()).toContain("bg-gray-50");
+    });
+
+    it("a back pressed during the rise is not undone when the panel settles", async () => {
+      const add = jest.spyOn(BackHandler, "addEventListener").mockImplementation(() => ({
+        remove: jest.fn(),
+      }));
+      panelHandoffStore.setState({ phase: "rising" });
+      await renderInSafeArea(<RoleScreen />);
+      await layOut();
+      await appear();
+      await act(async () => {
+        focus();
+      });
+      const onBack = add.mock.calls[0][1] as () => boolean;
+      await act(async () => {
+        onBack();
+      });
+
+      await act(async () => panelHandoffStore.setState({ phase: "risen" })); // mid-exit
+      await advance(transitionMs * 2);
+      expect(rootOpacity()).toBe(0);
+      expect(router.back).toHaveBeenCalledTimes(1);
+      add.mockRestore();
+    });
+
+    it("pushed but never reported shown by the stack: enters after one more rise, not before", async () => {
+      const { panelRiseMs } = tokens.motion;
+      await renderInSafeArea(<RoleScreen />);
+      await layOut();
+      await advance(panelRiseMs - 1);
+      expect(rootOpacity()).toBe(0);
+      await advance(1 + transitionMs * 2);
+      expect(rootOpacity()).toBe(1);
+    });
+
+    it("prefetched (not focused), it waits for the stack however long it takes", async () => {
+      jest.mocked(useIsFocused).mockReturnValue(false);
+      const { panelRiseMs } = tokens.motion;
+      await renderInSafeArea(<RoleScreen />);
+      await layOut();
+      await advance(panelRiseMs * 5);
+      expect(rootOpacity()).toBe(0);
     });
 
     it("reached any other way, the screen is simply there", async () => {

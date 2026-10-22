@@ -20,7 +20,7 @@ export function RoleScreen() {
   const [role, setRole] = useState<SignUpRole | null>(null);
   const titleRef = useRef<ComponentRef<typeof Text>>(null);
   const fromWelcome = from === "welcome";
-  const { rootStyle, contentStyle, enter, exit, bar, busy } = useContentTransition({
+  const { rootStyle, contentStyle, enter, exit, bar, ownsStatusBar, busy } = useContentTransition({
     animate: fromWelcome,
     reduceMotion: useReducedMotion(),
     titleRef,
@@ -34,7 +34,7 @@ export function RoleScreen() {
       pointerEvents={busy ? "none" : "auto"}
       testID="role-root"
     >
-      <Screen bar={bar} testID="role-screen">
+      <Screen bar={bar} ownsStatusBar={ownsStatusBar} testID="role-screen">
         <Animated.View
           className="flex-1"
           style={contentStyle}

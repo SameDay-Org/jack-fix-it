@@ -50,7 +50,7 @@ export function CredentialsForm({
   const passwordRef = useRef<InputHandle>(null);
   const titleRef = useRef<ComponentRef<typeof Text>>(null);
   const fromWelcome = from === "welcome";
-  const { rootStyle, contentStyle, enter, exit, bar, busy } = useContentTransition({
+  const { rootStyle, contentStyle, enter, exit, bar, ownsStatusBar, busy } = useContentTransition({
     animate: fromWelcome,
     reduceMotion: useReducedMotion(),
     titleRef,
@@ -68,7 +68,7 @@ export function CredentialsForm({
       pointerEvents={busy ? "none" : "auto"}
       testID={`${testID}-root`}
     >
-      <Screen bar={bar} testID={testID}>
+      <Screen bar={bar} ownsStatusBar={ownsStatusBar} testID={testID}>
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : undefined}
           className="flex-1"
