@@ -7,6 +7,7 @@ import { AccessibilityInfo } from "react-native";
 import { ApiError, NetworkError, register } from "@/api";
 
 import { deferred } from "../../../api/__tests__/helpers";
+import { phoneFlowStore } from "../../phone/phoneFlow";
 import { SignUpScreen } from "../SignUpScreen";
 import { renderInSafeArea } from "./helpers";
 
@@ -74,6 +75,22 @@ describe("SignUpScreen", () => {
       }),
     );
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("offers the phone step before the request (the gate reads it as the session flips), and withdraws it on failure", async () => {
+    phoneFlowStore.setState({ offeredAfterSignUp: false });
+    let offeredDuringRequest: boolean | undefined;
+    jest.mocked(register).mockImplementationOnce(async () => {
+      offeredDuringRequest = phoneFlowStore.getState().offeredAfterSignUp;
+    });
+    await renderInSafeArea(<SignUpScreen />);
+    await fillAndSubmit("maria@example.com", "correct horse battery");
+    await waitFor(() => expect(offeredDuringRequest).toBe(true));
+    expect(phoneFlowStore.getState().offeredAfterSignUp).toBe(true);
+
+    jest.mocked(register).mockRejectedValueOnce(new NetworkError(false));
+    await fireEvent.press(submitButton());
+    await waitFor(() => expect(phoneFlowStore.getState().offeredAfterSignUp).toBe(false));
   });
 
   it("client-side email and password-length validation runs before any request", async () => {

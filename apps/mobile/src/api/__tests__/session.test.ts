@@ -9,6 +9,7 @@ import {
   register,
   restoreSession,
   sessionStore,
+  setSessionUser,
 } from "../session";
 import {
   authResponse,
@@ -180,6 +181,30 @@ describe("session", () => {
     expect(storedRefreshToken()).toBeNull();
     expect(sessionStore.getState()).toEqual(SIGNED_OUT);
     expect(callsTo(fetchMock, "/v1/auth/refresh")).toHaveLength(0);
+  });
+});
+
+describe("setSessionUser", () => {
+  const verified = { ...user, phone: "+14155550123", phone_verified: true };
+
+  it("replaces the signed-in user with the server's fresher copy", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, authResponse(1)));
+    await login({ email: user.email, password: "correct horse battery" });
+
+    setSessionUser(verified);
+
+    expect(sessionStore.getState().user).toEqual(verified);
+    expect(sessionStore.getState().status).toBe("signedIn");
+  });
+
+  it("drops a user that arrives after a sign-out, or that is another account", async () => {
+    setSessionUser(verified); // signed out
+    expect(sessionStore.getState().user).toBeNull();
+
+    fetchMock.mockResolvedValue(jsonResponse(200, authResponse(1)));
+    await login({ email: user.email, password: "correct horse battery" });
+    setSessionUser({ ...verified, id: "22222222-2222-4222-8222-222222222222" });
+    expect(sessionStore.getState().user).toEqual(user);
   });
 });
 
