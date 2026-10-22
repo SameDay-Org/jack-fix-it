@@ -404,6 +404,48 @@ export interface paths {
         patch: operations["update_my_profile_v1_pros_me_patch"];
         trace?: never;
     };
+    "/v1/pros/me/opportunities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List my opportunities
+         * @description The requests dispatched to the caller that they can still quote on, newest first, in
+         *     pages. The location is the ZIP and city only; the customer is never shown.
+         */
+        get: operations["list_opportunities_v1_pros_me_opportunities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pros/me/opportunities/{dispatch_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Open one of my opportunities
+         * @description The full request with presigned media URLs. The first open records that the pro saw
+         *     it (viewed, viewed_at); opening it again changes nothing.
+         */
+        get: operations["open_opportunity_v1_pros_me_opportunities__dispatch_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -584,6 +626,93 @@ export interface components {
              * Format: date-time
              */
             expires_at: string;
+        };
+        /** OpportunityDetail */
+        OpportunityDetail: {
+            /**
+             * Dispatch Id
+             * Format: uuid
+             */
+            dispatch_id: string;
+            /** Public Code */
+            public_code: string;
+            category: components["schemas"]["CategorySummary"] | null;
+            /** Description */
+            description: string;
+            /** Intake Answers */
+            intake_answers: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            location: components["schemas"]["OpportunityLocation"];
+            /** Preferred Date */
+            preferred_date: string | null;
+            /** Media */
+            media: components["schemas"]["MediaOut"][];
+            /**
+             * Sent At
+             * Format: date-time
+             */
+            sent_at: string;
+            /**
+             * Viewed At
+             * @description When the pro first opened it.
+             */
+            viewed_at: string | null;
+        };
+        /**
+         * OpportunityLocation
+         * @description Where the job is, as much as a pro may see before it is theirs. ZIP and city until
+         *     Cesar decides on #49; a wider decision changes this schema only.
+         */
+        OpportunityLocation: {
+            /** Zip Code */
+            zip_code: string;
+            /** City */
+            city: string;
+        };
+        /** OpportunityPage */
+        OpportunityPage: {
+            /** Items */
+            items: components["schemas"]["OpportunitySummary"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor` for the next page.
+             */
+            next_cursor: string | null;
+        };
+        /** OpportunitySummary */
+        OpportunitySummary: {
+            /**
+             * Dispatch Id
+             * Format: uuid
+             */
+            dispatch_id: string;
+            /**
+             * Public Code
+             * @description The request's code, e.g. JF-000124.
+             */
+            public_code: string;
+            category: components["schemas"]["CategorySummary"] | null;
+            /**
+             * Description Excerpt
+             * @description The start of the customer's description.
+             */
+            description_excerpt: string;
+            location: components["schemas"]["OpportunityLocation"];
+            /** Preferred Date */
+            preferred_date: string | null;
+            /** Media Count */
+            media_count: number;
+            /**
+             * Sent At
+             * Format: date-time
+             */
+            sent_at: string;
+            /**
+             * Viewed
+             * @description True once the pro has opened it.
+             */
+            viewed: boolean;
         };
         /** PasswordForgotRequest */
         PasswordForgotRequest: {
@@ -1948,6 +2077,115 @@ export interface operations {
                 };
             };
             /** @description invalid_media: photo_key is not the caller's own profile_photo upload; invalid_category / invalid_service_area: an unknown or inactive id; validation_error: any other invalid field (duplicates or too many ids, bio length, years out of range, fields the platform sets such as verification_status). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_opportunities_v1_pros_me_opportunities_get: {
+        parameters: {
+            query?: {
+                /** @description Capped at the server's maximum. */
+                limit?: number | null;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpportunityPage"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have opportunities. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a malformed cursor. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    open_opportunity_v1_pros_me_opportunities__dispatch_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dispatch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpportunityDetail"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have opportunities. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no open opportunity of the caller with this id (another pro's, declined, expired, or the request is closed). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
             422: {
                 headers: {
                     [name: string]: unknown;

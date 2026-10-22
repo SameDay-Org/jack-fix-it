@@ -1298,6 +1298,180 @@
           }
         ]
       }
+    },
+    "/v1/pros/me/opportunities": {
+      "get": {
+        "tags": [
+          "pros"
+        ],
+        "summary": "List my opportunities",
+        "description": "The requests dispatched to the caller that they can still quote on, newest first, in\npages. The location is the ZIP and city only; the customer is never shown.",
+        "operationId": "list_opportunities_v1_pros_me_opportunities_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Capped at the server's maximum.",
+              "title": "Limit"
+            },
+            "description": "Capped at the server's maximum."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpportunityPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a malformed cursor.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros have opportunities.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pros/me/opportunities/{dispatch_id}": {
+      "get": {
+        "tags": [
+          "pros"
+        ],
+        "summary": "Open one of my opportunities",
+        "description": "The full request with presigned media URLs. The first open records that the pro saw\nit (viewed, viewed_at); opening it again changes nothing.",
+        "operationId": "open_opportunity_v1_pros_me_opportunities__dispatch_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dispatch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Dispatch Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpportunityDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros have opportunities.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no open opportunity of the caller with this id (another pro's, declined, expired, or the request is closed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1674,6 +1848,217 @@
           "expires_at"
         ],
         "title": "MediaOut"
+      },
+      "OpportunityDetail": {
+        "properties": {
+          "dispatch_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Dispatch Id"
+          },
+          "public_code": {
+            "type": "string",
+            "title": "Public Code"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CategorySummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "intake_answers": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Intake Answers"
+          },
+          "location": {
+            "$ref": "#/components/schemas/OpportunityLocation"
+          },
+          "preferred_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Date"
+          },
+          "media": {
+            "items": {
+              "$ref": "#/components/schemas/MediaOut"
+            },
+            "type": "array",
+            "title": "Media"
+          },
+          "sent_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Sent At"
+          },
+          "viewed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Viewed At",
+            "description": "When the pro first opened it."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "dispatch_id",
+          "public_code",
+          "category",
+          "description",
+          "intake_answers",
+          "location",
+          "preferred_date",
+          "media",
+          "sent_at",
+          "viewed_at"
+        ],
+        "title": "OpportunityDetail"
+      },
+      "OpportunityLocation": {
+        "properties": {
+          "zip_code": {
+            "type": "string",
+            "title": "Zip Code"
+          },
+          "city": {
+            "type": "string",
+            "title": "City"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "zip_code",
+          "city"
+        ],
+        "title": "OpportunityLocation",
+        "description": "Where the job is, as much as a pro may see before it is theirs. ZIP and city until\nCesar decides on #49; a wider decision changes this schema only."
+      },
+      "OpportunityPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OpportunitySummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Pass as `cursor` for the next page."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "OpportunityPage"
+      },
+      "OpportunitySummary": {
+        "properties": {
+          "dispatch_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Dispatch Id"
+          },
+          "public_code": {
+            "type": "string",
+            "title": "Public Code",
+            "description": "The request's code, e.g. JF-000124."
+          },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CategorySummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description_excerpt": {
+            "type": "string",
+            "title": "Description Excerpt",
+            "description": "The start of the customer's description."
+          },
+          "location": {
+            "$ref": "#/components/schemas/OpportunityLocation"
+          },
+          "preferred_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Date"
+          },
+          "media_count": {
+            "type": "integer",
+            "title": "Media Count"
+          },
+          "sent_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Sent At"
+          },
+          "viewed": {
+            "type": "boolean",
+            "title": "Viewed",
+            "description": "True once the pro has opened it."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "dispatch_id",
+          "public_code",
+          "category",
+          "description_excerpt",
+          "location",
+          "preferred_date",
+          "media_count",
+          "sent_at",
+          "viewed"
+        ],
+        "title": "OpportunitySummary"
       },
       "PasswordForgotRequest": {
         "properties": {
