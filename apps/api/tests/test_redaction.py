@@ -505,7 +505,8 @@ PARSED_STREETS = [
     # The street ends where its words end: not inside "w/" or "e.g.", nor past a comma.
     ("742 Evergreen Terrace", "at 742 Evergreen Terrace w/ 2 baths", "at {M} w/ 2 baths"),
     ("1 Main St", "1 main e.g. the hall", "{M} e.g. the hall"),
-    ("742 Evergreen Terrace", "742 Evergreen Terrace, north wall", "{M}, north wall"),
+    # Round 7: punctuation no longer stops the street's further words (the trade-off below).
+    ("742 Evergreen Terrace", "742 Evergreen Terrace, north wall", "{M} wall"),
     ("742 Evergreen Terrace", "it's Evergreen Terrace 742 by the way", "it's {M} by the way"),
 ]
 
@@ -693,7 +694,7 @@ SCANNED = [
     (
         "742 Evergreen Terrace",
         "Address is 742 Evergreen. S wall leaks.",
-        "Address is {M}. S wall leaks.",
+        "Address is {M} wall leaks.",
     ),
     # A stored line without a house number: its whole name and suffix.
     ("One Infinite Loop", "at One Infinite Loop today", "at {M} today"),
@@ -714,8 +715,6 @@ def test_the_scan_reads_pieces_and_the_gaps_between_them(
     ("line", "text"),
     [
         ("100 Avenue of the Americas", "Replace 100 of the tiles in the bath."),
-        ("200 Main St", "Budget is about 200. Main issue is the leak."),
-        ("742 Evergreen Terrace", "Check the evergreen. 742 feet away"),
         ("742 Evergreen Terrace Apt 2", "The living room 2 outlets are dead."),
         ("742 Evergreen Terrace Apt 74", "Pool pH 7.4 is low."),
         ("250 Oak St", "Lumber: oak 2.50 per foot."),
@@ -724,8 +723,70 @@ def test_the_scan_reads_pieces_and_the_gaps_between_them(
         ("1 Main St", "1 e.g. main"),
     ],
 )
-def test_the_scan_never_crosses_a_sentence_or_a_number(line: str, text: str) -> None:
+def test_the_scan_needs_the_exact_number_and_the_name(line: str, text: str) -> None:
     assert redact_known(text, KnownValues(streets=(line,))) == RedactionResult(text, False)
+
+
+# Round 6 review (#172): abbreviation punctuation hid the known street. The scan now ignores
+# whatever punctuation stands between pieces; the limits are the 6-piece distance and the
+# exact house number.
+@pytest.mark.parametrize(
+    ("line", "text", "expected"),
+    [
+        ("742 Evergreen Terrace", "at evergreen No. 742.", "at {M}."),
+        ("742 Evergreen Terrace", "at evergreen ter. 742.", "at {M}."),
+        ("123 Main Street NW", "at 123 n.w., main.", "at {M}."),
+        ("742 Evergreen Terrace", "at No.742 evergreen", "at No.{M}"),
+        (
+            "742 Evergreen Terrace",
+            "at n" + chr(0xBA) + " 742 evergreen",
+            "at n" + chr(0xBA) + " {M}",
+        ),
+        ("742 Evergreen Terrace", "at evergreen. 742", "at {M}"),
+        ("742 Evergreen Terrace", "at 742, evergreen", "at {M}"),
+        ("742 Evergreen Terrace", "at 742 / evergreen", "at {M}"),
+        ("123 Main Street NW", "at 123 N.W.: main", "at {M}"),
+    ],
+)
+def test_punctuation_between_number_and_name_never_hides_the_street(
+    line: str, text: str, expected: str
+) -> None:
+    result = redact_known(text, KnownValues(streets=(line,)))
+
+    assert result == RedactionResult(expected.replace("{M}", MASK), True)
+
+
+@pytest.mark.parametrize(
+    ("line", "text"),
+    [
+        ("742 Evergreen Terrace", "Lot 742 is far from the tall evergreen hedge"),
+        ("742 Evergreen Terrace", "Check 742 of the pipes; they run under every tall evergreen."),
+    ],
+)
+def test_a_number_more_than_six_pieces_from_the_name_stays(line: str, text: str) -> None:
+    assert redact_known(text, KnownValues(streets=(line,))) == RedactionResult(text, False)
+
+
+@pytest.mark.parametrize(
+    ("line", "text", "expected"),
+    [
+        (
+            "200 Main St",
+            "Budget is about 200. Main issue is the leak.",
+            "Budget is about {M} issue is the leak.",
+        ),
+        ("742 Evergreen Terrace", "Check the evergreen. 742 feet away", "Check the {M} feet away"),
+    ],
+)
+def test_the_known_street_is_masked_across_a_sentence_by_design(
+    line: str, text: str, expected: str
+) -> None:
+    # The accepted trade-off (round 7): the customer's own number and street name within six
+    # pieces are masked even across a sentence. A few words more hidden cost little; a leak of
+    # the address costs much.
+    result = redact_known(text, KnownValues(streets=(line,)))
+
+    assert result == RedactionResult(expected.replace("{M}", MASK), True)
 
 
 def test_a_unit_inside_the_street_line_is_masked_on_its_own() -> None:
