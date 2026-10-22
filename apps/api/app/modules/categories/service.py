@@ -96,6 +96,10 @@ class CategoryService:
             for row in await self._categories.get_many(ids)
         ]
 
+    async def any_requires_license(self, ids: Collection[uuid.UUID]) -> bool:
+        """True when at least one of these categories requires a license (active or not)."""
+        return await self._categories.any_requires_license(ids)
+
 
 def _parse_questions(row: Category) -> list[IntakeQuestion] | None:
     try:

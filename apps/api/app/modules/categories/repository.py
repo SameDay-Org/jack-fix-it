@@ -55,3 +55,9 @@ class CategoryRepository:
             return []
         statement = select(Category).where(Category.id.in_(ids)).order_by(Category.slug)
         return list((await self._session.scalars(statement)).all())
+
+    async def any_requires_license(self, ids: Collection[uuid.UUID]) -> bool:
+        if not ids:
+            return False
+        statement = select(Category.id).where(Category.id.in_(ids), Category.requires_license)
+        return (await self._session.scalar(statement.limit(1))) is not None

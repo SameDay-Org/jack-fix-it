@@ -166,3 +166,34 @@ def test_openapi_documents_the_typed_questions(app: FastAPI) -> None:
         "TextQuestion",
     ):
         assert schemas[name]["additionalProperties"] is False
+
+
+async def test_categories_api_returns_option_description_and_icon(
+    db_client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    jobs = {
+        "key": "jobs",
+        "type": "multi_choice",
+        "required": True,
+        "labels": {"en": "Jobs", "es": "Trabajos"},
+        "options": [
+            {
+                "value": "walls",
+                "labels": {"en": "Walls", "es": "Paredes"},
+                "description": {"en": "One or more rooms", "es": "Una o varias habitaciones"},
+                "icon": "paint-walls",
+            },
+            {"value": "other", "labels": {"en": "Other", "es": "Otro"}},
+        ],
+        "min_selected": 1,
+    }
+    db_session.add(category("test-illustrated", intake_questions=[jobs]))
+    await db_session.flush()
+
+    listed = {c["slug"]: c for c in (await db_client.get("/v1/categories")).json()}
+
+    [question] = listed["test-illustrated"]["intake_questions"]
+    walls, other = question["options"]
+    assert walls["description"] == {"en": "One or more rooms", "es": "Una o varias habitaciones"}
+    assert walls["icon"] == "paint-walls"
+    assert (other["description"], other["icon"]) == (None, None)
