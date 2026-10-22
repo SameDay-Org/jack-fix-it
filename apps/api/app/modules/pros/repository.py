@@ -1,5 +1,5 @@
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -12,12 +12,30 @@ from app.modules.pros.models import (
     ProDocumentType,
     ProProfile,
     ProServiceArea,
+    ProVerificationStatus,
 )
 
 
 class ProProfileRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def dispatch_candidates(
+        self, category_id: uuid.UUID, service_area_ids: Collection[uuid.UUID]
+    ) -> list[ProProfile]:
+        if not service_area_ids:
+            return []
+        in_category = select(ProCategory.pro_id).where(ProCategory.category_id == category_id)
+        in_areas = select(ProServiceArea.pro_id).where(
+            ProServiceArea.service_area_id.in_(service_area_ids)
+        )
+        statement = select(ProProfile).where(
+            ProProfile.verification_status == ProVerificationStatus.APPROVED,
+            ProProfile.payouts_enabled,
+            ProProfile.id.in_(in_category),
+            ProProfile.id.in_(in_areas),
+        )
+        return list((await self._session.scalars(statement)).all())
 
     async def get_id_by_user_id(self, user_id: uuid.UUID) -> uuid.UUID | None:
         return await self._session.scalar(
