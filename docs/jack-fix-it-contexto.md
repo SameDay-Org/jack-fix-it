@@ -174,6 +174,7 @@ O detalhe completo está no plano. Tabelas principais:
 - 5 categorias no lançamento.
 - O README antigo (repositório Lovable) serve só como referência de conteúdo e UX.
 - Hospedagem no Railway Pro: staging na `develop`, produção na `main` (16/10/2026, ADR 0001).
+- Endereço que o profissional vê numa oportunidade: só ZIP e cidade até o job ser pago (decided 2026-10-22 by Cesar, #49).
 
 **Pendentes:**
 

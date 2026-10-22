@@ -26,6 +26,15 @@ class UserRepository:
     async def get_by_id(self, user_id: uuid.UUID) -> User | None:
         return await self._session.get(User, user_id)
 
+    async def contact_points(
+        self, user_ids: Collection[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, str, str | None]]:
+        """(id, email, phone) only."""
+        if not user_ids:
+            return []
+        statement = select(User.id, User.email, User.phone).where(User.id.in_(user_ids))
+        return [(row[0], row[1], row[2]) for row in (await self._session.execute(statement)).all()]
+
     async def get_by_email(self, email: str, *, lock: bool = False) -> User | None:
         """`lock`: FOR NO KEY UPDATE until the transaction ends, reading the row as last
         committed (populate_existing, not the copy an earlier read left in the session). Not
