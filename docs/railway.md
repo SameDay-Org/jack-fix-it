@@ -180,3 +180,8 @@ Confirm the exact dashboard steps on the first drill and update this section.
 5. Generate public domains for api and web in staging; keep production private until D20.
 6. For Sentinel: a project token scoped to the staging environment, and a GitHub token limited
    to issues and pull requests.
+7. After the first deploy of each environment, create the first admin from a shell on the api
+   service: `uv run python -m scripts.create_staff_user` (it asks for the email and the role,
+   and the password twice without echoing it). Public registration never creates staff
+   accounts (#155). For a scripted setup: `--email … --role admin --password-env NAME`, with
+   the password only in that environment variable.
