@@ -96,8 +96,10 @@ export function useCodeEntry(digits: string, onVerified: () => void): CodeEntry 
     const signal = unmountSignal();
     resendInFlight.current = true;
     // A new code is on its way: the field starts empty for it.
+    const before = codeNow.current;
     keepCode("");
     setError(null);
+    let restored = false;
     try {
       await send.mutateAsync({ phone, signal });
       if (signal.aborted) return;
@@ -105,11 +107,19 @@ export function useCodeEntry(digits: string, onVerified: () => void): CodeEntry 
       showToast({ message: t("phone.codeResent"), tone: "neutral" });
     } catch (failure) {
       if (signal.aborted) return;
+      // No new code is coming: the one typed before is still good, unless something was typed since.
+      if (codeNow.current === "" && before !== "") {
+        keepCode(before);
+        restored = true;
+      }
       if (!(failure instanceof SessionExpiredError)) fail(t(describePhoneFailure(failure)));
     } finally {
       resendInFlight.current = false;
-      // Digits typed while the resend ran were held: a complete code is checked now, once.
-      if (!signal.aborted && codeNow.current.length === CODE_LENGTH) void check(codeNow.current);
+      // Digits typed while the resend ran were held: a complete code is checked now, once. A code
+      // put back after a failed resend waits for the user, as it did before the resend.
+      if (!signal.aborted && !restored && codeNow.current.length === CODE_LENGTH) {
+        void check(codeNow.current);
+      }
     }
   };
 

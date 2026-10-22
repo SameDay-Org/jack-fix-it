@@ -289,7 +289,77 @@ describe("a response that arrives after the user left, or alongside a resend (#1
     expect(verifyCalls()).toHaveLength(1);
   });
 
-  it("a resend cannot start while a verify is in flight", async () => {
+  it("leaving the code step cancels the request in flight", async () => {
+    const answer = deferred<Response>();
+    fetchMock.mockReturnValue(answer.promise);
+    const { unmount } = await renderScreen(<CodeEntryScreen />);
+    await typeCode(CODE);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    await unmount();
+
+    expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    await act(async () => answer.resolve(jsonResponse(200, VERIFIED)));
+  });
+
+  it("a late resend failure after leaving is not announced", async () => {
+    jest.useFakeTimers();
+    const answer = deferred<Response>();
+    fetchMock.mockReturnValue(answer.promise);
+    const { unmount } = await renderScreen(<CodeEntryScreen />);
+    await passResendWait();
+    await fireEvent.press(resendButton());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    await unmount();
+    await act(async () => answer.resolve(errorResponse(429, "rate_limited")));
+
+    expect(announce).not.toHaveBeenCalled();
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it("digits held during a resend that fails are still verified, once", async () => {
+    jest.useFakeTimers();
+    const resent = deferred<Response>();
+    fetchMock.mockImplementation((url) =>
+      String(url).endsWith(SEND) ? resent.promise : Promise.resolve(jsonResponse(200, VERIFIED)),
+    );
+    await renderScreen(<CodeEntryScreen />);
+    await passResendWait();
+    await fireEvent.press(resendButton());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await typeCode(CODE);
+
+    await act(async () => resent.resolve(errorResponse(429, "rate_limited")));
+
+    await waitFor(() => expect(verifyCalls()).toHaveLength(1));
+    await waitFor(() => expect(router.dismissTo).toHaveBeenCalledTimes(1));
+    expect(verifyCalls()).toHaveLength(1);
+  });
+
+  it("a failed resend puts back the code typed before it, and does not send it again", async () => {
+    jest.useFakeTimers();
+    fetchMock.mockImplementation((url) =>
+      Promise.resolve(
+        String(url).endsWith(SEND)
+          ? errorResponse(429, "rate_limited")
+          : errorResponse(503, "verification_unavailable"),
+      ),
+    );
+    await renderScreen(<CodeEntryScreen />);
+    await passResendWait();
+    await typeCode(CODE);
+    await screen.findByText("We couldn't send or check the code right now. Try again soon.");
+    expect(codeField().props.value).toBe(CODE); // kept to retry as is
+
+    await fireEvent.press(resendButton());
+
+    expect(await screen.findByText("Too many attempts. Try again in a moment.")).toBeTruthy();
+    expect(codeField().props.value).toBe(CODE);
+    expect(verifyCalls()).toHaveLength(1);
+  });
+
+  it("Resend is disabled while a verify is in flight (the hook guard: useCodeEntry.test)", async () => {
     jest.useFakeTimers();
     const verified = deferred<Response>();
     fetchMock.mockImplementation((url) =>
