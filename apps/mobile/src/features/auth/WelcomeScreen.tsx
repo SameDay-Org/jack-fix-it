@@ -53,8 +53,13 @@ export function WelcomeScreen() {
     borderTopRightRadius: xl * (1 - progress.value),
     transform: [{ translateY: -travel.value * progress.value }],
   }));
+  // The skirt rises with the panel and covers what the panel leaves behind, down to the bottom
+  // edge. It is a sibling anchored to the container's bottom, not a child of the padded panel:
+  // Yoga resolves an absolute child's percentage offsets against the content box, so a `top: 100%`
+  // skirt inside the panel ended a padding short of the screen's edge.
   const skirtStyle = useAnimatedStyle(() => ({
     backgroundColor: interpolateColor(progress.value, [0, 1], [white, page]),
+    transform: [{ translateY: -travel.value * progress.value }],
   }));
   const actionsStyle = useAnimatedStyle(() => ({
     opacity: Math.max(0, 1 - 2 * progress.value),
@@ -82,19 +87,18 @@ export function WelcomeScreen() {
           <Text className="text-body text-white">{t("welcome.support")}</Text>
         </Animated.View>
         <Animated.View
+          pointerEvents="none"
+          style={[
+            skirtStyle,
+            { position: "absolute", left: 0, right: 0, bottom: -skirtHeight, height: skirtHeight },
+          ]}
+          testID="welcome-actions-skirt"
+        />
+        <Animated.View
           style={[continuousCorners, panelStyle, { paddingBottom: bottom }]}
           onLayout={onPanelLayout}
           testID="welcome-actions"
         >
-          {/* Covers what the panel leaves behind as it rises; the same color, no corners. */}
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              skirtStyle,
-              { position: "absolute", left: 0, right: 0, top: "100%", height: skirtHeight },
-            ]}
-            testID="welcome-actions-skirt"
-          />
           <Animated.View
             className="gap-3 px-4 pb-4 pt-6"
             style={actionsStyle}
