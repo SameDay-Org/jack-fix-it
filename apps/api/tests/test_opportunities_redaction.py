@@ -244,10 +244,32 @@ ROUND3_CASES = [
 ]
 
 
+# Round 4 review (#172): the request's own street, written without the parts that follow its
+# name in the stored line (a direction after the suffix, a unit inside line1).
+ROUND4_CASES = [
+    (
+        "street-direction-after-suffix",
+        "Repair the leaking kitchen sink at 123 main nw.",
+        "123 main nw",
+        "test@example.invalid",
+        "+13055550199",
+        "123 Main Street NW",
+    ),
+    (
+        "street-unit-in-line1",
+        "Repair the leaking kitchen sink at 742 evergreen.",
+        "742 evergreen",
+        "test@example.invalid",
+        "+13055550199",
+        "742 Evergreen Terrace Apt 4B",
+    ),
+]
+
+
 @pytest.mark.parametrize(
     ("name", "text", "secret", "email", "phone", "street"),
-    ROUND3_CASES,
-    ids=[case[0] for case in ROUND3_CASES],
+    ROUND3_CASES + ROUND4_CASES,
+    ids=[case[0] for case in ROUND3_CASES + ROUND4_CASES],
 )
 @pytest.mark.parametrize(
     ("source", "route"), [("description", "list"), ("description", "detail"), ("intake", "detail")]
