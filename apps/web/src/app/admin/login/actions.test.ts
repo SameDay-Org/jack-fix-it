@@ -66,9 +66,12 @@ describe("login action", () => {
     const result = await submit(form(`  ${EMAIL}  `));
 
     expect(result.redirectedTo).toBe("/admin");
-    expect(cookies.get(ACCESS_COOKIE)?.value).toBe(TOKENS.access_token);
-    expect(cookies.get(REFRESH_COOKIE)?.value).toBe(TOKENS.refresh_token);
-    expect(cookies.get(SESSION_COOKIE)).toBeDefined(); // only a login starts a session
+    // A new login: its session id prefixes both tokens and leads the marker.
+    const sid = cookies.get(SESSION_COOKIE)?.value.split(".")[0];
+    expect(sid).toMatch(/^[0-9a-f-]{36}$/);
+    expect(cookies.get(SESSION_COOKIE)?.value).toBe(`${sid}.${auth(role).user.id}`);
+    expect(cookies.get(ACCESS_COOKIE)?.value).toBe(`${sid}.${TOKENS.access_token}`);
+    expect(cookies.get(REFRESH_COOKIE)?.value).toBe(`${sid}.${TOKENS.refresh_token}`);
     const [, init] = fetchMock.mock.calls[0]!;
     expect(JSON.parse(String(init?.body))).toEqual({ email: EMAIL, password: PASSWORD });
   });

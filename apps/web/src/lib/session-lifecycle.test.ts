@@ -1,7 +1,16 @@
 /** Orderings across tabs and over time (#158 round 1): stale refreshes, short access tokens. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { auth, FakeCookieJar, RedirectSignal, routeFetch, TOKENS, user } from "./test-helpers";
+import {
+  auth,
+  bound,
+  FakeCookieJar,
+  MARKER,
+  RedirectSignal,
+  routeFetch,
+  TOKENS,
+  user,
+} from "./test-helpers";
 
 const { jar } = vi.hoisted(() => ({ jar: { current: null as unknown } }));
 
@@ -81,14 +90,19 @@ function expireAfter(seconds: number): void {
   }
 }
 
-const SIGNED_IN = { [ACCESS_COOKIE]: "at-1", [REFRESH_COOKIE]: "rt-1", [SESSION_COOKIE]: "sid-1" };
+const SIGNED_IN = {
+  [ACCESS_COOKIE]: bound("at-1"),
+  [REFRESH_COOKIE]: bound("rt-1"),
+  [SESSION_COOKIE]: MARKER,
+};
 
 describe("the session marker (only login sets it)", () => {
   it("login sets it with the refresh cookie's attributes and lifetime", async () => {
     await startSession(auth("agent"));
 
     const marker = cookies.sets.find((call) => call.name === SESSION_COOKIE);
-    expect(marker?.value).toMatch(/^[0-9a-f-]{36}$/);
+    // <a new session id>.<the user's id>
+    expect(marker?.value).toMatch(new RegExp(`^[0-9a-f-]{36}\\.${user("agent").id}$`));
     expect(marker?.options).toMatchObject({
       httpOnly: true,
       sameSite: "strict",
@@ -109,7 +123,7 @@ describe("the session marker (only login sets it)", () => {
   });
 
   it("without it the tokens are not a session: no /me, the session ends", async () => {
-    cookies.reset({ [ACCESS_COOKIE]: "at-1", [REFRESH_COOKIE]: "rt-1" });
+    cookies.reset({ [ACCESS_COOKIE]: bound("at-1"), [REFRESH_COOKIE]: bound("rt-1") });
 
     expect(await redirectOf(requireStaff)).toBe(END_PATH);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -140,7 +154,7 @@ describe("the session marker (only login sets it)", () => {
     await refresh;
 
     // The stray tokens are not a session: the next render ends it, with no 200.
-    expect(cookies.get(ACCESS_COOKIE)?.value).toBe(TOKENS.access_token);
+    expect(cookies.get(ACCESS_COOKIE)?.value).toBe(bound(TOKENS.access_token));
     expect(await redirectOf(requireStaff)).toBe(END_PATH);
     const paths = fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname);
     expect(paths).not.toContain("/v1/auth/me");

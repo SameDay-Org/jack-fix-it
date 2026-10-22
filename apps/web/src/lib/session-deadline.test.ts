@@ -7,7 +7,7 @@ import type { AddressInfo } from "node:net";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { FakeCookieJar } from "./test-helpers";
+import { bound, FakeCookieJar, MARKER } from "./test-helpers";
 
 const { jar } = vi.hoisted(() => ({ jar: { current: null as unknown } }));
 
@@ -97,7 +97,7 @@ describe.each(["silent", "headers-only"] as const)("an API that is %s", (mode) =
   });
 
   it("a refresh gives up within the deadline", async () => {
-    cookies.reset({ [REFRESH_COOKIE]: "rt-1", [SESSION_COOKIE]: "sid-1" });
+    cookies.reset({ [REFRESH_COOKIE]: bound("rt-1"), [SESSION_COOKIE]: MARKER });
     let next: unknown;
 
     const elapsed = await within(async () => {
@@ -109,13 +109,21 @@ describe.each(["silent", "headers-only"] as const)("an API that is %s", (mode) =
   });
 
   it("the /me check gives up within the deadline", async () => {
-    cookies.reset({ [ACCESS_COOKIE]: "at-1", [REFRESH_COOKIE]: "rt-1", [SESSION_COOKIE]: "sid-1" });
+    cookies.reset({
+      [ACCESS_COOKIE]: bound("at-1"),
+      [REFRESH_COOKIE]: bound("rt-1"),
+      [SESSION_COOKIE]: MARKER,
+    });
 
     expect(await within(() => requireStaff())).toBeLessThan(BOUND_MS);
   });
 
   it("logout clears every cookie however the revoke ends", async () => {
-    cookies.reset({ [ACCESS_COOKIE]: "at-1", [REFRESH_COOKIE]: "rt-1", [SESSION_COOKIE]: "sid-1" });
+    cookies.reset({
+      [ACCESS_COOKIE]: bound("at-1"),
+      [REFRESH_COOKIE]: bound("rt-1"),
+      [SESSION_COOKIE]: MARKER,
+    });
 
     expect(await within(endSession)).toBeLessThan(BOUND_MS);
     expect(cookies.values.size).toBe(0);

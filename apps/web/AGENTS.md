@@ -23,8 +23,9 @@ apply.
   `requireStaff()`, which checks `GET /v1/auth/me` on every request. Only server actions and
   route handlers may write cookies, so an expired access token goes through
   `/admin/session/refresh` (one refresh, both cookies rotated) and any failure through
-  `/admin/session/end`. Only login sets the session marker `jfi_sid`; tokens without it are
-  no session (a late refresh cannot revive a logout). Both session routes act only on
+  `/admin/session/end`. Each login gets a session id: `jfi_sid` is `<sid>.<user id>` and only
+  login sets it; the token cookies are `<sid>.<token>` and count only under the current sid, with
+  `/me` answering that user (a late refresh cannot revive a logout or switch user). Both session routes act only on
   same-origin requests (`fromThisSite`). Every API call has the `API_TIMEOUT_MS` deadline, body
   included, and sign-out clears the cookies before it revokes. Server actions keep Next's
   Origin check: never set `serverActions.allowedOrigins`. `/admin` responses are

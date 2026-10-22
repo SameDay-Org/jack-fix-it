@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { FakeCookieJar, RedirectSignal } from "@/lib/test-helpers";
+import { bound, FakeCookieJar, RedirectSignal } from "@/lib/test-helpers";
 
 const { jar } = vi.hoisted(() => ({ jar: { current: null as unknown } }));
 
@@ -24,7 +24,7 @@ let cookies: FakeCookieJar;
 
 beforeEach(() => {
   cookies = new FakeCookieJar();
-  cookies.reset({ [ACCESS_COOKIE]: "at-1", [REFRESH_COOKIE]: "rt-1" });
+  cookies.reset({ [ACCESS_COOKIE]: bound("at-1"), [REFRESH_COOKIE]: bound("rt-1") });
   jar.current = cookies;
   vi.stubEnv("API_INTERNAL_URL", "http://api.test.invalid:8000");
   vi.stubEnv("API_TIMEOUT_MS", "1000");
@@ -60,7 +60,7 @@ describe("GET /admin/session/end", () => {
     "a link from another site cannot sign anyone out (%s)",
     async (site) => {
       expect(await visit(site)).toBe(LOGIN_PATH);
-      expect(cookies.get(REFRESH_COOKIE)?.value).toBe("rt-1");
+      expect(cookies.get(REFRESH_COOKIE)?.value).toBe(bound("rt-1"));
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );

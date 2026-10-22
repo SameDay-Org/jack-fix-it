@@ -61,6 +61,17 @@ export function user(role: User["role"], extra: Partial<User> = {}): User {
   };
 }
 
+/** The session id of the fixture login (a UUID, like the real ones). */
+export const SID = "5f0e3c1a-7d2b-4e8f-9a61-0c3b2d4e5f60";
+
+/** A token cookie's value under the fixture login: `<sid>.<token>`. */
+export function bound(token: string): string {
+  return `${SID}.${token}`;
+}
+
+/** The fixture login's session marker, for the user user() returns: `<sid>.<user id>`. */
+export const MARKER = `${SID}.${user("agent").id}`;
+
 export function auth(role: User["role"]): AuthResponse {
   return { ...TOKENS, user: user(role) };
 }
