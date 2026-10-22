@@ -1298,6 +1298,124 @@
           }
         ]
       }
+    },
+    "/v1/devices": {
+      "put": {
+        "tags": [
+          "devices"
+        ],
+        "summary": "Register this device for pushes",
+        "description": "Registers the app's Expo push token for the caller; call it at every start.\n\nA token already registered to someone else (the phone changed hands) moves to the caller.\nPast PUSH_MAX_DEVICES_PER_USER, the caller's least recently seen device is dropped.",
+        "operationId": "register_device_v1_devices_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceRegistration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Registered."
+          },
+          "422": {
+            "description": "validation_error: not an Expo push token, or an unknown platform.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers and pros receive pushes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "devices"
+        ],
+        "summary": "Stop pushes to this device",
+        "description": "Removes the caller's token; the app calls it on logout. The token travels in the body,\nnever in the path, because paths are logged.",
+        "operationId": "unregister_device_v1_devices_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceRemoval"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Always, whether or not the token was registered to the caller."
+          },
+          "422": {
+            "description": "validation_error: not an Expo push token, or an unknown platform.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers and pros receive pushes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -1552,6 +1670,50 @@
           "redis"
         ],
         "title": "DependencyChecks"
+      },
+      "DevicePlatform": {
+        "type": "string",
+        "enum": [
+          "ios",
+          "android"
+        ],
+        "title": "DevicePlatform"
+      },
+      "DeviceRegistration": {
+        "properties": {
+          "expo_push_token": {
+            "type": "string",
+            "pattern": "^Expo(nent)?PushToken\\[[A-Za-z0-9_-]{1,200}\\]$",
+            "title": "Expo Push Token",
+            "description": "The Expo push token."
+          },
+          "platform": {
+            "$ref": "#/components/schemas/DevicePlatform"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expo_push_token",
+          "platform"
+        ],
+        "title": "DeviceRegistration"
+      },
+      "DeviceRemoval": {
+        "properties": {
+          "expo_push_token": {
+            "type": "string",
+            "pattern": "^Expo(nent)?PushToken\\[[A-Za-z0-9_-]{1,200}\\]$",
+            "title": "Expo Push Token",
+            "description": "The Expo push token."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expo_push_token"
+        ],
+        "title": "DeviceRemoval"
       },
       "DownloadUrlRequest": {
         "properties": {
