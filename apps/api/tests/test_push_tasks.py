@@ -5,7 +5,7 @@ import json
 import logging
 import uuid
 from collections import Counter
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -16,6 +16,7 @@ import pytest
 from arq import Retry
 from arq.worker import Function
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,7 +32,13 @@ from app.integrations.expo_push import (
 )
 from app.modules.devices.models import Device, DevicePlatform
 from app.modules.devices.service import DeviceService
-from app.modules.notifications.push_tasks import check_push_receipts, send_push
+from app.modules.notifications.push_tasks import (
+    PushStateNotStoredError,
+    PushStore,
+    Recipient,
+    check_push_receipts,
+    send_push,
+)
 from app.modules.notifications.service import InvalidPushError
 from app.modules.users.models import User
 from app.modules.users.types import UserRole
@@ -549,3 +556,121 @@ async def test_cleanup_failure_keeps_tickets_and_retries_the_cleanup_only(
     assert len(sender.sent) == 1  # the retry only deleted the device
     assert await device_tokens(db_session) == {OK}
     assert await ticket_ids(redis, prefix) == {f"ticket-{OK}"}
+
+
+# Round 2 (B6): a state write that fails around the send never leads to a second send.
+
+
+def fail_writes(monkeypatch: pytest.MonkeyPatch, status: str, times: int) -> list[str]:
+    """Makes the store's writes that carry a recipient in `status` raise RedisError, `times`
+    times (the real Redis write runs otherwise). Returns the failures so far."""
+    record = PushStore.record
+    failures: list[str] = []
+
+    async def flaky(
+        self: PushStore, message_id: str, recipients: Mapping[uuid.UUID, Recipient]
+    ) -> None:
+        if len(failures) < times and any(r.status == status for r in recipients.values()):
+            failures.append(status)
+            raise RedisError("synthetic outage")
+        await record(self, message_id, recipients)
+
+    monkeypatch.setattr(PushStore, "record", flaky)
+    return failures
+
+
+async def statuses(redis: Redis, prefix: str, message_id: str = "test:1") -> list[str]:
+    store = PushStore(redis, ttl_seconds=TICKET_TTL, timeout_seconds=5, prefix=prefix)
+    return [str(r.status) for r in (await store.delivery(message_id) or {}).values()]
+
+
+async def test_lost_outcome_write_never_resends(
+    ctx: dict[str, Any],
+    db_session: AsyncSession,
+    sender: FakeSender,
+    redis: Redis,
+    prefix: str,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    user = await make_user(db_session, "en", OK)
+    fail_writes(monkeypatch, "accepted", times=1_000)  # Expo took it; Redis never stores that
+
+    with caplog.at_level(logging.WARNING), pytest.raises(Retry):
+        await push(ctx, user)
+    assert [r for r in caplog.records if r.message == "push_state_not_stored"]
+    assert await statuses(redis, prefix) == ["in_flight"]
+
+    monkeypatch.undo()  # Redis is back
+    ctx["job_try"] = 2
+    with caplog.at_level(logging.WARNING):
+        await push(ctx, user)  # ARQ's retry
+    ctx["job_try"] = 1
+    await push(ctx, user)  # a later job with the same id (a resend from a receipt)
+
+    assert sent_to(sender) == {OK: 1}
+    assert await statuses(redis, prefix) == ["unknown"]
+    [unknown] = [r for r in caplog.records if r.message == "push_outcome_unknown"]
+    assert unknown.__dict__["count"] == 1
+
+
+async def test_failed_in_flight_write_sends_nothing_and_retries(
+    ctx: dict[str, Any],
+    db_session: AsyncSession,
+    sender: FakeSender,
+    redis: Redis,
+    prefix: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await make_user(db_session, "en", OK)
+    fail_writes(monkeypatch, "in_flight", times=1)
+
+    with pytest.raises(Retry):
+        await push(ctx, user)
+    assert sender.sent == []
+    assert await statuses(redis, prefix) == ["pending"]
+
+    ctx["job_try"] = 2
+    await push(ctx, user)
+
+    assert sent_to(sender) == {OK: 1}
+    assert await statuses(redis, prefix) == ["accepted"]
+
+
+async def test_transient_outcome_write_failure_is_retried_without_resending(
+    ctx: dict[str, Any],
+    db_session: AsyncSession,
+    sender: FakeSender,
+    redis: Redis,
+    prefix: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await make_user(db_session, "en", OK)
+    failures = fail_writes(monkeypatch, "accepted", times=1)
+
+    await push(ctx, user)  # no Retry: the second write of the outcome went through
+    await push(ctx, user)
+
+    assert failures == ["accepted"]
+    assert sent_to(sender) == {OK: 1}
+    assert await statuses(redis, prefix) == ["accepted"]
+    assert await ticket_ids(redis, prefix) == {f"ticket-{OK}"}
+
+
+async def test_lost_outcome_write_on_the_last_try_fails_the_job(
+    ctx: dict[str, Any],
+    db_session: AsyncSession,
+    sender: FakeSender,
+    redis: Redis,
+    prefix: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await make_user(db_session, "en", OK)
+    fail_writes(monkeypatch, "accepted", times=1_000)
+    ctx["job_try"] = MAX_ATTEMPTS  # ARQ runs it no more: the job must not end as a success
+
+    with pytest.raises(PushStateNotStoredError):
+        await push(ctx, user)
+
+    assert sent_to(sender) == {OK: 1}
+    assert await statuses(redis, prefix) == ["in_flight"]  # never sent again

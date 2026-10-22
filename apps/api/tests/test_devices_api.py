@@ -5,6 +5,7 @@ import json
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import httpx
 import pytest
@@ -13,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
 from app.modules.auth import security
+from app.modules.auth.models import RefreshToken
 from app.modules.devices.models import Device, DevicePlatform
 from app.modules.devices.repository import DeviceRepository
 from app.modules.users.models import User
@@ -224,8 +226,14 @@ async def test_no_tokens_in_logs(
     }
 
 
-async def wait_until_blocking(sessions: async_sessionmaker[AsyncSession], *, holder: int) -> None:
-    """Returns once Postgres reports some backend waiting on a lock `holder` holds."""
+async def wait_until_blocking(
+    sessions: async_sessionmaker[AsyncSession],
+    *,
+    holder: int,
+    or_until: asyncio.Event | None = None,
+) -> None:
+    """Returns once Postgres reports some backend waiting on a lock `holder` holds, or once
+    `or_until` is set (the other side got through without waiting)."""
     query = text(
         "SELECT EXISTS (SELECT 1 FROM pg_stat_activity"
         " WHERE CAST(:holder AS integer) = ANY(pg_blocking_pids(pid)))"
@@ -233,7 +241,9 @@ async def wait_until_blocking(sessions: async_sessionmaker[AsyncSession], *, hol
     async with sessions() as monitor:
         try:
             async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
-                while not await monitor.scalar(query, {"holder": holder}):
+                while not (or_until is not None and or_until.is_set()) and not (
+                    await monitor.scalar(query, {"holder": holder})
+                ):
                     pass
         except TimeoutError:
             pytest.fail(
@@ -295,4 +305,89 @@ async def test_concurrent_registrations_keep_the_cap(
     finally:
         async with committed.sessions() as session:
             await session.execute(delete(Device).where(Device.user_id == user_id))
+            await session.commit()
+
+
+async def test_crossing_token_transfers_between_two_owners_do_not_deadlock(
+    committed: Committed, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A and B each have MAX_DEVICES devices. A registers B's oldest token while B registers
+    # A's oldest: each upsert takes a row of the other owner, then each prune deletes a row the
+    # other holds. Without one lock order over both owners, Postgres kills one (40P01, a 500).
+    emails = [committed.email, f"refresh-{uuid.uuid4().hex}@example.com"]
+    bodies = [(await register_account(committed.client, email=e)).json() for e in emails]
+    owners = [uuid.UUID(body["user"]["id"]) for body in bodies]
+    moved = [token(f"move-{n}-{uuid.uuid4().hex}") for n in range(2)]
+    async with committed.sessions() as session:
+        for owner, oldest in zip(owners, moved, strict=True):
+            session.add(
+                Device(
+                    user_id=owner,
+                    expo_push_token=oldest,
+                    platform=DevicePlatform.IOS,
+                    last_seen_at=datetime.now(UTC) - timedelta(days=MAX_DEVICES),
+                )
+            )
+            session.add_all(
+                Device(
+                    user_id=owner,
+                    expo_push_token=token(f"keep-{uuid.uuid4().hex}"),
+                    platform=DevicePlatform.IOS,
+                    last_seen_at=datetime.now(UTC) - timedelta(days=n),
+                )
+                for n in range(1, MAX_DEVICES)
+            )
+        await session.commit()
+    # The first upsert holds its transaction until the second upsert is done too (both then
+    # prune: the deadlock) or Postgres reports the second waiting on it (serialized).
+    upserts = 0
+    second_upserted = asyncio.Event()
+    upsert = DeviceRepository.upsert
+
+    async def upsert_then_hold(self: DeviceRepository, *args: Any) -> uuid.UUID:
+        nonlocal upserts
+        device_id = await upsert(self, *args)
+        upserts += 1
+        if upserts == 1:
+            holder = await backend_pid(self._session)
+            await wait_until_blocking(committed.sessions, holder=holder, or_until=second_upserted)
+        else:
+            second_upserted.set()
+        return device_id
+
+    monkeypatch.setattr(DeviceRepository, "upsert", upsert_then_hold)
+    # Both requests reach their first owner lock before either takes it, so the lock order
+    # alone decides whether they queue (same first owner) or each holds what the other wants.
+    first_locks = asyncio.Barrier(2)
+    met: set[int] = set()
+    lock_owner = DeviceRepository.lock_owner
+
+    async def meet_then_lock(self: DeviceRepository, user_id: uuid.UUID) -> None:
+        if id(self._session) not in met:
+            met.add(id(self._session))
+            async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+                await first_locks.wait()
+        await lock_owner(self, user_id)
+
+    monkeypatch.setattr(DeviceRepository, "lock_owner", meet_then_lock)
+    try:
+        responses = await asyncio.gather(
+            *(
+                register(committed.client, {"Authorization": f"Bearer {body['access_token']}"}, t)
+                for body, t in zip(bodies, reversed(moved), strict=True)
+            )
+        )
+
+        assert [r.status_code for r in responses] == [204, 204]
+        async with committed.sessions() as reader:
+            rows = (await reader.execute(select(Device.user_id, Device.expo_push_token))).all()
+        mine = {owner: {t for user_id, t in rows if user_id == owner} for owner in owners}
+        assert moved[1] in mine[owners[0]]  # A took B's token
+        assert moved[0] in mine[owners[1]]  # and B took A's
+        assert all(len(tokens) <= MAX_DEVICES for tokens in mine.values())
+    finally:
+        async with committed.sessions() as session:
+            await session.execute(delete(Device).where(Device.user_id.in_(owners)))
+            await session.execute(delete(RefreshToken).where(RefreshToken.user_id == owners[1]))
+            await session.execute(delete(User).where(User.id == owners[1]))
             await session.commit()

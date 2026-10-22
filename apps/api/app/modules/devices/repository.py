@@ -12,12 +12,23 @@ class DeviceRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def lock_token(self, token: str) -> None:
+        """Transaction-scoped lock serializing the registrations of one push token, so its
+        owner cannot change until the transaction ends."""
+        await self._lock(f"device-token:{token}")
+
     async def lock_owner(self, user_id: uuid.UUID) -> None:
         """Transaction-scoped lock serializing the device changes of one user."""
+        await self._lock(f"devices:{user_id}")
+
+    async def _lock(self, key: str) -> None:
         await self._session.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-            {"key": f"devices:{user_id}"},
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": key}
         )
+
+    async def owner_of(self, token: str) -> uuid.UUID | None:
+        statement = select(Device.user_id).where(Device.expo_push_token == token)
+        return (await self._session.scalars(statement)).one_or_none()
 
     async def upsert(
         self, user_id: uuid.UUID, token: str, platform: DevicePlatform, now: datetime

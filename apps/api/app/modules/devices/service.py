@@ -34,10 +34,19 @@ class DeviceService:
         """Upserts by token (a phone that changed hands moves to the caller), then keeps only
         the caller's most recently seen devices, and commits.
 
-        The caller's lock makes two registrations take turns, so each prunes after seeing the
-        other's device and the cap holds. Only the caller's devices need it: moving a token
-        away from another user can only lower that user's count."""
-        await self._devices.lock_owner(user.id)
+        Locks, always in this order: the token, then every owner the transaction changes (the
+        caller and the token's previous owner) sorted by id. The token lock keeps that owner
+        from changing before its lock is taken. Owner locks make two registrations of one
+        user take turns, so each prunes after seeing the other's device and the cap holds; the
+        sorted order makes two crossing transfers (A takes B's token while B takes A's) queue
+        instead of deadlocking. unregister and forget delete one row each and take no other
+        lock while waiting on it, so they cannot close a cycle with this order."""
+        await self._devices.lock_token(data.expo_push_token)
+        owners = {user.id}
+        if (previous_owner := await self._devices.owner_of(data.expo_push_token)) is not None:
+            owners.add(previous_owner)
+        for owner_id in sorted(owners):
+            await self._devices.lock_owner(owner_id)
         device_id = await self._devices.upsert(
             user.id, data.expo_push_token, data.platform, datetime.now(UTC)
         )

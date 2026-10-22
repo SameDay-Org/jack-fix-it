@@ -10,6 +10,13 @@ Expo's verdicts clean up devices: DeviceNotRegistered, on the ticket or later on
 deletes the device. A send's outcome is stored before that cleanup, and a cleanup that fails is
 retried on its own, without sending. Every Redis and HTTP call has a timeout. Logs carry user
 and device ids, Expo error codes and counts only.
+
+Expo has no idempotency key, so a device is never left plain pending once it may have been sent
+to: before the HTTP call its state becomes `in_flight` (if that write fails, nothing is sent and
+the job retries), and after the call the outcome replaces it. If the outcome cannot be stored,
+even after a few tries, the device stays `in_flight` and the next run marks it `unknown`, final:
+it is never sent again. A push lost in that rare window is the price of never sending one twice
+(at most once).
 """
 
 import asyncio
@@ -52,6 +59,8 @@ from app.modules.users.service import UserService
 logger = logging.getLogger(__name__)
 
 KEY_PREFIX: Final = "push"
+# Writes of a send's outcome before giving up on it; each one is bounded by the store timeout.
+OUTCOME_WRITE_TRIES: Final = 3
 REQUEST_FIELD: Final = "request"
 
 SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
@@ -72,6 +81,13 @@ class Status(StrEnum):
     DEAD = "dead"  # DeviceNotRegistered; the device is still to be deleted
     GONE = "gone"  # DeviceNotRegistered; the device was deleted
     FAILED = "failed"  # a final error, or out of attempts
+    IN_FLIGHT = "in_flight"  # handed to Expo; the outcome is not stored yet
+    UNKNOWN = "unknown"  # its outcome was lost after the send: final, never sent again
+
+
+class PushStateNotStoredError(RuntimeError):
+    """A send's outcome could not be stored on the job's last try. The devices stay in_flight,
+    so no later run sends to them again."""
 
 
 @dataclass(frozen=True)
@@ -288,6 +304,16 @@ async def send_push(
         targets, locale = await _targets_and_locale(deps, request.user_id)
         if recipients is None:
             recipients = await deps.store.start(request, [t.device_id for t in targets])
+        # In flight when an earlier run ended without storing the outcome: maybe delivered.
+        lost = {
+            device_id: replace(recipient, status=Status.UNKNOWN)
+            for device_id, recipient in recipients.items()
+            if recipient.status is Status.IN_FLIGHT
+        }
+        if lost:
+            await deps.store.record(message_id, lost)
+            logger.warning("push_outcome_unknown", extra={**extra, "count": len(lost)})
+            recipients = {**recipients, **lost}
     except (RedisError, OSError, SQLAlchemyError):
         raise _retry(deps, attempt, extra) from None
     due = [t for t in targets if _status(recipients, t.device_id) is Status.PENDING]
@@ -297,6 +323,14 @@ async def send_push(
 
     outcome: dict[uuid.UUID, Recipient] = {}
     if due:
+        in_flight = {
+            t.device_id: Recipient(Status.IN_FLIGHT, recipients[t.device_id].attempts + 1)
+            for t in due
+        }
+        try:
+            await deps.store.record(message_id, in_flight)
+        except (RedisError, OSError):
+            raise _retry(deps, attempt, extra) from None  # nothing was sent
         try:
             tickets = await deps.sender.send(
                 [
@@ -314,7 +348,7 @@ async def send_push(
         last_try = attempt >= deps.max_attempts
         for index, target in enumerate(due):
             ticket = tickets[index] if index < len(tickets) else None
-            sends = recipients[target.device_id].attempts + 1
+            sends = in_flight[target.device_id].attempts
             outcome[target.device_id] = _after_send(
                 ticket, sends, last_try or sends >= deps.max_attempts
             )
@@ -328,12 +362,12 @@ async def send_push(
                         "error": ticket.error if ticket is not None else "unavailable",
                     },
                 )
-        try:
-            await deps.store.record(message_id, outcome)
-        except (RedisError, OSError):
-            # Sent already: a retry would push twice to the devices Expo accepted.
+        if not await _store_outcome(deps, message_id, outcome):
+            # The devices stay in_flight: the next run marks them unknown and never resends.
             logger.error("push_state_not_stored", extra={**extra, "count": len(outcome)})
-            return
+            if attempt < deps.max_attempts:
+                raise _retry(deps, attempt, extra)
+            raise PushStateNotStoredError
 
     current = {**recipients, **outcome}
     cleaned = await _clean_up(
@@ -343,6 +377,19 @@ async def send_push(
     logger.info("push_sent", extra={**extra, **counts})
     if (not cleaned or counts[Status.PENDING] > 0) and attempt < deps.max_attempts:
         raise _retry(deps, attempt, extra)
+
+
+async def _store_outcome(
+    deps: PushDeps, message_id: str, outcome: Mapping[uuid.UUID, Recipient]
+) -> bool:
+    """Writes a send's outcome, trying again a few times; never sends again."""
+    for _ in range(OUTCOME_WRITE_TRIES):
+        try:
+            await deps.store.record(message_id, outcome)
+        except (RedisError, OSError):
+            continue
+        return True
+    return False
 
 
 def _status(recipients: Mapping[uuid.UUID, Recipient], device_id: uuid.UUID) -> Status | None:
