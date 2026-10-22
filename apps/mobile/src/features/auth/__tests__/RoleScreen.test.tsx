@@ -1,8 +1,8 @@
 import "@/i18n";
 
 import { act, fireEvent, screen } from "@testing-library/react-native";
-import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { BackHandler } from "react-native";
+import { router, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
+import { BackHandler, Platform } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
 
 import { moveAccessibilityFocus } from "@/components/ui";
@@ -16,6 +16,8 @@ jest.mock("expo-router", () => ({
   useLocalSearchParams: jest.fn(() => ({})),
   // The focus effect (hardware back while focused) runs only where a test calls it.
   useFocusEffect: jest.fn(),
+  // The stack's events: `transitionEnd` tells the content its screen has appeared.
+  useNavigation: jest.fn(() => ({ addListener: jest.fn(() => jest.fn()) })),
 }));
 jest.mock("@/components/ui", () => ({
   ...jest.requireActual("@/components/ui"),
@@ -191,6 +193,42 @@ describe("RoleScreen", () => {
       expect(contentStyle().opacity).toBeGreaterThan(0);
       expect(contentStyle().opacity).toBeLessThan(1);
       expect(contentStyle().transform?.[0].translateY).toBe(0);
+    });
+
+    describe("on Android, where the route appears with no stack motion", () => {
+      let listeners: Record<string, (event: { data: { closing: boolean } }) => void>;
+      beforeEach(() => {
+        jest.replaceProperty(Platform, "OS", "android");
+        listeners = {};
+        jest.mocked(useNavigation).mockReturnValue({
+          addListener: jest.fn((type: string, listener: (typeof listeners)[string]) => {
+            listeners[type] = listener;
+            return jest.fn();
+          }),
+        } as never);
+      });
+      afterEach(() => jest.restoreAllMocks());
+
+      it("the content enters once the screen has appeared, not on its first layout", async () => {
+        await renderInSafeArea(<RoleScreen />);
+        await act(async () => fireEvent(screen.getByTestId("role-content"), "layout", LAYOUT));
+        await act(async () => jest.advanceTimersByTime(transitionMs));
+        expect(contentStyle().opacity).toBe(0); // still waiting: a fade now would run unseen
+
+        await act(async () => listeners.transitionEnd({ data: { closing: false } }));
+        await act(async () => jest.advanceTimersByTime(transitionMs / 2));
+        expect(contentStyle().opacity).toBeGreaterThan(0);
+        await act(async () => jest.advanceTimersByTime(transitionMs));
+        expect(contentStyle().opacity).toBe(1);
+      });
+
+      it("if the stack never reports it, the content enters anyway after one rise", async () => {
+        const { panelRiseMs } = tokens.motion;
+        await renderInSafeArea(<RoleScreen />);
+        await act(async () => fireEvent(screen.getByTestId("role-content"), "layout", LAYOUT));
+        await act(async () => jest.advanceTimersByTime(panelRiseMs + transitionMs * 2));
+        expect(contentStyle().opacity).toBe(1);
+      });
     });
 
     it("reached any other way, the content is simply there", async () => {

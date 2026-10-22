@@ -25,6 +25,8 @@ jest.mock("expo-router", () => ({
   Redirect: jest.fn(() => null),
   // The focus effect (hardware back while focused) runs only where a test calls it.
   useFocusEffect: jest.fn(),
+  // The stack's events: `transitionEnd` tells the content its screen has appeared.
+  useNavigation: jest.fn(() => ({ addListener: jest.fn(() => jest.fn()) })),
 }));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(

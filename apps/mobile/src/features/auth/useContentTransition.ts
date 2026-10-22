@@ -1,6 +1,8 @@
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useNavigation } from "expo-router";
+import type { NativeStackNavigationProp } from "expo-router/native-stack";
+import type { ParamListBase } from "expo-router/react-navigation";
 import { useCallback, useEffect, useRef, useState, type ComponentRef, type RefObject } from "react";
-import { BackHandler, type Text, type ViewStyle } from "react-native";
+import { BackHandler, Platform, type Text, type ViewStyle } from "react-native";
 import {
   Easing,
   ReduceMotion,
@@ -15,6 +17,7 @@ import { moveAccessibilityFocus } from "@/components/ui";
 import { tokens } from "@/theme";
 
 import { backToPrevious } from "./components/BackButton";
+import { risenFromWelcome } from "./panelRoute";
 
 type Params = {
   /** The screen was reached by Welcome's panel rise: its content enters, and leaves on back. */
@@ -27,7 +30,7 @@ type Params = {
 export type ContentTransition = {
   /** For the content's container: fades (and slides, unless Reduce Motion) in and out. */
   style: AnimatedStyle<ViewStyle>;
-  /** The container's `onLayout`: the content enters once it is laid out, once. */
+  /** The container's `onLayout`: the content enters once it is laid out (and shown), once. */
   enter: () => void;
   /** Fades the content out, then runs `then` (the navigation). At once when not animating. */
   exit: (then: () => void) => void;
@@ -45,15 +48,27 @@ export type ContentTransition = {
  * fading opacity to each card and to its elevation shadow separately, and the cards turn into gray
  * blocks mid-fade. Under Reduce Motion the fade still runs (a dissolve is the reduced motion; only
  * the slide goes), so the destination crossfades in instead of popping.
+ *
+ * Where the stack shows the route with no animation of its own (Android after a rise), the native
+ * screen attaches a beat after the content's first layout, so a fade started on layout ran hidden
+ * and the content popped in on the device. There the content enters when the stack reports the
+ * screen has appeared (`transitionEnd`), with a one-shot guard of `motion.panelRiseMs` after layout
+ * so it can never stay hidden.
  */
 export function useContentTransition({
   animate,
   reduceMotion,
   titleRef,
 }: Params): ContentTransition {
-  const { transitionMs, slidePx } = tokens.motion;
+  const { transitionMs, slidePx, panelRiseMs } = tokens.motion;
+  const navigation = useNavigation<NativeStackNavigationProp<ParamListBase>>();
+  const enterOnAppear =
+    animate && risenFromWelcome({ from: "welcome" }, Platform.OS, reduceMotion) === "none";
   const visible = useSharedValue(animate ? 0 : 1);
   const entered = useRef(false);
+  const laidOut = useRef(false);
+  const appeared = useRef(!enterOnAppear);
+  const appearGuard = useRef<ReturnType<typeof setTimeout> | null>(null);
   const exitingRef = useRef(false);
   const [busy, setBusy] = useState(false);
   // What runs after the exit. Kept in a ref: a JS function captured by the worklet callback would
@@ -67,12 +82,25 @@ export function useContentTransition({
 
   const focusTitle = () => moveAccessibilityFocus(titleRef.current);
 
-  const enter = () => {
-    if (!animate || entered.current) return;
+  const clearAppearGuard = () => {
+    if (appearGuard.current) clearTimeout(appearGuard.current);
+    appearGuard.current = null;
+  };
+
+  const start = () => {
+    if (entered.current) return;
     entered.current = true;
+    clearAppearGuard();
     visible.value = withTiming(1, timing, (finished) => {
       if (finished) runOnJS(focusTitle)();
     });
+  };
+
+  const enter = () => {
+    if (!animate || laidOut.current) return;
+    laidOut.current = true;
+    if (appeared.current) start();
+    else appearGuard.current = setTimeout(start, panelRiseMs);
   };
 
   const afterExit = (finished: boolean) => {
@@ -98,6 +126,21 @@ export function useContentTransition({
       runOnJS(afterExit)(finished === true);
     });
   };
+
+  // The latest `start` for the stack's listener, registered once.
+  const startRef = useRef(start);
+  useEffect(() => {
+    startRef.current = start;
+  });
+  useEffect(() => {
+    if (!enterOnAppear) return;
+    return navigation.addListener("transitionEnd", ({ data }) => {
+      if (data.closing) return;
+      appeared.current = true;
+      if (laidOut.current) startRef.current();
+    });
+  }, [enterOnAppear, navigation]);
+  useEffect(() => clearAppearGuard, []);
 
   // Android's hardware back runs the same exit before popping, but only while this screen is the
   // focused one: a screen pushed on top (sign-up over Role) owns its own back. The listener reads
