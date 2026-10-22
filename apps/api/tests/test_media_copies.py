@@ -362,15 +362,26 @@ def test_worker_registers_the_task_with_its_tries_and_no_kept_result() -> None:
 # Second review (#173): a try that runs out of time, errors outside one file's copy.
 
 
-class FakeClock:
-    """Each read moves time on by `step` seconds."""
+class ManualClock:
+    """Time moves only when a test (or a fake storage) moves it."""
 
-    def __init__(self, step: float) -> None:
-        self.now, self.step = 0.0, step
+    def __init__(self) -> None:
+        self.now = 0.0
 
     def __call__(self) -> float:
-        self.now += self.step
         return self.now
+
+
+@dataclass
+class SlowStorage(MemoryStorage):
+    """Each download moves `clock` on by `seconds`: a file that takes that long to fetch."""
+
+    clock: ManualClock = field(default_factory=ManualClock)
+    seconds: float = 0.0
+
+    def download_to(self, key: str, path: Path) -> None:
+        self.clock.now += self.seconds
+        super().download_to(key, path)
 
 
 async def make_two_photos(session: AsyncSession, storage: MemoryStorage) -> tuple[Media, uuid.UUID]:
@@ -386,20 +397,26 @@ async def make_two_photos(session: AsyncSession, storage: MemoryStorage) -> tupl
 
 
 def short_copier(session: AsyncSession, storage: MemoryStorage) -> MediaCopier:
-    # A try of 25 s and 10 s per file: with 10 s per clock read, the second file has no time.
+    # A try of 25 s and 10 s per file: after a download of 20 s, the second file has no time.
     sanitize = SanitizeConfig(1_000_000, 85, "ffmpeg", 60)
     config = MediaCopyConfig(MAX_TRIES, sanitize, job_budget_seconds=25, row_budget_seconds=10)
     return MediaCopier(sessions_of(session), storage, config)
 
 
-async def test_a_try_out_of_time_defers_the_rest_to_the_next(
-    db_session: AsyncSession, storage: MemoryStorage
-) -> None:
-    media, second = await make_two_photos(db_session, storage)
-    jobs = short_copier(db_session, storage)
+@pytest.fixture
+def slow_storage() -> SlowStorage:
+    return SlowStorage(seconds=20)
 
-    first = await jobs.copy_request_media(media.request_id, attempt=1, clock=FakeClock(10))
-    then = await jobs.copy_request_media(media.request_id, attempt=2, clock=FakeClock(10))
+
+async def test_a_try_out_of_time_defers_the_rest_to_the_next(
+    db_session: AsyncSession, slow_storage: SlowStorage
+) -> None:
+    media, second = await make_two_photos(db_session, slow_storage)
+    jobs = short_copier(db_session, slow_storage)
+    clock = slow_storage.clock
+
+    first = await jobs.copy_request_media(media.request_id, attempt=1, clock=clock)
+    then = await jobs.copy_request_media(media.request_id, attempt=2, clock=clock)
 
     assert (first.ready, first.deferred) == (1, 1)
     assert (then.ready, then.deferred) == (1, 0)
@@ -407,12 +424,12 @@ async def test_a_try_out_of_time_defers_the_rest_to_the_next(
 
 
 async def test_the_final_try_fails_what_it_has_no_time_for(
-    db_session: AsyncSession, storage: MemoryStorage
+    db_session: AsyncSession, slow_storage: SlowStorage
 ) -> None:
-    media, second = await make_two_photos(db_session, storage)
+    media, second = await make_two_photos(db_session, slow_storage)
 
-    outcome = await short_copier(db_session, storage).copy_request_media(
-        media.request_id, attempt=MAX_TRIES + 2, final=True, clock=FakeClock(10)
+    outcome = await short_copier(db_session, slow_storage).copy_request_media(
+        media.request_id, attempt=MAX_TRIES + 2, final=True, clock=slow_storage.clock
     )
 
     assert (outcome.ready, outcome.failed, outcome.deferred) == (1, 1, 0)

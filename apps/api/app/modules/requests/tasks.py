@@ -5,6 +5,7 @@ import uuid
 from typing import Any
 
 from arq import Retry
+from arq.worker import Function, func
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import Settings
@@ -35,8 +36,9 @@ async def sanitize_request_media(ctx: dict[str, Any], request_id: str) -> str:
     try:
         outcome = await copier.copy_request_media(uuid.UUID(request_id), attempt, final=final)
     except (SQLAlchemyError, OSError) as error:
-        # The database or the network failed outside one file's copy: ARQ would end the job
-        # for good on this error, so it is a retry. Its text is never logged.
+        # The database or the network failed (or did not answer in time: TimeoutError is an
+        # OSError) outside one file's copy: ARQ would end the job for good on this error, so it
+        # is a retry. Its text is never logged.
         logger.warning(
             "media_sanitize_retry",
             extra={
@@ -50,3 +52,18 @@ async def sanitize_request_media(ctx: dict[str, Any], request_id: str) -> str:
     if outcome.waiting or outcome.deferred:
         raise Retry(defer=settings.media_sanitize_retry_seconds)
     return str(outcome)
+
+
+def sanitize_task(settings: Settings) -> Function:
+    """sanitize_request_media as the worker registers it (app/worker.py). No result is kept: a
+    failed run's exception (with its SQL) never stays in Redis, and the job id is free again
+    once a run ends; rows already copied are skipped. Two spare tries: the job fails its rows
+    from MEDIA_SANITIZE_MAX_TRIES on, so a try stopped by a deploy is followed by one that still
+    settles them. ARQ's timeout ends a job for good, so each try stops itself before it (see
+    app/modules/requests/media_copies.py) and asks for the next one."""
+    return func(
+        sanitize_request_media,
+        keep_result=0,
+        max_tries=settings.media_sanitize_max_tries + SANITIZE_SPARE_TRIES,
+        timeout=settings.media_sanitize_job_timeout_seconds,
+    )

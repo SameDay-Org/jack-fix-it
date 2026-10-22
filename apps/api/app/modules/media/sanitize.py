@@ -25,8 +25,10 @@ import asyncio
 import json
 import subprocess
 import warnings
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import partial
 from pathlib import Path
 from typing import Final
 
@@ -102,6 +104,11 @@ class SafeFile:
     extension: str
 
 
+# Runs an image transform in a thread; by default asyncio.to_thread. The worker passes its own,
+# which bounds it in time (app/modules/requests/media_copies.py).
+InThread = Callable[[Callable[[], SafeFile]], Awaitable[SafeFile]]
+
+
 @dataclass(frozen=True)
 class _ImageOutput:
     pillow_format: str  # the only format the original may decode as
@@ -141,12 +148,18 @@ _DENIED_TAGS: Final = ("location", "xyz", "gps", "creation", "date", "make", "mo
 
 
 async def sanitize(
-    source: Path, content_type: str, workdir: Path, config: SanitizeConfig
+    source: Path,
+    content_type: str,
+    workdir: Path,
+    config: SanitizeConfig,
+    *,
+    in_thread: InThread | None = None,
 ) -> SafeFile:
     """The safe copy of `source`, written into `workdir`. SanitizeError when the file can never
     be made safe, SanitizeRetryableError when a later try may succeed."""
     if content_type in IMAGE_OUTPUTS:
-        return await asyncio.to_thread(sanitize_image, source, content_type, workdir, config)
+        work = partial(sanitize_image, source, content_type, workdir, config)
+        return await (asyncio.to_thread(work) if in_thread is None else in_thread(work))
     if content_type in VIDEO_OUTPUTS:
         return await sanitize_video(source, content_type, workdir, config)
     raise SanitizeError(SanitizeFailure.UNSUPPORTED)

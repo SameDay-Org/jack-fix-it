@@ -15,7 +15,7 @@ from app.integrations.expo_push import ExpoPushSender
 from app.integrations.storage import S3Storage, StorageNotConfiguredError
 from app.modules.dispatch.tasks import dispatch_request
 from app.modules.notifications.push_tasks import check_push_receipts, send_push
-from app.modules.requests.tasks import SANITIZE_SPARE_TRIES, sanitize_request_media
+from app.modules.requests.tasks import sanitize_task
 from app.observability import configure_logging, init_sentry
 
 logger = logging.getLogger(__name__)
@@ -64,17 +64,7 @@ class WorkerSettings:
         # No result is kept, so a receipt that asks for a resend can queue the message's job id
         # again once the first run is over; the tries match the sends per device.
         func(send_push, keep_result=0, max_tries=get_settings().push_max_attempts),
-        # No result is kept: a failed run's exception (with its SQL) never stays in Redis, and
-        # the job id is free again once a run ends; rows already copied are skipped. Two spare
-        # tries: the job fails its rows from MEDIA_SANITIZE_MAX_TRIES on, so a try stopped by a
-        # deploy is followed by one that still settles them. The job stops itself before the
-        # timeout when it has no time for one more file, and goes on in its next try.
-        func(
-            sanitize_request_media,
-            keep_result=0,
-            max_tries=get_settings().media_sanitize_max_tries + SANITIZE_SPARE_TRIES,
-            timeout=get_settings().media_sanitize_job_timeout_seconds,
-        ),
+        sanitize_task(get_settings()),
     )
     cron_jobs = (
         cron(check_push_receipts, minute=every(get_settings().push_receipt_check_minutes)),

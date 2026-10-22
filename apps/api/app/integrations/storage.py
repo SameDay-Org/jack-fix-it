@@ -77,17 +77,25 @@ class S3Storage:
         access_key_id: str,
         secret_access_key: str,
         region: str,
+        connect_timeout: float,
+        read_timeout: float,
     ) -> None:
         self._bucket = bucket
         # Path-style (endpoint/bucket/key): R2 and Railway Buckets serve it without a
-        # bucket subdomain. Credentials are explicit, so nothing is read from ~/.aws.
+        # bucket subdomain. Credentials are explicit, so nothing is read from ~/.aws. The
+        # timeouts bound the worker's transfers (#173): a stalled one ends its thread by itself.
         self._client = boto3.client(
             "s3",
             endpoint_url=endpoint_url,
             aws_access_key_id=access_key_id,
             aws_secret_access_key=secret_access_key,
             region_name=region,
-            config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+            config=Config(
+                signature_version="s3v4",
+                s3={"addressing_style": "path"},
+                connect_timeout=connect_timeout,
+                read_timeout=read_timeout,
+            ),
         )
 
     @classmethod
@@ -105,6 +113,8 @@ class S3Storage:
             access_key_id=settings.s3_access_key_id.get_secret_value(),
             secret_access_key=settings.s3_secret_access_key.get_secret_value(),
             region=settings.s3_region,
+            connect_timeout=settings.s3_connect_timeout_seconds,
+            read_timeout=settings.s3_read_timeout_seconds,
         )
 
     def presign_put(

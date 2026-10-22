@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Collection, Sequence
 from datetime import datetime
 
-from sqlalchemy import Select, func, select, tuple_
+from sqlalchemy import Select, func, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.requests.models import (
@@ -60,6 +60,20 @@ class ServiceRequestRepository:
                 RequestMedia.safe_status == MediaSafeStatus.PENDING,
             )
             .order_by(RequestMedia.created_at, RequestMedia.id)
+        )
+        return list((await self._session.scalars(statement)).all())
+
+    async def fail_pending_media(self, media_ids: Collection[uuid.UUID]) -> list[uuid.UUID]:
+        """Marks those of the media rows still pending failed (#173); the ids it changed."""
+        statement = (
+            update(RequestMedia)
+            .where(
+                RequestMedia.id.in_(media_ids),
+                RequestMedia.safe_status == MediaSafeStatus.PENDING,
+            )
+            .values(safe_status=MediaSafeStatus.FAILED)
+            .returning(RequestMedia.id)
+            .execution_options(synchronize_session=False)
         )
         return list((await self._session.scalars(statement)).all())
 

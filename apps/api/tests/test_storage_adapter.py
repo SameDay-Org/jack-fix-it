@@ -99,6 +99,18 @@ def test_missing_settings_raise_not_configured(missing: str) -> None:
 
 # The worker's copies (#173): errors are typed and never carry the key.
 
+
+def test_transfers_end_on_their_own_timeouts() -> None:
+    # A stalled transfer must end its thread by itself: the job only stops waiting for it.
+    settings = make_settings(
+        **TEST_STORAGE_SETTINGS, s3_connect_timeout_seconds=3, s3_read_timeout_seconds=7
+    )
+
+    config = S3Storage.from_settings(settings)._client.meta.config
+
+    assert (config.connect_timeout, config.read_timeout) == (3, 7)
+
+
 KEY = "u/00000000-0000-0000-0000-000000000001/request_media/" + "a" * 32 + ".jpg"
 
 
