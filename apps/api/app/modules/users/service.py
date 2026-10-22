@@ -4,11 +4,13 @@ Returns UserAccount / UserCredentials values (types.py), never the ORM model (AD
 """
 
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import violated_constraint
 from app.modules.users.errors import (
     EmailAlreadyRegisteredError,
     NamesIncompleteError,
@@ -27,6 +29,12 @@ class UserService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._users = UserRepository(session)
+
+    async def active_ids_with_role(
+        self, user_ids: Collection[uuid.UUID], role: UserRole
+    ) -> set[uuid.UUID]:
+        """The ids among `user_ids` of active (not suspended) accounts with `role`."""
+        return await self._users.active_ids_with_role(user_ids, role)
 
     async def get_by_id(self, user_id: uuid.UUID) -> UserAccount | None:
         user = await self._users.get_by_id(user_id)
@@ -71,7 +79,7 @@ class UserService:
             await self._users.add(user)
         except IntegrityError as exc:
             await savepoint.rollback()
-            if _violated_constraint(exc) == _EMAIL_UNIQUE_CONSTRAINT:
+            if violated_constraint(exc) == _EMAIL_UNIQUE_CONSTRAINT:
                 raise EmailAlreadyRegisteredError from None
             raise
         await savepoint.commit()
@@ -128,7 +136,7 @@ class UserService:
             await self._users.set_verified_phone(user_id, phone, verified_at)
         except IntegrityError as exc:
             await savepoint.rollback()
-            if _violated_constraint(exc) == _PHONE_UNIQUE_CONSTRAINT:
+            if violated_constraint(exc) == _PHONE_UNIQUE_CONSTRAINT:
                 raise PhoneUnavailableError from None
             raise
         await savepoint.commit()
@@ -148,9 +156,3 @@ def _to_account(user: User) -> UserAccount:
         first_name=user.first_name,
         last_name=user.last_name,
     )
-
-
-def _violated_constraint(exc: IntegrityError) -> str | None:
-    # asyncpg's exception, wrapped by SQLAlchemy's DBAPI adapter, carries the constraint name.
-    name = getattr(exc.orig.__cause__, "constraint_name", None) if exc.orig else None
-    return name if isinstance(name, str) else None

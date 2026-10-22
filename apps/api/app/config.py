@@ -97,6 +97,9 @@ class Settings(BaseSettings):
     # Longest wait on Redis for one limit check (past it the request goes through: fail open)
     # or one password-reset code operation (past it the reset fails).
     rate_limit_timeout_seconds: float = Field(default=0.5, gt=0)
+    # Longest wait on Redis to queue a background job from a request (#48); past it the request
+    # still succeeds and the failure is logged.
+    job_enqueue_timeout_seconds: float = Field(default=2.0, gt=0)
     # Keys the HMAC that turns an email or phone into a rate-limit key (#137). Required in
     # staging and production; elsewhere a documented, non-secret development key is used.
     rate_limit_key_secret: SecretStr | None = None
@@ -175,6 +178,9 @@ class Settings(BaseSettings):
     # counts as final; also the most runs ARQ gives one send_push job.
     push_max_attempts: int = Field(default=5, gt=0)
     push_max_devices_per_user: int = Field(default=10, gt=0)
+    # Waitlist (D8.4, #46): joins per client IP and per contact (email or phone, hashed), per
+    # AUTH_RATE_LIMIT_WINDOW_SECONDS.
+    waitlist_join_limit: int = Field(default=5, gt=0)
 
     @field_validator("database_url")
     @classmethod

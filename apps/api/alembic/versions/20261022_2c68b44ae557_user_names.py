@@ -1,7 +1,7 @@
 """user names
 
 Revision ID: 2c68b44ae557
-Revises: e50611b29dde
+Revises: 4eb1fd67455e
 Create Date: 2026-10-22 06:21:40.640663
 
 """
@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "2c68b44ae557"
-down_revision: str | Sequence[str] | None = "e50611b29dde"
+down_revision: str | Sequence[str] | None = "4eb1fd67455e"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

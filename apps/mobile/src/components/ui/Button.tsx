@@ -1,12 +1,12 @@
 import { useTranslation } from "react-i18next";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
-import { continuousCorners } from "@/theme";
+import { continuousCorners, type ColorToken } from "@/theme";
 
 import { cx } from "./cx";
 import { useFlag } from "./useFlag";
 
-export type ButtonVariant = "primary" | "secondary" | "ghost";
+export type ButtonVariant = "primary" | "secondary" | "ghost" | "hero";
 export type ButtonSize = "md" | "lg";
 
 export type ButtonProps = {
@@ -31,10 +31,14 @@ type VariantClasses = {
   base: string;
   fill: StateClasses;
   label: StateClasses;
+  /** The surfaces the variant sits on; the contrast test checks the label over each. Light by default. */
+  on?: readonly ColorToken[];
 };
 
 // Pairs from the contrast table in docs/design/README.md: navy-900 on green-500 at rest, white on
 // green-700 while pressed. Secondary and ghost press into a navy-900 tint and keep navy-900 text.
+// Hero is the ghost for navy surfaces: white text on a translucent white pill that gets a little
+// more opaque while pressed, both well above AA over navy-900.
 export const VARIANT: Record<ButtonVariant, VariantClasses> = {
   primary: {
     base: "",
@@ -50,6 +54,12 @@ export const VARIANT: Record<ButtonVariant, VariantClasses> = {
     base: "",
     fill: { rest: "", pressed: "bg-navy-900/10" },
     label: { rest: "text-navy-900", pressed: "text-navy-900" },
+  },
+  hero: {
+    base: "",
+    fill: { rest: "bg-white/15", pressed: "bg-white/25" },
+    label: { rest: "text-white", pressed: "text-white" },
+    on: ["navy-900"],
   },
 };
 

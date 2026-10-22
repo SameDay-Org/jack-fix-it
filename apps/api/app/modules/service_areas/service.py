@@ -12,10 +12,12 @@ from app.modules.service_areas.repository import ServiceAreaRepository
 from app.modules.service_areas.schemas import (
     CityOut,
     RegionOut,
+    ServedCheckOut,
     ServiceAreaOut,
     ServiceAreaSeed,
     ServiceAreaSeedFile,
     ZipOut,
+    zip5,
 )
 
 SEED_DATA_PATH: Final = Path(__file__).with_name("seed_data.json")
@@ -66,6 +68,10 @@ class ServiceAreaService:
         """The ids among `ids` that exist and are active."""
         return await self._areas.active_ids(ids)
 
+    async def active_ids_for_zip(self, zip_code: str) -> set[uuid.UUID]:
+        """The active areas serving the ZIP (5 digits or ZIP+4; none when it is not served)."""
+        return await self._areas.active_ids_for_zip(zip5(zip_code))
+
     async def get_many(self, ids: Collection[uuid.UUID]) -> list[ServiceAreaOut]:
         """The areas with these ids, active or not, by ZIP."""
         return [
@@ -78,3 +84,10 @@ class ServiceAreaService:
             )
             for area in await self._areas.get_many(ids)
         ]
+
+    async def is_served(self, zip_code: str) -> bool:
+        """True when the ZIP (5 digits or ZIP+4) is an active service area."""
+        return await self._areas.is_active_zip(zip5(zip_code))
+
+    async def check(self, zip_code: str) -> ServedCheckOut:
+        return ServedCheckOut(zip_code=zip5(zip_code), served=await self.is_served(zip_code))

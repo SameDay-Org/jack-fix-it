@@ -16,6 +16,11 @@ class ServiceAreaSeed(BaseModel):
     # [A-Z] and [0-9], not \w or \d: Pydantic's regex also matches non-ASCII letters and digits.
     state: str = Field(pattern=r"^[A-Z]{2}$")
     zip_code: str = Field(pattern=r"^[0-9]{5}$")
+    # Which county the build script put the ZIP in (#9): checked by tests, never a column.
+    county: Annotated[Name, StringConstraints(max_length=64)] | None = None
+    # Off for a county that opens later; switched on in the admin (#41) or with SQL, since the
+    # seed never updates a row.
+    active: bool = True
 
 
 class ServiceAreaSeedFile(BaseModel):
@@ -57,3 +62,17 @@ class CityOut(BaseModel):
 class RegionOut(BaseModel):
     region: str
     cities: list[CityOut]
+
+
+# A US ZIP as people type it: 5 digits, or ZIP+4. [0-9], not \d (non-ASCII digits).
+ZIP_INPUT_PATTERN = r"^[0-9]{5}(-[0-9]{4})?$"
+
+
+def zip5(zip_code: str) -> str:
+    """The 5-digit ZIP that service areas use: ZIP+4 is served when its ZIP is."""
+    return zip_code[:5]
+
+
+class ServedCheckOut(BaseModel):
+    zip_code: str = Field(description="The 5-digit ZIP that was checked.")
+    served: bool

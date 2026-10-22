@@ -55,6 +55,10 @@ class CategoryService:
         await self._session.commit()
         return SeedResult(inserted=len(inserted), skipped=len(entries) - len(inserted))
 
+    async def is_active(self, category_id: uuid.UUID) -> bool:
+        """True when the category exists and is offered (active)."""
+        return await self._categories.get_active(category_id) is not None
+
     async def intake_questions(self, category_id: uuid.UUID) -> list[IntakeQuestion] | None:
         """The questions of an active category; None when it is unknown or inactive. Raises
         BrokenIntakeQuestionsError when its stored questions do not parse."""
@@ -91,6 +95,10 @@ class CategoryService:
             CategorySummary(id=row.id, slug=row.slug, names=row.names)
             for row in await self._categories.get_many(ids)
         ]
+
+    async def any_requires_license(self, ids: Collection[uuid.UUID]) -> bool:
+        """True when at least one of these categories requires a license (active or not)."""
+        return await self._categories.any_requires_license(ids)
 
 
 def _parse_questions(row: Category) -> list[IntakeQuestion] | None:

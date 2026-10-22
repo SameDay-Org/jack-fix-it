@@ -17,8 +17,14 @@ in `categories.intake_questions`. Changing them needs no code change and no depl
 - **Later:** the admin panel (SQLAdmin, #41) edits the stored JSON. Stored questions are parsed
   on every read, so a bad edit cannot break the API. See
   [When stored questions do not parse](#when-stored-questions-do-not-parse).
-- **Launch content** exists only for house cleaning and handyman. Painting, lawn & landscaping
-  and moving & assembly ask nothing until Cesar and the partners supply their questions.
+- **Launch content:**
+  - house cleaning and handyman ask their own questions;
+  - painting, lawn & landscaping and moving & assembly each ask one `jobs` question: a list of
+    jobs, each with a short description and an illustration (decided by Cesar on 2026-10-22).
+    The customer picks at least one job, then gives the details in the request description.
+- **A database seeded before 2026-10-22** keeps `[]` for those three categories, because the
+  seed never updates a row. To get the lists, reseed a fresh database, or copy the questions
+  from `seed_data.json` through the admin (#41) or with SQL.
 - **Copy rule:** follow the legal-copy rule in `AGENTS.md`. Questions ask; they never promise.
 
 ## Labels are data, not i18next keys
@@ -60,7 +66,8 @@ Each type adds its own fields.
 ### `single_choice`
 
 `options` holds 2 to 20 entries of `{value, labels}`. Each `value` follows the key pattern and
-is unique within the question.
+is unique within the question. An option may also carry a `description` and an `icon`; see
+[Option description and icon](#option-description-and-icon).
 
 ```json
 {
@@ -137,7 +144,43 @@ No extra fields.
 }
 ```
 
-The `multi_choice` and `boolean` examples only illustrate the format; they are not in the seed.
+The `rooms_to_paint` and `has_pets` examples only illustrate the format; they are not in the
+seed.
+
+### Option description and icon
+
+Both fields are optional, on `single_choice` and `multi_choice` options. An option without them
+stays valid.
+
+| Field         | Type             | Rule                                                                        |
+| ------------- | ---------------- | --------------------------------------------------------------------------- |
+| `description` | `{locale: text}` | what the option covers; `en` and `es` required, at most 160 characters each |
+| `icon`        | string           | `^[a-z0-9]+(-[a-z0-9]+)*$`, at most 40 characters                           |
+
+- **The label names the job and the description says what it covers.** The app shows the label
+  first, then the description.
+- **`icon` is the key of an illustration bundled in the app** (flat-design SVGs, #166). It is
+  never a URL or raw SVG: the pattern refuses both.
+  - An app that does not know a key shows the option without an illustration.
+  - A new key needs a new app build.
+- **Keys are unique app-wide**, one illustration per job. They are prefixed by area: `paint-`,
+  `lawn-`, `assembly-`, `moving-`.
+
+This option comes from the painting `jobs` question in the seed:
+
+```json
+{
+  "value": "interior",
+  "labels": { "en": "Interior painting", "es": "Pintura interior" },
+  "description": {
+    "en": "Walls in one or more rooms",
+    "es": "Paredes de una o varias habitaciones"
+  },
+  "icon": "paint-interior"
+}
+```
+
+`GET /v1/categories` returns both fields on every option, as `null` when absent.
 
 ## How answers are validated
 

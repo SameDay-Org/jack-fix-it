@@ -9,6 +9,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from sqlalchemy import DateTime, Enum, MetaData, func, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -69,6 +70,13 @@ def import_models() -> None:
         name = f"app.modules.{module.name}.models"
         if importlib.util.find_spec(name) is not None:
             importlib.import_module(name)
+
+
+def violated_constraint(exc: IntegrityError) -> str | None:
+    """The name of the constraint an integrity error broke, or None when the driver gives none."""
+    # asyncpg's exception, wrapped by SQLAlchemy's DBAPI adapter, carries the constraint name.
+    name = getattr(exc.orig.__cause__, "constraint_name", None) if exc.orig else None
+    return name if isinstance(name, str) else None
 
 
 def create_engine(settings: Settings) -> AsyncEngine:
