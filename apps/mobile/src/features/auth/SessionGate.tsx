@@ -3,7 +3,9 @@ import { useTranslation } from "react-i18next";
 import { Text } from "react-native";
 
 import { useSession } from "@/api";
-import { LaunchHero } from "@/features/launch";
+// The deep path, not the barrel: the launch shell imports this feature, and the barrel would close
+// a require cycle (launch -> auth -> launch) that Metro warns about.
+import { LaunchHero } from "@/features/launch/LaunchHero";
 import { tokens } from "@/theme";
 
 import { OfflineScreen } from "./OfflineScreen";
