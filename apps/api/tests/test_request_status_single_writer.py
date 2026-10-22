@@ -10,18 +10,11 @@ import pytest
 from tests.test_job_status_single_writer import (
     APP_DIR,
     REQUEST_STATE_MACHINE,
+    REQUESTS,
     STATE_MACHINE,
-    StatusModel,
     guarded_writes,
     planted,
     status_writes,
-)
-
-REQUESTS = StatusModel(
-    model="ServiceRequest",
-    package="app.modules.requests",
-    table="service_requests",
-    state_machine=REQUEST_STATE_MACHINE,
 )
 
 
@@ -130,14 +123,12 @@ def test_guard_detects_a_planted_request_status_write(name: str) -> None:
         # How POST /v1/requests creates one: the default status (received).
         "from app.modules.requests.models import ServiceRequest\n"
         "request = ServiceRequest(customer_id=1, description='x')\n",
-        "from sqlalchemy import update\nfrom app.modules.requests.models import ServiceRequest\n"
-        "statement = update(ServiceRequest).values(description='x')\n",
         "statement = 'SELECT status FROM service_requests WHERE id = :id'\n",
         # A job's statement is the jobs guard's business, not this one's.
         "from sqlalchemy import update\nfrom app.modules.jobs.models import Job\n"
         "statement = update(Job).values(status='confirmed')\n",
     ],
-    ids=["read", "query_filter", "default_status", "other_column", "select", "jobs_table"],
+    ids=["read", "query_filter", "default_status", "select", "jobs_table"],
 )
 def test_guard_ignores_reads_and_other_writes(source: str) -> None:
     assert status_writes(source, "allowed.py", REQUESTS, attributes=False) == []
@@ -159,3 +150,12 @@ def test_a_request_status_write_in_the_jobs_machine_is_caught(body: str) -> None
 def test_a_second_write_in_the_request_machine_is_caught(body: str) -> None:
     source = planted(REQUEST_STATE_MACHINE, body)
     assert guarded_writes(REQUEST_STATE_MACHINE, source, REQUESTS) != []
+
+
+def test_a_literal_update_of_another_column_is_flagged_since_round_4() -> None:
+    # Allowed until round 3; strict since (Cesar): any construction on the model is flagged.
+    source = (
+        "from sqlalchemy import update\nfrom app.modules.requests.models import ServiceRequest\n"
+        "statement = update(ServiceRequest).values(description='x')\n"
+    )
+    assert status_writes(source, "strict.py", REQUESTS) != []
