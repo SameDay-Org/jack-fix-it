@@ -18,7 +18,13 @@ from app.modules.users.errors import (
 )
 from app.modules.users.models import User
 from app.modules.users.repository import UserRepository
-from app.modules.users.types import UserAccount, UserCredentials, UserRole, UserStatus
+from app.modules.users.types import (
+    ContactPoints,
+    UserAccount,
+    UserCredentials,
+    UserRole,
+    UserStatus,
+)
 
 # Named by app.db.NAMING_CONVENTION.
 _EMAIL_UNIQUE_CONSTRAINT = "uq_users_email"
@@ -35,6 +41,16 @@ class UserService:
     ) -> set[uuid.UUID]:
         """The ids among `user_ids` of active (not suspended) accounts with `role`."""
         return await self._users.active_ids_with_role(user_ids, role)
+
+    async def contact_points(
+        self, user_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, ContactPoints]:
+        """Each user's email and phone, read in one query. Only for masking a customer's own
+        details in text shown to pros (#172): never logged or returned to anyone else."""
+        return {
+            user_id: ContactPoints(email=email, phone=phone)
+            for user_id, email, phone in await self._users.contact_points(user_ids)
+        }
 
     async def get_by_id(self, user_id: uuid.UUID) -> UserAccount | None:
         user = await self._users.get_by_id(user_id)

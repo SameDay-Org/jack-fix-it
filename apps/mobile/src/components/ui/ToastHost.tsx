@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AccessibilityInfo, Pressable, Text, View } from "react-native";
+import { AccessibilityInfo, Keyboard, Platform, Pressable, Text, View } from "react-native";
 import Animated, {
   runOnJS,
   useAnimatedStyle,
@@ -25,7 +25,33 @@ const INDICATOR: Record<ToastTone, string> = {
 };
 
 /**
- * Renders the current toast as a light glass pill above the bottom safe area. Mounted once by the
+ * How far the keyboard covers the bottom of the window, 0 when it is down. iOS measures the
+ * keyboard from the screen edge, home indicator included; Android's height leaves out the system
+ * bars (`ReactRootView` subtracts them), so the bottom inset goes on top of it there.
+ */
+function useKeyboardCover(bottomInset: number): number {
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    // iOS announces the keyboard before it moves; Android only once it is up.
+    const ios = Platform.OS === "ios";
+    const shown = Keyboard.addListener(ios ? "keyboardWillShow" : "keyboardDidShow", (event) =>
+      setHeight(event.endCoordinates.height),
+    );
+    const hidden = Keyboard.addListener(ios ? "keyboardWillHide" : "keyboardDidHide", () =>
+      setHeight(0),
+    );
+    return () => {
+      shown.remove();
+      hidden.remove();
+    };
+  }, []);
+  if (height === 0) return 0;
+  return Platform.OS === "android" ? height + bottomInset : height;
+}
+
+/**
+ * Renders the current toast as a light glass pill above the bottom safe area, or above the
+ * keyboard while it is up. Mounted once by the
  * root layout. It slides and fades over `motion.transitionMs` through an animated style on one
  * persistent view (layout animations would take it out of the accessibility tree on Android), or
  * appears in place under Reduce Motion. It announces its message to assistive technology, never
@@ -36,6 +62,7 @@ export function ToastHost() {
   const reduceMotion = useReducedMotion();
   const { t } = useTranslation();
   const { bottom } = useSafeAreaInsets();
+  const keyboardCover = useKeyboardCover(bottom);
   const { transitionMs, slidePx } = tokens.motion;
 
   // The last toast stays mounted while it fades out; a replacement swaps the content in place.
@@ -66,8 +93,9 @@ export function ToastHost() {
   return (
     <View
       pointerEvents="box-none"
+      testID="toast-host"
       className="absolute inset-x-0 bottom-0"
-      style={{ paddingBottom: bottom }}
+      style={{ paddingBottom: Math.max(bottom, keyboardCover) }}
     >
       <Animated.View testID="toast" style={motion} className="px-4 pb-4">
         <Pressable

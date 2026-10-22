@@ -184,6 +184,8 @@ class Settings(BaseSettings):
     # The job stops itself before, when the time left cannot cover one more file (see
     # media_sanitize_row_budget_seconds), and goes on in its next try.
     media_sanitize_job_timeout_seconds: int = Field(default=1_800, gt=0)
+    # Characters of a request's description shown in a pro's opportunities list (#49).
+    opportunity_excerpt_chars: int = Field(default=160, gt=0)
     # Pro profile (D6.1, #36): the most categories and service areas one pro may list.
     pro_max_categories: int = Field(default=5, gt=0)
     pro_max_service_areas: int = Field(default=50, gt=0)

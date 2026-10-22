@@ -1,11 +1,16 @@
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import datetime
 
-from sqlalchemy import func, select, tuple_
+from sqlalchemy import Select, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.requests.models import MediaSafeStatus, RequestMedia, ServiceRequest
+from app.modules.requests.models import (
+    MediaSafeStatus,
+    RequestMedia,
+    RequestStatus,
+    ServiceRequest,
+)
 
 
 class ServiceRequestRepository:
@@ -83,6 +88,17 @@ class ServiceRequestRepository:
         statement = statement.order_by(
             ServiceRequest.created_at.desc(), ServiceRequest.id.desc()
         ).limit(limit)
+        return list((await self._session.scalars(statement)).all())
+
+    @staticmethod
+    def ids_with_status(statuses: Collection[RequestStatus]) -> Select[uuid.UUID]:
+        """A subquery of the ids of requests in these statuses, for another module's query."""
+        return select(ServiceRequest.id).where(ServiceRequest.status.in_(statuses))
+
+    async def get_many(self, request_ids: Collection[uuid.UUID]) -> list[ServiceRequest]:
+        if not request_ids:
+            return []
+        statement = select(ServiceRequest).where(ServiceRequest.id.in_(request_ids))
         return list((await self._session.scalars(statement)).all())
 
     async def media_counts(self, request_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, int]:

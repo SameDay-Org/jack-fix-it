@@ -28,6 +28,15 @@ class AddressIn(BaseModel):
     zip_code: str = Field(pattern=r"^[0-9]{5}(-[0-9]{4})?$", description="5 digits or ZIP+4.")
 
 
+class AddressArea(BaseModel):
+    """Where an address is, coarsely: what someone who must not see the street may see. Never
+    text the customer typed: the 5-digit ZIP, and the city of its service area (GeoNames names,
+    #9), or None when the ZIP has no active area any more."""
+
+    zip_code: str
+    city: str | None
+
+
 class AddressOut(BaseModel):
     line1: str
     line2: str | None
