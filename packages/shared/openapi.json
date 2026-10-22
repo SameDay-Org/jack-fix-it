@@ -377,6 +377,61 @@
             "HTTPBearer": []
           }
         ]
+      },
+      "patch": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Update the current user",
+        "description": "Sets the caller's own first and last name (#165). Both are required together while\nthey are not stored; afterwards either may change alone.",
+        "operationId": "update_me_v1_auth_me_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: an invalid or null name, another field, an empty body, or one name while the other is not stored yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/v1/auth/phone/send": {
@@ -2591,6 +2646,42 @@
         ],
         "title": "LoginRequest"
       },
+      "MeUpdateRequest": {
+        "properties": {
+          "first_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 60,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Name",
+            "description": "1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. Both or neither."
+          },
+          "last_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 60,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Name",
+            "description": "1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. Both or neither."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "MeUpdateRequest",
+        "description": "PATCH /v1/auth/me: the caller's own names. Omit a field to keep it; null is refused."
+      },
       "MediaOut": {
         "properties": {
           "kind": {
@@ -3280,6 +3371,34 @@
             ],
             "title": "Locale",
             "default": "en"
+          },
+          "first_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 60,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Name",
+            "description": "1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. Both or neither."
+          },
+          "last_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 60,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Name",
+            "description": "1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. Both or neither."
           }
         },
         "type": "object",
@@ -3830,6 +3949,30 @@
           "phone_verified": {
             "type": "boolean",
             "title": "Phone Verified"
+          },
+          "first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Name",
+            "description": "Null for accounts created before names."
+          },
+          "last_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Name",
+            "description": "Null for accounts created before names."
           }
         },
         "type": "object",
@@ -3840,7 +3983,9 @@
           "locale",
           "status",
           "phone",
-          "phone_verified"
+          "phone_verified",
+          "first_name",
+          "last_name"
         ],
         "title": "UserOut",
         "description": "The user as the API shows it. Never carries the password hash."
