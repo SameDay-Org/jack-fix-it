@@ -3016,11 +3016,20 @@
         "properties": {
           "zip_code": {
             "type": "string",
-            "title": "Zip Code"
+            "title": "Zip Code",
+            "description": "The 5-digit ZIP."
           },
           "city": {
-            "type": "string",
-            "title": "City"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City",
+            "description": "The official city of the ZIP's service area; null when the area is no longer served. Never the text the customer typed."
           }
         },
         "additionalProperties": false,

@@ -29,8 +29,11 @@ class OpportunityLocation(_Out):
     """Where the job is, as much as a pro may see before it is theirs: ZIP and city until the
     job is paid (Cesar, 2026-10-22, #49). Any wider rule changes this schema only."""
 
-    zip_code: str
-    city: str
+    zip_code: str = Field(description="The 5-digit ZIP.")
+    city: str | None = Field(
+        description="The official city of the ZIP's service area; null when the area is no "
+        "longer served. Never the text the customer typed."
+    )
 
 
 class OpportunitySummary(_Out):

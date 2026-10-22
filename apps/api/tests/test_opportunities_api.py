@@ -28,6 +28,7 @@ from app.modules.requests.models import (
     RequestStatus,
     ServiceRequest,
 )
+from app.modules.service_areas.models import ServiceArea
 from app.modules.users.models import User
 from app.modules.users.types import UserRole
 from app.observability import JsonFormatter
@@ -45,6 +46,7 @@ EMAIL, PHONE = "probe.customer@example.com", "+15555550199"
 UTM = "probe-utm-campaign"
 NEXT_ACTION = "probe-next-action"
 BASE = "/v1/pros/me/opportunities"
+TYPED_CITY = "orlando downtown"  # as the customer typed it: pros never see it
 T0 = datetime(2026, 10, 22, 12, 0, tzinfo=UTC)
 
 
@@ -104,11 +106,13 @@ async def build_world(db_session: AsyncSession) -> World:
         user_id=customer.id,
         line1=LINE1,
         line2=LINE2,
-        city="Orlando",
+        city=TYPED_CITY,
         state="FL",
         zip_code="32801-1234",
     )
-    db_session.add(address)
+    # The served ZIP's official city: what pros see, never the customer's text (#172).
+    area = ServiceArea(region="Test Region", city="Orlando", state="FL", zip_code="32801")
+    db_session.add_all([address, area])
     await db_session.flush()
     return World(me, other, customer.id, agent.id, address.id, category.id)
 
@@ -206,7 +210,7 @@ async def test_lists_only_callers_active_dispatches(
     assert body["next_cursor"] is None
     first = body["items"][1]
     assert first["description_excerpt"] == DESCRIPTION[:EXCERPT]
-    assert first["location"] == {"zip_code": "32801-1234", "city": "Orlando"}
+    assert first["location"] == {"zip_code": "32801", "city": "Orlando"}
     assert first["category"]["names"] == {"en": "Plumbing", "es": "Plomería"}
     assert first["viewed"] is False
     assert body["items"][0]["viewed"] is True
@@ -241,7 +245,7 @@ async def test_detail_marks_viewed_once_and_sets_viewed_at(
     detail = first.json()
     assert detail["description"] == DESCRIPTION
     assert detail["intake_answers"] == {"rooms": 2}
-    assert detail["location"] == {"zip_code": "32801-1234", "city": "Orlando"}
+    assert detail["location"] == {"zip_code": "32801", "city": "Orlando"}
     [item] = (await listed(db_client, world.me)).json()["items"]
     assert item["viewed"] is True
 

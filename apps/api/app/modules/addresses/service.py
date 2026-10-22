@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.addresses.models import Address
 from app.modules.addresses.repository import AddressRepository
-from app.modules.addresses.schemas import AddressArea, AddressIn, AddressOut
+from app.modules.addresses.schemas import AddressIn, AddressOut
 
 
 class AddressService:
@@ -31,12 +31,10 @@ class AddressService:
         )
         return address.id
 
-    async def areas(self, address_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, AddressArea]:
-        """ZIP and city per address, without the street (pros before a job, #49)."""
-        return {
-            address_id: AddressArea(zip_code=zip_code, city=city)
-            for address_id, zip_code, city in await self._addresses.areas(address_ids)
-        }
+    async def zip_codes(self, address_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """The ZIP per address as stored (5 digits or ZIP+4), nothing else: pros see where a job
+        is by ZIP and the canonical city of its service area (#49, #172)."""
+        return dict(await self._addresses.zip_codes(address_ids))
 
     async def street_lines(
         self, address_ids: Collection[uuid.UUID]
