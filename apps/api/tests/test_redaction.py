@@ -8,7 +8,14 @@ import time
 
 import pytest
 
-from app.redaction import MASK, KnownValues, redact_contacts, redact_known, redact_text
+from app.redaction import (
+    MASK,
+    KnownValues,
+    RedactionResult,
+    redact_contacts,
+    redact_known,
+    redact_text,
+)
 
 POSITIVE: list[tuple[str, list[str]]] = [
     # Emails: plain, spaced, spelled out (EN and ES), bracketed.
@@ -390,6 +397,159 @@ def test_known_values_are_masked_in_any_format(text: str) -> None:
     assert result.redacted is True
     for secret in ("0199", "01 99", "jane", "evergreen", "742", "4-b"):
         assert secret not in result.text.lower(), secret
+
+
+# Round 4 review (#172): the known street parsed into its parts. The house number and the
+# first name word are required; directions, the suffix and further name words are optional,
+# in any form and anywhere around them.
+KNOWN_STREETS = {
+    "123 Main Street NW": [
+        "at 123 main nw.",
+        "123 main",
+        "123 Main St",
+        "123 nw main st",
+        "123 main street northwest",
+        "123 N.W. Main",
+        "Main St NW 123",
+        "123, main",
+    ],
+    "742 Evergreen Terrace Apt 4B": [
+        "at 742 evergreen.",
+        "742 Evergreen Ter.",
+        "742 evergreen terrace apt 4b",
+        "742 EVERGREEN TERR",
+        "Evergreen 742",
+    ],
+    "45 Martin Luther King Jr Blvd": [
+        "45 martin",
+        "45 martin luther king",
+        "45 Martin Luther King Jr Boulevard",
+        "martin luther king 45",
+    ],
+    "123 1/2 N Ocean Dr": ["123 1/2 n ocean dr", "123 ocean", "123 n. ocean drive"],
+}
+STREET_CASES = [(line, text) for line, texts in KNOWN_STREETS.items() for text in texts]
+
+
+@pytest.mark.parametrize(("line", "text"), STREET_CASES)
+def test_a_known_street_is_masked_without_its_trailing_parts(line: str, text: str) -> None:
+    number, name = line.split()[0], ("main", "evergreen", "martin", "ocean")
+    result = redact_known(text, KnownValues(streets=(line,)))
+
+    assert result.redacted is True
+    lowered = result.text.lower()
+    assert number not in lowered
+    assert not any(word in lowered for word in name), result.text
+
+
+@pytest.mark.parametrize(
+    ("line", "text"),
+    [
+        ("123 Main Street NW", "the main water line"),
+        ("123 Main Street NW", "123 mainly"),
+        ("123 Main Street NW", "1123 main"),
+        ("123 Main Street NW", "Main Street NW"),
+        ("742 Evergreen Terrace Apt 4B", "evergreen trees"),
+        ("742 Evergreen Terrace Apt 4B", "742 sq ft"),
+        ("742 Evergreen Terrace Apt 4B", "742 evergreens"),
+        ("123 1/2 N Ocean Dr", "ocean drive"),
+    ],
+)
+def test_a_known_street_needs_its_number_and_its_name(line: str, text: str) -> None:
+    assert redact_known(text, KnownValues(streets=(line,))) == RedactionResult(text, False)
+
+
+# Each part found anywhere in the stored line (adversarial review of round 5): units and
+# building names before the number, dotted directions, house letters, punctuation, and name
+# words with a period, an apostrophe or an accent. "{M}" stands for the mask.
+CURLY = chr(0x2019)
+PARSED_STREETS = [
+    (
+        "Apt 4B, 742 Evergreen Terrace",
+        "Leak at 742 Evergreen, ring twice",
+        "Leak at {M}, ring twice",
+    ),
+    ("Apt 4B, 742 Evergreen Terrace", "ring apt 4b", "ring {M}"),
+    (
+        "Unit 5, 1200 Brickell Ave",
+        "desk at 1200 Brickell will let you up",
+        "desk at {M} will let you up",
+    ),
+    ("Lot 12, 4500 Tamiami Trl", "trailer at 4500 Tamiami", "trailer at {M}"),
+    ("Suite 300 - 9100 S Dadeland Blvd", "office at 9100 Dadeland", "office at {M}"),
+    ("#12 450 Ocean Dr", "Parking behind 450 Ocean", "Parking behind {M}"),
+    ("Brickell Tower 1200 Brickell Ave", "Front desk at 1200 Brickell", "Front desk at {M}"),
+    ("#742 Evergreen Ter", "house at 742 Evergreen", "house at {M}"),
+    ("Evergreen Ter 742", "Evergreen Ter 742", "{M}"),
+    ("100 S.E. Ocean Blvd", "house is 100 Ocean, blue door", "house is {M}, blue door"),
+    ("100 S.E. Ocean Blvd", "house is 100 S.E. Ocean Blvd", "house is {M}"),
+    ("100 N.W. 5th Ave", "house is 100 NW 5th, blue door", "house is {M}, blue door"),
+    ("123A Main St", "the house is 123 A Main", "the house is {M}"),
+    ("123A Main St", "the house is 123-A Main", "the house is {M}"),
+    ("123-A Main St", "the house is 123A Main", "the house is {M}"),
+    ("12-14 Main St", "the house is 12-14 main", "the house is {M}"),
+    ("742 Evergreen Ter", "742 - Evergreen", "{M}"),
+    ("742 - Evergreen Terrace", "742 Evergreen", "{M}"),
+    ("12 Mt. Vernon St", "house at 12 Mt. Vernon, by the park", "house at {M}, by the park"),
+    ("12 Mt Vernon St", "house at 12 Mt. Vernon", "house at {M}"),
+    ("12 O'Brien Rd", f"house at 12 O{CURLY}Brien", "house at {M}"),
+    ("12 O'Brien Rd", "house at 12 OBrien", "house at {M}"),
+    ("100 Pe" + chr(0xF1) + "a Blvd", "100 Pena, gate", "{M}, gate"),
+    ("95 North St", "I live at 95 north st", "I live at {M}"),
+    ("742 Evergreen Terrace Apt 4B", "unit 4-b please", "{M} please"),
+    ("100 Main St #2A", "ring #2A", "ring {M}"),
+    # The street ends where its words end: not inside "w/" or "e.g.", nor past a comma.
+    ("742 Evergreen Terrace", "at 742 Evergreen Terrace w/ 2 baths", "at {M} w/ 2 baths"),
+    ("1 Main St", "1 main e.g. the hall", "{M} e.g. the hall"),
+    ("742 Evergreen Terrace", "742 Evergreen Terrace, north wall", "{M}, north wall"),
+    ("742 Evergreen Terrace", "it's Evergreen Terrace 742 by the way", "it's {M} by the way"),
+]
+
+
+@pytest.mark.parametrize(("line", "text", "expected"), PARSED_STREETS)
+def test_each_part_of_the_street_line_is_found_anywhere(
+    line: str, text: str, expected: str
+) -> None:
+    result = redact_known(text, KnownValues(streets=(line,)))
+
+    assert result == RedactionResult(expected.replace("{M}", MASK), True)
+
+
+@pytest.mark.parametrize(
+    ("line", "text"),
+    [
+        # A unit's id alone is an everyday number or word: it needs its unit word or "#".
+        ("742 Evergreen Terrace #12", "Need 12 outlets replaced, 12 total"),
+        ("#12 450 Ocean Dr", "need 12 outlets"),
+        ("100 Main St #2A", "Service 2 A/C units"),
+        ("742 Main St Apt", "the apt is upstairs"),
+        # A street named by a direction never matches inside a word ("N95").
+        ("95 North St", "Please wear N95 masks"),
+        ("60 West St", "a 60W bulb"),
+    ],
+)
+def test_a_unit_or_direction_alone_stays_unmasked(line: str, text: str) -> None:
+    assert redact_known(text, KnownValues(streets=(line,))) == RedactionResult(text, False)
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["100 N N N N N", "12 N N N N Ave", "100 N. N. N. N. N.", "45 Martin Luther King Jr Blvd"],
+)
+@pytest.mark.parametrize(
+    "text", ["n " * 1000, "n, " * 666, "n. " * 666, "N.E. " * 400, "north n " * 250, "100 n " * 333]
+)
+def test_hostile_inputs_against_odd_street_lines_finish_quickly(line: str, text: str) -> None:
+    started = time.perf_counter()
+    redact_text(text[:2000], KnownValues(streets=(line,)))
+
+    assert time.perf_counter() - started < 0.25
+
+
+def test_a_unit_inside_the_street_line_is_masked_on_its_own() -> None:
+    result = redact_known("ring apt 4-b", KnownValues(streets=("742 Evergreen Terrace Apt 4B",)))
+
+    assert result == RedactionResult(f"ring {MASK}", True)
 
 
 def test_known_values_leave_other_text_alone() -> None:

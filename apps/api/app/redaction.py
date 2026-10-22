@@ -759,7 +759,28 @@ _DIRECTION_GROUPS: Final = (
     ("se", "southeast"),
     ("sw", "southwest"),
 )
-_HOUSE: Final = re.compile(r"\d{1,6}[a-z]?(?:-[a-z0-9]+)?", _FLAGS)
+# The house number as stored: "742", "123A", "123-A", "#742", or a range "12-14".
+_HOUSE_TOKEN: Final = re.compile(
+    r"#?(?P<digits>\d{1,6})(?:-?(?P<letter>[a-z]))?(?P<range>-\d{1,6})?", _FLAGS
+)
+_FRACTION: Final = re.compile(r"\d/\d{1,2}")
+_UNIT_WORDS_ALT: Final = "apartment|apto|apt|unit|suite|ste|lot|bldg|building|room|rm|penthouse|ph"
+_UNIT_WORD: Final = re.compile(rf"(?:{_UNIT_WORDS_ALT})\.?", _FLAGS)
+# Any direction, in any form ("nw", "n.w.", "northwest"), around the known street's name.
+_ANY_DIRECTION: Final = "|".join(
+    [
+        *(rf"{re.escape(form)}\.?" for group in _DIRECTION_GROUPS for form in group),
+        r"[nsew]\.\s?[ew]\.",
+    ]
+)
+# A known street starts at the start of a word, never inside "it's" or "N95"...
+_KNOWN_START: Final = rf"(?<![\w{_APOSTROPHES}-])"
+# ... and a direction or suffix around it ends a word: not "w" in "w/", nor "e" in "e.g.".
+_KNOWN_END: Final = r"(?=$|[\s,;:!?)\]]|\.(?:\s|$))"
+# Between the number and the name, or two name words: "742 Evergreen", "742, Evergreen",
+# "742 - Evergreen", "Mt. Vernon".
+_KNOWN_SEP: Final = r"(?:\s*[,/-]\s*|\.?\s+)"
+_MAX_NAME_WORDS: Final = 5
 
 
 @dataclass(frozen=True)
@@ -831,44 +852,148 @@ def _phone_pattern(phone: str) -> str | None:
 
 
 def _group_of(word: str, groups: tuple[tuple[str, ...], ...]) -> tuple[str, ...] | None:
-    lower = word.lower().rstrip(".")
+    """The group `word` belongs to, whatever its case or dots ("N.W." is "nw")."""
+    lower = word.lower().replace(".", "")
     return next((group for group in groups if lower in group), None)
 
 
 def _word_pattern(word: str) -> str:
+    """One name word as stored, in any case, with or without its period ("Mt."), apostrophe
+    ("O'Brien", "OBrien") or accents ("Pena" for "Peña")."""
     directions = _group_of(word, _DIRECTION_GROUPS)
     if directions is not None:
         return "(?:" + "|".join(rf"{re.escape(v)}\.?" for v in directions) + r"|[nsew]\.\s?[ew]\.)"
-    return re.escape(word.rstrip("."))
+    parts = []
+    for char in word.rstrip("."):
+        base = unicodedata.normalize("NFD", char)[0]
+        if char in _APOSTROPHES:
+            parts.append(f"[{_APOSTROPHES}]?")
+        elif base != char:
+            parts.append(f"[{re.escape(char)}{re.escape(base)}]")
+        else:
+            parts.append(re.escape(char))
+    return "".join(parts) + r"\.?"
+
+
+@dataclass(frozen=True)
+class _Street:
+    """A stored street line, parsed. House number and names are pattern sources."""
+
+    house: str | None
+    names: tuple[str, ...]
+    suffixes: tuple[tuple[str, ...], ...]
+    units: tuple[str, ...]
+
+
+def _parse_street(line: str) -> _Street:
+    """Finds each part anywhere in the line: units ("Apt 4B", "#12") before or after the street,
+    the house number (the first number outside a unit, a "#742" only when it is the only one),
+    the directions and suffixes, and the name words (after the number, or before it in
+    "Evergreen Ter 742"). Words before the number are a building's name and are left out."""
+    tokens = [
+        t for t in re.sub(r"#\s+", "#", line).replace(",", " ").split() if re.search(r"\w", t)
+    ]
+    in_unit: set[int] = set()
+    for index, token in enumerate(tokens):
+        if _UNIT_WORD.fullmatch(token):
+            in_unit |= {index, index + 1}
+    numbers = [i for i, t in enumerate(tokens) if i not in in_unit and _HOUSE_TOKEN.fullmatch(t)]
+    plain = [i for i in numbers if not tokens[i].startswith("#")]
+    house_at = plain[0] if plain else (numbers[0] if numbers else None)
+    in_unit |= {i for i in numbers if tokens[i].startswith("#") and i != house_at}
+    in_unit &= set(range(len(tokens)))
+    runs: list[list[int]] = []
+    for index in sorted(in_unit):
+        if runs and runs[-1][-1] == index - 1:
+            runs[-1].append(index)
+        else:
+            runs.append([index])
+    units = tuple(" ".join(tokens[i] for i in run) for run in runs)
+    if house_at is None:
+        rest = [t for i, t in enumerate(tokens) if i not in in_unit]
+        house = None
+    else:
+        after = [t for i, t in enumerate(tokens) if i > house_at and i not in in_unit]
+        before = [t for i, t in enumerate(tokens) if i < house_at and i not in in_unit]
+        rest = after or before
+        number = _HOUSE_TOKEN.fullmatch(tokens[house_at])
+        assert number is not None  # noqa: S101 - house_at indexes a matching token
+        letter, fraction = number["letter"], None
+        if after and _FRACTION.fullmatch(after[0]):
+            fraction, rest = after[0], after[1:]
+        elif (  # "123 A Main", not "100 N Main"
+            after
+            and len(after[0]) == 1
+            and after[0].isalpha()
+            and not letter
+            and _group_of(after[0], _DIRECTION_GROUPS) is None
+        ):
+            letter, rest = after[0], after[1:]
+        house = "#?" + number["digits"]
+        if letter:
+            house += rf"(?:[\s-]?{re.escape(letter)})?"
+        if number["range"]:
+            house += rf"(?:\s*-\s*{re.escape(number['range'][1:])})?"
+        if fraction:
+            house += rf"(?:\s*{re.escape(fraction)})?"
+    suffixes = tuple(group for word in rest if (group := _group_of(word, _SUFFIX_GROUPS)))
+    names = [
+        word
+        for word in rest
+        if _group_of(word, _SUFFIX_GROUPS) is None and _group_of(word, _DIRECTION_GROUPS) is None
+    ]
+    if not names:
+        # A street named by a direction or a suffix word ("100 North Street", "5 Court St"):
+        # its first such word, alone (several would make the pattern ambiguous).
+        names = ([w for w in rest if _group_of(w, _SUFFIX_GROUPS) is None] or rest)[:1]
+    return _Street(house, tuple(names[:_MAX_NAME_WORDS]), suffixes, units)
 
 
 def _street_patterns(line: str) -> list[str]:
-    """The street as written, case- and space-flexible, with its suffix in any form or none,
-    and in either order ("742 Evergreen Terrace", "Evergreen Ter 742")."""
-    tokens = line.replace(",", " ").split()
-    number = tokens[0] if tokens and _HOUSE.fullmatch(tokens[0]) else None
-    rest = tokens[1:] if number else tokens
-    suffixes = _group_of(rest[-1], _SUFFIX_GROUPS) if rest else None
-    name = rest[:-1] if suffixes else rest
-    if not name or (number is None and len(rest) < 2):
-        return []
-    name_pattern = r"\s+".join(_word_pattern(word) for word in name)
-    suffix = (
-        r"(?:\s+(?:" + "|".join(re.escape(v) for v in suffixes) + r")\b\.?)?" if suffixes else ""
-    )
-    if number is None:
-        return [rf"\b{name_pattern}{suffix}(?![\w-])"]
-    house = re.escape(number)
+    """The street, in the parts _parse_street finds. The house number and the first name word
+    are required, in either order ("742 evergreen", "Evergreen Ter 742"); a name such as
+    "Main" or "Ocean" alone is an everyday word. Further name words follow in order when
+    present, and the directions and the suffix may come in any form, anywhere around them, or
+    not at all: "123 Main Street NW" masks "123 main", "123 nw main st" and "123 main nw".
+    A unit in the line is matched on its own, like the unit line."""
+    street = _parse_street(line)
+    patterns = [unit for text in street.units if (unit := _unit_pattern(text))]
+    if not street.names:
+        return patterns
+    suffix_forms = [rf"{re.escape(form)}\.?" for group in street.suffixes for form in group]
+    alternatives = "|".join([_ANY_DIRECTION, *suffix_forms])
+    filler = rf"(?:\s+(?:{alternatives}){_KNOWN_END})"
+    words = [_word_pattern(word) for word in street.names]
+    if street.house is None:
+        # Without a number, the whole name and the suffix are required ("Evergreen Terrace").
+        if not suffix_forms and len(words) < 2:
+            return patterns
+        whole = rf"{filler}{{0,2}}{_KNOWN_SEP}".join(words)
+        suffix = rf"{filler}{{0,2}}\s+(?:{'|'.join(suffix_forms)})" if suffix_forms else ""
+        return [*patterns, rf"{_KNOWN_START}{whole}{suffix}(?![\w-])"]
+    later = ""  # the further name words, each optional, in order
+    for word in reversed(words[1:]):
+        later = rf"(?:{filler}{{0,2}}{_KNOWN_SEP}{word}{later})?"
+    core = words[0] + later
+    house = street.house
+    lead = rf"(?:(?:{_ANY_DIRECTION}){_KNOWN_END}{_KNOWN_SEP}){{0,2}}"
     return [
-        rf"\b{house}\s*,?\s+{name_pattern}{suffix}(?![\w-])",
-        rf"\b{name_pattern}{suffix}\s*,?\s*(?:#|no\.?|n[oº°]\.?|n[uú]mero)?\s*{house}(?![\w-])",
+        *patterns,
+        rf"{_KNOWN_START}{house}{filler}{{0,2}}{_KNOWN_SEP}{core}{filler}{{0,3}}(?![\w-])",
+        rf"{_KNOWN_START}{lead}{core}{filler}{{0,3}}(?:\s*,\s*|\s+)(?:{_NUMBER_MARK}\s*)?"
+        rf"{house}(?![\w-])",
     ]
 
 
 def _unit_pattern(line: str) -> str | None:
-    """The unit line ("Apt 4B"), in any spacing or punctuation, when it says enough to matter."""
+    """A unit ("Apt 4B", "#12"), in any spacing or punctuation, after a unit word or "#":
+    alone, its id is an everyday number or word ("12 outlets", "2 A/C")."""
     # Letters and digits apart, so "4B" also matches "4-B" or "4 B".
     tokens = re.findall(r"[^\W\d_]+|\d+", line)
-    if len("".join(tokens)) < 2:
+    if tokens and _UNIT_WORD.fullmatch(tokens[0]):
+        tokens = tokens[1:]
+    if not tokens:
         return None
-    return r"(?<![\w-])" + r"[\s.,#-]*".join(re.escape(token) for token in tokens) + r"(?![\w-])"
+    lead = rf"(?:(?:{_UNIT_WORDS_ALT})\b\.?[\s#]*|#\s*)"
+    body = r"[\s.,#-]*".join(re.escape(token) for token in tokens)
+    return rf"{_KNOWN_START}{lead}{body}(?![\w-])"
