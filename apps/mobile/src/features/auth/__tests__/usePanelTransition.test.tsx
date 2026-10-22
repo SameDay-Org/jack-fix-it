@@ -50,17 +50,25 @@ type Animated = {
   transform?: { translateY: number }[];
 };
 const animated = (testID: string): Animated =>
-  (screen.getByTestId(testID).props.jestAnimatedStyle as { value: Animated }).value;
+  (
+    screen.getByTestId(testID, { includeHiddenElements: true }).props.jestAnimatedStyle as {
+      value: Animated;
+    }
+  ).value;
 const panelY = () => animated("welcome-actions").transform?.[0].translateY ?? 0;
-const backdrop = () => screen.getByTestId("system-bar-backdrop").props.className as string;
-const getStarted = () => screen.getByRole("button", { name: "Get started" });
+const backdrop = () =>
+  screen.getByTestId("system-bar-backdrop", { includeHiddenElements: true }).props
+    .className as string;
+// Mid-motion Welcome is hidden from assistive technology; these taps test touch handling.
+const getStarted = () =>
+  screen.getByRole("button", { name: "Get started", includeHiddenElements: true });
 const advance = (ms: number) => act(async () => jest.advanceTimersByTime(ms));
 
 /** Renders Welcome and lays the panel out, as the native side would. */
 async function renderWelcome() {
   await renderInSafeArea(<WelcomeScreen />);
   await act(async () => {
-    fireEvent(screen.getByTestId("welcome-actions"), "layout", {
+    fireEvent(screen.getByTestId("welcome-actions", { includeHiddenElements: true }), "layout", {
       nativeEvent: { layout: { x: 0, y: RESTING_TOP, width: 320, height: 184 } },
     });
   });
@@ -125,7 +133,12 @@ describe("usePanelTransition (through WelcomeScreen)", () => {
   it("the account link rises the same way into login", async () => {
     await renderWelcome();
     await act(async () =>
-      fireEvent.press(screen.getByRole("button", { name: "I already have an account" })),
+      fireEvent.press(
+        screen.getByRole("button", {
+          name: "I already have an account",
+          includeHiddenElements: true,
+        }),
+      ),
     );
     await advance(panelRiseMs * 1.5);
     expect(router.push).toHaveBeenCalledWith({
@@ -140,7 +153,12 @@ describe("usePanelTransition (through WelcomeScreen)", () => {
     await advance(panelRiseMs / 3);
     await act(async () => fireEvent.press(getStarted()));
     await act(async () =>
-      fireEvent.press(screen.getByRole("button", { name: "I already have an account" })),
+      fireEvent.press(
+        screen.getByRole("button", {
+          name: "I already have an account",
+          includeHiddenElements: true,
+        }),
+      ),
     );
     await advance(panelRiseMs * 1.5);
 
@@ -184,14 +202,15 @@ describe("usePanelTransition (through WelcomeScreen)", () => {
 
   it("the status-bar strip beside the panel stays navy whichever way the bar flips", async () => {
     await renderWelcome();
-    const strip = screen.getByTestId("welcome-bar-strip");
+    const strip = screen.getByTestId("welcome-bar-strip", { includeHiddenElements: true });
     expect(strip.props.className).toContain("bg-navy-900");
     expect(strip.props.style).toMatchObject({ top: -TOP_INSET, height: TOP_INSET });
   });
 
   it("the skirt tucks a corner radius under the panel, so no seam shows as they rise", async () => {
     await renderWelcome();
-    const skirt = screen.getByTestId("welcome-actions-skirt").props.style as object[];
+    const skirt = screen.getByTestId("welcome-actions-skirt", { includeHiddenElements: true }).props
+      .style as object[];
     expect(skirt).toEqual(
       expect.arrayContaining([expect.objectContaining({ bottom: -TRAVEL, height: TRAVEL + xl })]),
     );
@@ -262,6 +281,25 @@ describe("the hand-off to the destination", () => {
 
     await refocus(); // back: the panel lowers
     expect(panelHandoffStore.getState().phase).toBe("idle");
+  });
+
+  it("covered, Welcome leaves the accessibility tree; back at rest, it returns", async () => {
+    const hero = () =>
+      screen.queryByRole("header", { name: "Whatever happens at home, we fix it." });
+    await renderWelcome();
+    expect(hero()).toBeTruthy();
+
+    await act(async () => fireEvent.press(getStarted()));
+    await advance(panelRiseMs * 1.5);
+    expect(hero()).toBeNull(); // the destination is the screen now, even where Welcome still paints
+    expect(
+      screen.getByTestId("welcome-body", { includeHiddenElements: true }).props
+        .importantForAccessibility,
+    ).toBe("no-hide-descendants");
+
+    await refocus();
+    await advance(panelRiseMs * 1.5);
+    expect(hero()).toBeTruthy();
   });
 
   it("iOS: the destination is pushed when the panel has settled", async () => {

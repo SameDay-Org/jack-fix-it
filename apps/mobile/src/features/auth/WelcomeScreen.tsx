@@ -80,7 +80,15 @@ export function WelcomeScreen() {
 
   return (
     <Screen bar={bar} edges={[]} testID="welcome-screen">
-      <View className="flex-1 bg-navy-900">
+      {/* Covered (or on its way up or down), Welcome is out of the accessibility tree: on Android
+          the destination is a transparent screen over it, and a reader must not reach the hero
+          underneath. */}
+      <View
+        className="flex-1 bg-navy-900"
+        importantForAccessibility={busy ? "no-hide-descendants" : "auto"}
+        accessibilityElementsHidden={busy}
+        testID="welcome-body"
+      >
         {/* Navy under the status bar, below the panel: Screen's backdrop strip follows `bar`, and
             its swap must never show beside the panel's top edge, in either direction. */}
         <View
