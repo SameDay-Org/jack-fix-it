@@ -17,6 +17,7 @@ the customer), a path or ffmpeg's output.
 import asyncio
 import logging
 import tempfile
+import time
 import uuid
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
@@ -76,12 +77,17 @@ def new_safe_key(extension: str) -> str:
 class MediaCopyConfig:
     max_tries: int
     sanitize: SanitizeConfig
+    # One try's time and one file's worst case: a try stops before ARQ's timeout would cut it.
+    job_budget_seconds: float = float("inf")
+    row_budget_seconds: float = 0.0
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "MediaCopyConfig":
         return cls(
             max_tries=settings.media_sanitize_max_tries,
             sanitize=SanitizeConfig.from_settings(settings),
+            job_budget_seconds=settings.media_sanitize_job_timeout_seconds,
+            row_budget_seconds=settings.media_sanitize_row_budget_seconds,
         )
 
 
@@ -90,9 +96,13 @@ class MediaCopyOutcome:
     ready: int = 0
     failed: int = 0
     waiting: int = 0  # still pending after a transient failure: the job should run again
+    deferred: int = 0  # not tried: no time left in this try, the next one goes on
 
     def __str__(self) -> str:
-        return f"ready={self.ready} failed={self.failed} waiting={self.waiting}"
+        return (
+            f"ready={self.ready} failed={self.failed} waiting={self.waiting} "
+            f"deferred={self.deferred}"
+        )
 
 
 class MediaCopier:
@@ -106,26 +116,65 @@ class MediaCopier:
         self._storage = storage
         self._config = config
 
-    async def copy_request_media(self, request_id: uuid.UUID, attempt: int) -> MediaCopyOutcome:
+    async def copy_request_media(
+        self,
+        request_id: uuid.UUID,
+        attempt: int,
+        *,
+        final: bool = False,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> MediaCopyOutcome:
         """Makes the safe copy of each pending media row of the request. `attempt` is the job's
-        try (1 first): on the last one, a transient failure fails the row too."""
+        try (1 first): from MEDIA_SANITIZE_MAX_TRIES on, a transient failure fails the row too.
+        A row starts only while the try has time for one more file; the rest is deferred to the
+        next try, or failed (timeout) on the `final` one ARQ allows."""
+        started = clock()
         async with self._sessions() as session:
             pending = [
                 (media.id, media.file_key)
                 for media in await ServiceRequestRepository(session).pending_media(request_id)
             ]
         settled: dict[_RowResult, int] = {"ready": 0, "failed": 0, "waiting": 0, "skipped": 0}
+        deferred = 0
         for media_id, file_key in pending:
-            try:
-                result = await self._copy_one(media_id, request_id, file_key, attempt)
-            except Exception as error:  # noqa: BLE001 - one bad row never stops the others
-                # Its text can name the key or a path: only the class is logged.
-                result = await self._transient(
-                    media_id, request_id, SanitizeFailure.INTERNAL, attempt, type(error).__name__
-                )
-            settled[result] += 1
+            elapsed = clock() - started
+            if elapsed + self._config.row_budget_seconds > self._config.job_budget_seconds:
+                if final:
+                    await self._fail(media_id, request_id, SanitizeFailure.TIMEOUT, None)
+                    settled["failed"] += 1
+                else:
+                    deferred += 1
+                continue
+            settled[await self._copy_guarded(media_id, request_id, file_key, attempt)] += 1
         ready, failed, waiting = settled["ready"], settled["failed"], settled["waiting"]
-        return MediaCopyOutcome(ready=ready, failed=failed, waiting=waiting)
+        return MediaCopyOutcome(ready=ready, failed=failed, waiting=waiting, deferred=deferred)
+
+    async def _copy_guarded(
+        self, media_id: uuid.UUID, request_id: uuid.UUID, file_key: str, attempt: int
+    ) -> _RowResult:
+        """One row, whatever goes wrong: an unexpected error is retried, then failed, and one bad
+        row never stops the others. Errors are logged by class only: their text can name the
+        key or a path."""
+        try:
+            return await self._copy_one(media_id, request_id, file_key, attempt)
+        except Exception as error:  # noqa: BLE001 - see the docstring
+            error_class = type(error).__name__
+        try:
+            return await self._transient(
+                media_id, request_id, SanitizeFailure.INTERNAL, attempt, error_class
+            )
+        except Exception as error:  # noqa: BLE001 - the database fails too: the next try settles it
+            logger.warning(
+                "media_sanitize_retry",
+                extra={
+                    "media_id": str(media_id),
+                    "service_request_id": str(request_id),
+                    "reason": SanitizeFailure.INTERNAL.value,
+                    "attempt": attempt,
+                    "error_class": type(error).__name__,
+                },
+            )
+            return "waiting"
 
     async def _copy_one(
         self, media_id: uuid.UUID, request_id: uuid.UUID, file_key: str, attempt: int
@@ -173,7 +222,11 @@ class MediaCopier:
         content_type = upload_content_type(file_key)
         if content_type is None:
             raise SanitizeError(SanitizeFailure.UNSUPPORTED)
-        with tempfile.TemporaryDirectory(prefix="media-copy-") as directory:
+        # ignore_cleanup_errors: on Windows a file still open in a cancelled thread would turn
+        # the cancellation into a PermissionError. The OS temp cleanup removes what is left.
+        with tempfile.TemporaryDirectory(
+            prefix="media-copy-", ignore_cleanup_errors=True
+        ) as directory:
             workdir = Path(directory)
             original = workdir / "original"
             await asyncio.to_thread(self._storage.download_to, file_key, original)

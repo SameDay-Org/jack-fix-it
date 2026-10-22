@@ -5,6 +5,7 @@ import uuid
 from typing import Any
 
 from arq import Retry
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import Settings
 from app.integrations.storage import Storage
@@ -29,7 +30,23 @@ async def sanitize_request_media(ctx: dict[str, Any], request_id: str) -> str:
         )
         return "storage_unconfigured"
     copier = MediaCopier(ctx["session_factory"], storage, MediaCopyConfig.from_settings(settings))
-    outcome = await copier.copy_request_media(uuid.UUID(request_id), attempt=ctx["job_try"])
-    if outcome.waiting:
+    attempt: int = ctx["job_try"]
+    final = attempt >= settings.media_sanitize_max_tries + SANITIZE_SPARE_TRIES
+    try:
+        outcome = await copier.copy_request_media(uuid.UUID(request_id), attempt, final=final)
+    except (SQLAlchemyError, OSError) as error:
+        # The database or the network failed outside one file's copy: ARQ would end the job
+        # for good on this error, so it is a retry. Its text is never logged.
+        logger.warning(
+            "media_sanitize_retry",
+            extra={
+                "service_request_id": request_id,
+                "reason": "internal",
+                "attempt": attempt,
+                "error_class": type(error).__name__,
+            },
+        )
+        raise Retry(defer=settings.media_sanitize_retry_seconds) from None
+    if outcome.waiting or outcome.deferred:
         raise Retry(defer=settings.media_sanitize_retry_seconds)
     return str(outcome)

@@ -16,6 +16,7 @@ from arq import Retry
 from arq.worker import Function
 from PIL import Image
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -27,7 +28,7 @@ from app.integrations.storage import (
 from app.modules.addresses.models import Address
 from app.modules.categories.models import Category
 from app.modules.media.sanitize import SanitizeConfig
-from app.modules.requests.media_copies import MediaCopier, MediaCopyConfig
+from app.modules.requests.media_copies import MediaCopier, MediaCopyConfig, MediaCopyOutcome
 from app.modules.requests.models import (
     MediaSafeStatus,
     RequestMedia,
@@ -330,7 +331,7 @@ async def test_the_task_asks_for_a_retry_while_a_copy_waits(
         ctx(db_session, storage, MAX_TRIES), str(media.request_id)
     )
 
-    assert outcome == "ready=0 failed=1 waiting=0"
+    assert outcome == "ready=0 failed=1 waiting=0 deferred=0"
 
 
 async def test_the_task_leaves_rows_pending_without_storage(
@@ -356,3 +357,125 @@ def test_worker_registers_the_task_with_its_tries_and_no_kept_result() -> None:
     assert task.max_tries == settings.media_sanitize_max_tries + SANITIZE_SPARE_TRIES
     assert task.timeout_s == settings.media_sanitize_job_timeout_seconds
     assert task.keep_result_s == 0
+
+
+# Second review (#173): a try that runs out of time, errors outside one file's copy.
+
+
+class FakeClock:
+    """Each read moves time on by `step` seconds."""
+
+    def __init__(self, step: float) -> None:
+        self.now, self.step = 0.0, step
+
+    def __call__(self) -> float:
+        self.now += self.step
+        return self.now
+
+
+async def make_two_photos(session: AsyncSession, storage: MemoryStorage) -> tuple[Media, uuid.UUID]:
+    media = await make_media(session, storage, gps_jpeg())
+    second = RequestMedia(
+        request_id=media.request_id,
+        kind=RequestMediaKind.PHOTO,
+        file_key=f"u/{media.customer_id}/request_media/{uuid.uuid4().hex}.jpg",
+    )
+    await add(session, second)
+    storage.objects[second.file_key] = gps_jpeg()
+    return media, second.id
+
+
+def short_copier(session: AsyncSession, storage: MemoryStorage) -> MediaCopier:
+    # A try of 25 s and 10 s per file: with 10 s per clock read, the second file has no time.
+    sanitize = SanitizeConfig(1_000_000, 85, "ffmpeg", 60)
+    config = MediaCopyConfig(MAX_TRIES, sanitize, job_budget_seconds=25, row_budget_seconds=10)
+    return MediaCopier(sessions_of(session), storage, config)
+
+
+async def test_a_try_out_of_time_defers_the_rest_to_the_next(
+    db_session: AsyncSession, storage: MemoryStorage
+) -> None:
+    media, second = await make_two_photos(db_session, storage)
+    jobs = short_copier(db_session, storage)
+
+    first = await jobs.copy_request_media(media.request_id, attempt=1, clock=FakeClock(10))
+    then = await jobs.copy_request_media(media.request_id, attempt=2, clock=FakeClock(10))
+
+    assert (first.ready, first.deferred) == (1, 1)
+    assert (then.ready, then.deferred) == (1, 0)
+    assert (await row(db_session, second)).safe_status == MediaSafeStatus.READY
+
+
+async def test_the_final_try_fails_what_it_has_no_time_for(
+    db_session: AsyncSession, storage: MemoryStorage
+) -> None:
+    media, second = await make_two_photos(db_session, storage)
+
+    outcome = await short_copier(db_session, storage).copy_request_media(
+        media.request_id, attempt=MAX_TRIES + 2, final=True, clock=FakeClock(10)
+    )
+
+    assert (outcome.ready, outcome.failed, outcome.deferred) == (1, 1, 0)
+    statuses = {(await row(db_session, i)).safe_status for i in (media.media_id, second)}
+    assert statuses == {MediaSafeStatus.READY, MediaSafeStatus.FAILED}  # either may come first
+
+
+async def test_a_failure_while_failing_a_row_leaves_it_waiting(
+    db_session: AsyncSession, storage: MemoryStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    media = await make_media(db_session, storage, gps_jpeg())
+    storage.broken.add(media.file_key)
+    jobs = copier(db_session, storage)
+
+    async def database_down(*args: object, **kwargs: object) -> None:
+        raise ConnectionRefusedError("database restarting")
+
+    monkeypatch.setattr(jobs, "_fail", database_down)
+
+    outcome = await jobs.copy_request_media(media.request_id, attempt=MAX_TRIES)
+
+    assert (outcome.waiting, outcome.failed) == (1, 0)
+    assert (await row(db_session, media.media_id)).safe_status == MediaSafeStatus.PENDING
+
+
+@pytest.mark.parametrize(
+    "error", [OperationalError("SELECT", {}, Exception("down")), OSError("down")]
+)
+async def test_the_task_retries_a_database_or_network_failure(
+    db_session: AsyncSession,
+    storage: MemoryStorage,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    error: Exception,
+) -> None:
+    media = await make_media(db_session, storage, gps_jpeg())
+
+    async def failing(*args: object, **kwargs: object) -> None:
+        raise error
+
+    monkeypatch.setattr(MediaCopier, "copy_request_media", failing)
+
+    with caplog.at_level(logging.WARNING), pytest.raises(Retry):
+        await sanitize_request_media(ctx(db_session, storage, 1), str(media.request_id))
+    [record] = [r for r in caplog.records if r.getMessage() == "media_sanitize_retry"]
+    assert record.__dict__["error_class"] == type(error).__name__
+    assert "down" not in caplog.text
+
+
+async def test_the_task_asks_for_a_retry_while_files_are_deferred(
+    db_session: AsyncSession, storage: MemoryStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    media = await make_media(db_session, storage, gps_jpeg())
+
+    async def deferring(*args: object, **kwargs: object) -> MediaCopyOutcome:
+        return MediaCopyOutcome(deferred=1)
+
+    monkeypatch.setattr(MediaCopier, "copy_request_media", deferring)
+
+    with pytest.raises(Retry):
+        await sanitize_request_media(ctx(db_session, storage, 1), str(media.request_id))
+
+
+def test_the_job_timeout_must_cover_one_file() -> None:
+    with pytest.raises(ValueError, match="MEDIA_SANITIZE_JOB_TIMEOUT_SECONDS"):
+        make_settings(media_sanitize_timeout_seconds=120, media_sanitize_job_timeout_seconds=300)

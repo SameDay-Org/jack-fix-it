@@ -587,3 +587,39 @@ async def test_any_decoder_error_fails_the_image(
         await sanitize(tmp_path / "original", "image/heic", workdir, CONFIG)
 
     assert error.value.reason == reason
+
+
+# Second review (#173): trimmed content kept by an edit list; audio the mov muxer cannot hold.
+
+
+async def test_frames_hidden_by_an_edit_list_fail_the_copy(
+    tmp_path: Path, workdir: Path, tools: Tools
+) -> None:
+    full, source = tmp_path / "full.mp4", tmp_path / "original"
+    run_ffmpeg(
+        tools, "-f", "lavfi", "-i", "testsrc=size=160x120:rate=10", "-t", "4",
+        "-c:v", "libx264", "-x264-params", "keyint=100", "-pix_fmt", "yuv420p", str(full),
+    )  # fmt: skip
+    # Seconds 0 to 3 trimmed off by an edit list, as a phone's editor does without re-encoding.
+    run_ffmpeg(tools, "-ss", "3", "-i", str(full), "-c", "copy", "-f", "mp4", str(source))
+
+    with pytest.raises(SanitizeError) as error:
+        await sanitize(source, "video/mp4", workdir, CONFIG)
+
+    assert error.value.reason == SanitizeFailure.HIDDEN_FRAMES
+
+
+async def test_opus_audio_declared_as_quicktime_is_written_as_mp4(
+    tmp_path: Path, workdir: Path, tools: Tools
+) -> None:
+    source = tmp_path / "original"
+    run_ffmpeg(
+        tools, "-f", "lavfi", "-i", "testsrc=duration=1:size=64x48:rate=10",
+        "-f", "lavfi", "-i", "sine=duration=1:sample_rate=48000",
+        "-c:v", "libx264", "-c:a", "libopus", "-shortest", "-f", "mp4", str(source),
+    )  # fmt: skip
+
+    safe = await sanitize(source, "video/quicktime", workdir, CONFIG)
+
+    assert (safe.content_type, safe.extension) == ("video/mp4", ".mp4")
+    assert video_kinds(tools, safe.path) == [("video", "h264"), ("audio", "opus")]

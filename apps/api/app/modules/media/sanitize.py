@@ -46,6 +46,7 @@ class SanitizeFailure(StrEnum):
     TOO_MANY_PIXELS = "too_many_pixels"  # a decompression bomb
     UNSUPPORTED_CODEC = "unsupported_codec"  # a video or audio codec outside the allowlists
     METADATA_REMAINS = "metadata_remains"  # the copy still holds a location or date tag
+    HIDDEN_FRAMES = "hidden_frames"  # an edit list hides trimmed frames that a copy would keep
     FFMPEG_FAILED = "ffmpeg_failed"  # ffmpeg exited non-zero
     TIMEOUT = "timeout"  # ffmpeg or ffprobe ran past the timeout (retried)
     FFMPEG_UNAVAILABLE = "ffmpeg_unavailable"  # a binary could not be started (retried)
@@ -131,6 +132,10 @@ _KEPT_MODES: Final[dict[str, tuple[str, ...]]] = {
 # Read the input as MP4/QuickTime, from a local file only: never a playlist, a manifest or a
 # network URL that a crafted file could point to.
 _INPUT_OPTIONS: Final = ("-protocol_whitelist", "file", "-f", "mov")
+# Discarded audio packets an encoder's priming accounts for (AAC: about 2,112 samples).
+_AUDIO_PRIMING_PACKETS: Final = 3
+# Audio the mov muxer cannot hold: such a file is written as MP4 (which can).
+_NOT_IN_MOV: Final = frozenset({"opus"})
 # A tag the copy may not hold, by any part of its name.
 _DENIED_TAGS: Final = ("location", "xyz", "gps", "creation", "date", "make", "model")
 
@@ -213,7 +218,6 @@ class _Stream:
 async def sanitize_video(
     source: Path, content_type: str, workdir: Path, config: SanitizeConfig
 ) -> SafeFile:
-    extension, muxer = VIDEO_OUTPUTS[content_type]
     streams, _ = await _probe(source, config)
     video = next((s for s in streams if s.kind == "video" and not s.attached_picture), None)
     audio = next((s for s in streams if s.kind == "audio"), None)
@@ -223,6 +227,9 @@ async def sanitize_video(
         audio is not None and audio.codec not in config.audio_codecs
     ):
         raise SanitizeError(SanitizeFailure.UNSUPPORTED_CODEC)
+    if content_type == "video/quicktime" and audio is not None and audio.codec in _NOT_IN_MOV:
+        content_type = "video/mp4"  # Opus fits MP4 only
+    extension, muxer = VIDEO_OUTPUTS[content_type]
     target = workdir / f"safe{extension}"
     arguments = [
         "-nostdin", "-y", *_INPUT_OPTIONS, "-i", str(source),
@@ -237,7 +244,33 @@ async def sanitize_video(
         raise SanitizeError(SanitizeFailure.FFMPEG_FAILED, exit_code=exit_code)
     copied, format_tags = await _probe(target, config)
     _check_copy(copied, format_tags, config)
+    if await _has_hidden_frames(target, copied, config):
+        raise SanitizeError(SanitizeFailure.HIDDEN_FRAMES)
     return SafeFile(target, content_type, extension)
+
+
+async def _has_hidden_frames(path: Path, streams: list[_Stream], config: SanitizeConfig) -> bool:
+    """True when an edit list hides content the copy still holds: packets flagged D (discard),
+    what a customer trimmed off in their phone's editor. Any hidden video packet counts; a few
+    hidden audio packets are an encoder's priming (AAC starts with one or two), more are not."""
+    arguments = [
+        "-v", "quiet", *_INPUT_OPTIONS,
+        "-show_entries", "packet=stream_index,flags", "-of", "csv=p=0",
+        str(path),
+    ]  # fmt: skip
+    exit_code, output = await _run(
+        config.ffprobe_path, arguments, config.timeout_seconds, capture=True
+    )
+    if exit_code != 0:
+        raise SanitizeError(SanitizeFailure.UNREADABLE, exit_code=exit_code)
+    hidden = {"video": 0, "audio": 0}
+    for line in output.decode("ascii", "replace").splitlines():
+        index, _, flags = line.partition(",")
+        if "D" not in flags or not index.isdigit() or int(index) >= len(streams):
+            continue
+        kind = streams[int(index)].kind
+        hidden[kind] = hidden.get(kind, 0) + 1
+    return hidden["video"] > 0 or hidden["audio"] > _AUDIO_PRIMING_PACKETS
 
 
 def _check_copy(

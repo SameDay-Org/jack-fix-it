@@ -181,6 +181,8 @@ class Settings(BaseSettings):
     media_video_codecs: Annotated[list[str], NoDecode] = Field(default=["h264", "hevc"])
     media_audio_codecs: Annotated[list[str], NoDecode] = Field(default=["aac", "mp3", "opus"])
     # The longest one sanitize job may run (every media of one request), past which ARQ stops it.
+    # The job stops itself before, when the time left cannot cover one more file (see
+    # media_sanitize_row_budget_seconds), and goes on in its next try.
     media_sanitize_job_timeout_seconds: int = Field(default=1_800, gt=0)
     # Pro profile (D6.1, #36): the most categories and service areas one pro may list.
     pro_max_categories: int = Field(default=5, gt=0)
@@ -258,6 +260,21 @@ class Settings(BaseSettings):
     @classmethod
     def _empty_is_none(cls, value: object) -> object:
         return None if value == "" else value
+
+    @property
+    def media_sanitize_row_budget_seconds(self) -> float:
+        """The longest one file's copy may take: two ffprobe runs, one ffmpeg run, and the
+        download and upload, each within MEDIA_SANITIZE_TIMEOUT_SECONDS."""
+        return 4 * self.media_sanitize_timeout_seconds
+
+    @model_validator(mode="after")
+    def _media_job_fits_one_file(self) -> Self:
+        if self.media_sanitize_job_timeout_seconds < self.media_sanitize_row_budget_seconds:
+            raise ValueError(
+                "MEDIA_SANITIZE_JOB_TIMEOUT_SECONDS must cover one file: at least 4 x "
+                "MEDIA_SANITIZE_TIMEOUT_SECONDS"
+            )
+        return self
 
     @model_validator(mode="after")
     def _list_default_within_max(self) -> Self:

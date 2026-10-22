@@ -67,7 +67,8 @@ class WorkerSettings:
         # No result is kept: a failed run's exception (with its SQL) never stays in Redis, and
         # the job id is free again once a run ends; rows already copied are skipped. Two spare
         # tries: the job fails its rows from MEDIA_SANITIZE_MAX_TRIES on, so a try stopped by a
-        # deploy or a timeout is followed by one that still settles them.
+        # deploy is followed by one that still settles them. The job stops itself before the
+        # timeout when it has no time for one more file, and goes on in its next try.
         func(
             sanitize_request_media,
             keep_result=0,
