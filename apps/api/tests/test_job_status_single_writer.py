@@ -11,38 +11,61 @@ An AST scan of app/ flags, outside STATUS_WRITERS:
 - `Job(status=...)` and `Job(**anything)`;
 - raw SQL that updates the status of the jobs table (quoted or schema-qualified too).
 
-Request statuses also change only through a state machine (AGENTS.md). A module that gets its
-own state machine for another model's `status` is added to STATUS_WRITERS, with the reason.
+Request statuses also change only through a state machine (AGENTS.md): the same scanner,
+pointed at ServiceRequest, guards them in test_request_status_single_writer.py. A module that
+gets its own state machine for another model's `status` is added to STATUS_WRITERS, with the
+reason; the other model's DML is still checked in it.
 """
 
 import ast
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
 STATE_MACHINE = APP_DIR / "modules" / "jobs" / "service.py"
+REQUEST_STATE_MACHINE = APP_DIR / "modules" / "requests" / "state_machine.py"
 # The only files allowed to write a `.status`, each with its reason.
 STATUS_WRITERS = {
     STATE_MACHINE: "JobStateMachine, the single writer of jobs.status",
+    REQUEST_STATE_MACHINE: "RequestStateMachine, the single writer of service_requests.status",
 }
-JOBS_MODELS = "app.modules.jobs.models"
-_RAW_SQL_STATUS_UPDATE = re.compile(
-    r"update\s+(?:\"?\w+\"?\.)?\"?jobs\"?\s.*\bset\b.*\bstatus\b", re.I | re.S
-)
 
 
-def _job_names(tree: ast.Module) -> tuple[set[str], set[str]]:
-    """Local names bound to the Job model, and to the jobs models module."""
-    classes, modules = {"Job"}, set()
+@dataclass(frozen=True)
+class StatusModel:
+    """A model whose status only its state machine writes: its class, package and table."""
+
+    model: str
+    package: str
+    table: str
+
+    @property
+    def models_module(self) -> str:
+        return f"{self.package}.models"
+
+    @property
+    def raw_sql_update(self) -> re.Pattern[str]:
+        return re.compile(
+            rf"update\s+(?:\"?\w+\"?\.)?\"?{self.table}\"?\s.*\bset\b.*\bstatus\b", re.I | re.S
+        )
+
+
+JOBS = StatusModel(model="Job", package="app.modules.jobs", table="jobs")
+
+
+def _model_names(tree: ast.Module, target: StatusModel) -> tuple[set[str], set[str]]:
+    """Local names bound to the model class, and to its models module."""
+    classes, modules = {target.model}, set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == JOBS_MODELS:
-            classes |= {a.asname or a.name for a in node.names if a.name == "Job"}
-        elif isinstance(node, ast.ImportFrom) and node.module == "app.modules.jobs":
+        if isinstance(node, ast.ImportFrom) and node.module == target.models_module:
+            classes |= {a.asname or a.name for a in node.names if a.name == target.model}
+        elif isinstance(node, ast.ImportFrom) and node.module == target.package:
             modules |= {a.asname or a.name for a in node.names if a.name == "models"}
         elif isinstance(node, ast.Import):
-            modules |= {a.asname or a.name for a in node.names if a.name == JOBS_MODELS}
+            modules |= {a.asname or a.name for a in node.names if a.name == target.models_module}
     return classes, modules
 
 
@@ -75,11 +98,12 @@ def _assignments(tree: ast.Module) -> list[tuple[list[ast.expr], ast.expr]]:
 
 
 class _Scanner:
-    """Knows which local names stand for the Job model or table, or a statement on it."""
+    """Knows which local names stand for the target model or table, or a statement on it."""
 
-    def __init__(self, tree: ast.Module) -> None:
-        self.job_classes, self.job_modules = _job_names(tree)
-        self.job_statements: set[str] = set()
+    def __init__(self, tree: ast.Module, target: StatusModel) -> None:
+        self.target = target
+        self.model_classes, self.model_modules = _model_names(tree, target)
+        self.model_statements: set[str] = set()
         # Bind names until nothing changes: `t = Job.__table__`, `s = update(t)`, `s = s.where()`.
         assignments = _assignments(tree)
         changed = True
@@ -89,51 +113,52 @@ class _Scanner:
                 names = {t.id for t in targets if isinstance(t, ast.Name)}
                 if len(targets) != 1 or not names:
                     continue
-                if self.is_job(value) and not names <= self.job_classes:
-                    self.job_classes |= names
+                if self.is_model(value) and not names <= self.model_classes:
+                    self.model_classes |= names
                     changed = True
-                elif self.is_job_statement(value) and not names <= self.job_statements:
-                    self.job_statements |= names
+                elif self.is_model_statement(value) and not names <= self.model_statements:
+                    self.model_statements |= names
                     changed = True
 
-    def is_job(self, node: ast.expr) -> bool:
-        """Job, an alias of it, models.Job, Job.__table__, or a Table/table named "jobs"."""
+    def is_model(self, node: ast.expr) -> bool:
+        """The model (Job), an alias, models.Job, Job.__table__, or a Table/table of its
+        table name ("jobs")."""
         if isinstance(node, ast.Name):
-            return node.id in self.job_classes
+            return node.id in self.model_classes
         if isinstance(node, ast.Attribute):
-            if node.attr == "Job":
+            if node.attr == self.target.model:
                 return True
             if node.attr == "__table__":
-                return self.is_job(node.value)
+                return self.is_model(node.value)
         return (
             isinstance(node, ast.Call)
             and _called_name(node) in ("Table", "table")
             and bool(node.args)
             and isinstance(node.args[0], ast.Constant)
-            and node.args[0].value == "jobs"
+            and node.args[0].value == self.target.table
         )
 
-    def is_job_statement(self, node: ast.AST) -> bool:
+    def is_model_statement(self, node: ast.AST) -> bool:
         """A DML statement on the jobs table, or a name bound to one, anywhere in a call chain.
 
         Function forms: `update(Job)`, `insert(Job.__table__)`. Table method forms:
         `Job.__table__.update()`, `jobs.insert()`, `table("jobs").delete()`, for any receiver
-        is_job() recognizes.
+        is_model() recognizes.
         """
         while isinstance(node, ast.Call | ast.Attribute | ast.Name):
             if isinstance(node, ast.Name):
-                return node.id in self.job_statements
-            if isinstance(node, ast.Call) and self._is_job_dml(node):
+                return node.id in self.model_statements
+            if isinstance(node, ast.Call) and self._is_model_dml(node):
                 return True
             node = node.func if isinstance(node, ast.Call) else node.value
         return False
 
-    def _is_job_dml(self, call: ast.Call) -> bool:
+    def _is_model_dml(self, call: ast.Call) -> bool:
         if _called_name(call) not in ("update", "insert", "delete"):
             return False
-        if any(self.is_job(arg) for arg in call.args):
+        if any(self.is_model(arg) for arg in call.args):
             return True
-        return isinstance(call.func, ast.Attribute) and self.is_job(call.func.value)
+        return isinstance(call.func, ast.Attribute) and self.is_model(call.func.value)
 
 
 def _is_status_key(key: ast.expr | None) -> bool:
@@ -156,10 +181,13 @@ def _sets_status(call: ast.Call) -> bool:
     return False
 
 
-def status_writes(source: str, path: str) -> list[str]:
-    """Every place in `source` that writes a status, as "path:line"."""
+def status_writes(
+    source: str, path: str, target: StatusModel = JOBS, *, attributes: bool = True
+) -> list[str]:
+    """Every place in `source` that writes a status, as "path:line". `attributes=False` leaves
+    out `<x>.status = ...` and setattr, which fit any model, to check only `target`'s DML."""
     tree = ast.parse(source)
-    scanner = _Scanner(tree)
+    scanner = _Scanner(tree, target)
     found: list[int] = []
     for node in ast.walk(tree):
         line = getattr(node, "lineno", 0)
@@ -173,23 +201,24 @@ def status_writes(source: str, path: str) -> list[str]:
                 node.target if isinstance(node, ast.For | ast.AsyncFor) else node.optional_vars
             )
             targets = _assigned_names(loop_target) if loop_target is not None else []
-        if any(isinstance(t, ast.Attribute) and t.attr == "status" for t in targets):
+        if attributes and any(isinstance(t, ast.Attribute) and t.attr == "status" for t in targets):
             found.append(line)
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if _RAW_SQL_STATUS_UPDATE.search(node.value):
+            if target.raw_sql_update.search(node.value):
                 found.append(line)
             continue
         if not isinstance(node, ast.Call):
             continue
         name = _called_name(node)
         if (
-            name == "setattr"
+            attributes
+            and name == "setattr"
             and len(node.args) >= 2
             and isinstance(node.args[1], ast.Constant)
             and node.args[1].value == "status"
         ):
             found.append(line)
-        if scanner.is_job(node.func) and any(
+        if scanner.is_model(node.func) and any(
             keyword.arg in ("status", None) for keyword in node.keywords
         ):
             found.append(line)
@@ -197,14 +226,14 @@ def status_writes(source: str, path: str) -> list[str]:
         if (
             name == "values"
             and receiver is not None
-            and scanner.is_job_statement(receiver)
+            and scanner.is_model_statement(receiver)
             and _sets_status(node)
         ):
             found.append(line)
         if (
             name == "on_conflict_do_update"
             and receiver is not None
-            and scanner.is_job_statement(receiver)
+            and scanner.is_model_statement(receiver)
         ):
             set_ = next((k.value for k in node.keywords if k.arg == "set_"), None)
             if (
@@ -215,7 +244,7 @@ def status_writes(source: str, path: str) -> list[str]:
                 found.append(line)
         # ORM bulk UPDATE by primary key: execute(update(Job), [{"id": ..., "status": ...}]),
         # also through a name bound to the statement. The parameters are opaque here.
-        if name == "execute" and len(node.args) >= 2 and scanner.is_job_statement(node.args[0]):
+        if name == "execute" and len(node.args) >= 2 and scanner.is_model_statement(node.args[0]):
             found.append(line)
     return [f"{path}:{line}" for line in sorted(set(found))]
 
@@ -223,10 +252,13 @@ def status_writes(source: str, path: str) -> list[str]:
 def test_no_status_assignment_outside_state_machine() -> None:
     writes: list[str] = []
     for path in sorted(APP_DIR.rglob("*.py")):
-        if path in STATUS_WRITERS:
+        if path == STATE_MACHINE:
             continue
         relative = path.relative_to(APP_DIR.parent).as_posix()
-        writes += status_writes(path.read_text(encoding="utf-8"), relative)
+        # Another model's state machine may assign its own `.status`, never the jobs'.
+        writes += status_writes(
+            path.read_text(encoding="utf-8"), relative, attributes=path not in STATUS_WRITERS
+        )
 
     assert writes == [], f"jobs.status may only change in JobStateMachine: {writes}"
 
