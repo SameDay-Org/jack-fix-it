@@ -22,7 +22,7 @@ class ServiceAreaRepository:
             return []
         statement = (
             insert(ServiceArea)
-            .values([entry.model_dump() for entry in entries])
+            .values([entry.model_dump(exclude={"county"}) for entry in entries])
             .on_conflict_do_nothing(index_elements=[ServiceArea.zip_code])
             .returning(ServiceArea.zip_code)
         )
