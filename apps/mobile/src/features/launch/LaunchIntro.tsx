@@ -103,9 +103,11 @@ export function LaunchIntro({ onReady, onDone }: LaunchIntroProps) {
         className="flex-1"
         testID="launch-intro-tap"
       >
+        {/* Skip leaves the moment the exit starts: it has nothing left to do, and Welcome's second
+            action fades in on its row, so the two labels would read as one over the other. */}
         <LaunchHero
           testID="launch-hero"
-          skip={{ label: t("launch.skip"), onPress: skip }}
+          skip={phase === "exiting" ? undefined : { label: t("launch.skip"), onPress: skip }}
           onLaidOut={heroLaidOut}
           word={
             <WordRotator
