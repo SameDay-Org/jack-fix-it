@@ -9,6 +9,13 @@
  *   finds an expired access token redirects to `/admin/session/refresh`, which refreshes once
  *   (rotating both cookies) and comes back; any failure ends at `/admin/session/end`, which
  *   clears the cookies and goes to the login.
+ * - `jfi_sid` marks a session that a login started; only login sets it, a refresh never does,
+ *   and sign-out deletes it. Tokens without it are not a session. So a refresh whose response
+ *   lands after a logout (another tab, a slow network) sets tokens but cannot revive it: the
+ *   next render ends it and clears the strays.
+ * - Both session routes act only on requests from this site (`fromThisSite`): a cross-site
+ *   navigation arrives without the Strict cookies, and a Set-Cookie on it would still delete
+ *   them in the browser.
  */
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -23,14 +30,15 @@ export type AuthResponse = components["schemas"]["AuthResponse"];
 
 export const ACCESS_COOKIE = "jfi_at";
 export const REFRESH_COOKIE = "jfi_rt";
-// Set by a refresh for a minute: if the API still refuses the new token, the session ends
-// instead of refreshing again, so a broken session never loops.
+// Set by a refresh for a little less than the new access token lives: if the API still refuses
+// that token, the session ends instead of refreshing again, so a broken session never loops,
+// while a refresh that becomes due later, once the token expires, still happens.
 export const REFRESHED_COOKIE = "jfi_rf";
+export const SESSION_COOKIE = "jfi_sid";
 export const PANEL_PATH = "/admin";
 export const LOGIN_PATH = "/admin/login";
 export const REFRESH_PATH = "/admin/session/refresh";
 export const END_PATH = "/admin/session/end";
-const REFRESHED_MAX_AGE_SECONDS = 60;
 const STAFF_ROLES: ReadonlySet<string> = new Set(["agent", "admin"]);
 const DEPLOYED: ReadonlySet<string> = new Set(["staging", "production"]);
 
@@ -76,12 +84,31 @@ export async function setSession(tokens: AuthResponse): Promise<void> {
   jar.set(REFRESH_COOKIE, tokens.refresh_token, cookieOptions(refreshTokenTtlSeconds()));
 }
 
+/** A login: both tokens and the session marker. Only from a server action or a route handler. */
+export async function startSession(tokens: AuthResponse): Promise<void> {
+  await setSession(tokens);
+  (await cookies()).set(
+    SESSION_COOKIE,
+    crypto.randomUUID(),
+    cookieOptions(refreshTokenTtlSeconds()),
+  );
+}
+
 /** Removes every session cookie. Only callable from a server action or a route handler. */
 export async function clearSession(): Promise<void> {
   const jar = await cookies();
-  for (const name of [ACCESS_COOKIE, REFRESH_COOKIE, REFRESHED_COOKIE]) {
+  for (const name of [ACCESS_COOKIE, REFRESH_COOKIE, REFRESHED_COOKIE, SESSION_COOKIE]) {
     jar.delete({ name, path: PANEL_PATH });
   }
+}
+
+/**
+ * True for a request from this site: Sec-Fetch-Site same-origin or none (typed in the address
+ * bar), or absent (an older browser). Shared by both session routes so they cannot drift.
+ */
+export function fromThisSite(request: Request): boolean {
+  const site = request.headers.get("sec-fetch-site");
+  return site === null || site === "same-origin" || site === "none";
 }
 
 /** Revokes the session's refresh token on the API, best effort: it never throws. */
@@ -109,6 +136,7 @@ async function currentUser(accessToken: string): Promise<User | null> {
  */
 export const requireStaff = cache(async (): Promise<User> => {
   const jar = await cookies();
+  if (!jar.get(SESSION_COOKIE)) redirect(END_PATH); // tokens without a login are no session
   const accessToken = jar.get(ACCESS_COOKIE)?.value;
   const user = accessToken ? await currentUser(accessToken) : null;
   if (user !== null) {
@@ -121,15 +149,14 @@ export const requireStaff = cache(async (): Promise<User> => {
 
 /**
  * Route handler side of the refresh: one `POST /v1/auth/refresh`, then both cookies rotate.
- * Returns where to go next: the panel on success, the login otherwise (session cleared).
+ * Returns where to go next: the panel on success, the login otherwise (session cleared). With
+ * no refresh cookie it clears nothing: there is nothing to clear. Never sets the session marker.
  */
 export async function refreshStaffSession(): Promise<string> {
   const jar = await cookies();
   const refreshToken = jar.get(REFRESH_COOKIE)?.value;
-  if (!refreshToken) {
-    await clearSession();
-    return LOGIN_PATH;
-  }
+  if (!refreshToken) return LOGIN_PATH;
+  if (!jar.get(SESSION_COOKIE)) return END_PATH; // tokens without a login: end them
   let tokens: AuthResponse;
   try {
     tokens = await apiPost("/v1/auth/refresh", { refresh_token: refreshToken });
@@ -143,13 +170,16 @@ export async function refreshStaffSession(): Promise<string> {
     return LOGIN_PATH;
   }
   await setSession(tokens);
-  jar.set(REFRESHED_COOKIE, "1", cookieOptions(REFRESHED_MAX_AGE_SECONDS));
+  jar.set(REFRESHED_COOKIE, "1", cookieOptions(Math.max(1, tokens.expires_in - 1)));
   return PANEL_PATH;
 }
 
-/** Ends the session: revokes the refresh token (best effort) and clears every cookie. */
+/**
+ * Ends the session: clears every cookie first, then revokes the refresh token, best effort and
+ * bounded by API_TIMEOUT_MS, so the API can never hold or skip the local sign-out.
+ */
 export async function endSession(): Promise<void> {
   const refreshToken = (await cookies()).get(REFRESH_COOKIE)?.value;
-  if (refreshToken) await revoke(refreshToken);
   await clearSession();
+  if (refreshToken) await revoke(refreshToken);
 }

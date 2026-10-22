@@ -22,6 +22,15 @@ export class ApiError extends Error {
   }
 }
 
+/** API_TIMEOUT_MS: the longest wait on the API for one call, body included (never a literal). */
+export function apiTimeoutMs(): number {
+  const ms = Number(process.env.API_TIMEOUT_MS);
+  if (!Number.isInteger(ms) || ms <= 0) {
+    throw new Error("API_TIMEOUT_MS is not set to a positive whole number");
+  }
+  return ms;
+}
+
 function apiBaseUrl(): string {
   const url = process.env.API_INTERNAL_URL;
   if (!url) throw new Error("API_INTERNAL_URL is not set");
@@ -37,14 +46,23 @@ async function readErrorCode(response: Response): Promise<string | undefined> {
   }
 }
 
-/** Server-side GET against the API (Railway private network). Throws ApiError on non-2xx. */
+/**
+ * Server-side GET against the API (Railway private network). Throws ApiError on non-2xx, and
+ * the fetch's TimeoutError when the API takes longer than API_TIMEOUT_MS.
+ */
 export async function apiGet<P extends GetPath>(
   path: P,
   init?: RequestInit,
 ): Promise<GetResponse<P>> {
   const headers = new Headers(init?.headers);
   headers.set("Accept", "application/json");
-  const response = await fetch(new URL(path, apiBaseUrl()), { ...init, method: "GET", headers });
+  // The signal stays armed while the body is read, so a stalled body times out too.
+  const response = await fetch(new URL(path, apiBaseUrl()), {
+    ...init,
+    method: "GET",
+    headers,
+    signal: AbortSignal.timeout(apiTimeoutMs()),
+  });
   if (!response.ok) throw new ApiError(response.status, await readErrorCode(response));
   return (await response.json()) as GetResponse<P>;
 }
@@ -87,6 +105,7 @@ export async function apiPost<P extends PostPath>(
     headers,
     body: JSON.stringify(body),
     cache: "no-store",
+    signal: AbortSignal.timeout(apiTimeoutMs()), // body read included, as in apiGet
   });
   if (!response.ok) throw new ApiError(response.status, await readErrorCode(response));
   if (response.status === 204) return undefined as PostResponse<P>;

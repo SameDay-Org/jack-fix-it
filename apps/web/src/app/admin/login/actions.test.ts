@@ -14,7 +14,7 @@ vi.mock("next/navigation", async () => {
   };
 });
 
-import { ACCESS_COOKIE, REFRESH_COOKIE } from "@/lib/session";
+import { ACCESS_COOKIE, REFRESH_COOKIE, SESSION_COOKIE } from "@/lib/session";
 
 import { login } from "./actions";
 
@@ -27,6 +27,7 @@ beforeEach(() => {
   cookies = new FakeCookieJar();
   jar.current = cookies;
   vi.stubEnv("API_INTERNAL_URL", "http://api.test.invalid:8000");
+  vi.stubEnv("API_TIMEOUT_MS", "1000");
   vi.stubEnv("REFRESH_TOKEN_TTL_SECONDS", "2592000");
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -67,6 +68,7 @@ describe("login action", () => {
     expect(result.redirectedTo).toBe("/admin");
     expect(cookies.get(ACCESS_COOKIE)?.value).toBe(TOKENS.access_token);
     expect(cookies.get(REFRESH_COOKIE)?.value).toBe(TOKENS.refresh_token);
+    expect(cookies.get(SESSION_COOKIE)).toBeDefined(); // only a login starts a session
     const [, init] = fetchMock.mock.calls[0]!;
     expect(JSON.parse(String(init?.body))).toEqual({ email: EMAIL, password: PASSWORD });
   });

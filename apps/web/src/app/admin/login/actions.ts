@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 
 import { ApiError, apiPost } from "@/lib/api";
-import { type AuthResponse, isStaff, PANEL_PATH, revoke, setSession } from "@/lib/session";
+import { type AuthResponse, isStaff, PANEL_PATH, revoke, startSession } from "@/lib/session";
 
 /** The login outcomes the form shows, each with its own i18n message. */
 export type LoginError =
@@ -42,6 +42,6 @@ export async function login(_previous: LoginState, form: FormData): Promise<Logi
     await revoke(tokens.refresh_token);
     return { error: "not_staff", email };
   }
-  await setSession(tokens);
+  await startSession(tokens);
   redirect(PANEL_PATH);
 }

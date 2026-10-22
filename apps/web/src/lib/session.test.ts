@@ -24,6 +24,7 @@ import {
   REFRESH_PATH,
   REFRESHED_COOKIE,
   refreshStaffSession,
+  SESSION_COOKIE,
   requireStaff,
   setSession,
 } from "./session";
@@ -36,6 +37,7 @@ beforeEach(() => {
   cookies = new FakeCookieJar();
   jar.current = cookies;
   vi.stubEnv("API_INTERNAL_URL", "http://api.test.invalid:8000");
+  vi.stubEnv("API_TIMEOUT_MS", "1000");
   vi.stubEnv("REFRESH_TOKEN_TTL_SECONDS", REFRESH_TTL);
   vi.stubEnv("APP_ENV", "development");
   vi.stubGlobal("fetch", fetchMock);
@@ -94,7 +96,7 @@ describe("session cookies", () => {
 
 describe("requireStaff", () => {
   it("returns the staff member checked against /me with the access token", async () => {
-    cookies.reset({ [ACCESS_COOKIE]: "at-1", [REFRESH_COOKIE]: "rt-1" });
+    cookies.reset({ [SESSION_COOKIE]: "sid-1", [ACCESS_COOKIE]: "at-1", [REFRESH_COOKIE]: "rt-1" });
     fetchMock.mockImplementation(routeFetch({ "/v1/auth/me": () => Response.json(user("admin")) }));
 
     const staff = await requireStaff();
@@ -106,7 +108,7 @@ describe("requireStaff", () => {
 
   it("requireStaff_refreshes_once_then_redirects", async () => {
     // 1. The access token is refused: off to the one-time refresh.
-    cookies.reset({ [ACCESS_COOKIE]: "at-old", [REFRESH_COOKIE]: "rt-old" });
+    cookies.reset({ [SESSION_COOKIE]: "sid-1", [ACCESS_COOKIE]: "at-old", [REFRESH_COOKIE]: "rt-old" });
     fetchMock.mockImplementation(
       routeFetch({
         "/v1/auth/me": () => Response.json({ error: { code: "invalid_token" } }, { status: 401 }),
@@ -134,7 +136,7 @@ describe("requireStaff", () => {
   it.each(["customer", "pro"] as const)(
     "requireStaff_redirects_non_staff_role (%s)",
     async (role) => {
-      cookies.reset({ [ACCESS_COOKIE]: "at-1", [REFRESH_COOKIE]: "rt-1" });
+      cookies.reset({ [SESSION_COOKIE]: "sid-1", [ACCESS_COOKIE]: "at-1", [REFRESH_COOKIE]: "rt-1" });
       fetchMock.mockImplementation(routeFetch({ "/v1/auth/me": () => Response.json(user(role)) }));
 
       expect(await redirectOf(requireStaff)).toBe(END_PATH);
@@ -144,7 +146,7 @@ describe("requireStaff", () => {
 
 describe("refreshStaffSession", () => {
   it("refresh_rotates_both_cookies", async () => {
-    cookies.reset({ [ACCESS_COOKIE]: "at-old", [REFRESH_COOKIE]: "rt-old" });
+    cookies.reset({ [SESSION_COOKIE]: "sid-1", [ACCESS_COOKIE]: "at-old", [REFRESH_COOKIE]: "rt-old" });
     fetchMock.mockImplementation(
       routeFetch({ "/v1/auth/refresh": () => Response.json(auth("agent")) }),
     );
@@ -159,7 +161,7 @@ describe("refreshStaffSession", () => {
   });
 
   it("clears the session and goes to the login when the refresh is refused", async () => {
-    cookies.reset({ [ACCESS_COOKIE]: "at-old", [REFRESH_COOKIE]: "rt-old" });
+    cookies.reset({ [SESSION_COOKIE]: "sid-1", [ACCESS_COOKIE]: "at-old", [REFRESH_COOKIE]: "rt-old" });
     fetchMock.mockImplementation(
       routeFetch({
         "/v1/auth/refresh": () =>
@@ -172,7 +174,7 @@ describe("refreshStaffSession", () => {
   });
 
   it("revokes and clears when the refreshed account is no longer staff", async () => {
-    cookies.reset({ [REFRESH_COOKIE]: "rt-old" });
+    cookies.reset({ [SESSION_COOKIE]: "sid-1", [REFRESH_COOKIE]: "rt-old" });
     fetchMock.mockImplementation(
       routeFetch({
         "/v1/auth/refresh": () => Response.json(auth("customer")),
@@ -193,7 +195,7 @@ describe("endSession", () => {
     ["the API errors", () => Promise.resolve(new Response(null, { status: 500 }))],
     ["the API answers", () => Promise.resolve(new Response(null, { status: 204 }))],
   ])("logout_clears_cookies_even_if_api_fails (%s)", async (_, answer) => {
-    cookies.reset({ [ACCESS_COOKIE]: "at-1", [REFRESH_COOKIE]: "rt-1", [REFRESHED_COOKIE]: "1" });
+    cookies.reset({ [SESSION_COOKIE]: "sid-1", [ACCESS_COOKIE]: "at-1", [REFRESH_COOKIE]: "rt-1", [REFRESHED_COOKIE]: "1" });
     fetchMock.mockImplementation(answer);
 
     await endSession();

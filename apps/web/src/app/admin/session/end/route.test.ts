@@ -27,6 +27,7 @@ beforeEach(() => {
   cookies.reset({ [ACCESS_COOKIE]: "at-1", [REFRESH_COOKIE]: "rt-1" });
   jar.current = cookies;
   vi.stubEnv("API_INTERNAL_URL", "http://api.test.invalid:8000");
+  vi.stubEnv("API_TIMEOUT_MS", "1000");
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
 });

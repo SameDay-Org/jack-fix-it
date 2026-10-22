@@ -23,9 +23,12 @@ apply.
   `requireStaff()`, which checks `GET /v1/auth/me` on every request. Only server actions and
   route handlers may write cookies, so an expired access token goes through
   `/admin/session/refresh` (one refresh, both cookies rotated) and any failure through
-  `/admin/session/end`. Server actions keep Next's Origin check: never set
-  `serverActions.allowedOrigins`. `/admin` responses are `Cache-Control: no-store`
-  (`next.config.ts`).
+  `/admin/session/end`. Only login sets the session marker `jfi_sid`; tokens without it are
+  no session (a late refresh cannot revive a logout). Both session routes act only on
+  same-origin requests (`fromThisSite`). Every API call has the `API_TIMEOUT_MS` deadline, body
+  included, and sign-out clears the cookies before it revokes. Server actions keep Next's
+  Origin check: never set `serverActions.allowedOrigins`. `/admin` responses are
+  `Cache-Control: no-store` (`next.config.ts`).
 - UI kit: shadcn/ui components in `src/components/ui/`, written on the deck tokens (no extra
   color variables: `src/theme/tokens.test.ts` allows only the mobile tokens) with `cn()` from
   `src/lib/utils.ts`. Icons from `lucide-react`. TanStack Table comes with #81.
