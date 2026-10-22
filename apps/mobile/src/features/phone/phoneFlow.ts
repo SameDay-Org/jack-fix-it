@@ -8,7 +8,7 @@ type PhoneFlowState = {
    * so the number never travels in a URL (or anything that records one).
    */
   pendingNumber: string | null;
-  /** A sign-up is in flight or just succeeded: the gate lands on the phone step, once. */
+  /** A sign-up is in flight or just succeeded: home opens the phone step over itself, once. */
   offeredAfterSignUp: boolean;
 };
 
@@ -38,8 +38,8 @@ export function leavePhoneFlow(): void {
 }
 
 /**
- * Set before the sign-up request: the session turns signed-in inside it, and the gate reads this
- * flag on that same render to land on the phone step instead of home.
+ * Set before the sign-up request: the session turns signed-in inside it, and home, which the gate
+ * shows on that same render, reads this flag to open the phone step over itself.
  */
 export const offerPhoneStepAfterSignUp = (): void =>
   phoneFlowStore.setState({ offeredAfterSignUp: true });

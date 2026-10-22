@@ -43,8 +43,15 @@ describe("phone number formatter", () => {
   it("deleting a separator deletes the digit before it, so the cursor never sticks", () => {
     expect(editNationalDigits("(415) 555", "(415) 55", "+1")).toBe("41555");
     expect(editNationalDigits("(415) 5", "(415) ", "+1")).toBe("415");
-    expect(editNationalDigits("(415) 555-0", "(415) 5550", "+1")).toBe("415555");
+    // The dash deleted mid-text: the digit before it goes (the 5), not the last one.
+    expect(editNationalDigits("(415) 555-0", "(415) 5550", "+1")).toBe("415550");
+    expect(editNationalDigits("(415) 555-0123", "(415) 5550123", "+1")).toBe("415550123");
     expect(editNationalDigits("(415", "(4156", "+1")).toBe("4156");
+  });
+
+  it("an autofill or paste of the same number is taken as it is, never as a deleted separator", () => {
+    expect(editNationalDigits("(415) 555-0123", "+14155550123", "+1")).toBe("4155550123");
+    expect(editNationalDigits("(415) 555-0123", "4155550123", "+1")).toBe("4155550123");
   });
 
   it("builds E.164 from the calling code and the ten digits", () => {

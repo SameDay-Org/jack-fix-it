@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AccessibilityInfo } from "react-native";
 
-import { ApiError } from "@/api";
+import { ApiError, SessionExpiredError } from "@/api";
 import { showToast } from "@/components/ui";
 
 import { useSendCode, useVerifyCode } from "./api";
@@ -42,6 +42,7 @@ export function useCodeEntry(digits: string, onVerified: () => void): CodeEntry 
   const send = useSendCode();
   const countdown = useCountdown(resendSeconds);
   const inFlight = useRef(false);
+  const resendInFlight = useRef(false);
 
   const fail = (message: string) => {
     setError(message);
@@ -56,6 +57,8 @@ export function useCodeEntry(digits: string, onVerified: () => void): CodeEntry 
       showToast({ message: t("phone.verified"), tone: "success" });
       onVerified();
     } catch (failure) {
+      // The session ended meanwhile: the gate is taking the user to welcome, nothing to say here.
+      if (failure instanceof SessionExpiredError) return;
       if (failure instanceof ApiError && failure.code === INVALID_CODE) setCodeState("");
       fail(t(describePhoneFailure(failure)));
     } finally {
@@ -64,13 +67,15 @@ export function useCodeEntry(digits: string, onVerified: () => void): CodeEntry 
   };
 
   const setCode = (next: string) => {
+    if (inFlight.current) return; // the code being checked stays as it is
     setCodeState(next);
     setError(null);
     if (next.length === CODE_LENGTH) void check(next);
   };
 
   const resend = async () => {
-    if (countdown.remaining > 0 || send.isPending) return;
+    if (countdown.remaining > 0 || resendInFlight.current) return;
+    resendInFlight.current = true;
     try {
       await send.mutateAsync(phone);
       countdown.restart();
@@ -78,7 +83,9 @@ export function useCodeEntry(digits: string, onVerified: () => void): CodeEntry 
       setError(null);
       showToast({ message: t("phone.codeResent"), tone: "neutral" });
     } catch (failure) {
-      fail(t(describePhoneFailure(failure)));
+      if (!(failure instanceof SessionExpiredError)) fail(t(describePhoneFailure(failure)));
+    } finally {
+      resendInFlight.current = false;
     }
   };
 

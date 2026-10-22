@@ -10,7 +10,10 @@ import { useFlag } from "./useFlag";
 export type CodeInputProps = {
   /** Visible label; also the accessible name of the field. */
   label: string;
-  /** Digits only; anything else typed or pasted is dropped. */
+  /**
+   * Digits only; anything else typed or pasted is dropped. A paste or autofill that brings more
+   * digits than the cells (a whole SMS, or a code over a half-typed one) keeps its last ones.
+   */
   value: string;
   onChangeText: (digits: string) => void;
   /** How many digits the code has: one cell each. */
@@ -48,6 +51,14 @@ export function CodeInput({
   const activeCell = Math.min(value.length, length - 1);
   const cells = Array.from({ length }, (_, index) => index);
 
+  const change = (text: string) => {
+    const digits = text.replace(/[^0-9]/g, "");
+    if (digits.length <= length) onChangeText(digits);
+    // More than one character at once is a paste or an autofill: the code is its last digits.
+    // One more keystroke on a full field is ignored.
+    else if (digits.length - value.length > 1) onChangeText(digits.slice(-length));
+  };
+
   return (
     <View>
       <Text className="mb-2 text-callout font-semibold text-navy-900">{label}</Text>
@@ -81,8 +92,11 @@ export function CodeInput({
         <TextInput
           ref={ref}
           value={value}
-          onChangeText={(text) => onChangeText(text.replace(/[^0-9]/g, "").slice(0, length))}
-          maxLength={length}
+          onChangeText={change}
+          // No native maxLength: it trims a paste to the cell count before the digits are picked
+          // out, so "123-456" or a whole SMS would lose its code. `change` keeps the length.
+          // The caret stays after the last digit: a tap on a filled cell must not move it there.
+          selection={{ start: value.length, end: value.length }}
           keyboardType="number-pad"
           inputMode="numeric"
           textContentType="oneTimeCode"

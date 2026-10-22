@@ -94,7 +94,6 @@ describe("CodeEntryScreen", () => {
       textContentType: "oneTimeCode",
       autoComplete: "sms-otp",
       keyboardType: "number-pad",
-      maxLength: 6,
     });
   });
 
@@ -124,16 +123,21 @@ describe("CodeEntryScreen", () => {
     expect(router.dismissTo).toHaveBeenCalledWith("/");
   });
 
-  it("while verifying, the button shows progress and the code cannot change", async () => {
+  it("while verifying, the button shows progress and the code holds (the field keeps its keyboard)", async () => {
     const answer = deferred<Response>();
     fetchMock.mockReturnValue(answer.promise);
     await renderScreen(<CodeEntryScreen />);
 
     await typeCode(CODE);
-    await waitFor(() => expect(codeField().props.editable).toBe(false));
-    expect(screen.getByTestId("phone-verify").props.accessibilityState).toMatchObject({
-      busy: true,
-    });
+    await waitFor(() =>
+      expect(screen.getByTestId("phone-verify").props.accessibilityState).toMatchObject({
+        busy: true,
+      }),
+    );
+    // Still editable, so Android keeps focus and the keyboard for a retry; edits wait meanwhile.
+    expect(codeField().props.editable).toBe(true);
+    await typeCode("9");
+    expect(codeField().props.value).toBe(CODE);
 
     answer.resolve(jsonResponse(200, VERIFIED));
     await waitFor(() => expect(router.dismissTo).toHaveBeenCalled());

@@ -2,6 +2,8 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AccessibilityInfo } from "react-native";
 
+import { SessionExpiredError } from "@/api";
+
 import { useSendCode } from "./api";
 import { phoneConfig } from "./config";
 import { describePhoneFailure } from "./errors";
@@ -54,7 +56,8 @@ export function usePhoneEntry(onSent: () => void): PhoneEntry {
       startCodeStep(digits);
       onSent();
     } catch (failure) {
-      fail(t(describePhoneFailure(failure)));
+      // The session ended meanwhile: the gate is taking the user to welcome, nothing to say here.
+      if (!(failure instanceof SessionExpiredError)) fail(t(describePhoneFailure(failure)));
     } finally {
       inFlight.current = false;
     }

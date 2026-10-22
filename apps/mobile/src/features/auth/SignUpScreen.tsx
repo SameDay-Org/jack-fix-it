@@ -19,8 +19,8 @@ export function SignUpScreen() {
 
 function SignUpForm({ role }: { role: SignUpRole }) {
   const { t } = useTranslation();
-  // The offer goes up before the request: the session turns signed-in inside `register`, and the
-  // gate reads it on that render to land on the phone step.
+  // The offer goes up before the request: the session turns signed-in inside `register`, and home,
+  // shown on that same render, reads it to open the phone step.
   const submit = useCallback(
     async (credentials: Credentials) => {
       offerPhoneStepAfterSignUp();

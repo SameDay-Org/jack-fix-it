@@ -38,14 +38,20 @@ export function formatNational(digits: string): string {
 
 /**
  * The digits after an edit of the formatted field. Deleting only a separator (a parenthesis, the
- * space or the dash) would re-format to the same text and trap the cursor, so it deletes the digit
- * before it instead.
+ * space or the dash: one character fewer, the same digits) would re-format to the same text and
+ * trap the cursor, so it deletes the digit before that separator instead. Any other edit, an
+ * autofill or a paste included, is taken as it is.
  */
 export function editNationalDigits(previous: string, next: string, countryCode: string): string {
   const before = digitsOf(previous);
   const after = nationalDigits(next, countryCode);
-  const deletedSeparator = next.length < previous.length && after === before;
-  return deletedSeparator ? after.slice(0, -1) : after;
+  const deletedSeparator = next.length === previous.length - 1 && after === before;
+  if (!deletedSeparator) return after;
+  let at = 0; // where the one deleted character was
+  while (at < next.length && previous[at] === next[at]) at += 1;
+  const digitsBefore = digitsOf(previous.slice(0, at)).length;
+  if (digitsBefore === 0) return after;
+  return after.slice(0, digitsBefore - 1) + after.slice(digitsBefore);
 }
 
 /** A complete, well-formed US number: 10 digits, area code and exchange starting with 2-9. */

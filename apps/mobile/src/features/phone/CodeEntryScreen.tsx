@@ -59,7 +59,6 @@ function CodeEntry({ digits }: { digits: string }) {
             onChangeText={entry.setCode}
             length={CODE_LENGTH}
             error={entry.error ?? undefined}
-            disabled={entry.verifying}
             autoFocus
             testID="phone-code"
           />
