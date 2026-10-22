@@ -1,7 +1,7 @@
 """devices
 
 Revision ID: e50611b29dde
-Revises: 9b4694b6c884
+Revises: 2167b98c0780
 Create Date: 2026-10-21 23:24:41.284965
 
 """
@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "e50611b29dde"
-down_revision: str | Sequence[str] | None = "9b4694b6c884"
+down_revision: str | Sequence[str] | None = "2167b98c0780"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
