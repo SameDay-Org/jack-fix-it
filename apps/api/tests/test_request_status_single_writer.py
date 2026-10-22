@@ -10,29 +10,25 @@ import pytest
 from tests.test_job_status_single_writer import (
     APP_DIR,
     REQUEST_STATE_MACHINE,
-    STATUS_WRITERS,
+    STATE_MACHINE,
     StatusModel,
+    guarded_writes,
+    planted,
     status_writes,
 )
 
 REQUESTS = StatusModel(
-    model="ServiceRequest", package="app.modules.requests", table="service_requests"
+    model="ServiceRequest",
+    package="app.modules.requests",
+    table="service_requests",
+    state_machine=REQUEST_STATE_MACHINE,
 )
 
 
 def test_only_the_state_machine_writes_request_status() -> None:
     writes: list[str] = []
     for path in sorted(APP_DIR.rglob("*.py")):
-        if path == REQUEST_STATE_MACHINE:
-            continue
-        relative = path.relative_to(APP_DIR.parent).as_posix()
-        # The jobs' state machine may assign its own `.status`, never a request's.
-        writes += status_writes(
-            path.read_text(encoding="utf-8"),
-            relative,
-            REQUESTS,
-            attributes=path not in STATUS_WRITERS,
-        )
+        writes += guarded_writes(path, path.read_text(encoding="utf-8"), REQUESTS)
 
     assert writes == [], f"service_requests.status may only change in RequestStateMachine: {writes}"
 
@@ -108,3 +104,21 @@ def test_guard_detects_a_planted_request_status_write(name: str) -> None:
 )
 def test_guard_ignores_reads_and_other_writes(source: str) -> None:
     assert status_writes(source, "allowed.py", REQUESTS, attributes=False) == []
+
+
+# Review round 1 (#162): the other state machine's file is no blind spot.
+FOREIGN_REQUEST_WRITES = {
+    "attribute": "request.status = 'accepted'",
+    "setattr": "setattr(request, 'status', 'accepted')",
+}
+
+
+@pytest.mark.parametrize("body", FOREIGN_REQUEST_WRITES.values(), ids=list(FOREIGN_REQUEST_WRITES))
+def test_a_request_status_write_in_the_jobs_machine_is_caught(body: str) -> None:
+    assert guarded_writes(STATE_MACHINE, planted(STATE_MACHINE, body), REQUESTS) != []
+
+
+@pytest.mark.parametrize("body", FOREIGN_REQUEST_WRITES.values(), ids=list(FOREIGN_REQUEST_WRITES))
+def test_a_second_write_in_the_request_machine_is_caught(body: str) -> None:
+    source = planted(REQUEST_STATE_MACHINE, body)
+    assert guarded_writes(REQUEST_STATE_MACHINE, source, REQUESTS) != []
