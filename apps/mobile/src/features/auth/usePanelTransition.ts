@@ -13,7 +13,7 @@ import {
 import type { SystemBar } from "@/components/ui";
 import { tokens } from "@/theme";
 
-import { setPanelBar, setRisePhase } from "./panelHandoff";
+import { panelHandoffStore, setPanelBar, setRisePhase } from "./panelHandoff";
 import { pushesUnderRise } from "./panelRoute";
 
 export type PanelGeometry = {
@@ -84,6 +84,10 @@ export function usePanelTransition({ reduceMotion, destinations }: Params): Pane
     const next: SystemBar = covered ? "light" : "hero";
     setBar(next);
     setPanelBar(next);
+    // Covering the status bar is the panel nearly settled: the rest of the ease is its last few
+    // dp. The destination may start its content now, so it arrives as the panel lands rather than
+    // a frame or two after.
+    if (covered && panelHandoffStore.getState().phase === "rising") setRisePhase("risen");
   };
 
   useAnimatedReaction(

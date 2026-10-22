@@ -276,8 +276,20 @@ describe("the hand-off to the destination", () => {
     await act(async () => fireEvent.press(getStarted()));
     expect(panelHandoffStore.getState()).toEqual({ phase: "rising", bar: "hero" });
 
+    // Nearly settled: once the panel covers the status bar, the destination may start.
+    await advance(panelRiseMs / 2);
+    expect(panelHandoffStore.getState().phase).toBe("rising");
+    let progressAtHandoff = 0;
+    const unsubscribe = panelHandoffStore.subscribe((state) => {
+      if (state.phase === "risen" && progressAtHandoff === 0)
+        progressAtHandoff = -panelY() / TRAVEL;
+    });
+
     await advance(panelRiseMs * 1.5);
+    unsubscribe();
     expect(panelHandoffStore.getState()).toEqual({ phase: "risen", bar: "light" });
+    expect(progressAtHandoff).toBeGreaterThan(0.95); // the strip covered, not the last frame
+    expect(progressAtHandoff).toBeLessThan(1);
 
     await refocus(); // back: the panel lowers
     expect(panelHandoffStore.getState().phase).toBe("idle");
