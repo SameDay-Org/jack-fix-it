@@ -16,7 +16,12 @@ to: before the HTTP call its state becomes `in_flight` (if that write fails, not
 the job retries), and after the call the outcome replaces it. If the outcome cannot be stored,
 even after a few tries, the device stays `in_flight` and the next run marks it `unknown`, final:
 it is never sent again. A push lost in that rare window is the price of never sending one twice
-(at most once).
+there (at most once).
+
+That at-most-once guarantee covers only this recovery of a persisted `in_flight` state. An
+HTTP call whose outcome is uncertain (a timeout, a connection error or a 5xx from Expo, with no
+ticket back for a device) puts the device back to pending and retries it, as a retryable
+error: if Expo had in fact accepted it, the device can get the push twice.
 """
 
 import asyncio

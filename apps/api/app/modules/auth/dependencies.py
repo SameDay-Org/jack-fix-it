@@ -73,6 +73,24 @@ async def get_current_user(
 CurrentUser = Annotated[UserAccount, Depends(get_current_user)]
 
 
+async def get_optional_user(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    users: Annotated[UserService, Depends(get_user_service)],
+    config: Annotated[AuthConfig, Depends(get_auth_config)],
+) -> UserAccount | None:
+    """For public routes that use the caller when known: the active user of a valid bearer
+    token, else None. Never a 401: a missing, expired or invalid token is simply anonymous."""
+    if credentials is None:
+        return None
+    try:
+        return await authenticate_access_token(credentials.credentials, users=users, config=config)
+    except InvalidTokenError:
+        return None
+
+
+OptionalUser = Annotated[UserAccount | None, Depends(get_optional_user)]
+
+
 # Rate limits on the unauthenticated routes (D4.4, #28): register and login run Argon2.
 limit_register = limit_per_ip("auth_register")
 limit_login_per_ip = limit_per_ip("auth_login")

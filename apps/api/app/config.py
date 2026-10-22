@@ -175,6 +175,9 @@ class Settings(BaseSettings):
     # counts as final; also the most runs ARQ gives one send_push job.
     push_max_attempts: int = Field(default=5, gt=0)
     push_max_devices_per_user: int = Field(default=10, gt=0)
+    # Waitlist (D8.4, #46): joins per client IP and per contact (email or phone, hashed), per
+    # AUTH_RATE_LIMIT_WINDOW_SECONDS.
+    waitlist_join_limit: int = Field(default=5, gt=0)
 
     @field_validator("database_url")
     @classmethod
