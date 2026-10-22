@@ -46,6 +46,9 @@ export function useContentTransition({
   const visible = useSharedValue(animate ? 0 : 1);
   const entered = useRef(false);
   const exiting = useRef(false);
+  // What runs after the exit. Kept in a ref: a JS function captured by the worklet callback would
+  // cross to the UI thread as a remote function, and the callback only needs to say "done".
+  const afterExitRef = useRef<(() => void) | null>(null);
 
   const focusTitle = () => moveAccessibilityFocus(titleRef.current);
 
@@ -61,9 +64,11 @@ export function useContentTransition({
     );
   };
 
-  const afterExit = (finished: boolean, then: () => void) => {
+  const afterExit = (finished: boolean) => {
     exiting.current = false;
-    if (finished) then();
+    const then = afterExitRef.current;
+    afterExitRef.current = null;
+    if (finished) then?.();
   };
 
   const exit = (then: () => void) => {
@@ -73,11 +78,12 @@ export function useContentTransition({
     }
     if (exiting.current) return;
     exiting.current = true;
+    afterExitRef.current = then;
     visible.value = withTiming(
       0,
       { duration: transitionMs, easing: Easing.out(Easing.cubic) },
       (finished) => {
-        runOnJS(afterExit)(finished === true, then);
+        runOnJS(afterExit)(finished === true);
       },
     );
   };

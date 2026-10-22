@@ -21,6 +21,8 @@ export type PanelGeometry = {
 
 type Params = { reduceMotion: boolean };
 
+const EASING = Easing.out(Easing.cubic);
+
 export type PanelTransition = {
   /** 0 at rest, 1 when the panel covers the screen. Drives every style on the UI thread. */
   progress: SharedValue<number>;
@@ -55,10 +57,6 @@ export function usePanelTransition({ reduceMotion }: Params): PanelTransition {
   const busyRef = useRef(false);
   const settleCheck = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Eases out over the token's duration: a deterministic end, so the navigation follows on time.
-  const rise = (to: number, done?: (finished?: boolean) => void) =>
-    withTiming(to, { duration: panelRiseMs, easing: Easing.out(Easing.cubic) }, done);
-
   const setGeometry = ({ restingTop, topInset }: PanelGeometry) => {
     const distance = restingTop + topInset;
     travel.value = distance;
@@ -82,7 +80,8 @@ export function usePanelTransition({ reduceMotion }: Params): PanelTransition {
     clearSettleCheck();
     busyRef.current = false;
     setBusy(false);
-    if (progress.value > 0) progress.value = rise(0);
+    if (progress.value > 0)
+      progress.value = withTiming(0, { duration: panelRiseMs, easing: EASING });
   };
 
   const navigate = (href: Href) => {
@@ -107,7 +106,10 @@ export function usePanelTransition({ reduceMotion }: Params): PanelTransition {
       navigate(href);
       return;
     }
-    progress.value = rise(1, (finished) => {
+    // The completion callback is passed to withTiming directly so the Babel plugin makes it a
+    // worklet (through a helper it would stay a JS function and fail on the UI thread). It eases
+    // out over the token's duration: a deterministic end, so the navigation follows on time.
+    progress.value = withTiming(1, { duration: panelRiseMs, easing: EASING }, (finished) => {
       if (finished) runOnJS(navigate)(href);
     });
   };
