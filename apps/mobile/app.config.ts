@@ -1,5 +1,7 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
+import { colors } from "./src/theme/tokens.json";
+
 type AppVariant = "development" | "preview" | "production";
 
 // Development and preview builds install next to production, with their own name and id.
@@ -43,7 +45,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       "expo-secure-store",
       "expo-localization",
       "expo-font",
-      "expo-splash-screen",
+      // The native splash is the intro's first frame (#147): plain navy-900, no image until the
+      // logo lands (#8). A change here needs a new dev build.
+      ["expo-splash-screen", { backgroundColor: colors["navy-900"] }],
       "expo-status-bar",
     ],
     experiments: { typedRoutes: true },
