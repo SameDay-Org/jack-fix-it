@@ -68,7 +68,10 @@ export function LaunchIntro({ onReady, onDone }: LaunchIntroProps) {
   }, [exit, launchExitMs, onDone, phase]);
 
   // A fade only: the intro's last frame is Welcome's own hero (or the gate's), so any scale would
-  // draw the same sentence twice, slightly apart, while it fades.
+  // draw the same sentence twice, slightly apart, while it fades. The fade is composited offscreen:
+  // by default Android applies the opacity to each child on its own, so the intro's navy page would
+  // dim the identical hero under it and the half-faded sentence on top would not bring it back (the
+  // headline read gray mid-exit). Flattened first, every pixel of the intro fades over its twin.
   const exitStyle = useAnimatedStyle(() => ({
     opacity: shown.value * (1 - exit.value),
   }));
@@ -77,6 +80,7 @@ export function LaunchIntro({ onReady, onDone }: LaunchIntroProps) {
     <Animated.View
       style={[StyleSheet.absoluteFill, exitStyle]}
       pointerEvents={phase === "exiting" ? "none" : "auto"}
+      needsOffscreenAlphaCompositing
       testID="launch-intro"
     >
       {/* The tap-anywhere layer is not an accessibility node of its own: a clickable view that is

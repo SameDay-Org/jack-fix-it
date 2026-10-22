@@ -98,7 +98,10 @@ describe("LaunchShell: the intro over the gate", () => {
   it("draws the hero with the headline and the first word, Skip reachable, the rolling words hidden", async () => {
     await renderRouter(routes);
 
-    expect(screen.getByTestId("launch-intro")).toBeTruthy();
+    const intro = screen.getByTestId("launch-intro");
+    // The exit fades the intro over an identical hero; Android must flatten it before applying the
+    // opacity, or the sentence reads gray halfway (its navy page dims the twin under it).
+    expect(intro.props.needsOffscreenAlphaCompositing).toBe(true);
     const headline = screen.getByTestId("launch-hero-headline");
     expect(headline.props.accessibilityLabel).toBe("Whatever happens at home, we fix it.");
     expect(screen.getByTestId("launch-rotator", HIDDEN).props.importantForAccessibility).toBe(
