@@ -1,17 +1,20 @@
 """docs/railway.md lists every variable staging and production require, for api and worker (#144).
 
 The required set is not written down here: it is found by asking Settings itself. Starting from
-a complete production configuration, each setting is left out in turn; the ones whose absence
-fails validation are the ones a deployed service cannot start without. So a new validator, or a
-new required field, fails this test until the doc lists it.
+a complete configuration for staging, and again for production, each setting is left out in
+turn; the ones whose absence fails validation in either environment are the ones a deployed
+service cannot start without. So a new validator, or a new required field, fails this test until
+the doc lists it, even when only one of the two environments requires it.
 """
 
 import re
 import typing
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Self
 
 import pytest
-from pydantic import SecretStr, ValidationError
+from pydantic import SecretStr, ValidationError, model_validator
 
 from app.config import Settings
 from tests.conftest import (
@@ -23,10 +26,12 @@ from tests.conftest import (
 )
 
 RAILWAY_DOC = Path(__file__).resolve().parents[3] / "docs" / "railway.md"
+# The services that build the API's Settings; web is another app with its own variables.
 SERVICES = ("api", "worker")
-# Fixture values only: a complete production configuration.
-PRODUCTION: dict[str, object] = {
-    "app_env": "production",
+TABLES = (*SERVICES, "web")
+DEPLOYED_ENVS = ("staging", "production")
+# Fixture values only: everything a deployed environment requires (app_env is added per run).
+COMPLETE: dict[str, object] = {
     "database_url": "postgresql://test:test@localhost:5432/test",
     "redis_url": "redis://localhost:6379/0",
     "jwt_secret": TEST_JWT_SECRET,
@@ -58,16 +63,33 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name.upper(), raising=False)
 
 
-def deployed_required() -> set[str]:
-    Settings(_env_file=None, **PRODUCTION)  # type: ignore[arg-type]  # pydantic-settings init kwargs
+def required_in(
+    app_env: str,
+    settings_class: type[Settings] = Settings,
+    extra: Mapping[str, object] | None = None,
+) -> set[str]:
+    """The variables `settings_class` cannot start without when APP_ENV is `app_env`."""
+    complete = {**COMPLETE, **(extra or {}), "app_env": app_env}
+    settings_class(_env_file=None, **complete)  # type: ignore[arg-type]  # pydantic-settings init kwargs
     required: set[str] = set()
-    for name in Settings.model_fields:
-        values = {key: value for key, value in PRODUCTION.items() if key != name}
+    for name in settings_class.model_fields:
+        values = {key: value for key, value in complete.items() if key != name}
         try:
-            Settings(_env_file=None, **values)  # type: ignore[arg-type]  # as above
+            settings_class(_env_file=None, **values)  # type: ignore[arg-type]  # as above
         except ValidationError:
             required.add(name.upper())
     return required
+
+
+def deployed_required(
+    settings_class: type[Settings] = Settings, extra: Mapping[str, object] | None = None
+) -> set[str]:
+    """Required in staging or in production: a service must start in both."""
+    return set().union(*(required_in(env, settings_class, extra) for env in DEPLOYED_ENVS))
+
+
+def undocumented(service: str, required: set[str]) -> set[str]:
+    return required - set(service_table(service))
 
 
 def is_secret(name: str) -> bool:
@@ -95,23 +117,50 @@ def test_required_set_is_found_from_settings(isolated_env: None) -> None:
 
 @pytest.mark.parametrize("service", SERVICES)
 def test_every_required_variable_is_listed(isolated_env: None, service: str) -> None:
-    listed = set(service_table(service))
-
-    missing = deployed_required() - listed
+    missing = undocumented(service, deployed_required())
 
     assert not missing, f"docs/railway.md, {service}: add {sorted(missing)}"
 
 
+class _StagingOnlyRequirement(Settings):
+    """A setting only staging requires, planted to prove the probe covers staging too."""
+
+    planted_staging_secret: str | None = None
+
+    @model_validator(mode="after")
+    def _require_planted_in_staging(self) -> Self:
+        if self.app_env == "staging" and self.planted_staging_secret is None:
+            raise ValueError("PLANTED_STAGING_SECRET must be set when APP_ENV is staging")
+        return self
+
+
+def test_a_staging_only_requirement_fails_the_doc_check(isolated_env: None) -> None:
+    extra = {"planted_staging_secret": "planted"}
+
+    required = deployed_required(_StagingOnlyRequirement, extra)
+
+    assert "PLANTED_STAGING_SECRET" not in required_in("production", _StagingOnlyRequirement, extra)
+    for service in SERVICES:
+        assert "PLANTED_STAGING_SECRET" in undocumented(service, required)
+
+
+@pytest.mark.parametrize("table", TABLES)
+def test_every_row_has_a_value_secret_flag_and_source(table: str) -> None:
+    rows = service_table(table)
+
+    assert rows, f"no table under ### {table}"
+    for name, cells in rows.items():
+        assert len(cells) == 3, f"{table}: {name} needs Value, Secret and Source columns"
+        value, secret, source = cells
+        assert value, f"{table}: {name} needs a value"
+        assert secret == "no" or secret.startswith("yes"), f"{table}: {name} secret is yes or no"
+        assert source, f"{table}: {name} needs a source task"
+
+
 @pytest.mark.parametrize("service", SERVICES)
 def test_listed_variables_are_settings_and_secrets_are_marked(service: str) -> None:
-    rows = service_table(service)
-
-    assert rows, f"no table under ### {service}"
-    for name, cells in rows.items():
+    for name, (_, secret, _) in service_table(service).items():
         assert name.lower() in Settings.model_fields, f"{service}: {name} is not a setting"
-        value, secret, source = cells
-        assert value, f"{service}: {name} needs a value"
-        assert source, f"{service}: {name} needs a source task"
         if is_secret(name):
             assert secret.startswith("yes"), f"{service}: {name} is a secret"
 

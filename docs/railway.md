@@ -105,10 +105,10 @@ is missing from either table, so this list cannot fall behind `app/config.py`.
 
 ### web
 
-| Variable           | Value                                                    |
-| ------------------ | -------------------------------------------------------- |
-| `APP_ENV`          | `staging` or `production` (only production is indexable) |
-| `API_INTERNAL_URL` | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}`   |
+| Variable           | Value                                                    | Secret | Source     |
+| ------------------ | -------------------------------------------------------- | ------ | ---------- |
+| `APP_ENV`          | `staging` or `production` (only production is indexable) | no     | D3.1 (#22) |
+| `API_INTERNAL_URL` | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}`   | no     | D3.1 (#22) |
 
 The web server calls the API over the private network; browsers and the mobile app use the
 api's public domain.
