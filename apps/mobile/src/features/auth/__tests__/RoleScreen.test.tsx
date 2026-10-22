@@ -226,8 +226,27 @@ describe("RoleScreen", () => {
         const { panelRiseMs } = tokens.motion;
         await renderInSafeArea(<RoleScreen />);
         await act(async () => fireEvent(screen.getByTestId("role-content"), "layout", LAYOUT));
-        await act(async () => jest.advanceTimersByTime(panelRiseMs + transitionMs * 2));
+        await act(async () => jest.advanceTimersByTime(panelRiseMs - 1));
+        expect(contentStyle().opacity).toBe(0); // the guard has not fired yet
+        await act(async () => jest.advanceTimersByTime(1 + transitionMs * 2));
         expect(contentStyle().opacity).toBe(1);
+      });
+
+      it("ignores a closing transition, and enters and focuses the title only once", async () => {
+        jest.mocked(moveAccessibilityFocus).mockClear();
+        await renderInSafeArea(<RoleScreen />);
+        await act(async () => fireEvent(screen.getByTestId("role-content"), "layout", LAYOUT));
+        await act(async () => listeners.transitionEnd({ data: { closing: true } }));
+        await act(async () => jest.advanceTimersByTime(transitionMs));
+        expect(contentStyle().opacity).toBe(0);
+
+        await act(async () => listeners.transitionEnd({ data: { closing: false } }));
+        await act(async () => jest.advanceTimersByTime(transitionMs * 2));
+        // Back from sign-up, Role appears again: nothing re-enters, nothing is announced twice.
+        await act(async () => listeners.transitionEnd({ data: { closing: false } }));
+        await act(async () => jest.advanceTimersByTime(transitionMs * 2));
+        expect(contentStyle().opacity).toBe(1);
+        expect(moveAccessibilityFocus).toHaveBeenCalledTimes(1);
       });
     });
 
