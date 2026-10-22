@@ -10,8 +10,10 @@ export type ButtonVariant = "primary" | "secondary" | "ghost" | "hero";
 export type ButtonSize = "md" | "lg";
 
 export type ButtonProps = {
-  /** Visible text; also the accessible name. */
+  /** Visible text; also the accessible name unless `accessibilityLabel` gives a fuller one. */
   label: string;
+  /** A fuller name for assistive technology, e.g. "Remove Photo 2" where many rows say "Remove". */
+  accessibilityLabel?: string;
   onPress?: () => void;
   variant?: ButtonVariant;
   size?: ButtonSize;
@@ -74,6 +76,7 @@ const forState = (classes: StateClasses, pressed: boolean) =>
 
 export function Button({
   label,
+  accessibilityLabel,
   onPress,
   variant = "primary",
   size = "md",
@@ -90,7 +93,11 @@ export function Button({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={loading ? `${label}, ${t("common.loading")}` : label}
+      accessibilityLabel={
+        loading
+          ? `${accessibilityLabel ?? label}, ${t("common.loading")}`
+          : (accessibilityLabel ?? label)
+      }
       accessibilityState={{ disabled: inactive, busy: loading }}
       disabled={inactive}
       onPress={onPress}

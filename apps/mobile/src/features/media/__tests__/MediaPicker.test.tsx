@@ -2,8 +2,11 @@ import "@/i18n";
 
 import { act, fireEvent, render, screen } from "@testing-library/react-native";
 import { router } from "expo-router";
-import { Linking } from "react-native";
+import { AccessibilityInfo, Linking } from "react-native";
 
+import { showToast } from "@/components/ui";
+
+import { MediaItemRow } from "../MediaItemRow";
 import { MediaPicker } from "../MediaPicker";
 import { MediaSourceSheet } from "../MediaSourceSheet";
 import type { MediaItem, MediaUpload } from "../useMediaUpload";
@@ -23,6 +26,10 @@ jest.mock(
   "react-native-safe-area-context",
   () => jest.requireActual("react-native-safe-area-context/jest/mock").default,
 );
+jest.mock("@/components/ui", () => ({
+  ...jest.requireActual("@/components/ui"),
+  showToast: jest.fn(),
+}));
 jest.mock("expo-glass-effect", () => ({
   GlassView: () => null,
   isLiquidGlassAvailable: () => false,
@@ -58,21 +65,30 @@ const makeUpload = (patch: Partial<MediaUpload> = {}): MediaUpload => ({
 const renderPicker = (upload: MediaUpload) =>
   render(<MediaPicker upload={upload} sourceSheet="/dev/media-source" />);
 
-beforeEach(() => jest.clearAllMocks());
+let announce: jest.SpyInstance;
+beforeEach(() => {
+  jest.clearAllMocks();
+  announce = jest
+    .spyOn(AccessibilityInfo, "announceForAccessibility")
+    .mockImplementation(() => undefined);
+});
+afterEach(() => announce.mockRestore());
 
 describe("MediaPicker", () => {
   it("empty: says what to add, and the one primary action adds it", async () => {
     await renderPicker(makeUpload());
 
-    expect(screen.getByText("No photos yet")).toBeTruthy();
+    expect(screen.getByText("No photos or videos yet")).toBeTruthy();
     expect(screen.getByText("Add up to 10 photos or videos.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Add photos" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add photos or videos" })).toBeTruthy();
   });
 
   it("photos only for a purpose without videos", async () => {
     await renderPicker(makeUpload({ acceptsVideo: false, max: 1 }));
 
+    expect(screen.getByText("No photos yet")).toBeTruthy();
     expect(screen.getByText("Add up to 1 photos.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add photos" })).toBeTruthy();
   });
 
   it("each item shows its status; a retryable failure offers Retry, every item Remove", async () => {
@@ -97,13 +113,18 @@ describe("MediaPicker", () => {
     expect(screen.getByTestId("media-item-3-status")).toHaveTextContent(
       "This video is over 100 MB.",
     );
-    expect(screen.getAllByRole("button", { name: "Retry" })).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: "Remove" })).toHaveLength(4);
+    // Each action says which file it acts on.
+    expect(screen.getByRole("button", { name: "Retry Photo 3" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /^Retry/ })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Remove Video 4" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /^Remove/ })).toHaveLength(4);
+    // The video tile says what it is (the tile is hidden from assistive technology: the row speaks).
+    expect(screen.getByText("Video", { includeHiddenElements: true })).toBeTruthy();
     expect(screen.getByTestId("media-count")).toHaveTextContent("4 of 10 added");
 
-    await fireEvent.press(screen.getByRole("button", { name: "Retry" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Retry Photo 3" }));
     expect(upload.retry).toHaveBeenCalledWith("media-3");
-    await fireEvent.press(screen.getAllByRole("button", { name: "Remove" })[1]);
+    await fireEvent.press(screen.getByRole("button", { name: "Remove Photo 2" }));
     expect(upload.remove).toHaveBeenCalledWith("media-2");
   });
 
@@ -120,6 +141,9 @@ describe("MediaPicker", () => {
     await renderPicker(upload);
 
     expect(screen.getByText("Camera access is off")).toBeTruthy();
+    expect(announce).toHaveBeenCalledWith(
+      "Camera access is off. To take photos here, allow camera access in Settings.",
+    );
     expect(screen.getByText("To take photos here, allow camera access in Settings.")).toBeTruthy();
 
     await fireEvent.press(screen.getByRole("button", { name: "Open settings" }));
@@ -130,31 +154,89 @@ describe("MediaPicker", () => {
     expect(upload.dismissPermissionNotice).toHaveBeenCalledTimes(2);
   });
 
-  it("Add asks camera or library in the sheet, then adds from the chosen source", async () => {
-    const upload = makeUpload();
+  it("Add asks camera or library; the picker opens over the sheet, which closes after", async () => {
+    let finishPicking!: () => void;
+    const upload = makeUpload({
+      add: jest.fn(() => new Promise<void>((resolve) => (finishPicking = resolve))),
+    });
     await renderPicker(upload);
 
-    await fireEvent.press(screen.getByRole("button", { name: "Add photos" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Add photos or videos" }));
     expect(router.push).toHaveBeenCalledWith("/dev/media-source");
 
-    // The sheet route: choosing closes it; the choice lands once it is gone.
     const sheet = await render(<MediaSourceSheet />);
+    expect(sheet.getByText("Add photos or videos")).toBeTruthy(); // the sheet speaks of videos too
     await fireEvent.press(sheet.getByRole("button", { name: "Choose from library" }));
-    expect(router.back).toHaveBeenCalled();
-    expect(upload.add).not.toHaveBeenCalled();
-    await act(async () => sheet.unmount());
 
+    // The library opens while the sheet is still up; the sheet goes once the picker returns.
     expect(upload.add).toHaveBeenCalledWith("library");
+    expect(router.back).not.toHaveBeenCalled();
+    await act(async () => finishPicking());
+    expect(router.back).toHaveBeenCalledTimes(1);
   });
 
-  it("a sheet closed without a choice adds nothing", async () => {
+  it("a sheet closed without a choice adds nothing and closes nothing more", async () => {
     const upload = makeUpload();
     await renderPicker(upload);
-    await fireEvent.press(screen.getByRole("button", { name: "Add photos" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Add photos or videos" }));
 
     const sheet = await render(<MediaSourceSheet />);
     await act(async () => sheet.unmount());
 
     expect(upload.add).not.toHaveBeenCalled();
+    expect(router.back).not.toHaveBeenCalled();
+  });
+
+  it("a second tap while the sheet opens opens nothing more", async () => {
+    await renderPicker(makeUpload());
+
+    const add = screen.getByRole("button", { name: "Add photos or videos" });
+    await fireEvent.press(add);
+    await fireEvent.press(screen.getByTestId("media-add"));
+
+    expect(router.push).toHaveBeenCalledTimes(1);
+  });
+
+  it("a camera or picker that fails to open says so", async () => {
+    const upload = makeUpload({ add: jest.fn(async () => Promise.reject(new Error("native"))) });
+    await renderPicker(upload);
+    await fireEvent.press(screen.getByRole("button", { name: "Add photos or videos" }));
+    const sheet = await render(<MediaSourceSheet />);
+
+    await act(async () => fireEvent.press(sheet.getByRole("button", { name: "Take a photo" })));
+
+    expect(showToast).toHaveBeenCalledWith({
+      message: "Couldn't open the camera or your photos. Try again.",
+      tone: "danger",
+    });
+    expect(router.back).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("MediaItemRow", () => {
+  it("announces the outcome once, never each progress step", async () => {
+    const view = await render(
+      <MediaItemRow item={item(1)} index={0} onRetry={jest.fn()} onRemove={jest.fn()} />,
+    );
+    await view.rerender(
+      <MediaItemRow
+        item={item(1, { progress: 0.8 })}
+        index={0}
+        onRetry={jest.fn()}
+        onRemove={jest.fn()}
+      />,
+    );
+    expect(announce).not.toHaveBeenCalled();
+
+    await view.rerender(
+      <MediaItemRow
+        item={item(1, { status: "done", progress: 1, key: "k" })}
+        index={0}
+        onRetry={jest.fn()}
+        onRemove={jest.fn()}
+      />,
+    );
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(announce).toHaveBeenCalledWith("Photo 1: Uploaded");
   });
 });

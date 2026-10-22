@@ -110,7 +110,9 @@ export function useMediaUpload({
     const live = entries.current;
     return () => {
       mounted.current = false;
+      // Every item, running or still waiting its turn: nothing is prepared or uploaded after this.
       live.forEach((entry) => entry.controller?.abort());
+      live.clear();
     };
   }, []);
 
@@ -122,15 +124,16 @@ export function useMediaUpload({
   const process = useCallback(
     async (id: string) => {
       const entry = entries.current.get(id);
-      if (!entry) return; // removed while it waited its turn
-      const controller = new AbortController();
-      entry.controller = controller;
+      const controller = entry?.controller;
+      // Removed, or the screen left, while it waited its turn.
+      if (!entry || !controller || controller.signal.aborted) return;
       try {
         if (!entry.prepared) {
           update(id, { status: "compressing", progress: 0, failure: null });
-          entry.prepared = await prepareMedia(entry.picked);
+          const prepared = await prepareMedia(entry.picked);
+          if (controller.signal.aborted) return;
+          entry.prepared = prepared;
         }
-        if (controller.signal.aborted) return;
         update(id, { status: "uploading", progress: 0, failure: null });
         const { key } = await uploadMedia({
           purpose,
@@ -147,8 +150,15 @@ export function useMediaUpload({
     [purpose, update],
   );
 
+  // The item's controller exists from the moment it is queued, so unmounting or removing it stops
+  // it even before its turn.
   const enqueue = useCallback(
     (id: string) => {
+      const entry = entries.current.get(id);
+      if (!entry) return;
+      if (!entry.controller || entry.controller.signal.aborted) {
+        entry.controller = new AbortController();
+      }
       queue.current = queue.current.then(() => process(id));
     },
     [process],

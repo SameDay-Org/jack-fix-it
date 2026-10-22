@@ -7,6 +7,7 @@ export const configMock = {
     baseUrl: new URL(`${API_ORIGIN}/`),
     timeoutMs: 15_000,
     uploadTimeoutMs: 120_000,
+    uploadMinBytesPerSecond: 131_072,
     passwordMinLength: 10,
   },
 };

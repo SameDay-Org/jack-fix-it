@@ -255,6 +255,44 @@ describe("useMediaUpload", () => {
     expect(result.current.items[0]).toMatchObject({ status: "uploading" });
   });
 
+  it("unmounting stops the files still waiting their turn too", async () => {
+    picker.launchImageLibraryAsync.mockResolvedValue(picked(asset(1), asset(2), asset(3)));
+    const { result, unmount } = await render();
+    await act(() => result.current.add("library"));
+    await flush();
+    expect(pending).toHaveLength(1);
+
+    await unmount();
+    await act(async () =>
+      pending[0].reject(Object.assign(new Error("Aborted"), { name: "AbortError" })),
+    );
+    await flush();
+
+    // Files 2 and 3 were never prepared nor uploaded.
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(upload).toHaveBeenCalledTimes(1);
+  });
+
+  it("unmounting while a file is being prepared uploads nothing", async () => {
+    picker.launchImageLibraryAsync.mockResolvedValue(picked(asset(1)));
+    let finishCompressing!: () => void;
+    prepare.mockImplementationOnce(
+      (file: PickedMedia) =>
+        new Promise((resolve) => {
+          finishCompressing = () =>
+            resolve({ uri: `${file.uri}.compressed`, contentType: "image/jpeg", kind: file.kind });
+        }),
+    );
+    const { result, unmount } = await render();
+    await act(() => result.current.add("library"));
+
+    await unmount();
+    await act(async () => finishCompressing());
+    await flush();
+
+    expect(upload).not.toHaveBeenCalled();
+  });
+
   it("unmounting cancels the upload in flight", async () => {
     picker.launchImageLibraryAsync.mockResolvedValue(picked(asset(1)));
     const { result, unmount } = await render();

@@ -101,14 +101,22 @@
       "title": "Añadir fotos",
       "body": "Usa la cámara o elige entre las fotos de este teléfono.",
       "camera": "Tomar una foto",
-      "library": "Elegir de la galería"
+      "library": "Elegir de la galería",
+      "titleMedia": "Añadir fotos o videos",
+      "bodyMedia": "Usa la cámara o elige fotos y videos de este teléfono."
     },
     "permission": {
       "cameraTitle": "El acceso a la cámara está desactivado",
       "cameraBody": "Para tomar fotos aquí, permite el acceso a la cámara en Configuración.",
       "openSettings": "Abrir Configuración",
       "notNow": "Ahora no"
-    }
+    },
+    "addMedia": "Añadir fotos o videos",
+    "emptyTitleMedia": "Aún no hay fotos ni videos",
+    "pickFailed": "No se pudo abrir la cámara ni tus fotos. Inténtalo de nuevo.",
+    "videoTile": "Video",
+    "itemRetry": "Reintentar {{name}}",
+    "itemRemove": "Quitar {{name}}"
   },
   "permissions": {
     "camera": "Jack usa la cámara para tomar fotos de lo que hay que arreglar.",

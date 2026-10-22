@@ -1,6 +1,7 @@
 import {
   DEFAULT_PASSWORD_MIN_LENGTH,
   DEFAULT_TIMEOUT_MS,
+  DEFAULT_UPLOAD_MIN_BYTES_PER_SECOND,
   DEFAULT_UPLOAD_TIMEOUT_MS,
   readApiConfig,
 } from "../config";
@@ -62,6 +63,13 @@ describe("readApiConfig", () => {
     expect(readApiConfig({ ...base, uploadTimeoutMs: "60000" }).uploadTimeoutMs).toBe(60_000);
     expect(() => readApiConfig({ ...base, uploadTimeoutMs: "-1" })).toThrow(
       /EXPO_PUBLIC_UPLOAD_TIMEOUT_MS/,
+    );
+    expect(readApiConfig(base).uploadMinBytesPerSecond).toBe(DEFAULT_UPLOAD_MIN_BYTES_PER_SECOND);
+    expect(
+      readApiConfig({ ...base, uploadMinBytesPerSecond: "65536" }).uploadMinBytesPerSecond,
+    ).toBe(65_536);
+    expect(() => readApiConfig({ ...base, uploadMinBytesPerSecond: "fast" })).toThrow(
+      /EXPO_PUBLIC_UPLOAD_MIN_BYTES_PER_SECOND/,
     );
   });
 

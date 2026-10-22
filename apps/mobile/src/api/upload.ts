@@ -93,6 +93,13 @@ async function createUpload(
 
 const hasExpired = (ticket: UploadTicket): boolean => Date.now() >= Date.parse(ticket.expires_at);
 
+const MS_PER_SECOND = 1000;
+
+/** The PUT's timeout: the fixed part, plus the time to send `bytes` at the slowest uplink waited for. */
+const uploadTimeoutFor = (bytes: number): number =>
+  apiConfig.uploadTimeoutMs +
+  Math.ceil((bytes / apiConfig.uploadMinBytesPerSecond) * MS_PER_SECOND);
+
 /** The URL the API returned, refused if it would send the file in the clear outside development. */
 function storageUrl(ticket: UploadTicket): string {
   const { protocol } = new URL(ticket.upload_url);
@@ -127,7 +134,7 @@ function putToStorage(
     xhr.open("PUT", url);
     // Exactly the signed headers: nothing added (no Authorization), nothing dropped.
     for (const [name, value] of Object.entries(ticket.headers)) xhr.setRequestHeader(name, value);
-    xhr.timeout = apiConfig.uploadTimeoutMs;
+    xhr.timeout = uploadTimeoutFor(body.size);
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && event.total > 0) onProgress?.(event.loaded / event.total);
     };

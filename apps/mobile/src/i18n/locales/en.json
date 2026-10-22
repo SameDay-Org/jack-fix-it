@@ -101,14 +101,22 @@
       "title": "Add photos",
       "body": "Use the camera, or pick from the photos on this phone.",
       "camera": "Take a photo",
-      "library": "Choose from library"
+      "library": "Choose from library",
+      "titleMedia": "Add photos or videos",
+      "bodyMedia": "Use the camera, or pick photos and videos from this phone."
     },
     "permission": {
       "cameraTitle": "Camera access is off",
       "cameraBody": "To take photos here, allow camera access in Settings.",
       "openSettings": "Open settings",
       "notNow": "Not now"
-    }
+    },
+    "addMedia": "Add photos or videos",
+    "emptyTitleMedia": "No photos or videos yet",
+    "pickFailed": "Couldn't open the camera or your photos. Try again.",
+    "videoTile": "Video",
+    "itemRetry": "Retry {{name}}",
+    "itemRemove": "Remove {{name}}"
   },
   "permissions": {
     "camera": "Jack uses the camera to take photos of what needs fixing.",

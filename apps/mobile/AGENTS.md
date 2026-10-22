@@ -83,7 +83,8 @@ options={sheetOptions([0.5, 0.95])} />`, or `"fitToContents"`), rendering `Sheet
   `POST /v1/uploads` for a URL signed for the exact type and size, then PUTs the bytes (XHR, for
   progress) to exactly that URL with exactly its headers and never the bearer token; one retry on
   a network failure, with a fresh URL if it expired; `UploadRejectedError` (403/422) and
-  `UploadFailedError` (storage refusal, network, `EXPO_PUBLIC_UPLOAD_TIMEOUT_MS`). `MediaPicker`
+  `UploadFailedError` (storage refusal, network, or past `EXPO_PUBLIC_UPLOAD_TIMEOUT_MS` plus the
+  file's time at `EXPO_PUBLIC_UPLOAD_MIN_BYTES_PER_SECOND`). `MediaPicker`
   renders the list and asks "Camera or library" in `MediaSourceSheet`, a sheet route in the
   caller's stack; `ProgressRing` (kit) draws progress without SVG. Local uploads need an
   S3-compatible server on the host; docker-compose has none, see the commands below.

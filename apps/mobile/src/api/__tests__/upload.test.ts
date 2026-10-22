@@ -153,7 +153,11 @@ describe("uploadMedia", () => {
     expect(xhr.url).toBe(ticket(1).upload_url);
     expect(xhr.headers).toEqual(ticket(1).headers);
     expect(xhr.body).toBe(BLOB);
-    expect(xhr.timeout).toBe(configMock.apiConfig.uploadTimeoutMs);
+    // The fixed part plus the time to send the file at the slowest uplink waited for.
+    const { uploadTimeoutMs, uploadMinBytesPerSecond } = configMock.apiConfig;
+    expect(xhr.timeout).toBe(
+      uploadTimeoutMs + Math.ceil((FILE_SIZE / uploadMinBytesPerSecond) * 1000),
+    );
 
     xhr.respond(200);
     await upload;

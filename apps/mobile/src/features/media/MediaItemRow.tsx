@@ -1,6 +1,7 @@
 import type { TFunction } from "i18next";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Image, Text, View } from "react-native";
+import { AccessibilityInfo, Image, Text, View } from "react-native";
 
 import { Button, Card, ProgressRing } from "@/components/ui";
 import { continuousCorners } from "@/theme";
@@ -40,13 +41,25 @@ function statusText(t: TFunction, item: MediaItem): string {
  * One picked file on a bubble card: its thumbnail (a progress ring over it while it is prepared
  * and uploaded, a success dot once it is in), its name and status, and its actions: Retry when
  * trying again can help, and Remove. The thumbnail and the ring keep a fixed size, so progress
- * never moves the layout.
+ * never moves the layout. Assistive technology hears the outcome once (uploaded, or what went
+ * wrong), not every percent.
  */
 export function MediaItemRow({ item, index, onRetry, onRemove }: MediaItemRowProps) {
   const { t } = useTranslation();
   const name = t(item.kind === "video" ? "media.video" : "media.photo", { number: index + 1 });
   const working = item.status === "compressing" || item.status === "uploading";
   const failed = item.status === "failed";
+  const status = statusText(t, item);
+
+  // Announce an outcome when it happens, not on mount and not for every progress step.
+  const announced = useRef(item.status);
+  useEffect(() => {
+    if (announced.current === item.status) return;
+    announced.current = item.status;
+    if (item.status === "done" || item.status === "failed") {
+      AccessibilityInfo.announceForAccessibility(`${name}: ${status}`);
+    }
+  }, [item.status, name, status]);
 
   return (
     <Card testID={`media-item-${index}`}>
@@ -65,7 +78,11 @@ export function MediaItemRow({ item, index, onRetry, onRemove }: MediaItemRowPro
               resizeMode="cover"
               accessibilityIgnoresInvertColors
             />
-          ) : null}
+          ) : (
+            <View className="h-full w-full items-center justify-center">
+              <Text className="text-caption text-white">{t("media.videoTile")}</Text>
+            </View>
+          )}
           {working ? (
             <View className="absolute inset-0 items-center justify-center bg-navy-900/40">
               <ProgressRing
@@ -83,16 +100,25 @@ export function MediaItemRow({ item, index, onRetry, onRemove }: MediaItemRowPro
           <Text className="text-headline text-navy-900">{name}</Text>
           <Text
             className={failed ? "text-footnote text-danger" : "text-footnote text-gray-500"}
-            accessibilityLiveRegion="polite"
             testID={`media-item-${index}-status`}
           >
-            {statusText(t, item)}
+            {status}
           </Text>
           <View className="-ml-5 flex-row flex-wrap">
             {failed && isRetryable(item.failure) ? (
-              <Button label={t("media.retry")} variant="ghost" onPress={onRetry} />
+              <Button
+                label={t("media.retry")}
+                accessibilityLabel={t("media.itemRetry", { name })}
+                variant="ghost"
+                onPress={onRetry}
+              />
             ) : null}
-            <Button label={t("media.remove")} variant="ghost" onPress={onRemove} />
+            <Button
+              label={t("media.remove")}
+              accessibilityLabel={t("media.itemRemove", { name })}
+              variant="ghost"
+              onPress={onRemove}
+            />
           </View>
         </View>
       </View>
