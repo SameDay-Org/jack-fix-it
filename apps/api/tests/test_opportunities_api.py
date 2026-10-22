@@ -32,6 +32,7 @@ from app.modules.users.models import User
 from app.modules.users.types import UserRole
 from app.observability import JsonFormatter
 from tests.conftest import make_settings
+from tests.helpers import as_status_writer
 from tests.test_requests_api import Caller, FakeStorage, make_caller
 
 EXCERPT = 12
@@ -133,8 +134,9 @@ async def make_request(
         next_action=NEXT_ACTION,
         first_contact_at=T0,
     )
-    session.add(request)
-    await session.flush()
+    async with as_status_writer(session):  # the database guard (#163)
+        session.add(request)
+        await session.flush()
     return request.id
 
 
