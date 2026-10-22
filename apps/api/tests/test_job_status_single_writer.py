@@ -46,8 +46,17 @@ STATUS_WRITERS = {
 }
 
 
+# The flag the database guard (#163) checks: only the state machines may set it.
+STATUS_WRITER_FLAG = "app.status_writer"
+
 # Reviewed exceptions: (file under apps/api, function, rule) -> reason. Keep it short.
 ALLOW_LIST: dict[tuple[str, str, str], str] = {
+    ("app/modules/requests/state_machine.py", "_status_writer", "status_writer_flag"): (
+        "RequestStateMachine sets the database guard's flag around its single status write"
+    ),
+    ("app/modules/jobs/service.py", "_status_writer", "status_writer_flag"): (
+        "JobStateMachine sets the database guard's flag around its single status write"
+    ),
     ("app/modules/jobs/service.py", "transition", "setattr_dynamic"): (
         "sets the entry timestamp named in _ENTRY_TIMESTAMPS (started_at, completed_at, "
         "confirmed_at) on the job it locked; never status"
@@ -260,6 +269,10 @@ def findings(
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             if target.raw_sql_update.search(node.value) or target.raw_sql_insert.search(node.value):
                 found.append((line, "raw_sql"))
+            # The database guard's flag (#163): set_config('app.status_writer', ...) or
+            # SET LOCAL app.status_writer lets a transaction change any status.
+            if STATUS_WRITER_FLAG in node.value:
+                found.append((line, "status_writer_flag"))
             continue
         if not isinstance(node, ast.Call):
             continue
@@ -740,3 +753,30 @@ def test_each_state_machine_has_exactly_one_exempt_write() -> None:
         source = path.read_text(encoding="utf-8")
         assert len(own_status_writes(source)) == 1, path
         assert guarded_writes(path, source) == []
+
+
+# The database guard (#163): its flag belongs to the two state machines.
+STATUS_WRITER_PLANTS = {
+    "set_config": (
+        "from sqlalchemy import text\n"
+        "async def f(session) -> None:\n"
+        "    statement = \"SELECT set_config('app.status_writer', 'state_machine', true)\"\n"
+        "    await session.execute(text(statement))\n"
+    ),
+    "set_local": (
+        "async def f(connection) -> None:\n"
+        "    await connection.exec_driver_sql(\"SET LOCAL app.status_writer = 'state_machine'\")\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("name", STATUS_WRITER_PLANTS)
+def test_static_guard_flags_set_config_outside_machines(name: str) -> None:
+    for target in (JOBS, REQUESTS):
+        assert status_writes(STATUS_WRITER_PLANTS[name], "planted.py", target) != []
+
+
+@pytest.mark.parametrize("machine", [STATE_MACHINE, REQUEST_STATE_MACHINE])
+def test_the_flag_outside_a_machines_status_writer_is_flagged(machine: Path) -> None:
+    body = "await session.execute(text(\"SET LOCAL app.status_writer = 'x'\"))"
+    assert guarded_writes(machine, planted(machine, body)) != []

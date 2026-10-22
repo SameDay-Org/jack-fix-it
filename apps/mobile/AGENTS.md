@@ -18,6 +18,16 @@ rules apply.
   gray-50) and of the top safe-area backdrop, which stays outside scrolling content. The root
   layout mounts no `StatusBar`, and ESLint rejects `expo-status-bar` or safe-area view imports
   in `src/app` (`eslint.config.js`).
+- Welcome's panel (#148): the white bubble rises into Role or Login (`usePanelTransition`,
+  `src/features/auth`): a UI-thread transform over `motion.panelRiseMs`, corners and color
+  easing into the page, the hero dimming by `motion.panelHeroDim`. Welcome prefetches both
+  routes at rest; pushed with `from: "welcome"`, they take `risenFromWelcome`'s options (Android:
+  a transparent modal pushed as the rise starts, so Welcome keeps painting under it both ways;
+  iOS: `fade`, pushed as it ends). `useContentTransition` hands off through `panelHandoff` (scoped to the `(auth)` layout by
+  `PanelHandoffProvider`, so a sign-in takes it away and the next Welcome starts at rest): the
+  screen fades in only once laid out, shown by the stack and the panel risen, mirrors the panel's
+  status bar until then, focuses the title, and fades out before back (hardware back only while
+  focused). Reduce Motion: a crossfade over Welcome.
 - Routing (D5.3, #33): `src/app/(auth)` holds welcome, role, sign-up and login; `src/app/(app)`
   holds the signed-in screens. `SessionGate` (`src/features/auth`) is the one gate: `restoring`
   keeps the native splash, `restoreFailure: "offline"` shows the offline screen, and

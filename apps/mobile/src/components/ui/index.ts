@@ -31,3 +31,4 @@ export type { WordRotatorProps } from "./WordRotator";
 export type { ReduceTransparency } from "./useReduceTransparency";
 export { CodeInput } from "./CodeInput";
 export type { CodeInputProps } from "./CodeInput";
+export { moveAccessibilityFocus } from "./focus";
