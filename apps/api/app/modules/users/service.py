@@ -9,6 +9,7 @@ from datetime import datetime
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import violated_constraint
 from app.modules.users.errors import EmailAlreadyRegisteredError, PhoneUnavailableError
 from app.modules.users.models import User
 from app.modules.users.repository import UserRepository
@@ -56,7 +57,7 @@ class UserService:
             await self._users.add(user)
         except IntegrityError as exc:
             await savepoint.rollback()
-            if _violated_constraint(exc) == _EMAIL_UNIQUE_CONSTRAINT:
+            if violated_constraint(exc) == _EMAIL_UNIQUE_CONSTRAINT:
                 raise EmailAlreadyRegisteredError from None
             raise
         await savepoint.commit()
@@ -94,7 +95,7 @@ class UserService:
             await self._users.set_verified_phone(user_id, phone, verified_at)
         except IntegrityError as exc:
             await savepoint.rollback()
-            if _violated_constraint(exc) == _PHONE_UNIQUE_CONSTRAINT:
+            if violated_constraint(exc) == _PHONE_UNIQUE_CONSTRAINT:
                 raise PhoneUnavailableError from None
             raise
         await savepoint.commit()
@@ -112,9 +113,3 @@ def _to_account(user: User) -> UserAccount:
         phone=user.phone,
         phone_verified_at=user.phone_verified_at,
     )
-
-
-def _violated_constraint(exc: IntegrityError) -> str | None:
-    # asyncpg's exception, wrapped by SQLAlchemy's DBAPI adapter, carries the constraint name.
-    name = getattr(exc.orig.__cause__, "constraint_name", None) if exc.orig else None
-    return name if isinstance(name, str) else None

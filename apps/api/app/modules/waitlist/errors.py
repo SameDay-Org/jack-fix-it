@@ -14,6 +14,17 @@ class InvalidCategoryError(AppError):
     message = "The category is not available."
 
 
+class WaitlistWriteError(Exception):
+    """A waitlist write broke a constraint the join does not expect: a server error (500).
+
+    Carries the constraint's name only. The driver's message holds the row's values (an email,
+    a phone), so it is raised `from None` and never reaches the logs or Sentry."""
+
+    def __init__(self, constraint: str | None) -> None:
+        super().__init__(f"waitlist write broke constraint {constraint}")
+        self.constraint = constraint
+
+
 class InvalidPhoneNumberError(AppError):
     """A phone outside the allowed country codes (PHONE_ALLOWED_COUNTRY_CODES)."""
 
