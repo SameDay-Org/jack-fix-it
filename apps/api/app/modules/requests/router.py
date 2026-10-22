@@ -14,6 +14,7 @@ from app.modules.categories.service import CategoryService
 from app.modules.requests.schemas import RequestCreate, RequestOut, RequestPage
 from app.modules.requests.service import RequestConfig, ServiceRequestService
 from app.modules.service_areas.service import ServiceAreaService
+from app.queue import JobQueue, get_job_queue
 from app.rate_limit import RateLimiter, enforce_limit, get_rate_limiter
 
 router = APIRouter(prefix="/requests", tags=["requests"])
@@ -27,6 +28,7 @@ def get_request_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     storage: Annotated[Storage, Depends(get_storage)],
     settings: Annotated[Settings, Depends(get_app_settings)],
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
 ) -> ServiceRequestService:
     return ServiceRequestService(
         session,
@@ -35,6 +37,7 @@ def get_request_service(
         ServiceAreaService(session),
         storage,
         RequestConfig.from_settings(settings),
+        queue,
     )
 
 

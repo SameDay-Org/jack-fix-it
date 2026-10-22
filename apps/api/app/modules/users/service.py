@@ -4,6 +4,7 @@ Returns UserAccount / UserCredentials values (types.py), never the ORM model (AD
 """
 
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 
 from sqlalchemy.exc import IntegrityError
@@ -24,6 +25,12 @@ class UserService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._users = UserRepository(session)
+
+    async def active_ids_with_role(
+        self, user_ids: Collection[uuid.UUID], role: UserRole
+    ) -> set[uuid.UUID]:
+        """The ids among `user_ids` of active (not suspended) accounts with `role`."""
+        return await self._users.active_ids_with_role(user_ids, role)
 
     async def get_by_id(self, user_id: uuid.UUID) -> UserAccount | None:
         user = await self._users.get_by_id(user_id)

@@ -12,6 +12,7 @@ from arq.connections import RedisSettings
 from app.config import get_settings
 from app.db import create_engine, create_session_factory
 from app.integrations.expo_push import ExpoPushSender
+from app.modules.dispatch.tasks import dispatch_request
 from app.modules.notifications.push_tasks import check_push_receipts, send_push
 from app.observability import configure_logging, init_sentry
 
@@ -27,7 +28,8 @@ async def startup(ctx: dict[str, Any]) -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
     init_sentry(settings)
-    # What the tasks use (push_tasks.PushDeps.from_context); ARQ adds ctx["redis"] itself.
+    # What the tasks use (dispatch.tasks, push_tasks.PushDeps.from_context); ARQ adds
+    # ctx["redis"] itself.
     engine = create_engine(settings)
     ctx["settings"] = settings
     ctx["engine"] = engine
@@ -51,6 +53,7 @@ def every(minutes: int) -> set[int]:
 class WorkerSettings:
     functions = (
         ping,
+        dispatch_request,
         # No result is kept, so a receipt that asks for a resend can queue the message's job id
         # again once the first run is over; the tries match the sends per device.
         func(send_push, keep_result=0, max_tries=get_settings().push_max_attempts),

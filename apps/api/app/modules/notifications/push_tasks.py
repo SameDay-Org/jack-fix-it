@@ -53,13 +53,9 @@ from app.integrations.expo_push import (
 )
 from app.modules.devices.service import DeviceService, PushTarget
 from app.modules.notifications import catalog
-from app.modules.notifications.service import (
-    InvalidPushError,
-    JobQueue,
-    PushRequest,
-    enqueue_push,
-)
+from app.modules.notifications.service import InvalidPushError, PushRequest, enqueue_push
 from app.modules.users.service import UserService
+from app.queue import JobQueue
 
 logger = logging.getLogger(__name__)
 

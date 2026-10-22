@@ -5,14 +5,14 @@ worker (send_push), with an ARQ job id derived from `message_id`: the same event
 sends once. The text is resolved in the worker, in the user's locale at send time.
 """
 
-import asyncio
 import re
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Final, Protocol
+from typing import Final
 
 from app.modules.notifications import catalog, deep_links
+from app.queue import JobQueue, enqueue
 
 SEND_PUSH_TASK: Final = "send_push"
 # A stable id per event, chosen by the feature, e.g. "quote_ready:<quote id>".
@@ -22,12 +22,6 @@ MAX_PARAM_LENGTH: Final = 64
 
 class InvalidPushError(ValueError):
     """A programming error in the caller: unknown key, wrong params or a link not allowed."""
-
-
-class JobQueue(Protocol):
-    async def enqueue_job(self, function: str, *args: Any, _job_id: str | None = None) -> object:
-        """ARQ's ArqRedis.enqueue_job: does nothing when a job with this id already exists."""
-        ...
 
 
 @dataclass(frozen=True)
@@ -82,15 +76,15 @@ async def enqueue_push(
     """
     request = PushRequest(user_id, message_id, title_key, body_key, dict(params), deep_link)
     request.validate()
-    async with asyncio.timeout(timeout_seconds):
-        job = await queue.enqueue_job(
-            SEND_PUSH_TASK,
-            str(user_id),
-            message_id,
-            title_key,
-            body_key,
-            dict(params),
-            deep_link,
-            _job_id=request.job_id,
-        )
-    return job is not None
+    return await enqueue(
+        queue,
+        SEND_PUSH_TASK,
+        str(user_id),
+        message_id,
+        title_key,
+        body_key,
+        dict(params),
+        deep_link,
+        job_id=request.job_id,
+        timeout_seconds=timeout_seconds,
+    )

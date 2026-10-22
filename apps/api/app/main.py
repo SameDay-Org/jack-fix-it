@@ -4,9 +4,9 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from arq.connections import ArqRedis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from redis.asyncio import Redis
 
 from app.api import v1_router
 from app.config import Settings, get_settings
@@ -28,7 +28,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Neither client connects here; they connect on first use.
         engine = create_engine(settings)
-        redis = Redis.from_url(settings.redis_url)
+        # ARQ's own client (a Redis): rate limits and codes use it as is, and routes can queue
+        # jobs for the worker through it (app/queue.py).
+        redis = ArqRedis.from_url(settings.redis_url)
         app.state.engine = engine
         app.state.session_factory = create_session_factory(engine)
         app.state.redis = redis

@@ -5,6 +5,9 @@ media in one transaction (one savepoint): a failure leaves nothing behind. The s
 origin (app), language (the caller's locale) and status (received); urgency and preferred
 contact are not accepted from the client yet (#45 defines their values).
 
+After the commit, create queues dispatch (#48) for the worker; a failed or slow enqueue is
+logged and never fails the request (the BDC can dispatch it again).
+
 Customers read only their own requests: another customer's id answers 404 (ensure_owner).
 Logs carry the request id, the user id and counts: never the description, the address, media
 keys or URLs.
@@ -19,6 +22,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from pydantic import JsonValue
+from redis.exceptions import RedisError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +33,7 @@ from app.modules.addresses.service import AddressService
 from app.modules.auth.permissions import ensure_owner
 from app.modules.categories.intake import InvalidAnswersError, validate_answers
 from app.modules.categories.service import BrokenIntakeQuestionsError, CategoryService
+from app.modules.dispatch.service import enqueue_dispatch
 from app.modules.requests.customer_status import REQUEST_CUSTOMER_STATUS
 from app.modules.requests.errors import (
     InvalidCategoryError,
@@ -55,6 +60,7 @@ from app.modules.service_areas.service import ServiceAreaService
 from app.modules.uploads.schemas import UploadPurpose
 from app.modules.uploads.service import owned_upload
 from app.modules.users.types import UserAccount
+from app.queue import JobQueue
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +72,7 @@ class RequestConfig:
     list_default_limit: int
     list_max_limit: int
     media_url_ttl_seconds: int
+    enqueue_timeout_seconds: float
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "RequestConfig":
@@ -75,6 +82,7 @@ class RequestConfig:
             list_default_limit=settings.request_list_default_limit,
             list_max_limit=settings.request_list_max_limit,
             media_url_ttl_seconds=settings.download_url_ttl_seconds,
+            enqueue_timeout_seconds=settings.job_enqueue_timeout_seconds,
         )
 
 
@@ -87,6 +95,7 @@ class ServiceRequestService:
         service_areas: ServiceAreaService,
         storage: Storage,
         config: RequestConfig,
+        queue: JobQueue,
     ) -> None:
         self._session = session
         self._requests = ServiceRequestRepository(session)
@@ -95,6 +104,7 @@ class ServiceRequestService:
         self._service_areas = service_areas
         self._storage = storage
         self._config = config
+        self._queue = queue
 
     async def create(self, user: UserAccount, data: RequestCreate) -> RequestOut:
         if data.preferred_date is not None and data.preferred_date < datetime.now(UTC).date():
@@ -143,7 +153,16 @@ class ServiceRequestService:
                 "media_count": len(media_kinds),
             },
         )
+        await self._queue_dispatch(request.id)
         return await self._detail(request)
+
+    async def _queue_dispatch(self, request_id: uuid.UUID) -> None:
+        """Hands the committed request to dispatch. Never fails the create: the request is
+        saved, and the BDC can dispatch it again."""
+        try:
+            await enqueue_dispatch(self._queue, request_id, self._config.enqueue_timeout_seconds)
+        except (RedisError, OSError):  # TimeoutError is an OSError
+            logger.error("dispatch_enqueue_failed", extra={"service_request_id": str(request_id)})
 
     async def get(self, user: UserAccount, request_id: uuid.UUID) -> RequestOut:
         request = await self._requests.get(request_id)
