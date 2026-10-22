@@ -32,6 +32,10 @@ from app.modules.users.types import UserAccount, UserRole
 
 logger = logging.getLogger(__name__)
 
+# The statuses are part of this service's interface: other modules take RequestStatus from here,
+# never from requests.models (ADR 0003).
+__all__ = ["LockedRequest", "RequestStateMachine", "RequestStatus"]
+
 _ACTOR_KIND_BY_ROLE: Final = {
     UserRole.CUSTOMER: ActorKind.CUSTOMER,
     UserRole.AGENT: ActorKind.STAFF,

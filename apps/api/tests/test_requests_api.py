@@ -1,5 +1,6 @@
 """Service requests over HTTP: create, list and read (D8.1, #42)."""
 
+import asyncio
 import base64
 import json
 import logging
@@ -13,6 +14,7 @@ from typing import Any
 import httpx
 import pytest
 from fastapi import FastAPI
+from redis.exceptions import RedisError
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +28,7 @@ from app.modules.requests.models import RequestMedia, RequestStatus, ServiceRequ
 from app.modules.users.models import User
 from app.modules.users.types import UserRole
 from app.observability import JsonFormatter
+from app.queue import get_job_queue
 from app.rate_limit import get_rate_limiter
 from tests.conftest import TEST_JWT_SECRET, InMemoryRateLimiter, make_settings
 
@@ -37,6 +40,7 @@ CREATE_LIMIT = 3
 LIST_DEFAULT = 1
 LIST_MAX = 2
 MEDIA_TTL = 120
+ENQUEUE_TIMEOUT = 0.05
 NOW = 1_000.0
 
 DESCRIPTION = "Water leaks under the kitchen sink"
@@ -73,7 +77,43 @@ def settings() -> Settings:
         request_list_default_limit=LIST_DEFAULT,
         request_list_max_limit=LIST_MAX,
         download_url_ttl_seconds=MEDIA_TTL,
+        job_enqueue_timeout_seconds=ENQUEUE_TIMEOUT,
     )
+
+
+@dataclass
+class RecordingQueue:
+    """ARQ's enqueue_job, recorded: a known job id is not queued again. `failure` makes every
+    call raise it; `hang` makes every call wait for ever (the caller's deadline must end it)."""
+
+    jobs: dict[str, tuple[str, tuple[object, ...]]] = field(default_factory=dict)
+    failure: Exception | None = None
+    hang: bool = False
+    before: list[str] = field(default_factory=list)  # what had happened at each enqueue
+
+    async def enqueue_job(self, function: str, *args: object, _job_id: str | None = None) -> object:
+        self.before.append(",".join(EVENTS))
+        if self.failure is not None:
+            raise self.failure
+        if self.hang:
+            await asyncio.Event().wait()
+        assert _job_id is not None
+        if _job_id in self.jobs:
+            return None
+        self.jobs[_job_id] = (function, args)
+        return object()
+
+
+# What the session did so far in a create: "commit" entries, read by RecordingQueue.
+EVENTS: list[str] = []
+
+
+@pytest.fixture(autouse=True)
+def queue(app: FastAPI) -> RecordingQueue:
+    recorder = RecordingQueue()
+    app.dependency_overrides[get_job_queue] = lambda: recorder
+    EVENTS.clear()
+    return recorder
 
 
 @pytest.fixture
@@ -754,3 +794,41 @@ def test_customer_status_mapping_is_total_and_uses_glossary_keys() -> None:
     assert len(keys) == 11
     assert {status.value: REQUEST_CUSTOMER_STATUS[status] for status in RequestStatus} == expected
     assert set(REQUEST_CUSTOMER_STATUS.values()) <= keys
+
+
+# Dispatch trigger (D9.1, #48)
+
+
+async def test_create_request_enqueues_after_commit_and_enqueue_failure_does_not_fail_create(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    queue: RecordingQueue,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ana = await make_caller(db_session)
+    commit = AsyncSession.commit
+
+    async def recorded_commit(self: AsyncSession) -> None:
+        await commit(self)
+        EVENTS.append("commit")
+
+    monkeypatch.setattr(AsyncSession, "commit", recorded_commit)
+
+    # 1. Queued once, after the request's commit, under a job id of the request.
+    created = await create(db_client, ana)
+    assert created.status_code == 201
+    request_id = created.json()["id"]
+    assert queue.jobs == {f"dispatch:{request_id}": ("dispatch_request", (request_id,))}
+    assert queue.before == ["commit"]
+
+    # 2. Redis fails, or never answers: the request is still created, and the failure logged.
+    for broken in (RecordingQueue(failure=RedisError("down")), RecordingQueue(hang=True)):
+        queue.failure, queue.hang = broken.failure, broken.hang
+        with caplog.at_level(logging.ERROR):
+            response = await asyncio.wait_for(create(db_client, ana), timeout=5)
+        assert response.status_code == 201
+        [record] = [r for r in caplog.records if r.message == "dispatch_enqueue_failed"]
+        assert record.__dict__["service_request_id"] == response.json()["id"]
+        caplog.clear()
