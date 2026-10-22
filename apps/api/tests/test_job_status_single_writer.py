@@ -41,6 +41,7 @@ class StatusModel:
     model: str
     package: str
     table: str
+    state_machine: Path
 
     @property
     def models_module(self) -> str:
@@ -53,7 +54,9 @@ class StatusModel:
         )
 
 
-JOBS = StatusModel(model="Job", package="app.modules.jobs", table="jobs")
+JOBS = StatusModel(
+    model="Job", package="app.modules.jobs", table="jobs", state_machine=STATE_MACHINE
+)
 
 
 def _model_names(tree: ast.Module, target: StatusModel) -> tuple[set[str], set[str]]:
@@ -249,16 +252,64 @@ def status_writes(
     return [f"{path}:{line}" for line in sorted(set(found))]
 
 
+def _loads_for_update(value: ast.expr) -> bool:
+    """`await self.<repository>.get_for_update(...)`: the row a state machine just locked."""
+    return (
+        isinstance(value, ast.Await)
+        and isinstance(value.value, ast.Call)
+        and isinstance(value.value.func, ast.Attribute)
+        and value.value.func.attr == "get_for_update"
+        and isinstance(value.value.func.value, ast.Attribute)
+        and isinstance(value.value.func.value.value, ast.Name)
+        and value.value.func.value.value.id == "self"
+    )
+
+
+def own_status_writes(source: str) -> set[int]:
+    """The lines of a state machine's own write: `<row>.status = ...` inside its `transition`
+    method, where `<row>` was bound there from `await self.<repository>.get_for_update(...)`.
+    Nothing else in the file is exempt: not setattr, not another row, not another function."""
+    lines: set[int] = set()
+    for function in ast.walk(ast.parse(source)):
+        if not isinstance(function, ast.AsyncFunctionDef) or function.name != "transition":
+            continue
+        rows = {
+            node.targets[0].id
+            for node in ast.walk(function)
+            if isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and _loads_for_update(node.value)
+        }
+        for node in ast.walk(function):
+            if (
+                isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(target := node.targets[0], ast.Attribute)
+                and target.attr == "status"
+                and isinstance(target.value, ast.Name)
+                and target.value.id in rows
+            ):
+                lines.add(node.lineno)
+    return lines
+
+
+def guarded_writes(path: Path, source: str, target: StatusModel = JOBS) -> list[str]:
+    """The status writes the guard reports in one app file, as "path:line". Every file is
+    scanned, the state machines' too; only each machine's own write is exempt. `.status =`
+    fits any model, so both guards exempt both machines' own writes, and nothing more."""
+    relative = path.relative_to(APP_DIR.parent).as_posix()
+    writes = status_writes(source, relative, target)
+    if path in STATUS_WRITERS:
+        own = {f"{relative}:{line}" for line in own_status_writes(source)}
+        writes = [write for write in writes if write not in own]
+    return writes
+
+
 def test_no_status_assignment_outside_state_machine() -> None:
     writes: list[str] = []
     for path in sorted(APP_DIR.rglob("*.py")):
-        if path == STATE_MACHINE:
-            continue
-        relative = path.relative_to(APP_DIR.parent).as_posix()
-        # Another model's state machine may assign its own `.status`, never the jobs'.
-        writes += status_writes(
-            path.read_text(encoding="utf-8"), relative, attributes=path not in STATUS_WRITERS
-        )
+        writes += guarded_writes(path, path.read_text(encoding="utf-8"))
 
     assert writes == [], f"jobs.status may only change in JobStateMachine: {writes}"
 
@@ -496,3 +547,42 @@ def test_guard_detects_a_planted_assignment(name: str) -> None:
 )
 def test_guard_ignores_reads_and_other_writes(source: str) -> None:
     assert status_writes(source, "allowed.py") == []
+
+
+# Review round 1 (#162): the state machines' files are scanned too; only each one's own write
+# in its transition method is exempt.
+
+
+def planted(path: Path, body: str) -> str:
+    """`path`'s real source with a function appended that runs `body`."""
+    return (
+        path.read_text(encoding="utf-8")
+        + "\n\nasync def planted(machine, job, request, job_id, to, actor) -> None:\n    "
+        + body.replace("\n", "\n    ")
+        + "\n"
+    )
+
+
+FOREIGN_JOB_WRITES = {
+    "attribute": "job.status = 'refunded'",
+    "setattr": "setattr(job, 'status', 'refunded')",
+    "after_transition": "job = await machine.transition(job_id, to, actor)\njob.status = to",
+}
+
+
+@pytest.mark.parametrize("body", FOREIGN_JOB_WRITES.values(), ids=list(FOREIGN_JOB_WRITES))
+def test_a_job_status_write_in_the_request_machine_is_caught(body: str) -> None:
+    assert guarded_writes(REQUEST_STATE_MACHINE, planted(REQUEST_STATE_MACHINE, body)) != []
+
+
+@pytest.mark.parametrize("body", FOREIGN_JOB_WRITES.values(), ids=list(FOREIGN_JOB_WRITES))
+def test_a_second_write_in_the_jobs_machine_is_caught(body: str) -> None:
+    # Outside transition(), or on another row than the one it locked: not the exempt write.
+    assert guarded_writes(STATE_MACHINE, planted(STATE_MACHINE, body)) != []
+
+
+def test_each_state_machine_has_exactly_one_exempt_write() -> None:
+    for path in STATUS_WRITERS:
+        source = path.read_text(encoding="utf-8")
+        assert len(own_status_writes(source)) == 1, path
+        assert guarded_writes(path, source) == []
