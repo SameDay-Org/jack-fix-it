@@ -1,8 +1,9 @@
-"""Handing work from the API to the ARQ worker (D9.1, #48).
+"""Handing work to the ARQ worker: the one queue port for dispatch (#48) and pushes (#54).
 
-The API's Redis client is ARQ's own `ArqRedis` (app/main.py), so a route can queue a job. A job
-id makes a second enqueue of the same work a no-op while the first is queued, running or kept.
-Every enqueue waits at most JOB_ENQUEUE_TIMEOUT_SECONDS.
+The API's Redis client is ARQ's own `ArqRedis` (app/main.py), so a route can queue a job; in the
+worker, ARQ's ctx["redis"] is the same kind of pool. A job id makes a second enqueue of the same
+work a no-op while the first is queued, running or kept. Every enqueue is bounded by the
+caller's timeout (JOB_ENQUEUE_TIMEOUT_SECONDS for dispatch, PUSH_SEND_TIMEOUT_SECONDS for pushes).
 """
 
 import asyncio

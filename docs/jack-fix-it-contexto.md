@@ -82,7 +82,7 @@ Rastreamento do profissional no mapa em tempo real, background check automático
 - Só profissionais aprovados e com Stripe ativo (`payouts_enabled`) recebem pedidos.
 - Cada pedido vai para até N profissionais da categoria e do ZIP (N configurável, padrão 5), ordenados por nota e tempo de resposta.
 - Pedido sem categoria cai na fila do BDC, que classifica antes de distribuir.
-- Orçamento expira em X horas (configurável).
+- Orçamento expira em 48 horas (configurável em `settings.quote_ttl_hours`).
 - Sem confirmação nem disputa em 48 h após a conclusão, o job é confirmado automaticamente.
 - Cancelamento grátis até 24 h antes; a regra depois disso está **pendente**.
 
@@ -174,6 +174,8 @@ O detalhe completo está no plano. Tabelas principais:
 - 5 categorias no lançamento.
 - O README antigo (repositório Lovable) serve só como referência de conteúdo e UX.
 - Hospedagem no Railway Pro: staging na `develop`, produção na `main` (16/10/2026, ADR 0001).
+- Endereço que o profissional vê numa oportunidade: só ZIP e cidade até o job ser pago (decided 2026-10-22 by Cesar, #49).
+- Orçamento expira em 48 horas depois de enviado (decided 2026-10-22 by Cesar, #50).
 
 **Pendentes:**
 

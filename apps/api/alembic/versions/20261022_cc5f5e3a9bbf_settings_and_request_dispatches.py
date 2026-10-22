@@ -1,7 +1,7 @@
 """settings and request_dispatches
 
 Revision ID: cc5f5e3a9bbf
-Revises: 2167b98c0780
+Revises: 9072864e3137
 Create Date: 2026-10-22 03:13:40.027313
 
 """
@@ -15,7 +15,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "cc5f5e3a9bbf"
-down_revision: str | Sequence[str] | None = "2167b98c0780"
+down_revision: str | Sequence[str] | None = "9072864e3137"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -53,8 +53,15 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("key", name=op.f("pk_settings")),
     )
     op.create_index(op.f("ix_settings_updated_by"), "settings", ["updated_by"])
-    # Launch values are data: dispatch sends each request to up to 5 pros (context doc §5).
-    op.bulk_insert(settings, [{"key": "dispatch_max_pros", "value": 5}])
+    # Launch values are data: dispatch sends each request to up to 5 pros (context doc §5), and
+    # a quote expires 48 hours after it is sent (Cesar, 2026-10-22, #50). No code default.
+    op.bulk_insert(
+        settings,
+        [
+            {"key": "dispatch_max_pros", "value": 5},
+            {"key": "quote_ttl_hours", "value": 48},
+        ],
+    )
 
     # A request sent to one pro (#48). Enum as varchar plus one named CHECK (ADR 0007); one row
     # per request and pro, so a re-run of dispatch never sends twice.

@@ -6,6 +6,7 @@ const fetchMock = vi.fn<typeof fetch>();
 
 beforeEach(() => {
   vi.stubEnv("API_INTERNAL_URL", "http://api.test.invalid:8000");
+  vi.stubEnv("API_TIMEOUT_MS", "1000");
   vi.stubGlobal("fetch", fetchMock);
 });
 
@@ -39,5 +40,12 @@ describe("apiGet", () => {
     vi.stubEnv("API_INTERNAL_URL", "");
 
     await expect(apiGet("/health")).rejects.toThrow("API_INTERNAL_URL is not set");
+  });
+
+  it("throws when API_TIMEOUT_MS is missing", async () => {
+    vi.stubEnv("API_TIMEOUT_MS", "");
+
+    await expect(apiGet("/health")).rejects.toThrow("API_TIMEOUT_MS");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

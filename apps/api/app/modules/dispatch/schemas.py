@@ -18,8 +18,8 @@ class _Out(BaseModel):
 
 
 class OpportunityLocation(_Out):
-    """Where the job is, as much as a pro may see before it is theirs. ZIP and city until
-    Cesar decides on #49; a wider decision changes this schema only."""
+    """Where the job is, as much as a pro may see before it is theirs: ZIP and city until the
+    job is paid (Cesar, 2026-10-22, #49). Any wider rule changes this schema only."""
 
     zip_code: str
     city: str

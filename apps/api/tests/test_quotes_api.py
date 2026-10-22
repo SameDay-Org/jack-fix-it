@@ -36,7 +36,7 @@ from tests.test_opportunities_api import (
 )
 from tests.test_requests_api import FakeStorage, make_caller
 
-TTL_HOURS = 36  # a fixture value: X is Cesar's to pick (#50)
+TTL_HOURS = 36  # not the seeded 48, so the tests prove the value is read
 
 
 @pytest.fixture

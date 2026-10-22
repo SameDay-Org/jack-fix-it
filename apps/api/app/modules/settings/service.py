@@ -7,7 +7,7 @@ missing or invalid row means depends on the setting:
 | Key                          | Type                 | When missing or invalid                    |
 | ---------------------------- | -------------------- | ------------------------------------------ |
 | `dispatch_max_pros`          | integer 1..50        | the default, 5 (the migration seeds it)    |
-| `quote_ttl_hours`            | integer 1..8760      | None: no default (Cesar picks X, #50);     |
+| `quote_ttl_hours`            | integer 1..8760      | None: no code default (seeded 48, #50);    |
 |                              |                      | the caller refuses to act (not_configured) |
 | `quote_max_amount_cents`     | integer 1..int4 max  | None: no cap beyond the column's int4      |
 | `quote_max_duration_minutes` | integer 1..int4 max  | None: no cap                               |
@@ -45,8 +45,8 @@ class SettingsService:
         return DISPATCH_MAX_PROS_DEFAULT if value is None else value
 
     async def quote_ttl_hours(self) -> int | None:
-        """How long a quote stays open (context doc §5: "expira em X horas"). None when not
-        set: there is no default, so callers must refuse to create a quote."""
+        """How long a quote stays open (context doc §5: 48 hours, seeded by the migration).
+        None when missing or invalid: there is no default in code, so callers refuse to quote."""
         return await self._integer(QUOTE_TTL_HOURS, QUOTE_TTL_HOURS_ALLOWED, required=True)
 
     async def quote_max_amount_cents(self) -> int | None:

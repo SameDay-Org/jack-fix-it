@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import URL, delete
+from sqlalchemy import URL, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.modules.addresses.models import Address
@@ -69,6 +69,10 @@ async def committed(test_database_url: URL) -> AsyncIterator[Committed]:
             for profile in profiles
         ]
         session.add_all(dispatches)
+        # Real commits: keep the migration's seeded value and put it back afterwards.
+        seeded_ttl = await session.scalar(
+            select(Setting.value).where(Setting.key == "quote_ttl_hours")
+        )
         await session.execute(delete(Setting).where(Setting.key == "quote_ttl_hours"))
         session.add(Setting(key="quote_ttl_hours", value=TTL_HOURS))
         await session.commit()
@@ -104,6 +108,8 @@ async def committed(test_database_url: URL) -> AsyncIterator[Committed]:
             )
             await session.execute(delete(Category).where(Category.id == category.id))
             await session.execute(delete(Setting).where(Setting.key == "quote_ttl_hours"))
+            if seeded_ttl is not None:
+                session.add(Setting(key="quote_ttl_hours", value=seeded_ttl))
             await session.commit()
         await engine.dispose()
 
