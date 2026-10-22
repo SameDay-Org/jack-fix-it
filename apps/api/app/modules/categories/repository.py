@@ -32,3 +32,7 @@ class CategoryRepository:
     async def is_active(self, category_id: uuid.UUID) -> bool:
         statement = select(Category.id).where(Category.id == category_id, Category.active)
         return (await self._session.scalar(statement)) is not None
+
+    async def list_active(self) -> list[Category]:
+        statement = select(Category).where(Category.active).order_by(Category.slug)
+        return list((await self._session.scalars(statement)).all())
