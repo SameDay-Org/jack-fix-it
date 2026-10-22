@@ -10,6 +10,8 @@ endpoint.
   environment variable named by --password-env. A password is never a command-line argument.
 - An existing email is refused unless --promote is given. Promoting changes the role only,
   never the password, and never demotes; it asks to confirm (--yes skips that, non-interactive).
+- --first-name and --last-name (optional, both or neither, #165) name a new account; they are
+  validated like the API's names and never printed. They do not apply to a promotion.
 
 Goes through UserService. Prints the user id and the role only: never the password or its hash.
 """
@@ -31,6 +33,7 @@ from app.config import PASSWORD_MAX_LENGTH, Settings, get_settings
 from app.db import create_engine, create_session_factory
 from app.modules.auth import security
 from app.modules.auth.schemas import NormalizedEmail
+from app.modules.users.names import NAME_MAX_LENGTH, PersonName
 from app.modules.users.service import UserService
 from app.modules.users.types import UserRole
 
@@ -39,6 +42,7 @@ STAFF_ROLES: Final = {"admin": UserRole.ADMIN, "agent": UserRole.AGENT}
 _RANK: Final = {UserRole.CUSTOMER: 0, UserRole.PRO: 0, UserRole.AGENT: 1, UserRole.ADMIN: 2}
 STAFF_LOCALE: Final = "en"
 _EMAIL: Final = TypeAdapter(NormalizedEmail)
+_NAME: Final = TypeAdapter(PersonName)
 
 SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
@@ -84,6 +88,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         "--promote", action="store_true", help="Change the role of an existing account."
     )
     parser.add_argument("--yes", action="store_true", help="Non-interactive: confirm a promotion.")
+    parser.add_argument("--first-name", help="Optional, with --last-name: names a new account.")
+    parser.add_argument("--last-name", help="Optional, with --first-name: names a new account.")
     args = parser.parse_args(argv)
     if args.password_env is not None and (args.email is None or args.role is None):
         parser.error("--password-env needs --email and --role")
@@ -99,6 +105,7 @@ async def run(argv: Sequence[str], sessions: SessionFactory, settings: Settings,
     try:
         email = _email(args.email if args.email is not None else io.prompt("Email: "))
         role = _role(args.role if args.role is not None else io.prompt("Role (admin, agent): "))
+        first_name, last_name = _names(args.first_name, args.last_name)
         async with sessions() as session:
             users = UserService(session)
             existing = await users.get_credentials_by_email(email)
@@ -106,7 +113,12 @@ async def run(argv: Sequence[str], sessions: SessionFactory, settings: Settings,
                 password = _password(args, io, settings)
                 password_hash = await asyncio.to_thread(security.hash_password, password)
                 account = await users.create_user(
-                    email=email, password_hash=password_hash, role=role, locale=STAFF_LOCALE
+                    email=email,
+                    password_hash=password_hash,
+                    role=role,
+                    locale=STAFF_LOCALE,
+                    first_name=first_name,
+                    last_name=last_name,
                 )
                 await session.commit()
                 print(f"Created user {account.id} with role {role.value}.", file=io.out)
@@ -152,6 +164,21 @@ def _email(raw: str) -> str:
         return _EMAIL.validate_python(raw)
     except ValidationError:
         raise StaffUserError("That is not a valid email address.") from None
+
+
+def _names(first: str | None, last: str | None) -> tuple[str | None, str | None]:
+    """Both validated, or neither given. The refusal never repeats what was typed."""
+    if first is None and last is None:
+        return None, None
+    try:
+        if first is None or last is None:
+            raise ValueError
+        return _NAME.validate_python(first), _NAME.validate_python(last)
+    except (ValueError, ValidationError):
+        raise StaffUserError(
+            f"--first-name and --last-name go together, each 1 to {NAME_MAX_LENGTH} letters, "
+            "spaces, hyphens, apostrophes or periods."
+        ) from None
 
 
 def _role(raw: str) -> UserRole:

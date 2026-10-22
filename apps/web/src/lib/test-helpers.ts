@@ -57,6 +57,8 @@ export function user(role: User["role"], extra: Partial<User> = {}): User {
     status: "active",
     phone: null,
     phone_verified: false,
+    first_name: null,
+    last_name: null,
     ...extra,
   };
 }
