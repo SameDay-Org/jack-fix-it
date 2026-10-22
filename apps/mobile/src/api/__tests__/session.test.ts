@@ -47,7 +47,8 @@ let consoleWatch: ReturnType<typeof watchConsole>;
 beforeEach(() => {
   fetchMock = installFetchMock();
   resetSecureStore();
-  queryClient = new QueryClient();
+  // gcTime Infinity: no garbage-collection timer, so Jest exits once the tests are done.
+  queryClient = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
   attachQueryClient(queryClient);
   sessionStore.setState({ ...SIGNED_OUT, status: "restoring" });
   consoleWatch = watchConsole();
