@@ -264,6 +264,31 @@ ROUND4_CASES = [
         "+13055550199",
         "742 Evergreen Terrace Apt 4B",
     ),
+    # Round 6 review: abbreviation punctuation between the number and the name.
+    (
+        "number-mark-period",
+        "Repair the leaking kitchen sink at evergreen No. 742.",
+        "evergreen No. 742",
+        "test@example.invalid",
+        "+13055550199",
+        "742 Evergreen Terrace",
+    ),
+    (
+        "suffix-period",
+        "Repair the leaking kitchen sink at evergreen ter. 742.",
+        "evergreen ter. 742",
+        "test@example.invalid",
+        "+13055550199",
+        "742 Evergreen Terrace",
+    ),
+    (
+        "direction-period-comma",
+        "Repair the leaking kitchen sink at 123 n.w., main.",
+        "123 n.w., main",
+        "test@example.invalid",
+        "+13055550199",
+        "123 Main Street NW",
+    ),
     # Round 5 review: a dotted direction without its final period.
     (
         "dotted-direction-no-final-period",
