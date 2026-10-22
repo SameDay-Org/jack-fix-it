@@ -18,17 +18,21 @@ import binascii
 import json
 import logging
 import uuid
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from typing import Final
 
 from pydantic import JsonValue
 from redis.exceptions import RedisError
+from sqlalchemy import Select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.errors import NotFoundError
 from app.integrations.storage import Storage
+from app.modules.addresses.schemas import AddressArea
 from app.modules.addresses.service import AddressService
 from app.modules.auth.permissions import ensure_owner
 from app.modules.categories.intake import InvalidAnswersError, validate_answers
@@ -46,6 +50,7 @@ from app.modules.requests.models import (
     RequestMedia,
     RequestMediaKind,
     RequestOrigin,
+    RequestStatus,
     ServiceRequest,
 )
 from app.modules.requests.repository import ServiceRequestRepository
@@ -56,11 +61,14 @@ from app.modules.requests.schemas import (
     RequestPage,
     RequestSummary,
 )
+from app.modules.service_areas.schemas import zip5
 from app.modules.service_areas.service import ServiceAreaService
 from app.modules.uploads.schemas import UploadPurpose
 from app.modules.uploads.service import owned_upload
+from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount
 from app.queue import JobQueue
+from app.redaction import KnownValues, redact_text
 
 logger = logging.getLogger(__name__)
 
@@ -314,3 +322,128 @@ def _has_nul(value: JsonValue) -> bool:
     if isinstance(value, list):
         return any(_has_nul(item) for item in value)
     return False
+
+
+# What a pro sees before a job (#49): the work, the place coarsely, never the customer.
+OPEN_FOR_QUOTES: Final = frozenset({RequestStatus.FINDING_PRO, RequestStatus.QUOTE_READY})
+
+
+@dataclass(frozen=True)
+class RequestForPro:
+    """A request as a dispatched pro may see it: no customer, contact, street, coordinates,
+    attribution (utm) or BDC fields. The area is the ZIP and its service area's canonical city
+    until the job is paid (#49), never the city the customer typed (#172). No
+    media either: stored photos and videos carry the customer's id in their keys and their
+    original metadata (GPS), so pros get sanitized copies only, with #173.
+
+    The customer's free text is redacted (app.redaction): their own email, phone and street are
+    masked first in any formatting, then every contact pattern, in the description and in every
+    string of the answers (whatever the question's current type: questions are editable, so it
+    proves nothing about an old answer). A pro cannot reach the customer before payment. The
+    stored text is unchanged; the customer and staff still see it as written."""
+
+    id: uuid.UUID
+    public_code: str
+    category_id: uuid.UUID | None
+    description: str  # redacted
+    intake_answers: dict[str, JsonValue]  # every string redacted
+    preferred_date: date | None
+    area: AddressArea
+    description_redacted: bool  # something was masked in the description
+    answers_redacted: bool  # something was masked in the answers
+
+    @property
+    def text_redacted(self) -> bool:
+        return self.description_redacted or self.answers_redacted
+
+
+class ProRequestReader:
+    """Read-only access for the pro opportunities (#49), through this module (ADR 0003)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._requests = ServiceRequestRepository(session)
+        self._addresses = AddressService(session)
+        self._users = UserService(session)
+        self._service_areas = ServiceAreaService(session)
+
+    @staticmethod
+    def open_ids() -> Select[uuid.UUID]:
+        """The requests pros can still quote on (finding_pro, quote_ready), as a subquery."""
+        return ServiceRequestRepository.ids_with_status(OPEN_FOR_QUOTES)
+
+    async def open_views(
+        self, request_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, RequestForPro]:
+        """The requests among `request_ids` still open for quotes, as a pro may see them, with
+        contact details masked in the free text (see RequestForPro)."""
+        rows = [
+            r for r in await self._requests.get_many(request_ids) if r.status in OPEN_FOR_QUOTES
+        ]
+        zip_codes = await self._addresses.zip_codes([r.address_id for r in rows])
+        cities = await self._service_areas.canonical_cities(zip_codes.values())
+        # What each customer's own details are, read once per page, for the known-value pass.
+        streets = await self._addresses.street_lines([r.address_id for r in rows])
+        contacts = await self._users.contact_points([r.customer_id for r in rows])
+        views: dict[uuid.UUID, RequestForPro] = {}
+        for row in rows:
+            contact = contacts.get(row.customer_id)
+            known = KnownValues(
+                emails=(contact.email,) if contact else (),
+                phones=(contact.phone,) if contact and contact.phone else (),
+                streets=streets.get(row.address_id, ()),
+            )
+            description = redact_text(row.description, known)
+            answers, answers_redacted = _redact_answers(row.intake_answers, known)
+            views[row.id] = RequestForPro(
+                id=row.id,
+                public_code=row.public_code,
+                category_id=row.category_id,
+                description=description.text,
+                intake_answers=answers,
+                preferred_date=row.preferred_date,
+                area=self._area(row.id, zip_codes[row.address_id], cities),
+                description_redacted=description.redacted,
+                answers_redacted=answers_redacted,
+            )
+        return views
+
+    @staticmethod
+    def _area(request_id: uuid.UUID, zip_code: str, cities: Mapping[str, str]) -> AddressArea:
+        """The 5-digit ZIP and its service area's city; no city when the area is gone (an
+        inactive or deleted ZIP), never the customer's own text."""
+        zip_code = zip5(zip_code)
+        city = cities.get(zip_code)
+        if city is None:
+            logger.warning(
+                "opportunity_city_missing", extra={"service_request_id": str(request_id)}
+            )
+        return AddressArea(zip_code=zip_code, city=city)
+
+
+def _redact_answers(
+    answers: Mapping[str, JsonValue], known: KnownValues
+) -> tuple[dict[str, JsonValue], bool]:
+    """The answers with contact details masked in every string, at any depth. Numbers and
+    booleans pass; a short option value passes the redactor unchanged."""
+    redacted: dict[str, JsonValue] = {}
+    masked = False
+    for key, value in answers.items():
+        redacted[key], hit = _redact_value(value, known)
+        masked = masked or hit
+    return redacted, masked
+
+
+def _redact_value(value: JsonValue, known: KnownValues) -> tuple[JsonValue, bool]:
+    if isinstance(value, str):
+        result = redact_text(value, known)
+        return result.text, result.redacted
+    if isinstance(value, list):
+        items = [_redact_value(item, known) for item in value]
+        return [item for item, _ in items], any(hit for _, hit in items)
+    if isinstance(value, dict):
+        entries = {key: _redact_value(item, known) for key, item in value.items()}
+        return (
+            {key: item for key, (item, _) in entries.items()},
+            any(hit for _, hit in entries.values()),
+        )
+    return value, False

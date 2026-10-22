@@ -4,6 +4,7 @@ The caller owns the transaction: these methods flush and never commit.
 """
 
 import uuid
+from collections.abc import Collection
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +30,21 @@ class AddressService:
             )
         )
         return address.id
+
+    async def zip_codes(self, address_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """The ZIP per address as stored (5 digits or ZIP+4), nothing else: pros see where a job
+        is by ZIP and the canonical city of its service area (#49, #172)."""
+        return dict(await self._addresses.zip_codes(address_ids))
+
+    async def street_lines(
+        self, address_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, tuple[str, ...]]:
+        """The street line and, when set, the unit line per address. Only for masking the
+        customer's own street in text shown to pros (#172); never returned to a pro."""
+        return {
+            address_id: (line1, line2) if line2 else (line1,)
+            for address_id, line1, line2 in await self._addresses.street_lines(address_ids)
+        }
 
     async def get(self, address_id: uuid.UUID) -> AddressOut | None:
         address = await self._addresses.get_by_id(address_id)

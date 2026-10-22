@@ -13,15 +13,22 @@ export type PostPath = {
   [P in keyof paths]: paths[P] extends { post: object } ? P : never;
 }[keyof paths];
 
-/** The JSON body of an operation's success response: 200 or 201 with JSON, `undefined` for 204. */
+/**
+ * The JSON body of an operation's success response: 200, 201 or 202 with JSON, `undefined` for a
+ * 202 without content (an accepted request, like the SMS code send) and for 204.
+ */
 type SuccessBody<Operation> = Operation extends { responses: infer Responses }
   ? Responses extends { 200: { content: { "application/json": infer Body } } }
     ? Body
     : Responses extends { 201: { content: { "application/json": infer Body } } }
       ? Body
-      : Responses extends { 204: object }
-        ? undefined
-        : never
+      : Responses extends { 202: { content: { "application/json": infer Body } } }
+        ? Body
+        : Responses extends { 202: object }
+          ? undefined
+          : Responses extends { 204: object }
+            ? undefined
+            : never
   : never;
 
 export type GetResponse<P extends GetPath> = SuccessBody<paths[P]["get"]>;
@@ -35,6 +42,8 @@ export type PostBody<P extends PostPath> = paths[P]["post"] extends {
   : never;
 
 type Method = "GET" | "POST";
+
+const ACCEPTED = 202;
 
 export type SendOptions = {
   body?: unknown;
@@ -115,5 +124,12 @@ export async function sendRequest<T>(
 
   if (response.status === 204) return undefined as T;
   if (!response.ok) throw new ApiError(response.status, await readErrorCode(response));
+  // An accepted request answers 202 with an empty body (the contract types it `undefined`). A 202
+  // that carries anything else must be JSON like any other answer: a malformed body is an error,
+  // never a silent acceptance.
+  if (response.status === ACCEPTED) {
+    const text = await response.text();
+    return (text === "" ? undefined : JSON.parse(text)) as T;
+  }
   return (await response.json()) as T;
 }

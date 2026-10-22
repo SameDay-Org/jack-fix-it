@@ -12,7 +12,15 @@ export {
 } from "./errors";
 export type { UploadFailure } from "./errors";
 export type { GetPath, GetResponse, PostBody, PostPath, PostResponse } from "./http";
-export { attachQueryClient, login, logout, register, restoreSession, useSession } from "./session";
+export {
+  attachQueryClient,
+  login,
+  logout,
+  register,
+  restoreSession,
+  setSessionUser,
+  useSession,
+} from "./session";
 export type { RestoreFailure, SessionStatus, SessionUser } from "./session";
 export { uploadMedia } from "./upload";
 export type { UploadFile, UploadMediaOptions, UploadPurpose } from "./upload";

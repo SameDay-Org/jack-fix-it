@@ -85,6 +85,12 @@ class ServiceAreaService:
             for area in await self._areas.get_many(ids)
         ]
 
+    async def canonical_cities(self, zip_codes: Collection[str]) -> dict[str, str]:
+        """The official city of each served ZIP (5 digits or ZIP+4), keyed by its 5 digits: the
+        name pros see, never the city a customer typed (#172). A ZIP with no active area is
+        missing from the result."""
+        return await self._areas.active_cities({zip5(zip_code) for zip_code in zip_codes})
+
     async def is_served(self, zip_code: str) -> bool:
         """True when the ZIP (5 digits or ZIP+4) is an active service area."""
         return await self._areas.is_active_zip(zip5(zip_code))

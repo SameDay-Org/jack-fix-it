@@ -459,6 +459,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/pros/me/opportunities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List my opportunities
+         * @description The requests dispatched to the caller that they can still quote on, newest first, in
+         *     pages. The location is the ZIP and city only; the customer is never shown.
+         */
+        get: operations["list_opportunities_v1_pros_me_opportunities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pros/me/opportunities/{dispatch_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Open one of my opportunities
+         * @description The full request, without its photos for now (sanitized copies come with #173). The
+         *     first open records that the pro saw it (viewed, viewed_at); opening it again changes
+         *     nothing.
+         */
+        get: operations["open_opportunity_v1_pros_me_opportunities__dispatch_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/devices": {
         parameters: {
             query?: never;
@@ -927,6 +970,126 @@ export interface components {
              * @description At most this many; all options when absent.
              */
             max_selected?: number | null;
+        };
+        /**
+         * OpportunityCategory
+         * @description The request's category, as this module shows it: its own strict model, not the shared
+         *     CategorySummary, whose extra fields would not be refused.
+         */
+        OpportunityCategory: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Slug */
+            slug: string;
+            /**
+             * Names
+             * @description Display name per locale, e.g. en and es.
+             */
+            names: {
+                [key: string]: string;
+            };
+        };
+        /** OpportunityDetail */
+        OpportunityDetail: {
+            /**
+             * Dispatch Id
+             * Format: uuid
+             */
+            dispatch_id: string;
+            /** Public Code */
+            public_code: string;
+            category: components["schemas"]["OpportunityCategory"] | null;
+            /** Description */
+            description: string;
+            /** Intake Answers */
+            intake_answers: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            location: components["schemas"]["OpportunityLocation"];
+            /** Preferred Date */
+            preferred_date: string | null;
+            /**
+             * Sent At
+             * Format: date-time
+             */
+            sent_at: string;
+            /**
+             * Viewed At
+             * @description When the pro first opened it.
+             */
+            viewed_at: string | null;
+            /**
+             * Text Redacted
+             * @description True when contact details were masked in the description or the answers (shown as •••): the customer is reached through the app.
+             */
+            text_redacted: boolean;
+        };
+        /**
+         * OpportunityLocation
+         * @description Where the job is, as much as a pro may see before it is theirs: ZIP and city until the
+         *     job is paid (Cesar, 2026-10-22, #49). Any wider rule changes this schema only.
+         */
+        OpportunityLocation: {
+            /**
+             * Zip Code
+             * @description The 5-digit ZIP.
+             */
+            zip_code: string;
+            /**
+             * City
+             * @description The official city of the ZIP's service area; null when the area is no longer served. Never the text the customer typed.
+             */
+            city: string | null;
+        };
+        /** OpportunityPage */
+        OpportunityPage: {
+            /** Items */
+            items: components["schemas"]["OpportunitySummary"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor` for the next page.
+             */
+            next_cursor: string | null;
+        };
+        /** OpportunitySummary */
+        OpportunitySummary: {
+            /**
+             * Dispatch Id
+             * Format: uuid
+             */
+            dispatch_id: string;
+            /**
+             * Public Code
+             * @description The request's code, e.g. JF-000124.
+             */
+            public_code: string;
+            category: components["schemas"]["OpportunityCategory"] | null;
+            /**
+             * Description Excerpt
+             * @description The start of the customer's description.
+             */
+            description_excerpt: string;
+            location: components["schemas"]["OpportunityLocation"];
+            /** Preferred Date */
+            preferred_date: string | null;
+            /**
+             * Sent At
+             * Format: date-time
+             */
+            sent_at: string;
+            /**
+             * Viewed
+             * @description True once the pro has opened it.
+             */
+            viewed: boolean;
+            /**
+             * Text Redacted
+             * @description True when contact details were masked in the description (shown as •••).
+             */
+            text_redacted: boolean;
         };
         /** PasswordForgotRequest */
         PasswordForgotRequest: {
@@ -2604,6 +2767,124 @@ export interface operations {
                 };
             };
             /** @description invalid_media: file_key is not the caller's own pro_document upload, or is already a document; validation_error: an unknown type, an expiry date in the past, or a field the review sets (status, rejection_reason, reviewed_by...). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_opportunities_v1_pros_me_opportunities_get: {
+        parameters: {
+            query?: {
+                /** @description Capped at the server's maximum. */
+                limit?: number | null;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpportunityPage"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have opportunities. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: the caller has no pro profile yet (GET /v1/pros/me creates it). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a malformed cursor. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    open_opportunity_v1_pros_me_opportunities__dispatch_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dispatch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpportunityDetail"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have opportunities. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no open opportunity of the caller with this id (another pro's, declined, expired, or the request is closed). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
             422: {
                 headers: {
                     [name: string]: unknown;

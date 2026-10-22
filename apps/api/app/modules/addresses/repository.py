@@ -1,5 +1,7 @@
 import uuid
+from collections.abc import Collection
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.addresses.models import Address
@@ -16,3 +18,21 @@ class AddressRepository:
 
     async def get_by_id(self, address_id: uuid.UUID) -> Address | None:
         return await self._session.get(Address, address_id)
+
+    async def zip_codes(self, address_ids: Collection[uuid.UUID]) -> list[tuple[uuid.UUID, str]]:
+        """(id, zip_code) only: neither the street nor the city the customer typed is loaded."""
+        if not address_ids:
+            return []
+        statement = select(Address.id, Address.zip_code).where(Address.id.in_(address_ids))
+        return [(row[0], row[1]) for row in (await self._session.execute(statement)).all()]
+
+    async def street_lines(
+        self, address_ids: Collection[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, str, str | None]]:
+        """(id, line1, line2): the street and the unit, for masking them in text (#172)."""
+        if not address_ids:
+            return []
+        statement = select(Address.id, Address.line1, Address.line2).where(
+            Address.id.in_(address_ids)
+        )
+        return [(row[0], row[1], row[2]) for row in (await self._session.execute(statement)).all()]
