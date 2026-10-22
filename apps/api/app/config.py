@@ -36,6 +36,9 @@ _TWILIO_SETTINGS: tuple[str, ...] = (
 # The HMAC key for PII in rate-limit keys (#137): required where a weak one stops startup.
 RATE_LIMIT_KEY_SECRET_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
 RATE_LIMIT_KEY_SECRET_MIN_LENGTH = 32
+# The HMAC key that derives each rotated refresh token (#152): required when deployed.
+REFRESH_ROTATION_SECRET_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
+REFRESH_ROTATION_SECRET_MIN_LENGTH = 32
 # Email through Resend (D4.3, #27): deployed environments must be able to send.
 _EMAIL_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
 _EMAIL_SETTINGS: tuple[str, ...] = ("resend_api_key", "email_from")
@@ -97,6 +100,13 @@ class Settings(BaseSettings):
     # Keys the HMAC that turns an email or phone into a rate-limit key (#137). Required in
     # staging and production; elsewhere a documented, non-secret development key is used.
     rate_limit_key_secret: SecretStr | None = None
+    # Keys the HMAC that derives a rotated refresh token from the one it replaces (#152), so
+    # a retry after a lost response gets the same successor without storing it. Required in
+    # staging and production; elsewhere a documented, non-secret development key is used.
+    refresh_rotation_secret: SecretStr | None = None
+    # Seconds after a rotation during which the old refresh token, presented again, gets the
+    # same successor instead of revoking the session (#152). 0 turns the grace window off.
+    refresh_reuse_grace_seconds: int = Field(default=30, ge=0)
     # Proxies whose X-Forwarded-For uvicorn trusts for the client IP (CSV, or "*").
     forwarded_allow_ips: str = "127.0.0.1"
     # Object storage, S3-compatible (R2 or Railway Buckets), reached only through presigned URLs.
@@ -191,6 +201,7 @@ class Settings(BaseSettings):
         "twilio_auth_token",
         "twilio_verify_service_sid",
         "rate_limit_key_secret",
+        "refresh_rotation_secret",
         "resend_api_key",
         "email_from",
         mode="before",
@@ -244,6 +255,18 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"RATE_LIMIT_KEY_SECRET must be set to at least "
                 f"{RATE_LIMIT_KEY_SECRET_MIN_LENGTH} characters when APP_ENV is {self.app_env}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_refresh_rotation_secret_when_deployed(self) -> Self:
+        if self.app_env not in REFRESH_ROTATION_SECRET_REQUIRED_IN:
+            return self
+        secret = self.refresh_rotation_secret
+        if secret is None or len(secret.get_secret_value()) < REFRESH_ROTATION_SECRET_MIN_LENGTH:
+            raise ValueError(
+                f"REFRESH_ROTATION_SECRET must be set to at least "
+                f"{REFRESH_ROTATION_SECRET_MIN_LENGTH} characters when APP_ENV is {self.app_env}"
             )
         return self
 

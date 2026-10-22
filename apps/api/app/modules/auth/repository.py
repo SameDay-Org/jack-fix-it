@@ -40,6 +40,15 @@ class RefreshTokenRepository:
         )
         return (await self._session.scalars(statement)).one_or_none()
 
+    async def get_by_id(self, token_id: uuid.UUID) -> RefreshToken | None:
+        """A row of a family the caller has already locked (get_by_hash_for_update)."""
+        statement = (
+            select(RefreshToken)
+            .where(RefreshToken.id == token_id)
+            .execution_options(populate_existing=True)
+        )
+        return await self._session.scalar(statement)
+
     async def revoke_family(self, family_id: uuid.UUID, now: datetime) -> None:
         """Revokes every token of the family that is not revoked yet, in one UPDATE."""
         await self._session.execute(

@@ -43,6 +43,11 @@ TEST_TWILIO_SETTINGS: dict[str, object] = {
 TEST_RATE_LIMIT_SETTINGS: dict[str, object] = {
     "rate_limit_key_secret": "test-rate-limit-key-secret-not-real-0123",
 }
+# Fixture value only. make_settings leaves it unset, so tests use the development rotation key
+# unless a test sets it; deployed settings must have one (#152).
+TEST_REFRESH_SETTINGS: dict[str, object] = {
+    "refresh_rotation_secret": "test-refresh-rotation-secret-not-real-01",
+}
 # Fixture values only: a fake key, and a sender on a domain that never resolves. Tests never
 # call Resend.
 TEST_EMAIL_SETTINGS: dict[str, object] = {
