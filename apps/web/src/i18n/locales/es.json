@@ -8,6 +8,33 @@
   },
   "admin": {
     "title": "Panel de operaciones",
-    "notAvailable": "El panel de operaciones aún no está disponible."
+    "login": {
+      "title": "Ingresa al panel",
+      "subtitle": "Para el equipo de Jack Fix It.",
+      "email": "Correo electrónico",
+      "password": "Contraseña",
+      "submit": "Ingresar",
+      "submitting": "Ingresando…",
+      "errors": {
+        "invalid_credentials": "El correo o la contraseña son incorrectos.",
+        "account_suspended": "Esta cuenta está suspendida.",
+        "rate_limited": "Demasiados intentos. Vuelve a intentarlo en un momento.",
+        "not_staff": "Esta cuenta no tiene acceso al panel.",
+        "unavailable": "No pudimos iniciar tu sesión ahora. Vuelve a intentarlo en un momento."
+      }
+    },
+    "nav": {
+      "label": "Panel",
+      "home": "Inicio"
+    },
+    "roles": {
+      "agent": "Agente",
+      "admin": "Administrador"
+    },
+    "logout": "Cerrar sesión",
+    "home": {
+      "welcome": "Te damos la bienvenida, {{email}}",
+      "queueSoon": "La cola de operaciones llega pronto. Las nuevas solicitudes aparecerán aquí."
+    }
   }
 }

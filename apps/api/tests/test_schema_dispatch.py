@@ -133,7 +133,13 @@ async def test_indexes(db_session: AsyncSession) -> None:
     assert ["updated_by"] in found["settings"]
 
 
-async def test_migration_seeds_dispatch_max_pros(db_session: AsyncSession) -> None:
-    value = await db_session.scalar(select(Setting.value).where(Setting.key == "dispatch_max_pros"))
+async def test_migration_seeds_dispatch_max_pros_and_quote_ttl_hours(
+    db_session: AsyncSession,
+) -> None:
+    rows = await db_session.execute(
+        select(Setting.key, Setting.value).where(
+            Setting.key.in_(("dispatch_max_pros", "quote_ttl_hours"))
+        )
+    )
 
-    assert value == 5
+    assert {key: value for key, value in rows} == {"dispatch_max_pros": 5, "quote_ttl_hours": 48}

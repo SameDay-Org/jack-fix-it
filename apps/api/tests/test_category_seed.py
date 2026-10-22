@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.categories.intake import dump_questions
 from app.modules.categories.models import Category
 from app.modules.categories.service import (
     SEED_DATA_PATH,
@@ -56,7 +57,7 @@ async def test_seed_inserts_all_launch_categories(db_session: AsyncSession) -> N
     for entry in FILE_ENTRIES:
         row = rows[entry["slug"]]
         assert row.names == entry["names"]
-        assert row.intake_questions == []
+        assert row.intake_questions == entry["intake_questions"]
         assert row.requires_license is False
         assert row.reference_price_cents is None
         assert row.icon is None
@@ -109,6 +110,7 @@ async def test_seed_inserts_only_missing(db_session: AsyncSession) -> None:
 
 def test_seed_data_file_is_valid() -> None:
     entries = load_seed_data()
+    by_slug = {entry["slug"]: entry for entry in FILE_ENTRIES}
 
     assert [entry.slug for entry in entries] == [entry["slug"] for entry in FILE_ENTRIES]
     assert len(entries) == LAUNCH_CATEGORY_COUNT
@@ -116,12 +118,13 @@ def test_seed_data_file_is_valid() -> None:
     for entry in entries:
         assert entry.names["en"].strip()
         assert entry.names["es"].strip()
-        # Criterion 1: no license, no invented price, no icon or questions yet, active.
+        # Criterion 1: no license, no invented price, no icon yet, active.
         assert entry.requires_license is False
         assert entry.reference_price_cents is None
         assert entry.icon is None
-        assert entry.intake_questions == []
         assert entry.active is True
+        # The typed questions (#44) stored as written in the file.
+        assert dump_questions(entry.intake_questions) == by_slug[entry.slug]["intake_questions"]
 
 
 def _first_entry_with(**changes: object) -> list[dict[str, Any]]:
@@ -139,6 +142,7 @@ def _first_entry_with(**changes: object) -> list[dict[str, Any]]:
         _first_entry_with(names={"en": "Blank Spanish", "es": "  "}),
         _first_entry_with(reference_price_cents=-1),
         _first_entry_with(unexpected="field"),
+        _first_entry_with(intake_questions=[{"key": "rooms", "type": "number"}]),
         [*FILE_ENTRIES, FILE_ENTRIES[0]],
     ],
     ids=[
@@ -148,6 +152,7 @@ def _first_entry_with(**changes: object) -> list[dict[str, Any]]:
         "blank_es",
         "negative_price",
         "unknown_field",
+        "untyped_question",
         "duplicate_slug",
     ],
 )

@@ -6,8 +6,7 @@ import inspect
 import pytest
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
-from tests.test_job_status_single_writer import JOBS, StatusModel, status_writes
-from tests.test_request_status_single_writer import REQUESTS
+from tests.test_job_status_single_writer import JOBS, REQUESTS, StatusModel, status_writes
 
 MODELS = pytest.mark.parametrize("target", [JOBS, REQUESTS], ids=["jobs", "requests"])
 EXECUTORS = ["execute", "scalars", "scalar", "stream", "stream_scalars"]
@@ -15,7 +14,7 @@ EXECUTORS = ["execute", "scalars", "scalar", "stream", "stream_scalars"]
 
 def module(target: StatusModel, body: str) -> str:
     return (
-        "from sqlalchemy import bindparam, insert, update\n"
+        "from sqlalchemy import bindparam, delete, insert, update\n"
         f"from {target.models_module} import {target.model}\n"
         f"Model = {target.model}\n"
         "async def write(session, connection, rows, helper) -> None:\n"
@@ -112,20 +111,60 @@ def test_literal_values_with_parameters_are_caught(target: StatusModel) -> None:
 
 
 @MODELS
+def test_setattr_of_another_literal_attribute_is_allowed(target: StatusModel) -> None:
+    assert not flagged(target, "setattr(rows[0], 'next_action', 'x')")
+
+
+@MODELS
 @pytest.mark.parametrize(
     "body",
     [
         "await session.execute(update(Model).where(Model.id == 1).values(next_action='x'))",
         "await session.execute(insert(Model).values(description='d', customer_id=1))",
         "await session.execute(Model.__table__.update().where(Model.id == 1).values(note='x'))",
-        "setattr(rows[0], 'next_action', 'x')",
+        "await session.execute(delete(Model).where(Model.id == 1))",
     ],
-    ids=[
-        "update_literal_values",
-        "insert_server_default_status",
-        "table_method_literal",
-        "setattr_literal",
-    ],
+    ids=["update_literal_values", "insert_literal_values", "table_method_literal", "delete"],
 )
-def test_literal_writes_of_other_columns_are_allowed(target: StatusModel, body: str) -> None:
-    assert not flagged(target, body)
+def test_any_construction_is_flagged_since_round_4(target: StatusModel, body: str) -> None:
+    # Allowed in round 3 (literal values without status); Cesar chose strict in round 4: a
+    # legitimate one gets an ALLOW_LIST entry with its reason.
+    assert flagged(target, body)
+
+
+# Review round 4 (Cesar: strict). A literal .values() reached execution through a carrier the
+# scanner cannot follow, with parameters adding status: the construction itself is flagged.
+INDIRECT = {
+    "helper_return": (
+        "def build_statement():\n"
+        "    return update(Model).where(Model.id == bindparam('rid'))"
+        ".values(next_action='x').returning(Model.id)\n"
+        "async def write(connection, rows):\n"
+        "    await connection.execute(build_statement(), parameters=rows)\n"
+    ),
+    "container": (
+        "async def write(connection, rows):\n"
+        "    statements = [update(Model).where(Model.id == bindparam('rid'))"
+        ".values(next_action='x').returning(Model.id)]\n"
+        "    await connection.execute(statements[0], parameters=rows)\n"
+    ),
+    "run_sync_helper": (
+        "def build_statement():\n"
+        "    return update(Model).values(next_action='x')\n"
+        "async def write(connection, rows):\n"
+        "    await connection.run_sync(\n"
+        "        lambda sync: sync.execute(build_statement(), parameters=rows)\n"
+        "    )\n"
+    ),
+}
+
+
+@MODELS
+@pytest.mark.parametrize("kind", INDIRECT)
+def test_indirect_literal_construction_is_caught(target: StatusModel, kind: str) -> None:
+    source = (
+        "from sqlalchemy import bindparam, update\n"
+        f"from {target.models_module} import {target.model}\n"
+        f"Model = {target.model}\n" + INDIRECT[kind]
+    )
+    assert status_writes(source, "planted.py", target), kind

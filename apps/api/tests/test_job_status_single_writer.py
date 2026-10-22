@@ -11,21 +11,17 @@ An AST scan of app/ flags, outside STATUS_WRITERS:
 - `Job(status=...)` and `Job(**anything)`;
 - raw SQL that updates the status of the jobs table (quoted or schema-qualified too).
 
-Review round 3 (Cesar's decision): the scanner guards how a statement on the model is BUILT,
-not which executor runs it, so a session, a connection, any keyword, run_sync or a helper all
-fall under one rule:
-- `update(Job)` / `Job.__table__.update()` unless every `.values(...)` it chains has literal
-  keyword keys, none of them `status` (a bare update gets its SET from execution parameters);
-- `insert(Job)` unless every chained `.values(...)` has literal keys without `status` (a bare
-  insert takes bulk rows at execution); the server-default status stays allowed;
-- `setattr(<x>, <not a literal>, ...)`, and `bulk_update_mappings` / `bulk_insert_mappings` of
-  the model and any `bulk_save_objects`;
-- raw SQL that inserts into the table with a status column.
-Execution parameters can still add columns to a literal `.values()` (SQLAlchemy builds the SET
-from the parameter keys too), so a second layer flags any call that receives a statement on the
-model together with bulk parameters (a second positional argument, `params=` or
-`parameters=`), whatever the call is named. ALLOW_LIST holds reviewed exceptions, each with a
-file, a function, a rule and a reason.
+Review rounds 3 and 4 (Cesar's decisions): the scanner guards how a statement on the model is
+BUILT, not which executor runs it, and strictly: any construction of `update(Job)`,
+`Job.__table__.update()` / `<table>.update()`, `insert(...)` or `delete(...)` on the model is
+flagged wherever it happens, whatever its values (a literal `.values()` still takes columns
+from execution parameters, and a statement travels through helpers, lists and run_sync the
+scanner cannot follow). A legitimate construction gets an ALLOW_LIST entry (file, function,
+rule, reason), reviewed like code; a stale entry fails a test. Also flagged:
+`setattr(<x>, <not a literal>, ...)`, `bulk_update_mappings` / `bulk_insert_mappings` of the
+model and any `bulk_save_objects`, raw SQL inserting a status, and, as a second net, any call
+receiving a statement on the model together with execution parameters (a second positional
+argument, `params=` or `parameters=`). The database-level guard is #163.
 
 Request statuses also change only through a state machine (AGENTS.md): the same scanner,
 pointed at ServiceRequest, guards them in test_request_status_single_writer.py. A module that
@@ -88,6 +84,12 @@ class StatusModel:
 
 JOBS = StatusModel(
     model="Job", package="app.modules.jobs", table="jobs", state_machine=STATE_MACHINE
+)
+REQUESTS = StatusModel(
+    model="ServiceRequest",
+    package="app.modules.requests",
+    table="service_requests",
+    state_machine=REQUEST_STATE_MACHINE,
 )
 
 
@@ -220,40 +222,6 @@ def _sets_status(call: ast.Call) -> bool:
 _PARAMETER_KEYWORDS = frozenset({"params", "parameters"})
 
 
-def _chain(call: ast.Call, parents: dict[ast.AST, ast.AST]) -> list[ast.Call]:
-    """The method calls chained on `call`: `update(Job).where(...).values(...)` gives where and
-    values, in order."""
-    chained: list[ast.Call] = []
-    node: ast.AST = call
-    while True:
-        attribute = parents.get(node)
-        method = parents.get(attribute) if attribute is not None else None
-        if (
-            isinstance(attribute, ast.Attribute)
-            and attribute.value is node
-            and isinstance(method, ast.Call)
-            and method.func is attribute
-        ):
-            chained.append(method)
-            node = method
-            continue
-        return chained
-
-
-def _literal_values(call: ast.Call) -> bool:
-    """`.values(a=..., b=...)`: only literal keyword keys, none of them status."""
-    return not call.args and all(k.arg is not None and k.arg != "status" for k in call.keywords)
-
-
-def _builds_status_write(call: ast.Call, chained: list[ast.Call]) -> bool:
-    """An update or insert on the model whose chain does not prove its SET leaves status out."""
-    names = [_called_name(method) for method in chained]
-    if "ordered_values" in names:
-        return True
-    values = [method for method, name in zip(chained, names, strict=True) if name == "values"]
-    return not values or not all(_literal_values(method) for method in values)
-
-
 def _carries_parameters(call: ast.Call) -> bool:
     """A call given execution parameters: a second positional argument, or params=/parameters=."""
     return len(call.args) >= 2 or any(k.arg in _PARAMETER_KEYWORDS for k in call.keywords)
@@ -274,7 +242,6 @@ def findings(
     """(line, rule) for every status write in `source`."""
     tree = ast.parse(source)
     scanner = _Scanner(tree, target)
-    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     found: list[tuple[int, str]] = []
     for node in ast.walk(tree):
         line = getattr(node, "lineno", 0)
@@ -307,11 +274,7 @@ def findings(
             keyword.arg in ("status", None) for keyword in node.keywords
         ):
             found.append((line, "constructor"))
-        if (
-            name in ("update", "insert")
-            and scanner.is_model_dml(node)
-            and _builds_status_write(node, _chain(node, parents))
-        ):
+        if name in ("update", "insert", "delete") and scanner.is_model_dml(node):
             found.append((line, f"{name}_construction"))
         if name in ("bulk_update_mappings", "bulk_insert_mappings") and any(
             scanner.is_model(arg) for arg in node.args[:1]
@@ -657,9 +620,6 @@ def test_guard_detects_a_planted_assignment(name: str) -> None:
         # Filtering on it in a query is fine.
         "from sqlalchemy import select\nfrom app.modules.jobs.models import Job\n"
         "statement = select(Job).where(Job.status == 'confirmed')\n",
-        # Updating other columns of a job is not a status write.
-        "from sqlalchemy import update\nfrom app.modules.jobs.models import Job\n"
-        "statement = update(Job).where(Job.id == 1).values(started_at=None)\n",
         # Creating a job with the default status.
         "from app.modules.jobs.models import Job\njob = Job(request_id=1, quote_id=2)\n",
         # Raw SQL on another table, or reading jobs.
@@ -672,50 +632,75 @@ def test_guard_detects_a_planted_assignment(name: str) -> None:
         ),
         ("def f(job, values) -> None:\n    job.started_at, job.completed_at = values\n"),
         (
-            "from app.modules.jobs.models import Job\n"
-            "statement = Job.__table__.update().where(Job.id == 1).values(started_at=None)\n"
-        ),
-        (
-            "from app.modules.jobs.models import Job\n"
-            "statement = Job.__table__.delete().where(Job.id == 1)\n"
-        ),
-        (
             "from app.modules.users.models import User\n"
             "statement = User.__table__.update().values(status='suspended')\n"
         ),
-        # Review round 2: an executor with parameters that runs a read, and a DML statement
-        # with no bulk parameters, are not bulk status writes.
+        # Review round 2: an executor with parameters that runs a read is not a write.
         (
             "from sqlalchemy import select\n"
             "from app.modules.jobs.models import Job\n"
             "async def f(session, rows) -> None:\n"
             "    await session.execute(select(Job), params=rows)\n"
         ),
-        (
-            "from sqlalchemy import update\n"
-            "from app.modules.jobs.models import Job\n"
-            "async def f(session) -> None:\n"
-            "    await session.scalars(statement=update(Job).values(started_at=None))\n"
-        ),
     ],
     ids=[
         "read",
         "query_filter",
-        "other_columns",
         "default_status",
         "other_table",
         "select",
         "other_table_object",
         "tuple_without_status",
-        "table_method_other_column",
-        "table_method_delete",
         "other_table_method",
         "read_with_params",
-        "update_without_bulk_params",
     ],
 )
 def test_guard_ignores_reads_and_other_writes(source: str) -> None:
     assert status_writes(source, "allowed.py") == []
+
+
+# Review round 4 (Cesar: strict). These were allowed until round 3: every construction of an
+# update, insert or delete on the model is flagged now, whatever its values, because a literal
+# .values() still takes columns from execution parameters where the statement ends up.
+STRICT_SINCE_ROUND_4 = {
+    "other_columns": (
+        "from sqlalchemy import update\nfrom app.modules.jobs.models import Job\n"
+        "statement = update(Job).where(Job.id == 1).values(started_at=None)\n"
+    ),
+    "table_method_other_column": (
+        "from app.modules.jobs.models import Job\n"
+        "statement = Job.__table__.update().where(Job.id == 1).values(started_at=None)\n"
+    ),
+    "table_method_delete": (
+        "from app.modules.jobs.models import Job\n"
+        "statement = Job.__table__.delete().where(Job.id == 1)\n"
+    ),
+    "update_without_bulk_params": (
+        "from sqlalchemy import update\n"
+        "from app.modules.jobs.models import Job\n"
+        "async def f(session) -> None:\n"
+        "    await session.scalars(statement=update(Job).values(started_at=None))\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("name", STRICT_SINCE_ROUND_4)
+def test_any_construction_on_the_model_is_flagged(name: str) -> None:
+    assert status_writes(STRICT_SINCE_ROUND_4[name], f"strict_{name}.py") != []
+
+
+def test_allow_list_has_no_stale_entries() -> None:
+    # Each entry must still match a construction the scanner flags in that function.
+    for (relative, function, rule), reason in ALLOW_LIST.items():
+        source = (APP_DIR.parent / relative).read_text(encoding="utf-8")
+        functions = _functions_by_line(source)
+        matches = [
+            line
+            for target in (JOBS, REQUESTS)
+            for line, found_rule in findings(source, target)
+            if found_rule == rule and functions.get(line) == function
+        ]
+        assert matches, f"stale ALLOW_LIST entry {relative}::{function} ({rule}): {reason}"
 
 
 # Review round 1 (#162): the state machines' files are scanned too; only each one's own write

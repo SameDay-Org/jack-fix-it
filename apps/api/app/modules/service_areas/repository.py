@@ -22,7 +22,7 @@ class ServiceAreaRepository:
             return []
         statement = (
             insert(ServiceArea)
-            .values([entry.model_dump() for entry in entries])
+            .values([entry.model_dump(exclude={"county"}) for entry in entries])
             .on_conflict_do_nothing(index_elements=[ServiceArea.zip_code])
             .returning(ServiceArea.zip_code)
         )
@@ -55,3 +55,9 @@ class ServiceAreaRepository:
             select(ServiceArea).where(ServiceArea.id.in_(ids)).order_by(ServiceArea.zip_code)
         )
         return list((await self._session.scalars(statement)).all())
+
+    async def is_active_zip(self, zip_code: str) -> bool:
+        statement = select(ServiceArea.id).where(
+            ServiceArea.zip_code == zip_code, ServiceArea.active
+        )
+        return (await self._session.scalar(statement)) is not None

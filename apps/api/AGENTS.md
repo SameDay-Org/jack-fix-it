@@ -59,6 +59,7 @@ uv run python -m app.serve                       # API on HOST:PORT from .env
 uv run arq app.worker.WorkerSettings --custom-log-dict app.observability.WORKER_LOG_CONFIG
 uv run alembic upgrade head
 uv run python -m scripts.seed_categories          # inserts missing launch categories (seed_data.json); never updates a row
-uv run python -m scripts.seed_service_areas       # inserts missing served ZIPs (service_areas/seed_data.json, empty until #9); never updates a row
+uv run python -m scripts.seed_service_areas       # inserts missing served ZIPs (service_areas/seed_data.json: South Florida, Broward active, #9); never updates a row
+uv run python -m scripts.create_staff_user        # creates an admin or agent (asks; password via getpass), or --promote an account; --help
 uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest
 ```
