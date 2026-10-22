@@ -96,6 +96,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Dropping a table drops its constraints, indexes and rows (the seeded setting too).
+    # Dropping a table drops its constraints, indexes and rows (the seeded settings too).
     op.drop_table("request_dispatches")
     op.drop_table("settings")

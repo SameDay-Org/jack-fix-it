@@ -43,7 +43,6 @@ logger = logging.getLogger(__name__)
 
 DISPATCH_TASK: Final = "dispatch_request"
 _DISPATCHABLE: Final = frozenset({RequestStatus.RECEIVED, RequestStatus.REVIEWING})
-_ZIP_DIGITS: Final = 5  # service areas are five-digit ZIPs; an address may be ZIP+4
 
 
 class DispatchOutcome(StrEnum):
@@ -103,7 +102,10 @@ class DispatchService:
 
     async def dispatch_request(self, request_id: uuid.UUID) -> DispatchOutcome:
         """Dispatches one request in the caller's transaction (flushes, never commits). Also
-        what the BDC runs again after classifying a request (#82)."""
+        what the BDC runs again after classifying a request (#82) that dispatch took to
+        reviewing: it has no rows yet. A request with rows is never dispatched again, including
+        one the BDC pulled back from finding_pro; what a re-dispatch does with the old rows is
+        open (#82)."""
         extra = {"service_request_id": str(request_id)}
         request = await self._requests.lock(request_id)
         if request is None:
@@ -142,9 +144,7 @@ class DispatchService:
         address = await AddressService(self._session).get(address_id)
         if address is None:  # pragma: no cover - the foreign key guarantees it
             return []
-        areas = await ServiceAreaService(self._session).active_ids_for_zip(
-            address.zip_code[:_ZIP_DIGITS]
-        )
+        areas = await ServiceAreaService(self._session).active_ids_for_zip(address.zip_code)
         candidates = await ProService(self._session).dispatch_candidates(category_id, areas)
         active = await UserService(self._session).active_ids_with_role(
             [c.user_id for c in candidates], UserRole.PRO
