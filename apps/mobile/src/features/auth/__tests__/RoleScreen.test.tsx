@@ -54,6 +54,9 @@ const animated = (testID: string): Animated =>
 const rootOpacity = () => animated("role-root").opacity;
 const slide = () => animated("role-content").transform?.[0].translateY;
 const backdrop = () => screen.getByTestId("system-bar-backdrop").props.className as string;
+/** The style the screen's StatusBar was last rendered with ("light" icons or "dark"). */
+const statusBarStyle = () =>
+  (jest.mocked(StatusBar).mock.calls.at(-1)?.[0] as { style?: string } | undefined)?.style;
 
 /** Runs the focus effect Role registered, as the navigator does on focus; returns its blur. */
 const focus = () => {
@@ -206,13 +209,14 @@ describe("RoleScreen", () => {
       await renderInSafeArea(<RoleScreen />);
       await layOut();
       await appear();
-      expect(backdrop()).toContain("bg-navy-900"); // the hero's light icons, mirrored
+      expect(statusBarStyle()).toBe("light"); // the hero's light icons, mirrored
 
       await act(async () => panelHandoffStore.setState({ bar: "light" })); // the panel covers it
-      expect(backdrop()).toContain("bg-gray-50");
+      expect(statusBarStyle()).toBe("dark");
       await act(async () => panelHandoffStore.setState({ phase: "risen" }));
       await advance(transitionMs * 2);
-      expect(backdrop()).toContain("bg-gray-50");
+      expect(statusBarStyle()).toBe("dark");
+      expect(backdrop()).toContain("bg-gray-50"); // the page never took the hero's navy
     });
 
     it("shown again (back from sign-up), it neither re-enters nor re-announces", async () => {
@@ -384,7 +388,8 @@ describe("RoleScreen", () => {
       expect(root().transform[0].translateY).toBeCloseTo(TRAVEL * 0.75, 5);
       expect(root().borderTopLeftRadius).toBeCloseTo(xl * 0.75, 5);
       expect(root().opacity).toBe(0);
-      expect(backdrop()).toContain("bg-navy-900"); // the bar is still the panel's
+      expect(statusBarStyle()).toBe("light"); // the bar is still the panel's
+      expect(backdrop()).toContain("bg-gray-50"); // but the page riding the panel is the page
 
       await act(async () => {
         panelProgress.value = 0.75;
@@ -399,7 +404,7 @@ describe("RoleScreen", () => {
       expect(root().opacity).toBe(1);
       expect(root().transform[0].translateY).toBe(0);
       expect(root().borderTopLeftRadius).toBe(0);
-      expect(backdrop()).toContain("bg-gray-50");
+      expect(statusBarStyle()).toBe("dark");
       panelProgress.value = 0;
       panelTravel.value = 0;
     });

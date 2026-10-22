@@ -71,6 +71,29 @@ describe("Screen", () => {
     expect(screen.getByTestId("system-bar-backdrop").props.className).toContain("bg-gray-50");
   });
 
+  it("statusBar sets only the icons: the page and its backdrop stay the bar's", async () => {
+    await renderScreen(
+      <Screen bar="light" statusBar="hero" testID="page">
+        <Text>Body</Text>
+      </Screen>,
+    );
+
+    expect(statusBarStyle()).toBe("light"); // the hero's icons, still showing above
+    expect(screen.getByTestId("system-bar-backdrop").props.className).toContain("bg-gray-50");
+    expect(screen.getByTestId("page").props.className).toContain("bg-gray-50");
+  });
+
+  it("ownsStatusBar false renders no StatusBar (a screen built ahead of time)", async () => {
+    await renderScreen(
+      <Screen bar="light" ownsStatusBar={false}>
+        <Text>Body</Text>
+      </Screen>,
+    );
+
+    expect(StatusBar).not.toHaveBeenCalled();
+    expect(screen.getByText("Body")).toBeTruthy();
+  });
+
   it("edges defaults to bottom", async () => {
     await renderScreen(
       <Screen bar="light" testID="screen">

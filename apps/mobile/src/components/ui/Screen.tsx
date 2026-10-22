@@ -20,6 +20,11 @@ export type ScreenProps = {
    * StatusBar wins, so a screen that is mounted but not shown (prefetched) passes false.
    */
   ownsStatusBar?: boolean;
+  /**
+   * The status bar style when it is not the page's own: a screen drawn over another one that still
+   * shows at the top (a panel rising into it) mirrors that one's icons until it covers the bar.
+   */
+  statusBar?: SystemBar;
   testID?: string;
 };
 
@@ -45,13 +50,14 @@ export function Screen({
   edges = DEFAULT_EDGES,
   className,
   ownsStatusBar = true,
+  statusBar = bar,
   testID,
 }: ScreenProps) {
   const { top } = useSafeAreaInsets();
 
   return (
     <SafeAreaView edges={edges} testID={testID} className={cx("flex-1", BAR[bar].page, className)}>
-      {ownsStatusBar ? <StatusBar style={BAR[bar].style} /> : null}
+      {ownsStatusBar ? <StatusBar style={BAR[statusBar].style} /> : null}
       <View testID="system-bar-backdrop" className={BAR[bar].backdrop} style={{ height: top }} />
       {/* The content area ends above the padded edges, so an absolutely positioned child (a
           floating bar) sits above the bottom inset without reading it. */}

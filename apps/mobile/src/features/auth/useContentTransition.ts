@@ -43,8 +43,11 @@ export type ContentTransition = {
   enter: () => void;
   /** Fades the screen out, then runs `then` (the navigation). At once when not animating. */
   exit: (then: () => void) => void;
-  /** The system bar to show: the panel's until the content is in, then the page's. */
-  bar: SystemBar;
+  /**
+   * The status bar style (the page itself is always the light page): the panel's until it covers
+   * the bar, then the page's.
+   */
+  statusBar: SystemBar;
   /** Whether the screen sets the status bar: only while focused (not while prefetched). */
   ownsStatusBar: boolean;
   /** Not in yet, or leaving: the screen takes no taps. */
@@ -246,7 +249,7 @@ export function useContentTransition({
     // is still the hero's, and a navy page fading out was the empty-navy frame of #175.
     // Riding the panel the screen shows before the panel covers the bar: the bar follows the panel
     // until then.
-    bar: !animate || (shown && phase !== "rising") ? "light" : panelBar,
+    statusBar: !animate || (shown && phase !== "rising") ? "light" : panelBar,
     ownsStatusBar: !animate || focused,
     busy: animate && (!shown || exiting),
   };
