@@ -81,24 +81,25 @@ The worker builds the same settings when `app/worker.py` is imported, so the sam
 stop it: without every required variable it crash-loops under its `ALWAYS` restart policy and
 never logs `worker_started`. Use the same values as api.
 
-| Variable                    | Value                        | Secret          | Source     |
-| --------------------------- | ---------------------------- | --------------- | ---------- |
-| `APP_ENV`                   | same as api                  | no              | D3.1 (#22) |
-| `LOG_LEVEL`                 | same as api                  | no              | D3.1 (#22) |
-| `DATABASE_URL`              | `${{Postgres.DATABASE_URL}}` | yes (reference) | D3.1 (#22) |
-| `REDIS_URL`                 | `${{Redis.REDIS_URL}}`       | yes (reference) | D3.1 (#22) |
-| `SENTRY_DSN`                | same as api                  | no              | D3.1 (#22) |
-| `JWT_SECRET`                | same as api                  | yes             | D4.2 (#25) |
-| `RATE_LIMIT_KEY_SECRET`     | same as api                  | yes             | #137       |
-| `TWILIO_ACCOUNT_SID`        | same as api                  | no              | D4.3 (#26) |
-| `TWILIO_AUTH_TOKEN`         | same as api                  | yes             | D4.3 (#26) |
-| `TWILIO_VERIFY_SERVICE_SID` | same as api                  | no              | D4.3 (#26) |
-| `RESEND_API_KEY`            | same as api                  | yes             | D4.3 (#27) |
-| `EMAIL_FROM`                | same as api                  | no              | D4.3 (#27) |
-| `S3_ENDPOINT_URL`           | same as api                  | no              | D6.2 (#35) |
-| `S3_BUCKET`                 | same as api                  | no              | D6.2 (#35) |
-| `S3_ACCESS_KEY_ID`          | same as api                  | yes             | D6.2 (#35) |
-| `S3_SECRET_ACCESS_KEY`      | same as api                  | yes             | D6.2 (#35) |
+| Variable                    | Value                                                      | Secret          | Source      |
+| --------------------------- | ---------------------------------------------------------- | --------------- | ----------- |
+| `APP_ENV`                   | same as api                                                | no              | D3.1 (#22)  |
+| `LOG_LEVEL`                 | same as api                                                | no              | D3.1 (#22)  |
+| `DATABASE_URL`              | `${{Postgres.DATABASE_URL}}`                               | yes (reference) | D3.1 (#22)  |
+| `REDIS_URL`                 | `${{Redis.REDIS_URL}}`                                     | yes (reference) | D3.1 (#22)  |
+| `SENTRY_DSN`                | same as api                                                | no              | D3.1 (#22)  |
+| `JWT_SECRET`                | same as api                                                | yes             | D4.2 (#25)  |
+| `RATE_LIMIT_KEY_SECRET`     | same as api                                                | yes             | #137        |
+| `TWILIO_ACCOUNT_SID`        | same as api                                                | no              | D4.3 (#26)  |
+| `TWILIO_AUTH_TOKEN`         | same as api                                                | yes             | D4.3 (#26)  |
+| `TWILIO_VERIFY_SERVICE_SID` | same as api                                                | no              | D4.3 (#26)  |
+| `RESEND_API_KEY`            | same as api                                                | yes             | D4.3 (#27)  |
+| `EMAIL_FROM`                | same as api                                                | no              | D4.3 (#27)  |
+| `S3_ENDPOINT_URL`           | same as api                                                | no              | D6.2 (#35)  |
+| `S3_BUCKET`                 | same as api                                                | no              | D6.2 (#35)  |
+| `S3_ACCESS_KEY_ID`          | same as api                                                | yes             | D6.2 (#35)  |
+| `S3_SECRET_ACCESS_KEY`      | same as api                                                | yes             | D6.2 (#35)  |
+| `EXPO_ACCESS_TOKEN`         | optional; set it only if Expo enhanced push security is on | yes             | D10.3 (#54) |
 
 `apps/api/tests/test_railway_doc.py` fails when a setting that staging or production requires
 is missing from either table, so this list cannot fall behind `app/config.py`.

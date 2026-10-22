@@ -147,6 +147,18 @@ class Settings(BaseSettings):
     request_create_window_seconds: int = Field(default=3_600, gt=0)
     request_list_default_limit: int = Field(default=20, gt=0)
     request_list_max_limit: int = Field(default=50, gt=0)
+    # Push notifications through Expo (D10.3, #54). The access token is optional everywhere:
+    # Expo accepts unauthenticated sends unless the project turns on enhanced security.
+    expo_access_token: SecretStr | None = None
+    # Longest wait on Expo or Redis for one push operation.
+    push_send_timeout_seconds: float = Field(default=5.0, gt=0)
+    # How often the worker asks Expo for delivery receipts (a cron, in minutes of the hour).
+    push_receipt_check_minutes: int = Field(default=15, ge=1, le=60)
+    # How long a sent ticket waits for its receipt; Expo keeps receipts for about a day.
+    push_ticket_ttl_seconds: int = Field(default=86_400, gt=0)
+    # Delay before a failed send is retried, times the attempt number.
+    push_retry_backoff_seconds: int = Field(default=30, gt=0)
+    push_max_devices_per_user: int = Field(default=10, gt=0)
 
     @field_validator("database_url")
     @classmethod
@@ -190,6 +202,7 @@ class Settings(BaseSettings):
         "rate_limit_key_secret",
         "resend_api_key",
         "email_from",
+        "expo_access_token",
         mode="before",
     )
     @classmethod
