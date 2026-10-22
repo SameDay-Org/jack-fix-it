@@ -1,7 +1,8 @@
 """Error contract: every error response body is {"error": {"code": ..., "message": ...}}.
 
 Raise an AppError subclass for expected failures. Anything else becomes a generic 500 that
-reveals nothing about the cause; the details go to the logs and Sentry.
+reveals nothing about the cause; the details go to the logs and Sentry. A database error's
+details are its summary only (app/db_errors.py): its text can hold SQL literals.
 """
 
 import logging
@@ -15,6 +16,7 @@ from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
 
+from app.db_errors import summary_of
 from app.middleware import REQUEST_ID_HEADER
 
 logger = logging.getLogger(__name__)
@@ -107,7 +109,16 @@ async def _handle_unexpected_error(request: Request, exc: Exception) -> JSONResp
     # Runs in Starlette's outermost middleware, after RequestIdMiddleware has finished,
     # so the request id is read from the request state instead of the context var.
     request_id: str | None = getattr(request.state, "request_id", None)
-    logger.error("unhandled_error", exc_info=exc, extra={"request_id": request_id})
+    summary = summary_of(exc)
+    if summary is None:
+        logger.error("unhandled_error", exc_info=exc, extra={"request_id": request_id})
+    else:
+        if summary.guard_table is not None:
+            logger.warning(
+                "status_guard_refused",
+                extra={"table": summary.guard_table, "request_id": request_id},
+            )
+        logger.error("unhandled_error", extra={**summary.as_extra(), "request_id": request_id})
     headers = {REQUEST_ID_HEADER: request_id} if request_id else None
     return error_response(500, AppError.code, AppError.message, headers=headers)
 

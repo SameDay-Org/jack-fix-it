@@ -25,6 +25,7 @@ from app.modules.settings.models import Setting
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole
 from tests.conftest import backend_pid, wait_until_blocked
+from tests.helpers import as_status_writer
 from tests.test_quotes_api import TTL_HOURS, body, quotes_of, status_of
 from tests.test_requests_api import ENQUEUE_TIMEOUT, RecordingQueue
 
@@ -63,8 +64,9 @@ async def committed(test_database_url: URL) -> AsyncIterator[Committed]:
             origin=RequestOrigin.APP,
             status=RequestStatus.FINDING_PRO,
         )
-        session.add(request)
-        await session.flush()
+        async with as_status_writer(session):  # the database guard (#163)
+            session.add(request)
+            await session.flush()
         dispatches = [
             RequestDispatch(request_id=request.id, pro_id=profile.id, sent_at=datetime.now(UTC))
             for profile in profiles

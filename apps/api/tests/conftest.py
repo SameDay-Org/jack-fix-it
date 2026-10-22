@@ -121,9 +121,14 @@ async def _create_database_if_missing(url: URL) -> None:
             exists = await connection.scalar(
                 text("SELECT 1 FROM pg_database WHERE datname = :name"), {"name": url.database}
             )
+            name = connection.dialect.identifier_preparer.quote(str(url.database))
             if not exists:
-                name = connection.dialect.identifier_preparer.quote(str(url.database))
                 await connection.execute(text(f"CREATE DATABASE {name}"))
+            # The test database alone accepts the fixtures' wildcard status token (#163,
+            # tests/helpers.py::as_status_writer); connections opened from now on see it.
+            await connection.execute(
+                text(f"ALTER DATABASE {name} SET app.status_writer_fixtures = 'on'")
+            )
     finally:
         await engine.dispose()
 

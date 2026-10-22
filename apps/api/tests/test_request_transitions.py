@@ -22,6 +22,7 @@ from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole, UserStatus
 from app.observability import JsonFormatter
 from tests.conftest import backend_pid, wait_until_blocked
+from tests.helpers import as_status_writer
 
 # Hand-written from docs/glossary.md and #160 on purpose: a change to transitions.py must show
 # up as a diff here. (from, to) -> the actor kinds allowed; every other pair is a 409.
@@ -116,7 +117,8 @@ async def world(db_session: AsyncSession) -> World:
 async def make_request(
     session: AsyncSession, customer_id: uuid.UUID, address_id: uuid.UUID, status: RequestStatus
 ) -> ServiceRequest:
-    # Tests may set any status directly; app code may not (test_request_status_single_writer).
+    # Tests may set any status directly, through the test helper (the database guard, #163);
+    # app code may not (test_request_status_single_writer).
     request = ServiceRequest(
         customer_id=customer_id,
         address_id=address_id,
@@ -124,8 +126,9 @@ async def make_request(
         origin=RequestOrigin.APP,
         status=status,
     )
-    session.add(request)
-    await session.flush()
+    async with as_status_writer(session):
+        session.add(request)
+        await session.flush()
     return request
 
 
