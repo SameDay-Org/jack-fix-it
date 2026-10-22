@@ -720,7 +720,8 @@ _STEPS: Final[tuple[tuple[re.Pattern[str], _Replace], ...]] = (
 # --- Known values ----------------------------------------------------------------------------
 # Patterns cannot foresee every way people write a contact, so the values known for a request
 # (the customer's account email and phone, the address lines) are masked first, whatever their
-# formatting. Each pattern is built from one value, with bounded gaps, so it stays linear.
+# formatting. The email and phone patterns are built from one value, with bounded gaps, so they
+# stay linear; the address is a token scan.
 
 _KNOWN_AT: Final = r"(?:\s*@\s*|\s*[(\[{<]\s*(?:at|arroba)\s*[)\]}>]\s*|\s+(?:at|arroba)\s+)"
 _KNOWN_DOT: Final = r"(?:\s*\.\s*|\s*[(\[{<]\s*(?:dot|punto)\s*[)\]}>]\s*|\s+(?:dot|punto)\s+)"
@@ -759,28 +760,38 @@ _DIRECTION_GROUPS: Final = (
     ("se", "southeast"),
     ("sw", "southwest"),
 )
-# The house number as stored: "742", "123A", "123-A", "#742", or a range "12-14".
-_HOUSE_TOKEN: Final = re.compile(
-    r"#?(?P<digits>\d{1,6})(?:-?(?P<letter>[a-z]))?(?P<range>-\d{1,6})?", _FLAGS
+# The known street and unit are found by a scan over word pieces, not by patterns (#172
+# round 6): a pattern built from a stored line backtracks when the line repeats its parts. The
+# scan reads each piece once and, at a house number only, at most _KNOWN_WINDOW pieces around
+# it: O(pieces x window), whatever the stored line.
+_KNOWN_WINDOW: Final = 6
+# A piece: letters and digits only, or "#". What stands between two pieces (spaces, a period, a
+# slash, an apostrophe...) is judged by the scan, never glued into a piece, so "Evergreen.Need",
+# "Evergreen's", "Dir.742" and "Apt.4B" still show their parts.
+_KNOWN_PIECE: Final = re.compile(r"[^\W_]+|#")
+# Every form of a direction or a suffix, mapped to one: "northwest" is "nw", "terrace" is "ter".
+_KNOWN_CANONICAL: Final[dict[str, str]] = {
+    form: group[0] for groups in (_SUFFIX_GROUPS, _DIRECTION_GROUPS) for group in groups
+    for form in group
+}  # fmt: skip
+_KNOWN_SUFFIXES: Final = frozenset(group[0] for group in _SUFFIX_GROUPS)
+_KNOWN_DIRECTIONS: Final = frozenset(group[0] for group in _DIRECTION_GROUPS)
+_KNOWN_PLACE_WORDS: Final = _KNOWN_SUFFIXES | _KNOWN_DIRECTIONS
+_KNOWN_UNIT_WORDS: Final = frozenset(
+    {"apartment", "apartamento", "apto", "apt", "departamento", "depto", "unidad", "unit",
+     "suite", "ste", "lot", "bldg"}
+)  # fmt: skip
+_KNOWN_NUMBER_MARKS: Final = frozenset({"#", "no", "nro", "num", "numero", "number"})
+# Short words inside a street's name that are everyday words too ("Avenue of the Americas",
+# "Calle de la Paz"): passable, never the name word a match needs.
+_KNOWN_FUNCTION_WORDS: Final = frozenset(
+    {"of", "the", "and", "at", "de", "la", "las", "los", "el", "del", "y"}
 )
-_FRACTION: Final = re.compile(r"\d/\d{1,2}")
-_UNIT_WORDS_ALT: Final = "apartment|apto|apt|unit|suite|ste|lot|bldg|building|room|rm|penthouse|ph"
-_UNIT_WORD: Final = re.compile(rf"(?:{_UNIT_WORDS_ALT})\.?", _FLAGS)
-# Any direction, in any form ("nw", "n.w.", "northwest"), around the known street's name.
-_ANY_DIRECTION: Final = "|".join(
-    [
-        *(rf"{re.escape(form)}\.?" for group in _DIRECTION_GROUPS for form in group),
-        r"[nsew]\.\s?[ew]\.",
-    ]
+# What may stand between the house number and the first name word (and, when the name comes
+# first, the street's other name words: "Martin Luther King 45").
+_KNOWN_SKIPPABLE: Final = (
+    _KNOWN_PLACE_WORDS | _KNOWN_UNIT_WORDS | _KNOWN_NUMBER_MARKS | _KNOWN_FUNCTION_WORDS
 )
-# A known street starts at the start of a word, never inside "it's" or "N95"...
-_KNOWN_START: Final = rf"(?<![\w{_APOSTROPHES}-])"
-# ... and a direction or suffix around it ends a word: not "w" in "w/", nor "e" in "e.g.".
-_KNOWN_END: Final = r"(?=$|[\s,;:!?)\]]|\.(?:\s|$))"
-# Between the number and the name, or two name words: "742 Evergreen", "742, Evergreen",
-# "742 - Evergreen", "Mt. Vernon".
-_KNOWN_SEP: Final = r"(?:\s*[,/-]\s*|\.?\s+)"
-_MAX_NAME_WORDS: Final = 5
 
 
 @dataclass(frozen=True)
@@ -800,7 +811,8 @@ def redact_known(text: str, known: KnownValues) -> RedactionResult:
     for pattern in _known_patterns(known):
         cleaned, count = _substitute(pattern, _mask, cleaned)
         masked += count
-    return RedactionResult(cleaned, masked > 0)
+    cleaned, count = _mask_spans(cleaned, _known_spans(cleaned, known.streets))
+    return RedactionResult(cleaned, masked + count > 0)
 
 
 def redact_text(text: str, known: KnownValues) -> RedactionResult:
@@ -811,12 +823,11 @@ def redact_text(text: str, known: KnownValues) -> RedactionResult:
 
 
 def _known_patterns(known: KnownValues) -> list[re.Pattern[str]]:
+    """The email and phone patterns; the address is a token scan (_known_spans)."""
     sources = [
         *(_email_pattern(email) for email in known.emails),
         *(_phone_pattern(phone) for phone in known.phones),
     ]
-    for index, line in enumerate(known.streets):
-        sources += _street_patterns(line) if index == 0 else [_unit_pattern(line)]
     return [re.compile(source, _FLAGS) for source in sources if source]
 
 
@@ -851,149 +862,409 @@ def _phone_pattern(phone: str) -> str | None:
     return rf"(?<!\d){prefix}{core}(?!\d)"
 
 
-def _group_of(word: str, groups: tuple[tuple[str, ...], ...]) -> tuple[str, ...] | None:
-    """The group `word` belongs to, whatever its case or dots ("N.W." is "nw")."""
-    lower = word.lower().replace(".", "")
-    return next((group for group in groups if lower in group), None)
-
-
-def _word_pattern(word: str) -> str:
-    """One name word as stored, in any case, with or without its period ("Mt."), apostrophe
-    ("O'Brien", "OBrien") or accents ("Pena" for "Peña")."""
-    directions = _group_of(word, _DIRECTION_GROUPS)
-    if directions is not None:
-        return "(?:" + "|".join(rf"{re.escape(v)}\.?" for v in directions) + r"|[nsew]\.\s?[ew]\.)"
-    parts = []
-    for char in word.rstrip("."):
-        base = unicodedata.normalize("NFD", char)[0]
-        if char in _APOSTROPHES:
-            parts.append(f"[{_APOSTROPHES}]?")
-        elif base != char:
-            parts.append(f"[{re.escape(char)}{re.escape(base)}]")
-        else:
-            parts.append(re.escape(char))
-    return "".join(parts) + r"\.?"
+def _known_spans(text: str, lines: tuple[str, ...]) -> list[tuple[int, int]]:
+    """Where the known street (line1) and unit (line1's unit, line2) are in `text`."""
+    tokens = _known_tokens(text)
+    spans: list[tuple[int, int]] = []
+    for index, line in enumerate(lines):
+        street, units = _parse_known_line(line, street_line=index == 0)
+        if street is not None:
+            spans += _street_spans(text, tokens, street)
+        for unit in units:
+            spans += _unit_spans(text, tokens, unit)
+    return spans
 
 
 @dataclass(frozen=True)
-class _Street:
-    """A stored street line, parsed. House number and names are pattern sources."""
-
-    house: str | None
-    names: tuple[str, ...]
-    suffixes: tuple[tuple[str, ...], ...]
-    units: tuple[str, ...]
+class _KnownToken:
+    key: str  # casefolded, without accents, directions and suffixes in their canonical form
+    start: int
+    end: int
 
 
-def _parse_street(line: str) -> _Street:
-    """Finds each part anywhere in the line: units ("Apt 4B", "#12") before or after the street,
-    the house number (the first number outside a unit, a "#742" only when it is the only one),
-    the directions and suffixes, and the name words (after the number, or before it in
-    "Evergreen Ter 742"). Words before the number are a building's name and are left out."""
-    tokens = [
-        t for t in re.sub(r"#\s+", "#", line).replace(",", " ").split() if re.search(r"\w", t)
-    ]
-    in_unit: set[int] = set()
-    for index, token in enumerate(tokens):
-        if _UNIT_WORD.fullmatch(token):
-            in_unit |= {index, index + 1}
-    numbers = [i for i, t in enumerate(tokens) if i not in in_unit and _HOUSE_TOKEN.fullmatch(t)]
-    plain = [i for i in numbers if not tokens[i].startswith("#")]
-    house_at = plain[0] if plain else (numbers[0] if numbers else None)
-    in_unit |= {i for i in numbers if tokens[i].startswith("#") and i != house_at}
-    in_unit &= set(range(len(tokens)))
-    runs: list[list[int]] = []
-    for index in sorted(in_unit):
-        if runs and runs[-1][-1] == index - 1:
-            runs[-1].append(index)
-        else:
-            runs.append([index])
-    units = tuple(" ".join(tokens[i] for i in run) for run in runs)
-    if house_at is None:
-        rest = [t for i, t in enumerate(tokens) if i not in in_unit]
-        house = None
-    else:
-        after = [t for i, t in enumerate(tokens) if i > house_at and i not in in_unit]
-        before = [t for i, t in enumerate(tokens) if i < house_at and i not in in_unit]
-        rest = after or before
-        number = _HOUSE_TOKEN.fullmatch(tokens[house_at])
-        assert number is not None  # noqa: S101 - house_at indexes a matching token
-        letter, fraction = number["letter"], None
-        if after and _FRACTION.fullmatch(after[0]):
-            fraction, rest = after[0], after[1:]
-        elif (  # "123 A Main", not "100 N Main"
-            after
-            and len(after[0]) == 1
-            and after[0].isalpha()
-            and not letter
-            and _group_of(after[0], _DIRECTION_GROUPS) is None
-        ):
-            letter, rest = after[0], after[1:]
-        house = "#?" + number["digits"]
-        if letter:
-            house += rf"(?:[\s-]?{re.escape(letter)})?"
-        if number["range"]:
-            house += rf"(?:\s*-\s*{re.escape(number['range'][1:])})?"
-        if fraction:
-            house += rf"(?:\s*{re.escape(fraction)})?"
-    suffixes = tuple(group for word in rest if (group := _group_of(word, _SUFFIX_GROUPS)))
-    names = [
-        word
-        for word in rest
-        if _group_of(word, _SUFFIX_GROUPS) is None and _group_of(word, _DIRECTION_GROUPS) is None
-    ]
-    if not names:
-        # A street named by a direction or a suffix word ("100 North Street", "5 Court St"):
-        # its first such word, alone (several would make the pattern ambiguous).
-        names = ([w for w in rest if _group_of(w, _SUFFIX_GROUPS) is None] or rest)[:1]
-    return _Street(house, tuple(names[:_MAX_NAME_WORDS]), suffixes, units)
-
-
-def _street_patterns(line: str) -> list[str]:
-    """The street, in the parts _parse_street finds. The house number and the first name word
-    are required, in either order ("742 evergreen", "Evergreen Ter 742"); a name such as
-    "Main" or "Ocean" alone is an everyday word. Further name words follow in order when
-    present, and the directions and the suffix may come in any form, anywhere around them, or
-    not at all: "123 Main Street NW" masks "123 main", "123 nw main st" and "123 main nw".
-    A unit in the line is matched on its own, like the unit line."""
-    street = _parse_street(line)
-    patterns = [unit for text in street.units if (unit := _unit_pattern(text))]
-    if not street.names:
-        return patterns
-    suffix_forms = [rf"{re.escape(form)}\.?" for group in street.suffixes for form in group]
-    alternatives = "|".join([_ANY_DIRECTION, *suffix_forms])
-    filler = rf"(?:\s+(?:{alternatives}){_KNOWN_END})"
-    words = [_word_pattern(word) for word in street.names]
-    if street.house is None:
-        # Without a number, the whole name and the suffix are required ("Evergreen Terrace").
-        if not suffix_forms and len(words) < 2:
-            return patterns
-        whole = rf"{filler}{{0,2}}{_KNOWN_SEP}".join(words)
-        suffix = rf"{filler}{{0,2}}\s+(?:{'|'.join(suffix_forms)})" if suffix_forms else ""
-        return [*patterns, rf"{_KNOWN_START}{whole}{suffix}(?![\w-])"]
-    later = ""  # the further name words, each optional, in order
-    for word in reversed(words[1:]):
-        later = rf"(?:{filler}{{0,2}}{_KNOWN_SEP}{word}{later})?"
-    core = words[0] + later
-    house = street.house
-    lead = rf"(?:(?:{_ANY_DIRECTION}){_KNOWN_END}{_KNOWN_SEP}){{0,2}}"
+def _known_tokens(text: str) -> list[_KnownToken]:
     return [
-        *patterns,
-        rf"{_KNOWN_START}{house}{filler}{{0,2}}{_KNOWN_SEP}{core}{filler}{{0,3}}(?![\w-])",
-        rf"{_KNOWN_START}{lead}{core}{filler}{{0,3}}(?:\s*,\s*|\s+)(?:{_NUMBER_MARK}\s*)?"
-        rf"{house}(?![\w-])",
+        _KnownToken(_known_key(match.group()), match.start(), match.end())
+        for match in _KNOWN_PIECE.finditer(text)
     ]
 
 
-def _unit_pattern(line: str) -> str | None:
-    """A unit ("Apt 4B", "#12"), in any spacing or punctuation, after a unit word or "#":
-    alone, its id is an everyday number or word ("12 outlets", "2 A/C")."""
-    # Letters and digits apart, so "4B" also matches "4-B" or "4 B".
-    tokens = re.findall(r"[^\W\d_]+|\d+", line)
-    if tokens and _UNIT_WORD.fullmatch(tokens[0]):
-        tokens = tokens[1:]
-    if not tokens:
+def _known_key(piece: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", piece.casefold())
+    plain = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return _KNOWN_CANONICAL.get(plain, plain)
+
+
+@dataclass(frozen=True)
+class _KnownStreet:
+    house: str | None  # the house number's digits; None for a line without one
+    letter: str | None  # "123A", "123-A" or "123 A"
+    range_end: str | None  # "12-14"
+    fraction: tuple[str, str] | None  # "123 1/2"
+    names: tuple[str, ...]  # in order; the first is the one a match needs
+    suffixes: frozenset[str]
+
+
+def _house_parts(key: str) -> tuple[str, str | None] | None:
+    """("123", "a") for "123a", ("742", None) for "742"; None for anything else."""
+    if key.isdigit() and len(key) <= 6:
+        return key, None
+    if 2 <= len(key) <= 7 and key[:-1].isdigit() and key[-1].isalpha():
+        return key[:-1], key[-1]
+    return None
+
+
+def _known_words(text: str, tokens: list[_KnownToken]) -> list[tuple[str, int, int]]:
+    """The stored line's words: (key, first piece, last piece). Pieces joined by an apostrophe
+    are one word ("O'Brien" is "obrien")."""
+    words: list[tuple[str, int, int]] = []
+    for index, token in enumerate(tokens):
+        joined = index > 0 and _is_apostrophe(text[tokens[index - 1].end : token.start])
+        if joined and words:
+            key, first, _ = words[-1]
+            words[-1] = (key + token.key, first, index)
+        else:
+            words.append((token.key, index, index))
+    return words
+
+
+def _parse_known_line(line: str, *, street_line: bool) -> tuple[_KnownStreet | None, list[str]]:
+    """The street and the unit ids of a stored address line. On the street line, each part is
+    found anywhere: units ("Apt 4B", "#12") before or after the street; the house number (the
+    first number outside a unit; a "#742" only when it is the only one); the name words, after
+    the number, or before it in "Evergreen Ter 742" (words before the number are otherwise a
+    building's name). The unit line is a unit id, with or without its unit word."""
+    cleaned = _clean(line)
+    tokens = _known_tokens(cleaned)
+    words = _known_words(cleaned, tokens)
+    keys = [word[0] for word in words]
+    if not street_line:
+        unit = "".join(k for k in keys if k not in _KNOWN_UNIT_WORDS | _KNOWN_NUMBER_MARKS)
+        return None, [unit] if unit else []
+
+    def gap(left: int, right: int) -> str:
+        return cleaned[tokens[words[left][2]].end : tokens[words[right][1]].start]
+
+    in_unit: set[int] = set()
+    for index, key in enumerate(keys):
+        if key in _KNOWN_UNIT_WORDS:
+            after = index + 1
+            while after < len(keys) and keys[after] in _KNOWN_NUMBER_MARKS:
+                after += 1
+            in_unit |= set(range(index, min(after + 1, len(keys))))
+    hashed = {i + 1 for i, k in enumerate(keys) if k == "#" and i + 1 < len(keys)} - in_unit
+    numbers = [i for i, k in enumerate(keys) if i not in in_unit and _house_parts(k)]
+    plain = [i for i in numbers if i not in hashed]
+    house_at = plain[0] if plain else (numbers[0] if numbers else None)
+    in_unit |= {i for n in hashed if n != house_at for i in (n - 1, n)}
+    units = _unit_ids(keys, in_unit)
+    house = letter = range_end = None
+    fraction: tuple[str, str] | None = None
+    if house_at is None:
+        rest = [i for i in range(len(keys)) if i not in in_unit]
+    else:
+        parts = _house_parts(keys[house_at])
+        assert parts is not None  # noqa: S101 - house_at indexes a house number
+        house, letter = parts
+        rest = [i for i in range(house_at + 1, len(keys)) if i not in in_unit]
+        nxt = house_at + 1
+        if rest and rest[0] == nxt:
+            between = gap(house_at, nxt).strip()
+            if (
+                nxt + 1 < len(keys)
+                and keys[nxt].isdigit()
+                and keys[nxt + 1].isdigit()
+                and gap(nxt, nxt + 1) == "/"
+            ):
+                fraction, rest = (keys[nxt], keys[nxt + 1]), rest[2:]  # "123 1/2"
+            elif keys[nxt].isdigit() and between == "-":
+                range_end, rest = keys[nxt], rest[1:]  # "12-14"
+            elif (
+                len(keys[nxt]) == 1
+                and keys[nxt].isalpha()
+                and keys[nxt] not in _KNOWN_DIRECTIONS
+                and not letter
+            ):
+                letter, rest = keys[nxt], rest[1:]  # "123 A Main", not "100 N Main"
+        if not rest:
+            rest = [i for i in range(house_at) if i not in in_unit]
+    text_words = [
+        keys[i] for i in rest if keys[i] not in _KNOWN_NUMBER_MARKS | _KNOWN_FUNCTION_WORDS
+    ]
+    names = [w for w in text_words if w not in _KNOWN_PLACE_WORDS]
+    # A street named by a direction or a suffix word ("100 North Street", "5 Court St").
+    names = names or [w for w in text_words if w not in _KNOWN_SUFFIXES] or text_words[:1]
+    suffixes = frozenset(w for w in text_words if w in _KNOWN_SUFFIXES)
+    if not names or (house is None and not suffixes and len(names) < 2):
+        # Without a number, the whole name and a suffix, or two name words, are needed.
+        return None, units
+    street = _KnownStreet(house, letter, range_end, fraction, tuple(names[:5]), suffixes)
+    return street, units
+
+
+def _unit_ids(keys: list[str], in_unit: set[int]) -> list[str]:
+    """Each run of unit words, as its id: "Apt 4B" is "4b", "#12" is "12"."""
+    ids: list[str] = []
+    run: list[str] = []
+    for index in range(len(keys) + 1):
+        if index in in_unit:
+            run.append(keys[index])
+            continue
+        unit = "".join(k for k in run if k not in _KNOWN_UNIT_WORDS | _KNOWN_NUMBER_MARKS)
+        if unit:
+            ids.append(unit)
+        run = []
+    return ids
+
+
+def _between(text: str, tokens: list[_KnownToken], left: int, right: int) -> str:
+    return text[tokens[left].end : tokens[right].start]
+
+
+def _is_apostrophe(gap: str) -> bool:
+    return len(gap) == 1 and gap in _APOSTROPHES
+
+
+def _standalone(text: str, tokens: list[_KnownToken], index: int) -> bool:
+    """A direction or suffix piece that is a word of its own: not the "w" of "w/", the "e" of
+    "e.g." or the "s" of "Evergreen's"."""
+    if index > 0 and _is_apostrophe(_between(text, tokens, index - 1, index)):
+        return False
+    after = text[tokens[index].end : tokens[index + 1].start if index + 1 < len(tokens) else None]
+    if after.startswith("/") or _is_apostrophe(after):
+        return False
+    following = tokens[index + 1].key if index + 1 < len(tokens) else ""
+    return not (after == "." and following not in _KNOWN_PLACE_WORDS)
+
+
+def _beside_house(gap: str) -> bool:
+    """Next to the house number: spaces and at most one ",", "-" or "/"; a period would end a
+    sentence ("Budget is 200. Main issue...")."""
+    return gap.strip() in ("", ",", "-", "/")
+
+
+def _inside_address(gap: str) -> bool:
+    """Between two words of the address: spaces and at most one ",", "-", "/" or "."."""
+    return gap.strip() in ("", ",", "-", "/", ".")
+
+
+def _continues_street(gap: str, left_key: str, right_is_name: bool) -> bool:
+    """A further word after the name: spaces, or an abbreviation's period ("St. NW",
+    "Mt. Vernon"); never a comma ("Evergreen Terrace, north wall") nor a sentence's period
+    ("Evergreen. S wall")."""
+    stripped = gap.strip()
+    return stripped == "" or (stripped == "." and (left_key in _KNOWN_PLACE_WORDS or right_is_name))
+
+
+def _house_end(
+    text: str, tokens: list[_KnownToken], index: int, street: _KnownStreet
+) -> int | None:
+    """The last piece of the street's house number when it starts at `index`; None when the
+    piece is not that number, or is part of a decimal or a thousands group ("2.50", "1,742")."""
+    assert street.house is not None  # noqa: S101 - only called for a street with a number
+    key = tokens[index].key
+    for neighbour in (index - 1, index + 1):
+        if 0 <= neighbour < len(tokens) and tokens[neighbour].key.isdigit():
+            left, right = sorted((index, neighbour))
+            if _between(text, tokens, left, right) in (".", ","):
+                return None
+    if street.letter and key == street.house + street.letter:
+        return index
+    if key != street.house:
         return None
-    lead = rf"(?:(?:{_UNIT_WORDS_ALT})\b\.?[\s#]*|#\s*)"
-    body = r"[\s.,#-]*".join(re.escape(token) for token in tokens)
-    return rf"{_KNOWN_START}{lead}{body}(?![\w-])"
+    nxt = index + 1
+    if nxt >= len(tokens):
+        return index
+    gap = _between(text, tokens, index, nxt).strip()
+    if street.letter and tokens[nxt].key == street.letter and gap in ("", "-"):
+        return nxt
+    if street.range_end and tokens[nxt].key == street.range_end and gap == "-":
+        return nxt
+    if (
+        street.fraction
+        and nxt + 1 < len(tokens)
+        and gap == ""
+        and (tokens[nxt].key, tokens[nxt + 1].key) == street.fraction
+        and _between(text, tokens, nxt, nxt + 1) == "/"
+    ):
+        return nxt + 1
+    return index
+
+
+def _word_at(text: str, tokens: list[_KnownToken], index: int, word: str, step: int) -> int | None:
+    """The far piece of `word` when it starts (step 1) or ends (step -1) at `index`, its pieces
+    joined by apostrophes ("O'Brien", "OBrien")."""
+    collected, current = "", index
+    for _ in range(4):
+        piece = tokens[current].key
+        collected = collected + piece if step > 0 else piece + collected
+        if collected == word:
+            return current
+        if not word.startswith(collected) if step > 0 else not word.endswith(collected):
+            return None
+        nxt = current + step
+        if not 0 <= nxt < len(tokens):
+            return None
+        left, right = sorted((current, nxt))
+        if not _is_apostrophe(_between(text, tokens, left, right)):
+            return None
+        current = nxt
+    return None
+
+
+def _street_spans(
+    text: str, tokens: list[_KnownToken], street: _KnownStreet
+) -> list[tuple[int, int]]:
+    """At each house number: the first name word within the window after it ("742 nw
+    evergreen"), or before it ("Evergreen Ter 742"); then the street's further words. A street
+    without a number: its whole name, in order, and its suffix."""
+    if street.house is None:
+        return _whole_name_spans(text, tokens, street)
+    spans: list[tuple[int, int]] = []
+    for index in range(len(tokens)):
+        end = _house_end(text, tokens, index, street)
+        if end is None:
+            continue
+        found = _find_name(text, tokens, end, 1, street)
+        if found is not None:
+            last = _extend(text, tokens, found, 1, street)
+            spans.append((tokens[index].start, tokens[last].end))
+            continue
+        found = _find_name(text, tokens, index, -1, street)
+        if found is not None:
+            first = _extend(text, tokens, found, -1, street)
+            spans.append((tokens[first].start, tokens[end].end))
+    return spans
+
+
+def _find_name(
+    text: str, tokens: list[_KnownToken], house: int, step: int, street: _KnownStreet
+) -> int | None:
+    """The far piece of the first name word within _KNOWN_WINDOW pieces of the house number,
+    in direction `step`, across directions, suffixes, unit words, number marks and function
+    words only (and, before the number, the street's other name words)."""
+    passable = _KNOWN_SKIPPABLE | (frozenset(street.names) if step < 0 else frozenset())
+    current = house
+    for _ in range(_KNOWN_WINDOW):
+        candidate = current + step
+        if not 0 <= candidate < len(tokens):
+            return None
+        gap = _between(text, tokens, *sorted((current, candidate)))
+        if not (_beside_house(gap) if current == house else _inside_address(gap)):
+            return None
+        found = _word_at(text, tokens, candidate, street.names[0], step)
+        if found is not None:
+            return found
+        key = tokens[candidate].key
+        # A direction glued to the name by a period ("123 N.Main") is still a direction.
+        glued_to_name = (
+            step > 0
+            and candidate + 1 < len(tokens)
+            and _between(text, tokens, candidate, candidate + 1) == "."
+            and tokens[candidate + 1].key == street.names[0]
+        )
+        if key not in passable or (
+            key in _KNOWN_PLACE_WORDS
+            and not glued_to_name
+            and not _standalone(text, tokens, candidate)
+        ):
+            return None
+        current = candidate
+    return None
+
+
+def _extend(
+    text: str, tokens: list[_KnownToken], start: int, step: int, street: _KnownStreet
+) -> int:
+    """From the name word, over the street's further words, at most _KNOWN_WINDOW of them."""
+    words = frozenset(street.names) | street.suffixes | _KNOWN_DIRECTIONS
+    current = start
+    for _ in range(_KNOWN_WINDOW):
+        candidate = current + step
+        if not 0 <= candidate < len(tokens) or tokens[candidate].key not in words:
+            break
+        left, right = sorted((current, candidate))
+        gap = _between(text, tokens, left, right)
+        if not _continues_street(gap, tokens[left].key, tokens[candidate].key in street.names):
+            break
+        if tokens[candidate].key in _KNOWN_PLACE_WORDS and not _standalone(text, tokens, candidate):
+            break
+        current = candidate
+    return current
+
+
+def _whole_name_spans(
+    text: str, tokens: list[_KnownToken], street: _KnownStreet
+) -> list[tuple[int, int]]:
+    """A stored street without a house number ("Evergreen Terrace"): every name word in order,
+    then a suffix when the line has one."""
+    spans: list[tuple[int, int]] = []
+    for index in range(len(tokens)):
+        current = _word_at(text, tokens, index, street.names[0], 1)
+        for name in street.names[1:]:
+            if current is None or current + 1 >= len(tokens):
+                current = None
+                break
+            if not _inside_address(_between(text, tokens, current, current + 1)):
+                current = None
+                break
+            current = _word_at(text, tokens, current + 1, name, 1)
+        if current is None:
+            continue
+        if street.suffixes:
+            nxt = current + 1
+            if not (
+                nxt < len(tokens)
+                and tokens[nxt].key in street.suffixes
+                and _continues_street(_between(text, tokens, current, nxt), "", False)
+            ):
+                continue
+            current = nxt
+        spans.append((tokens[index].start, tokens[_extend(text, tokens, current, 1, street)].end))
+    return spans
+
+
+def _unit_spans(text: str, tokens: list[_KnownToken], unit: str) -> list[tuple[int, int]]:
+    """The unit id right after a unit word or "#" ("apt 4-b", "Apt.4B", "unit #4B", "Apt No.
+    4B"): alone, an id is an everyday number or word ("12 outlets", "2 A/C")."""
+    spans: list[tuple[int, int]] = []
+    for index, token in enumerate(tokens):
+        if token.key not in _KNOWN_UNIT_WORDS and token.key != "#":
+            continue
+        first = index + 1
+        while (
+            token.key != "#"
+            and first < len(tokens)
+            and first - index <= 2
+            and tokens[first].key in _KNOWN_NUMBER_MARKS
+        ):
+            first += 1
+        collected = ""
+        for position in range(first, min(first + 4, len(tokens))):
+            gap = _between(text, tokens, position - 1, position).strip()
+            allowed = ("", ".", ":", "#", "-") if position == first else ("", "-")
+            if gap not in allowed and not (position == first and gap in (".:", ":#", ".#")):
+                break
+            collected += tokens[position].key
+            if collected == unit:
+                spans.append((token.start, tokens[position].end))
+                break
+            if not unit.startswith(collected):
+                break
+    return spans
+
+
+def _mask_spans(text: str, spans: list[tuple[int, int]]) -> tuple[str, int]:
+    """`text` with each span (merged when they overlap) replaced by the mask."""
+    pieces: list[str] = []
+    position = count = 0
+    for start, end in sorted(spans):
+        if start < position:  # overlaps the previous mask: extend it
+            if end > position:
+                position = end
+            continue
+        pieces += [text[position:start], MASK]
+        position = end
+        count += 1
+    pieces.append(text[position:])
+    return "".join(pieces), count

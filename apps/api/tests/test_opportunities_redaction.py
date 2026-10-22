@@ -5,6 +5,7 @@ the canary email and phone, at the canary street, then dispatched; the pro's fee
 are checked on their serialized values. The customer's own view keeps the text as written.
 """
 
+import time
 import uuid
 from typing import Any
 
@@ -263,6 +264,15 @@ ROUND4_CASES = [
         "+13055550199",
         "742 Evergreen Terrace Apt 4B",
     ),
+    # Round 5 review: a dotted direction without its final period.
+    (
+        "dotted-direction-no-final-period",
+        "Repair the leaking kitchen sink at 123 n.w main.",
+        "123 n.w main",
+        "test@example.invalid",
+        "+13055550199",
+        "123 Main Street NW",
+    ),
 ]
 
 
@@ -306,6 +316,37 @@ async def test_ordinary_contacts_never_reach_a_pro(
     body = response.json()
     flagged = body["items"][0]["text_redacted"] if route == "list" else body["text_redacted"]
     assert flagged is True
+
+
+@pytest.mark.parametrize(
+    ("source", "route"), [("description", "list"), ("description", "detail"), ("intake", "detail")]
+)
+async def test_a_street_of_repeated_suffixes_does_not_slow_a_read(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    source: str,
+    route: str,
+) -> None:
+    # Round 5 review: a stored street that repeats its suffix, against text that repeats it too
+    # (the description at its longest, the notes answer at its 500-character limit).
+    text = ("st " * (166 if source == "intake" else 666)).strip()
+    _, pro, _, dispatch_id, _ = await dispatched(
+        db_client,
+        db_session,
+        description=text if source == "description" else "Repair the leaking kitchen sink.",
+        answers={"notes": text} if source == "intake" else None,
+        street="100 " + " ".join(["St"] * 25),
+    )
+
+    started = time.perf_counter()
+    response = await db_client.get(
+        BASE if route == "list" else f"{BASE}/{dispatch_id}", headers=pro.caller.headers
+    )
+    elapsed = time.perf_counter() - started
+
+    assert response.status_code == 200, response.text
+    assert elapsed < 0.25, f"{source}/{route}: {elapsed:.3f} s"
 
 
 @pytest.mark.parametrize("new_type", ["integer", "boolean", "single_choice"])
