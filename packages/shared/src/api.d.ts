@@ -1055,10 +1055,16 @@ export interface components {
          *     job is paid (Cesar, 2026-10-22, #49). Any wider rule changes this schema only.
          */
         OpportunityLocation: {
-            /** Zip Code */
+            /**
+             * Zip Code
+             * @description The 5-digit ZIP.
+             */
             zip_code: string;
-            /** City */
-            city: string;
+            /**
+             * City
+             * @description The official city of the ZIP's service area; null when the area is no longer served. Never the text the customer typed.
+             */
+            city: string | null;
         };
         /** OpportunityPage */
         OpportunityPage: {

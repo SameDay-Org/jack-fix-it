@@ -5,6 +5,7 @@ the canary email and phone, at the canary street, then dispatched; the pro's fee
 are checked on their serialized values. The customer's own view keeps the text as written.
 """
 
+import logging
 import time
 import uuid
 from typing import Any
@@ -89,6 +90,7 @@ async def dispatched(
     email: str = EMAIL,
     phone: str = PHONE,
     street: str = STREET,
+    address: dict[str, str] | None = None,
 ) -> tuple[Caller, Pro, uuid.UUID, uuid.UUID, uuid.UUID]:
     """A request created through the API, moved to finding_pro and dispatched to a new pro.
     The customer's account holds `email` and `phone`; the request's address is `street`."""
@@ -103,7 +105,7 @@ async def dispatched(
         category_id=str(category_id),
         description=description,
         intake_answers=answers or {},
-        address=dict(ADDRESS, line1=street),
+        address=address or dict(ADDRESS, line1=street),
     )
     assert response.status_code == 201, response.text
     request_id = uuid.UUID(response.json()["id"])
@@ -490,3 +492,150 @@ async def test_the_customers_own_details_are_masked_in_any_format(
     description = detail.json()["description"]
     for secret in ("0199", "01 99", "privacy", "evergreen", "742"):
         assert secret not in description.lower(), secret
+
+
+# Vault round 2 (#172): the city pros see is the service area's, never the customer's text.
+
+CITY_CANARY = f"Orlando; {EMAIL}; {PHONE}; {STREET}"
+
+
+async def pro_reads(
+    client: httpx.AsyncClient, pro: Pro, dispatch_id: uuid.UUID
+) -> tuple[httpx.Response, httpx.Response]:
+    listing = await client.get(BASE, headers=pro.caller.headers)
+    detail = await client.get(f"{BASE}/{dispatch_id}", headers=pro.caller.headers)
+    assert listing.status_code == detail.status_code == 200, (listing.text, detail.text)
+    return listing, detail
+
+
+@pytest.mark.parametrize("typed", [CITY_CANARY, "orlando", "Orlndo", "ORLANDO FL"])
+async def test_pros_see_the_service_areas_city_never_the_typed_one(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage, typed: str
+) -> None:
+    customer, pro, request_id, dispatch_id, _ = await dispatched(
+        db_client, db_session, address=dict(ADDRESS, city=typed)
+    )
+
+    listing, detail = await pro_reads(db_client, pro, dispatch_id)
+
+    expected = {"zip_code": ADDRESS["zip_code"], "city": "Orlando"}
+    assert listing.json()["items"][0]["location"] == expected
+    assert detail.json()["location"] == expected
+    for response in (listing, detail):
+        for canary in CANARIES:
+            assert canary not in response.text, canary
+    # The customer's own view keeps what they typed.
+    own = await db_client.get(f"/v1/requests/{request_id}", headers=customer.headers)
+    assert own.json()["address"]["city"] == typed
+
+
+async def test_a_zip_without_an_active_area_shows_no_city(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _, pro, request_id, dispatch_id, _ = await dispatched(
+        db_client, db_session, address=dict(ADDRESS, city=CITY_CANARY)
+    )
+    # The area is deactivated after the request (the BDC stops serving the ZIP).
+    await db_session.execute(
+        update(ServiceArea).where(ServiceArea.zip_code == ADDRESS["zip_code"]).values(active=False)
+    )
+
+    with caplog.at_level(logging.WARNING):
+        listing, detail = await pro_reads(db_client, pro, dispatch_id)
+
+    expected = {"zip_code": ADDRESS["zip_code"], "city": None}
+    assert listing.json()["items"][0]["location"] == expected
+    assert detail.json()["location"] == expected
+    for response in (listing, detail):
+        assert "Orlando" not in response.text
+        for canary in CANARIES:
+            assert canary not in response.text, canary
+    missing = [r for r in caplog.records if r.getMessage() == "opportunity_city_missing"]
+    assert missing
+    assert {r.__dict__["service_request_id"] for r in missing} == {str(request_id)}
+
+
+async def test_a_zip_plus_four_is_shown_as_its_five_digits(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    _, pro, _, dispatch_id, _ = await dispatched(
+        db_client, db_session, address=dict(ADDRESS, zip_code=ADDRESS["zip_code"] + "-1234")
+    )
+
+    _, detail = await pro_reads(db_client, pro, dispatch_id)
+
+    assert detail.json()["location"] == {"zip_code": ADDRESS["zip_code"], "city": "Orlando"}
+    assert "1234" not in detail.text
+
+
+# Every customer-controlled field holds a canary. Free text pros are meant to read (the
+# description, the answers) holds contact-shaped canaries, which must be masked; every other
+# field holds a plain canary, which must never appear at all.
+PROVENANCE_ADDRESS = {
+    "line1": "1234 Canary-Line-One Ave",
+    "line2": "Canary-Line-Two Apt 9",
+    "city": "Canary-City",
+    "state": "FL",
+    "zip_code": ADDRESS["zip_code"],
+}
+PROVENANCE_UTM = {
+    "source": "canary-utm-source",
+    "medium": "canary-utm-medium",
+    "campaign": "canary-utm-campaign",
+    "term": "canary-utm-term",
+    "content": "canary-utm-content",
+}
+PROVENANCE_NAMES = {"first_name": "Canaryfirst", "last_name": "Canarylast"}
+PROVENANCE_TEXT = (
+    "Leak at 1234 canary-line-one ave, call 305 555 0142 or mail canary-mail@example.invalid"
+)
+PROVENANCE_CANARIES = (
+    "Canary-Line-One",
+    "canary-line-one",
+    "Canary-Line-Two",
+    "Canary-City",
+    "canary-utm",
+    "Canaryfirst",
+    "Canarylast",
+    "canary-mail",
+    "0142",
+    "canary-account@example.invalid",
+    "5550143",
+)
+
+
+async def test_no_customer_controlled_field_reaches_a_pro(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    customer = await make_caller(db_session)
+    await db_session.execute(
+        update(User)
+        .where(User.id == customer.id)
+        .values(email="canary-account@example.invalid", phone="+13055550143", **PROVENANCE_NAMES)
+    )
+    category_id = await make_category(db_session, questions=QUESTIONS)
+    created = await create(
+        db_client,
+        customer,
+        category_id=str(category_id),
+        description=PROVENANCE_TEXT,
+        intake_answers={"notes": PROVENANCE_TEXT},
+        address=PROVENANCE_ADDRESS,
+        utm=PROVENANCE_UTM,
+    )
+    assert created.status_code == 201, created.text
+    request_id = uuid.UUID(created.json()["id"])
+    await RequestStateMachine(db_session).transition(request_id, RequestStatus.FINDING_PRO, SYSTEM)
+    pro = await make_pro(db_session)
+    dispatch_id = await dispatch(db_session, request_id, pro)
+
+    listing, detail = await pro_reads(db_client, pro, dispatch_id)
+
+    for response in (listing, detail):
+        for canary in PROVENANCE_CANARIES:
+            assert canary.lower() not in response.text.lower(), canary
+    assert detail.json()["location"] == {"zip_code": ADDRESS["zip_code"], "city": "Orlando"}
+    assert detail.json()["text_redacted"] is True
