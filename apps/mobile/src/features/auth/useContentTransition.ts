@@ -2,7 +2,7 @@ import { useFocusEffect, useIsFocused, useNavigation } from "expo-router";
 import type { NativeStackNavigationProp } from "expo-router/native-stack";
 import type { ParamListBase } from "expo-router/react-navigation";
 import { useCallback, useEffect, useRef, useState, type ComponentRef, type RefObject } from "react";
-import { BackHandler, type Text, type ViewStyle } from "react-native";
+import { BackHandler, Platform, type Text, type ViewStyle } from "react-native";
 import {
   Easing,
   ReduceMotion,
@@ -17,7 +17,14 @@ import { moveAccessibilityFocus, type SystemBar } from "@/components/ui";
 import { tokens } from "@/theme";
 
 import { backToPrevious } from "./components/BackButton";
-import { panelHandoffStore, usePanelHandoff } from "./panelHandoff";
+import {
+  CONTENT_FROM,
+  panelHandoffStore,
+  panelProgress,
+  panelTravel,
+  usePanelHandoff,
+} from "./panelHandoff";
+import { pushesUnderRise } from "./panelRoute";
 
 type Params = {
   /** The screen was reached by Welcome's panel rise: it hands off from the panel, and back to it. */
@@ -64,9 +71,12 @@ export function useContentTransition({
   titleRef,
 }: Params): ContentTransition {
   const { transitionMs, slidePx, panelRiseMs } = tokens.motion;
+  const { xl } = tokens.radius;
+  // Android, with the rise: the screen is on screen under the rising panel, so it rides it.
+  const ridesPanel = animate && !reduceMotion && pushesUnderRise(Platform.OS);
   const focused = useIsFocused();
   const navigation = useNavigation<NativeStackNavigationProp<ParamListBase>>();
-  const { bar: panelBar } = usePanelHandoff();
+  const { bar: panelBar, phase } = usePanelHandoff();
   const visible = useSharedValue(animate ? 0 : 1);
   const entered = useRef(false);
   const laidOut = useRef(false);
@@ -109,7 +119,9 @@ export function useContentTransition({
    */
   const tryStart = () => {
     if (!animate || entered.current || exitingRef.current) return;
-    const panelSettled = panelHandoffStore.getState().phase !== "rising";
+    // Riding the panel, the screen shows with it (its opacity follows the panel); otherwise it
+    // waits for the panel to settle.
+    const panelSettled = ridesPanel || panelHandoffStore.getState().phase !== "rising";
     if (!laidOut.current || !panelSettled) return;
     if (appearing.current) {
       start();
@@ -206,7 +218,21 @@ export function useContentTransition({
     }, [animate]),
   );
 
-  const rootStyle = useAnimatedStyle(() => ({ opacity: visible.value }));
+  const rootStyle = useAnimatedStyle(() => {
+    if (!ridesPanel) return { opacity: visible.value };
+    // The screen's top edge is the panel's, with its corners, and its content shows over the
+    // second half of the rise: page and content arrive in the panel's own frames, on the UI
+    // thread, however long the device takes to draw a frame.
+    const p = panelProgress.value;
+    const shownOnPanel = Math.min(1, Math.max(0, (p - CONTENT_FROM) / (1 - CONTENT_FROM)));
+    return {
+      opacity: visible.value * shownOnPanel,
+      transform: [{ translateY: panelTravel.value * (1 - p) }],
+      borderTopLeftRadius: xl * (1 - p),
+      borderTopRightRadius: xl * (1 - p),
+      overflow: "hidden",
+    };
+  });
   const contentStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: reduceMotion ? 0 : slidePx * (1 - visible.value) }],
   }));
@@ -218,7 +244,9 @@ export function useContentTransition({
     exit,
     // Once shown, the page keeps its color through the exit: under Reduce Motion the panel's bar
     // is still the hero's, and a navy page fading out was the empty-navy frame of #175.
-    bar: !animate || shown ? "light" : panelBar,
+    // Riding the panel the screen shows before the panel covers the bar: the bar follows the panel
+    // until then.
+    bar: !animate || (shown && phase !== "rising") ? "light" : panelBar,
     ownsStatusBar: !animate || focused,
     busy: animate && (!shown || exiting),
   };

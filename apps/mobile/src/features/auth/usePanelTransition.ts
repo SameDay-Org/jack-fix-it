@@ -13,7 +13,13 @@ import {
 import type { SystemBar } from "@/components/ui";
 import { tokens } from "@/theme";
 
-import { panelHandoffStore, setPanelBar, setRisePhase } from "./panelHandoff";
+import {
+  panelHandoffStore,
+  panelProgress,
+  panelTravel,
+  setPanelBar,
+  setRisePhase,
+} from "./panelHandoff";
 import { pushesUnderRise } from "./panelRoute";
 
 export type PanelGeometry = {
@@ -66,8 +72,9 @@ export type PanelTransition = {
 export function usePanelTransition({ reduceMotion, destinations }: Params): PanelTransition {
   const { panelRiseMs, launchMaxMs } = tokens.motion;
   const navigation = useNavigation();
-  const progress = useSharedValue(0);
-  const travel = useSharedValue(0);
+  // Module-level, so the destination can ride the same values (see `panelHandoff`).
+  const progress = panelProgress;
+  const travel = panelTravel;
   const flipAt = useSharedValue(1);
   const [bar, setBar] = useState<SystemBar>("hero");
   const [busy, setBusy] = useState(false);

@@ -14,6 +14,7 @@ import { BrandHero } from "@/features/launch/BrandHero";
 import { tokens } from "@/theme";
 
 import { WelcomeActions } from "./components/WelcomeActions";
+import { CONTENT_FROM } from "./panelHandoff";
 import { usePanelTransition } from "./usePanelTransition";
 
 const { white, "gray-50": page } = tokens.colors;
@@ -74,7 +75,7 @@ export function WelcomeScreen() {
     transform: [{ translateY: -travel.value * progress.value }],
   }));
   const actionsStyle = useAnimatedStyle(() => ({
-    opacity: Math.max(0, 1 - 2 * progress.value),
+    opacity: Math.max(0, 1 - progress.value / CONTENT_FROM),
     transform: [{ translateY: -slidePx * progress.value }],
   }));
 

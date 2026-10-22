@@ -9,13 +9,13 @@ import {
   useNavigation,
 } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { BackHandler } from "react-native";
+import { BackHandler, Platform } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
 
 import { moveAccessibilityFocus } from "@/components/ui";
 import { tokens } from "@/theme";
 
-import { panelHandoffStore } from "../panelHandoff";
+import { panelHandoffStore, panelProgress, panelTravel } from "../panelHandoff";
 import { RoleScreen } from "../RoleScreen";
 import { renderInSafeArea } from "./helpers";
 
@@ -139,7 +139,10 @@ describe("RoleScreen", () => {
         }),
       } as never);
     });
-    afterEach(() => jest.useRealTimers());
+    afterEach(() => {
+      jest.useRealTimers();
+      jest.restoreAllMocks();
+    });
 
     it("enters once laid out, on screen and the panel risen; then focus moves to the title", async () => {
       jest.mocked(moveAccessibilityFocus).mockClear();
@@ -356,6 +359,49 @@ describe("RoleScreen", () => {
       await layOut();
       await advance(panelRiseMs * 5);
       expect(rootOpacity()).toBe(0);
+    });
+
+    it("Android: it rides the rising panel, its content showing over the rise's second half", async () => {
+      jest.replaceProperty(Platform, "OS", "android");
+      const { xl } = tokens.radius;
+      const TRAVEL = 464;
+      panelTravel.value = TRAVEL;
+      panelProgress.value = 0.25;
+      panelHandoffStore.setState({ phase: "rising", bar: "hero" });
+      await renderInSafeArea(<RoleScreen />);
+      await layOut();
+      await appear();
+      await advance(transitionMs * 2); // on screen and ready, under the rising panel
+      type Riding = {
+        opacity: number;
+        transform: { translateY: number }[];
+        borderTopLeftRadius: number;
+      };
+      const root = () =>
+        (screen.getByTestId("role-root").props.jestAnimatedStyle as { value: Riding }).value;
+
+      // Its top edge is the panel's; Welcome's actions are still fading: nothing of it shows yet.
+      expect(root().transform[0].translateY).toBeCloseTo(TRAVEL * 0.75, 5);
+      expect(root().borderTopLeftRadius).toBeCloseTo(xl * 0.75, 5);
+      expect(root().opacity).toBe(0);
+      expect(backdrop()).toContain("bg-navy-900"); // the bar is still the panel's
+
+      await act(async () => {
+        panelProgress.value = 0.75;
+      });
+      expect(root().opacity).toBeCloseTo(0.5, 5);
+      expect(root().transform[0].translateY).toBeCloseTo(TRAVEL * 0.25, 5);
+
+      await act(async () => {
+        panelProgress.value = 1;
+        panelHandoffStore.setState({ phase: "risen", bar: "light" });
+      });
+      expect(root().opacity).toBe(1);
+      expect(root().transform[0].translateY).toBe(0);
+      expect(root().borderTopLeftRadius).toBe(0);
+      expect(backdrop()).toContain("bg-gray-50");
+      panelProgress.value = 0;
+      panelTravel.value = 0;
     });
 
     it("reached any other way, the screen is simply there", async () => {

@@ -8,7 +8,7 @@ import { useReducedMotion } from "react-native-reanimated";
 import { useSession } from "@/api";
 import { tokens } from "@/theme";
 
-import { panelHandoffStore } from "../panelHandoff";
+import { panelHandoffStore, panelProgress, panelTravel } from "../panelHandoff";
 import { WelcomeScreen } from "../WelcomeScreen";
 import { renderInSafeArea, SIGNED_OUT } from "./helpers";
 
@@ -83,6 +83,9 @@ const refocus = () =>
 
 beforeEach(() => {
   jest.useFakeTimers();
+  // Shared with the destination at module level: every test starts with the panel at rest.
+  panelProgress.value = 0;
+  panelTravel.value = 0;
   jest.mocked(useSession).mockReturnValue(SESSION_SIGNED_OUT);
   jest.mocked(useReducedMotion).mockReturnValue(false);
   jest.mocked(router.push).mockReset();
