@@ -28,7 +28,12 @@ from app.integrations.storage import (
 from app.modules.addresses.models import Address
 from app.modules.categories.models import Category
 from app.modules.media.sanitize import SanitizeConfig
-from app.modules.requests.media_copies import MediaCopier, MediaCopyConfig, MediaCopyOutcome
+from app.modules.requests.media_copies import (
+    MediaCopier,
+    MediaCopyConfig,
+    MediaCopyOutcome,
+    safe_key_for,
+)
 from app.modules.requests.models import (
     MediaSafeStatus,
     RequestMedia,
@@ -177,7 +182,10 @@ async def test_safe_key_is_opaque(db_session: AsyncSession, storage: MemoryStora
     assert SAFE_KEY.fullmatch(safe_key)
     assert str(media.customer_id) not in safe_key
     assert media.customer_id.hex not in safe_key
+    assert media.media_id.hex not in safe_key
     assert "request_media" not in safe_key
+    # One key per row: a try again, or an upload a timeout left running, rewrites this copy.
+    assert safe_key == safe_key_for(media.media_id, ".jpg")
 
 
 async def test_rerun_skips_ready_rows_no_second_copy(
@@ -453,6 +461,82 @@ async def test_a_failure_while_failing_a_row_leaves_it_waiting(
 
     assert (outcome.waiting, outcome.failed) == (1, 0)
     assert (await row(db_session, media.media_id)).safe_status == MediaSafeStatus.PENDING
+
+
+async def test_a_final_try_settles_a_row_whose_failing_write_failed(
+    db_session: AsyncSession,
+    storage: MemoryStorage,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    media = await make_media(db_session, storage, gps_jpeg())
+    storage.broken.add(media.file_key)
+    jobs = copier(db_session, storage)
+
+    async def slow_database(*args: object, **kwargs: object) -> None:
+        raise TimeoutError
+
+    monkeypatch.setattr(jobs, "_fail", slow_database)
+
+    with caplog.at_level(logging.ERROR):
+        outcome = await jobs.copy_request_media(media.request_id, attempt=MAX_TRIES + 2, final=True)
+
+    # Both of the row's own failing writes failed; the settlement's write fails it.
+    assert (outcome.waiting, outcome.failed) == (0, 1)
+    assert (await row(db_session, media.media_id)).safe_status == MediaSafeStatus.FAILED
+    [failure] = [r for r in caplog.records if r.getMessage() == "media_sanitize_failed"]
+    assert failure.__dict__["reason"] == "internal"
+
+
+async def test_the_last_two_tries_settle_every_row(
+    db_session: AsyncSession, storage: MemoryStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    media = await make_media(db_session, storage, gps_jpeg())
+    finals: dict[int, bool] = {}
+
+    async def recording(
+        self: MediaCopier, request_id: uuid.UUID, attempt: int, *, final: bool = False
+    ) -> MediaCopyOutcome:
+        finals[attempt] = final
+        return MediaCopyOutcome()
+
+    monkeypatch.setattr(MediaCopier, "copy_request_media", recording)
+
+    last = MAX_TRIES + SANITIZE_SPARE_TRIES
+    for attempt in range(1, last + 1):
+        await sanitize_request_media(ctx(db_session, storage, attempt), str(media.request_id))
+
+    # A deploy that stops one settling try leaves the other.
+    assert finals == {attempt: attempt >= last - 1 for attempt in range(1, last + 1)}
+
+
+@pytest.mark.parametrize("waiting", [True, False])
+async def test_the_last_try_never_asks_for_a_retry(
+    db_session: AsyncSession,
+    storage: MemoryStorage,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    waiting: bool,
+) -> None:
+    # ARQ would refuse it ("max retries exceeded"): the job logs what it could not settle.
+    media = await make_media(db_session, storage, gps_jpeg())
+
+    async def unsettled(*args: object, **kwargs: object) -> MediaCopyOutcome:
+        if waiting:
+            return MediaCopyOutcome(waiting=1)
+        raise OperationalError("UPDATE", {}, Exception("down"))
+
+    monkeypatch.setattr(MediaCopier, "copy_request_media", unsettled)
+
+    with caplog.at_level(logging.ERROR):
+        outcome = await sanitize_request_media(
+            ctx(db_session, storage, MAX_TRIES + SANITIZE_SPARE_TRIES), str(media.request_id)
+        )
+
+    assert outcome == "unsettled"
+    [record] = [r for r in caplog.records if r.getMessage() == "media_sanitize_unsettled"]
+    assert record.__dict__["service_request_id"] == str(media.request_id)
+    assert "down" not in caplog.text
 
 
 @pytest.mark.parametrize(

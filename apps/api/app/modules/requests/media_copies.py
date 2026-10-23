@@ -4,7 +4,8 @@ POST /v1/requests queues sanitize_request_media after its commit. For each media
 pending, the job downloads the original to a temporary file, makes the safe copy
 (app/modules/media/sanitize.py), uploads it under an opaque key (m/<32 hex><ext>: no user id,
 no purpose) and marks the row ready in one short transaction. Temporary files are deleted in
-every case. A row already ready or failed is skipped, so a run again makes no second copy.
+every case. A row already ready or failed is skipped. A row has one key, derived from its id: a
+try again, or an upload a timeout left running, rewrites that one copy and never leaves another.
 
 A transient failure (the storage, a timeout, ffmpeg missing for now) leaves the row pending and
 asks for a retry, until the job's last try, where it fails like a file that can never be made
@@ -17,7 +18,8 @@ MEDIA_SANITIZE_OVERHEAD_SECONDS. No step goes past the try's work deadline,
 MEDIA_SANITIZE_SETTLE_SECONDS before ARQ's. A file starts only while the try has time for its
 whole budget (Settings.media_sanitize_min_job_seconds gives the first one that time). The files
 a try had no time for, or that its deadline cut, go on in the next try, or fail (timeout) in one
-write on the last one.
+write on the last two (with a row whose own failing write failed). The very last try never asks
+for a retry: ARQ would refuse it.
 
 A transfer or an image transform runs in a thread, which a timeout cannot stop: the row's
 temporary directory stays until the thread ends, so no thread ever writes to a removed file.
@@ -69,6 +71,8 @@ SANITIZE_TASK: Final = "sanitize_request_media"
 # What one row's run ended in; "skipped": another run had already settled it.
 _RowResult = Literal["ready", "failed", "waiting", "skipped"]
 SAFE_KEY_PREFIX: Final = "m/"
+# Makes a row's safe key from its id (uuid5): stable for the row, and its id cannot be read back.
+_SAFE_KEY_NAMESPACE: Final = uuid.UUID("5d1f0b0e-6a43-4f4e-9b8a-173c0a5e1d7f")
 # The threads of transfers and image transforms. A timed-out one cannot be stopped: it ends on
 # its own (the storage's connect and read timeouts, an image's pixel cap).
 _THREADS: Final = ThreadPoolExecutor(thread_name_prefix="media-copy")
@@ -90,8 +94,9 @@ async def enqueue_sanitize(queue: JobQueue, request_id: uuid.UUID, timeout_secon
     )
 
 
-def new_safe_key(extension: str) -> str:
-    return f"{SAFE_KEY_PREFIX}{uuid.uuid4().hex}{extension}"
+def safe_key_for(media_id: uuid.UUID, extension: str) -> str:
+    """The row's one safe key: every try, and any upload left running, writes the same object."""
+    return f"{SAFE_KEY_PREFIX}{uuid.uuid5(_SAFE_KEY_NAMESPACE, str(media_id)).hex}{extension}"
 
 
 @dataclass(frozen=True)
@@ -247,8 +252,9 @@ class MediaCopier:
         try (1 first): from MEDIA_SANITIZE_MAX_TRIES on, a transient failure fails the row too.
         The first row always starts; a later one only while the try has time for its whole
         budget. The rows a try had no time for, or that its deadline cut, are deferred to the
-        next try, or failed (timeout) on the `final` one ARQ allows. TimeoutError when the
-        database does not answer in time."""
+        next try. A `final` try fails them (timeout) instead, with the rows whose own failing
+        write failed, in one write from the settle reserve. TimeoutError when the database does
+        not answer in time."""
         run = _Try(self._config, clock)
         try:
             pending = await run.step(
@@ -258,16 +264,26 @@ class MediaCopier:
             raise TimeoutError from None
         settled: dict[_RowResult, int] = {"ready": 0, "failed": 0, "waiting": 0, "skipped": 0}
         unsettled: list[uuid.UUID] = []
+        stuck: list[uuid.UUID] = []  # final: rows still waiting after their failing write failed
         for index, (media_id, file_key) in enumerate(pending):
             if unsettled or (index > 0 and run.work_left() < self._config.row_budget_seconds):
                 unsettled.append(media_id)
                 continue
             try:
-                settled[await self._copy_guarded(run, media_id, request_id, file_key, attempt)] += 1
+                result = await self._copy_guarded(run, media_id, request_id, file_key, attempt)
             except _OutOfTimeError:
                 unsettled.append(media_id)
-        if final and unsettled:
-            settled["failed"] += await self._fail_unsettled(run, request_id, unsettled)
+                continue
+            if final and result == "waiting":
+                stuck.append(media_id)
+            else:
+                settled[result] += 1
+        if final and (unsettled or stuck):
+            reasons = {
+                **dict.fromkeys(unsettled, SanitizeFailure.TIMEOUT),
+                **dict.fromkeys(stuck, SanitizeFailure.INTERNAL),
+            }
+            settled["failed"] += await self._fail_unsettled(run, request_id, reasons)
             unsettled = []
         return MediaCopyOutcome(
             ready=settled["ready"],
@@ -306,7 +322,8 @@ class MediaCopier:
             )
         except _OutOfTimeError:
             raise
-        except Exception as error:  # noqa: BLE001 - the database fails too: the next try settles it
+        # The database fails too: the next try, or a final try's settlement, settles it.
+        except Exception as error:  # noqa: BLE001
             logger.warning(
                 "media_sanitize_retry",
                 extra={
@@ -328,7 +345,7 @@ class MediaCopier:
         attempt: int,
     ) -> _RowResult:
         try:
-            safe_key, content_type = await self._copy(run, file_key)
+            safe_key, content_type = await self._copy(run, media_id, file_key)
         except SanitizeError as error:
             await self._fail(run, media_id, request_id, error.reason, error.exit_code)
             return "failed"
@@ -373,7 +390,7 @@ class MediaCopier:
         logger.warning("media_sanitize_retry", extra=extra)
         return "waiting"
 
-    async def _copy(self, run: _Try, file_key: str) -> tuple[str, str]:
+    async def _copy(self, run: _Try, media_id: uuid.UUID, file_key: str) -> tuple[str, str]:
         """Original -> temporary file -> safe copy -> storage. The safe key and its type."""
         content_type = upload_content_type(file_key)
         if content_type is None:
@@ -395,7 +412,7 @@ class MediaCopier:
                 in_thread=partial(_bounded_thread, workdir, seconds),
             )
             safe = await run.step(transform, math.inf, _OutOfTimeError)
-            safe_key = new_safe_key(safe.extension)
+            safe_key = safe_key_for(media_id, safe.extension)
             upload = partial(self._storage.upload_from, safe.path, safe_key, safe.content_type)
             await run.step(partial(workdir.run, upload), seconds, _step_timed_out)
         finally:
@@ -438,19 +455,20 @@ class MediaCopier:
         logger.error("media_sanitize_failed", extra=extra)
 
     async def _fail_unsettled(
-        self, run: _Try, request_id: uuid.UUID, media_ids: Sequence[uuid.UUID]
+        self, run: _Try, request_id: uuid.UUID, reasons: dict[uuid.UUID, SanitizeFailure]
     ) -> int:
-        """The last try's settlement: the rows it had no time for fail (timeout) in one write,
-        within MEDIA_SANITIZE_OVERHEAD_SECONDS and what is left before ARQ's timeout."""
+        """A final try's settlement: the rows it could not settle fail in one write, within
+        MEDIA_SANITIZE_OVERHEAD_SECONDS and what is left before ARQ's timeout (the settle
+        reserve: past the work deadline, never cut by it)."""
         seconds = min(self._config.overhead_seconds, run.left())
-        failed = await _within(seconds, partial(self._fail_rows, media_ids), TimeoutError)
+        failed = await _within(seconds, partial(self._fail_rows, list(reasons)), TimeoutError)
         for media_id in failed:
             logger.error(
                 "media_sanitize_failed",
                 extra={
                     "media_id": str(media_id),
                     "service_request_id": str(request_id),
-                    "reason": SanitizeFailure.TIMEOUT.value,
+                    "reason": reasons[media_id].value,
                 },
             )
         return len(failed)

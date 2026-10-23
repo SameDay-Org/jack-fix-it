@@ -291,10 +291,13 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _media_job_fits_one_file(self) -> Self:
-        if self.media_sanitize_settle_seconds <= self.media_sanitize_overhead_seconds:
+        # The reserve covers a database step the deadline cut (its connection's cleanup) and
+        # the final try's write that fails what is left: up to one database step each.
+        if self.media_sanitize_settle_seconds < 2 * self.media_sanitize_overhead_seconds:
             raise ValueError(
-                "MEDIA_SANITIZE_SETTLE_SECONDS must exceed MEDIA_SANITIZE_OVERHEAD_SECONDS: the "
-                "last try's write that fails what is left runs within it"
+                "MEDIA_SANITIZE_SETTLE_SECONDS must be at least 2 x "
+                "MEDIA_SANITIZE_OVERHEAD_SECONDS: a cut database step's cleanup and the last "
+                "try's write that fails what is left run within it"
             )
         if self.media_sanitize_job_timeout_seconds < self.media_sanitize_min_job_seconds:
             raise ValueError(

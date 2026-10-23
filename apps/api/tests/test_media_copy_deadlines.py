@@ -262,6 +262,20 @@ class JumpClock:
         return self.before if self.reads >= 0 else self.after
 
 
+class Ticks:
+    """Reads `values` in turn, then the last one for good."""
+
+    def __init__(self, *values: float) -> None:
+        self.values = list(values)
+
+    def __call__(self) -> float:
+        return self.values.pop(0) if len(self.values) > 1 else self.values[0]
+
+
+# A copy that hangs must fail its test, not hang the run: a regression in a step bound shows here.
+BOUND = 5
+
+
 def fast_copier(session: AsyncSession, storage: MemoryStorage, settings: Settings) -> MediaCopier:
     return MediaCopier(sessions_of(session), storage, MediaCopyConfig.from_settings(settings))
 
@@ -277,13 +291,32 @@ async def test_the_deadline_cuts_a_running_step(
     settings = make_settings(**FAST)
     clock = JumpClock(reads=2, before=0.0, after=1.45)
 
-    outcome = await fast_copier(db_session, storage, settings).copy_request_media(
-        media.request_id, attempt=1, final=final, clock=clock
-    )
+    async with asyncio.timeout(BOUND):
+        outcome = await fast_copier(db_session, storage, settings).copy_request_media(
+            media.request_id, attempt=1, final=final, clock=clock
+        )
 
     expected = MediaSafeStatus.FAILED if final else MediaSafeStatus.PENDING
     assert (outcome.deferred, outcome.failed) == ((0, 1) if final else (1, 0))
     assert (await row(db_session, media.media_id)).safe_status == expected
+
+
+async def test_a_final_try_settles_after_its_work_deadline(
+    db_session: AsyncSession, released: list[StalledStorage]
+) -> None:
+    # The deadline cuts the stalled download at 1.45 s; the settlement starts at 1.6 s, past the
+    # work deadline (1.5 s) but inside the settle reserve: it still fails the row.
+    storage = stalled(released, "download")
+    media = await make_media(db_session, storage, gps_jpeg())
+    settings = make_settings(**FAST)
+
+    async with asyncio.timeout(BOUND):
+        outcome = await fast_copier(db_session, storage, settings).copy_request_media(
+            media.request_id, attempt=1, final=True, clock=Ticks(0.0, 0.0, 1.45, 1.6)
+        )
+
+    assert (outcome.failed, outcome.deferred) == (1, 0)
+    assert (await row(db_session, media.media_id)).safe_status == MediaSafeStatus.FAILED
 
 
 async def test_the_accepted_minimum_budget_copies_a_file(db_session: AsyncSession) -> None:
@@ -327,6 +360,27 @@ async def test_a_file_starts_on_the_terms_the_settings_check(db_session: AsyncSe
     assert (outcome.ready, outcome.deferred) == (2, 0)
 
 
+async def test_the_first_file_starts_even_when_the_query_ran_long(
+    db_session: AsyncSession,
+) -> None:
+    # The query took a little more than its allowance (30.001 s): less than one file's budget is
+    # left, and the first file still starts. Every try makes progress.
+    storage = MemoryStorage()
+    media = await make_media(db_session, storage, gps_jpeg())
+    settings = make_settings(
+        media_sanitize_timeout_seconds=120,
+        media_sanitize_overhead_seconds=30,
+        media_sanitize_settle_seconds=60,
+        media_sanitize_job_timeout_seconds=840,
+    )
+
+    outcome = await fast_copier(db_session, storage, settings).copy_request_media(
+        media.request_id, attempt=1, clock=JumpClock(reads=2, before=0.0, after=30.001)
+    )
+
+    assert (outcome.ready, outcome.deferred) == (1, 0)
+
+
 def test_the_job_timeout_must_cover_the_query_one_file_and_the_reserve() -> None:
     lowest = {
         "media_sanitize_timeout_seconds": 120,
@@ -338,9 +392,10 @@ def test_the_job_timeout_must_cover_the_query_one_file_and_the_reserve() -> None
         make_settings(**lowest, media_sanitize_job_timeout_seconds=839)
 
 
-def test_the_settle_reserve_must_outlast_one_database_step() -> None:
+def test_the_settle_reserve_must_cover_two_database_steps() -> None:
+    make_settings(media_sanitize_overhead_seconds=30, media_sanitize_settle_seconds=60)
     with pytest.raises(ValueError, match="MEDIA_SANITIZE_SETTLE_SECONDS"):
-        make_settings(media_sanitize_overhead_seconds=30, media_sanitize_settle_seconds=30)
+        make_settings(media_sanitize_overhead_seconds=30, media_sanitize_settle_seconds=59)
 
 
 # A thread a timeout left behind
@@ -355,7 +410,8 @@ async def test_a_stalled_transfer_keeps_its_files_until_its_thread_ends(
     sanitize = SanitizeConfig(1_000_000, 85, "ffmpeg", 0.1)
     jobs = MediaCopier(sessions_of(db_session), storage, MediaCopyConfig(3, sanitize))
 
-    outcome = await jobs.copy_request_media(media.request_id, attempt=1)
+    async with asyncio.timeout(BOUND):
+        outcome = await jobs.copy_request_media(media.request_id, attempt=1)
 
     assert outcome.waiting == 1  # the step timed out; the row waits for the next try
     [path] = storage.files
@@ -391,7 +447,8 @@ async def test_a_slow_image_transform_times_out_and_keeps_its_files(
 
     try:
         with caplog.at_level(logging.WARNING):
-            outcome = await jobs.copy_request_media(media.request_id, attempt=1)
+            async with asyncio.timeout(BOUND):
+                outcome = await jobs.copy_request_media(media.request_id, attempt=1)
         [workdir] = workdirs
         assert workdir.is_dir()
     finally:
