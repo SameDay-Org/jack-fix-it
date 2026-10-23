@@ -1,4 +1,5 @@
 import type { ApiSchema } from "@jack/shared";
+import { Platform } from "react-native";
 
 import { apiPost } from "./client";
 import { apiConfig } from "./config";
@@ -14,15 +15,16 @@ export type UploadFile = {
   /** What the bytes are, e.g. `image/jpeg`; it is signed into the URL with the size. */
   contentType: string;
   /**
-   * The file's exact size in bytes, when already known (a picked video). The file then streams
-   * from disk during the PUT and is never loaded into memory; without it the bytes are read once,
-   * natively, to measure them (fine for a compressed photo). A wrong size is refused by the
-   * storage, since the size is signed.
+   * The file's exact size in bytes, when already known (a picked video). The file itself is then
+   * the PUT's body and never passes through JavaScript: Android streams it from disk, while iOS
+   * (React Native's networking) reads it into native memory first. Without a size the bytes are
+   * read once as a native Blob to measure them (fine for a compressed photo). A wrong size is
+   * refused by the storage, since the size is signed.
    */
   sizeBytes?: number;
 };
 
-/** What the PUT sends: a native Blob already read, or the file itself, streamed from disk. */
+/** What the PUT sends: a native Blob already read, or the file itself (`{ uri }`). */
 type UploadBody = { send: Blob | { uri: string }; size: number };
 
 export type UploadMediaOptions = {
@@ -37,6 +39,11 @@ export type UploadMediaOptions = {
 // 403 upload_forbidden / forbidden, 422 upload_invalid: the same file would get the same answer.
 const REJECTED_STATUSES: ReadonlySet<number> = new Set([403, 422]);
 const LOCAL_FILE = /^(file|content):/;
+// React Native 0.88's Android ProgressRequestBody counts every byte twice: FilterOutputStream's
+// array write loops into the overridden single-byte write, which counts too, and then the array
+// write adds the whole count again. Its `loaded` reaches `total` halfway through. The tripwire
+// test in upload.test.ts reads that source and fails once React Native stops double counting.
+const ANDROID_PROGRESS_OVERCOUNT = 2;
 
 /**
  * Uploads one file for `purpose` and returns its storage key, which the feature then attaches.
@@ -153,6 +160,10 @@ function storageUrl(ticket: UploadTicket): string {
  * One PUT of `body` to the ticket's URL with exactly the ticket's headers. XMLHttpRequest rather
  * than fetch, for upload progress. Resolves on a 2xx; rejects with `UploadFailedError` or, when
  * the caller cancels, with the signal's abort.
+ *
+ * The deadline is also kept in JavaScript: on iOS, React Native prepares a `{ uri }` body before
+ * the request exists, and a failure there is only logged natively, so neither an answer nor the
+ * native timeout would ever come. The watchdog aborts the PUT and reports a timeout.
  */
 function putToStorage(
   ticket: UploadTicket,
@@ -165,8 +176,15 @@ function putToStorage(
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    const timeoutMs = uploadTimeoutFor(body.size);
+    let timedOut = false;
+    const watchdog = setTimeout(() => {
+      timedOut = true;
+      xhr.abort();
+    }, timeoutMs);
     const cancel = () => xhr.abort();
     const settle = (outcome: () => void) => {
+      clearTimeout(watchdog);
       signal?.removeEventListener("abort", cancel);
       outcome();
     };
@@ -174,12 +192,11 @@ function putToStorage(
     xhr.open("PUT", url);
     // Exactly the signed headers: nothing added (no Authorization), nothing dropped.
     for (const [name, value] of Object.entries(ticket.headers)) xhr.setRequestHeader(name, value);
-    xhr.timeout = uploadTimeoutFor(body.size);
+    xhr.timeout = timeoutMs;
     xhr.upload.onprogress = (event) => {
-      // Android can count more bytes sent than the body holds (seen at 195%): a share stays a share.
-      if (event.lengthComputable && event.total > 0) {
-        onProgress?.(Math.min(1, event.loaded / event.total));
-      }
+      if (!event.lengthComputable || event.total <= 0) return;
+      const counted = Platform.OS === "android" ? ANDROID_PROGRESS_OVERCOUNT : 1;
+      onProgress?.(Math.min(1, event.loaded / (event.total * counted)));
     };
     xhr.onload = () =>
       settle(() => {
@@ -192,11 +209,12 @@ function putToStorage(
       });
     xhr.onerror = () => settle(() => reject(new UploadFailedError("network")));
     xhr.ontimeout = () => settle(() => reject(new UploadFailedError("timeout")));
-    xhr.onabort = () => settle(() => reject(abortError(signal)));
+    xhr.onabort = () =>
+      settle(() => reject(timedOut ? new UploadFailedError("timeout") : abortError(signal)));
 
     signal?.addEventListener("abort", cancel, { once: true });
     onProgress?.(0);
-    // React Native's XHR also takes `{ uri }`: the native side streams the file as the body.
+    // React Native's XHR also takes `{ uri }`: the native side sends the file itself as the body.
     xhr.send(body.send as unknown as XMLHttpRequestBodyInit);
   });
 }

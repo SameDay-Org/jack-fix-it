@@ -1,4 +1,8 @@
+import { readFileSync } from "fs";
+import { join } from "path";
+
 import type { ApiSchema } from "@jack/shared";
+import { Platform } from "react-native";
 
 import { UploadFailedError, UploadRejectedError } from "../errors";
 import { sessionStore } from "../session";
@@ -182,7 +186,7 @@ describe("uploadMedia", () => {
     ]);
   });
 
-  it("a file of known size streams from disk: no read, its size signed, the file itself sent", async () => {
+  it("a file of known size is sent as itself: no read, its size signed, `{ uri }` as the body", async () => {
     const video = {
       uri: "file:///cache/ImagePicker/clip.mp4",
       contentType: "video/mp4",
@@ -202,18 +206,77 @@ describe("uploadMedia", () => {
     await expect(upload).resolves.toEqual({ key: ticket(1).key });
   });
 
-  it("reports progress from 0 to 1", async () => {
-    const onProgress = jest.fn();
-    const upload = start({ onProgress });
-    await flush();
+  describe("progress", () => {
+    afterEach(() => jest.restoreAllMocks());
 
-    lastXhr().progress(FILE_SIZE / 4, FILE_SIZE);
-    lastXhr().progress(FILE_SIZE, FILE_SIZE);
-    lastXhr().progress(FILE_SIZE * 1.95, FILE_SIZE); // Android over-counts sent bytes at times
-    lastXhr().respond(200);
-    await upload;
+    it("iOS: the share of the bytes sent, from 0 to 1", async () => {
+      jest.replaceProperty(Platform, "OS", "ios");
+      const onProgress = jest.fn();
+      const upload = start({ onProgress });
+      await flush();
 
-    expect(onProgress.mock.calls.map(([fraction]) => fraction)).toEqual([0, 0.25, 1, 1, 1]);
+      lastXhr().progress(FILE_SIZE / 4, FILE_SIZE);
+      lastXhr().progress(FILE_SIZE, FILE_SIZE);
+      lastXhr().respond(200);
+      await upload;
+
+      expect(onProgress.mock.calls.map(([fraction]) => fraction)).toEqual([0, 0.25, 1, 1]);
+    });
+
+    it("Android: React Native counts each byte twice, so its count is halved", async () => {
+      jest.replaceProperty(Platform, "OS", "android");
+      const onProgress = jest.fn();
+      const upload = start({ onProgress });
+      await flush();
+
+      // What RN 0.88 reports a quarter, half and all the way through: twice the bytes sent.
+      lastXhr().progress(FILE_SIZE / 2, FILE_SIZE);
+      lastXhr().progress(FILE_SIZE, FILE_SIZE);
+      lastXhr().progress(FILE_SIZE * 2, FILE_SIZE);
+      lastXhr().respond(200);
+      await upload;
+
+      expect(onProgress.mock.calls.map(([fraction]) => fraction)).toEqual([0, 0.25, 0.5, 1, 1]);
+    });
+
+    it("tripwire: React Native's Android progress still double counts (else drop the halving)", () => {
+      const source = readFileSync(
+        join(
+          require.resolve("react-native/package.json"),
+          "..",
+          "ReactAndroid/src/main/java/com/facebook/react/modules/network/ProgressRequestBody.kt",
+        ),
+        "utf8",
+      );
+      // The array write calls super (FilterOutputStream loops into the overridden single-byte
+      // write, which counts each byte) and then adds the whole count again.
+      expect(source).toMatch(
+        /override fun write\(data: ByteArray, offset: Int, byteCount: Int\) \{\s*super\.write\(data, offset, byteCount\)\s*count \+= byteCount/,
+      );
+      expect(source).toMatch(
+        /override fun write\(data: Int\) \{\s*super\.write\(data\)\s*count\+\+/,
+      );
+    });
+  });
+
+  it("a PUT that never settles is aborted at its deadline and reported as a timeout", async () => {
+    jest.useFakeTimers();
+    try {
+      const upload = start().catch((error: unknown) => error);
+      // The file read and the URL request settle over a few ticks, far below the deadline.
+      for (let tick = 0; tick < 20 && !lastXhr(); tick += 1) await jest.advanceTimersByTimeAsync(1);
+      const xhr = lastXhr();
+      expect(xhr).toBeDefined();
+
+      // No answer and no native timeout event: what iOS does when a `{ uri }` body cannot be built.
+      await jest.advanceTimersByTimeAsync(xhr.timeout);
+
+      expect(xhr.aborted).toBe(true);
+      expect(await upload).toMatchObject({ name: "UploadFailedError", reason: "timeout" });
+      expect(FakeXhr.instances).toHaveLength(1); // a timeout is not retried
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it.each([

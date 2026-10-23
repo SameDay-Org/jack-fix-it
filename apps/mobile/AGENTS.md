@@ -87,8 +87,11 @@ options={sheetOptions([0.5, 0.95])} />`, or `"fitToContents"`), rendering `Sheet
   `EXPO_PUBLIC_UPLOAD_MAX_VIDEO_BYTES`. `uploadMedia` (`src/api/upload.ts`) asks
   `POST /v1/uploads` for a URL signed for the exact type and size, then PUTs the bytes (XHR, for
   progress) to exactly that URL with exactly its headers and never the bearer token. Bytes stay
-  native: a photo is read as a native Blob, a video (size known from the picker) streams from
-  disk as `{ uri }`; never `fetch(uri).blob()`, which copies through base64 into JavaScript; one retry on
+  native: a photo is read as a native Blob, a video (size known from the picker) is sent as
+  `{ uri }` (Android streams it from disk; iOS reads it into native memory first); never
+  `fetch(uri).blob()`, which copies through base64 into JavaScript. Android upload progress is
+  halved (RN 0.88 counts each byte twice; a tripwire test watches that source), and a JavaScript
+  watchdog keeps the PUT deadline on both platforms; one retry on
   a network failure, with a fresh URL if it expired; `UploadRejectedError` (403/422) and
   `UploadFailedError` (storage refusal, network, or past `EXPO_PUBLIC_UPLOAD_TIMEOUT_MS` plus the
   file's time at `EXPO_PUBLIC_UPLOAD_MIN_BYTES_PER_SECOND`). `MediaPicker`
