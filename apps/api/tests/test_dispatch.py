@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from arq.worker import Function
 from sqlalchemy import URL, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -529,4 +530,5 @@ async def test_the_task_dispatches_in_its_own_transaction(
 
 
 def test_worker_registers_the_task() -> None:
-    assert dispatch_request in WorkerSettings.functions
+    coroutines = [f.coroutine for f in WorkerSettings.functions if isinstance(f, Function)]
+    assert dispatch_request in coroutines
