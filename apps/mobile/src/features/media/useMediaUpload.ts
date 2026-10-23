@@ -82,7 +82,8 @@ function toPicked(asset: ImagePicker.ImagePickerAsset): PickedMedia {
     uri: asset.uri,
     kind: isVideo ? "video" : "image",
     mimeType: asset.mimeType,
-    fileSize: asset.fileSize,
+    // Android reports null, not undefined, when the provider gives no size: unknown either way.
+    fileSize: typeof asset.fileSize === "number" && asset.fileSize > 0 ? asset.fileSize : undefined,
   };
 }
 

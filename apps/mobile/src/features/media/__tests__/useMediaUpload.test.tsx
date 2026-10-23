@@ -228,6 +228,19 @@ describe("useMediaUpload", () => {
     ]);
   });
 
+  // Android: null when the provider gives no size, and 0 when it reads a NULL column as a number.
+  it.each([null, 0])("a size the picker reports as %p is unknown", async (size) => {
+    picker.launchImageLibraryAsync.mockResolvedValue(
+      picked({ ...asset(1, "video"), fileSize: size as unknown as number }),
+    );
+    const { result } = await render();
+
+    await act(() => result.current.add("library"));
+    await flush();
+
+    expect(prepare.mock.calls[0][0]).toMatchObject({ kind: "video", fileSize: undefined });
+  });
+
   it("camera refused: no camera, and the notice until dismissed", async () => {
     picker.requestCameraPermissionsAsync.mockResolvedValue({
       granted: false,

@@ -83,7 +83,10 @@ export async function uploadMedia({
 async function uploadBody(file: UploadFile, signal: AbortSignal | undefined): Promise<UploadBody> {
   if (!LOCAL_FILE.test(file.uri)) throw new Error("uploadMedia reads files on this device only");
   throwIfAborted(signal);
-  if (file.sizeBytes !== undefined) return { send: { uri: file.uri }, size: file.sizeBytes };
+  // A size only counts if it is a real byte count: callers can pass on a picker's null.
+  if (typeof file.sizeBytes === "number" && file.sizeBytes > 0) {
+    return { send: { uri: file.uri }, size: file.sizeBytes };
+  }
   const blob = await readLocalFile(file.uri, signal);
   return { send: blob, size: blob.size };
 }
@@ -161,9 +164,11 @@ function storageUrl(ticket: UploadTicket): string {
  * than fetch, for upload progress. Resolves on a 2xx; rejects with `UploadFailedError` or, when
  * the caller cancels, with the signal's abort.
  *
- * The deadline is also kept in JavaScript: on iOS, React Native prepares a `{ uri }` body before
- * the request exists, and a failure there is only logged natively, so neither an answer nor the
- * native timeout would ever come. The watchdog aborts the PUT and reports a timeout.
+ * The deadline lives in JavaScript only. A native XHR timeout would mean different things on each
+ * platform: Android applies it as OkHttp's call timeout and reports it as a network failure (which
+ * would then be retried), and on iOS a `{ uri }` body is built before the request exists, so a
+ * failure there is only logged natively and no timeout would ever start. The watchdog aborts the
+ * PUT at the deadline and reports a timeout, which is not retried.
  */
 function putToStorage(
   ticket: UploadTicket,
@@ -192,7 +197,6 @@ function putToStorage(
     xhr.open("PUT", url);
     // Exactly the signed headers: nothing added (no Authorization), nothing dropped.
     for (const [name, value] of Object.entries(ticket.headers)) xhr.setRequestHeader(name, value);
-    xhr.timeout = timeoutMs;
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable || event.total <= 0) return;
       const counted = Platform.OS === "android" ? ANDROID_PROGRESS_OVERCOUNT : 1;
@@ -208,7 +212,6 @@ function putToStorage(
         resolve();
       });
     xhr.onerror = () => settle(() => reject(new UploadFailedError("network")));
-    xhr.ontimeout = () => settle(() => reject(new UploadFailedError("timeout")));
     xhr.onabort = () =>
       settle(() => reject(timedOut ? new UploadFailedError("timeout") : abortError(signal)));
 

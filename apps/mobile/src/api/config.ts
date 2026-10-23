@@ -3,9 +3,9 @@ export type ApiConfig = {
   readonly baseUrl: URL;
   readonly timeoutMs: number;
   /**
-   * The fixed part of one file's PUT timeout, in milliseconds. Android caps the whole call with
-   * it (OkHttp's call timeout), so the PUT also gets the time to send the file at
-   * `uploadMinBytesPerSecond`: a large video on a slow uplink is not cut off by a fixed cap.
+   * The fixed part of one file's PUT deadline, in milliseconds. The deadline covers the whole PUT,
+   * so it also gets the time to send the file at `uploadMinBytesPerSecond`: a large video on a
+   * slow uplink is not cut off by a fixed cap.
    */
   readonly uploadTimeoutMs: number;
   /** The slowest uplink an upload still waits for, in bytes per second. */

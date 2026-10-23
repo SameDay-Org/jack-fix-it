@@ -1,6 +1,3 @@
-import { readFileSync } from "fs";
-import { join } from "path";
-
 import type { ApiSchema } from "@jack/shared";
 import { Platform } from "react-native";
 
@@ -55,7 +52,6 @@ class FakeXhr {
   upload: { onprogress: ((event: ProgressEvent) => void) | null } = { onprogress: null };
   onload: (() => void) | null = null;
   onerror: (() => void) | null = null;
-  ontimeout: (() => void) | null = null;
   onabort: (() => void) | null = null;
 
   open(method: string, url: string) {
@@ -86,9 +82,6 @@ class FakeXhr {
   }
   fail() {
     this.onerror?.();
-  }
-  timeOut() {
-    this.ontimeout?.();
   }
 }
 
@@ -168,11 +161,7 @@ describe("uploadMedia", () => {
     expect(xhr.url).toBe(ticket(1).upload_url);
     expect(xhr.headers).toEqual(ticket(1).headers);
     expect(xhr.body).toBe(BLOB);
-    // The fixed part plus the time to send the file at the slowest uplink waited for.
-    const { uploadTimeoutMs, uploadMinBytesPerSecond } = configMock.apiConfig;
-    expect(xhr.timeout).toBe(
-      uploadTimeoutMs + Math.ceil((FILE_SIZE / uploadMinBytesPerSecond) * 1000),
-    );
+    expect(xhr.timeout).toBe(0); // no native timeout: the deadline is kept in JavaScript
 
     xhr.respond(200);
     await upload;
@@ -240,12 +229,14 @@ describe("uploadMedia", () => {
     });
 
     it("tripwire: React Native's Android progress still double counts (else drop the halving)", () => {
+      // Node's fs and module resolution, typed here: the app's tsconfig carries no Node types.
+      const { readFileSync } = jest.requireActual<{
+        readFileSync: (path: string, encoding: "utf8") => string;
+      }>("fs");
+      const resolve = (require as unknown as { resolve: (id: string) => string }).resolve;
+      const reactNative = resolve("react-native/package.json").replace(/package\.json$/, "");
       const source = readFileSync(
-        join(
-          require.resolve("react-native/package.json"),
-          "..",
-          "ReactAndroid/src/main/java/com/facebook/react/modules/network/ProgressRequestBody.kt",
-        ),
+        `${reactNative}ReactAndroid/src/main/java/com/facebook/react/modules/network/ProgressRequestBody.kt`,
         "utf8",
       );
       // The array write calls super (FilterOutputStream loops into the overridden single-byte
@@ -264,12 +255,18 @@ describe("uploadMedia", () => {
     try {
       const upload = start().catch((error: unknown) => error);
       // The file read and the URL request settle over a few ticks, far below the deadline.
-      for (let tick = 0; tick < 20 && !lastXhr(); tick += 1) await jest.advanceTimersByTimeAsync(1);
+      // Zero-millisecond steps flush the promises without moving the clock.
+      for (let tick = 0; tick < 50 && !lastXhr(); tick += 1) await jest.advanceTimersByTimeAsync(0);
       const xhr = lastXhr();
       expect(xhr).toBeDefined();
 
       // No answer and no native timeout event: what iOS does when a `{ uri }` body cannot be built.
-      await jest.advanceTimersByTimeAsync(xhr.timeout);
+      // The deadline is the fixed part plus the file's time at the slowest uplink waited for.
+      const { uploadTimeoutMs, uploadMinBytesPerSecond } = configMock.apiConfig;
+      const deadline = uploadTimeoutMs + Math.ceil((FILE_SIZE / uploadMinBytesPerSecond) * 1000);
+      await jest.advanceTimersByTimeAsync(deadline - 1);
+      expect(xhr.aborted).toBe(false);
+      await jest.advanceTimersByTimeAsync(1);
 
       expect(xhr.aborted).toBe(true);
       expect(await upload).toMatchObject({ name: "UploadFailedError", reason: "timeout" });
@@ -308,15 +305,6 @@ describe("uploadMedia", () => {
       reason: "status",
       status: 403,
     });
-    expect(FakeXhr.instances).toHaveLength(1);
-  });
-
-  it("a PUT that times out fails with reason timeout, no retry", async () => {
-    const upload = start().catch((error: unknown) => error);
-    await flush();
-    lastXhr().timeOut();
-
-    expect(await upload).toMatchObject({ name: "UploadFailedError", reason: "timeout" });
     expect(FakeXhr.instances).toHaveLength(1);
   });
 
@@ -387,6 +375,38 @@ describe("uploadMedia", () => {
     expect(FakeXhr.reads).toHaveLength(0);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("a remote uri with a size is refused before anything is read, asked or sent", async () => {
+    await expect(
+      start({
+        file: {
+          uri: "https://elsewhere.invalid/clip.mp4",
+          contentType: "video/mp4",
+          sizeBytes: 1024,
+        },
+      }),
+    ).rejects.toThrow(/files on this device/);
+    expect(FakeXhr.reads).toHaveLength(0);
+    expect(FakeXhr.instances).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([null, 0])(
+    "a size that is not a real byte count (%p) falls back to reading the file",
+    async (size) => {
+      const upload = start({
+        file: { uri: FILE_URI, contentType: "image/jpeg", sizeBytes: size as unknown as number },
+      });
+      await flush();
+
+      expect(FakeXhr.reads).toHaveLength(1);
+      expect(callBody(callsTo(fetchMock, "/v1/uploads")[0])).toMatchObject({
+        size_bytes: FILE_SIZE,
+      });
+      lastXhr().respond(200);
+      await upload;
+    },
+  );
 
   it("a file that cannot be read asks for no URL", async () => {
     FakeXhr.fileBlob = null;
