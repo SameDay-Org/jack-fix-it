@@ -8,6 +8,8 @@ from typing import Any
 
 from arq import cron, func
 from arq.connections import RedisSettings
+from arq.typing import WorkerCoroutine
+from arq.worker import Function
 
 from app.config import get_settings
 from app.db import create_engine, create_session_factory
@@ -45,6 +47,20 @@ async def shutdown(ctx: dict[str, Any]) -> None:
     logger.info("worker_stopped")
 
 
+def discarding_result(
+    coroutine: WorkerCoroutine,
+    *,
+    max_tries: int | None = None,
+    timeout: float | None = None,
+) -> Function:
+    """A worker function that keeps no result in Redis (#176). A failed job's result is its
+    pickled exception, and a database error's text holds its SQL statement with literals.
+    Register every function through it (tests/test_worker.py checks)."""
+    return func(
+        coroutine, keep_result=0, keep_result_forever=False, max_tries=max_tries, timeout=timeout
+    )
+
+
 def every(minutes: int) -> set[int]:
     """The minutes of the hour a cron every `minutes` runs at (60 means once an hour)."""
     return set(range(0, 60, minutes))
@@ -52,15 +68,25 @@ def every(minutes: int) -> set[int]:
 
 class WorkerSettings:
     functions = (
-        ping,
-        dispatch_request,
-        # No result is kept, so a receipt that asks for a resend can queue the message's job id
+        discarding_result(ping),
+        discarding_result(dispatch_request),
+        # With no result kept, a receipt that asks for a resend can queue the message's job id
         # again once the first run is over; the tries match the sends per device.
-        func(send_push, keep_result=0, max_tries=get_settings().push_max_attempts),
+        discarding_result(send_push, max_tries=get_settings().push_max_attempts),
     )
+    # A cron job keeps no result by default (ARQ's cron keep_result is 0); stated anyway.
     cron_jobs = (
-        cron(check_push_receipts, minute=every(get_settings().push_receipt_check_minutes)),
+        cron(
+            check_push_receipts,
+            minute=every(get_settings().push_receipt_check_minutes),
+            keep_result=0,
+            keep_result_forever=False,
+        ),
     )
+    # The worker's own default, which also covers the results ARQ writes itself for a job that
+    # fails before it runs (too many tries, an unknown function): none is kept (#176).
+    keep_result = 0
+    keep_result_forever = False
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
