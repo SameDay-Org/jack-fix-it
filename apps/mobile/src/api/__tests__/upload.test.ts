@@ -56,8 +56,9 @@ const packageDir = (name: string) =>
  * its own worker: with `network = "test"` a request sends what the test moves; with
  * `network = "completes"` it sends the whole body and the storage answers 200 as the start runs,
  * before anything else on the queue (the start's acknowledgement included) and whatever
- * JavaScript does. A cancel stops a request still in flight and does nothing to a settled one.
- * `nativeLog` records the native calls in the order they happen.
+ * JavaScript does; with `network = "refuses"` the start fails in its own turn. A cancel stops a request still in flight and does nothing to a settled one;
+ * any call on a released handle throws, as Expo's shared objects do. `nativeLog` records the
+ * native calls in the order they happen.
  */
 type NativeRequest = {
   url: string;
@@ -77,6 +78,7 @@ type NativeRequest = {
   reject: (error: Error) => void;
 };
 type NativeTask = {
+  released?: boolean;
   cancelled: boolean;
   request?: NativeRequest;
   emit: (event: string, payload: unknown) => void;
@@ -89,8 +91,8 @@ const nativeMock = jest.requireActual<{
 }>(`${packageDir("expo-file-system")}mocks/FileSystem`);
 const nativeQueue: (() => void)[] = [];
 const requests: NativeRequest[] = [];
-const nativeLog: ("barrier" | "start" | "cancel")[] = [];
-let network: "test" | "completes" = "test";
+const nativeLog: ("barrier" | "start" | "cancel" | "release")[] = [];
+let network: "test" | "completes" | "refuses" = "test";
 // Sizes the file metadata reports, by URI; a missing URI is a missing file.
 const files = new Map<string, number>();
 
@@ -176,6 +178,8 @@ function installNativeDouble() {
           if (network === "completes") {
             request.transmit(total);
             request.respond(200);
+          } else if (network === "refuses") {
+            request.reject(new Error("Upload was cancelled")); // iOS's guard, or a file error
           }
         });
       });
@@ -184,12 +188,20 @@ function installNativeDouble() {
   Object.defineProperty(taskProto, "cancel", {
     configurable: true,
     value(this: NativeTask) {
+      if (this.released) throw new Error("Cannot use a released shared object");
       nativeLog.push("cancel");
       this.cancelled = true;
       const { request } = this;
       if (!request || request.cancelled || request.settled) return;
       request.cancelled = true;
       request.reject(new Error("Upload was cancelled"));
+    },
+  });
+  Object.defineProperty(taskProto, "release", {
+    configurable: true,
+    value(this: NativeTask) {
+      nativeLog.push("release");
+      this.released = true;
     },
   });
 }
@@ -367,6 +379,7 @@ describe("uploadMedia", () => {
     let controller: AbortController;
     let outcome: Promise<unknown>;
     let settled: boolean;
+    let onProgress: jest.Mock;
 
     beforeEach(() => {
       jest.useFakeTimers();
@@ -382,7 +395,8 @@ describe("uploadMedia", () => {
     /** Starts an upload up to the native start: the start and its acknowledgement wait queued. */
     async function untilStartQueued() {
       settled = false;
-      outcome = start({ signal: controller.signal })
+      onProgress = jest.fn();
+      outcome = start({ signal: controller.signal, onProgress })
         .then(
           (value) => ({ resolved: value }),
           (error: unknown) => error,
@@ -414,8 +428,8 @@ describe("uploadMedia", () => {
       await runNativeCalls(1); // the start clears its flag: that first cancel is lost
       expect(lastRequest().cancelled).toBe(false);
       expect(settled).toBe(false); // the caller's queue waits while bytes may still go out
-      await runNativeCalls(1); // its acknowledgement cancels again
-      expect(nativeLog).toEqual(["barrier", "cancel", "start", "barrier", "cancel"]);
+      await runNativeCalls(1); // its acknowledgement cancels again, before the handle is released
+      expect(nativeLog).toEqual(["barrier", "cancel", "start", "barrier", "cancel", "release"]);
       expect(lastRequest()).toMatchObject({ cancelled: true, bytesOnWire: 0, stored: false });
       await expectStopErrorWithoutRetry();
     });
@@ -445,7 +459,8 @@ describe("uploadMedia", () => {
       // The residual: the storage keeps that object, but the upload reports the stop, not a key.
       await expectStopErrorWithoutRetry();
       expect(await outcome).not.toHaveProperty("resolved");
-      expect(nativeLog).toEqual(["barrier", "cancel", "start", "barrier", "cancel"]);
+      // The handle outlives the re-cancel: a released one would throw.
+      expect(nativeLog).toEqual(["barrier", "cancel", "start", "barrier", "cancel", "release"]);
     });
 
     it("(d) a delayed acknowledgement: the cancel is repeated the moment it arrives", async () => {
@@ -462,8 +477,22 @@ describe("uploadMedia", () => {
       expect(settled).toBe(false);
 
       await runNativeCalls(1);
-      expect(nativeLog).toEqual(["barrier", "cancel", "start", "barrier", "cancel"]);
+      expect(nativeLog).toEqual(["barrier", "cancel", "start", "barrier", "cancel", "release"]);
       expect(request).toMatchObject({ cancelled: true, bytesOnWire: SMALL / 2, stored: false });
+      await expectStopErrorWithoutRetry();
+      // A stopped item's progress does not move, though bytes went out after the stop.
+      expect(onProgress.mock.calls).toEqual([[0]]);
+    });
+
+    it("(e) a start that fails at once with a stop recorded: the re-cancel still finds the handle", async () => {
+      network = "refuses";
+      await untilStartQueued();
+      stopNow();
+
+      await runNativeCalls(1); // the start rejects in its own turn, before its acknowledgement
+      expect(settled).toBe(false); // the handle is kept until the acknowledgement has run
+      await runNativeCalls(1);
+      expect(nativeLog).toEqual(["barrier", "cancel", "start", "barrier", "cancel", "release"]);
       await expectStopErrorWithoutRetry();
     });
 
@@ -656,7 +685,7 @@ describe("uploadMedia", () => {
     // iOS: one serial default queue (no `.concurrent`) for every AsyncFunction without its own.
     const asyncFunction = read(`${core}ios/Core/Functions/AsyncFunctionDefinition.swift`);
     expect(asyncFunction).toMatch(
-      /private let defaultQueue = DispatchQueue\(label: "expo\.modules\.AsyncFunctionQueue", qos: \.userInitiated\)\r?\n/,
+      /(?:^|\n)private let defaultQueue = DispatchQueue\(label: "expo\.modules\.AsyncFunctionQueue", qos: \.userInitiated\)\r?\n/,
     );
     expect(asyncFunction).toMatch(/let queue = queue \?\? defaultQueue/);
     // Android: the default scope runs on one HandlerThread, so launches run in order.

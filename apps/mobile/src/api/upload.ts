@@ -183,6 +183,7 @@ async function putToStorage(
     if (!stopped && totalBytes > 0) onProgress?.(Math.min(1, bytesSent / totalBytes));
   });
   let startIssued = false;
+  let acknowledged: Promise<void> | null = null;
   const stop = (why: Stop) => {
     if (stopped) return;
     stopped = why;
@@ -210,7 +211,7 @@ async function putToStorage(
       sessionType: "foreground",
     }); // queued on the native queue by this call
     startIssued = true;
-    void nativeQueueBarrier().then(() => {
+    acknowledged = nativeQueueBarrier().then(() => {
       // The start has run and cleared its cancelled flag: cancel again if a stop came before.
       if (stopped) task.cancel();
     });
@@ -230,6 +231,9 @@ async function putToStorage(
     clearTimeout(watchdog);
     signal?.removeEventListener("abort", onAbort);
     progress.remove();
+    // A start that fails at once settles before its acknowledgement; the handle stays alive for
+    // that re-cancel (a released handle throws), and the barrier itself never rejects.
+    await acknowledged;
     task.release();
   }
 }
