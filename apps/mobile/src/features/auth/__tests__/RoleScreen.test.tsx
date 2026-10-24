@@ -324,6 +324,10 @@ describe("RoleScreen", () => {
       await advance(transitionMs / 2);
       expect(rootOpacity()).toBeLessThan(1);
       expect(backdrop()).toContain("bg-gray-50");
+      // Faded out, iOS still shows its own card (the page's color): the page's bar.
+      await advance(transitionMs);
+      expect(rootOpacity()).toBe(0);
+      expect(statusBarStyle()).toBe("dark");
     });
 
     it("a back pressed during the rise is not undone when the panel settles", async () => {
@@ -497,6 +501,63 @@ describe("RoleScreen", () => {
         expect(pointerEvents()).toBe("auto");
         expect(statusBarStyle()).toBe("dark");
         expect(moveAccessibilityFocus).toHaveBeenCalledTimes(1); // entered and announced once
+      });
+
+      it("Android: in on a panel still rising when the bound expires, it glides off it (no jump)", async () => {
+        const TRAVEL = 464;
+        handoff.progress.value = 0.75; // a slow rise, its content half shown
+        handoff.store.setState({ phase: "rising", bar: "hero" });
+        await renderInSafeArea(<RoleScreen />, handoff);
+        await layOut();
+        await appear();
+        await advance(handoffMaxMs);
+        expect(root().opacity).toBeCloseTo(0.5, 1); // where the panel had it: no jump
+        expect(root().transform[0].translateY).toBeCloseTo(TRAVEL * 0.25, 0);
+
+        await advance(transitionMs / 2);
+        expect(root().opacity).toBeGreaterThan(0.5);
+        expect(root().transform[0].translateY).toBeGreaterThan(0);
+        expect(root().transform[0].translateY).toBeLessThan(TRAVEL * 0.25);
+        await advance(transitionMs);
+        expect(root().opacity).toBe(1);
+        expect(root().transform[0].translateY).toBe(0);
+        expect(statusBarStyle()).toBe("dark");
+      });
+
+      it("Android: the panel going down under content half shown, it glides off it (no dip)", async () => {
+        handoff.progress.value = 0.75;
+        handoff.store.setState({ phase: "rising", bar: "hero" });
+        await renderInSafeArea(<RoleScreen />, handoff);
+        await layOut();
+        await appear();
+        await advance(transitionMs * 2);
+        expect(root().opacity).toBeCloseTo(0.5, 5);
+
+        await act(async () => {
+          handoff.store.setState({ phase: "idle", bar: "hero" });
+          handoff.progress.value = 0; // the panel no longer under it
+        });
+        expect(root().opacity).toBeGreaterThanOrEqual(0.49); // where it was, not with the panel
+        await advance(transitionMs * 2);
+        expect(root().opacity).toBe(1);
+        expect(root().transform[0].translateY).toBe(0);
+        expect(pointerEvents()).toBe("auto");
+      });
+
+      it("Android under Reduce Motion: faded out over Welcome's hero, the bar is the hero's", async () => {
+        jest.mocked(useReducedMotion).mockReturnValue(true);
+        handoff.progress.value = 0; // no rise: the phase is risen, the panel at rest
+        handoff.store.setState({ phase: "risen", bar: "hero" });
+        await renderInSafeArea(<RoleScreen />, handoff);
+        await enterFully();
+        expect(statusBarStyle()).toBe("dark");
+
+        await act(async () => fireEvent.press(screen.getByRole("button", { name: "Back" })));
+        await advance(transitionMs / 2);
+        expect(statusBarStyle()).toBe("dark"); // the page still shows, with its color
+        await advance(transitionMs);
+        expect(root().opacity).toBe(0);
+        expect(statusBarStyle()).toBe("light");
       });
 
       it("Android: shown by the stack before it is focused, on a stalled rise: the bound still holds", async () => {

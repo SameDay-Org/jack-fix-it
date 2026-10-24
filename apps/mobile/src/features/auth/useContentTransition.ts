@@ -90,8 +90,10 @@ export function useContentTransition({
   const { xl } = tokens.radius;
   // Android, with the rise: the screen is on screen under the rising panel, so it rides it.
   const ridesPanel = animate && !reduceMotion && pushesUnderRise(Platform.OS);
-  // 1 while the panel carries the screen; 0 once it does not (see `standAlone`).
+  // 1 while the panel carries the screen; 0 once it does not; between the two while it glides off
+  // it from the panel's progress at that moment, `leftAt` (see `standAlone`).
   const riding = useSharedValue(ridesPanel ? 1 : 0);
+  const leftAt = useSharedValue(-1);
   const focused = useIsFocused();
   const navigation = useNavigation<NativeStackNavigationProp<ParamListBase>>();
   const { bar: panelBar, phase } = usePanelHandoff();
@@ -163,20 +165,23 @@ export function useContentTransition({
   /**
    * The panel no longer carries the screen: it went back down under it, or never finished
    * rising. Riding it then, the screen would sit at the panel's opacity, invisible over Welcome
-   * yet taking its taps (#193). It shows on its own instead, a plain fade over Welcome, from the
-   * opacity it was drawn at on the panel (no dip, and no jump to full opacity).
+   * yet taking its taps (#193). It shows on its own instead, over Welcome: not in yet, `start`
+   * fades it in at its place. In, it glides off the panel over one fade, its top edge and opacity
+   * going on from where the panel had them to the risen page's (no jump, no dip), whatever the
+   * panel does meanwhile.
    */
   const standAlone = () => {
     if (!carried.current) return;
-    const drawn = visible.value * shownOnPanel(panelProgress.value);
     carried.current = false;
     setOnPanel(false);
-    // The fade first: a frame drawn between the two writes then shows less of the screen, never
-    // more.
-    visible.value = drawn;
-    riding.value = 0;
-    // Not in yet, `start` fades it in.
-    if (entered.current) fadeIn();
+    if (!entered.current) {
+      riding.value = 0; // nothing of it shows yet
+      return;
+    }
+    leftAt.value = panelProgress.value;
+    riding.value = withTiming(0, timing, (finished) => {
+      if (finished) runOnJS(arrived)();
+    });
   };
 
   /** The fail-safes' way in: now, on its own. */
@@ -206,9 +211,12 @@ export function useContentTransition({
     clearGuard(exitGuard);
     setExiting(false);
     setFaded(false);
-    if (!entered.current) enterNow();
-    else if (carried.current) standAlone();
-    else fadeIn();
+    if (!entered.current) {
+      enterNow();
+      return;
+    }
+    standAlone();
+    fadeIn();
   };
 
   /**
@@ -259,13 +267,13 @@ export function useContentTransition({
     setFaded(true);
     // Still leaving (no taps) until the navigation takes the screen away. One that never does
     // (a back that went nowhere) must not leave it invisible on top, now or once it is focused
-    // again (blurred meanwhile).
-    then?.();
+    // again (blurred meanwhile). Armed before the navigation runs, in case that throws.
     exitGuard.current = setTimeout(() => {
       exitGuard.current = null;
       stranded.current = true;
       tryStartRef.current();
     }, handoffMaxMs);
+    then?.();
   };
 
   const exit = (then: () => void) => {
@@ -350,8 +358,10 @@ export function useContentTransition({
     if (!ridesPanel) return { opacity: visible.value };
     // The screen's top edge is the panel's, with its corners, and its content shows over the
     // second half of the rise: page and content arrive in the panel's own frames, on the UI
-    // thread, however long the device takes to draw a frame. Standing alone, it is the risen panel.
-    const p = riding.value ? panelProgress.value : 1;
+    // thread, however long the device takes to draw a frame. Standing alone, it is the risen panel
+    // (`riding` between the two while it glides off the panel, from where the panel left it).
+    const from = leftAt.value < 0 ? panelProgress.value : leftAt.value;
+    const p = 1 - riding.value * (1 - from);
     return {
       opacity: visible.value * shownOnPanel(p),
       transform: [{ translateY: panelTravel.value * (1 - p) }],
@@ -371,11 +381,14 @@ export function useContentTransition({
     exit,
     // Once shown, the page keeps its color through the exit: under Reduce Motion the panel's bar
     // is still the hero's, and a navy page fading out was the empty-navy frame of #175. Faded out,
-    // the bar is the panel's again unless the panel still covers the screen (it went down meanwhile).
-    // Riding the panel the screen shows before the panel covers the bar: the bar follows the panel
-    // until then. Faded in on its own, the page covers the bar whatever the phase.
+    // what shows is under the screen: on iOS its own card, the page's color; on Android (a
+    // transparent modal) the panel, or Welcome's hero when the panel went down or, under Reduce
+    // Motion, never rose: the panel's bar. Riding the panel the screen shows before the panel
+    // covers the bar: the bar follows the panel until then. Faded in on its own, the page covers
+    // the bar whatever the phase.
     statusBar:
-      !animate || (shown && (faded ? phase === "risen" : standing || phase !== "rising"))
+      !animate ||
+      (shown && (faded ? !pushesUnderRise(Platform.OS) : standing || phase !== "rising"))
         ? "light"
         : panelBar,
     ownsStatusBar: !animate || focused,
