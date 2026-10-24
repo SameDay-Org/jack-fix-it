@@ -8,12 +8,14 @@ Content-Type are signed into the PUT: the client must send exactly the declared 
 or the storage rejects the upload.
 
 The worker is the exception: it copies files between the storage and local temporary files
-(download_to, upload_from) to make privacy-safe copies of request media (#173). These calls
-block; the worker runs them in a thread. Errors never carry the key: a key can hold a user id.
+(download_to, upload_from) to make privacy-safe copies of request media (#173), and lists and
+deletes uploads no row ever attached (list_older_than, delete_many: #191). These calls block;
+the worker runs them in a thread. Errors never carry the key: a key can hold a user id.
 """
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -33,6 +35,31 @@ class PresignedUpload:
     headers: Mapping[str, str]
 
 
+@dataclass(frozen=True)
+class StoredObject:
+    key: str
+    last_modified: datetime  # timezone-aware
+
+
+@dataclass(frozen=True)
+class ObjectPage:
+    """One page of a listing: its objects last modified before the cut-off, and how many of the
+    page's other objects were left out for being newer."""
+
+    objects: Sequence[StoredObject]
+    newer: int
+
+
+@dataclass(frozen=True)
+class DeleteResult:
+    deleted: int
+    failed: int  # objects the storage answered an error for: they are still there
+
+
+# The most keys one DeleteObjects call takes (the S3 API's limit).
+DELETE_BATCH_MAX = 1_000
+
+
 class Storage(Protocol):
     def presign_put(
         self, key: str, content_type: str, content_length: int, expires_in: int
@@ -48,6 +75,18 @@ class Storage(Protocol):
     def upload_from(self, path: Path, key: str, content_type: str) -> None:
         """Stores the file at `path` under `key`, streamed. StorageUnavailableError when the
         storage fails."""
+        ...
+
+    def list_older_than(self, prefix: str, before: datetime) -> Iterator[ObjectPage]:
+        """The objects under `prefix` last modified before `before`, one storage page at a time
+        (each page is one request, made when it is reached). StorageUnavailableError when the
+        storage fails."""
+        ...
+
+    def delete_many(self, keys: Sequence[str]) -> DeleteResult:
+        """Deletes these objects, at most DELETE_BATCH_MAX keys per storage call. A key with no
+        object counts as deleted. StorageUnavailableError when a whole call fails; the keys of
+        the calls before it are deleted already."""
         ...
 
 
@@ -163,6 +202,44 @@ class S3Storage:
             # boto3 wraps most failed uploads in S3UploadFailedError (a Boto3Error); its text,
             # like a ClientError's, names the key, so only the class is kept.
             raise StorageUnavailableError(f"upload failed: {type(error).__name__}") from None
+
+    def list_older_than(self, prefix: str, before: datetime) -> Iterator[ObjectPage]:
+        pages = self._client.get_paginator("list_objects_v2").paginate(
+            Bucket=self._bucket, Prefix=prefix
+        )
+        try:
+            for page in pages:
+                listed = [
+                    StoredObject(key=item["Key"], last_modified=item["LastModified"])
+                    for item in page.get("Contents", [])
+                ]
+                older = [item for item in listed if item.last_modified < before]
+                yield ObjectPage(objects=older, newer=len(listed) - len(older))
+        except ClientError as error:
+            code = str(error.response.get("Error", {}).get("Code", ""))
+            raise StorageUnavailableError(f"list failed: {code or 'unknown'}") from None
+        except (Boto3Error, BotoCoreError, OSError) as error:
+            raise StorageUnavailableError(f"list failed: {type(error).__name__}") from None
+
+    def delete_many(self, keys: Sequence[str]) -> DeleteResult:
+        deleted = failed = 0
+        for start in range(0, len(keys), DELETE_BATCH_MAX):
+            batch = keys[start : start + DELETE_BATCH_MAX]
+            try:
+                # Quiet: the answer lists only the keys that failed.
+                answer = self._client.delete_objects(
+                    Bucket=self._bucket,
+                    Delete={"Objects": [{"Key": key} for key in batch], "Quiet": True},
+                )
+            except ClientError as error:
+                code = str(error.response.get("Error", {}).get("Code", ""))
+                raise StorageUnavailableError(f"delete failed: {code or 'unknown'}") from None
+            except (Boto3Error, BotoCoreError, OSError) as error:
+                raise StorageUnavailableError(f"delete failed: {type(error).__name__}") from None
+            errors = len(answer.get("Errors", []))
+            failed += errors
+            deleted += len(batch) - errors
+        return DeleteResult(deleted=deleted, failed=failed)
 
 
 def get_storage(request: Request) -> Storage:

@@ -8,7 +8,9 @@ import io
 import logging
 import re
 import uuid
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -21,6 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.integrations.storage import (
+    DeleteResult,
+    ObjectPage,
     PresignedUpload,
     StorageObjectMissingError,
     StorageUnavailableError,
@@ -84,6 +88,14 @@ class MemoryStorage:
             raise StorageUnavailableError("upload failed: test")
         self.objects[key] = path.read_bytes()
         self.uploads.append((key, content_type))
+
+    def list_older_than(
+        self, prefix: str, before: datetime
+    ) -> Iterator[ObjectPage]:  # pragma: no cover - the copier never lists
+        raise AssertionError("the copier never lists")
+
+    def delete_many(self, keys: Sequence[str]) -> DeleteResult:  # pragma: no cover
+        raise AssertionError("the copier never deletes")
 
 
 @dataclass(frozen=True)

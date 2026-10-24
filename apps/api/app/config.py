@@ -10,6 +10,8 @@ from starlette.requests import Request
 
 AppEnv = Literal["development", "test", "staging", "production"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+# What the orphan upload sweep does (#191): nothing, count only, or delete.
+OrphanUploadMode = Literal["off", "dry_run", "delete"]
 
 _ASYNC_SCHEME = "postgresql+asyncpg://"
 _SYNC_SCHEMES = ("postgres://", "postgresql://")
@@ -132,6 +134,12 @@ class Settings(BaseSettings):
     upload_max_image_bytes: int = Field(default=10 * MIB, gt=0)
     upload_max_video_bytes: int = Field(default=100 * MIB, gt=0)
     upload_max_document_bytes: int = Field(default=15 * MIB, gt=0)
+    # The worker's sweep of uploads no row references (#191): what it does (dry_run only counts
+    # and logs; delete removes them), the age an upload must reach before it may count as
+    # orphaned, and how often it runs (a cron, in minutes of the hour).
+    orphan_upload_mode: OrphanUploadMode = "dry_run"
+    orphan_upload_min_age_hours: int = Field(default=24, ge=1)
+    orphan_upload_sweep_minutes: int = Field(default=60, ge=1, le=60)
     # Phone verification by SMS code through Twilio Verify (D4.3, #26). Required in staging and
     # production; without them, the phone endpoints answer a generic 500.
     twilio_account_sid: str | None = None

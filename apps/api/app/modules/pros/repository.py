@@ -1,7 +1,7 @@
 import uuid
 from collections.abc import Collection, Sequence
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import Select, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +36,11 @@ class ProProfileRepository:
             ProProfile.id.in_(in_areas),
         )
         return list((await self._session.scalars(statement)).all())
+
+    @staticmethod
+    def photo_keys_among(keys: Collection[str]) -> Select[str | None]:
+        """The photo keys among `keys` that profiles hold, for another module's query."""
+        return select(ProProfile.photo_key).where(ProProfile.photo_key.in_(keys))
 
     async def get_id_by_user_id(self, user_id: uuid.UUID) -> uuid.UUID | None:
         return await self._session.scalar(
@@ -86,6 +91,12 @@ class ProProfileRepository:
 class ProDocumentRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    @staticmethod
+    def file_keys_among(keys: Collection[str]) -> Select[str]:
+        """The file keys among `keys` that documents hold (superseded ones too), for another
+        module's query."""
+        return select(ProDocument.file_key).where(ProDocument.file_key.in_(keys))
 
     async def supersede_pending(self, pro_id: uuid.UUID, doc_type: ProDocumentType) -> int:
         """Marks the pending documents of this type superseded; returns how many."""

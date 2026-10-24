@@ -72,6 +72,15 @@ def test_registration_keeps_names_tries_and_timeouts() -> None:
     }
 
 
+def test_cron_jobs_and_their_minutes() -> None:
+    crons = {job.name: job.minute for job in WorkerSettings.cron_jobs}
+
+    assert crons == {
+        "cron:check_push_receipts": set(range(0, 60, get_settings().push_receipt_check_minutes)),
+        "cron:sweep_orphan_uploads": set(range(0, 60, get_settings().orphan_upload_sweep_minutes)),
+    }
+
+
 @pytest.fixture
 async def redis() -> AsyncIterator[ArqRedis]:
     """The real Redis of REDIS_URL, on a private queue whose keys are deleted afterwards."""

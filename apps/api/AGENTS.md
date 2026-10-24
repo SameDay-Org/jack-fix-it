@@ -72,6 +72,11 @@ them idempotent: they can run twice.
   without it. ARQ ends a job at its timeout for good (no retry), so every step of the job is
   bounded and each try stops itself `MEDIA_SANITIZE_SETTLE_SECONDS` before it
   (`media_copies.py`); `tests/test_media_copy_deadlines.py` runs the real worker on Redis.
+- **Orphan uploads (#191).** The cron `sweep_orphan_uploads` (`uploads/orphans.py`) lists `u/`
+  and deletes uploads older than `ORPHAN_UPLOAD_MIN_AGE_HOURS` that no row references.
+  `ORPHAN_UPLOAD_MODE` is `off`, `dry_run` (the default: counts only, in the
+  `orphan_uploads_swept` log) or `delete`. A new upload purpose or key column must be added to
+  `REFERENCED_BY` or `SKIPPED` there; tests fail until it is.
 
 ## Tests
 
