@@ -136,10 +136,12 @@ class Settings(BaseSettings):
     upload_max_document_bytes: int = Field(default=15 * MIB, gt=0)
     # The worker's sweep of uploads no row references (#191): what it does (dry_run only counts
     # and logs; delete removes them), the age an upload must reach before it may count as
-    # orphaned, and how often it runs (a cron, in minutes of the hour).
+    # orphaned, how often it runs (a cron, in minutes of the hour), and the longest one run may
+    # take (ARQ stops it there; the next run starts over).
     orphan_upload_mode: OrphanUploadMode = "dry_run"
     orphan_upload_min_age_hours: int = Field(default=24, ge=1)
     orphan_upload_sweep_minutes: int = Field(default=60, ge=1, le=60)
+    orphan_upload_sweep_timeout_seconds: int = Field(default=1_800, gt=0)
     # Phone verification by SMS code through Twilio Verify (D4.3, #26). Required in staging and
     # production; without them, the phone endpoints answer a generic 500.
     twilio_account_sid: str | None = None

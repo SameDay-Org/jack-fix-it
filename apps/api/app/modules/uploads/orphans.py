@@ -24,8 +24,11 @@ ever in that window; a fresh upload never is.
 Modes (ORPHAN_UPLOAD_MODE): `off` does nothing, not even a storage call; `dry_run` (the
 default) counts and logs what it would delete; `delete` deletes. The logs are one
 `orphan_uploads_swept` line of counts per run, and `orphan_upload_sweep_failed` with an error
-class when the storage or the database fails (the next run starts over). Never a key or a user
-id: a key holds the owner's id and the purpose.
+class when the storage or the database fails, or ARQ stops the run at
+ORPHAN_UPLOAD_SWEEP_TIMEOUT_SECONDS (the next run starts over). The summary's `completed` is
+false for such a run: its counts cover the pages it reached, and a delete batch it was waiting
+on when stopped is in none of them. Never a key or a user id: a key holds the owner's id and
+the purpose.
 """
 
 import asyncio
@@ -119,8 +122,9 @@ class OrphanSweepConfig:
 @dataclass
 class SweepCounts:
     """One run's counts. Every object listed lands in exactly one of too_young, unparsed,
-    skipped_purpose, referenced and orphaned; deleted and failed split the orphaned ones a
-    delete was tried on."""
+    skipped_purpose, referenced and orphaned. Of the orphaned ones a delete was tried on, deleted
+    counts those gone and failed those the storage refused or failed on (still there); a batch
+    an unexpected error or a cancellation cut is in neither."""
 
     scanned: int = 0
     too_young: int = 0
@@ -152,19 +156,31 @@ class OrphanUploadSweeper:
         if self._config.mode == "off":
             return counts
         before = self._clock() - self._config.min_age
+        completed = False
         try:
             pages = self._storage.list_older_than(UPLOAD_PREFIX, before)
             while (page := await asyncio.to_thread(_next_page, pages)) is not None:
                 await self._sweep_page(page, before, counts)
+            completed = True
+        except asyncio.CancelledError:
+            # ARQ's timeout: logged like a failure, then ARQ's to finish.
+            self._log_failure("CancelledError")
+            raise
         except Exception as error:  # noqa: BLE001 - ARQ would log the error's text, and a storage or driver message can hold a key
-            logger.warning(
-                "orphan_upload_sweep_failed",
-                extra={"mode": self._config.mode, "error_class": type(error).__name__},
-            )
+            self._log_failure(type(error).__name__)
         finally:
-            # Also after a failure or a cancellation: what was deleted so far is on record.
-            logger.info("orphan_uploads_swept", extra={"mode": self._config.mode, **asdict(counts)})
+            # Also after a failure or a cancellation: what the run did so far is on record.
+            logger.info(
+                "orphan_uploads_swept",
+                extra={"mode": self._config.mode, "completed": completed, **asdict(counts)},
+            )
         return counts
+
+    def _log_failure(self, error_class: str) -> None:
+        logger.warning(
+            "orphan_upload_sweep_failed",
+            extra={"mode": self._config.mode, "error_class": error_class},
+        )
 
     async def _sweep_page(self, page: ObjectPage, before: datetime, counts: SweepCounts) -> None:
         counts.scanned += len(page.objects) + page.newer

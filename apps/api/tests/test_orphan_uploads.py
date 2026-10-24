@@ -4,6 +4,7 @@ An in-memory storage that lists and deletes; the real database (rolled back) for
 checks. The S3 side of listing and deleting is in test_storage_adapter.py.
 """
 
+import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
@@ -433,7 +434,7 @@ async def test_replaced_pro_photo_becomes_orphan(db_session: AsyncSession, world
     assert result == counts(scanned=2, referenced=1, orphaned=1, deleted=1)
 
 
-async def test_off_mode_touches_no_storage() -> None:
+async def test_off_mode_touches_no_storage(caplog: pytest.LogCaptureFixture) -> None:
     storage = ListingStorage({f"u/{uuid.uuid4()}/request_media/{uuid.uuid4().hex}.jpg": OLD})
 
     def no_session() -> AbstractAsyncContextManager[AsyncSession]:
@@ -445,11 +446,15 @@ async def test_off_mode_touches_no_storage() -> None:
         "session_factory": no_session,
     }
 
-    await sweep_orphan_uploads(ctx)
-    result = await sweeper(no_session, storage, "off").sweep()
+    with caplog.at_level(logging.DEBUG):
+        await sweep_orphan_uploads(ctx)
+        # Without storage either: off is not a missing configuration.
+        await sweep_orphan_uploads({**ctx, "storage": None})
+        result = await sweeper(no_session, storage, "off").sweep()
 
     assert storage.calls == []
     assert result == counts()
+    assert caplog.records == []
 
 
 async def test_the_task_without_storage_logs_and_returns(caplog: pytest.LogCaptureFixture) -> None:
@@ -544,7 +549,43 @@ async def test_a_failed_run_still_logs_what_it_deleted(
     assert result == counts(scanned=2, orphaned=2, deleted=2)
     messages = [r.message for r in caplog.records]
     assert messages == ["orphan_upload_sweep_failed", "orphan_uploads_swept"]
-    assert caplog.records[1].__dict__["deleted"] == 2
+    assert (caplog.records[1].__dict__["deleted"], caplog.records[1].__dict__["completed"]) == (
+        2,
+        False,
+    )
+
+
+async def test_a_run_stopped_by_its_timeout_logs_it_and_stops(
+    db_session: AsyncSession, world: World, caplog: pytest.LogCaptureFixture
+) -> None:
+    keys = sorted(upload_key(world.customer.id, UploadPurpose.REQUEST_MEDIA) for _ in range(3))
+    storage = ListingStorage(dict.fromkeys(keys, OLD), page_size=1)
+    reached = asyncio.Event()
+    pages_checked: list[bool] = []
+
+    async def stall_on_the_second_page() -> None:
+        pages_checked.append(True)
+        if len(pages_checked) == 2:
+            reached.set()
+            await asyncio.Event().wait()  # until ARQ's timeout cancels the run
+
+    run = asyncio.create_task(
+        sweeper(sessions_of(db_session, stall_on_the_second_page), storage).sweep()
+    )
+    with caplog.at_level(logging.INFO):
+        await asyncio.wait_for(reached.wait(), timeout=5)
+        run.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await run
+
+    assert set(storage.objects) == set(keys[1:])
+    [failed, summary] = caplog.records
+    assert (failed.message, failed.__dict__["error_class"]) == (
+        "orphan_upload_sweep_failed",
+        "CancelledError",
+    )
+    assert summary.message == "orphan_uploads_swept"
+    assert (summary.__dict__["completed"], summary.__dict__["deleted"]) == (False, 1)
 
 
 async def test_partial_delete_failure_is_counted(db_session: AsyncSession, world: World) -> None:
@@ -602,7 +643,7 @@ async def test_logs_carry_no_keys_or_user_ids(
         "skipped_purpose": 2,
         "failed": 1,
     }
-    assert summary.__dict__["mode"] == "delete"
+    assert (summary.__dict__["mode"], summary.__dict__["completed"]) == ("delete", True)
 
 
 def count_queries(session: AsyncSession) -> list[str]:
@@ -670,6 +711,8 @@ async def test_pagination(db_session: AsyncSession, world: World) -> None:
         ({"orphan_upload_sweep_minutes": 60}, True),
         ({"orphan_upload_sweep_minutes": 0}, False),
         ({"orphan_upload_sweep_minutes": 61}, False),
+        ({"orphan_upload_sweep_timeout_seconds": 60}, True),
+        ({"orphan_upload_sweep_timeout_seconds": 0}, False),
     ],
 )
 def test_sweep_settings(overrides: dict[str, object], valid: bool) -> None:
@@ -682,5 +725,6 @@ def test_sweep_settings(overrides: dict[str, object], valid: bool) -> None:
         "orphan_upload_mode": "dry_run",
         "orphan_upload_min_age_hours": 24,
         "orphan_upload_sweep_minutes": 60,
+        "orphan_upload_sweep_timeout_seconds": 1_800,
     }
     assert {name: getattr(settings, name) for name in defaults} == defaults | overrides

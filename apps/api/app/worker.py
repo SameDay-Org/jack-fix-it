@@ -95,6 +95,7 @@ class WorkerSettings:
         cron(
             sweep_orphan_uploads,
             minute=every(get_settings().orphan_upload_sweep_minutes),
+            timeout=get_settings().orphan_upload_sweep_timeout_seconds,
             keep_result=0,
             keep_result_forever=False,
         ),
