@@ -1,6 +1,8 @@
 """Shared test helpers."""
 
-from collections.abc import AsyncIterator
+import gc
+import time
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Final
 
@@ -13,6 +15,22 @@ _SET_STATUS_WRITER: Final = text("SELECT set_config('app.status_writer', :value,
 # app.status_writer_fixtures is 'on', which conftest sets on the test database alone.
 FIXTURES_TOKEN: Final = "fixtures"
 _IN_FAILED_TRANSACTION: Final = "25P02"
+
+
+def seconds_without_gc(work: Callable[[], object]) -> float:
+    """Wall-clock seconds of work() with the cyclic garbage collector paused. A full collection
+    walks every live object of the test process (over a million late in the suite) and took up
+    to 0.86 s on CI: when it fires inside a timed call, it measures the suite's heap, not the
+    code under test (#194). Backtracking still shows: the code itself runs slowly."""
+    was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        started = time.perf_counter()
+        work()
+        return time.perf_counter() - started
+    finally:
+        if was_enabled:
+            gc.enable()
 
 
 @asynccontextmanager
