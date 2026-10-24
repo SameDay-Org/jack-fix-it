@@ -4,9 +4,13 @@ A pro sees only their own dispatches that are still active (sent or viewed) on r
 open for quotes (finding_pro, quote_ready). Anything else, another pro's included, answers the
 same 404, as does a pro without a profile. The request comes through the requests module's
 pro-safe reader (ADR 0003), so no customer, contact, street, coordinates, utm or BDC field
-ever reaches this module, and no media (#173); the free text comes with contact details
-masked (app.redaction). Opening one marks the dispatch viewed, once.
-Logs carry dispatch, request and pro ids only.
+ever reaches this module; the free text comes with contact details masked (app.redaction).
+Opening one marks the dispatch viewed, once.
+
+The detail shows the request's photos and videos as their privacy-safe copies only (#173):
+the reader hands this module no original key (file_key), and sign_safe_media, the one place a
+pro's media is signed, refuses any key outside the safe copies' prefix. The list shows none.
+Logs carry dispatch, request, media and pro ids only.
 """
 
 import base64
@@ -15,12 +19,13 @@ import logging
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.errors import NotFoundError
+from app.integrations.storage import Storage
 from app.modules.categories.service import CategoryService
 from app.modules.dispatch.models import DispatchStatus, RequestDispatch
 from app.modules.dispatch.repository import DispatchRepository
@@ -28,12 +33,14 @@ from app.modules.dispatch.schemas import (
     OpportunityCategory,
     OpportunityDetail,
     OpportunityLocation,
+    OpportunityMedia,
     OpportunityPage,
     OpportunitySummary,
 )
 from app.modules.pros.service import ProService
 from app.modules.requests.errors import InvalidRequestError
-from app.modules.requests.service import ProRequestReader, RequestForPro
+from app.modules.requests.media_copies import SAFE_KEY_PREFIX
+from app.modules.requests.service import ProRequestReader, RequestForPro, SafeMedia
 from app.modules.users.types import UserAccount
 
 logger = logging.getLogger(__name__)
@@ -44,6 +51,7 @@ class OpportunityConfig:
     excerpt_chars: int
     list_default_limit: int
     list_max_limit: int
+    media_url_ttl_seconds: int
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "OpportunityConfig":
@@ -51,16 +59,18 @@ class OpportunityConfig:
             excerpt_chars=settings.opportunity_excerpt_chars,
             list_default_limit=settings.request_list_default_limit,
             list_max_limit=settings.request_list_max_limit,
+            media_url_ttl_seconds=settings.download_url_ttl_seconds,
         )
 
 
 class OpportunityService:
-    def __init__(self, session: AsyncSession, config: OpportunityConfig) -> None:
+    def __init__(self, session: AsyncSession, storage: Storage, config: OpportunityConfig) -> None:
         self._session = session
         self._dispatches = DispatchRepository(session)
         self._requests = ProRequestReader(session)
         self._categories = CategoryService(session)
         self._pros = ProService(session)
+        self._storage = storage
         self._config = config
 
     async def list_own(
@@ -120,6 +130,9 @@ class OpportunityService:
         viewed_at = await self._dispatches.viewed_at(dispatch.id)
         await self._session.commit()
         categories = await self._category_summaries([view])
+        media = await self._requests.safe_media(view.id)
+        ttl = self._config.media_url_ttl_seconds
+        expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
         logger.info(
             "opportunity_opened",
             extra={
@@ -141,6 +154,12 @@ class OpportunityService:
             sent_at=dispatch.sent_at,
             viewed_at=viewed_at,
             text_redacted=view.text_redacted,
+            media=[
+                signed
+                for item in media.ready
+                if (signed := sign_safe_media(self._storage, item, ttl, expires_at)) is not None
+            ],
+            media_pending=media.pending,
         )
 
     async def _category_summaries(
@@ -151,6 +170,25 @@ class OpportunityService:
             summary.id: OpportunityCategory(id=summary.id, slug=summary.slug, names=summary.names)
             for summary in await self._categories.summaries(ids)
         }
+
+
+def sign_safe_media(
+    storage: Storage, media: SafeMedia, ttl_seconds: int, expires_at: datetime
+) -> OpportunityMedia | None:
+    """The one way a pro's media is signed (#173): only a safe copy's key (SAFE_KEY_PREFIX), so
+    never the customer's original, whatever the row holds. Anything else signs nothing and
+    logs pro_media_key_refused with the media id; the caller serves the rest. A copy without a
+    content type is incomplete and is refused the same way."""
+    key, content_type = media.safe_key, media.content_type
+    if key is None or not key.startswith(SAFE_KEY_PREFIX) or content_type is None:
+        logger.error("pro_media_key_refused", extra={"media_id": str(media.id)})
+        return None
+    return OpportunityMedia(
+        kind=media.kind,
+        content_type=content_type,
+        url=storage.presign_get(key, ttl_seconds),
+        expires_at=expires_at,
+    )
 
 
 def _location(view: RequestForPro) -> OpportunityLocation:

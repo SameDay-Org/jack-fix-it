@@ -489,7 +489,8 @@ export interface paths {
         };
         /**
          * Open one of my opportunities
-         * @description The full request, without its photos for now (sanitized copies come with #173). The
+         * @description The full request, with its photos and videos as privacy-safe copies (no location or
+         *     other metadata) behind short-lived signed URLs, and how many are still being prepared. The
          *     first open records that the pro saw it (viewed, viewed_at); opening it again changes
          *     nothing.
          */
@@ -1048,6 +1049,16 @@ export interface components {
              * @description True when contact details were masked in the description or the answers (shown as •••): the customer is reached through the app.
              */
             text_redacted: boolean;
+            /**
+             * Media
+             * @description The photos and videos ready to show, oldest first.
+             */
+            media: components["schemas"]["OpportunityMedia"][];
+            /**
+             * Media Pending
+             * @description How many more photos and videos are still being prepared.
+             */
+            media_pending: number;
         };
         /**
          * OpportunityLocation
@@ -1065,6 +1076,29 @@ export interface components {
              * @description The official city of the ZIP's service area; null when the area is no longer served. Never the text the customer typed.
              */
             city: string | null;
+        };
+        /**
+         * OpportunityMedia
+         * @description A photo or video of the request: its privacy-safe copy (#173), without location or other
+         *     metadata, under a key that names no one.
+         */
+        OpportunityMedia: {
+            kind: components["schemas"]["RequestMediaKind"];
+            /**
+             * Content Type
+             * @description The copy's media type, e.g. image/jpeg.
+             */
+            content_type: string;
+            /**
+             * Url
+             * @description Presigned GET URL.
+             */
+            url: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
         };
         /** OpportunityPage */
         OpportunityPage: {
