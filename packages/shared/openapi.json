@@ -1819,7 +1819,7 @@
             }
           },
           "503": {
-            "description": "not_configured: quoting is not configured yet (the quote lifetime is not set).",
+            "description": "not_configured: quoting is not configured yet (the quote lifetime is not set, or a quote cap is set to an invalid value).",
             "content": {
               "application/json": {
                 "schema": {

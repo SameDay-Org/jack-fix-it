@@ -7,7 +7,8 @@ lock, so two quotes on one request take turns) it checks, in this order:
 - the dispatch is active (sent, viewed) and the request open for quotes (finding_pro,
   quote_ready): else 409 not_quotable;
 - the quote TTL is set (settings `quote_ttl_hours`, no default): else 503 not_configured;
-- the amount and the duration are within the platform's caps, when set: else 422.
+- the amount and the duration are within the platform's caps, when set: else 422. A cap set
+  to an invalid value is not "no cap": 503 not_configured, like a missing TTL.
 Then, in the caller's transaction: the quote (pending, expires_at = now + TTL), the dispatch
 marked quoted, and the first quote moves the request from finding_pro to quote_ready (SYSTEM).
 The amount is the pro's own price in cents, stored as given; fees are #58.
@@ -31,7 +32,7 @@ from app.modules.quotes.models import Quote
 from app.modules.quotes.repository import QuoteRepository
 from app.modules.quotes.schemas import QuoteCreate, QuoteOut
 from app.modules.requests.state_machine import RequestStateMachine, RequestStatus
-from app.modules.settings.errors import SettingNotConfiguredError
+from app.modules.settings.errors import SettingMalformedError, SettingNotConfiguredError
 from app.modules.settings.service import QUOTE_TTL_HOURS, SettingsService
 from app.modules.users.types import UserAccount
 
@@ -111,8 +112,13 @@ class QuoteService:
         return QuoteOut.model_validate(quote, from_attributes=True)
 
     async def _check_caps(self, data: QuoteCreate) -> None:
-        max_amount = await self._settings.quote_max_amount_cents()
-        max_duration = await self._settings.quote_max_duration_minutes()
+        try:
+            max_amount = await self._settings.quote_max_amount_cents()
+            max_duration = await self._settings.quote_max_duration_minutes()
+        except SettingMalformedError as error:
+            # Logged by the settings service too (setting_invalid, the key only).
+            logger.error("quote_not_configured", extra={"key": error.key})
+            raise
         if (max_amount is not None and data.amount_cents > max_amount) or (
             max_duration is not None and data.duration_minutes > max_duration
         ):
