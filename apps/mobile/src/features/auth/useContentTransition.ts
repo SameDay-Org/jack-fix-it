@@ -20,6 +20,13 @@ import { backToPrevious } from "./components/BackButton";
 import { CONTENT_FROM, usePanelHandoff, usePanelHandoffContext } from "./panelHandoff";
 import { pushesUnderRise } from "./panelRoute";
 
+type Guard = RefObject<ReturnType<typeof setTimeout> | null>;
+
+const clearGuard = (guard: Guard) => {
+  if (guard.current) clearTimeout(guard.current);
+  guard.current = null;
+};
+
 type Params = {
   /** The screen was reached by Welcome's panel rise: it hands off from the panel, and back to it. */
   animate: boolean;
@@ -59,6 +66,11 @@ export type ContentTransition = {
  * panel before the route pops and Welcome lowers it. Under Reduce Motion the same fade is a
  * crossfade over Welcome, without the slide. Reached any other way, the screen is simply there.
  *
+ * Whatever the signals do, the focused screen never stays an invisible page on top (#193): if the
+ * panel goes back down under it, it stops riding and fades in on its own; it is in at most
+ * `motion.handoffMaxMs` after it is focused; and an exit whose navigation has not taken it away
+ * within that bound fades it back in.
+ *
  * The root must set `needsOffscreenAlphaCompositing`: Android otherwise applies the fading opacity
  * to each card and to its elevation shadow separately, and the cards turn into gray blocks.
  */
@@ -67,10 +79,12 @@ export function useContentTransition({
   reduceMotion,
   titleRef,
 }: Params): ContentTransition {
-  const { transitionMs, slidePx, panelRiseMs } = tokens.motion;
+  const { transitionMs, slidePx, panelRiseMs, handoffMaxMs } = tokens.motion;
   const { xl } = tokens.radius;
   // Android, with the rise: the screen is on screen under the rising panel, so it rides it.
   const ridesPanel = animate && !reduceMotion && pushesUnderRise(Platform.OS);
+  // 1 while the panel carries the screen; 0 once it does not (see `standAlone`).
+  const riding = useSharedValue(ridesPanel ? 1 : 0);
   const focused = useIsFocused();
   const navigation = useNavigation<NativeStackNavigationProp<ParamListBase>>();
   const { bar: panelBar, phase } = usePanelHandoff();
@@ -84,8 +98,13 @@ export function useContentTransition({
   const laidOut = useRef(false);
   const appearing = useRef(false);
   const focusedRef = useRef(focused);
-  const appearGuard = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const appearGuard: Guard = useRef(null);
+  const enterGuard: Guard = useRef(null);
+  const exitGuard: Guard = useRef(null);
+  // Leaving: from the exit's start until the navigation takes the screen away (or `exitGuard`
+  // brings it back).
   const exitingRef = useRef(false);
+  const carried = useRef(ridesPanel);
   const [shown, setShown] = useState(!animate);
   const [exiting, setExiting] = useState(false);
   // What runs after the exit. Kept in a ref: a JS function captured by the worklet callback would
@@ -98,17 +117,21 @@ export function useContentTransition({
     reduceMotion: ReduceMotion.Never,
   };
 
-  const focusTitle = () => moveAccessibilityFocus(titleRef.current);
-
-  const clearAppearGuard = () => {
-    if (appearGuard.current) clearTimeout(appearGuard.current);
-    appearGuard.current = null;
+  // Once: a fade restarted by `standAlone` must not announce the title a second time.
+  const titleFocused = useRef(false);
+  const focusTitle = () => {
+    if (titleFocused.current) return;
+    titleFocused.current = true;
+    moveAccessibilityFocus(titleRef.current);
   };
+
+  const clearAppearGuard = () => clearGuard(appearGuard);
 
   const start = () => {
     if (entered.current) return;
     entered.current = true;
     clearAppearGuard();
+    clearGuard(enterGuard);
     setShown(true);
     visible.value = withTiming(1, timing, (finished) => {
       if (finished) runOnJS(focusTitle)();
@@ -116,11 +139,46 @@ export function useContentTransition({
   };
 
   /**
+   * The panel no longer carries the screen: it went back down under it, or never finished
+   * rising. Riding it then, the screen would sit at the panel's opacity, invisible over Welcome
+   * yet taking its taps (#193). It shows on its own instead, a plain fade over Welcome.
+   */
+  const standAlone = () => {
+    if (!carried.current) return;
+    carried.current = false;
+    riding.value = 0;
+    // Not in yet, `start` fades it in. On a panel still covering the screen it is fully shown
+    // already, and riding or not draws the same frame: nothing to fade.
+    if (!entered.current || panelProgress.value >= 1) return;
+    visible.value = 0;
+    visible.value = withTiming(1, timing, (finished) => {
+      if (finished) runOnJS(focusTitle)();
+    });
+  };
+
+  /** The fail-safes' way in: now, carried by the panel or not. */
+  const enterNow = () => {
+    standAlone();
+    appearing.current = true;
+    start();
+  };
+
+  /** Focused for `handoffMaxMs` and still not in, whatever held it up: it enters on its own. */
+  const forceEnter = () => {
+    enterGuard.current = null;
+    if (entered.current || exitingRef.current || !focusedRef.current) return;
+    enterNow();
+  };
+
+  /**
    * Enters once laid out and on screen, unless the panel is still on its way up or the screen is
    * already leaving (a back during the rise must not be undone by the panel settling).
    */
   const tryStart = () => {
-    if (!animate || entered.current || exitingRef.current) return;
+    if (!animate || exitingRef.current) return;
+    // Focused with the panel at rest: Welcome lowered it, so nothing carries this screen.
+    if (focusedRef.current && handoffStore.getState().phase === "idle") standAlone();
+    if (entered.current) return;
     // Riding the panel, the screen shows with it (its opacity follows the panel); otherwise it
     // waits for the panel to settle.
     const panelSettled = ridesPanel || handoffStore.getState().phase !== "rising";
@@ -145,14 +203,29 @@ export function useContentTransition({
     tryStart();
   };
 
-  const afterExit = (finished: boolean) => {
+  // The screen comes back rather than staying invisible over live controls, and takes taps:
+  // left before its content was in (a back during the rise), it enters now.
+  const comeBack = () => {
     exitingRef.current = false;
     setExiting(false);
+    if (entered.current) visible.value = withTiming(1, timing);
+    else enterNow();
+  };
+
+  const afterExit = (finished: boolean) => {
     const then = afterExitRef.current;
     afterExitRef.current = null;
-    if (finished) then?.();
-    // Interrupted: the screen comes back rather than staying invisible over live controls.
-    else visible.value = withTiming(1, timing);
+    if (!finished) {
+      comeBack(); // interrupted
+      return;
+    }
+    // Still leaving (no taps) until the navigation takes the screen away. One that never does
+    // (a back that went nowhere) must not leave it invisible on top.
+    then?.();
+    exitGuard.current = setTimeout(() => {
+      exitGuard.current = null;
+      if (focusedRef.current) comeBack();
+    }, handoffMaxMs);
   };
 
   const exit = (then: () => void) => {
@@ -175,11 +248,23 @@ export function useContentTransition({
   useEffect(() => {
     tryStartRef.current = tryStart;
   });
+  const forceEnterRef = useRef(forceEnter);
+  useEffect(() => {
+    forceEnterRef.current = forceEnter;
+  });
+  // Focused, it is the screen the user sees: whatever the panel or the stack report, it is in
+  // within `handoffMaxMs` (plus its fade) and takes taps, never an invisible page on top.
   useEffect(() => {
     focusedRef.current = focused;
-    if (focused) tryStartRef.current();
-  }, [focused]);
-  useEffect(() => clearAppearGuard, []);
+    if (!focused) {
+      clearGuard(enterGuard);
+      return;
+    }
+    tryStartRef.current();
+    if (animate && !entered.current && !enterGuard.current)
+      enterGuard.current = setTimeout(() => forceEnterRef.current(), handoffMaxMs);
+  }, [animate, focused, handoffMaxMs]);
+  useEffect(() => () => [appearGuard, enterGuard, exitGuard].forEach(clearGuard), []);
   useEffect(() => {
     if (!animate) return;
     return handoffStore.subscribe(() => tryStartRef.current());
@@ -224,8 +309,8 @@ export function useContentTransition({
     if (!ridesPanel) return { opacity: visible.value };
     // The screen's top edge is the panel's, with its corners, and its content shows over the
     // second half of the rise: page and content arrive in the panel's own frames, on the UI
-    // thread, however long the device takes to draw a frame.
-    const p = panelProgress.value;
+    // thread, however long the device takes to draw a frame. Standing alone, it is the risen panel.
+    const p = riding.value ? panelProgress.value : 1;
     const shownOnPanel = Math.min(1, Math.max(0, (p - CONTENT_FROM) / (1 - CONTENT_FROM)));
     return {
       opacity: visible.value * shownOnPanel,

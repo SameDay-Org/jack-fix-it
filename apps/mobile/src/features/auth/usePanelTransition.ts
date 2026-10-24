@@ -1,4 +1,10 @@
-import { router, useFocusEffect, useNavigation, type Href } from "expo-router";
+import {
+  router,
+  unstable_useIsNavigating as useIsNavigating,
+  useFocusEffect,
+  useNavigation,
+  type Href,
+} from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 import {
@@ -76,6 +82,10 @@ export function usePanelTransition({ reduceMotion, destinations }: Params): Pane
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const settleCheck = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The router still has a navigation queued or rendering (see `settle`).
+  const navigating = useIsNavigating();
+  const navigatingRef = useRef(navigating);
+  const settleWhenIdle = useRef(false);
   // Every rise and every lowering is a new generation: a completion from an older one (a rise
   // replaced by a back, a screen gone meanwhile) changes nothing.
   const generation = useRef(0);
@@ -108,6 +118,7 @@ export function usePanelTransition({ reduceMotion, destinations }: Params): Pane
   const clearSettleCheck = () => {
     if (settleCheck.current) clearTimeout(settleCheck.current);
     settleCheck.current = null;
+    settleWhenIdle.current = false;
   };
 
   const prefetch = () => {
@@ -146,6 +157,24 @@ export function usePanelTransition({ reduceMotion, destinations }: Params): Pane
     );
   };
 
+  /**
+   * A push that leaves Welcome focused did nothing (no such route, an interrupted navigation):
+   * the panel must not stay up over a screen the user cannot use. But the router queues a push
+   * and runs it after a render, behind whatever it is still building (a prefetched screen, right
+   * after a sign-out or a back), so Welcome stays focused until then. Lowered meanwhile, the panel
+   * left the destination arriving with nothing to ride: a screen on top, invisible, taking every
+   * tap (#193). So the check waits until the router has nothing pending.
+   */
+  const settle = () => {
+    settleCheck.current = null;
+    if (!mounted.current || !busyRef.current) return;
+    if (navigatingRef.current) {
+      settleWhenIdle.current = true;
+      return;
+    }
+    if (navigation.isFocused()) rest();
+  };
+
   const navigate = (href: Href) => {
     try {
       router.push(href);
@@ -153,11 +182,7 @@ export function usePanelTransition({ reduceMotion, destinations }: Params): Pane
       rest();
       return;
     }
-    // A push that leaves Welcome focused did nothing (no such route, an interrupted
-    // navigation): the panel must not stay up over a screen the user cannot use.
-    settleCheck.current = setTimeout(() => {
-      if (mounted.current && navigation.isFocused()) rest();
-    }, panelRiseMs);
+    settleCheck.current = setTimeout(settle, panelRiseMs);
   };
 
   /** The panel covers the screen: the destination may show its content; on iOS, push it now. */
@@ -202,6 +227,17 @@ export function usePanelTransition({ reduceMotion, destinations }: Params): Pane
   useEffect(() => {
     prefetchRef.current = prefetch;
   });
+  const settleRef = useRef(settle);
+  useEffect(() => {
+    settleRef.current = settle;
+  });
+  // The settle check came while the router was busy: it runs once the router is done.
+  useEffect(() => {
+    navigatingRef.current = navigating;
+    if (navigating || !settleWhenIdle.current) return;
+    settleWhenIdle.current = false;
+    settleRef.current();
+  }, [navigating]);
   useFocusEffect(
     useCallback(() => {
       if (busyRef.current) {

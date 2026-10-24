@@ -14,6 +14,7 @@ jest.mock("expo-router", () => ({
   router: { push: jest.fn(), replace: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) },
   useFocusEffect: jest.fn(),
   useNavigation: jest.fn(() => ({ isFocused: () => false })),
+  unstable_useIsNavigating: () => false,
 }));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
