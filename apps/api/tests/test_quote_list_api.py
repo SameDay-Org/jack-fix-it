@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.auth import security
 from app.modules.pros.models import ProProfile, ProVerificationStatus
 from app.modules.quotes.models import Quote, QuoteStatus
+from app.modules.quotes.repository import QuoteRepository
 from app.modules.quotes.schemas import CustomerQuote, CustomerQuoteList, QuotePro
 from app.modules.requests.models import RequestStatus
 from app.modules.users.models import User
@@ -94,6 +95,7 @@ async def quoting_pro(
     jobs_count: int = 0,
     years: int | None = None,
     verification: ProVerificationStatus = ProVerificationStatus.APPROVED,
+    email: str | None = None,
 ) -> QuotingPro:
     """A pro with every private field filled, so a leak would show."""
     pro = await make_pro(session)
@@ -102,6 +104,8 @@ async def quoting_pro(
     assert user is not None
     assert profile is not None
     user.first_name, user.last_name = first_name, last_name
+    if email is not None:
+        user.email = email
     user.phone = PRO_PHONE if not await _phone_taken(session) else None
     profile.rating_avg = Decimal(rating) if rating is not None else None
     profile.jobs_count = jobs_count
@@ -129,9 +133,11 @@ async def add_quote(
     expires_in: timedelta = timedelta(hours=24),
     created_at: datetime = T0,
     scope: str = "Replace the faucet",
+    quote_id: uuid.UUID | None = None,
 ) -> uuid.UUID:
     """created_at is set: rows flushed in one transaction would otherwise share now()."""
     quote = Quote(
+        id=quote_id,
         request_id=request_id,
         pro_id=pro.profile_id,
         amount_cents=amount,
@@ -164,14 +170,25 @@ async def test_owner_sees_open_quotes_cheapest_first(
     request_id = await make_request(db_session, world, RequestStatus.QUOTE_READY)
     pros = [await quoting_pro(db_session) for _ in range(4)]
     dear = await add_quote(db_session, request_id, pros[0], amount=30_000, created_at=T0)
+    # On the tie, the ids run against created_at: only created_at puts tie_early first.
     tie_late = await add_quote(
-        db_session, request_id, pros[1], amount=15_000, created_at=T0 + timedelta(minutes=5)
+        db_session,
+        request_id,
+        pros[1],
+        amount=15_000,
+        created_at=T0 + timedelta(minutes=5),
+        quote_id=uuid.UUID(int=1),
     )
     cheap = await add_quote(
         db_session, request_id, pros[2], amount=9_000, created_at=T0 + timedelta(hours=1)
     )
     tie_early = await add_quote(
-        db_session, request_id, pros[3], amount=15_000, created_at=T0 + timedelta(minutes=1)
+        db_session,
+        request_id,
+        pros[3],
+        amount=15_000,
+        created_at=T0 + timedelta(minutes=1),
+        quote_id=uuid.UUID(int=2**128 - 1),
     )
 
     response = await db_client.get(path(request_id), headers=customer(world))
@@ -199,7 +216,7 @@ async def test_full_tie_is_broken_by_id(
     request_id = await make_request(db_session, world, RequestStatus.QUOTE_READY)
     ids = [
         await add_quote(db_session, request_id, await quoting_pro(db_session), amount=5_000)
-        for _ in range(3)
+        for _ in range(6)  # a scan order matching sorted ids by luck: 1 in 720
     ]
 
     assert await listed_ids(db_client, world, request_id) == sorted(ids)
@@ -216,6 +233,23 @@ async def test_expired_by_time_is_left_out(
     )
 
     assert await listed_ids(db_client, world, request_id) == [live]
+
+
+async def test_expiry_boundary_is_already_expired(db_session: AsyncSession, world: World) -> None:
+    """expires_at equal to now is expired: an offer is open strictly before its expires_at."""
+    request_id = await make_request(db_session, world, RequestStatus.QUOTE_READY)
+    quote_id = await add_quote(db_session, request_id, await quoting_pro(db_session))
+    stored = await db_session.get(Quote, quote_id)
+    assert stored is not None
+    repository = QuoteRepository(db_session)
+
+    at_expiry = await repository.open_of_request(request_id, stored.expires_at)
+    just_before = await repository.open_of_request(
+        request_id, stored.expires_at - timedelta(microseconds=1)
+    )
+
+    assert at_expiry == []
+    assert [quote.id for quote in just_before] == [quote_id]
 
 
 async def test_closed_quotes_are_left_out(
@@ -414,6 +448,26 @@ async def test_known_values_are_the_quoting_pros_not_another_pros(
     response = await db_client.get(path(request_id), headers=customer(world))
 
     assert [item["scope"] for item in response.json()["items"]] == ["Same day, •••", scope]
+
+
+async def test_known_email_is_the_quoting_pros_not_another_pros(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: World
+) -> None:
+    """A bare handle-shaped local part ("handle.one188") is no pattern: only the known-value
+    pass masks it, with the email of the pro who wrote it. Each scope names both handles."""
+    request_id = await make_request(db_session, world, RequestStatus.QUOTE_READY)
+    one = await quoting_pro(db_session, email="handle.one188@x.com")
+    two = await quoting_pro(db_session, email="handle.two188@x.com")
+    scope = "Find me as handle.one188 or handle.two188"
+    await add_quote(db_session, request_id, one, scope=scope, amount=1_000)
+    await add_quote(db_session, request_id, two, scope=scope, amount=2_000)
+
+    response = await db_client.get(path(request_id), headers=customer(world))
+
+    assert [item["scope"] for item in response.json()["items"]] == [
+        "Find me as ••• or handle.two188",
+        "Find me as handle.one188 or •••",
+    ]
 
 
 async def test_no_pro_contact_or_internal_field_leaks(
