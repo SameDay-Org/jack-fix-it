@@ -79,9 +79,14 @@ def configure_logging(level: str) -> None:
     # httpx logs every outgoing request at INFO with the full URL, query string included.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     # At DEBUG, botocore logs the canonical request and the signature of every presigned URL:
-    # enough to rebuild a working URL from the logs.
-    for name in ("boto3", "botocore"):
+    # enough to rebuild a working URL from the logs. s3transfer logs each transfer's bucket,
+    # object key and local path, and Pillow every EXIF value it reads (an artist's name, GPS):
+    # media copies must not log originals' keys, paths or metadata (#173).
+    for name in ("boto3", "botocore", "s3transfer", "PIL"):
         logging.getLogger(name).setLevel(logging.WARNING)
+    # urllib3, under botocore, names each request's path, which holds the object key: at DEBUG
+    # for every request, at WARNING for a response whose headers it cannot parse.
+    logging.getLogger("urllib3").setLevel(logging.ERROR)
 
 
 # Passed to `arq --custom-log-dict` so ARQ's own startup lines are JSON too.

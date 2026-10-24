@@ -13,6 +13,7 @@ from sqlalchemy.exc import ProgrammingError
 
 from app.config import Settings, get_settings
 from app.modules.dispatch.tasks import dispatch_request
+from app.modules.requests.tasks import SANITIZE_SPARE_TRIES
 from app.worker import WorkerSettings
 
 
@@ -64,6 +65,10 @@ def test_registration_keeps_names_tries_and_timeouts() -> None:
         "ping": (None, None),
         "dispatch_request": (None, None),
         "send_push": (get_settings().push_max_attempts, None),
+        "sanitize_request_media": (
+            get_settings().media_sanitize_max_tries + SANITIZE_SPARE_TRIES,
+            get_settings().media_sanitize_job_timeout_seconds,
+        ),
     }
 
 

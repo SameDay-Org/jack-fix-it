@@ -147,6 +147,14 @@ def owned_upload(key: str, owner_id: uuid.UUID, purpose: UploadPurpose) -> Owned
     return OwnedUpload(key=key, content_type=content_type)
 
 
+def upload_content_type(key: str) -> str | None:
+    """The content type a well-formed upload key's extension stands for; None for any other
+    key. For the worker that copies an upload it already recorded (#173)."""
+    if KEY_PATTERN.fullmatch(key) is None:
+        return None
+    return _CONTENT_TYPE_BY_EXTENSION[key[key.rindex(".") :]]
+
+
 def make_key(user_id: uuid.UUID, purpose: UploadPurpose, content_type: str) -> str:
     return f"u/{user_id}/{purpose.value}/{uuid.uuid4().hex}{EXTENSIONS[content_type]}"
 

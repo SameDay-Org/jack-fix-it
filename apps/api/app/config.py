@@ -63,6 +63,11 @@ def parse_country_codes(value: str) -> list[str]:
     return [code.strip() for code in value.split(",") if code.strip()]
 
 
+def parse_codecs(value: str) -> list[str]:
+    """Split a CSV of ffmpeg codec names such as "h264,hevc"; ignore blanks and case."""
+    return [codec.strip().lower() for codec in value.split(",") if codec.strip()]
+
+
 def parse_cors_origins(value: str) -> list[str]:
     """Split a CSV of origins; ignore blanks and trailing slashes."""
     return [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
@@ -119,6 +124,9 @@ class Settings(BaseSettings):
     s3_access_key_id: SecretStr | None = None
     s3_secret_access_key: SecretStr | None = None
     s3_region: str = "auto"  # what R2 expects
+    # The worker's own transfers (#173): seconds to connect, and to wait for each read.
+    s3_connect_timeout_seconds: float = Field(default=10.0, gt=0)
+    s3_read_timeout_seconds: float = Field(default=60.0, gt=0)
     upload_url_ttl_seconds: int = Field(default=300, gt=0)
     download_url_ttl_seconds: int = Field(default=300, gt=0)
     upload_max_image_bytes: int = Field(default=10 * MIB, gt=0)
@@ -160,6 +168,31 @@ class Settings(BaseSettings):
     request_create_window_seconds: int = Field(default=3_600, gt=0)
     request_list_default_limit: int = Field(default=20, gt=0)
     request_list_max_limit: int = Field(default=50, gt=0)
+    # Privacy-safe copies of request photos and videos (#173), made by the worker. Runs one
+    # sanitize job gets, the delay before a retry, the longest one step of a file's copy may take
+    # (its download, image transform, ffmpeg or ffprobe run, or upload), the most pixels an image
+    # may decode to (more is a decompression bomb: the file fails), the re-encode quality of
+    # JPEG and WebP copies, and the ffmpeg binary.
+    media_sanitize_max_tries: int = Field(default=5, gt=0)
+    media_sanitize_retry_seconds: int = Field(default=30, gt=0)
+    media_sanitize_timeout_seconds: float = Field(default=120.0, gt=0)
+    media_max_image_pixels: int = Field(default=50_000_000, gt=0)
+    media_jpeg_quality: int = Field(default=85, ge=1, le=95)
+    ffmpeg_path: str = Field(default="ffmpeg", min_length=1)
+    ffprobe_path: str = Field(default="ffprobe", min_length=1)
+    # The only video and audio codecs a safe copy may carry (CSV of ffmpeg codec names): a remux
+    # copies the streams as they are, and an image codec (MJPEG, PNG) keeps its EXIF.
+    media_video_codecs: Annotated[list[str], NoDecode] = Field(default=["h264", "hevc"])
+    media_audio_codecs: Annotated[list[str], NoDecode] = Field(default=["aac", "mp3", "opus"])
+    # The longest one sanitize job may run (every media of one request), past which ARQ stops it
+    # and never runs it again. So the job's work ends MEDIA_SANITIZE_SETTLE_SECONDS before, and a
+    # file it has no time for goes on in its next try (see media_sanitize_min_job_seconds).
+    media_sanitize_job_timeout_seconds: int = Field(default=1_800, gt=0)
+    # The longest one database step of the job may take: its pending-row query, or one write.
+    media_sanitize_overhead_seconds: float = Field(default=30.0, gt=0)
+    # The end of each try, kept for after its work: asking ARQ for the next try or, on the last
+    # one, failing what is left in one write. It also covers ARQ's own start of the job.
+    media_sanitize_settle_seconds: float = Field(default=60.0, gt=0)
     # Characters of a request's description shown in a pro's opportunities list (#49).
     opportunity_excerpt_chars: int = Field(default=160, gt=0)
     # Pro profile (D6.1, #36): the most categories and service areas one pro may list.
@@ -201,6 +234,11 @@ class Settings(BaseSettings):
             raise ValueError("CORS_ORIGINS must list explicit origins, not '*'")
         return value
 
+    @field_validator("media_video_codecs", "media_audio_codecs", mode="before")
+    @classmethod
+    def _split_codecs(cls, value: object) -> object:
+        return parse_codecs(value) if isinstance(value, str) else value
+
     @field_validator("phone_allowed_country_codes", mode="before")
     @classmethod
     def _split_country_codes(cls, value: object) -> object:
@@ -233,6 +271,41 @@ class Settings(BaseSettings):
     @classmethod
     def _empty_is_none(cls, value: object) -> object:
         return None if value == "" else value
+
+    @property
+    def media_sanitize_row_budget_seconds(self) -> float:
+        """The longest one file's copy may take: its download, three ffprobe runs, one ffmpeg
+        run and its upload, each within MEDIA_SANITIZE_TIMEOUT_SECONDS, then its write."""
+        return 6 * self.media_sanitize_timeout_seconds + self.media_sanitize_overhead_seconds
+
+    @property
+    def media_sanitize_min_job_seconds(self) -> float:
+        """The shortest job timeout: the pending-row query, one whole file, and the settle
+        reserve. The job starts a file on the same terms (app/modules/requests/media_copies.py),
+        so with it the first file always has its whole budget."""
+        return (
+            self.media_sanitize_overhead_seconds
+            + self.media_sanitize_row_budget_seconds
+            + self.media_sanitize_settle_seconds
+        )
+
+    @model_validator(mode="after")
+    def _media_job_fits_one_file(self) -> Self:
+        # The reserve covers a database step the deadline cut (its connection's cleanup) and
+        # the final try's write that fails what is left: up to one database step each.
+        if self.media_sanitize_settle_seconds < 2 * self.media_sanitize_overhead_seconds:
+            raise ValueError(
+                "MEDIA_SANITIZE_SETTLE_SECONDS must be at least 2 x "
+                "MEDIA_SANITIZE_OVERHEAD_SECONDS: a cut database step's cleanup and the last "
+                "try's write that fails what is left run within it"
+            )
+        if self.media_sanitize_job_timeout_seconds < self.media_sanitize_min_job_seconds:
+            raise ValueError(
+                "MEDIA_SANITIZE_JOB_TIMEOUT_SECONDS must cover one file: at least "
+                "6 x MEDIA_SANITIZE_TIMEOUT_SECONDS + 2 x MEDIA_SANITIZE_OVERHEAD_SECONDS "
+                "+ MEDIA_SANITIZE_SETTLE_SECONDS"
+            )
+        return self
 
     @model_validator(mode="after")
     def _list_default_within_max(self) -> Self:

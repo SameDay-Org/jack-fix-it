@@ -5,7 +5,8 @@ media in one transaction (one savepoint): a failure leaves nothing behind. The s
 origin (app), language (the caller's locale) and status (received); urgency and preferred
 contact are not accepted from the client yet (#45 defines their values).
 
-After the commit, create queues dispatch (#48) for the worker; a failed or slow enqueue is
+After the commit, create queues dispatch (#48) for the worker, then, when the request has
+media, the privacy-safe copy of its photos and videos (#173); a failed or slow enqueue is
 logged and never fails the request (the BDC can dispatch it again).
 
 Customers read only their own requests: another customer's id answers 404 (ensure_owner).
@@ -46,6 +47,7 @@ from app.modules.requests.errors import (
     InvalidRequestError,
     ZipNotServedError,
 )
+from app.modules.requests.media_copies import enqueue_sanitize
 from app.modules.requests.models import (
     RequestMedia,
     RequestMediaKind,
@@ -162,6 +164,8 @@ class ServiceRequestService:
             },
         )
         await self._queue_dispatch(request.id)
+        if media_kinds:
+            await self._queue_sanitize(request.id)
         return await self._detail(request)
 
     async def _queue_dispatch(self, request_id: uuid.UUID) -> None:
@@ -171,6 +175,14 @@ class ServiceRequestService:
             await enqueue_dispatch(self._queue, request_id, self._config.enqueue_timeout_seconds)
         except (RedisError, OSError):  # TimeoutError is an OSError
             logger.error("dispatch_enqueue_failed", extra={"service_request_id": str(request_id)})
+
+    async def _queue_sanitize(self, request_id: uuid.UUID) -> None:
+        """Hands the committed media to the privacy-safe copy (#173), after dispatch, which it
+        never delays. Never fails the create: the rows stay pending."""
+        try:
+            await enqueue_sanitize(self._queue, request_id, self._config.enqueue_timeout_seconds)
+        except (RedisError, OSError):  # TimeoutError is an OSError
+            logger.error("sanitize_enqueue_failed", extra={"service_request_id": str(request_id)})
 
     async def get(self, user: UserAccount, request_id: uuid.UUID) -> RequestOut:
         request = await self._requests.get(request_id)

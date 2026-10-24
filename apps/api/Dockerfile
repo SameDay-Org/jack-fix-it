@@ -15,6 +15,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# ffmpeg remuxes request videos into privacy-safe copies (#173). Only the worker runs it, but
+# both services use this one image.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 # Dependencies first so code-only changes reuse this layer.
 COPY pyproject.toml uv.lock .python-version ./
 RUN uv sync --frozen --no-dev
