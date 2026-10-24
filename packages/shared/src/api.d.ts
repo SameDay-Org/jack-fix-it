@@ -502,6 +502,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/pros/me/opportunities/{dispatch_id}/quote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a quote for one of my opportunities
+         * @description A fixed-price quote: the price in cents, what it includes, the estimated duration and a
+         *     proposed start. It expires after the platform's quote lifetime. The first quote on a
+         *     request makes it Quote Ready for the customer.
+         */
+        post: operations["submit_quote_v1_pros_me_opportunities__dispatch_id__quote_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/devices": {
         parameters: {
             query?: never;
@@ -1210,6 +1232,70 @@ export interface components {
          * @enum {string}
          */
         ProVerificationStatus: "pending" | "approved" | "rejected";
+        /**
+         * QuoteCreate
+         * @description A pro's fixed-price quote (#50). The server sets the status, the expiry, the pro and the
+         *     request; a client sending any of them gets a 422.
+         */
+        QuoteCreate: {
+            /**
+             * Amount Cents
+             * @description The pro's price in integer cents (USD); the platform may set a lower cap.
+             */
+            amount_cents: number;
+            /**
+             * Scope
+             * @description What the price includes.
+             */
+            scope: string;
+            /**
+             * Duration Minutes
+             * @description Estimated duration of the work.
+             */
+            duration_minutes: number;
+            /**
+             * Proposed Start At
+             * Format: date-time
+             * @description When the pro proposes to start.
+             */
+            proposed_start_at: string;
+        };
+        /** QuoteOut */
+        QuoteOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Amount Cents */
+            amount_cents: number;
+            /** Scope */
+            scope: string;
+            /** Duration Minutes */
+            duration_minutes: number;
+            /**
+             * Proposed Start At
+             * Format: date-time
+             */
+            proposed_start_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            status: components["schemas"]["QuoteStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * QuoteStatus
+         * @description Internal states (docs/glossary.md). Transitions belong to the state machine (#60).
+         * @enum {string}
+         */
+        QuoteStatus: "pending" | "accepted" | "rejected" | "expired" | "withdrawn";
         /** ReadinessResponse */
         ReadinessResponse: {
             /**
@@ -2886,6 +2972,86 @@ export interface operations {
             };
             /** @description The request is invalid. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    submit_quote_v1_pros_me_opportunities__dispatch_id__quote_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dispatch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros send quotes. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no opportunity of the caller with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description quote_exists: the caller already quoted this request; not_quotable: the opportunity was declined or expired, or the request is no longer open for quotes. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: amount or duration not a positive integer or above the platform's cap, scope empty or too long, proposed_start_at not a future time with a time zone, or a field the server sets (status, expires_at, pro or request). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_configured: quoting is not configured yet (the quote lifetime is not set, or a quote cap is set to an invalid value). */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

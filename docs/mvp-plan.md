@@ -90,7 +90,7 @@ Cliente e profissional usam o mesmo app React Native, com o modo escolhido no ca
 
 - Só profissionais aprovados e com Stripe ativo veem pedidos.
 - Cada pedido vai para até N profissionais da categoria e da área (N configurável, padrão 5).
-- Orçamento expira se não for aceito em X horas (configurável).
+- Orçamento expira se não for aceito em 48 horas (configurável em `settings.quote_ttl_hours`).
 - Se o cliente não confirmar nem abrir problema em 48 h após a conclusão, o job é confirmado automaticamente.
 - Cancelamento grátis até 24 h antes; depois disso, a regra é definida pelos sócios.
 - Telefones, e-mails e links escritos no chat são ocultados, para manter o pagamento dentro do app.

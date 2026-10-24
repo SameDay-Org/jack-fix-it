@@ -8,6 +8,7 @@ from app.modules.categories.router import router as categories_router
 from app.modules.devices.router import router as devices_router
 from app.modules.dispatch.router import router as opportunities_router
 from app.modules.pros.router import router as pros_router
+from app.modules.quotes.router import router as quotes_router
 from app.modules.requests.router import router as requests_router
 from app.modules.service_areas.router import router as service_areas_router
 from app.modules.uploads.router import router as uploads_router
@@ -25,5 +26,6 @@ v1_router.include_router(categories_router)
 v1_router.include_router(service_areas_router)
 v1_router.include_router(pros_router)
 v1_router.include_router(opportunities_router)
+v1_router.include_router(quotes_router)
 v1_router.include_router(devices_router)
 v1_router.include_router(waitlist_router)
