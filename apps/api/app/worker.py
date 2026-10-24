@@ -14,8 +14,10 @@ from arq.worker import Function
 from app.config import get_settings
 from app.db import create_engine, create_session_factory
 from app.integrations.expo_push import ExpoPushSender
+from app.integrations.storage import S3Storage, StorageNotConfiguredError
 from app.modules.dispatch.tasks import dispatch_request
 from app.modules.notifications.push_tasks import check_push_receipts, send_push
+from app.modules.requests.tasks import sanitize_task
 from app.observability import configure_logging, init_sentry
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,11 @@ async def startup(ctx: dict[str, Any]) -> None:
     ctx["engine"] = engine
     ctx["session_factory"] = create_session_factory(engine)
     ctx["push_sender"] = ExpoPushSender.from_settings(settings)
+    try:
+        ctx["storage"] = S3Storage.from_settings(settings)
+    except StorageNotConfiguredError:
+        # Development without storage: media copies wait (sanitize_request_media logs it).
+        ctx["storage"] = None
     # Sentinel looks for this line to confirm a worker deploy is healthy.
     logger.info("worker_started", extra={"app_env": settings.app_env})
 
@@ -73,6 +80,7 @@ class WorkerSettings:
         # With no result kept, a receipt that asks for a resend can queue the message's job id
         # again once the first run is over; the tries match the sends per device.
         discarding_result(send_push, max_tries=get_settings().push_max_attempts),
+        sanitize_task(get_settings()),
     )
     # A cron job keeps no result by default (ARQ's cron keep_result is 0); stated anyway.
     cron_jobs = (

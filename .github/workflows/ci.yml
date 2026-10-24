@@ -59,6 +59,9 @@ jobs:
       - run: uv run mypy .
       - name: Migrations upgrade, downgrade, upgrade
         run: uv run alembic upgrade head && uv run alembic downgrade base && uv run alembic upgrade head
+      # The media copy tests run ffmpeg and ffprobe (#173); in CI they fail without them.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: uv run pytest
 
   js:

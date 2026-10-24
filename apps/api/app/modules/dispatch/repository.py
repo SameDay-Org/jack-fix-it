@@ -108,3 +108,26 @@ class DispatchRepository:
     async def viewed_at(self, dispatch_id: uuid.UUID) -> datetime | None:
         statement = select(RequestDispatch.viewed_at).where(RequestDispatch.id == dispatch_id)
         return await self._session.scalar(statement)
+
+    async def get_for_pro(
+        self, dispatch_id: uuid.UUID, pro_id: uuid.UUID
+    ) -> RequestDispatch | None:
+        """The pro's own dispatch in any status (populate_existing: the current row)."""
+        statement = (
+            select(RequestDispatch)
+            .where(RequestDispatch.id == dispatch_id, RequestDispatch.pro_id == pro_id)
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def mark_quoted(self, dispatch_id: uuid.UUID, now: datetime) -> bool:
+        """sent or viewed -> quoted, with the pro's answer time; a conditional UPDATE, so it
+        happens once. False when the dispatch was no longer active."""
+        statement = (
+            update(RequestDispatch)
+            .where(RequestDispatch.id == dispatch_id, RequestDispatch.status.in_(ACTIVE))
+            .values(status=DispatchStatus.QUOTED, responded_at=now)
+            .returning(RequestDispatch.id)
+            .execution_options(synchronize_session=False)
+        )
+        return (await self._session.scalar(statement)) is not None

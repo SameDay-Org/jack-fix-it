@@ -1722,6 +1722,115 @@
         }
       }
     },
+    "/v1/pros/me/opportunities/{dispatch_id}/quote": {
+      "post": {
+        "tags": [
+          "pros"
+        ],
+        "summary": "Send a quote for one of my opportunities",
+        "description": "A fixed-price quote: the price in cents, what it includes, the estimated duration and a\nproposed start. It expires after the platform's quote lifetime. The first quote on a\nrequest makes it Quote Ready for the customer.",
+        "operationId": "submit_quote_v1_pros_me_opportunities__dispatch_id__quote_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dispatch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Dispatch Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: amount or duration not a positive integer or above the platform's cap, scope empty or too long, proposed_start_at not a future time with a time zone, or a field the server sets (status, expires_at, pro or request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros send quotes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no opportunity of the caller with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "quote_exists: the caller already quoted this request; not_quotable: the opportunity was declined or expired, or the request is no longer open for quotes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not_configured: quoting is not configured yet (the quote lifetime is not set, or a quote cap is set to an invalid value).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/devices": {
       "put": {
         "tags": [
@@ -3294,6 +3403,112 @@
           "rejected"
         ],
         "title": "ProVerificationStatus"
+      },
+      "QuoteCreate": {
+        "properties": {
+          "amount_cents": {
+            "type": "integer",
+            "maximum": 2147483647.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Amount Cents",
+            "description": "The pro's price in integer cents (USD); the platform may set a lower cap."
+          },
+          "scope": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "pattern": "^[^\\x00]*$",
+            "title": "Scope",
+            "description": "What the price includes."
+          },
+          "duration_minutes": {
+            "type": "integer",
+            "maximum": 2147483647.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Duration Minutes",
+            "description": "Estimated duration of the work."
+          },
+          "proposed_start_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Proposed Start At",
+            "description": "When the pro proposes to start."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "amount_cents",
+          "scope",
+          "duration_minutes",
+          "proposed_start_at"
+        ],
+        "title": "QuoteCreate",
+        "description": "A pro's fixed-price quote (#50). The server sets the status, the expiry, the pro and the\nrequest; a client sending any of them gets a 422."
+      },
+      "QuoteOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "amount_cents": {
+            "type": "integer",
+            "title": "Amount Cents"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "duration_minutes": {
+            "type": "integer",
+            "title": "Duration Minutes"
+          },
+          "proposed_start_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Proposed Start At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/QuoteStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "amount_cents",
+          "scope",
+          "duration_minutes",
+          "proposed_start_at",
+          "expires_at",
+          "status",
+          "created_at"
+        ],
+        "title": "QuoteOut"
+      },
+      "QuoteStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "accepted",
+          "rejected",
+          "expired",
+          "withdrawn"
+        ],
+        "title": "QuoteStatus",
+        "description": "Internal states (docs/glossary.md). Transitions belong to the state machine (#60)."
       },
       "ReadinessResponse": {
         "properties": {

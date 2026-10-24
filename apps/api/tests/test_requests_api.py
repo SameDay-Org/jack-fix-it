@@ -28,6 +28,8 @@ from app.modules.categories.service import load_seed_data
 from app.modules.requests.customer_status import REQUEST_CUSTOMER_STATUS
 from app.modules.requests.models import RequestMedia, RequestStatus, ServiceRequest
 from app.modules.service_areas.models import ServiceArea
+from app.modules.uploads.schemas import UploadPurpose
+from app.modules.uploads.service import owned_upload, upload_content_type
 from app.modules.users.models import User
 from app.modules.users.types import UserRole
 from app.observability import JsonFormatter
@@ -1098,3 +1100,81 @@ async def test_served_zip_plus_4_is_created(
 
     assert response.status_code == 201
     assert response.json()["address"]["zip_code"] == f"{ADDRESS['zip_code']}-4321"
+
+
+# Privacy-safe media copies (#173): queued after the commit, after dispatch.
+
+
+async def test_request_create_enqueues_sanitize_after_commit(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    queue: RecordingQueue,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ana = await make_caller(db_session)
+    commit = AsyncSession.commit
+
+    async def recorded_commit(self: AsyncSession) -> None:
+        await commit(self)
+        EVENTS.append("commit")
+
+    monkeypatch.setattr(AsyncSession, "commit", recorded_commit)
+
+    created = await create(db_client, ana, media_keys=[ana.media_key(), ana.media_key(".mp4")])
+
+    assert created.status_code == 201
+    request_id = created.json()["id"]
+    assert list(queue.jobs.items()) == [
+        (f"dispatch:{request_id}", ("dispatch_request", (request_id,))),
+        (f"sanitize:{request_id}", ("sanitize_request_media", (request_id,))),
+    ]
+    assert queue.before == ["commit", "commit"]  # both after the commit, dispatch first
+
+
+async def test_a_request_without_media_queues_no_sanitize(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    queue: RecordingQueue,
+) -> None:
+    created = await create(db_client, await make_caller(db_session))
+
+    assert created.status_code == 201
+    assert [job_id.split(":")[0] for job_id in queue.jobs] == ["dispatch"]
+
+
+async def test_enqueue_failure_does_not_fail_request(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    queue: RecordingQueue,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ana = await make_caller(db_session)
+    queue.failure = RedisError("down")
+
+    with caplog.at_level(logging.ERROR):
+        response = await create(db_client, ana, media_keys=[ana.media_key()])
+
+    assert response.status_code == 201
+    request_id = response.json()["id"]
+    [record] = [r for r in caplog.records if r.message == "sanitize_enqueue_failed"]
+    assert record.__dict__["service_request_id"] == request_id
+    media = (await db_session.scalars(select(RequestMedia))).all()
+    assert [m.safe_status.value for m in media if str(m.request_id) == request_id] == ["pending"]
+
+
+async def test_owned_upload_rejects_safe_keys(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    # A customer cannot attach a safe copy (or guess one) to a new request.
+    ana = await make_caller(db_session)
+    safe_key = "m/" + uuid.uuid4().hex + ".jpg"
+
+    response = await create(db_client, ana, media_keys=[safe_key])
+
+    assert response.status_code == 422
+    assert response.json() == INVALID_MEDIA
+    assert owned_upload(safe_key, ana.id, UploadPurpose.REQUEST_MEDIA) is None
+    assert upload_content_type(safe_key) is None

@@ -18,6 +18,9 @@ rules apply.
   gray-50) and of the top safe-area backdrop, which stays outside scrolling content. The root
   layout mounts no `StatusBar`, and ESLint rejects `expo-status-bar` or safe-area view imports
   in `src/app` (`eslint.config.js`).
+  A keyboard form inside `Screen` uses `KeyboardAvoidingView` with `behavior="padding"` on
+  both platforms (edge to edge, the Android window never resizes) and
+  `keyboardVerticalOffset={insets.top}` (it measures from the content area below the backdrop).
 - Welcome's panel (#148): the white bubble rises into Role or Login (`usePanelTransition`,
   `src/features/auth`): a UI-thread transform over `motion.panelRiseMs`, corners and color
   easing into the page, the hero dimming by `motion.panelHeroDim`. Welcome prefetches both

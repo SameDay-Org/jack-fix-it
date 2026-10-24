@@ -1,4 +1,4 @@
-"""SettingsService: typed, validated, read on every call (D9.1, #48)."""
+"""SettingsService: typed, validated, read on every call (D9.1, #48; D9.3, #50)."""
 
 import logging
 
@@ -7,10 +7,12 @@ from pydantic import JsonValue
 from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.settings.errors import SettingMalformedError, SettingNotConfiguredError
 from app.modules.settings.models import Setting
 from app.modules.settings.service import (
     DISPATCH_MAX_PROS,
     DISPATCH_MAX_PROS_DEFAULT,
+    INT4_MAX,
     SettingsService,
 )
 from app.observability import JsonFormatter
@@ -74,3 +76,67 @@ async def test_an_invalid_value_falls_back_to_the_default_and_logs_the_key_only(
     [record] = invalid_logs(caplog)
     assert record.__dict__["key"] == DISPATCH_MAX_PROS
     assert "value" not in JsonFormatter().format(record)
+
+
+# An optional positive int (the quote caps, #50): absent is "not set", malformed is refused.
+
+OPTIONAL_KEY = "probe_optional_limit"
+
+
+async def put(session: AsyncSession, value: JsonValue) -> None:
+    await session.execute(delete(Setting).where(Setting.key == OPTIONAL_KEY))
+    session.add(Setting(key=OPTIONAL_KEY, value=value))
+    await session.flush()
+
+
+async def test_an_absent_optional_setting_is_none_and_logs_nothing(
+    db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING):
+        assert await SettingsService(db_session).optional_positive_int(OPTIONAL_KEY) is None
+
+    assert invalid_logs(caplog) == []
+
+
+@pytest.mark.parametrize("bound", [1, INT4_MAX])
+async def test_an_optional_setting_reads_its_bounds(db_session: AsyncSession, bound: int) -> None:
+    await put(db_session, bound)
+
+    assert await SettingsService(db_session).optional_positive_int(OPTIONAL_KEY) == bound
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["98765", 0, True, False, -98765, INT4_MAX + 1, 98765.0, 98765.5, None, [98765], {"n": 98765}],
+    ids=[
+        "string",
+        "zero",
+        "true",
+        "false",
+        "negative",
+        "above_int4",
+        "whole_float",
+        "float",
+        "null",
+        "list",
+        "object",
+    ],
+)
+async def test_a_malformed_optional_setting_raises_and_logs_the_key_only(
+    db_session: AsyncSession, caplog: pytest.LogCaptureFixture, value: JsonValue
+) -> None:
+    await put(db_session, value)
+
+    with caplog.at_level(logging.WARNING), pytest.raises(SettingMalformedError) as error:
+        await SettingsService(db_session).optional_positive_int(OPTIONAL_KEY)
+
+    assert error.value.key == OPTIONAL_KEY
+    # A 503 not_configured wherever it is not caught, so no caller can treat it as unset.
+    assert isinstance(error.value, SettingNotConfiguredError)
+    assert (error.value.status_code, error.value.code) == (503, "not_configured")
+    [record] = invalid_logs(caplog)
+    assert record.__dict__["key"] == OPTIONAL_KEY
+    output = JsonFormatter().format(record)
+    assert "value" not in output
+    assert "98765" not in output
+    assert str(INT4_MAX + 1) not in output

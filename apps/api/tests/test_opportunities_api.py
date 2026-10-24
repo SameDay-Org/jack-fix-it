@@ -90,8 +90,8 @@ async def make_pro(session: AsyncSession) -> Pro:
     return Pro(caller, profile.id)
 
 
-@pytest.fixture
-async def world(db_session: AsyncSession) -> World:
+async def build_world(db_session: AsyncSession) -> World:
+    """Two pros, a customer and an agent, a category and the customer's address."""
     me, other = await make_pro(db_session), await make_pro(db_session)
     customer = User(email=EMAIL, password_hash="x", role=UserRole.CUSTOMER, phone=PHONE)
     agent = User(
@@ -115,6 +115,11 @@ async def world(db_session: AsyncSession) -> World:
     db_session.add_all([address, area])
     await db_session.flush()
     return World(me, other, customer.id, agent.id, address.id, category.id)
+
+
+@pytest.fixture
+async def world(db_session: AsyncSession) -> World:
+    return await build_world(db_session)
 
 
 async def make_request(
