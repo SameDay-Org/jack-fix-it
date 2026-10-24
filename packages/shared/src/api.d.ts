@@ -1370,7 +1370,7 @@ export interface components {
             id: string;
             /**
              * Name
-             * @description The first name and the last name's initial, e.g. "María P."; null when the pro has not set both names.
+             * @description The first name and the last name's initial, e.g. "María P."; null when the pro has not set both names, or when the name shows a contact detail (an email, a phone, a domain...): withheld before payment, never partly masked.
              */
             name: string | null;
             /**

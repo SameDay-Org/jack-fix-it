@@ -3670,7 +3670,7 @@
               }
             ],
             "title": "Name",
-            "description": "The first name and the last name's initial, e.g. \"Mar\u00eda P.\"; null when the pro has not set both names."
+            "description": "The first name and the last name's initial, e.g. \"Mar\u00eda P.\"; null when the pro has not set both names, or when the name shows a contact detail (an email, a phone, a domain...): withheld before payment, never partly masked."
           },
           "rating_avg": {
             "anyOf": [

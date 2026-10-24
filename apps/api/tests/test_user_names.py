@@ -133,8 +133,8 @@ def test_safe_public_name_keeps_ordinary_names() -> None:
         ("J.R.", "Smith", "J.R. S."),
     ):
         assert safe_public_name(first, last, OWN) == shown
-    for first, last in (("María", None), (None, "Pérez"), (None, None)):
-        assert safe_public_name(first, last, OWN) is None
+    for given, family in (("María", None), (None, "Pérez"), (None, None)):
+        assert safe_public_name(given, family, OWN) is None
 
 
 @pytest.mark.parametrize("first", CONTACT_NAMES)
