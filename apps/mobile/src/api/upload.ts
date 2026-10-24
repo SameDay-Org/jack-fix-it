@@ -34,8 +34,10 @@ const LOCAL_FILE = /^(file|content):/;
 const BARRIER_FILE = "jack-upload-barrier.missing";
 
 /**
- * The size of a file on this device, in bytes, from its metadata: nothing is read. `null` when
- * the file is missing, empty or cannot be inspected.
+ * The size of a file on this device, in bytes, from its metadata, without reading it into
+ * JavaScript. (Only an Android `content://` file whose provider gives no size is measured by
+ * reading it natively; the picker and the compressor hand over `file://` copies.) `null` when the
+ * file is missing, empty or cannot be inspected.
  */
 export function localFileSize(uri: string): number | null {
   try {
@@ -128,11 +130,11 @@ const stopError = (stop: Stop, signal: AbortSignal | undefined): unknown =>
   stop === "timeout" ? new UploadFailedError("timeout") : abortError(signal);
 
 /**
- * Settles once every Expo native call made before it has run. Expo modules run async functions
- * one at a time, in call order, on one native queue (`expo.modules.AsyncFunctionQueue`: a serial
- * queue on iOS, one thread on Android), while the upload task's `cancel()` runs at once on the
- * JavaScript thread. The task's `start` clears its cancelled flag and only then creates the
- * request, so a cancel that overtakes a `start` still waiting on that queue would be lost. After
+ * Settles once every Expo native call made before it has had its turn. Expo modules start async
+ * functions in call order on one native queue (`expo.modules.AsyncFunctionQueue`: a serial queue
+ * on iOS, one thread on Android, where a coroutine runs until its first suspension), while the
+ * upload task's `cancel()` runs at once on the JavaScript thread. The task's `start` clears its
+ * cancelled flag and only then creates the request, so a cancel that overtakes a `start` still waiting on that queue would be lost. After
  * a barrier behind a `start`, the request exists and a cancel reaches it; a barrier before it
  * empties the queue, so the `start` is picked up at once. A tripwire test in upload.test.ts reads
  * those native sources.

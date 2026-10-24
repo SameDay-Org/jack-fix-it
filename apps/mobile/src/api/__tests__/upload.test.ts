@@ -572,11 +572,35 @@ describe("uploadMedia", () => {
       /AsyncFunction\("start"\) Coroutine \{ task: FileSystemUploadTask,[^}]*\}\s*Function\("cancel"\)/,
     );
     expect(android).toMatch(/AsyncFunction\("bytes"\) Coroutine \{ file: FileSystemFile ->/);
-    // Android creates the call before its first suspension, so it exists once start has run.
-    expect(
-      read(`${fs}android/src/main/java/expo/modules/filesystem/FileSystemUploadTask.kt`),
-    ).toMatch(
-      /suspendCancellableCoroutine \{ continuation ->[\s\S]*?call = client\.newCall\(request\)\s*call\?\.enqueue/,
+    // Android: start clears the flag and creates the call before its first suspension, so the
+    // call exists once start has had its turn. Nothing before `newCall` may suspend.
+    const androidTask = read(
+      `${fs}android/src/main/java/expo/modules/filesystem/FileSystemUploadTask.kt`,
+    );
+    expect(androidTask).toMatch(
+      /suspend fun start\([^)]*\): UploadTaskResult \{\s*file\.validatePermission\([^)]*\)\s*cancelled = false\s*val request = buildUploadRequest\(url, file, options\)\s*return executeUploadRequest\(request\)\s*\}/,
+    );
+    expect(androidTask).toMatch(/\n {2}private fun buildUploadRequest\(/);
+    expect(androidTask).not.toMatch(/suspend fun buildUploadRequest/);
+    expect(androidTask).toMatch(
+      /private suspend fun executeUploadRequest\(request: Request\): UploadTaskResult \{\s*return suspendCancellableCoroutine \{ continuation ->[\s\S]*?call = client\.newCall\(request\)\s*call\?\.enqueue/,
+    );
+    expect(androidTask).toMatch(/fun cancel\(\) \{\s*cancelled = true\s*call\?\.cancel\(\)\s*\}/);
+
+    // iOS: start clears the flag, creates the task, checks the flag and resumes, all in the queued
+    // block with no hop to another queue; cancel cancels the task once it exists.
+    const iosTask = read(`${fs}ios/FileSystemUploadTask.swift`);
+    const iosStart =
+      /func start\(url: URL, file: FileSystemFile, options: UploadTaskOptions, promise: Promise\) \{[\s\S]*?\n {2}func cancel\(\)/.exec(
+        iosTask,
+      )?.[0] ?? "";
+    expect(iosStart).not.toBe("");
+    expect(iosStart).toMatch(
+      /cancelled = false[\s\S]*?uploadTask = session\.uploadTask\(with: request, fromFile: sourceUrl\)[\s\S]*?guard !cancelled else[\s\S]*?uploadTask\.resume\(\)/,
+    );
+    expect(iosStart).not.toMatch(/Task \{|\.async\s*\{|\.asyncAfter|await /);
+    expect(iosTask).toMatch(
+      /func cancel\(\) \{\s*cancelled = true\s*uploadTask\?\.cancel\(\)\s*\}/,
     );
   });
 });
