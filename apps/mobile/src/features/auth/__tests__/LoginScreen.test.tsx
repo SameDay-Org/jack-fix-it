@@ -2,7 +2,14 @@ import "@/i18n";
 
 import { act, fireEvent, screen } from "@testing-library/react-native";
 import { router, useLocalSearchParams, useNavigation } from "expo-router";
-import { AccessibilityInfo } from "react-native";
+import {
+  AccessibilityInfo,
+  Keyboard,
+  Platform,
+  StyleSheet,
+  type KeyboardEvent,
+  type KeyboardEventName,
+} from "react-native";
 
 import { ApiError, login } from "@/api";
 import { moveAccessibilityFocus } from "@/components/ui";
@@ -10,7 +17,7 @@ import { tokens } from "@/theme";
 
 import { LoginScreen } from "../LoginScreen";
 import { createPanelHandoff, type PanelHandoff } from "../panelHandoff";
-import { renderInSafeArea } from "./helpers";
+import { METRICS, renderInSafeArea } from "./helpers";
 
 jest.mock(
   "../../../api/config",
@@ -48,6 +55,38 @@ async function fillAndSubmit(address: string, secret: string) {
 
 let handoff: PanelHandoff = createPanelHandoff();
 
+// The evidence emulator: the content area under the status bar is 592 dp tall, and the keyboard's
+// top edge is at y 381 on screen. A layout event goes through `persist()` in the avoider.
+const AREA_HEIGHT = 592;
+const KEYBOARD_TOP = 381;
+const AREA = {
+  nativeEvent: { layout: { x: 0, y: 0, width: 320, height: AREA_HEIGHT } },
+  persist: () => undefined,
+};
+const keyboardAt = (screenY: number): KeyboardEvent => ({
+  duration: 0,
+  easing: "keyboard",
+  startCoordinates: { screenX: 0, screenY: METRICS.frame.height, width: 320, height: 0 },
+  endCoordinates: { screenX: 0, screenY, width: 320, height: METRICS.frame.height - screenY },
+  isEventFromThisApp: true,
+});
+
+/** RN's keyboard events, captured: the avoider and the ScrollView subscribe when they mount. */
+let keyboardListeners: { type: KeyboardEventName; listener: (event: KeyboardEvent) => void }[] = [];
+const emitKeyboard = (type: KeyboardEventName, event: KeyboardEvent) =>
+  keyboardListeners
+    .filter((entry) => entry.type === type)
+    .forEach(({ listener }) => listener(event));
+/** Lays the avoider out over the content area, then opens the keyboard the way `os` reports it. */
+const openKeyboard = async (os: "android" | "ios") => {
+  await act(async () =>
+    fireEvent(screen.getByTestId("login-screen-keyboard-avoider"), "layout", AREA),
+  );
+  await act(async () =>
+    emitKeyboard(os === "ios" ? "keyboardWillShow" : "keyboardDidShow", keyboardAt(KEYBOARD_TOP)),
+  );
+};
+
 describe("LoginScreen", () => {
   beforeEach(() => {
     handoff = createPanelHandoff();
@@ -56,7 +95,33 @@ describe("LoginScreen", () => {
   beforeEach(() => {
     jest.mocked(login).mockReset();
     jest.spyOn(AccessibilityInfo, "announceForAccessibility").mockImplementation(() => undefined);
+    keyboardListeners = [];
+    jest.spyOn(Keyboard, "addListener").mockImplementation((type, listener) => {
+      keyboardListeners.push({ type, listener: listener as (event: KeyboardEvent) => void });
+      return { remove: jest.fn() };
+    });
   });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it.each(["android", "ios"] as const)(
+    "CredentialsForm keeps clear of the keyboard on %s: the form ends at the keyboard's top",
+    async (os) => {
+      jest.replaceProperty(Platform, "OS", os);
+      await renderInSafeArea(<LoginScreen />, handoff);
+
+      await openKeyboard(os);
+
+      // The area spans y 24 to 616 on screen; without the status-bar offset it would stop 24 dp
+      // short of the padding it needs and end under the keyboard.
+      const { paddingBottom } = StyleSheet.flatten(
+        screen.getByTestId("login-screen-keyboard-avoider").props.style,
+      );
+      expect(METRICS.insets.top + AREA_HEIGHT - paddingBottom).toBe(KEYBOARD_TOP);
+    },
+  );
 
   it.each([
     [401, "invalid_credentials", "Email or password is incorrect."],
@@ -135,6 +200,27 @@ describe("LoginScreen", () => {
       expect(moveAccessibilityFocus).toHaveBeenCalledTimes(1);
       expect(jest.mocked(moveAccessibilityFocus).mock.calls[0][0]).toBeTruthy(); // the title node
       expect(screen.getByRole("header", { name: "Welcome back" })).toBeTruthy();
+    });
+
+    it("the entrance runs once when the keyboard re-lays out the form", async () => {
+      jest.replaceProperty(Platform, "OS", "android");
+      jest.mocked(moveAccessibilityFocus).mockClear();
+      await renderInSafeArea(<LoginScreen />, handoff);
+      await ready();
+      await act(async () => jest.advanceTimersByTime(transitionMs * 1.5));
+      expect(moveAccessibilityFocus).toHaveBeenCalledTimes(1);
+      const settledOpacity = rootOpacity();
+
+      // The keyboard opens: the avoider pads, and the content is laid out again, shorter.
+      await openKeyboard("android");
+      const shorter = { nativeEvent: { layout: { x: 0, y: 0, width: 320, height: 357 } } };
+      await act(async () =>
+        fireEvent(screen.getByTestId("login-screen-content"), "layout", shorter),
+      );
+      await act(async () => jest.advanceTimersByTime(transitionMs * 1.5));
+
+      expect(rootOpacity()).toBe(settledOpacity);
+      expect(moveAccessibilityFocus).toHaveBeenCalledTimes(1);
     });
 
     it("the screen fades as one layer, and takes no taps before its content is in", async () => {

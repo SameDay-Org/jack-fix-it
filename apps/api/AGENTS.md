@@ -65,6 +65,14 @@ rules apply.
 ARQ tasks are async functions registered in `app/worker.py` `WorkerSettings.functions`. Make
 them idempotent: they can run twice.
 
+- **Media copies (#173).** `sanitize_request_media` makes a privacy-safe copy of each request
+  photo and video (no EXIF, GPS, XMP or video tags) under an opaque `m/<32 hex><ext>` key.
+  Only a `ready` copy may ever be shown to a pro; a `failed` one never is. Videos need the
+  ffmpeg binary: the Docker image installs it, and so does CI. Locally the video tests skip
+  without it. ARQ ends a job at its timeout for good (no retry), so every step of the job is
+  bounded and each try stops itself `MEDIA_SANITIZE_SETTLE_SECONDS` before it
+  (`media_copies.py`); `tests/test_media_copy_deadlines.py` runs the real worker on Redis.
+
 ## Tests
 
 `pytest` with `asyncio_mode = auto`; `tests/conftest.py` builds the app from explicit settings
