@@ -82,6 +82,7 @@ def sanitize_task(settings: Settings) -> Function:
     return func(
         sanitize_request_media,
         keep_result=0,
+        keep_result_forever=False,
         max_tries=settings.media_sanitize_max_tries + SANITIZE_SPARE_TRIES,
         timeout=settings.media_sanitize_job_timeout_seconds,
     )
