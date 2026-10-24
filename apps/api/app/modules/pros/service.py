@@ -68,8 +68,10 @@ class ProService:
         """The pro_profiles.id of a user, or None when the user has no pro profile."""
         return await self._profiles.get_id_by_user_id(user_id)
 
-    async def cards(self, pro_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, ProCard]:
-        """The public card of each pro among `pro_ids`, by profile id: two queries (the
+    async def hireable_cards(self, pro_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, ProCard]:
+        """The public card of each pro among `pro_ids` who can still be hired, by profile id:
+        approved with payouts enabled, like the pros who receive requests (#189). A pro left
+        out cannot be paid out, so their quote is neither listed nor accepted. Two queries (the
         profiles, then their names), whatever the count."""
         rows = await self._profiles.public_fields(pro_ids)
         names = await self._users.public_names([row[1] for row in rows])

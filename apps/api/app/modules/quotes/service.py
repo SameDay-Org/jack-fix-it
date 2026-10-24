@@ -1,4 +1,5 @@
-"""Quotes: a dispatched pro submits one (D9.3, #50); the customer compares them (D10.1, #188).
+"""Quotes: a dispatched pro submits one (D9.3, #50); the customer compares them (D10.1, #188)
+and accepts one (D10.1, #189).
 
 A pro quotes through their own dispatch. After locking the request (the state machine's row
 lock, so two quotes on one request take turns) it checks, in this order:
@@ -16,9 +17,22 @@ The amount is the pro's own price in cents, stored as given; fees are #58.
 The customer reads the quotes of their own request (else 404, the same body as the request
 itself) while it shows the quote screen (quote_ready, and accepted while the payment is
 pending: docs/glossary.md); any other status lists nothing. Listed: the accepted quote and the
-pending ones before their expires_at, whether or not the expiry worker (#51) has marked them.
+pending ones before their expires_at, whether or not the expiry worker (#51) has marked them,
+of the pros who can still be hired (approved, payouts enabled: the pros who receive requests).
 Contacts stay hidden before payment, so the scope is redacted (app.redaction): the pro's own
 email and phone first, then every pattern. The stored scope is unchanged.
+
+The customer accepts one of those quotes. After their own request (else 404) and locking it,
+then the quote (else 404, the same body, for a quote of another request):
+- the quote's pro can still be hired: else 409 quote_not_acceptable;
+- the request already accepted this very quote: 200 with it again, nothing written or logged
+  (idempotent);
+- else the request is quote_ready, and the quote pending before its expires_at: else 409
+  quote_not_acceptable. One accepted quote per request: the request lock serializes them.
+Then, in one transaction: the quote accepted, and the request quote_ready -> accepted through
+its state machine (CUSTOMER). The other quotes stay pending: after a failed payment the customer
+may pick another (#61), and rejecting them belongs to the payment's success. No money moves
+here: the payment attaches to this step (#58), and the job is created once it succeeds (#61).
 
 Logs carry ids only: never the scope text or the amount.
 """
@@ -35,8 +49,13 @@ from app.errors import NotFoundError
 from app.modules.dispatch.service import DispatchService
 from app.modules.jobs.service import SYSTEM
 from app.modules.pros.service import ProService
-from app.modules.quotes.errors import NotQuotableError, QuoteExistsError, QuoteOutOfBoundsError
-from app.modules.quotes.models import Quote
+from app.modules.quotes.errors import (
+    NotQuotableError,
+    QuoteExistsError,
+    QuoteNotAcceptableError,
+    QuoteOutOfBoundsError,
+)
+from app.modules.quotes.models import Quote, QuoteStatus
 from app.modules.quotes.repository import QuoteRepository
 from app.modules.quotes.schemas import (
     CustomerQuote,
@@ -142,12 +161,57 @@ class QuoteService:
         if status not in _QUOTE_SCREEN:
             return CustomerQuoteList(items=[])
         quotes = await self._quotes.open_of_request(request_id, datetime.now(UTC))
-        cards = await self._pros.cards({quote.pro_id for quote in quotes})
+        return CustomerQuoteList(items=await self._for_customer(quotes))
+
+    async def accept(
+        self, user: UserAccount, request_id: uuid.UUID, quote_id: uuid.UUID
+    ) -> CustomerQuote:
+        """Accepts the customer's quote and commits; idempotent (see the module doc)."""
+        await self._customer_requests.own_status(user, request_id)
+        request = await self._requests.lock(request_id)
+        # Under the request's lock: what another acceptance may have changed meanwhile.
+        quote = await self._quotes.get_of_request_for_update(quote_id, request_id)
+        if request is None:  # pragma: no cover - own_status found it; requests are never deleted
+            raise NotFoundError
+        if quote is None:
+            raise NotFoundError
+        shown = await self._for_customer([quote])
+        if not shown:
+            raise QuoteNotAcceptableError  # the pro can no longer be hired
+        [item] = shown
+        if request.status is RequestStatus.ACCEPTED and quote.status is QuoteStatus.ACCEPTED:
+            return item
+        if (
+            request.status is not RequestStatus.QUOTE_READY
+            or quote.status is not QuoteStatus.PENDING
+            or quote.expires_at <= datetime.now(UTC)
+        ):
+            raise QuoteNotAcceptableError
+        await self._quotes.mark_accepted(quote)
+        await self._requests.transition(request.id, RequestStatus.ACCEPTED, user)
+        await self._session.commit()
+        logger.info(
+            "quote_accepted",
+            extra={
+                "quote_id": str(quote.id),
+                "service_request_id": str(request.id),
+                "pro_id": str(quote.pro_id),
+            },
+        )
+        return item.model_copy(update={"status": quote.status})
+
+    async def _for_customer(self, quotes: list[Quote]) -> list[CustomerQuote]:
+        """The quotes as their customer sees them, in the given order, leaving out those whose
+        pro can no longer be hired. One query each for the pros, their names and their contact
+        points, whatever the count."""
+        cards = await self._pros.hireable_cards({quote.pro_id for quote in quotes})
         # The pros' own details, for the known-value pass only: never logged or returned.
         contacts = await self._users.contact_points({card.user_id for card in cards.values()})
         items: list[CustomerQuote] = []
         for quote in quotes:
-            card = cards[quote.pro_id]
+            card = cards.get(quote.pro_id)
+            if card is None:
+                continue
             contact = contacts.get(card.user_id)
             known = KnownValues(
                 emails=(contact.email,) if contact else (),
@@ -175,7 +239,7 @@ class QuoteService:
                     ),
                 )
             )
-        return CustomerQuoteList(items=items)
+        return items
 
     async def _check_caps(self, data: QuoteCreate) -> None:
         try:

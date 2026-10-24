@@ -25,3 +25,13 @@ class QuoteOutOfBoundsError(AppError):
     status_code = 422
     code = "validation_error"
     message = "The request is invalid."
+
+
+class QuoteNotAcceptableError(AppError):
+    """The customer's quote cannot be accepted (#189): it is no longer an open offer (accepted
+    elsewhere, rejected, expired, withdrawn, or past its expires_at), its pro can no longer be
+    paid out (not approved, or payouts disabled), or the request is not open for acceptance."""
+
+    status_code = 409
+    code = "quote_not_acceptable"
+    message = "This quote can no longer be accepted."

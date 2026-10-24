@@ -31,6 +31,26 @@ class QuoteRepository:
         )
         return list((await self._session.scalars(statement)).all())
 
+    async def get_of_request_for_update(
+        self, quote_id: uuid.UUID, request_id: uuid.UUID
+    ) -> Quote | None:
+        """The quote, locked until the transaction ends; None when it is not a quote of this
+        request. Take the request's lock first. populate_existing: a waiter gets the row as the
+        transaction that held the lock left it."""
+        statement = (
+            select(Quote)
+            .where(Quote.id == quote_id, Quote.request_id == request_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def mark_accepted(self, quote: Quote) -> None:
+        """Writes now (flush): the request's transition that follows needs nothing pending."""
+        quote.status = QuoteStatus.ACCEPTED
+        await self._session.flush()
+        await self._session.refresh(quote)  # updated_at, set by the database
+
     async def add(self, quote: Quote) -> Quote:
         """Inserts now (flush): a second quote by the pro on the request fails here, on the
         UNIQUE (request_id, pro_id), and the database sets id, status and timestamps."""

@@ -7,11 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_session
 from app.errors import ErrorResponse
 from app.modules.auth.permissions import CustomerUser, ProUser
-from app.modules.quotes.schemas import CustomerQuoteList, QuoteCreate, QuoteOut
+from app.modules.quotes.schemas import CustomerQuote, CustomerQuoteList, QuoteCreate, QuoteOut
 from app.modules.quotes.service import QuoteService
 
 router = APIRouter(prefix="/pros/me/opportunities", tags=["pros"])
-# The customer's side: the quotes on their own requests (#188).
+# The customer's side: the quotes on their own requests (#188, #189).
 customer_router = APIRouter(prefix="/requests", tags=["quotes"])
 
 
@@ -79,3 +79,33 @@ async def list_request_quotes(
     once it is closed. Each shows the price, what it includes (contact details masked), the
     duration, the proposed start, when it expires, and the pro's public card."""
     return await quotes.list_for_customer(user, request_id)
+
+
+@customer_router.post(
+    "/{request_id}/quotes/{quote_id}/accept",
+    status_code=status.HTTP_200_OK,
+    response_model=CustomerQuote,
+    summary="Accept a quote on one of my service requests",
+    responses={
+        status.HTTP_401_UNAUTHORIZED: _error("invalid_token: missing, invalid or expired token."),
+        status.HTTP_403_FORBIDDEN: _error("forbidden: only customers accept quotes."),
+        status.HTTP_404_NOT_FOUND: _error(
+            "not_found: no request of the caller with this id, or no quote with this id on it."
+        ),
+        status.HTTP_409_CONFLICT: _error(
+            "quote_not_acceptable: the request already accepted another quote or is not Quote "
+            "Ready; the quote was rejected, withdrawn or expired, or is past its expires_at; or "
+            "its pro can no longer be hired."
+        ),
+    },
+)
+async def accept_quote(
+    request_id: uuid.UUID,
+    quote_id: uuid.UUID,
+    user: CustomerUser,
+    quotes: Annotated[QuoteService, Depends(get_quote_service)],
+) -> CustomerQuote:
+    """Accepts one quote of the request: the quote becomes accepted and the request moves to
+    accepted, where the payment follows; the other quotes stay pending. Calling it again for the
+    accepted quote returns it unchanged. The response is the quote as listed, its scope masked."""
+    return await quotes.accept(user, request_id, quote_id)
