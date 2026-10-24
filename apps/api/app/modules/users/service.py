@@ -17,7 +17,7 @@ from app.modules.users.errors import (
     PhoneUnavailableError,
 )
 from app.modules.users.models import User
-from app.modules.users.names import public_name
+from app.modules.users.names import safe_public_name
 from app.modules.users.repository import UserRepository
 from app.modules.users.types import (
     ContactPoints,
@@ -26,6 +26,7 @@ from app.modules.users.types import (
     UserRole,
     UserStatus,
 )
+from app.redaction import KnownValues
 
 # Named by app.db.NAMING_CONVENTION.
 _EMAIL_UNIQUE_CONSTRAINT = "uq_users_email"
@@ -55,11 +56,14 @@ class UserService:
         }
 
     async def public_names(self, user_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str | None]:
-        """Each user's public name ("María P.", names.public_name), read in one query; None
-        when a name is missing. The full names never leave this module."""
+        """Each user's public name ("María P.", names.safe_public_name), read in one query;
+        None when a name is missing or shows a contact detail, the user's own email and phone
+        included. The full names and the contacts never leave this module."""
         return {
-            user_id: public_name(first, last)
-            for user_id, first, last in await self._users.names(user_ids)
+            user_id: safe_public_name(
+                first, last, KnownValues(emails=(email,), phones=(phone,) if phone else ())
+            )
+            for user_id, first, last, email, phone in await self._users.names(user_ids)
         }
 
     async def get_by_id(self, user_id: uuid.UUID) -> UserAccount | None:

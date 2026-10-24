@@ -64,7 +64,8 @@ class QuotePro(BaseModel):
     id: uuid.UUID = Field(description="The pro's profile id.")
     name: str | None = Field(
         description='The first name and the last name\'s initial, e.g. "María P."; null when '
-        "the pro has not set both names."
+        "the pro has not set both names, or when the name shows a contact detail (an email, a "
+        "phone, a domain...): withheld before payment, never partly masked."
     )
     rating_avg: str | None = Field(
         examples=["4.80"],

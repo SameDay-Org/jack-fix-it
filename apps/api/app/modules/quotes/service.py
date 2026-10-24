@@ -18,7 +18,8 @@ itself) while it shows the quote screen (quote_ready, and accepted while the pay
 pending: docs/glossary.md); any other status lists nothing. Listed: the accepted quote and the
 pending ones before their expires_at, whether or not the expiry worker (#51) has marked them.
 Contacts stay hidden before payment, so the scope is redacted (app.redaction): the pro's own
-email and phone first, then every pattern. The stored scope is unchanged.
+email and phone first, then every pattern. The stored scope is unchanged. The pro's public
+name goes through the same check and is withheld (null) when it shows a contact (#194).
 
 Logs carry ids only: never the scope text or the amount.
 """

@@ -571,6 +571,86 @@ async def test_pro_fields(
     ]
 
 
+@pytest.mark.parametrize(
+    "first_name",
+    [
+        "repair.example.com",
+        "contact at example dot com",
+        "three zero five five five five zero one nine nine",
+    ],
+)
+async def test_contact_in_an_edited_name_withholds_the_name(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: World, first_name: str
+) -> None:
+    """Vault #194 B1: an approved pro who has quoted renames themself to a contact through
+    PATCH /v1/auth/me. The name is withheld whole (null), nothing else changes."""
+    request_id = await make_request(db_session, world, RequestStatus.QUOTE_READY)
+    pro = await quoting_pro(db_session, rating="4.5", jobs_count=3, years=7)
+    await add_quote(db_session, request_id, pro)
+    before = (await db_client.get(path(request_id), headers=customer(world))).json()
+
+    renamed = await db_client.patch(
+        "/v1/auth/me",
+        headers=headers_for(pro.user_id, UserRole.PRO),
+        json={"first_name": first_name, "last_name": "Perez"},
+    )
+    assert renamed.status_code == 200
+    response = await db_client.get(path(request_id), headers=customer(world))
+
+    assert response.status_code == 200
+    assert first_name not in response.text
+    [item] = response.json()["items"]
+    assert item["pro"]["name"] is None
+    [expected] = before["items"]
+    expected["pro"]["name"] = None
+    assert item == expected
+
+
+@pytest.mark.parametrize(
+    ("first_name", "last_name", "shown"),
+    [("Jean-Luc", "de la Cruz", "Jean-Luc D."), ("D'Angelo", "O'Neil", "D'Angelo O.")],
+)
+async def test_ordinary_edited_names_still_show(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    first_name: str,
+    last_name: str,
+    shown: str,
+) -> None:
+    request_id = await make_request(db_session, world, RequestStatus.QUOTE_READY)
+    pro = await quoting_pro(db_session)
+    await add_quote(db_session, request_id, pro)
+    renamed = await db_client.patch(
+        "/v1/auth/me",
+        headers=headers_for(pro.user_id, UserRole.PRO),
+        json={"first_name": first_name, "last_name": last_name},
+    )
+    assert renamed.status_code == 200
+
+    response = await db_client.get(path(request_id), headers=customer(world))
+
+    assert response.json()["items"][0]["pro"]["name"] == shown
+
+
+async def test_name_holding_the_pros_own_email_is_withheld(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: World
+) -> None:
+    """A bare handle-shaped local part is no pattern: only the pro's own email withholds it."""
+    request_id = await make_request(db_session, world, RequestStatus.QUOTE_READY)
+    own = await quoting_pro(db_session, first_name="handle.own188", email="handle.own188@x.com")
+    other = await quoting_pro(db_session, first_name="handle.own188", email="other188@x.com")
+    await add_quote(db_session, request_id, own, amount=1_000)
+    await add_quote(db_session, request_id, other, amount=2_000)
+
+    response = await db_client.get(path(request_id), headers=customer(world))
+
+    assert [item["pro"]["name"] for item in response.json()["items"]] == [
+        None,
+        "handle.own188 P.",
+    ]
+
+
 async def test_quote_fields_round_trip(
     db_client: httpx.AsyncClient, db_session: AsyncSession, world: World
 ) -> None:
