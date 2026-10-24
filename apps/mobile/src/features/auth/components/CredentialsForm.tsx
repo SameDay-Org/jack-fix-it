@@ -1,15 +1,9 @@
 import { useLocalSearchParams } from "expo-router";
 import { useRef, type ComponentRef } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Text,
-  View,
-  type TextInputProps,
-} from "react-native";
+import { KeyboardAvoidingView, ScrollView, Text, View, type TextInputProps } from "react-native";
 import Animated, { useReducedMotion } from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button, Input, PasswordInput, Screen, type InputHandle } from "@/components/ui";
 
@@ -32,7 +26,7 @@ type CredentialsFormProps = {
 
 /**
  * Email and password with one primary action. Return moves from email to password, then submits;
- * the keyboard never covers the focused field (iOS pads, Android resizes the window). Reached
+ * the keyboard never covers the focused field or the action (padding on both platforms). Reached
  * from Welcome's panel (login), the content enters once the panel has become this page.
  */
 export function CredentialsForm({
@@ -47,6 +41,7 @@ export function CredentialsForm({
 }: CredentialsFormProps) {
   const { t } = useTranslation();
   const { from } = useLocalSearchParams<{ from?: string }>();
+  const { top } = useSafeAreaInsets();
   const passwordRef = useRef<InputHandle>(null);
   const titleRef = useRef<ComponentRef<typeof Text>>(null);
   const fromWelcome = from === "welcome";
@@ -71,8 +66,14 @@ export function CredentialsForm({
     >
       <Screen bar="light" statusBar={statusBar} ownsStatusBar={ownsStatusBar} testID={testID}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          // Padding on both platforms: the app draws edge to edge on Android, where the window
+          // no longer resizes for the keyboard, so the action would sit under it. It measures
+          // itself from the content area, which `Screen` starts below the status bar: the offset
+          // adds that back.
+          behavior="padding"
+          keyboardVerticalOffset={top}
           className="flex-1"
+          testID={`${testID}-keyboard-avoider`}
         >
           <Animated.View
             className="flex-1"
