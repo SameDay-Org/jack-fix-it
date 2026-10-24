@@ -529,7 +529,10 @@ describe("uploadMedia", () => {
 
     it("a cancel while the queue is being emptied creates no request at all", async () => {
       const controller = new AbortController();
-      const failure = start({ signal: controller.signal }).catch((error: unknown) => error);
+      const onProgress = jest.fn();
+      const failure = start({ signal: controller.signal, onProgress }).catch(
+        (error: unknown) => error,
+      );
       await flush();
       expect(nativeQueue).toHaveLength(1); // the first barrier, still waiting
 
@@ -539,6 +542,7 @@ describe("uploadMedia", () => {
       expect(await failure).toMatchObject({ name: "AbortError" });
       expect(requests).toHaveLength(0);
       expect(nativeQueue).toHaveLength(0);
+      expect(onProgress).not.toHaveBeenCalled(); // a stopped upload reports no progress
     });
 
     it("the deadline while the queue is being emptied creates no request at all", async () => {
@@ -569,6 +573,76 @@ describe("uploadMedia", () => {
       expect(request.bytesOnWire).toBe(FILE_SIZE / 2); // the storage never got the whole body
       expect(await upload).toMatchObject({ name: "AbortError" });
       expect(requests).toHaveLength(1);
+    });
+  });
+
+  // V1: `onProgress` is the caller's code, and it can abort the signal while it runs.
+  describe("V1: an abort from inside onProgress", () => {
+    let controller: AbortController;
+    let settled: boolean;
+    /** `at` is the callback that aborts: the first one, before the start, or the last one. */
+    const startAbortingAt = (at: "first" | "last" | "never") => {
+      controller = new AbortController();
+      settled = false;
+      const onProgress = jest.fn((fraction: number) => {
+        // The last one is the explicit 1 after the storage answered, not the native progress.
+        const last = fraction === 1 && lastRequest()?.settled === true;
+        if ((at === "first" && fraction === 0) || (at === "last" && last)) controller.abort();
+      });
+      const outcome = start({ signal: controller.signal, onProgress })
+        .then(
+          (value) => ({ resolved: value }),
+          (error: unknown) => error,
+        )
+        .finally(() => {
+          settled = true;
+        });
+      return { outcome, onProgress };
+    };
+
+    it("at the first callback (0): no native start at all, an AbortError, no key", async () => {
+      const { outcome, onProgress } = startAbortingAt("first");
+      await flush();
+      await runNativeQueue();
+
+      expect(await outcome).toMatchObject({ name: "AbortError" });
+      expect(onProgress.mock.calls).toEqual([[0]]);
+      expect(requests).toHaveLength(0);
+      expect(nativeLog).toEqual(["barrier", "release"]);
+      expect(nativeQueue).toHaveLength(0);
+    });
+
+    it("at the last callback (1) after a 200: an AbortError, no key, no retry", async () => {
+      const { outcome, onProgress } = startAbortingAt("last");
+      const request = await reachRequest();
+      expect(request.transmit(FILE_SIZE)).toBe(true);
+      request.respond(200);
+
+      expect(await outcome).toMatchObject({ name: "AbortError" });
+      expect(onProgress).toHaveBeenLastCalledWith(1);
+      // The storage keeps that object (#191 deletes it), but the upload reports the abort.
+      expect(request.stored).toBe(true);
+      expect(requests).toHaveLength(1);
+      expect(callsTo(fetchMock, "/v1/uploads")).toHaveLength(1);
+      expect(nativeLog).toEqual(["barrier", "start", "barrier", "cancel", "release"]);
+    });
+
+    it("while the cleanup waits for the start's acknowledgement: no key", async () => {
+      network = "completes";
+      const { outcome, onProgress } = startAbortingAt("never");
+      await flush();
+      await runNativeCalls(1); // the barrier that empties the queue
+      await runNativeCalls(1); // the start: the storage answers 200 before the acknowledgement
+
+      expect(onProgress).toHaveBeenLastCalledWith(1);
+      expect(nativeQueue).toHaveLength(1);
+      expect(settled).toBe(false); // the cleanup waits for the acknowledgement
+      controller.abort();
+      await runNativeQueue();
+
+      expect(await outcome).toMatchObject({ name: "AbortError" });
+      expect(requests).toHaveLength(1);
+      expect(nativeLog).toEqual(["barrier", "start", "barrier", "release"]);
     });
   });
 

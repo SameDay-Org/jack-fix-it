@@ -86,6 +86,8 @@ export async function uploadMedia({
     if (hasExpired(ticket)) ticket = await requestTicket();
     await putToStorage(ticket, file.uri, size, onProgress, signal);
   }
+  // A stop never yields a key: not one from the last progress callback, nor one during cleanup.
+  throwIfAborted(signal);
   return { key: ticket.key };
 }
 
@@ -166,8 +168,9 @@ async function nativeQueueBarrier(): Promise<void> {
  *
  * The promise settles only once the native task has settled, so the caller's queue never moves on
  * while bytes may still go out, and a recorded stop wins over whatever the native task reported,
- * a 2xx included. The deadline lives in JavaScript, the same on both platforms: the watchdog
- * cancels the PUT and reports a timeout, which is not retried.
+ * a 2xx included, and so does a stop made inside `onProgress`, which is the caller's code. The
+ * deadline lives in JavaScript, the same on both platforms: the watchdog cancels the PUT and
+ * reports a timeout, which is not retried.
  */
 async function putToStorage(
   ticket: UploadTicket,
@@ -192,16 +195,21 @@ async function putToStorage(
     if (startIssued) task.cancel();
   };
   const onAbort = () => stop("abort");
+  /** Ends the PUT on a recorded stop, the signal's included. */
+  const throwIfStopped = () => {
+    if (signal?.aborted) stop("abort");
+    if (stopped) throw stopError(stopped, signal);
+  };
   const watchdog = setTimeout(() => stop("timeout"), uploadTimeoutFor(size));
   signal?.addEventListener("abort", onAbort, { once: true });
 
   try {
     await nativeQueueBarrier();
-    // The last check before anything is sent; the listener covers every moment after it.
-    if (signal?.aborted) stop("abort");
-    if (stopped) throw stopError(stopped, signal);
-
+    throwIfStopped();
     onProgress?.(0);
+    // The last check before anything is sent (the callback is the caller's code, which may stop
+    // the upload); the listener covers every moment after it.
+    throwIfStopped();
     const sending = task.start(url, new File(uri), {
       httpMethod: "PUT",
       uploadType: UploadType.BINARY_CONTENT,
@@ -223,7 +231,7 @@ async function putToStorage(
       // Handled below: a stop explains the failure, otherwise it is the network's.
     }
     // The native task has settled. A recorded stop wins, whatever it reported.
-    if (stopped) throw stopError(stopped, signal);
+    throwIfStopped();
     if (status === null) throw new UploadFailedError("network");
     if (status < 200 || status >= 300) throw new UploadFailedError("status", status);
     onProgress?.(1);
