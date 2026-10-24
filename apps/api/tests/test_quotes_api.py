@@ -418,6 +418,107 @@ async def test_missing_ttl_setting_503_and_nothing_written(
     assert invalid.__dict__["key"] == "quote_ttl_hours"
 
 
+CAPS = ["quote_max_amount_cents", "quote_max_duration_minutes"]
+INT4_MAX = 2_147_483_647
+# Present but malformed: never read as "no cap" (Vault round 1: the first three let 2^31-1 in).
+MALFORMED_CAPS = ["98765", 0, True, -98765, INT4_MAX + 1, 98765.5, None, [98765], {"cap": 98765}]
+MALFORMED_IDS = [
+    "string",
+    "zero",
+    "true",
+    "negative",
+    "above_int4",
+    "float",
+    "null",
+    "list",
+    "object",
+]
+
+
+@pytest.mark.parametrize("stored", MALFORMED_CAPS, ids=MALFORMED_IDS)
+@pytest.mark.parametrize("key", CAPS)
+async def test_an_invalid_cap_503_and_nothing_written(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    storage: FakeStorage,
+    caplog: pytest.LogCaptureFixture,
+    key: str,
+    stored: object,
+) -> None:
+    await set_setting(db_session, key, stored)
+    request_id = await make_request(db_session, world)
+    dispatch_id = await dispatch(db_session, request_id, world.me)
+
+    with caplog.at_level(logging.DEBUG):
+        response = await quote(
+            db_client, world.me, dispatch_id, amount_cents=INT4_MAX, duration_minutes=INT4_MAX
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": {"code": "not_configured", "message": "This feature is not configured yet."}
+    }
+    assert await quotes_of(db_session, request_id) == []
+    assert (await dispatch_row(db_session, dispatch_id)).status is DispatchStatus.SENT
+    assert await status_of(db_session, request_id) is RequestStatus.FINDING_PRO
+    [invalid] = [r for r in caplog.records if r.message == "setting_invalid"]
+    [refused] = [r for r in caplog.records if r.message == "quote_not_configured"]
+    assert invalid.__dict__["key"] == refused.__dict__["key"] == key
+    output = "\n".join(JsonFormatter().format(r) for r in caplog.records)
+    assert "98765" not in output
+    assert str(INT4_MAX + 1) not in output
+    assert '"value"' not in output
+
+
+@pytest.mark.parametrize("amount", [1, INT4_MAX])
+async def test_absent_caps_accept_any_int4(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    storage: FakeStorage,
+    amount: int,
+) -> None:
+    await db_session.execute(delete(Setting).where(Setting.key.in_(CAPS)))
+    request_id = await make_request(db_session, world)
+    dispatch_id = await dispatch(db_session, request_id, world.me)
+
+    response = await quote(
+        db_client, world.me, dispatch_id, amount_cents=amount, duration_minutes=INT4_MAX
+    )
+
+    assert response.status_code == 201
+    [stored] = await quotes_of(db_session, request_id)
+    assert (stored.amount_cents, stored.duration_minutes) == (amount, INT4_MAX)
+
+
+@pytest.mark.parametrize(
+    ("key", "field"),
+    [
+        ("quote_max_amount_cents", "amount_cents"),
+        ("quote_max_duration_minutes", "duration_minutes"),
+    ],
+)
+@pytest.mark.parametrize("cap", [1, 10_000, INT4_MAX - 1])
+async def test_a_valid_cap_is_the_highest_value_accepted(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    storage: FakeStorage,
+    key: str,
+    field: str,
+    cap: int,
+) -> None:
+    await set_setting(db_session, key, cap)
+    over = await dispatch(db_session, await make_request(db_session, world), world.me)
+    at = await dispatch(db_session, await make_request(db_session, world), world.me)
+
+    rejected = await quote(db_client, world.me, over, **{field: cap + 1})
+    accepted = await quote(db_client, world.me, at, **{field: cap})
+
+    assert (rejected.status_code, accepted.status_code) == (422, 201)
+
+
 # Access
 
 

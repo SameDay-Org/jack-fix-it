@@ -3050,7 +3050,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description not_configured: quoting is not configured yet (the quote lifetime is not set). */
+            /** @description not_configured: quoting is not configured yet (the quote lifetime is not set, or a quote cap is set to an invalid value). */
             503: {
                 headers: {
                     [name: string]: unknown;

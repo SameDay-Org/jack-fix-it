@@ -46,7 +46,8 @@ def get_quote_service(
             "with a time zone, or a field the server sets (status, expires_at, pro or request)."
         ),
         status.HTTP_503_SERVICE_UNAVAILABLE: _error(
-            "not_configured: quoting is not configured yet (the quote lifetime is not set)."
+            "not_configured: quoting is not configured yet (the quote lifetime is not set, "
+            "or a quote cap is set to an invalid value)."
         ),
     },
 )
