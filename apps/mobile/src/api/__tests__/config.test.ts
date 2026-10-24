@@ -1,4 +1,10 @@
-import { DEFAULT_PASSWORD_MIN_LENGTH, DEFAULT_TIMEOUT_MS, readApiConfig } from "../config";
+import {
+  DEFAULT_PASSWORD_MIN_LENGTH,
+  DEFAULT_TIMEOUT_MS,
+  DEFAULT_UPLOAD_MIN_BYTES_PER_SECOND,
+  DEFAULT_UPLOAD_TIMEOUT_MS,
+  readApiConfig,
+} from "../config";
 
 jest.mock("../config", () => {
   // The module reads the environment at import time; tests exercise the pure reader instead.
@@ -48,6 +54,22 @@ describe("readApiConfig", () => {
     );
     expect(() => readApiConfig({ url: https, timeoutMs: "0", dev: false })).toThrow(
       /EXPO_PUBLIC_API_TIMEOUT_MS/,
+    );
+  });
+
+  it("defaults the upload timeout and rejects a bad one", () => {
+    const base = { url: https, timeoutMs: undefined, dev: false };
+    expect(readApiConfig(base).uploadTimeoutMs).toBe(DEFAULT_UPLOAD_TIMEOUT_MS);
+    expect(readApiConfig({ ...base, uploadTimeoutMs: "60000" }).uploadTimeoutMs).toBe(60_000);
+    expect(() => readApiConfig({ ...base, uploadTimeoutMs: "-1" })).toThrow(
+      /EXPO_PUBLIC_UPLOAD_TIMEOUT_MS/,
+    );
+    expect(readApiConfig(base).uploadMinBytesPerSecond).toBe(DEFAULT_UPLOAD_MIN_BYTES_PER_SECOND);
+    expect(
+      readApiConfig({ ...base, uploadMinBytesPerSecond: "65536" }).uploadMinBytesPerSecond,
+    ).toBe(65_536);
+    expect(() => readApiConfig({ ...base, uploadMinBytesPerSecond: "fast" })).toThrow(
+      /EXPO_PUBLIC_UPLOAD_MIN_BYTES_PER_SECOND/,
     );
   });
 
