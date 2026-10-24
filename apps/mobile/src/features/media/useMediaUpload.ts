@@ -5,7 +5,7 @@ import { uploadMedia, UploadRejectedError, type UploadPurpose } from "@/api";
 
 import { prepareMedia, type MediaKind, type PickedMedia, type PreparedMedia } from "./compress";
 import { mediaConfig } from "./config";
-import { MediaTooLargeError, UnsupportedMediaError } from "./errors";
+import { MediaSizeUnknownError, MediaTooLargeError, UnsupportedMediaError } from "./errors";
 
 export type MediaSource = "camera" | "library";
 export type MediaItemStatus = "compressing" | "uploading" | "done" | "failed";
@@ -14,7 +14,7 @@ export type MediaItemStatus = "compressing" | "uploading" | "done" | "failed";
  * Why an item failed. `failed` (the connection, the storage, or the device could not prepare the
  * file) can be retried; the others would fail the same way again.
  */
-export type MediaFailure = "failed" | "rejected" | "tooLarge" | "unsupported";
+export type MediaFailure = "failed" | "rejected" | "tooLarge" | "sizeUnknown" | "unsupported";
 
 export type MediaItem = {
   id: string;
@@ -70,6 +70,7 @@ export const isRetryable = (failure: MediaFailure | null): boolean =>
 
 function describeFailure(error: unknown): MediaFailure {
   if (error instanceof MediaTooLargeError) return "tooLarge";
+  if (error instanceof MediaSizeUnknownError) return "sizeUnknown";
   if (error instanceof UnsupportedMediaError) return "unsupported";
   if (error instanceof UploadRejectedError) return "rejected";
   return "failed";
@@ -78,13 +79,8 @@ function describeFailure(error: unknown): MediaFailure {
 function toPicked(asset: ImagePicker.ImagePickerAsset): PickedMedia {
   const isVideo =
     asset.type === "video" || (!asset.type && Boolean(asset.mimeType?.startsWith("video/")));
-  return {
-    uri: asset.uri,
-    kind: isVideo ? "video" : "image",
-    mimeType: asset.mimeType,
-    // Android reports null, not undefined, when the provider gives no size: unknown either way.
-    fileSize: typeof asset.fileSize === "number" && asset.fileSize > 0 ? asset.fileSize : undefined,
-  };
+  // The picker's fileSize is left out: it can be missing or stale, so prepareMedia measures the file.
+  return { uri: asset.uri, kind: isVideo ? "video" : "image", mimeType: asset.mimeType };
 }
 
 /**

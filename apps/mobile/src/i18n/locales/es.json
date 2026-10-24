@@ -118,6 +118,7 @@
       "failed": "No se pudo subir. Revisa tu conexión e inténtalo de nuevo.",
       "rejected": "Este archivo no se puede subir.",
       "tooLarge": "Este video pesa más de {{size}} MB.",
+      "sizeUnknown": "No pudimos comprobar el tamaño de este video, así que no se puede subir. Prueba con otro video.",
       "unsupported": "Este formato de video no es compatible."
     },
     "retry": "Reintentar",

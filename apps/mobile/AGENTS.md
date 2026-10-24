@@ -84,14 +84,15 @@ options={sheetOptions([0.5, 0.95])} />`, or `"fitToContents"`), rendering `Sheet
   items with status, progress, key, retry and remove. `prepareMedia` always re-encodes images as
   JPEG (long edge `EXPO_PUBLIC_IMAGE_MAX_EDGE`, quality `EXPO_PUBLIC_IMAGE_QUALITY`), so EXIF and
   GPS never leave the phone; videos go as they are, checked against
-  `EXPO_PUBLIC_UPLOAD_MAX_VIDEO_BYTES`. `uploadMedia` (`src/api/upload.ts`) asks
-  `POST /v1/uploads` for a URL signed for the exact type and size, then PUTs the bytes (XHR, for
-  progress) to exactly that URL with exactly its headers and never the bearer token. Bytes stay
-  native: a photo is read as a native Blob, a video (size known from the picker) is sent as
-  `{ uri }` (Android streams it from disk; iOS reads it into native memory first); never
-  `fetch(uri).blob()`, which copies through base64 into JavaScript. Android upload progress is
-  halved (RN 0.88 counts each byte twice; a tripwire test watches that source), and a JavaScript
-  watchdog keeps the PUT deadline on both platforms; one retry on
+  `EXPO_PUBLIC_UPLOAD_MAX_VIDEO_BYTES` with the size from the file's metadata (`localFileSize`,
+  never the picker's size, never a read); a size it cannot find is refused (`sizeUnknown`).
+  `uploadMedia` (`src/api/upload.ts`) asks `POST /v1/uploads` for a URL signed for the exact type
+  and that size, then PUTs the file to exactly that URL with exactly its headers and never the
+  bearer token, through expo-file-system's `UploadTask` (streams from disk on both platforms, true
+  progress, a cancel that stops the request); never `fetch(uri).blob()` or an XHR body. Cancel and
+  the JavaScript deadline are checked right before the task starts; a stop while its native start
+  still waits is applied once `nativeQueueBarrier` shows the request exists (tripwire test on the
+  native queue); one retry on
   a network failure, with a fresh URL if it expired; `UploadRejectedError` (403/422) and
   `UploadFailedError` (storage refusal, network, or past `EXPO_PUBLIC_UPLOAD_TIMEOUT_MS` plus the
   file's time at `EXPO_PUBLIC_UPLOAD_MIN_BYTES_PER_SECOND`). `MediaPicker`

@@ -1,8 +1,10 @@
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 
+import { localFileSize } from "@/api";
+
 import { compressImage, prepareMedia } from "../compress";
 import type { MediaConfig } from "../config";
-import { MediaTooLargeError, UnsupportedMediaError } from "../errors";
+import { MediaSizeUnknownError, MediaTooLargeError, UnsupportedMediaError } from "../errors";
 
 // The manipulator, recorded: what it was asked to load, resize and save, and what it released.
 type MockRef = {
@@ -18,6 +20,12 @@ type MockContext = {
   release: jest.Mock;
 };
 const mockContexts: MockContext[] = [];
+// The size the file's metadata reports, by URI (`localFileSize`); a missing URI is unknown.
+const mockSizes = new Map<string, number>();
+
+jest.mock("@/api", () => ({
+  localFileSize: jest.fn((uri: string) => mockSizes.get(uri) ?? null),
+}));
 let mockDecoded = { width: 0, height: 0 };
 
 jest.mock("expo-image-manipulator", () => {
@@ -83,6 +91,7 @@ const savedFrom = async (): Promise<MockRef> => {
 
 beforeEach(() => {
   mockContexts.length = 0;
+  mockSizes.clear();
   jest.mocked(ImageManipulator.manipulate).mockClear();
 });
 
@@ -141,6 +150,47 @@ describe("compressImage", () => {
     );
     refs.filter(Boolean).forEach((ref) => expect(ref.release).toHaveBeenCalled());
   });
+
+  it("a file that cannot be decoded still releases its loading context", async () => {
+    mockDecoded = { width: 4032, height: 3024 };
+    jest.mocked(ImageManipulator.manipulate).mockImplementationOnce((source) => {
+      const context = {
+        source,
+        resize: jest.fn(),
+        renderAsync: jest.fn(async () => {
+          throw new Error("decode failed");
+        }),
+        release: jest.fn(),
+      };
+      mockContexts.push(context);
+      return context as unknown as ReturnType<typeof ImageManipulator.manipulate>;
+    });
+
+    await expect(compressImage(ORIGINAL, CONFIG)).rejects.toThrow("decode failed");
+
+    expect(mockContexts).toHaveLength(1);
+    expect(mockContexts[0].release).toHaveBeenCalled();
+  });
+
+  it("a second context that cannot be made still releases the decoded image and the first", async () => {
+    mockDecoded = { width: 4032, height: 3024 };
+    const manipulate = jest.mocked(ImageManipulator.manipulate);
+    const real = manipulate.getMockImplementation();
+    manipulate.mockImplementation((source) => {
+      if (typeof source !== "string") throw new Error("out of memory");
+      return real!(source);
+    });
+    try {
+      await expect(compressImage(ORIGINAL, CONFIG)).rejects.toThrow("out of memory");
+
+      const [loading] = mockContexts;
+      const decoded = (await loading.renderAsync.mock.results[0].value) as MockRef;
+      expect(loading.release).toHaveBeenCalled();
+      expect(decoded.release).toHaveBeenCalled();
+    } finally {
+      manipulate.mockImplementation(real);
+    }
+  });
 });
 
 describe("prepareMedia", () => {
@@ -157,13 +207,13 @@ describe("prepareMedia", () => {
   });
 
   it("a video goes as it is, typed from the picker or its extension", async () => {
-    const video = { uri: "file:///picker/clip.mov", kind: "video" as const, fileSize: 1024 };
+    const video = { uri: "file:///picker/clip.mov", kind: "video" as const };
+    mockSizes.set(video.uri, 1024);
 
     await expect(prepareMedia({ ...video, mimeType: "video/mp4" }, CONFIG)).resolves.toEqual({
       uri: video.uri,
       contentType: "video/mp4",
       kind: "video",
-      sizeBytes: 1024, // passed on, so the upload streams the file instead of reading it
     });
     await expect(prepareMedia(video, CONFIG)).resolves.toMatchObject({
       contentType: "video/quicktime",
@@ -171,28 +221,40 @@ describe("prepareMedia", () => {
     expect(ImageManipulator.manipulate).not.toHaveBeenCalled();
   });
 
-  it("a video over the limit is refused before any upload", async () => {
-    const failure = await prepareMedia(
-      {
-        uri: "file:///picker/long.mp4",
-        kind: "video",
-        mimeType: "video/mp4",
-        fileSize: CONFIG.videoMaxBytes + 1,
-      },
-      CONFIG,
-    ).catch((error: unknown) => error);
-
-    expect(failure).toBeInstanceOf(MediaTooLargeError);
-    expect(failure).toMatchObject({ maxBytes: CONFIG.videoMaxBytes });
-  });
-
-  it("a video at the limit, or of unknown size, is left to the API's check", async () => {
+  describe("the video size comes from the file's metadata", () => {
     const video = { uri: "file:///picker/clip.mp4", kind: "video" as const, mimeType: "video/mp4" };
+    let fetchSpy: jest.SpyInstance;
 
-    await expect(
-      prepareMedia({ ...video, fileSize: CONFIG.videoMaxBytes }, CONFIG),
-    ).resolves.toBeTruthy();
-    await expect(prepareMedia(video, CONFIG)).resolves.toBeTruthy();
+    beforeEach(() => {
+      fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation(async () => {
+        throw new Error("prepareMedia must not call the network");
+      });
+    });
+    afterEach(() => {
+      // Neither the accepted nor the refused size was checked by asking the API.
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+
+    it("exactly the limit is accepted", async () => {
+      mockSizes.set(video.uri, CONFIG.videoMaxBytes);
+
+      await expect(prepareMedia(video, CONFIG)).resolves.toMatchObject({ kind: "video" });
+      expect(localFileSize).toHaveBeenCalledWith(video.uri);
+    });
+
+    it("one byte over the limit is too large, before any upload", async () => {
+      mockSizes.set(video.uri, CONFIG.videoMaxBytes + 1);
+
+      const failure = await prepareMedia(video, CONFIG).catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(MediaTooLargeError);
+      expect(failure).toMatchObject({ maxBytes: CONFIG.videoMaxBytes });
+    });
+
+    it("a video whose size cannot be found is refused here", async () => {
+      await expect(prepareMedia(video, CONFIG)).rejects.toBeInstanceOf(MediaSizeUnknownError);
+    });
   });
 
   it("a video in another format is refused", async () => {

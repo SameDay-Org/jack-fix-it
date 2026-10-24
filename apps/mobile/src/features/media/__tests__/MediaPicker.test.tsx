@@ -98,8 +98,9 @@ describe("MediaPicker", () => {
         item(2),
         item(3, { status: "failed", failure: "failed" }),
         item(4, { kind: "video", status: "failed", failure: "tooLarge" }),
+        item(5, { kind: "video", status: "failed", failure: "sizeUnknown" }),
       ],
-      remaining: 6,
+      remaining: 5,
     });
     await renderPicker(upload);
 
@@ -113,14 +114,17 @@ describe("MediaPicker", () => {
     expect(screen.getByTestId("media-item-3-status")).toHaveTextContent(
       "This video is over 100 MB.",
     );
+    expect(screen.getByTestId("media-item-4-status")).toHaveTextContent(
+      "We couldn't check this video's size, so it can't be uploaded. Try another video.",
+    );
     // Each action says which file it acts on.
     expect(screen.getByRole("button", { name: "Retry Photo 3" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: /^Retry/ })).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Remove Video 4" })).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: /^Remove/ })).toHaveLength(4);
+    expect(screen.getAllByRole("button", { name: /^Remove/ })).toHaveLength(5);
     // The video tile says what it is (the tile is hidden from assistive technology: the row speaks).
-    expect(screen.getByText("Video", { includeHiddenElements: true })).toBeTruthy();
-    expect(screen.getByTestId("media-count")).toHaveTextContent("4 of 10 added");
+    expect(screen.getAllByText("Video", { includeHiddenElements: true })).toHaveLength(2);
+    expect(screen.getByTestId("media-count")).toHaveTextContent("5 of 10 added");
 
     await fireEvent.press(screen.getByRole("button", { name: "Retry Photo 3" }));
     expect(upload.retry).toHaveBeenCalledWith("media-3");

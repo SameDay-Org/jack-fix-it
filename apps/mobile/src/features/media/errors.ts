@@ -6,6 +6,14 @@ export class MediaTooLargeError extends Error {
   }
 }
 
+/** A video whose size the phone cannot tell, so it cannot be checked against the upload limit. */
+export class MediaSizeUnknownError extends Error {
+  constructor() {
+    super("The video's size could not be found");
+    this.name = "MediaSizeUnknownError";
+  }
+}
+
 /** A video in a format the API does not take (MP4 and QuickTime only). */
 export class UnsupportedMediaError extends Error {
   constructor() {

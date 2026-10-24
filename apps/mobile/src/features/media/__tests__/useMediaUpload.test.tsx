@@ -2,6 +2,7 @@ import { act, renderHook } from "@testing-library/react-native";
 import * as ImagePicker from "expo-image-picker";
 
 import {
+  localFileSize,
   uploadMedia,
   UploadFailedError,
   UploadRejectedError,
@@ -9,7 +10,8 @@ import {
 } from "@/api";
 
 import { prepareMedia, type PickedMedia } from "../compress";
-import { MediaTooLargeError } from "../errors";
+import { mediaConfig } from "../config";
+import { MediaSizeUnknownError, MediaTooLargeError } from "../errors";
 import { useMediaUpload, type MediaUploadOptions } from "../useMediaUpload";
 
 jest.mock("expo-image-picker", () => ({
@@ -18,12 +20,17 @@ jest.mock("expo-image-picker", () => ({
   launchImageLibraryAsync: jest.fn(),
 }));
 // The real error classes (instanceof matters); the upload itself is driven by each test.
-jest.mock("@/api", () => ({ ...jest.requireActual("@/api/errors"), uploadMedia: jest.fn() }));
+jest.mock("@/api", () => ({
+  ...jest.requireActual("@/api/errors"),
+  uploadMedia: jest.fn(),
+  localFileSize: jest.fn(),
+}));
 jest.mock("../compress", () => ({ prepareMedia: jest.fn() }));
 
 const picker = jest.mocked(ImagePicker);
 const upload = jest.mocked(uploadMedia);
 const prepare = jest.mocked(prepareMedia);
+const fileSize = jest.mocked(localFileSize);
 
 const asset = (n: number, type: "image" | "video" = "image"): ImagePicker.ImagePickerAsset => ({
   uri: `file:///picked/${n}.${type === "image" ? "jpg" : "mp4"}`,
@@ -190,9 +197,10 @@ describe("useMediaUpload", () => {
   it.each([
     ["rejected", () => new UploadRejectedError(422, "upload_invalid")],
     ["tooLarge", () => new MediaTooLargeError(100)],
+    ["sizeUnknown", () => new MediaSizeUnknownError()],
   ])("a %s failure is final: retry does nothing", async (failure, makeError) => {
     picker.launchImageLibraryAsync.mockResolvedValue(picked(asset(1, "video")));
-    if (failure === "tooLarge") prepare.mockRejectedValueOnce(makeError());
+    if (failure !== "rejected") prepare.mockRejectedValueOnce(makeError());
     const { result } = await render();
     await act(() => result.current.add("library"));
     await flush();
@@ -228,17 +236,58 @@ describe("useMediaUpload", () => {
     ]);
   });
 
-  // Android: null when the provider gives no size, and 0 when it reads a NULL column as a number.
-  it.each([null, 0])("a size the picker reports as %p is unknown", async (size) => {
-    picker.launchImageLibraryAsync.mockResolvedValue(
-      picked({ ...asset(1, "video"), fileSize: size as unknown as number }),
+  // B2, with the real prepareMedia: whatever size the picker reports (none, Android's null, 0
+  // from a NULL column, or a stale number), the video's size is the file's metadata.
+  describe("a video's size comes from the file, whatever the picker reported", () => {
+    const { prepareMedia: realPrepare } =
+      jest.requireActual<typeof import("../compress")>("../compress");
+    const max = mediaConfig.videoMaxBytes;
+
+    beforeEach(() => prepare.mockImplementation((file) => realPrepare(file)));
+
+    const addVideo = async (pickerSize: unknown) => {
+      picker.launchImageLibraryAsync.mockResolvedValue(
+        picked({ ...asset(1, "video"), fileSize: pickerSize as number | undefined }),
+      );
+      const rendered = await render();
+      await act(() => rendered.result.current.add("library"));
+      await flush();
+      return rendered.result;
+    };
+
+    it.each([undefined, null, 0, 1024])(
+      "picker size %p, file at the limit: uploaded",
+      async (size) => {
+        fileSize.mockReturnValue(max);
+
+        const result = await addVideo(size);
+
+        expect(fileSize).toHaveBeenCalledWith("file:///picked/1.mp4");
+        expect(result.current.items[0]).toMatchObject({ status: "uploading", failure: null });
+        expect(upload).toHaveBeenCalledTimes(1);
+      },
     );
-    const { result } = await render();
 
-    await act(() => result.current.add("library"));
-    await flush();
+    it.each([undefined, null, 0, 1024])(
+      "picker size %p, file one byte over: too large, never uploaded",
+      async (size) => {
+        fileSize.mockReturnValue(max + 1);
 
-    expect(prepare.mock.calls[0][0]).toMatchObject({ kind: "video", fileSize: undefined });
+        const result = await addVideo(size);
+
+        expect(result.current.items[0]).toMatchObject({ status: "failed", failure: "tooLarge" });
+        expect(upload).not.toHaveBeenCalled();
+      },
+    );
+
+    it("a size the file cannot tell: refused here, never uploaded", async () => {
+      fileSize.mockReturnValue(null);
+
+      const result = await addVideo(undefined);
+
+      expect(result.current.items[0]).toMatchObject({ status: "failed", failure: "sizeUnknown" });
+      expect(upload).not.toHaveBeenCalled();
+    });
   });
 
   it("camera refused: no camera, and the notice until dismissed", async () => {

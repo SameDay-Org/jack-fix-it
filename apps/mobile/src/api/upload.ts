@@ -1,5 +1,5 @@
 import type { ApiSchema } from "@jack/shared";
-import { Platform } from "react-native";
+import { File, Paths, UploadTask, UploadType } from "expo-file-system";
 
 import { apiPost } from "./client";
 import { apiConfig } from "./config";
@@ -14,18 +14,7 @@ export type UploadFile = {
   uri: string;
   /** What the bytes are, e.g. `image/jpeg`; it is signed into the URL with the size. */
   contentType: string;
-  /**
-   * The file's exact size in bytes, when already known (a picked video). The file itself is then
-   * the PUT's body and never passes through JavaScript: Android streams it from disk, while iOS
-   * (React Native's networking) reads it into native memory first. Without a size the bytes are
-   * read once as a native Blob to measure them (fine for a compressed photo). A wrong size is
-   * refused by the storage, since the size is signed.
-   */
-  sizeBytes?: number;
 };
-
-/** What the PUT sends: a native Blob already read, or the file itself (`{ uri }`). */
-type UploadBody = { send: Blob | { uri: string }; size: number };
 
 export type UploadMediaOptions = {
   purpose: UploadPurpose;
@@ -36,14 +25,28 @@ export type UploadMediaOptions = {
   signal?: AbortSignal;
 };
 
+type Stop = "abort" | "timeout";
+
 // 403 upload_forbidden / forbidden, 422 upload_invalid: the same file would get the same answer.
 const REJECTED_STATUSES: ReadonlySet<number> = new Set([403, 422]);
 const LOCAL_FILE = /^(file|content):/;
-// React Native 0.88's Android ProgressRequestBody counts every byte twice: FilterOutputStream's
-// array write loops into the overridden single-byte write, which counts too, and then the array
-// write adds the whole count again. Its `loaded` reaches `total` halfway through. The tripwire
-// test in upload.test.ts reads that source and fails once React Native stops double counting.
-const ANDROID_PROGRESS_OVERCOUNT = 2;
+// Never created: reading it fails at once, which is all `nativeQueueBarrier` needs.
+const BARRIER_FILE = "jack-upload-barrier.missing";
+
+/**
+ * The size of a file on this device, in bytes, from its metadata: nothing is read. `null` when
+ * the file is missing, empty or cannot be inspected.
+ */
+export function localFileSize(uri: string): number | null {
+  try {
+    const file = new File(uri);
+    if (!file.exists) return null;
+    const { size } = file;
+    return Number.isSafeInteger(size) && size > 0 ? size : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Uploads one file for `purpose` and returns its storage key, which the feature then attaches.
@@ -64,61 +67,23 @@ export async function uploadMedia({
   onProgress,
   signal,
 }: UploadMediaOptions): Promise<{ key: string }> {
-  const body = await uploadBody(file, signal);
-  // The size the URL is signed for is the size of the bytes about to be sent.
-  const requestTicket = () => createUpload(purpose, file.contentType, body.size, signal);
+  if (!LOCAL_FILE.test(file.uri)) throw new Error("uploadMedia reads files on this device only");
+  throwIfAborted(signal);
+  // The URL is signed for the size of the file the PUT sends, taken from its metadata.
+  const size = localFileSize(file.uri);
+  if (size === null) throw new Error("The file could not be read");
+  const requestTicket = () => createUpload(purpose, file.contentType, size, signal);
 
   let ticket = await requestTicket();
   try {
-    await putToStorage(ticket, body, onProgress, signal);
+    await putToStorage(ticket, file.uri, size, onProgress, signal);
   } catch (error) {
     if (!(error instanceof UploadFailedError) || error.reason !== "network") throw error;
     throwIfAborted(signal);
     if (hasExpired(ticket)) ticket = await requestTicket();
-    await putToStorage(ticket, body, onProgress, signal);
+    await putToStorage(ticket, file.uri, size, onProgress, signal);
   }
   return { key: ticket.key };
-}
-
-async function uploadBody(file: UploadFile, signal: AbortSignal | undefined): Promise<UploadBody> {
-  if (!LOCAL_FILE.test(file.uri)) throw new Error("uploadMedia reads files on this device only");
-  throwIfAborted(signal);
-  // A size only counts if it is a real byte count: callers can pass on a picker's null.
-  if (typeof file.sizeBytes === "number" && file.sizeBytes > 0) {
-    return { send: { uri: file.uri }, size: file.sizeBytes };
-  }
-  const blob = await readLocalFile(file.uri, signal);
-  return { send: blob, size: blob.size };
-}
-
-/**
- * The file's bytes as a native Blob, read with XMLHttpRequest (`responseType: "blob"`): the bytes
- * stay in the native blob store from the read to the PUT. `fetch(uri).blob()` would copy them
- * through base64 into JavaScript, which a 100 MB video cannot afford. Nothing leaves the device.
- */
-function readLocalFile(uri: string, signal: AbortSignal | undefined): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    const cancel = () => xhr.abort();
-    const settle = (outcome: () => void) => {
-      signal?.removeEventListener("abort", cancel);
-      outcome();
-    };
-
-    xhr.open("GET", uri);
-    xhr.responseType = "blob";
-    xhr.onload = () =>
-      settle(() => {
-        const blob = xhr.response as Blob | null;
-        if (blob && blob.size > 0) resolve(blob);
-        else reject(new Error("The file could not be read"));
-      });
-    xhr.onerror = () => settle(() => reject(new Error("The file could not be read")));
-    xhr.onabort = () => settle(() => reject(abortError(signal)));
-
-    signal?.addEventListener("abort", cancel, { once: true });
-    xhr.send();
-  });
 }
 
 async function createUpload(
@@ -159,65 +124,98 @@ function storageUrl(ticket: UploadTicket): string {
   return ticket.upload_url;
 }
 
+const stopError = (stop: Stop, signal: AbortSignal | undefined): unknown =>
+  stop === "timeout" ? new UploadFailedError("timeout") : abortError(signal);
+
 /**
- * One PUT of `body` to the ticket's URL with exactly the ticket's headers. XMLHttpRequest rather
- * than fetch, for upload progress. Resolves on a 2xx; rejects with `UploadFailedError` or, when
- * the caller cancels, with the signal's abort.
- *
- * The deadline lives in JavaScript only. A native XHR timeout would mean different things on each
- * platform: Android applies it as OkHttp's call timeout and reports it as a network failure (which
- * would then be retried), and on iOS a `{ uri }` body is built before the request exists, so a
- * failure there is only logged natively and no timeout would ever start. The watchdog aborts the
- * PUT at the deadline and reports a timeout, which is not retried.
+ * Settles once every Expo native call made before it has run. Expo modules run async functions
+ * one at a time, in call order, on one native queue (`expo.modules.AsyncFunctionQueue`: a serial
+ * queue on iOS, one thread on Android), while the upload task's `cancel()` runs at once on the
+ * JavaScript thread. The task's `start` clears its cancelled flag and only then creates the
+ * request, so a cancel that overtakes a `start` still waiting on that queue would be lost. Once
+ * this settles, the request exists and a cancel reaches it. A tripwire test in upload.test.ts
+ * reads those native sources.
  */
-function putToStorage(
+async function nativeQueueBarrier(): Promise<void> {
+  try {
+    await new File(Paths.cache, BARRIER_FILE).bytes();
+  } catch {
+    // The file never exists: this failure is the expected answer.
+  }
+}
+
+/**
+ * One PUT of the file at `uri` to the ticket's URL with exactly the ticket's headers, through
+ * expo-file-system's upload task: the native side streams the file from disk on both platforms,
+ * reports the bytes really sent, and its cancel stops the request. Resolves on a 2xx; rejects
+ * with `UploadFailedError` or, when the caller cancels, with the signal's abort.
+ *
+ * Nothing is sent for an upload already cancelled or out of time: both are checked right before
+ * the task starts. A stop while the native start is still queued waits for it
+ * (`nativeQueueBarrier`) and then cancels the request it just made, before a connection can carry
+ * the body; a stop after that cancels the transfer in flight. The promise settles only once the
+ * native task has stopped, so the caller's queue never moves on while bytes are still going out.
+ *
+ * The deadline lives in JavaScript, the same on both platforms: the watchdog cancels the PUT and
+ * reports a timeout, which is not retried.
+ */
+async function putToStorage(
   ticket: UploadTicket,
-  body: UploadBody,
+  uri: string,
+  size: number,
   onProgress: ((fraction: number) => void) | undefined,
   signal: AbortSignal | undefined,
 ): Promise<void> {
-  throwIfAborted(signal);
   const url = storageUrl(ticket);
-
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    const timeoutMs = uploadTimeoutFor(body.size);
-    let timedOut = false;
-    const watchdog = setTimeout(() => {
-      timedOut = true;
-      xhr.abort();
-    }, timeoutMs);
-    const cancel = () => xhr.abort();
-    const settle = (outcome: () => void) => {
-      clearTimeout(watchdog);
-      signal?.removeEventListener("abort", cancel);
-      outcome();
-    };
-
-    xhr.open("PUT", url);
+  const task = new UploadTask(new File(uri), url, {
+    httpMethod: "PUT",
+    uploadType: UploadType.BINARY_CONTENT,
     // Exactly the signed headers: nothing added (no Authorization), nothing dropped.
-    for (const [name, value] of Object.entries(ticket.headers)) xhr.setRequestHeader(name, value);
-    xhr.upload.onprogress = (event) => {
-      if (!event.lengthComputable || event.total <= 0) return;
-      const counted = Platform.OS === "android" ? ANDROID_PROGRESS_OVERCOUNT : 1;
-      onProgress?.(Math.min(1, event.loaded / (event.total * counted)));
-    };
-    xhr.onload = () =>
-      settle(() => {
-        if (xhr.status < 200 || xhr.status >= 300) {
-          reject(new UploadFailedError("status", xhr.status));
-          return;
-        }
-        onProgress?.(1);
-        resolve();
-      });
-    xhr.onerror = () => settle(() => reject(new UploadFailedError("network")));
-    xhr.onabort = () =>
-      settle(() => reject(timedOut ? new UploadFailedError("timeout") : abortError(signal)));
-
-    signal?.addEventListener("abort", cancel, { once: true });
-    onProgress?.(0);
-    // React Native's XHR also takes `{ uri }`: the native side sends the file itself as the body.
-    xhr.send(body.send as unknown as XMLHttpRequestBodyInit);
+    headers: ticket.headers,
+    // The transfer lives and ends with the app, like the deadline that guards it (iOS only).
+    sessionType: "foreground",
+    onProgress: ({ bytesSent, totalBytes }) => {
+      if (totalBytes > 0) onProgress?.(Math.min(1, bytesSent / totalBytes));
+    },
   });
+
+  let stopped: Stop | null = null;
+  let requestExists = false;
+  const stop = (why: Stop) => {
+    if (stopped) return;
+    stopped = why;
+    if (requestExists) task.cancel();
+  };
+  const onAbort = () => stop("abort");
+  const watchdog = setTimeout(() => stop("timeout"), uploadTimeoutFor(size));
+  signal?.addEventListener("abort", onAbort, { once: true });
+
+  try {
+    // The last check before anything is sent; the listener covers every moment after it.
+    if (signal?.aborted) stop("abort");
+    if (stopped) throw stopError(stopped, signal);
+
+    onProgress?.(0);
+    const sending = task.uploadAsync(); // queues the native start, synchronously
+    void nativeQueueBarrier().then(() => {
+      requestExists = true;
+      if (stopped) task.cancel();
+    });
+
+    let status: number;
+    try {
+      ({ status } = await sending);
+    } catch {
+      if (stopped) throw stopError(stopped, signal);
+      throw new UploadFailedError("network");
+    }
+    // A caller that cancelled gets its abort, even if the storage answered first.
+    if (stopped === "abort") throw abortError(signal);
+    if (status < 200 || status >= 300) throw new UploadFailedError("status", status);
+    onProgress?.(1);
+  } finally {
+    clearTimeout(watchdog);
+    signal?.removeEventListener("abort", onAbort);
+    task.release();
+  }
 }

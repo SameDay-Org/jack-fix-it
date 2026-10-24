@@ -22,5 +22,5 @@ export {
   useSession,
 } from "./session";
 export type { RestoreFailure, SessionStatus, SessionUser } from "./session";
-export { uploadMedia } from "./upload";
+export { localFileSize, uploadMedia } from "./upload";
 export type { UploadFile, UploadMediaOptions, UploadPurpose } from "./upload";

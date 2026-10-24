@@ -118,6 +118,7 @@
       "failed": "Upload failed. Check your connection and try again.",
       "rejected": "This file can't be uploaded.",
       "tooLarge": "This video is over {{size}} MB.",
+      "sizeUnknown": "We couldn't check this video's size, so it can't be uploaded. Try another video.",
       "unsupported": "This video format isn't supported."
     },
     "retry": "Retry",

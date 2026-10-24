@@ -1,9 +1,9 @@
 import type { ApiSchema } from "@jack/shared";
-import { Platform } from "react-native";
+import { File } from "expo-file-system";
 
 import { UploadFailedError, UploadRejectedError } from "../errors";
 import { sessionStore } from "../session";
-import { uploadMedia, type UploadMediaOptions } from "../upload";
+import { localFileSize, uploadMedia, type UploadMediaOptions } from "../upload";
 import {
   callBody,
   callHeader,
@@ -32,60 +32,127 @@ const ticket = (n: number, expiresInMs = HOUR_MS): ApiSchema<"UploadResponse"> =
   expires_at: new Date(Date.now() + expiresInMs).toISOString(),
 });
 
-/**
- * A stand-in for React Native's XMLHttpRequest. A GET reads the local file and answers on its own
- * with `fileBlob`; a PUT is recorded in `instances` and the test settles it.
- */
-class FakeXhr {
-  static instances: FakeXhr[] = [];
-  static reads: FakeXhr[] = [];
-  static fileBlob: Blob | null = null;
-  responseType = "";
-  response: unknown = null;
-  method = "";
-  url = "";
-  headers: Record<string, string> = {};
-  timeout = 0;
-  body: unknown;
-  status = 0;
-  aborted = false;
-  upload: { onprogress: ((event: ProgressEvent) => void) | null } = { onprogress: null };
-  onload: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  onabort: (() => void) | null = null;
+// Node's fs and module resolution, typed here: the app's tsconfig carries no Node types.
+const { readFileSync } = jest.requireActual<{
+  readFileSync: (path: string, encoding: "utf8") => string;
+}>("fs");
+const resolveModule = (require as unknown as { resolve: (id: string) => string }).resolve;
+const packageDir = (name: string) =>
+  resolveModule(`${name}/package.json`).replace(/package\.json$/, "");
 
-  open(method: string, url: string) {
-    this.method = method;
-    this.url = url;
-    (method === "GET" ? FakeXhr.reads : FakeXhr.instances).push(this);
-  }
-  setRequestHeader(name: string, value: string) {
-    this.headers[name] = value;
-  }
-  send(body?: unknown) {
-    this.body = body;
-    if (this.method !== "GET") return;
-    this.status = 200;
-    this.response = FakeXhr.fileBlob;
-    queueMicrotask(() => this.onload?.());
-  }
-  abort() {
-    this.aborted = true;
-    this.onabort?.();
-  }
-  progress(loaded: number, total: number) {
-    this.upload.onprogress?.({ lengthComputable: true, loaded, total } as ProgressEvent);
-  }
-  respond(status: number) {
-    this.status = status;
-    this.onload?.();
-  }
-  fail() {
-    this.onerror?.();
+/**
+ * A stand-in for expo-file-system's native side, under its real JavaScript (`File`, `UploadTask`).
+ * It keeps what B1 depends on: async calls wait on one FIFO queue until the test runs it, as on
+ * `expo.modules.AsyncFunctionQueue`; `cancel()` acts at once, as on the JavaScript thread; `start`
+ * clears the cancelled flag and then creates the request, as both platforms do. A request sends
+ * nothing until the test moves bytes over the network, which a cancelled request refuses.
+ */
+type NativeRequest = {
+  url: string;
+  method: string;
+  uri: string;
+  headers: Record<string, string>;
+  sessionType: string | undefined;
+  cancelled: boolean;
+  bytesOnWire: number;
+  /** Moves `bytes` to the storage and reports progress; false once cancelled. */
+  transmit: (bytes: number) => boolean;
+  respond: (status: number) => void;
+  fail: () => void;
+  reject: (error: Error) => void;
+};
+type NativeTask = {
+  cancelled: boolean;
+  request?: NativeRequest;
+  emit: (event: string, payload: unknown) => void;
+};
+type StartOptions = { httpMethod: string; headers?: Record<string, string>; sessionType?: string };
+
+const nativeMock = jest.requireActual<{
+  FileSystemFile: { prototype: object };
+  FileSystemUploadTask: { prototype: object };
+}>(`${packageDir("expo-file-system")}mocks/FileSystem`);
+const nativeQueue: (() => void)[] = [];
+const requests: NativeRequest[] = [];
+// Sizes the file metadata reports, by URI; a missing URI is a missing file.
+const files = new Map<string, number>();
+
+/** Runs every queued native call, in order, letting JavaScript react between them. */
+async function runNativeQueue() {
+  for (let guard = 0; guard < 100 && nativeQueue.length > 0; guard += 1) {
+    nativeQueue.shift()?.();
+    for (let tick = 0; tick < 5; tick += 1) await Promise.resolve();
   }
 }
 
-const BLOB = { size: FILE_SIZE } as Blob;
+function installNativeDouble() {
+  const fileProto = nativeMock.FileSystemFile.prototype;
+  jest.spyOn(fileProto as { exists: boolean }, "exists", "get").mockImplementation(function (this: {
+    uri: string;
+  }) {
+    return files.has(this.uri);
+  });
+  jest.spyOn(fileProto as { size: number }, "size", "get").mockImplementation(function (this: {
+    uri: string;
+  }) {
+    return files.get(this.uri) ?? 0;
+  });
+  // An async native call: it waits its turn on the queue, then fails for a missing file.
+  Object.defineProperty(fileProto, "bytes", {
+    configurable: true,
+    value(this: { uri: string }) {
+      return new Promise((resolve, reject) => {
+        nativeQueue.push(() =>
+          files.has(this.uri) ? resolve(new Uint8Array(0)) : reject(new Error("missing")),
+        );
+      });
+    },
+  });
+
+  const taskProto = nativeMock.FileSystemUploadTask.prototype;
+  Object.defineProperty(taskProto, "start", {
+    configurable: true,
+    value(this: NativeTask, url: string, file: { uri: string }, options: StartOptions) {
+      return new Promise((resolve, reject) => {
+        nativeQueue.push(() => {
+          this.cancelled = false; // what both platforms' start does first
+          const total = files.get(file.uri) ?? 0;
+          const request: NativeRequest = {
+            url,
+            method: options.httpMethod,
+            uri: file.uri,
+            headers: { ...options.headers },
+            sessionType: options.sessionType,
+            cancelled: false,
+            bytesOnWire: 0,
+            transmit: (bytes) => {
+              if (request.cancelled) return false;
+              request.bytesOnWire += bytes;
+              this.emit("progress", { bytesSent: request.bytesOnWire, totalBytes: total });
+              return true;
+            },
+            respond: (status) => resolve({ status, body: "", headers: {} }),
+            fail: () => reject(new Error("The network connection was lost")),
+            reject,
+          };
+          this.request = request;
+          requests.push(request);
+        });
+      });
+    },
+  });
+  Object.defineProperty(taskProto, "cancel", {
+    configurable: true,
+    value(this: NativeTask) {
+      this.cancelled = true;
+      const { request } = this;
+      if (!request || request.cancelled) return;
+      request.cancelled = true;
+      request.reject(new Error("Upload was cancelled"));
+    },
+  });
+}
+
 // `__DEV__` is a global the bundler defines; the test flips it to check the production rule.
 const runtime = globalThis as unknown as { __DEV__: boolean };
 let fetchMock: FetchMock;
@@ -94,9 +161,21 @@ const consoleSpies = (["log", "info", "warn", "error", "debug"] as const).map((m
   jest.spyOn(console, method),
 );
 
-/** Lets the upload reach its next await (the file read, the URL request, the PUT). */
+/** Lets the upload reach its next await (the URL request, then the queued native start). */
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
-const lastXhr = () => FakeXhr.instances[FakeXhr.instances.length - 1];
+const lastRequest = () => requests[requests.length - 1];
+/** Lets the upload reach the native start, then runs the queue: the request now exists. */
+async function reachRequest() {
+  await flush();
+  await runNativeQueue();
+  return lastRequest();
+}
+/** With fake timers: moves the upload on without moving the clock until a native call waits. */
+async function untilNativeCall() {
+  for (let tick = 0; tick < 50 && nativeQueue.length === 0; tick += 1) {
+    await jest.advanceTimersByTimeAsync(0);
+  }
+}
 const start = (options: Partial<UploadMediaOptions> = {}) =>
   uploadMedia({
     purpose: "request_media",
@@ -105,14 +184,14 @@ const start = (options: Partial<UploadMediaOptions> = {}) =>
   });
 
 beforeEach(() => {
-  FakeXhr.instances = [];
-  FakeXhr.reads = [];
-  FakeXhr.fileBlob = BLOB;
-  globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest;
+  nativeQueue.length = 0;
+  requests.length = 0;
+  files.clear();
+  files.set(FILE_URI, FILE_SIZE);
+  installNativeDouble();
   tickets = [ticket(1), ticket(2)];
   fetchMock = installFetchMock();
-  fetchMock.mockImplementation(async (url) => {
-    if (url === FILE_URI) return { blob: async () => BLOB } as unknown as Response;
+  fetchMock.mockImplementation(async () => {
     const next = tickets.shift();
     if (!next) throw new Error("no more tickets");
     return jsonResponse(201, next);
@@ -135,10 +214,33 @@ afterEach(() => {
   ).toEqual([]);
 });
 
+describe("localFileSize", () => {
+  it("reads the size from the file's metadata", () => {
+    expect(localFileSize(FILE_URI)).toBe(FILE_SIZE);
+  });
+
+  it.each([
+    ["missing", "file:///cache/gone.mp4", undefined],
+    ["empty", "file:///cache/empty.mp4", 0],
+  ])("is null for a %s file", (_, uri, size) => {
+    if (size !== undefined) files.set(uri, size);
+    expect(localFileSize(uri)).toBeNull();
+  });
+
+  it("is null when the metadata cannot be read", () => {
+    jest
+      .spyOn(nativeMock.FileSystemFile.prototype as { exists: boolean }, "exists", "get")
+      .mockImplementation(() => {
+        throw new Error("no access");
+      });
+    expect(localFileSize(FILE_URI)).toBeNull();
+  });
+});
+
 describe("uploadMedia", () => {
-  it("asks for a URL signed for the file's type and the size of the bytes it will send", async () => {
+  it("asks for a URL signed for the file's type and its size from metadata", async () => {
     const upload = start();
-    await flush();
+    const request = await reachRequest();
 
     const [call] = callsTo(fetchMock, "/v1/uploads");
     expect(callBody(call)).toEqual({
@@ -148,132 +250,150 @@ describe("uploadMedia", () => {
     });
     expect(callHeader(call, "Authorization")).toBe("Bearer access-1");
 
-    lastXhr().respond(200);
+    request.respond(200);
     await expect(upload).resolves.toEqual({ key: ticket(1).key });
   });
 
-  it("PUTs the bytes to exactly the returned URL with exactly its headers, never the token", async () => {
+  it("PUTs the file itself to exactly the returned URL with exactly its headers, never the token", async () => {
     const upload = start();
-    await flush();
+    const request = await reachRequest();
 
-    const xhr = lastXhr();
-    expect(xhr.method).toBe("PUT");
-    expect(xhr.url).toBe(ticket(1).upload_url);
-    expect(xhr.headers).toEqual(ticket(1).headers);
-    expect(xhr.body).toBe(BLOB);
-    expect(xhr.timeout).toBe(0); // no native timeout: the deadline is kept in JavaScript
-
-    xhr.respond(200);
+    expect(request).toMatchObject({
+      method: "PUT",
+      url: ticket(1).upload_url,
+      uri: FILE_URI,
+      headers: ticket(1).headers,
+      sessionType: "foreground",
+    });
+    request.respond(200);
     await upload;
-    // One native file read (a Blob, never a copy through JavaScript) and one API call; the storage
-    // only ever sees the PUT above.
-    expect(FakeXhr.reads.map((read) => [read.url, read.responseType])).toEqual([
-      [FILE_URI, "blob"],
-    ]);
+    // One API call; the storage only ever sees the PUT above, and nothing read the file into JS.
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       expect.stringContaining("/v1/uploads"),
     ]);
+    expect(requests).toHaveLength(1);
   });
 
-  it("a file of known size is sent as itself: no read, its size signed, `{ uri }` as the body", async () => {
-    const video = {
-      uri: "file:///cache/ImagePicker/clip.mp4",
-      contentType: "video/mp4",
-      sizeBytes: 82_280_682,
-    };
-    const upload = start({ file: video });
-    await flush();
+  it("reports the share of the bytes really sent, from 0 to 1", async () => {
+    const onProgress = jest.fn();
+    const upload = start({ onProgress });
+    const request = await reachRequest();
 
-    expect(FakeXhr.reads).toHaveLength(0);
-    expect(callBody(callsTo(fetchMock, "/v1/uploads")[0])).toMatchObject({
-      content_type: "video/mp4",
-      size_bytes: 82_280_682,
-    });
-    expect(lastXhr().body).toEqual({ uri: video.uri });
+    request.transmit(FILE_SIZE / 4);
+    request.transmit((FILE_SIZE * 3) / 4);
+    request.respond(200);
+    await upload;
 
-    lastXhr().respond(200);
-    await expect(upload).resolves.toEqual({ key: ticket(1).key });
+    const fractions = onProgress.mock.calls.map(([fraction]: [number]) => fraction);
+    expect(fractions.slice(0, 3)).toEqual([0, 0.25, 1]);
+    expect(fractions[fractions.length - 1]).toBe(1);
+    expect(fractions.every((fraction) => fraction >= 0 && fraction <= 1)).toBe(true);
   });
 
-  describe("progress", () => {
-    afterEach(() => jest.restoreAllMocks());
-
-    it("iOS: the share of the bytes sent, from 0 to 1", async () => {
-      jest.replaceProperty(Platform, "OS", "ios");
-      const onProgress = jest.fn();
-      const upload = start({ onProgress });
-      await flush();
-
-      lastXhr().progress(FILE_SIZE / 4, FILE_SIZE);
-      lastXhr().progress(FILE_SIZE, FILE_SIZE);
-      lastXhr().respond(200);
-      await upload;
-
-      expect(onProgress.mock.calls.map(([fraction]) => fraction)).toEqual([0, 0.25, 1, 1]);
-    });
-
-    it("Android: React Native counts each byte twice, so its count is halved", async () => {
-      jest.replaceProperty(Platform, "OS", "android");
-      const onProgress = jest.fn();
-      const upload = start({ onProgress });
-      await flush();
-
-      // What RN 0.88 reports a quarter, half and all the way through: twice the bytes sent.
-      lastXhr().progress(FILE_SIZE / 2, FILE_SIZE);
-      lastXhr().progress(FILE_SIZE, FILE_SIZE);
-      lastXhr().progress(FILE_SIZE * 2, FILE_SIZE);
-      lastXhr().respond(200);
-      await upload;
-
-      expect(onProgress.mock.calls.map(([fraction]) => fraction)).toEqual([0, 0.25, 0.5, 1, 1]);
-    });
-
-    it("tripwire: React Native's Android progress still double counts (else drop the halving)", () => {
-      // Node's fs and module resolution, typed here: the app's tsconfig carries no Node types.
-      const { readFileSync } = jest.requireActual<{
-        readFileSync: (path: string, encoding: "utf8") => string;
-      }>("fs");
-      const resolve = (require as unknown as { resolve: (id: string) => string }).resolve;
-      const reactNative = resolve("react-native/package.json").replace(/package\.json$/, "");
-      const source = readFileSync(
-        `${reactNative}ReactAndroid/src/main/java/com/facebook/react/modules/network/ProgressRequestBody.kt`,
-        "utf8",
-      );
-      // The array write calls super (FilterOutputStream loops into the overridden single-byte
-      // write, which counts each byte) and then adds the whole count again.
-      expect(source).toMatch(
-        /override fun write\(data: ByteArray, offset: Int, byteCount: Int\) \{\s*super\.write\(data, offset, byteCount\)\s*count \+= byteCount/,
-      );
-      expect(source).toMatch(
-        /override fun write\(data: Int\) \{\s*super\.write\(data\)\s*count\+\+/,
-      );
-    });
-  });
-
-  it("a PUT that never settles is aborted at its deadline and reported as a timeout", async () => {
+  it("a PUT that never settles is cancelled at its deadline and reported as a timeout", async () => {
     jest.useFakeTimers();
     try {
       const upload = start().catch((error: unknown) => error);
-      // The file read and the URL request settle over a few ticks, far below the deadline.
-      // Zero-millisecond steps flush the promises without moving the clock.
-      for (let tick = 0; tick < 50 && !lastXhr(); tick += 1) await jest.advanceTimersByTimeAsync(0);
-      const xhr = lastXhr();
-      expect(xhr).toBeDefined();
+      await untilNativeCall();
+      await runNativeQueue();
+      const request = lastRequest();
+      expect(request).toBeDefined();
 
-      // No answer and no native timeout event: what iOS does when a `{ uri }` body cannot be built.
       // The deadline is the fixed part plus the file's time at the slowest uplink waited for.
       const { uploadTimeoutMs, uploadMinBytesPerSecond } = configMock.apiConfig;
       const deadline = uploadTimeoutMs + Math.ceil((FILE_SIZE / uploadMinBytesPerSecond) * 1000);
       await jest.advanceTimersByTimeAsync(deadline - 1);
-      expect(xhr.aborted).toBe(false);
+      expect(request.cancelled).toBe(false);
       await jest.advanceTimersByTimeAsync(1);
 
-      expect(xhr.aborted).toBe(true);
+      expect(request.cancelled).toBe(true);
       expect(await upload).toMatchObject({ name: "UploadFailedError", reason: "timeout" });
-      expect(FakeXhr.instances).toHaveLength(1); // a timeout is not retried
+      expect(requests).toHaveLength(1); // a timeout is not retried
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  describe("B1: a cancelled or timed-out upload never starts a PUT", () => {
+    it("a cancel while the native start still waits sends nothing and does not retry", async () => {
+      const controller = new AbortController();
+      let settled = false;
+      const upload = start({ signal: controller.signal })
+        .catch((error: unknown) => error)
+        .finally(() => {
+          settled = true;
+        });
+      await flush();
+      expect(nativeQueue).toHaveLength(2); // the start, then the barrier behind it
+      expect(requests).toHaveLength(0);
+
+      controller.abort();
+      await flush();
+      // The caller's queue does not move on before the native task has stopped.
+      expect(settled).toBe(false);
+
+      await runNativeQueue();
+      const request = lastRequest();
+      expect(request.cancelled).toBe(true); // cancelled as soon as it was created
+      expect(request.transmit(FILE_SIZE)).toBe(false);
+      expect(request.bytesOnWire).toBe(0);
+      expect(await upload).toMatchObject({ name: "AbortError" });
+      expect(requests).toHaveLength(1);
+      expect(callsTo(fetchMock, "/v1/uploads")).toHaveLength(1);
+    });
+
+    it("the deadline while the native start still waits sends nothing and does not retry", async () => {
+      jest.useFakeTimers();
+      try {
+        const upload = start().catch((error: unknown) => error);
+        await untilNativeCall();
+        expect(requests).toHaveLength(0);
+
+        // The queue is stuck behind other native work for longer than the whole deadline.
+        await jest.advanceTimersByTimeAsync(configMock.apiConfig.uploadTimeoutMs * 10);
+        await runNativeQueue();
+
+        const request = lastRequest();
+        expect(request.cancelled).toBe(true);
+        expect(request.transmit(FILE_SIZE)).toBe(false);
+        expect(request.bytesOnWire).toBe(0);
+        expect(await upload).toMatchObject({ name: "UploadFailedError", reason: "timeout" });
+        expect(requests).toHaveLength(1);
+        expect(callsTo(fetchMock, "/v1/uploads")).toHaveLength(1);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it("a cancel before the start creates no request at all", async () => {
+      const controller = new AbortController();
+      fetchMock.mockImplementation(async () => {
+        const next = tickets.shift();
+        controller.abort(); // lands while the URL is on its way back
+        return jsonResponse(201, next);
+      });
+
+      const failure = await start({ signal: controller.signal }).catch((error: unknown) => error);
+      await runNativeQueue();
+
+      expect(failure).toMatchObject({ name: "AbortError" });
+      expect(requests).toHaveLength(0);
+    });
+
+    it("a cancel after transmission started stops it, without a retry", async () => {
+      const controller = new AbortController();
+      const upload = start({ signal: controller.signal }).catch((error: unknown) => error);
+      const request = await reachRequest();
+      expect(request.transmit(FILE_SIZE / 2)).toBe(true);
+
+      controller.abort();
+
+      expect(request.cancelled).toBe(true);
+      expect(request.transmit(FILE_SIZE / 2)).toBe(false);
+      expect(request.bytesOnWire).toBe(FILE_SIZE / 2); // the storage never got the whole body
+      expect(await upload).toMatchObject({ name: "AbortError" });
+      expect(requests).toHaveLength(1);
+    });
   });
 
   it.each([
@@ -281,139 +401,86 @@ describe("uploadMedia", () => {
     [403, "forbidden"],
     [422, "upload_invalid"],
   ])("%i %s is an UploadRejectedError, with no PUT and no retry", async (status, code) => {
-    fetchMock.mockImplementation(async (url) =>
-      url === FILE_URI
-        ? ({ blob: async () => BLOB } as unknown as Response)
-        : errorResponse(status, code),
-    );
+    fetchMock.mockImplementation(async () => errorResponse(status, code));
 
     const failure = await start().catch((error: unknown) => error);
+    await runNativeQueue();
 
     expect(failure).toBeInstanceOf(UploadRejectedError);
     expect(failure).toMatchObject({ status, code });
     expect(callsTo(fetchMock, "/v1/uploads")).toHaveLength(1);
-    expect(FakeXhr.instances).toHaveLength(0);
+    expect(requests).toHaveLength(0);
   });
 
   it("a storage refusal is final: UploadFailedError with its status, no retry", async () => {
     const upload = start().catch((error: unknown) => error);
-    await flush();
-    lastXhr().respond(403);
+    (await reachRequest()).respond(403);
 
     expect(await upload).toMatchObject({
       name: "UploadFailedError",
       reason: "status",
       status: 403,
     });
-    expect(FakeXhr.instances).toHaveLength(1);
+    expect(requests).toHaveLength(1);
   });
 
   it("a network failure retries once on the same URL while it is valid, then gives up", async () => {
     const upload = start().catch((error: unknown) => error);
-    await flush();
-    lastXhr().fail();
-    await flush();
+    (await reachRequest()).fail();
+    await reachRequest();
 
-    expect(FakeXhr.instances).toHaveLength(2);
-    expect(lastXhr().url).toBe(ticket(1).upload_url);
+    expect(requests).toHaveLength(2);
+    expect(lastRequest().url).toBe(ticket(1).upload_url);
     expect(callsTo(fetchMock, "/v1/uploads")).toHaveLength(1);
 
-    lastXhr().fail();
+    lastRequest().fail();
     const failure = await upload;
     expect(failure).toBeInstanceOf(UploadFailedError);
     expect(failure).toMatchObject({ reason: "network" });
-    expect(FakeXhr.instances).toHaveLength(2);
+    expect(requests).toHaveLength(2);
   });
 
   it("a network failure after the URL expired asks for a fresh URL and uploads there", async () => {
     tickets = [ticket(1, -1), ticket(2)];
     const upload = start();
-    await flush();
-    lastXhr().fail();
-    await flush();
+    (await reachRequest()).fail();
+    const retried = await reachRequest();
 
     expect(callsTo(fetchMock, "/v1/uploads")).toHaveLength(2);
-    expect(lastXhr().url).toBe(ticket(2).upload_url);
-    expect(lastXhr().headers).toEqual(ticket(2).headers);
+    expect(retried.url).toBe(ticket(2).upload_url);
+    expect(retried.headers).toEqual(ticket(2).headers);
 
-    lastXhr().respond(200);
+    retried.respond(200);
     await expect(upload).resolves.toEqual({ key: ticket(2).key });
   });
 
   it("aborting while the URL is requested sends no PUT", async () => {
-    fetchMock.mockImplementation(async (url, init) =>
-      url === FILE_URI
-        ? ({ blob: async () => BLOB } as unknown as Response)
-        : neverAnswers(url, init),
-    );
+    fetchMock.mockImplementation(neverAnswers);
     const controller = new AbortController();
     const upload = start({ signal: controller.signal }).catch((error: unknown) => error);
     await flush();
 
     controller.abort();
+    await runNativeQueue();
 
     expect(await upload).toMatchObject({ name: "AbortError" });
-    expect(FakeXhr.instances).toHaveLength(0);
-  });
-
-  it("aborting during the PUT cancels it, without a retry", async () => {
-    const controller = new AbortController();
-    const upload = start({ signal: controller.signal }).catch((error: unknown) => error);
-    await flush();
-
-    controller.abort();
-
-    expect(lastXhr().aborted).toBe(true);
-    expect(await upload).toMatchObject({ name: "AbortError" });
-    expect(FakeXhr.instances).toHaveLength(1);
+    expect(requests).toHaveLength(0);
   });
 
   it("reads only files on this device", async () => {
     await expect(
       start({ file: { uri: "https://elsewhere.invalid/photo.jpg", contentType: "image/jpeg" } }),
     ).rejects.toThrow(/files on this device/);
-    expect(FakeXhr.reads).toHaveLength(0);
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(nativeQueue).toHaveLength(0);
   });
 
-  it("a remote uri with a size is refused before anything is read, asked or sent", async () => {
-    await expect(
-      start({
-        file: {
-          uri: "https://elsewhere.invalid/clip.mp4",
-          contentType: "video/mp4",
-          sizeBytes: 1024,
-        },
-      }),
-    ).rejects.toThrow(/files on this device/);
-    expect(FakeXhr.reads).toHaveLength(0);
-    expect(FakeXhr.instances).toHaveLength(0);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it.each([null, 0])(
-    "a size that is not a real byte count (%p) falls back to reading the file",
-    async (size) => {
-      const upload = start({
-        file: { uri: FILE_URI, contentType: "image/jpeg", sizeBytes: size as unknown as number },
-      });
-      await flush();
-
-      expect(FakeXhr.reads).toHaveLength(1);
-      expect(callBody(callsTo(fetchMock, "/v1/uploads")[0])).toMatchObject({
-        size_bytes: FILE_SIZE,
-      });
-      lastXhr().respond(200);
-      await upload;
-    },
-  );
-
-  it("a file that cannot be read asks for no URL", async () => {
-    FakeXhr.fileBlob = null;
+  it("a file whose size cannot be found asks for no URL", async () => {
+    files.clear();
 
     await expect(start()).rejects.toThrow(/could not be read/);
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(FakeXhr.instances).toHaveLength(0);
+    expect(nativeQueue).toHaveLength(0);
   });
 
   it("outside development, refuses to send the file to a plain http URL", async () => {
@@ -422,9 +489,58 @@ describe("uploadMedia", () => {
     tickets = [{ ...ticket(1), upload_url: "http://storage.test.invalid/bucket/u/1.jpg" }];
     try {
       await expect(start()).rejects.toThrow(/https/);
-      expect(FakeXhr.instances).toHaveLength(0);
+      await runNativeQueue();
+      expect(requests).toHaveLength(0);
     } finally {
       runtime.__DEV__ = dev;
     }
+  });
+
+  it("the double backs the File class the upload uses", () => {
+    expect(Object.getPrototypeOf(File.prototype)).toBe(nativeMock.FileSystemFile.prototype);
+  });
+
+  // The barrier in upload.ts rests on these native facts; if one changes, revisit the barrier.
+  it("tripwire: the upload start and the barrier share Expo's one ordered native queue", () => {
+    const core = packageDir("expo-modules-core");
+    const fs = packageDir("expo-file-system");
+    const read = (path: string) => readFileSync(path, "utf8");
+
+    // iOS: one serial default queue (no `.concurrent`) for every AsyncFunction without its own.
+    const asyncFunction = read(`${core}ios/Core/Functions/AsyncFunctionDefinition.swift`);
+    expect(asyncFunction).toMatch(
+      /private let defaultQueue = DispatchQueue\(label: "expo\.modules\.AsyncFunctionQueue", qos: \.userInitiated\)\r?\n/,
+    );
+    expect(asyncFunction).toMatch(/let queue = queue \?\? defaultQueue/);
+    // Android: the default scope runs on one HandlerThread, so launches run in order.
+    expect(read(`${core}android/src/main/java/expo/modules/kotlin/AppContext.kt`)).toMatch(
+      /modulesQueueDispatcher = HandlerThread\("expo\.modules\.AsyncFunctionQueue"\)[\s\S]*?val modulesQueue = CoroutineScope\(\s*modulesQueueDispatcher \+/,
+    );
+    expect(
+      read(
+        `${core}android/src/main/java/expo/modules/kotlin/functions/SuspendFunctionComponent.kt`,
+      ),
+    ).toMatch(/Queues\.DEFAULT -> appContext\.modulesQueue/);
+
+    // expo-file-system: `start` and `bytes` are default-queue AsyncFunctions on both platforms,
+    // and `cancel` is synchronous.
+    const ios = read(`${fs}ios/FileSystemModule.swift`);
+    expect(ios).toMatch(
+      /AsyncFunction\("start"\) \{ \(task: FileSystemUploadTask, [^)]*\) in\s*task\.start\([^)]*\)\s*\}\s*Function\("cancel"\)/,
+    );
+    expect(ios).toMatch(
+      /AsyncFunction\("bytes"\) \{ file in\s*return try file\.bytes\(\)\s*\}\s*Function\("bytesSync"\)/,
+    );
+    const android = read(`${fs}android/src/main/java/expo/modules/filesystem/FileSystemModule.kt`);
+    expect(android).toMatch(
+      /AsyncFunction\("start"\) Coroutine \{ task: FileSystemUploadTask,[^}]*\}\s*Function\("cancel"\)/,
+    );
+    expect(android).toMatch(/AsyncFunction\("bytes"\) Coroutine \{ file: FileSystemFile ->/);
+    // Android creates the call before its first suspension, so it exists once start has run.
+    expect(
+      read(`${fs}android/src/main/java/expo/modules/filesystem/FileSystemUploadTask.kt`),
+    ).toMatch(
+      /suspendCancellableCoroutine \{ continuation ->[\s\S]*?call = client\.newCall\(request\)\s*call\?\.enqueue/,
+    );
   });
 });
