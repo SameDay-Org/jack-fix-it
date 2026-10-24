@@ -38,7 +38,7 @@ export function seedRefreshToken(token: string): void {
 
 export const storedRefreshToken = (): string | null => storedValue;
 
-/** A Response stand-in with what the client reads: status, ok and json(). */
+/** A Response stand-in with what the client reads: status, ok, json() and text(). */
 export function jsonResponse(status: number, body?: unknown): Response {
   return {
     status,
@@ -47,6 +47,7 @@ export function jsonResponse(status: number, body?: unknown): Response {
       if (body === undefined) throw new Error("no body");
       return body;
     },
+    text: async () => (body === undefined ? "" : JSON.stringify(body)),
   } as unknown as Response;
 }
 

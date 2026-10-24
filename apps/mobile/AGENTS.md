@@ -34,6 +34,11 @@ rules apply.
   `Stack.Protected` guards send `signedIn` to `(app)` and everyone else to `(auth)/welcome`,
   deep links included. Routes stay thin: screens, form hooks and error mapping live in
   `src/features/auth`, and screen tests live there too (never under `src/app`).
+- Phone verification (D5.3 OTP, #138): `src/app/(app)/verify-phone` (number, then `code`),
+  screens and hooks in `src/features/phone`. A US number behind `EXPO_PUBLIC_PHONE_COUNTRY_CODE`,
+  sent as E.164; the code in the kit's `CodeInput` (one-time-code autofill), auto-submitted at 6
+  digits, resend after `EXPO_PUBLIC_OTP_RESEND_SECONDS`. The number travels in the flow store,
+  never in a route. A sign-up lands on it with "Skip for now"; home offers it until verified.
 - Launch intro (D18, #147): every start draws `LaunchIntro` (`src/features/launch`) over the
   gate: the navy hero with `WordRotator` (`src/components/ui`) rolling the headline's verb on
   the UI thread, width tweened so the sentence never jumps, one static screen-reader label, tap

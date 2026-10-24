@@ -28,6 +28,24 @@ describe("Input", () => {
     expect(screen.getByHintText("Enter a valid email")).toBe(field());
   });
 
+  it("a prefix sits fixed before the field, outside its value", async () => {
+    const onChangeText = jest.fn();
+    await render(
+      <Input
+        label="Phone"
+        value="(415) 555"
+        onChangeText={onChangeText}
+        prefix="+1"
+        testID="phone"
+      />,
+    );
+
+    expect(screen.getByTestId("phone-prefix")).toHaveTextContent("+1");
+    expect(screen.getByLabelText("Phone").props.value).toBe("(415) 555");
+    await fireEvent.changeText(screen.getByLabelText("Phone"), "(415) 5550");
+    expect(onChangeText).toHaveBeenCalledWith("(415) 5550");
+  });
+
   it("is not editable when disabled", async () => {
     const onChangeText = jest.fn();
     await render(<Input label="Email" value="" onChangeText={onChangeText} disabled />);

@@ -63,7 +63,32 @@
   "home": {
     "welcome": "Welcome,\n<email>{{email}}</email>",
     "comingSoon": "Your home screen is on its way.",
-    "logOut": "Log out"
+    "logOut": "Log out",
+    "verifyPhone": "Verify your phone",
+    "phone": "Phone",
+    "phoneVerified": "Verified"
+  },
+  "phone": {
+    "title": "Verify your phone",
+    "subtitle": "We'll text a {{length}}-digit code to this number.",
+    "numberLabel": "Phone number",
+    "send": "Send code",
+    "skip": "Skip for now",
+    "codeTitle": "Enter the code",
+    "codeSubtitle": "We sent it to {{phone}}.",
+    "codeLabel": "Verification code",
+    "verify": "Verify",
+    "resend": "Resend code",
+    "resendIn": "Resend code in {{seconds}} s",
+    "codeResent": "We sent a new code.",
+    "changeNumber": "Change number",
+    "verified": "Phone verified",
+    "errors": {
+      "invalidNumber": "Enter a valid 10-digit US phone number.",
+      "invalidCode": "That code isn't right. Check it and try again.",
+      "numberUnavailable": "This number can't be used. Try another one.",
+      "serviceUnavailable": "We couldn't send or check the code right now. Try again soon."
+    }
   },
   "roles": {
     "customer": "Customer",

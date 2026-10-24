@@ -14,9 +14,9 @@ const VARIANTS: Record<AppVariant, { nameSuffix: string; idSuffix: string }> = {
 // TODO(needs-human): confirm the bundle id / package name before the first store build.
 const BASE_APP_ID = "com.jackfixit.app";
 
-// Public EAS identifiers, not secrets: the project Cesar created under the organization's account.
-const EAS_OWNER = "same-day-auto-group";
-const EAS_PROJECT_ID = "491f33d8-b909-4c74-a1bb-6d373331404f";
+// Public EAS identifiers, not secrets: the project under the johngotitcom EAS account.
+const EAS_OWNER = "johngotitcom";
+const EAS_PROJECT_ID = "dc856055-5039-4f97-aeff-dc6aea84f8c0";
 
 function appVariant(): AppVariant {
   const value = process.env.APP_VARIANT ?? "development";
