@@ -12,6 +12,7 @@ ALLOWED_DEEP_LINKS: Final = (
     re.compile(rf"/requests/{_UUID}"),
     re.compile(rf"/jobs/{_UUID}"),
     re.compile(rf"/quotes/{_UUID}"),
+    re.compile(rf"/opportunities/{_UUID}"),  # a pro's dispatch (#49), from the new request push
 )
 
 

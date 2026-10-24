@@ -1,6 +1,7 @@
 """Push copy in English and Spanish (D10.3, #54). Titles and bodies show on lock screens, so
 they carry no personal data: placeholders are limited to PLACEHOLDERS (a test scans for it).
-The real notification kinds come with #55 and #65; `push.test.*` is a neutral message.
+#55 adds a new request (to a dispatched pro) and a new quote (to the customer); the job
+status kinds come with #65. `push.test.*` is a neutral message.
 """
 
 import string
@@ -18,12 +19,20 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
             {
                 "push.test.title": "Jack Fix It",
                 "push.test.body": "This is a test notification for {public_code}.",
+                "push.new_request.title": "New request",
+                "push.new_request.body": "Request {public_code} is waiting for your quote.",
+                "push.new_quote.title": "You have a new quote",
+                "push.new_quote.body": "A pro sent a quote for {public_code}.",
             }
         ),
         "es": MappingProxyType(
             {
                 "push.test.title": "Jack Fix It",
                 "push.test.body": "Esta es una notificación de prueba para {public_code}.",
+                "push.new_request.title": "Nueva solicitud",
+                "push.new_request.body": "La solicitud {public_code} espera tu presupuesto.",
+                "push.new_quote.title": "Tienes un nuevo presupuesto",
+                "push.new_quote.body": "Un profesional envió un presupuesto para {public_code}.",
             }
         ),
     }
