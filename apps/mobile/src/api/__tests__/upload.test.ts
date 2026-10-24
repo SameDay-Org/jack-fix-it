@@ -77,13 +77,15 @@ const requests: NativeRequest[] = [];
 // Sizes the file metadata reports, by URI; a missing URI is a missing file.
 const files = new Map<string, number>();
 
-/** Runs every queued native call, in order, letting JavaScript react between them. */
-async function runNativeQueue() {
-  for (let guard = 0; guard < 100 && nativeQueue.length > 0; guard += 1) {
+/** Runs the next `count` queued native calls, in order, letting JavaScript react after each. */
+async function runNativeCalls(count: number) {
+  for (let call = 0; call < count && nativeQueue.length > 0; call += 1) {
     nativeQueue.shift()?.();
     for (let tick = 0; tick < 5; tick += 1) await Promise.resolve();
   }
 }
+/** Runs every queued native call, including the ones they lead JavaScript to queue. */
+const runNativeQueue = () => runNativeCalls(100);
 
 function installNativeDouble() {
   const fileProto = nativeMock.FileSystemFile.prototype;
@@ -324,6 +326,8 @@ describe("uploadMedia", () => {
           settled = true;
         });
       await flush();
+      expect(nativeQueue).toHaveLength(1); // the barrier that empties the queue first
+      await runNativeCalls(1);
       expect(nativeQueue).toHaveLength(2); // the start, then the barrier behind it
       expect(requests).toHaveLength(0);
 
@@ -347,6 +351,8 @@ describe("uploadMedia", () => {
       try {
         const upload = start().catch((error: unknown) => error);
         await untilNativeCall();
+        await runNativeCalls(1); // the first barrier: the start is queued now
+        expect(nativeQueue).toHaveLength(2);
         expect(requests).toHaveLength(0);
 
         // The queue is stuck behind other native work for longer than the whole deadline.
@@ -373,11 +379,41 @@ describe("uploadMedia", () => {
         return jsonResponse(201, next);
       });
 
-      const failure = await start({ signal: controller.signal }).catch((error: unknown) => error);
+      const failure = start({ signal: controller.signal }).catch((error: unknown) => error);
+      await flush();
       await runNativeQueue();
 
-      expect(failure).toMatchObject({ name: "AbortError" });
+      expect(await failure).toMatchObject({ name: "AbortError" });
       expect(requests).toHaveLength(0);
+    });
+
+    it("a cancel while the queue is being emptied creates no request at all", async () => {
+      const controller = new AbortController();
+      const failure = start({ signal: controller.signal }).catch((error: unknown) => error);
+      await flush();
+      expect(nativeQueue).toHaveLength(1); // the first barrier, still waiting
+
+      controller.abort();
+      await runNativeQueue();
+
+      expect(await failure).toMatchObject({ name: "AbortError" });
+      expect(requests).toHaveLength(0);
+      expect(nativeQueue).toHaveLength(0);
+    });
+
+    it("the deadline while the queue is being emptied creates no request at all", async () => {
+      jest.useFakeTimers();
+      try {
+        const failure = start().catch((error: unknown) => error);
+        await untilNativeCall();
+        await jest.advanceTimersByTimeAsync(configMock.apiConfig.uploadTimeoutMs * 10);
+        await runNativeQueue();
+
+        expect(await failure).toMatchObject({ name: "UploadFailedError", reason: "timeout" });
+        expect(requests).toHaveLength(0);
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it("a cancel after transmission started stops it, without a retry", async () => {

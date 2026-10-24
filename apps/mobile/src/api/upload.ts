@@ -132,9 +132,10 @@ const stopError = (stop: Stop, signal: AbortSignal | undefined): unknown =>
  * one at a time, in call order, on one native queue (`expo.modules.AsyncFunctionQueue`: a serial
  * queue on iOS, one thread on Android), while the upload task's `cancel()` runs at once on the
  * JavaScript thread. The task's `start` clears its cancelled flag and only then creates the
- * request, so a cancel that overtakes a `start` still waiting on that queue would be lost. Once
- * this settles, the request exists and a cancel reaches it. A tripwire test in upload.test.ts
- * reads those native sources.
+ * request, so a cancel that overtakes a `start` still waiting on that queue would be lost. After
+ * a barrier behind a `start`, the request exists and a cancel reaches it; a barrier before it
+ * empties the queue, so the `start` is picked up at once. A tripwire test in upload.test.ts reads
+ * those native sources.
  */
 async function nativeQueueBarrier(): Promise<void> {
   try {
@@ -150,11 +151,14 @@ async function nativeQueueBarrier(): Promise<void> {
  * reports the bytes really sent, and its cancel stops the request. Resolves on a 2xx; rejects
  * with `UploadFailedError` or, when the caller cancels, with the signal's abort.
  *
- * Nothing is sent for an upload already cancelled or out of time: both are checked right before
- * the task starts. A stop while the native start is still queued waits for it
- * (`nativeQueueBarrier`) and then cancels the request it just made, before a connection can carry
- * the body; a stop after that cancels the transfer in flight. The promise settles only once the
- * native task has stopped, so the caller's queue never moves on while bytes are still going out.
+ * Nothing is sent for an upload already cancelled or out of time. The native queue is emptied
+ * first (`nativeQueueBarrier`); then the signal and the deadline are checked and the task starts
+ * in the same JavaScript tick, so the start does not wait behind other native work. A stop in the
+ * moment before the native side picks the start up is applied as soon as a second barrier shows
+ * the request exists: it is cancelled right after it is made, and the storage, whose URL is signed
+ * for the whole size, never stores a partial body. A stop after that cancels the transfer in
+ * flight. The promise settles only once the native task has stopped, so the caller's queue never
+ * moves on while bytes are still going out.
  *
  * The deadline lives in JavaScript, the same on both platforms: the watchdog cancels the PUT and
  * reports a timeout, which is not retried.
@@ -191,6 +195,7 @@ async function putToStorage(
   signal?.addEventListener("abort", onAbort, { once: true });
 
   try {
+    await nativeQueueBarrier();
     // The last check before anything is sent; the listener covers every moment after it.
     if (signal?.aborted) stop("abort");
     if (stopped) throw stopError(stopped, signal);
