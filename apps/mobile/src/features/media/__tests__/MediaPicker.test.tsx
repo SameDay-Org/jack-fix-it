@@ -1,4 +1,4 @@
-import "@/i18n";
+import i18n from "@/i18n";
 
 import { act, fireEvent, render, screen } from "@testing-library/react-native";
 import { router } from "expo-router";
@@ -130,6 +130,35 @@ describe("MediaPicker", () => {
     expect(upload.retry).toHaveBeenCalledWith("media-3");
     await fireEvent.press(screen.getByRole("button", { name: "Remove Photo 2" }));
     expect(upload.remove).toHaveBeenCalledWith("media-2");
+  });
+
+  it.each([
+    [
+      "en",
+      "This video is over 100 MB.",
+      "We couldn't check this video's size, so it can't be uploaded. Try another video.",
+    ],
+    [
+      "es",
+      "Este video pesa más de 100 MB.",
+      "No pudimos comprobar el tamaño de este video, así que no se puede subir. Prueba con otro video.",
+    ],
+  ])("the video size refusals read in %s", async (language, tooLarge, sizeUnknown) => {
+    await i18n.changeLanguage(language);
+    try {
+      await renderPicker(
+        makeUpload({
+          items: [
+            item(1, { kind: "video", status: "failed", failure: "tooLarge" }),
+            item(2, { kind: "video", status: "failed", failure: "sizeUnknown" }),
+          ],
+        }),
+      );
+      expect(screen.getByTestId("media-item-0-status")).toHaveTextContent(tooLarge);
+      expect(screen.getByTestId("media-item-1-status")).toHaveTextContent(sizeUnknown);
+    } finally {
+      await i18n.changeLanguage("en");
+    }
   });
 
   it("at the limit, Add is disabled and the count says so", async () => {

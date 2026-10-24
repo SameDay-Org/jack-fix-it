@@ -19,6 +19,14 @@ import {
 
 jest.mock("../config", () => jest.requireActual("./helpers").configMock);
 jest.mock("expo-secure-store", () => jest.requireActual("./helpers").secureStoreMock);
+// The upload drives expo-file-system's native handle (its mock class, patched below).
+jest.mock("../nativeUploadTask", () => {
+  const { resolve } = require as unknown as { resolve: (id: string) => string };
+  const native = jest.requireActual<{ FileSystemUploadTask: new () => unknown }>(
+    resolve("expo-file-system/package.json").replace(/package\.json$/, "mocks/FileSystem"),
+  );
+  return { createNativeUploadTask: () => new native.FileSystemUploadTask() };
+});
 
 const FILE_URI = "file:///data/cache/ImageManipulator/compressed.jpg";
 const FILE_SIZE = 734_211;
@@ -41,11 +49,15 @@ const packageDir = (name: string) =>
   resolveModule(`${name}/package.json`).replace(/package\.json$/, "");
 
 /**
- * A stand-in for expo-file-system's native side, under its real JavaScript (`File`, `UploadTask`).
- * It keeps what B1 depends on: async calls wait on one FIFO queue until the test runs it, as on
+ * A stand-in for expo-file-system's native side, under its real JavaScript `File`. It keeps what
+ * B1 depends on: async calls wait on one FIFO queue until the test runs it, as on
  * `expo.modules.AsyncFunctionQueue`; `cancel()` acts at once, as on the JavaScript thread; `start`
- * clears the cancelled flag and then creates the request, as both platforms do. A request sends
- * nothing until the test moves bytes over the network, which a cancelled request refuses.
+ * clears the cancelled flag and then creates the request, as both platforms do. The network is
+ * its own worker: with `network = "test"` a request sends what the test moves; with
+ * `network = "completes"` it sends the whole body and the storage answers 200 as the start runs,
+ * before anything else on the queue (the start's acknowledgement included) and whatever
+ * JavaScript does. A cancel stops a request still in flight and does nothing to a settled one.
+ * `nativeLog` records the native calls in the order they happen.
  */
 type NativeRequest = {
   url: string;
@@ -54,8 +66,11 @@ type NativeRequest = {
   headers: Record<string, string>;
   sessionType: string | undefined;
   cancelled: boolean;
+  settled: boolean;
+  /** The storage keeps the object: it answered 2xx after the whole body. */
+  stored: boolean;
   bytesOnWire: number;
-  /** Moves `bytes` to the storage and reports progress; false once cancelled. */
+  /** Moves `bytes` to the storage and reports progress; false once cancelled or settled. */
   transmit: (bytes: number) => boolean;
   respond: (status: number) => void;
   fail: () => void;
@@ -74,6 +89,8 @@ const nativeMock = jest.requireActual<{
 }>(`${packageDir("expo-file-system")}mocks/FileSystem`);
 const nativeQueue: (() => void)[] = [];
 const requests: NativeRequest[] = [];
+const nativeLog: ("barrier" | "start" | "cancel")[] = [];
+let network: "test" | "completes" = "test";
 // Sizes the file metadata reports, by URI; a missing URI is a missing file.
 const files = new Map<string, number>();
 
@@ -104,9 +121,10 @@ function installNativeDouble() {
     configurable: true,
     value(this: { uri: string }) {
       return new Promise((resolve, reject) => {
-        nativeQueue.push(() =>
-          files.has(this.uri) ? resolve(new Uint8Array(0)) : reject(new Error("missing")),
-        );
+        nativeQueue.push(() => {
+          if (this.uri.includes("barrier")) nativeLog.push("barrier");
+          return files.has(this.uri) ? resolve(new Uint8Array(0)) : reject(new Error("missing"));
+        });
       });
     },
   });
@@ -117,8 +135,14 @@ function installNativeDouble() {
     value(this: NativeTask, url: string, file: { uri: string }, options: StartOptions) {
       return new Promise((resolve, reject) => {
         nativeQueue.push(() => {
+          nativeLog.push("start");
           this.cancelled = false; // what both platforms' start does first
           const total = files.get(file.uri) ?? 0;
+          const settle = () => {
+            const first = !request.settled;
+            request.settled = true;
+            return first;
+          };
           const request: NativeRequest = {
             url,
             method: options.httpMethod,
@@ -126,19 +150,33 @@ function installNativeDouble() {
             headers: { ...options.headers },
             sessionType: options.sessionType,
             cancelled: false,
+            settled: false,
+            stored: false,
             bytesOnWire: 0,
             transmit: (bytes) => {
-              if (request.cancelled) return false;
+              if (request.cancelled || request.settled) return false;
               request.bytesOnWire += bytes;
               this.emit("progress", { bytesSent: request.bytesOnWire, totalBytes: total });
               return true;
             },
-            respond: (status) => resolve({ status, body: "", headers: {} }),
-            fail: () => reject(new Error("The network connection was lost")),
-            reject,
+            respond: (status) => {
+              if (!settle()) return;
+              request.stored = status >= 200 && status < 300 && request.bytesOnWire === total;
+              resolve({ status, body: "", headers: {} });
+            },
+            fail: () => {
+              if (settle()) reject(new Error("The network connection was lost"));
+            },
+            reject: (error) => {
+              if (settle()) reject(error);
+            },
           };
           this.request = request;
           requests.push(request);
+          if (network === "completes") {
+            request.transmit(total);
+            request.respond(200);
+          }
         });
       });
     },
@@ -146,9 +184,10 @@ function installNativeDouble() {
   Object.defineProperty(taskProto, "cancel", {
     configurable: true,
     value(this: NativeTask) {
+      nativeLog.push("cancel");
       this.cancelled = true;
       const { request } = this;
-      if (!request || request.cancelled) return;
+      if (!request || request.cancelled || request.settled) return;
       request.cancelled = true;
       request.reject(new Error("Upload was cancelled"));
     },
@@ -188,6 +227,8 @@ const start = (options: Partial<UploadMediaOptions> = {}) =>
 beforeEach(() => {
   nativeQueue.length = 0;
   requests.length = 0;
+  nativeLog.length = 0;
+  network = "test";
   files.clear();
   files.set(FILE_URI, FILE_SIZE);
   installNativeDouble();
@@ -316,61 +357,131 @@ describe("uploadMedia", () => {
     }
   });
 
-  describe("B1: a cancelled or timed-out upload never starts a PUT", () => {
-    it("a cancel while the native start still waits sends nothing and does not retry", async () => {
-      const controller = new AbortController();
-      let settled = false;
-      const upload = start({ signal: controller.signal })
-        .catch((error: unknown) => error)
+  // B1 and B3 with a small body, which the network can send in full before a cancel reaches it.
+  describe.each(["abort", "timeout"] as const)("B1/B3: a stop (%s) with a 64 KiB body", (kind) => {
+    const SMALL = 65_536;
+    const { uploadTimeoutMs, uploadMinBytesPerSecond } = configMock.apiConfig;
+    const deadline = uploadTimeoutMs + Math.ceil((SMALL / uploadMinBytesPerSecond) * 1000);
+    const stopError =
+      kind === "abort" ? { name: "AbortError" } : { name: "UploadFailedError", reason: "timeout" };
+    let controller: AbortController;
+    let outcome: Promise<unknown>;
+    let settled: boolean;
+
+    beforeEach(() => {
+      jest.useFakeTimers();
+      files.set(FILE_URI, SMALL);
+      controller = new AbortController();
+    });
+    afterEach(() => jest.useRealTimers());
+
+    /** The caller's abort, or the watchdog at the deadline; synchronous, like the real ones. */
+    const stopNow = () =>
+      kind === "abort" ? controller.abort() : jest.advanceTimersByTime(deadline);
+
+    /** Starts an upload up to the native start: the start and its acknowledgement wait queued. */
+    async function untilStartQueued() {
+      settled = false;
+      outcome = start({ signal: controller.signal })
+        .then(
+          (value) => ({ resolved: value }),
+          (error: unknown) => error,
+        )
         .finally(() => {
           settled = true;
         });
-      await flush();
-      expect(nativeQueue).toHaveLength(1); // the barrier that empties the queue first
-      await runNativeCalls(1);
-      expect(nativeQueue).toHaveLength(2); // the start, then the barrier behind it
-      expect(requests).toHaveLength(0);
+      await untilNativeCall();
+      await runNativeCalls(1); // the barrier that empties the queue
+      expect(nativeQueue).toHaveLength(2);
+      expect(nativeLog).toEqual(["barrier"]);
+    }
+    /** Runs the next native call without letting JavaScript react to it. */
+    const runNativeCallNow = () => nativeQueue.shift()?.();
 
-      controller.abort();
-      await flush();
-      // The caller's queue does not move on before the native task has stopped.
+    async function expectStopErrorWithoutRetry() {
+      await runNativeQueue();
+      expect(await outcome).toMatchObject(stopError);
+      expect(requests).toHaveLength(1); // no retry
+      expect(callsTo(fetchMock, "/v1/uploads")).toHaveLength(1);
+    }
+
+    it("(a) before the native start runs: cancelled at once and again on the acknowledgement", async () => {
+      await untilStartQueued();
+
+      stopNow();
+      expect(nativeLog).toEqual(["barrier", "cancel"]); // at stop time, before the start runs
+
+      await runNativeCalls(1); // the start clears its flag: that first cancel is lost
+      expect(lastRequest().cancelled).toBe(false);
+      expect(settled).toBe(false); // the caller's queue waits while bytes may still go out
+      await runNativeCalls(1); // its acknowledgement cancels again
+      expect(nativeLog).toEqual(["barrier", "cancel", "start", "barrier", "cancel"]);
+      expect(lastRequest()).toMatchObject({ cancelled: true, bytesOnWire: 0, stored: false });
+      await expectStopErrorWithoutRetry();
+    });
+
+    it("(b) after the native start, before its acknowledgement: cancelled at stop time", async () => {
+      await untilStartQueued();
+      await runNativeCalls(1); // the start runs; its acknowledgement still waits
+      const request = lastRequest();
+      expect(request.transmit(SMALL / 4)).toBe(true);
+
+      stopNow();
+      expect(nativeLog).toEqual(["barrier", "start", "cancel"]);
+      expect(nativeQueue).toHaveLength(1); // the acknowledgement has not arrived
+      expect(request).toMatchObject({ cancelled: true, bytesOnWire: SMALL / 4, stored: false });
+      expect(request.transmit(SMALL)).toBe(false);
+      await expectStopErrorWithoutRetry();
+    });
+
+    it("(c) the network completes before the cancel reaches native: still the stop error, no key", async () => {
+      network = "completes";
+      await untilStartQueued();
+
+      stopNow(); // its cancel is lost when the start clears the flag
+      await runNativeCalls(1); // the network sends the whole body and the storage answers 200
+      expect(lastRequest()).toMatchObject({ stored: true, bytesOnWire: SMALL });
+
+      // The residual: the storage keeps that object, but the upload reports the stop, not a key.
+      await expectStopErrorWithoutRetry();
+      expect(await outcome).not.toHaveProperty("resolved");
+      expect(nativeLog).toEqual(["barrier", "cancel", "start", "barrier", "cancel"]);
+    });
+
+    it("(d) a delayed acknowledgement: the cancel is repeated the moment it arrives", async () => {
+      await untilStartQueued();
+      stopNow();
+      await runNativeCalls(1); // the start runs and clears the cancelled flag
+      const request = lastRequest();
+
+      // The network sends on its own while the acknowledgement is still on its way.
+      expect(request.transmit(SMALL / 2)).toBe(true);
+      expect(request.cancelled).toBe(false);
+      await jest.advanceTimersByTimeAsync(1_000);
+      expect(nativeLog).toEqual(["barrier", "cancel", "start"]);
       expect(settled).toBe(false);
 
-      await runNativeQueue();
-      const request = lastRequest();
-      expect(request.cancelled).toBe(true); // cancelled as soon as it was created
-      expect(request.transmit(FILE_SIZE)).toBe(false);
-      expect(request.bytesOnWire).toBe(0);
-      expect(await upload).toMatchObject({ name: "AbortError" });
-      expect(requests).toHaveLength(1);
-      expect(callsTo(fetchMock, "/v1/uploads")).toHaveLength(1);
+      await runNativeCalls(1);
+      expect(nativeLog).toEqual(["barrier", "cancel", "start", "barrier", "cancel"]);
+      expect(request).toMatchObject({ cancelled: true, bytesOnWire: SMALL / 2, stored: false });
+      await expectStopErrorWithoutRetry();
     });
 
-    it("the deadline while the native start still waits sends nothing and does not retry", async () => {
-      jest.useFakeTimers();
-      try {
-        const upload = start().catch((error: unknown) => error);
-        await untilNativeCall();
-        await runNativeCalls(1); // the first barrier: the start is queued now
-        expect(nativeQueue).toHaveLength(2);
-        expect(requests).toHaveLength(0);
+    it("B3: a stop recorded before a 200 reaches JavaScript wins over the 200", async () => {
+      network = "completes";
+      await untilStartQueued();
 
-        // The queue is stuck behind other native work for longer than the whole deadline.
-        await jest.advanceTimersByTimeAsync(configMock.apiConfig.uploadTimeoutMs * 10);
-        await runNativeQueue();
+      runNativeCallNow(); // the start runs and the storage answers 200 at once...
+      expect(lastRequest()).toMatchObject({ stored: true, settled: true });
+      stopNow(); // ...but the stop lands before JavaScript sees that answer
+      expect(nativeLog).toEqual(["barrier", "start", "cancel"]);
 
-        const request = lastRequest();
-        expect(request.cancelled).toBe(true);
-        expect(request.transmit(FILE_SIZE)).toBe(false);
-        expect(request.bytesOnWire).toBe(0);
-        expect(await upload).toMatchObject({ name: "UploadFailedError", reason: "timeout" });
-        expect(requests).toHaveLength(1);
-        expect(callsTo(fetchMock, "/v1/uploads")).toHaveLength(1);
-      } finally {
-        jest.useRealTimers();
-      }
+      await expectStopErrorWithoutRetry();
+      expect(await outcome).not.toHaveProperty("resolved");
     });
+  });
 
+  describe("B1: a cancelled or timed-out upload never starts a PUT", () => {
     it("a cancel before the start creates no request at all", async () => {
       const controller = new AbortController();
       fetchMock.mockImplementation(async () => {
@@ -601,6 +712,26 @@ describe("uploadMedia", () => {
     expect(iosStart).not.toMatch(/Task \{|\.async\s*\{|\.asyncAfter|await /);
     expect(iosTask).toMatch(
       /func cancel\(\) \{\s*cancelled = true\s*uploadTask\?\.cancel\(\)\s*\}/,
+    );
+
+    // nativeUploadTask.ts drives the handle the public `UploadTask` wraps, with the wrapper's own
+    // calls: the "FileSystem" module's FileSystemUploadTask, start(url, file, options) with these
+    // options, progress events and release. Only the wrapper's once-only cancel is bypassed.
+    expect(read(`${fs}src/ExpoFileSystem.ts`)).toMatch(
+      /export default requireNativeModule<ExpoFileSystemModule>\('FileSystem'\);/,
+    );
+    const wrapper =
+      /export class UploadTask \{[\s\S]*?\r?\n\}\r?\n/.exec(
+        read(`${fs}src/NetworkTasks.ts`),
+      )?.[0] ?? "";
+    expect(wrapper).toMatch(/this\._nativeTask = new ExpoFileSystem\.FileSystemUploadTask\(\);/);
+    expect(wrapper).toMatch(
+      /const nativeOpts = \{\s*httpMethod: [^\n]*,\s*uploadType: [^\n]*,\s*headers: this\._options\?\.headers,[\s\S]*?sessionType: this\._options\?\.sessionType,\s*\};\s*const result = await this\._nativeTask\.start\(this\._url, this\._file, nativeOpts\);/,
+    );
+    expect(wrapper).toMatch(/return this\._nativeTask\.addListener\(eventName, listener\);/);
+    expect(wrapper).toMatch(/this\._nativeTask\.release\(\);/);
+    expect(wrapper).toMatch(
+      /cancel\(\): void \{\s*if \(\['completed', 'cancelled', 'error'\]\.includes\(this\._state\)\) return;/,
     );
   });
 });

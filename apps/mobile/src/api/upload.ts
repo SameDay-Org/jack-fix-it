@@ -1,10 +1,11 @@
 import type { ApiSchema } from "@jack/shared";
-import { File, Paths, UploadTask, UploadType } from "expo-file-system";
+import { File, Paths, UploadType } from "expo-file-system";
 
 import { apiPost } from "./client";
 import { apiConfig } from "./config";
 import { ApiError, UploadFailedError, UploadRejectedError } from "./errors";
 import { abortError, throwIfAborted } from "./http";
+import { createNativeUploadTask } from "./nativeUploadTask";
 
 export type UploadPurpose = ApiSchema<"UploadPurpose">;
 type UploadTicket = ApiSchema<"UploadResponse">;
@@ -133,10 +134,9 @@ const stopError = (stop: Stop, signal: AbortSignal | undefined): unknown =>
  * Settles once every Expo native call made before it has had its turn. Expo modules start async
  * functions in call order on one native queue (`expo.modules.AsyncFunctionQueue`: a serial queue
  * on iOS, one thread on Android, where a coroutine runs until its first suspension), while the
- * upload task's `cancel()` runs at once on the JavaScript thread. The task's `start` clears its
- * cancelled flag and only then creates the request, so a cancel that overtakes a `start` still waiting on that queue would be lost. After
- * a barrier behind a `start`, the request exists and a cancel reaches it; a barrier before it
- * empties the queue, so the `start` is picked up at once. A tripwire test in upload.test.ts reads
+ * upload task's `cancel()` runs at once on the JavaScript thread. A barrier before a `start`
+ * empties the queue, so the `start` is picked up at once; a barrier behind it is the start's
+ * acknowledgement: by then the native request exists. A tripwire test in upload.test.ts reads
  * those native sources.
  */
 async function nativeQueueBarrier(): Promise<void> {
@@ -149,21 +149,25 @@ async function nativeQueueBarrier(): Promise<void> {
 
 /**
  * One PUT of the file at `uri` to the ticket's URL with exactly the ticket's headers, through
- * expo-file-system's upload task: the native side streams the file from disk on both platforms,
- * reports the bytes really sent, and its cancel stops the request. Resolves on a 2xx; rejects
- * with `UploadFailedError` or, when the caller cancels, with the signal's abort.
+ * expo-file-system's native upload task: the native side streams the file from disk on both
+ * platforms, reports the bytes really sent, and its cancel stops the request. Resolves on a 2xx;
+ * rejects with `UploadFailedError` or, when the caller cancels, with the signal's abort.
  *
- * Nothing is sent for an upload already cancelled or out of time. The native queue is emptied
- * first (`nativeQueueBarrier`); then the signal and the deadline are checked and the task starts
- * in the same JavaScript tick, so the start does not wait behind other native work. A stop in the
- * moment before the native side picks the start up is applied as soon as a second barrier shows
- * the request exists: it is cancelled right after it is made, and the storage, whose URL is signed
- * for the whole size, never stores a partial body. A stop after that cancels the transfer in
- * flight. The promise settles only once the native task has stopped, so the caller's queue never
- * moves on while bytes are still going out.
+ * Nothing is sent for an upload already cancelled or out of time: the native queue is emptied
+ * first (`nativeQueueBarrier`), then the signal and the deadline are checked and the task starts
+ * in the same JavaScript tick. A stop after that (the caller's abort or the deadline) cancels the
+ * native task at once, wherever its start is. The native start clears its cancelled flag, so a
+ * cancel that reached it while the start still waited is lost; the start's acknowledgement (a
+ * barrier behind it) therefore cancels again whenever a stop is recorded.
  *
- * The deadline lives in JavaScript, the same on both platforms: the watchdog cancels the PUT and
- * reports a timeout, which is not retried.
+ * The client cannot do more than that: once the OS networking stack has the request, a small body
+ * can be sent in full before a cancel reaches it, and the storage then keeps it. The app never
+ * attaches that key; deleting uploads that are never attached is the server's job (#191).
+ *
+ * The promise settles only once the native task has settled, so the caller's queue never moves on
+ * while bytes may still go out, and a recorded stop wins over whatever the native task reported,
+ * a 2xx included. The deadline lives in JavaScript, the same on both platforms: the watchdog
+ * cancels the PUT and reports a timeout, which is not retried.
  */
 async function putToStorage(
   ticket: UploadTicket,
@@ -173,24 +177,18 @@ async function putToStorage(
   signal: AbortSignal | undefined,
 ): Promise<void> {
   const url = storageUrl(ticket);
-  const task = new UploadTask(new File(uri), url, {
-    httpMethod: "PUT",
-    uploadType: UploadType.BINARY_CONTENT,
-    // Exactly the signed headers: nothing added (no Authorization), nothing dropped.
-    headers: ticket.headers,
-    // The transfer lives and ends with the app, like the deadline that guards it (iOS only).
-    sessionType: "foreground",
-    onProgress: ({ bytesSent, totalBytes }) => {
-      if (totalBytes > 0) onProgress?.(Math.min(1, bytesSent / totalBytes));
-    },
-  });
-
+  const task = createNativeUploadTask();
   let stopped: Stop | null = null;
-  let requestExists = false;
+  const progress = task.addListener("progress", ({ bytesSent, totalBytes }) => {
+    if (!stopped && totalBytes > 0) onProgress?.(Math.min(1, bytesSent / totalBytes));
+  });
+  let startIssued = false;
   const stop = (why: Stop) => {
     if (stopped) return;
     stopped = why;
-    if (requestExists) task.cancel();
+    // At once, without waiting for any acknowledgement: it stops a request that exists, and
+    // marks a start still waiting as cancelled (which the start may clear: see below).
+    if (startIssued) task.cancel();
   };
   const onAbort = () => stop("abort");
   const watchdog = setTimeout(() => stop("timeout"), uploadTimeoutFor(size));
@@ -203,26 +201,35 @@ async function putToStorage(
     if (stopped) throw stopError(stopped, signal);
 
     onProgress?.(0);
-    const sending = task.uploadAsync(); // queues the native start, synchronously
+    const sending = task.start(url, new File(uri), {
+      httpMethod: "PUT",
+      uploadType: UploadType.BINARY_CONTENT,
+      // Exactly the signed headers: nothing added (no Authorization), nothing dropped.
+      headers: ticket.headers,
+      // The transfer lives and ends with the app, like the deadline that guards it (iOS only).
+      sessionType: "foreground",
+    }); // queued on the native queue by this call
+    startIssued = true;
     void nativeQueueBarrier().then(() => {
-      requestExists = true;
+      // The start has run and cleared its cancelled flag: cancel again if a stop came before.
       if (stopped) task.cancel();
     });
 
-    let status: number;
+    let status: number | null = null;
     try {
       ({ status } = await sending);
     } catch {
-      if (stopped) throw stopError(stopped, signal);
-      throw new UploadFailedError("network");
+      // Handled below: a stop explains the failure, otherwise it is the network's.
     }
-    // A caller that cancelled gets its abort, even if the storage answered first.
-    if (stopped === "abort") throw abortError(signal);
+    // The native task has settled. A recorded stop wins, whatever it reported.
+    if (stopped) throw stopError(stopped, signal);
+    if (status === null) throw new UploadFailedError("network");
     if (status < 200 || status >= 300) throw new UploadFailedError("status", status);
     onProgress?.(1);
   } finally {
     clearTimeout(watchdog);
     signal?.removeEventListener("abort", onAbort);
+    progress.remove();
     task.release();
   }
 }

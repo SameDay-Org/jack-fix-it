@@ -88,14 +88,16 @@ options={sheetOptions([0.5, 0.95])} />`, or `"fitToContents"`), rendering `Sheet
   never the picker's size, never a read); a size it cannot find is refused (`sizeUnknown`).
   `uploadMedia` (`src/api/upload.ts`) asks `POST /v1/uploads` for a URL signed for the exact type
   and that size, then PUTs the file to exactly that URL with exactly its headers and never the
-  bearer token, through expo-file-system's `UploadTask` (streams from disk on both platforms, true
-  progress, a cancel that stops the request); never `fetch(uri).blob()` or an XHR body. Cancel and
-  the JavaScript deadline are checked right before the task starts; a stop while its native start
-  still waits is applied once `nativeQueueBarrier` shows the request exists (tripwire test on the
-  native queue); one retry on
-  a network failure, with a fresh URL if it expired; `UploadRejectedError` (403/422) and
-  `UploadFailedError` (storage refusal, network, or past `EXPO_PUBLIC_UPLOAD_TIMEOUT_MS` plus the
-  file's time at `EXPO_PUBLIC_UPLOAD_MIN_BYTES_PER_SECOND`). `MediaPicker`
+  bearer token, through expo-file-system's native upload task (`src/api/nativeUploadTask.ts`, the
+  handle its `UploadTask` wraps: streams from disk on both platforms, true progress, a cancel that
+  stops the request); never `fetch(uri).blob()` or an XHR body. Cancel and the JavaScript deadline
+  are checked right before the task starts; a stop after that cancels at once and again on the
+  start's acknowledgement (`nativeQueueBarrier`; tripwire test on the native queue), and a recorded
+  stop wins over any answer. A small body the OS sent in full before the cancel can still be
+  stored: the app never attaches its key (server cleanup: #191). One retry on a network failure,
+  with a fresh URL if it expired; `UploadRejectedError` (403/422) and `UploadFailedError` (storage
+  refusal, network, or past `EXPO_PUBLIC_UPLOAD_TIMEOUT_MS` plus the file's time at
+  `EXPO_PUBLIC_UPLOAD_MIN_BYTES_PER_SECOND`). `MediaPicker`
   renders the list and asks "Camera or library" in `MediaSourceSheet`, a sheet route in the
   caller's stack; `ProgressRing` (kit) draws progress without SVG. Dev demo: `jackfixit://dev/media`
   (signed-in customer). Local uploads need an
