@@ -6,11 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
 from app.errors import ErrorResponse
-from app.modules.auth.permissions import ProUser
-from app.modules.quotes.schemas import QuoteCreate, QuoteOut
+from app.modules.auth.permissions import CustomerUser, ProUser
+from app.modules.quotes.schemas import CustomerQuoteList, QuoteCreate, QuoteOut
 from app.modules.quotes.service import QuoteService
 
 router = APIRouter(prefix="/pros/me/opportunities", tags=["pros"])
+# The customer's side: the quotes on their own requests (#188).
+customer_router = APIRouter(prefix="/requests", tags=["quotes"])
 
 
 def _error(description: str) -> dict[str, Any]:
@@ -55,3 +57,25 @@ async def submit_quote(
     proposed start. It expires after the platform's quote lifetime. The first quote on a
     request makes it Quote Ready for the customer."""
     return await quotes.submit(user, dispatch_id, data)
+
+
+@customer_router.get(
+    "/{request_id}/quotes",
+    response_model=CustomerQuoteList,
+    summary="Compare the quotes on one of my service requests",
+    responses={
+        status.HTTP_401_UNAUTHORIZED: _error("invalid_token: missing, invalid or expired token."),
+        status.HTTP_403_FORBIDDEN: _error("forbidden: only customers have service requests."),
+        status.HTTP_404_NOT_FOUND: _error("not_found: no request of the caller with this id."),
+    },
+)
+async def list_request_quotes(
+    request_id: uuid.UUID,
+    user: CustomerUser,
+    quotes: Annotated[QuoteService, Depends(get_quote_service)],
+) -> CustomerQuoteList:
+    """The quotes the customer can choose from: the pending ones not yet expired, and the
+    accepted one while the payment is pending. Empty until the request is Quote Ready, and
+    once it is closed. Each shows the price, what it includes (contact details masked), the
+    duration, the proposed start, when it expires, and the pro's public card."""
+    return await quotes.list_for_customer(user, request_id)

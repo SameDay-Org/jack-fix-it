@@ -17,6 +17,7 @@ from app.modules.users.errors import (
     PhoneUnavailableError,
 )
 from app.modules.users.models import User
+from app.modules.users.names import public_name
 from app.modules.users.repository import UserRepository
 from app.modules.users.types import (
     ContactPoints,
@@ -45,11 +46,20 @@ class UserService:
     async def contact_points(
         self, user_ids: Collection[uuid.UUID]
     ) -> dict[uuid.UUID, ContactPoints]:
-        """Each user's email and phone, read in one query. Only for masking a customer's own
-        details in text shown to pros (#172): never logged or returned to anyone else."""
+        """Each user's email and phone, read in one query. Only for masking a party's own
+        details in text shown to the other side: a customer's to pros (#172), a pro's to the
+        customer (#188). Never logged or returned to anyone."""
         return {
             user_id: ContactPoints(email=email, phone=phone)
             for user_id, email, phone in await self._users.contact_points(user_ids)
+        }
+
+    async def public_names(self, user_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str | None]:
+        """Each user's public name ("María P.", names.public_name), read in one query; None
+        when a name is missing. The full names never leave this module."""
+        return {
+            user_id: public_name(first, last)
+            for user_id, first, last in await self._users.names(user_ids)
         }
 
     async def get_by_id(self, user_id: uuid.UUID) -> UserAccount | None:

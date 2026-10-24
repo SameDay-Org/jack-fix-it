@@ -50,7 +50,8 @@ PersonName = Annotated[
 
 def public_name(first_name: str | None, last_name: str | None) -> str | None:
     """How a pro shows publicly: the first name and the last name's initial, "María P."
-    None when either name is missing. Not exposed yet: the public pro profile (#53) uses it."""
+    None when either name is missing. Customers see it on a pro's quote (#188); the public pro
+    profile (#53) will show it too."""
     if not first_name or not last_name:
         return None
     initial = next((char for char in last_name if _is_letter(char)), None)

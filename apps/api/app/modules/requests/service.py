@@ -324,6 +324,23 @@ def _has_nul(value: JsonValue) -> bool:
     return False
 
 
+class CustomerRequestReader:
+    """A customer's own request for other modules (ADR 0003): its status, for the quotes the
+    customer compares (#188)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._requests = ServiceRequestRepository(session)
+
+    async def own_status(self, user: UserAccount, request_id: uuid.UUID) -> RequestStatus:
+        """The status of the caller's request. 404 for an unknown request and for another
+        customer's, the same body as GET /requests/{id}: an id reveals nothing."""
+        request = await self._requests.get(request_id)
+        if request is None:
+            raise NotFoundError
+        ensure_owner(request.customer_id, user)
+        return request.status
+
+
 # What a pro sees before a job (#49): the work, the place coarsely, never the customer.
 OPEN_FOR_QUOTES: Final = frozenset({RequestStatus.FINDING_PRO, RequestStatus.QUOTE_READY})
 
