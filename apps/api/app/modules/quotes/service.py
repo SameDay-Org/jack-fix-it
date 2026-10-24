@@ -187,7 +187,8 @@ class QuoteService:
             or quote.expires_at <= datetime.now(UTC)
         ):
             raise QuoteNotAcceptableError
-        await self._quotes.mark_accepted(quote)
+        if not await self._quotes.mark_accepted(quote.id):
+            raise QuoteNotAcceptableError  # pragma: no cover - checked above, under the locks
         await self._requests.transition(request.id, RequestStatus.ACCEPTED, user)
         await self._session.commit()
         logger.info(
@@ -198,7 +199,7 @@ class QuoteService:
                 "pro_id": str(quote.pro_id),
             },
         )
-        return item.model_copy(update={"status": quote.status})
+        return item.model_copy(update={"status": QuoteStatus.ACCEPTED})
 
     async def _for_customer(self, quotes: list[Quote]) -> list[CustomerQuote]:
         """The quotes as their customer sees them, in the given order, leaving out those whose

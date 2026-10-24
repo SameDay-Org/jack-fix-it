@@ -9,9 +9,9 @@ from typing import Any
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.jobs.service import SystemActor
 from app.modules.pros.models import ProProfile, ProVerificationStatus
 from app.modules.quotes import service as quote_service
 from app.modules.quotes.errors import QuoteNotAcceptableError
@@ -29,6 +29,7 @@ from tests.test_quote_list_api import (
     ITEM_KEYS,
     QuotingPro,
     add_quote,
+    counted_statements,
     customer,
     headers_for,
     path,
@@ -159,12 +160,8 @@ async def test_accepting_again_is_idempotent(
 
     with caplog.at_level(logging.INFO):
         first = await accept(db_client, world, request_id, chosen)
-        written = await db_session.scalar(
-            select(Quote.updated_at)
-            .where(Quote.id == chosen)
-            .execution_options(populate_existing=True)
-        )
-        again = await accept(db_client, world, request_id, chosen)
+        with counted_statements(db_session) as statements:
+            again = await accept(db_client, world, request_id, chosen)
 
     assert (first.status_code, again.status_code) == (200, 200)
     assert again.content == first.content
@@ -172,14 +169,12 @@ async def test_accepting_again_is_idempotent(
         RequestStatus.ACCEPTED,
         {other: QuoteStatus.PENDING, chosen: QuoteStatus.ACCEPTED},
     )
-    assert (
-        await db_session.scalar(
-            select(Quote.updated_at)
-            .where(Quote.id == chosen)
-            .execution_options(populate_existing=True)
-        )
-        == written
-    )
+    # Nothing written by the repeat: its statements only read (and lock). The test session's
+    # own SAVEPOINT (its commit releases one) is not the service's.
+    writes = [
+        sql for sql in statements if sql.lstrip().upper().startswith(("UPDATE", "INSERT", "DELETE"))
+    ]
+    assert writes == []
     assert len(events(caplog, "quote_accepted")) == 1
     assert len(events(caplog, "request_status_changed")) == 1
 
@@ -455,12 +450,19 @@ async def test_acceptance_is_atomic(
     db_session: AsyncSession, world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     request_id, [quote_id], _ = await open_request(db_session, world, count=1)
-    seen: list[QuoteStatus] = []
+    seen: list[tuple[RequestStatus, dict[uuid.UUID, QuoteStatus]]] = []
+    transition = RequestStateMachine.transition
 
-    async def fail(self: RequestStateMachine, *args: object, **kwargs: object) -> RequestStatus:
-        # The quote's update is already in the database when the transition fails.
-        seen.append((await statuses(db_session, request_id))[1][quote_id])
-        raise RuntimeError("synthetic failure in the request's transition")
+    async def fail(
+        self: RequestStateMachine,
+        request: uuid.UUID,
+        to: RequestStatus,
+        actor: UserAccount | SystemActor,
+    ) -> RequestStatus:
+        # The real transition runs: both rows are written when the failure comes.
+        await transition(self, request, to, actor)
+        seen.append(await statuses(db_session, request_id))
+        raise RuntimeError("synthetic failure at the end of the request's transition")
 
     monkeypatch.setattr(RequestStateMachine, "transition", fail)
     actor = await customer_account(db_session, world)
@@ -469,7 +471,7 @@ async def test_acceptance_is_atomic(
         await QuoteService(db_session).accept(actor, request_id, quote_id)
     await savepoint.rollback()
 
-    assert seen == [QuoteStatus.ACCEPTED]
+    assert seen == [(RequestStatus.ACCEPTED, {quote_id: QuoteStatus.ACCEPTED})]
     assert await statuses(db_session, request_id) == (
         RequestStatus.QUOTE_READY,
         {quote_id: QuoteStatus.PENDING},

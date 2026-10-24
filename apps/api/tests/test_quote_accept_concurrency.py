@@ -23,7 +23,7 @@ from app.modules.quotes.service import QuoteService
 from app.modules.requests.models import RequestOrigin, RequestStatus, ServiceRequest
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole
-from tests.conftest import backend_pid, wait_until_blocked
+from tests.conftest import LOCK_WAIT_DEADLINE_SECONDS, backend_pid, wait_until_blocked
 from tests.helpers import as_status_writer
 from tests.test_quotes_api import quotes_of, status_of
 
@@ -118,27 +118,33 @@ async def accept_at_once(
 ) -> tuple[CustomerQuote | BaseException, CustomerQuote | BaseException]:
     """Both acceptances run at once. Whichever reaches the quote's write first holds it there,
     with its request and quote locked, until Postgres reports the other one waiting on a lock it
-    holds; then it goes on and commits."""
+    holds; then it goes on and commits. Fails after the deadline: one that never commits keeps the
+    other waiting on its locks."""
     sessions = committed.sessions
     async with sessions() as one, sessions() as two:
         pids = {id(one): await backend_pid(one), id(two): await backend_pid(two)}
         mark_accepted = QuoteRepository.mark_accepted
         holding: list[int] = []
 
-        async def mark_then_hold(self: QuoteRepository, quote: Quote) -> None:
-            await mark_accepted(self, quote)
+        async def mark_then_hold(self: QuoteRepository, quote_id: uuid.UUID) -> bool:
+            marked = await mark_accepted(self, quote_id)
             if not holding:
                 own = pids[id(self._session)]
                 holding.append(own)
                 [other] = [pid for pid in pids.values() if pid != own]
                 await wait_until_blocked(sessions, waiter=other, holder=own)
+            return marked
 
         monkeypatch.setattr(QuoteRepository, "mark_accepted", mark_then_hold)
-        return await asyncio.gather(
-            QuoteService(one).accept(committed.customer, committed.request_id, first_quote),
-            QuoteService(two).accept(committed.customer, committed.request_id, second),
-            return_exceptions=True,
-        )
+        try:
+            async with asyncio.timeout(2 * LOCK_WAIT_DEADLINE_SECONDS):
+                return await asyncio.gather(
+                    QuoteService(one).accept(committed.customer, committed.request_id, first_quote),
+                    QuoteService(two).accept(committed.customer, committed.request_id, second),
+                    return_exceptions=True,
+                )
+        except TimeoutError:
+            pytest.fail("an acceptance never finished: the other kept the locks (no commit?)")
 
 
 def events(caplog: pytest.LogCaptureFixture, message: str, request_id: uuid.UUID) -> int:

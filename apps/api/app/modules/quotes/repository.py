@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import and_, exists, or_, select
+from sqlalchemy import and_, exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.quotes.models import Quote, QuoteStatus
@@ -45,11 +45,17 @@ class QuoteRepository:
         )
         return (await self._session.scalars(statement)).one_or_none()
 
-    async def mark_accepted(self, quote: Quote) -> None:
-        """Writes now (flush): the request's transition that follows needs nothing pending."""
-        quote.status = QuoteStatus.ACCEPTED
-        await self._session.flush()
-        await self._session.refresh(quote)  # updated_at, set by the database
+    async def mark_accepted(self, quote_id: uuid.UUID) -> bool:
+        """pending -> accepted; a conditional UPDATE, so it happens once, and it leaves nothing
+        pending for the request's transition that follows (the session's copy of the quote is
+        synchronized, not made dirty). False when the quote was no longer pending."""
+        statement = (
+            update(Quote)
+            .where(Quote.id == quote_id, Quote.status == QuoteStatus.PENDING)
+            .values(status=QuoteStatus.ACCEPTED)
+            .returning(Quote.id)
+        )
+        return (await self._session.scalar(statement)) is not None
 
     async def add(self, quote: Quote) -> Quote:
         """Inserts now (flush): a second quote by the pro on the request fails here, on the
