@@ -39,7 +39,7 @@ from tests.conftest import LOCK_WAIT_DEADLINE_SECONDS, TEST_JWT_SECRET, backend_
 from tests.helpers import as_status_writer
 from tests.test_opportunities_api import EMAIL, LINE1, PHONE, Pro, World, build_world, make_request
 from tests.test_quotes_api import TTL_HOURS, body, quotes_of, status_of
-from tests.test_requests_api import FakeStorage, RecordingQueue
+from tests.test_requests_api import ENQUEUE_TIMEOUT, FakeStorage, RecordingQueue
 
 SCOPE = "Fix the faucet, probe-expiry-scope"
 AMOUNT = 87_654
@@ -625,7 +625,8 @@ async def test_quote_submitted_during_the_run_is_not_lost(
 
     async def submit() -> None:
         async with committed.sessions() as session:
-            await QuoteService(session).submit(committed.pro, committed.dispatch_id, data)
+            service = QuoteService(session, RecordingQueue(), ENQUEUE_TIMEOUT)
+            await service.submit(committed.pro, committed.dispatch_id, data)
 
     async def run() -> None:
         await expire_quotes({"session_factory": committed.sessions})
