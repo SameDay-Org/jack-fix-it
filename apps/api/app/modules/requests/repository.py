@@ -1,6 +1,7 @@
 import uuid
 from collections.abc import Collection, Sequence
 from datetime import datetime
+from typing import NamedTuple
 
 from sqlalchemy import Select, func, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,9 +9,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.requests.models import (
     MediaSafeStatus,
     RequestMedia,
+    RequestMediaKind,
     RequestStatus,
     ServiceRequest,
 )
+
+
+class SafeMediaRow(NamedTuple):
+    """A media row's safe-copy columns (#173): never the original's file_key."""
+
+    id: uuid.UUID
+    kind: RequestMediaKind
+    safe_status: MediaSafeStatus
+    safe_key: str | None
+    safe_content_type: str | None
 
 
 class ServiceRequestRepository:
@@ -50,6 +62,26 @@ class ServiceRequestRepository:
             .order_by(RequestMedia.created_at, RequestMedia.id)
         )
         return list((await self._session.scalars(statement)).all())
+
+    async def safe_media_of(self, request_id: uuid.UUID) -> list[SafeMediaRow]:
+        """The request's media whose safe copy is ready or still pending (#173), by
+        (created_at, id), in one statement. It selects the safe columns only: file_key is never
+        loaded."""
+        statement = (
+            select(
+                RequestMedia.id,
+                RequestMedia.kind,
+                RequestMedia.safe_status,
+                RequestMedia.safe_key,
+                RequestMedia.safe_content_type,
+            )
+            .where(
+                RequestMedia.request_id == request_id,
+                RequestMedia.safe_status.in_((MediaSafeStatus.READY, MediaSafeStatus.PENDING)),
+            )
+            .order_by(RequestMedia.created_at, RequestMedia.id)
+        )
+        return [SafeMediaRow(*row) for row in await self._session.execute(statement)]
 
     async def pending_media(self, request_id: uuid.UUID) -> list[RequestMedia]:
         """The request's media still without a safe copy (#173)."""

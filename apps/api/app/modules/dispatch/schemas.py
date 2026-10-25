@@ -2,14 +2,17 @@
 
 Every schema here, nested ones included, forbids extra fields and lists what it shows: never
 the customer (id, email, phone), the street, coordinates, utm or the BDC's fields. The
-customer's free text arrives with contact details masked (app.redaction). No media
-yet: pros get sanitized photos with #173 (stored ones carry the customer's id and GPS data).
+customer's free text arrives with contact details masked (app.redaction). Media, in the
+detail only, are the privacy-safe copies (#173), signed from their opaque m/ keys: never the
+stored originals, whose keys carry the customer's id and whose files carry GPS data.
 """
 
 import uuid
 from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
+
+from app.modules.requests.service import RequestMediaKind
 
 
 class _Out(BaseModel):
@@ -55,6 +58,16 @@ class OpportunityPage(_Out):
     next_cursor: str | None = Field(description="Pass as `cursor` for the next page.")
 
 
+class OpportunityMedia(_Out):
+    """A photo or video of the request: its privacy-safe copy (#173), without location or other
+    metadata, under a key that names no one."""
+
+    kind: RequestMediaKind
+    content_type: str = Field(description="The copy's media type, e.g. image/jpeg.")
+    url: str = Field(description="Presigned GET URL.")
+    expires_at: datetime
+
+
 class OpportunityDetail(_Out):
     dispatch_id: uuid.UUID
     public_code: str
@@ -68,4 +81,10 @@ class OpportunityDetail(_Out):
     text_redacted: bool = Field(
         description="True when contact details were masked in the description or the answers "
         "(shown as •••): the customer is reached through the app."
+    )
+    media: list[OpportunityMedia] = Field(
+        description="The photos and videos ready to show, oldest first."
+    )
+    media_pending: int = Field(
+        description="How many more photos and videos are still being prepared."
     )

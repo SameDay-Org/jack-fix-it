@@ -49,6 +49,7 @@ def test_render_uses_locale_and_falls_back_to_english() -> None:
         f"/requests/{uuid.UUID(int=1)}",
         f"/jobs/{uuid.UUID(int=2)}",
         f"/quotes/{uuid.UUID(int=3)}",
+        f"/opportunities/{uuid.UUID(int=4)}",
     ],
 )
 def test_allowed_deep_links(path: str) -> None:
@@ -183,3 +184,53 @@ async def test_enqueue_push_gives_up_on_a_hung_redis(silent_redis_url: str) -> N
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         await hung.aclose()
+
+
+# Transactional pushes (D10.4, #55)
+
+NEW_KEYS = (
+    "push.new_request.title",
+    "push.new_request.body",
+    "push.new_quote.title",
+    "push.new_quote.body",
+)
+
+
+def test_catalog_keys_exist_in_en_and_es_with_only_public_code() -> None:
+    for locale in ("en", "es"):
+        copy = catalog.CATALOG[locale]
+        for key in NEW_KEYS:
+            assert copy[key].strip()
+            assert catalog.placeholders(copy[key]) <= {"public_code"}
+        for kind in ("new_request", "new_quote"):
+            assert catalog.placeholders(copy[f"push.{kind}.title"]) == set()
+            assert catalog.placeholders(copy[f"push.{kind}.body"]) == {"public_code"}
+    params = {"public_code": "JF-000124"}
+    assert catalog.render("en", "push.new_request.body", params) == (
+        "Request JF-000124 is waiting for your quote."
+    )
+    assert catalog.render("en", "push.new_quote.body", params) == (
+        "A pro sent a quote for JF-000124."
+    )
+    # "Presupuesto", as the app's Spanish locale calls a quote.
+    assert catalog.render("es", "push.new_request.body", params) == (
+        "La solicitud JF-000124 espera tu presupuesto."
+    )
+    assert catalog.render("es", "push.new_quote.title", params) == "Tienes un nuevo presupuesto"
+
+
+def test_opportunities_deep_link_allowed_and_others_still_refused() -> None:
+    dispatch_id = uuid.UUID(int=4)
+
+    assert deep_links.is_allowed(f"/opportunities/{dispatch_id}")
+    for path in (
+        f"/opportunities/{dispatch_id}/quote",
+        f"/opportunities/{dispatch_id}?x=1",
+        "/opportunities/not-a-uuid",
+        "/opportunities/",
+        f"/opportunity/{dispatch_id}",
+        f"https://evil.example/opportunities/{dispatch_id}",
+        f"//evil.example/opportunities/{dispatch_id}",
+        f"/pros/me/opportunities/{dispatch_id}",
+    ):
+        assert not deep_links.is_allowed(path), path

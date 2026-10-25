@@ -41,7 +41,7 @@ from app.modules.notifications.push_tasks import (
 )
 from app.modules.notifications.service import InvalidPushError
 from app.modules.users.models import User
-from app.modules.users.types import UserRole
+from app.modules.users.types import UserRole, UserStatus
 from app.observability import JsonFormatter
 from app.worker import WorkerSettings, every
 from tests.conftest import make_settings
@@ -340,6 +340,32 @@ async def test_no_devices_or_no_user_sends_nothing(
     )
 
     assert sender.sent == []
+
+
+async def test_suspended_user_gets_no_push(
+    ctx: dict[str, Any],
+    db_session: AsyncSession,
+    sender: FakeSender,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Checked when the message runs (#55): a user suspended after the event was queued.
+    user = await make_user(db_session, "en", "ExponentPushToken[suspended]")
+    user.status = UserStatus.SUSPENDED
+    await db_session.flush()
+
+    with caplog.at_level(logging.INFO):
+        await push(ctx, user, "a:3")
+
+    assert sender.sent == []
+    [record] = [r for r in caplog.records if r.message == "push_user_not_active"]
+    assert record.__dict__["user_id"] == str(user.id)
+    # It stops there: no "no devices" or "already sent", which would misread the run.
+    assert {r.message for r in caplog.records} & {"push_no_devices", "push_already_sent"} == set()
+    # The same user, active again, is sent a new message: only the status stopped it.
+    user.status = UserStatus.ACTIVE
+    await db_session.flush()
+    await push(ctx, user, "a:4")
+    assert sent_to(sender) == Counter({"ExponentPushToken[suspended]": 1})
 
 
 async def test_logs_carry_ids_and_counts_only(
