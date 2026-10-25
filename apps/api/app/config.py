@@ -213,6 +213,11 @@ class Settings(BaseSettings):
     # counts as final; also the most runs ARQ gives one send_push job.
     push_max_attempts: int = Field(default=5, gt=0)
     push_max_devices_per_user: int = Field(default=10, gt=0)
+    # Quote expiry (D9.4, #51): how often the worker expires quotes past their expires_at (a
+    # cron, in minutes of the hour), and the longest one run may take. Two runs that overlap
+    # are safe (each request is locked), so the timeout only bounds a stuck run.
+    quote_expiry_sweep_minutes: int = Field(default=5, ge=1, le=60)
+    quote_expiry_timeout_seconds: int = Field(default=240, gt=0)
     # Waitlist (D8.4, #46): joins per client IP and per contact (email or phone, hashed), per
     # AUTH_RATE_LIMIT_WINDOW_SECONDS.
     waitlist_join_limit: int = Field(default=5, gt=0)

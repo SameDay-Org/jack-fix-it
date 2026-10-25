@@ -17,6 +17,7 @@ from app.integrations.expo_push import ExpoPushSender
 from app.integrations.storage import S3Storage, StorageNotConfiguredError
 from app.modules.dispatch.tasks import dispatch_request
 from app.modules.notifications.push_tasks import check_push_receipts, send_push
+from app.modules.quotes.tasks import expire_quotes
 from app.modules.requests.tasks import sanitize_task
 from app.observability import configure_logging, init_sentry
 
@@ -87,6 +88,13 @@ class WorkerSettings:
         cron(
             check_push_receipts,
             minute=every(get_settings().push_receipt_check_minutes),
+            keep_result=0,
+            keep_result_forever=False,
+        ),
+        cron(
+            expire_quotes,
+            minute=every(get_settings().quote_expiry_sweep_minutes),
+            timeout=get_settings().quote_expiry_timeout_seconds,
             keep_result=0,
             keep_result_forever=False,
         ),

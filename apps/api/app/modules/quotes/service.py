@@ -17,6 +17,7 @@ Logs carry ids only: never the scope text or the amount.
 
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Final
 
@@ -123,3 +124,50 @@ class QuoteService:
             max_duration is not None and data.duration_minutes > max_duration
         ):
             raise QuoteOutOfBoundsError
+
+
+@dataclass(frozen=True)
+class RequestExpiry:
+    """What expiring one request's due quotes did."""
+
+    expired: tuple[uuid.UUID, ...]  # the quotes this call expired, in id order
+    backed_out: bool  # the request moved from quote_ready back to finding_pro
+
+
+class QuoteExpiryService:
+    """Quote expiry (D9.4, #51 part 1), for the worker's sweep (quotes/tasks.py).
+
+    A quote expires when its expires_at passes without a decision (docs/glossary.md): a pending
+    quote whose expires_at is the sweep's `now` or earlier. Under the request's row lock (the one
+    a quote's submission and acceptance take, so they take turns with the sweep), its due quotes
+    become expired with a conditional update. An accepted quote never does: its payment is
+    pending (#58, #61). Then, if this call expired one, a quote_ready request with no pending or
+    accepted quote left backs out to finding_pro (SYSTEM), in the same transaction. A request in
+    any other status keeps it. The caller owns the transaction.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._quotes = QuoteRepository(session)
+        self._requests = RequestStateMachine(session)
+
+    async def requests_due(
+        self, now: datetime, after: uuid.UUID | None, limit: int
+    ) -> list[uuid.UUID]:
+        """Up to `limit` requests with a quote due at `now`, by id, after `after`."""
+        return await self._quotes.requests_with_due_quotes(now, after, limit)
+
+    async def expire_request(self, request_id: uuid.UUID, now: datetime) -> RequestExpiry:
+        """Expires the request's quotes due at `now` and backs the request out when none is
+        left (see the class doc). Flushes and never commits."""
+        request = await self._requests.lock(request_id)
+        if request is None:  # pragma: no cover - a quote's foreign key keeps its request
+            return RequestExpiry((), backed_out=False)
+        expired = tuple(await self._quotes.expire_due(request_id, now))
+        backed_out = (
+            bool(expired)
+            and request.status is RequestStatus.QUOTE_READY
+            and not await self._quotes.has_live(request_id)
+        )
+        if backed_out:
+            await self._requests.transition(request_id, RequestStatus.FINDING_PRO, SYSTEM)
+        return RequestExpiry(expired, backed_out)
