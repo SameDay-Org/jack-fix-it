@@ -22,6 +22,7 @@ from app.modules.quotes.schemas import CustomerQuote, CustomerQuoteList, QuotePr
 from app.modules.requests.models import RequestStatus
 from app.modules.users.models import User
 from app.modules.users.types import UserRole
+from app.queue import get_job_queue
 from tests.conftest import TEST_JWT_SECRET
 from tests.test_opportunities_api import (
     EMAIL,
@@ -32,7 +33,7 @@ from tests.test_opportunities_api import (
     make_pro,
     make_request,
 )
-from tests.test_requests_api import make_caller
+from tests.test_requests_api import RecordingQueue, make_caller
 
 FORBIDDEN = {"error": {"code": "forbidden", "message": "You do not have access to this resource."}}
 INVALID_TOKEN = {
@@ -64,6 +65,14 @@ class QuotingPro:
     profile_id: uuid.UUID
     user_id: uuid.UUID
     email: str
+
+
+@pytest.fixture(autouse=True)
+def queue(app: FastAPI) -> RecordingQueue:
+    """QuoteService takes the new quote push's queue (#55): recorded, never Redis."""
+    recorder = RecordingQueue()
+    app.dependency_overrides[get_job_queue] = lambda: recorder
+    return recorder
 
 
 @pytest.fixture
