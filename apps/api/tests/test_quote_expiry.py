@@ -204,6 +204,9 @@ async def test_never_expires_accepted_quotes(
     accepted = await add_quote(db_session, request_id, pro(world), past(), QuoteStatus.ACCEPTED)
 
     await sweep(db_session, caplog)
+    # The sweep never picks the request (no pending quote); expiring it directly changes nothing.
+    service = QuoteExpiryService(db_session)
+    assert await service.expire_request(request_id, datetime.now(UTC)) == RequestExpiry((), False)
 
     assert await statuses(db_session, request_id) == {accepted: QuoteStatus.ACCEPTED}
     assert await status_of(db_session, request_id) is RequestStatus.ACCEPTED

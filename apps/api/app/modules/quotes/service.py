@@ -141,9 +141,9 @@ class QuoteExpiryService:
     quote whose expires_at is the sweep's `now` or earlier. Under the request's row lock (the one
     a quote's submission and acceptance take, so they take turns with the sweep), its due quotes
     become expired with a conditional update. An accepted quote never does: its payment is
-    pending (#58, #61). Then, if this call expired one, a quote_ready request with no pending or
-    accepted quote left backs out to finding_pro (SYSTEM), in the same transaction. A request in
-    any other status keeps it. The caller owns the transaction.
+    pending (#58, #61). Then a quote_ready request with no pending or accepted quote left backs
+    out to finding_pro (SYSTEM), in the same transaction; a run that comes second finds it in
+    finding_pro already. A request in any other status keeps it. The caller owns the transaction.
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -163,10 +163,8 @@ class QuoteExpiryService:
         if request is None:  # pragma: no cover - a quote's foreign key keeps its request
             return RequestExpiry((), backed_out=False)
         expired = tuple(await self._quotes.expire_due(request_id, now))
-        backed_out = (
-            bool(expired)
-            and request.status is RequestStatus.QUOTE_READY
-            and not await self._quotes.has_live(request_id)
+        backed_out = request.status is RequestStatus.QUOTE_READY and not (
+            await self._quotes.has_live(request_id)
         )
         if backed_out:
             await self._requests.transition(request_id, RequestStatus.FINDING_PRO, SYSTEM)
