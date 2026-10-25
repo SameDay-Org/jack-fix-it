@@ -1649,7 +1649,7 @@
           "pros"
         ],
         "summary": "Open one of my opportunities",
-        "description": "The full request, without its photos for now (sanitized copies come with #173). The\nfirst open records that the pro saw it (viewed, viewed_at); opening it again changes\nnothing.",
+        "description": "The full request, with its photos and videos as privacy-safe copies (no location or\nother metadata) behind short-lived signed URLs, and how many are still being prepared. The\nfirst open records that the pro saw it (viewed, viewed_at); opening it again changes\nnothing.",
         "operationId": "open_opportunity_v1_pros_me_opportunities__dispatch_id__get",
         "security": [
           {
@@ -3148,6 +3148,19 @@
             "type": "boolean",
             "title": "Text Redacted",
             "description": "True when contact details were masked in the description or the answers (shown as \u2022\u2022\u2022): the customer is reached through the app."
+          },
+          "media": {
+            "items": {
+              "$ref": "#/components/schemas/OpportunityMedia"
+            },
+            "type": "array",
+            "title": "Media",
+            "description": "The photos and videos ready to show, oldest first."
+          },
+          "media_pending": {
+            "type": "integer",
+            "title": "Media Pending",
+            "description": "How many more photos and videos are still being prepared."
           }
         },
         "additionalProperties": false,
@@ -3162,7 +3175,9 @@
           "preferred_date",
           "sent_at",
           "viewed_at",
-          "text_redacted"
+          "text_redacted",
+          "media",
+          "media_pending"
         ],
         "title": "OpportunityDetail"
       },
@@ -3194,6 +3209,38 @@
         ],
         "title": "OpportunityLocation",
         "description": "Where the job is, as much as a pro may see before it is theirs: ZIP and city until the\njob is paid (Cesar, 2026-10-22, #49). Any wider rule changes this schema only."
+      },
+      "OpportunityMedia": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/RequestMediaKind"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type",
+            "description": "The copy's media type, e.g. image/jpeg."
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "Presigned GET URL."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "content_type",
+          "url",
+          "expires_at"
+        ],
+        "title": "OpportunityMedia",
+        "description": "A photo or video of the request: its privacy-safe copy (#173), without location or other\nmetadata, under a key that names no one."
       },
       "OpportunityPage": {
         "properties": {

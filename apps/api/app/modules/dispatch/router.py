@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_app_settings
 from app.db import get_session
 from app.errors import ErrorResponse
+from app.integrations.storage import Storage, get_storage
 from app.modules.auth.permissions import ProUser
 from app.modules.dispatch.opportunities import OpportunityConfig, OpportunityService
 from app.modules.dispatch.schemas import OpportunityDetail, OpportunityPage
@@ -20,9 +21,10 @@ def _error(description: str) -> dict[str, Any]:
 
 def get_opportunity_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    storage: Annotated[Storage, Depends(get_storage)],
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> OpportunityService:
-    return OpportunityService(session, OpportunityConfig.from_settings(settings))
+    return OpportunityService(session, storage, OpportunityConfig.from_settings(settings))
 
 
 _ACCESS: dict[int | str, dict[str, Any]] = {
@@ -71,7 +73,8 @@ async def open_opportunity(
     user: ProUser,
     opportunities: Annotated[OpportunityService, Depends(get_opportunity_service)],
 ) -> OpportunityDetail:
-    """The full request, without its photos for now (sanitized copies come with #173). The
+    """The full request, with its photos and videos as privacy-safe copies (no location or
+    other metadata) behind short-lived signed URLs, and how many are still being prepared. The
     first open records that the pro saw it (viewed, viewed_at); opening it again changes
     nothing."""
     return await opportunities.open_own(user, dispatch_id)

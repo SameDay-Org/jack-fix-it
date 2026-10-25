@@ -69,7 +69,8 @@ async def enqueue_push(
     """Queues a push to every device of the user. Raises InvalidPushError before queuing.
 
     False when a job for this message id is already queued or running: that job sends it.
-    Waits at most `timeout_seconds` (PUSH_SEND_TIMEOUT_SECONDS) on Redis, then raises
+    Waits at most `timeout_seconds` on Redis (PUSH_SEND_TIMEOUT_SECONDS in the worker's resends,
+    JOB_ENQUEUE_TIMEOUT_SECONDS for the events in notifications.events), then raises
     TimeoutError; a Redis failure raises RedisError or OSError. The caller decides whether the
     push may be lost: call it after the commit of the change it announces, and log a failure
     (ids only) rather than fail a request that already did its work.
