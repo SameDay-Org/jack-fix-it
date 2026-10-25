@@ -3,7 +3,8 @@
 The API's Redis client is ARQ's own `ArqRedis` (app/main.py), so a route can queue a job; in the
 worker, ARQ's ctx["redis"] is the same kind of pool. A job id makes a second enqueue of the same
 work a no-op while the first is queued, running or kept. Every enqueue is bounded by the
-caller's timeout (JOB_ENQUEUE_TIMEOUT_SECONDS for dispatch, PUSH_SEND_TIMEOUT_SECONDS for pushes).
+caller's timeout: JOB_ENQUEUE_TIMEOUT_SECONDS for dispatch and the event pushes
+(notifications.events, #55), PUSH_SEND_TIMEOUT_SECONDS for the push worker's own resends.
 """
 
 import asyncio

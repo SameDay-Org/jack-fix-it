@@ -100,5 +100,52 @@
     "headline": "Whatever happens at home, we {{word}} it.",
     "words": ["fix", "clean", "paint", "mow", "move"],
     "skip": "Skip intro"
+  },
+  "media": {
+    "add": "Add photos",
+    "addMore": "Add more",
+    "emptyTitle": "No photos yet",
+    "emptyBodyPhotos": "Add up to {{max}} photos.",
+    "emptyBodyMedia": "Add up to {{max}} photos or videos.",
+    "count": "{{count}} of {{max}} added",
+    "limitReached": "That's the most you can add.",
+    "photo": "Photo {{number}}",
+    "video": "Video {{number}}",
+    "status": {
+      "preparing": "Preparing…",
+      "uploading": "Uploading… {{percent}}%",
+      "done": "Uploaded",
+      "failed": "Upload failed. Check your connection and try again.",
+      "rejected": "This file can't be uploaded.",
+      "tooLarge": "This video is over {{size}} MB.",
+      "sizeUnknown": "We couldn't check this video's size, so it can't be uploaded. Try another video.",
+      "unsupported": "This video format isn't supported."
+    },
+    "retry": "Retry",
+    "remove": "Remove",
+    "source": {
+      "title": "Add photos",
+      "body": "Use the camera, or pick from the photos on this phone.",
+      "camera": "Take a photo",
+      "library": "Choose from library",
+      "titleMedia": "Add photos or videos",
+      "bodyMedia": "Use the camera, or pick photos and videos from this phone."
+    },
+    "permission": {
+      "cameraTitle": "Camera access is off",
+      "cameraBody": "To take photos here, allow camera access in Settings.",
+      "openSettings": "Open settings",
+      "notNow": "Not now"
+    },
+    "addMedia": "Add photos or videos",
+    "emptyTitleMedia": "No photos or videos yet",
+    "pickFailed": "Couldn't open the camera or your photos. Try again.",
+    "videoTile": "Video",
+    "itemRetry": "Retry {{name}}",
+    "itemRemove": "Remove {{name}}"
+  },
+  "permissions": {
+    "camera": "Jack uses the camera to take photos of what needs fixing.",
+    "photos": "Jack uses the photos you choose to show what needs fixing."
   }
 }

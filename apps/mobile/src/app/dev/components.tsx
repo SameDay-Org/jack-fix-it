@@ -165,6 +165,14 @@ function Gallery() {
           />
         </Section>
 
+        <Section title="Media upload">
+          <Button
+            label="Open the media demo"
+            variant="secondary"
+            onPress={() => router.push("/dev/media")}
+          />
+        </Section>
+
         <Section title="Glass">
           <GlassSurface tone="light" shape="xl" className="gap-1 p-4">
             <Text className="text-headline text-navy-900">Light tone, xl</Text>
