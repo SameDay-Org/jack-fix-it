@@ -12,8 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.modules.users.models import User
-from app.modules.users.names import PersonName, public_name
+from app.modules.users.names import PersonName, public_name, safe_public_name
 from app.observability import JsonFormatter
+from app.redaction import KnownValues
 from tests.test_auth_api import EMAIL, VALIDATION_ERROR, get_user, register
 from tests.test_create_staff_user import PASSWORD as STAFF_PASSWORD
 from tests.test_create_staff_user import STORED_EMAIL as STAFF_EMAIL
@@ -108,6 +109,48 @@ def test_public_name_initial_and_none_cases() -> None:
     assert public_name("Ana", "Ñúñez") == "Ana Ñ."
     for first, last in (("María", None), (None, "Pérez"), (None, None)):
         assert public_name(first, last) is None
+
+
+# What PersonName lets through yet names a contact (Vault, #194).
+CONTACT_NAMES = (
+    "repair.example.com",
+    "contact at example dot com",
+    "three zero five five five five zero one nine nine",
+)
+OWN = KnownValues(emails=("juan.perez@x.com",), phones=("+13055550199",))
+
+
+def test_safe_public_name_keeps_ordinary_names() -> None:
+    for first, last, shown in (
+        ("María", "Pérez", "María P."),
+        ("Jean-Luc", "de la Cruz", "Jean-Luc D."),
+        ("Ana", "O'Neil", "Ana O."),
+        (
+            "D\N{RIGHT SINGLE QUOTATION MARK}Angelo",
+            "Ñúñez",
+            "D\N{RIGHT SINGLE QUOTATION MARK}Angelo Ñ.",
+        ),
+        ("J.R.", "Smith", "J.R. S."),
+    ):
+        assert safe_public_name(first, last, OWN) == shown
+    for given, family in (("María", None), (None, "Pérez"), (None, None)):
+        assert safe_public_name(given, family, OWN) is None
+
+
+@pytest.mark.parametrize("first", CONTACT_NAMES)
+def test_safe_public_name_withholds_a_contact_pattern(first: str) -> None:
+    """Withheld whole, never partly masked; with or without the account's own contacts."""
+    assert safe_public_name(first, "Perez", OWN) is None
+    assert safe_public_name(first, "Perez", KnownValues()) is None
+
+
+def test_safe_public_name_withholds_the_accounts_own_email_and_phone() -> None:
+    """A handle-shaped local part and an odd phone grouping are no pattern (app.redaction known
+    gaps): only the account's own values withhold them. A stored name may predate PersonName,
+    hence the digits."""
+    for first in ("juan.perez", "30 55 55 01 99"):
+        assert safe_public_name(first, "Gómez", OWN) is None
+        assert safe_public_name(first, "Gómez", KnownValues()) == f"{first} G."
 
 
 # Register

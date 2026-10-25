@@ -1831,6 +1831,85 @@
         }
       }
     },
+    "/v1/requests/{request_id}/quotes": {
+      "get": {
+        "tags": [
+          "quotes"
+        ],
+        "summary": "Compare the quotes on one of my service requests",
+        "description": "The quotes the customer can choose from: the pending ones not yet expired, and the\naccepted one while the payment is pending. Empty until the request is Quote Ready, and\nonce it is closed. Each shows the price, what it includes (contact details masked), the\nduration, the proposed start, when it expires, and the pro's public card.",
+        "operationId": "list_request_quotes_v1_requests__request_id__quotes_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerQuoteList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers have service requests.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no request of the caller with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/devices": {
       "put": {
         "tags": [
@@ -2393,6 +2472,81 @@
           "zips"
         ],
         "title": "CityOut"
+      },
+      "CustomerQuote": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "amount_cents": {
+            "type": "integer",
+            "title": "Amount Cents"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "duration_minutes": {
+            "type": "integer",
+            "title": "Duration Minutes"
+          },
+          "proposed_start_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Proposed Start At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/QuoteStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "pro": {
+            "$ref": "#/components/schemas/QuotePro"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "amount_cents",
+          "scope",
+          "duration_minutes",
+          "proposed_start_at",
+          "expires_at",
+          "status",
+          "created_at",
+          "pro"
+        ],
+        "title": "CustomerQuote",
+        "description": "A quote on the customer's request (#188). `scope` arrives with contact details masked\n(app.redaction): the pro's own email and phone, then every contact pattern."
+      },
+      "CustomerQuoteList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CustomerQuote"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "The accepted quote, if any, and the pending ones not yet expired: cheapest first, then oldest."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "CustomerQuoteList"
       },
       "DependencyChecks": {
         "properties": {
@@ -3544,6 +3698,76 @@
           "created_at"
         ],
         "title": "QuoteOut"
+      },
+      "QuotePro": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id",
+            "description": "The pro's profile id."
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "The first name and the last name's initial, e.g. \"Mar\u00eda P.\"; null when the pro has not set both names, or when the name shows a contact detail (an email, a phone, a domain...): withheld before payment, never partly masked."
+          },
+          "rating_avg": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating Avg",
+            "description": "The average rating as a decimal string; null before the first review.",
+            "examples": [
+              "4.80"
+            ]
+          },
+          "jobs_count": {
+            "type": "integer",
+            "title": "Jobs Count",
+            "description": "Jobs completed on the platform."
+          },
+          "years_of_experience": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Years Of Experience"
+          },
+          "verified": {
+            "type": "boolean",
+            "title": "Verified",
+            "description": "The platform approved the pro's verification."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "rating_avg",
+          "jobs_count",
+          "years_of_experience",
+          "verified"
+        ],
+        "title": "QuotePro",
+        "description": "The pro behind a quote, as the customer sees them before paying: never a contact, a\ndocument, the photo or an internal id (the account, Stripe)."
       },
       "QuoteStatus": {
         "type": "string",
