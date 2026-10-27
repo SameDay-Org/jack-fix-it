@@ -10,18 +10,20 @@ export const METRICS = {
   insets: { top: 24, right: 0, bottom: 16, left: 0 },
 };
 
+/** The tree `renderInSafeArea` renders: also what a test passes to `rerender`. */
+export const inSafeArea = (ui: ReactElement, handoff: PanelHandoff) =>
+  createElement(
+    SafeAreaProvider,
+    { initialMetrics: METRICS },
+    createElement(PanelHandoffProvider, { value: handoff }, ui),
+  );
+
 /**
  * Renders a screen under a SafeAreaProvider (the test file mocks the safe-area module itself) and
  * the auth flow's panel hand-off: a fresh one, or the test's own to drive and read.
  */
 export const renderInSafeArea = (ui: ReactElement, handoff: PanelHandoff = createPanelHandoff()) =>
-  render(
-    createElement(
-      SafeAreaProvider,
-      { initialMetrics: METRICS },
-      createElement(PanelHandoffProvider, { value: handoff }, ui),
-    ),
-  );
+  render(inSafeArea(ui, handoff));
 
 /** Every field of the store when nobody is signed in. */
 export const SIGNED_OUT = {
