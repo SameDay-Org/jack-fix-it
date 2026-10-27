@@ -46,6 +46,13 @@ describe("Button", () => {
     expect(screen.getByText("Continue")).toBeTruthy();
   });
 
+  it("a fuller accessible name replaces the label for assistive technology only", async () => {
+    await render(<Button label="Remove" accessibilityLabel="Remove Photo 2" loading />);
+
+    expect(button("Remove Photo 2, Loading")).toBeTruthy();
+    expect(screen.getByText("Remove")).toBeTruthy();
+  });
+
   it("primary uses navy label on green and white label when pressed", async () => {
     await render(<Button label="Save" onPress={jest.fn()} />);
     expect(button("Save").props.className).toContain("bg-green-500");

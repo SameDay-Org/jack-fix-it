@@ -1,6 +1,7 @@
 """Dispatch (D9.1, #48): eligibility, ranking, N, the move to finding_pro, re-runs. Real DB."""
 
 import asyncio
+import json
 import logging
 import secrets
 import uuid
@@ -12,7 +13,9 @@ from decimal import Decimal
 
 import pytest
 from arq.worker import Function
+from redis.exceptions import RedisError
 from sqlalchemy import URL, delete, func, select, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.modules.addresses.models import Address
@@ -30,8 +33,9 @@ from app.modules.users.models import User
 from app.modules.users.types import UserRole, UserStatus
 from app.observability import JsonFormatter
 from app.worker import WorkerSettings
-from tests.conftest import backend_pid, wait_until_blocked
+from tests.conftest import backend_pid, make_settings, wait_until_blocked
 from tests.helpers import as_status_writer
+from tests.test_requests_api import ENQUEUE_TIMEOUT, EVENTS, RecordingQueue
 
 NOW = datetime.now(UTC)
 
@@ -201,7 +205,7 @@ async def test_eligible_requires_approved_payouts_active_category_and_active_zip
     await set_max_pros(db_session, 50)
     request_id = await make_request(db_session, world)
 
-    outcome = await DispatchService(db_session).dispatch_request(request_id)
+    outcome = (await DispatchService(db_session).dispatch(request_id)).outcome
 
     assert outcome is DispatchOutcome.SENT
     assert await dispatched_to(db_session, request_id) == {eligible}
@@ -223,7 +227,7 @@ async def test_a_request_in_an_inactive_area_goes_to_nobody(
     await db_session.flush()
     request_id = await make_request(db_session, replace(world, address_id=address.id))
 
-    outcome = await DispatchService(db_session).dispatch_request(request_id)
+    outcome = (await DispatchService(db_session).dispatch(request_id)).outcome
 
     assert outcome is DispatchOutcome.NO_ELIGIBLE_PROS
     assert await dispatched_to(db_session, request_id) == set()
@@ -290,7 +294,7 @@ async def test_ranking_reads_the_dispatch_history(db_session: AsyncSession, worl
     await set_max_pros(db_session, 4)
     request_id = await make_request(db_session, world)
 
-    await DispatchService(db_session).dispatch_request(request_id)
+    await DispatchService(db_session).dispatch(request_id)
 
     # Rated first, then the fast and the slow answerers, then the one never sent a request.
     assert await dispatched_to(db_session, request_id) == {rated, fast, slow, fresh}
@@ -303,7 +307,7 @@ async def test_caps_at_n_from_settings(db_session: AsyncSession, world: World) -
     await set_max_pros(db_session, 2)
     request_id = await make_request(db_session, world)
 
-    await DispatchService(db_session).dispatch_request(request_id)
+    await DispatchService(db_session).dispatch(request_id)
 
     assert await dispatched_to(db_session, request_id) == {best, second}
 
@@ -318,7 +322,7 @@ async def test_moves_to_finding_pro_in_same_transaction_as_rows(
     request_id = await make_request(db_session, world, status=RequestStatus.REVIEWING)
 
     savepoint = await db_session.begin_nested()
-    assert await DispatchService(db_session).dispatch_request(request_id) is DispatchOutcome.SENT
+    assert (await DispatchService(db_session).dispatch(request_id)).outcome is DispatchOutcome.SENT
     assert await dispatched_to(db_session, request_id) == {pro}
     assert await status_of(db_session, request_id) is RequestStatus.FINDING_PRO
     await savepoint.rollback()  # the caller's transaction fails: both go
@@ -334,7 +338,7 @@ async def test_moves_to_finding_pro_in_same_transaction_as_rows(
     monkeypatch.setattr(RequestStateMachine, "transition", refuse)
     savepoint = await db_session.begin_nested()
     with pytest.raises(RuntimeError):
-        await DispatchService(db_session).dispatch_request(request_id)
+        await DispatchService(db_session).dispatch(request_id)
     await savepoint.rollback()
     assert await dispatched_to(db_session, request_id) == set()
 
@@ -345,16 +349,15 @@ async def test_uncategorized_goes_to_reviewing_without_dispatch(
     await make_pro(db_session, world)
     request_id = await make_request(db_session, world, categorized=False)
 
-    outcome = await DispatchService(db_session).dispatch_request(request_id)
+    outcome = (await DispatchService(db_session).dispatch(request_id)).outcome
 
     assert outcome is DispatchOutcome.TO_REVIEW
     assert await status_of(db_session, request_id) is RequestStatus.REVIEWING
     assert await dispatched_to(db_session, request_id) == set()
     # Still uncategorized in reviewing: the BDC classifies it first, nothing happens.
     assert (
-        await DispatchService(db_session).dispatch_request(request_id)
-        is DispatchOutcome.NOT_DISPATCHABLE
-    )
+        await DispatchService(db_session).dispatch(request_id)
+    ).outcome is DispatchOutcome.NOT_DISPATCHABLE
 
 
 async def test_no_eligible_pros_leaves_status_and_logs(
@@ -364,7 +367,7 @@ async def test_no_eligible_pros_leaves_status_and_logs(
     request_id = await make_request(db_session, world)
 
     with caplog.at_level(logging.INFO):
-        outcome = await DispatchService(db_session).dispatch_request(request_id)
+        outcome = (await DispatchService(db_session).dispatch(request_id)).outcome
 
     assert outcome is DispatchOutcome.NO_ELIGIBLE_PROS
     assert await status_of(db_session, request_id) is RequestStatus.RECEIVED
@@ -390,7 +393,7 @@ async def test_non_dispatchable_status_is_noop(
     await make_pro(db_session, world)
     request_id = await make_request(db_session, world, status=status)
 
-    outcome = await DispatchService(db_session).dispatch_request(request_id)
+    outcome = (await DispatchService(db_session).dispatch(request_id)).outcome
 
     assert outcome is DispatchOutcome.NOT_DISPATCHABLE
     assert await status_of(db_session, request_id) is status
@@ -398,7 +401,7 @@ async def test_non_dispatchable_status_is_noop(
 
 
 async def test_unknown_request_is_noop(db_session: AsyncSession) -> None:
-    outcome = await DispatchService(db_session).dispatch_request(uuid.uuid4())
+    outcome = (await DispatchService(db_session).dispatch(uuid.uuid4())).outcome
 
     assert outcome is DispatchOutcome.UNKNOWN_REQUEST
 
@@ -410,7 +413,7 @@ async def test_logs_carry_ids_only(
     request_id = await make_request(db_session, world)
 
     with caplog.at_level(logging.DEBUG):
-        await DispatchService(db_session).dispatch_request(request_id)
+        await DispatchService(db_session).dispatch(request_id)
 
     output = "\n".join(JsonFormatter().format(r) for r in caplog.records)
     for secret in ("probe-description", "1 Main St", world.zip_code, "@x.com"):
@@ -427,9 +430,9 @@ async def test_rerun_is_noop(db_session: AsyncSession, world: World) -> None:
     pro = await make_pro(db_session, world)
     request_id = await make_request(db_session, world)
 
-    first = await DispatchService(db_session).dispatch_request(request_id)
+    first = (await DispatchService(db_session).dispatch(request_id)).outcome
     await make_pro(db_session, world)  # a new eligible pro appears
-    second = await DispatchService(db_session).dispatch_request(request_id)
+    second = (await DispatchService(db_session).dispatch(request_id)).outcome
 
     assert (first, second) == (DispatchOutcome.SENT, DispatchOutcome.ALREADY_DISPATCHED)
     assert await dispatched_to(db_session, request_id) == {pro}
@@ -485,15 +488,14 @@ async def test_concurrent_runs_insert_once(committed: Committed) -> None:
 
         # The first run locks the request and holds its transaction open...
         assert (
-            await DispatchService(first).dispatch_request(committed.request_id)
-            is DispatchOutcome.SENT
-        )
+            await DispatchService(first).dispatch(committed.request_id)
+        ).outcome is DispatchOutcome.SENT
         # ...while the second waits on that lock, as Postgres reports; then the first commits.
-        rerun = asyncio.create_task(DispatchService(second).dispatch_request(committed.request_id))
+        rerun = asyncio.create_task(DispatchService(second).dispatch(committed.request_id))
         await wait_until_blocked(sessions, waiter=second_pid, holder=first_pid)
         await first.commit()
 
-        assert await rerun is DispatchOutcome.ALREADY_DISPATCHED
+        assert (await rerun).outcome is DispatchOutcome.ALREADY_DISPATCHED
         await second.commit()
 
     async with sessions() as check:
@@ -523,7 +525,12 @@ async def test_the_task_dispatches_in_its_own_transaction(
     pro = await make_pro(db_session, world)
     request_id = await make_request(db_session, world)
 
-    outcome = await dispatch_request({"session_factory": sessions_of(db_session)}, str(request_id))
+    ctx = {
+        "session_factory": sessions_of(db_session),
+        "redis": RecordingQueue(),
+        "settings": make_settings(),
+    }
+    outcome = await dispatch_request(ctx, str(request_id))
 
     assert outcome == "sent"
     assert await dispatched_to(db_session, request_id) == {pro}
@@ -532,3 +539,147 @@ async def test_the_task_dispatches_in_its_own_transaction(
 def test_worker_registers_the_task() -> None:
     coroutines = [f.coroutine for f in WorkerSettings.functions if isinstance(f, Function)]
     assert dispatch_request in coroutines
+
+
+# New request pushes (D10.4, #55)
+
+LOG_BASE = {"timestamp", "level", "logger", "message", "request_id"}
+
+
+def record_commits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each commit appends to EVENTS, which RecordingQueue reads at every enqueue."""
+    EVENTS.clear()
+    commit = AsyncSession.commit
+
+    async def recorded(self: AsyncSession) -> None:
+        await commit(self)
+        EVENTS.append("commit")
+
+    monkeypatch.setattr(AsyncSession, "commit", recorded)
+
+
+def task_ctx(session: AsyncSession, queue: RecordingQueue) -> dict[str, object]:
+    return {
+        "session_factory": sessions_of(session),
+        "redis": queue,
+        "settings": make_settings(job_enqueue_timeout_seconds=ENQUEUE_TIMEOUT),
+    }
+
+
+async def public_code_of(session: AsyncSession, request_id: uuid.UUID) -> str:
+    code = await session.scalar(
+        select(ServiceRequest.public_code).where(ServiceRequest.id == request_id)
+    )
+    assert code is not None
+    return code
+
+
+async def test_dispatch_enqueues_one_push_per_dispatched_pro_after_commit(
+    db_session: AsyncSession, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for _ in range(2):
+        await make_pro(db_session, world)
+    request_id = await make_request(db_session, world)
+    code = await public_code_of(db_session, request_id)
+    queue = RecordingQueue()
+    record_commits(monkeypatch)
+
+    assert await dispatch_request(task_ctx(db_session, queue), str(request_id)) == "sent"
+
+    rows = (
+        await db_session.execute(
+            select(RequestDispatch.id, ProProfile.user_id)
+            .join(ProProfile, ProProfile.id == RequestDispatch.pro_id)
+            .where(RequestDispatch.request_id == request_id)
+        )
+    ).all()
+    assert len(rows) == 2
+    assert queue.jobs == {
+        f"push:dispatch:{dispatch_id}": (
+            "send_push",
+            (
+                str(user_id),
+                f"dispatch:{dispatch_id}",
+                "push.new_request.title",
+                "push.new_request.body",
+                {"public_code": code},
+                f"/opportunities/{dispatch_id}",
+            ),
+        )
+        for dispatch_id, user_id in rows
+    }
+    # Both queued after the dispatch transaction's one commit.
+    assert queue.before == ["commit", "commit"]
+
+
+async def test_dispatch_that_does_not_commit_enqueues_nothing(
+    db_session: AsyncSession, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await make_pro(db_session, world)
+    request_id = await make_request(db_session, world)
+    queue = RecordingQueue()
+
+    async def failing_commit(self: AsyncSession) -> None:
+        raise SQLAlchemyError("synthetic commit failure")
+
+    monkeypatch.setattr(AsyncSession, "commit", failing_commit)
+
+    with pytest.raises(SQLAlchemyError):
+        await dispatch_request(task_ctx(db_session, queue), str(request_id))
+
+    assert queue.jobs == {}
+    assert queue.before == []
+
+
+async def test_dispatch_rerun_does_not_enqueue_again(
+    db_session: AsyncSession, world: World
+) -> None:
+    await make_pro(db_session, world)
+    request_id = await make_request(db_session, world)
+    queue = RecordingQueue()
+    ctx = task_ctx(db_session, queue)
+
+    assert await dispatch_request(ctx, str(request_id)) == "sent"
+    first = dict(queue.jobs)
+    assert await dispatch_request(ctx, str(request_id)) == "already_dispatched"
+
+    assert queue.jobs == first
+    assert len(queue.before) == 1  # the re-run queued nothing at all
+    # The message id is the dispatch's own, so even a repeated announcement is one job.
+    [job_id] = first
+    assert job_id.startswith("push:dispatch:")
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [RecordingQueue(failure=RedisError("down")), RecordingQueue(hang=True)],
+    ids=["redis_error", "timeout"],
+)
+async def test_enqueue_failure_or_timeout_does_not_fail_dispatch(
+    db_session: AsyncSession,
+    world: World,
+    broken: RecordingQueue,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    pro = await make_pro(db_session, world)
+    request_id = await make_request(db_session, world)
+    user_id = await db_session.scalar(select(ProProfile.user_id).where(ProProfile.id == pro))
+    code = await public_code_of(db_session, request_id)
+
+    with caplog.at_level(logging.DEBUG):
+        outcome = await asyncio.wait_for(
+            dispatch_request(task_ctx(db_session, broken), str(request_id)), timeout=5
+        )
+
+    assert outcome == "sent"
+    assert await dispatched_to(db_session, request_id) == {pro}
+    assert await status_of(db_session, request_id) is RequestStatus.FINDING_PRO
+    # Logged with ids only: the user and the message (the event's kind and id).
+    [record] = [r for r in caplog.records if r.message == "push_enqueue_failed"]
+    payload = json.loads(JsonFormatter().format(record))
+    assert set(payload) - LOG_BASE == {"user_id", "message_id"}
+    assert payload["user_id"] == str(user_id)
+    assert payload["message_id"].startswith("dispatch:")
+    output = "\n".join(JsonFormatter().format(r) for r in caplog.records)
+    for secret in (code, "probe-description", "@x.com", world.zip_code):
+        assert secret not in output

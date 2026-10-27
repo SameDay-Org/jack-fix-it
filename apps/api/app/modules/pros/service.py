@@ -52,7 +52,8 @@ class ProCard:
 
     pro_id: uuid.UUID
     user_id: uuid.UUID
-    name: str | None  # "María P." (users.names.public_name); None when a name is missing
+    # "María P." (users.names.safe_public_name); None when a name is missing or shows a contact
+    name: str | None
     rating_avg: Decimal | None  # NULL until the first review
     jobs_count: int
     years_of_experience: int | None

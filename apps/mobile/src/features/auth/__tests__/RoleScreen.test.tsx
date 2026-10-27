@@ -17,7 +17,7 @@ import { tokens } from "@/theme";
 
 import { createPanelHandoff, type PanelHandoff } from "../panelHandoff";
 import { RoleScreen } from "../RoleScreen";
-import { renderInSafeArea } from "./helpers";
+import { inSafeArea, renderInSafeArea } from "./helpers";
 
 jest.mock("expo-router", () => ({
   router: { push: jest.fn(), replace: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) },
@@ -324,6 +324,10 @@ describe("RoleScreen", () => {
       await advance(transitionMs / 2);
       expect(rootOpacity()).toBeLessThan(1);
       expect(backdrop()).toContain("bg-gray-50");
+      // Faded out, iOS still shows its own card (the page's color): the page's bar.
+      await advance(transitionMs);
+      expect(rootOpacity()).toBe(0);
+      expect(statusBarStyle()).toBe("dark");
     });
 
     it("a back pressed during the rise is not undone when the panel settles", async () => {
@@ -417,6 +421,290 @@ describe("RoleScreen", () => {
       expect(backdrop()).toContain("bg-gray-50");
       await act(async () => fireEvent.press(screen.getByRole("button", { name: "Back" })));
       expect(router.back).toHaveBeenCalledTimes(1); // at once
+    });
+
+    // #193: nothing may leave the focused screen an invisible page on top, taking Welcome's taps.
+    describe("never an invisible page on top (#193)", () => {
+      const { handoffMaxMs } = tokens.motion;
+      const pointerEvents = () => screen.getByTestId("role-root").props.pointerEvents as string;
+      type Riding = { opacity: number; transform: { translateY: number }[] };
+      const root = () =>
+        (screen.getByTestId("role-root").props.jestAnimatedStyle as { value: Riding }).value;
+      beforeEach(() => {
+        jest.replaceProperty(Platform, "OS", "android");
+        handoff.travel.value = 464;
+        handoff.progress.value = 1;
+      });
+
+      it("Android: the panel lowered under it (a late push), it stops riding and shows on its own", async () => {
+        await renderInSafeArea(<RoleScreen />, handoff);
+        await enterFully();
+        expect(root().opacity).toBe(1);
+
+        // Welcome took the queued push for one that did nothing and lowered the panel: the
+        // phase goes first, and the page, still on the covering panel, shows no dip.
+        await act(async () => handoff.store.setState({ phase: "idle", bar: "hero" }));
+        expect(root().opacity).toBe(1);
+        await act(async () => {
+          handoff.progress.value = 0;
+        });
+        await advance(transitionMs * 2);
+        expect(root().opacity).toBe(1);
+        expect(root().transform[0].translateY).toBe(0);
+        expect(pointerEvents()).toBe("auto");
+      });
+
+      it("Android: pushed after the panel went back down, it fades in on its own", async () => {
+        handoff.progress.value = 0;
+        handoff.store.setState({ phase: "idle", bar: "hero" });
+        await renderInSafeArea(<RoleScreen />, handoff);
+        await enterFully();
+        expect(root().opacity).toBe(1);
+        expect(root().transform[0].translateY).toBe(0);
+        expect(pointerEvents()).toBe("auto");
+      });
+
+      it.each(["android", "ios"] as const)(
+        "%s: focused, it is in within motion.handoffMaxMs, whatever the panel and the stack report",
+        async (os) => {
+          jest.replaceProperty(Platform, "OS", os);
+          handoff.progress.value = 0.3; // a rise that never finishes
+          handoff.store.setState({ phase: "rising", bar: "hero" });
+          await renderInSafeArea(<RoleScreen />, handoff); // and the stack never says it is shown
+          await advance(handoffMaxMs - 1);
+          expect(root().opacity).toBe(0);
+          expect(pointerEvents()).toBe("none");
+          expect(statusBarStyle()).toBe("light"); // the hero's icons: it still shows at the top
+
+          await advance(1 + transitionMs * 2);
+          expect(root().opacity).toBe(1);
+          expect(pointerEvents()).toBe("auto");
+          // The page covers the bar now, though the phase still says the panel is rising.
+          expect(statusBarStyle()).toBe("dark");
+        },
+      );
+
+      it("Android: entered on a rise that then stalls, it is in on its own within motion.handoffMaxMs", async () => {
+        jest.mocked(moveAccessibilityFocus).mockClear();
+        handoff.progress.value = 0.3; // under Welcome's fading actions: nothing of it shows
+        handoff.store.setState({ phase: "rising", bar: "hero" });
+        await renderInSafeArea(<RoleScreen />, handoff);
+        await layOut();
+        await appear(); // its content fades in on the panel, which then never rises further
+        await advance(handoffMaxMs - 1);
+        expect(root().opacity).toBe(0);
+        expect(pointerEvents()).toBe("none"); // riding a rising panel: no taps while invisible
+
+        await advance(1 + transitionMs * 2);
+        expect(root().opacity).toBe(1);
+        expect(root().transform[0].translateY).toBe(0);
+        expect(pointerEvents()).toBe("auto");
+        expect(statusBarStyle()).toBe("dark");
+        expect(moveAccessibilityFocus).toHaveBeenCalledTimes(1); // entered and announced once
+      });
+
+      it("Android: in on a panel still rising when the bound expires, it glides off it (no jump)", async () => {
+        const TRAVEL = 464;
+        handoff.progress.value = 0.75; // a slow rise, its content half shown
+        handoff.store.setState({ phase: "rising", bar: "hero" });
+        await renderInSafeArea(<RoleScreen />, handoff);
+        await layOut();
+        await appear();
+        await advance(handoffMaxMs);
+        expect(root().opacity).toBeCloseTo(0.5, 1); // where the panel had it: no jump
+        expect(root().transform[0].translateY).toBeCloseTo(TRAVEL * 0.25, 0);
+
+        await advance(transitionMs / 2);
+        expect(root().opacity).toBeGreaterThan(0.5);
+        expect(root().transform[0].translateY).toBeGreaterThan(0);
+        expect(root().transform[0].translateY).toBeLessThan(TRAVEL * 0.25);
+        await advance(transitionMs);
+        expect(root().opacity).toBe(1);
+        expect(root().transform[0].translateY).toBe(0);
+        expect(statusBarStyle()).toBe("dark");
+      });
+
+      it("Android: the panel going down under content half shown, it glides off it (no dip)", async () => {
+        handoff.progress.value = 0.75;
+        handoff.store.setState({ phase: "rising", bar: "hero" });
+        await renderInSafeArea(<RoleScreen />, handoff);
+        await layOut();
+        await appear();
+        await advance(transitionMs * 2);
+        expect(root().opacity).toBeCloseTo(0.5, 5);
+
+        await act(async () => {
+          handoff.store.setState({ phase: "idle", bar: "hero" });
+          handoff.progress.value = 0; // the panel no longer under it
+        });
+        expect(root().opacity).toBeGreaterThanOrEqual(0.49); // where it was, not with the panel
+        await advance(transitionMs * 2);
+        expect(root().opacity).toBe(1);
+        expect(root().transform[0].translateY).toBe(0);
+        expect(pointerEvents()).toBe("auto");
+      });
+
+      it("Android under Reduce Motion: faded out over Welcome's hero, the bar is the hero's", async () => {
+        jest.mocked(useReducedMotion).mockReturnValue(true);
+        handoff.progress.value = 0; // no rise: the phase is risen, the panel at rest
+        handoff.store.setState({ phase: "risen", bar: "hero" });
+        await renderInSafeArea(<RoleScreen />, handoff);
+        await enterFully();
+        expect(statusBarStyle()).toBe("dark");
+
+        await act(async () => fireEvent.press(screen.getByRole("button", { name: "Back" })));
+        await advance(transitionMs / 2);
+        expect(statusBarStyle()).toBe("dark"); // the page still shows, with its color
+        await advance(transitionMs);
+        expect(root().opacity).toBe(0);
+        expect(statusBarStyle()).toBe("light");
+      });
+
+      it("Android: shown by the stack before it is focused, on a stalled rise: the bound still holds", async () => {
+        let isFocused = false;
+        jest.mocked(useIsFocused).mockImplementation(() => isFocused);
+        handoff.progress.value = 0.3;
+        handoff.store.setState({ phase: "rising", bar: "hero" });
+        const view = await renderInSafeArea(<RoleScreen />, handoff);
+        await layOut();
+        await appear(); // `transitionStart` ahead of the focus change: its content fades in on the panel
+        isFocused = true;
+        await view.rerender(inSafeArea(<RoleScreen />, handoff));
+        await advance(handoffMaxMs - 1);
+        expect(root().opacity).toBe(0);
+
+        await advance(1 + transitionMs * 2);
+        expect(root().opacity).toBe(1);
+        expect(pointerEvents()).toBe("auto");
+      });
+
+      it("Android: the panel lowered during an exit that never lands, it comes back on its own", async () => {
+        await renderInSafeArea(<RoleScreen />, handoff);
+        await enterFully();
+        await act(async () => fireEvent.press(screen.getByRole("button", { name: "Back" })));
+        await advance(transitionMs * 1.5);
+        expect(router.back).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+          handoff.store.setState({ phase: "idle", bar: "hero" });
+          handoff.progress.value = 0;
+        });
+        expect(root().opacity).toBe(0);
+        expect(pointerEvents()).toBe("none");
+        expect(statusBarStyle()).toBe("light"); // faded out over Welcome's hero: its icons
+
+        await advance(handoffMaxMs + transitionMs * 2);
+        expect(root().opacity).toBe(1);
+        expect(root().transform[0].translateY).toBe(0);
+        expect(pointerEvents()).toBe("auto");
+        expect(statusBarStyle()).toBe("dark");
+      });
+
+      it("an exit that never lands, blurred when its bound expires: back once focused again", async () => {
+        let isFocused = true;
+        jest.mocked(useIsFocused).mockImplementation(() => isFocused);
+        const add = jest.spyOn(BackHandler, "addEventListener").mockImplementation(() => ({
+          remove: jest.fn(),
+        }));
+        const view = await renderInSafeArea(<RoleScreen />, handoff);
+        const setFocused = async (value: boolean) => {
+          isFocused = value;
+          await view.rerender(inSafeArea(<RoleScreen />, handoff));
+        };
+        await enterFully();
+        await act(async () => fireEvent.press(screen.getByRole("button", { name: "Back" })));
+        await advance(transitionMs * 1.5);
+        expect(router.back).toHaveBeenCalledTimes(1);
+
+        await setFocused(false);
+        await advance(handoffMaxMs * 2); // the exit's bound expires while it is not shown
+        expect(root().opacity).toBe(0); // under the focused screen, it is left alone
+
+        await setFocused(true);
+        await advance(transitionMs * 2);
+        expect(root().opacity).toBe(1);
+        expect(pointerEvents()).toBe("auto");
+        expect(statusBarStyle()).toBe("dark");
+
+        // And it leaves again: the hardware back is not swallowed by the earlier exit.
+        await act(async () => {
+          focus();
+        });
+        const onBack = add.mock.calls.at(-1)?.[1] as () => boolean;
+        await act(async () => {
+          onBack();
+        });
+        await advance(transitionMs * 1.5);
+        expect(router.back).toHaveBeenCalledTimes(2);
+        add.mockRestore();
+      });
+
+      it("an exit whose navigation never takes it away fades back in after motion.handoffMaxMs", async () => {
+        await renderInSafeArea(<RoleScreen />, handoff);
+        await enterFully();
+        await act(async () => fireEvent.press(screen.getByRole("button", { name: "Back" })));
+        await advance(transitionMs * 1.5);
+        expect(router.back).toHaveBeenCalledTimes(1);
+        expect(root().opacity).toBe(0);
+        expect(pointerEvents()).toBe("none"); // still leaving: no taps while invisible
+
+        await advance(handoffMaxMs);
+        await advance(transitionMs * 2);
+        expect(root().opacity).toBe(1);
+        expect(pointerEvents()).toBe("auto");
+      });
+
+      it("Android: prefetched while the panel rests, it still rides the rise that brings it", async () => {
+        let isFocused = false;
+        jest.mocked(useIsFocused).mockImplementation(() => isFocused);
+        handoff.progress.value = 0;
+        handoff.store.setState({ phase: "idle", bar: "hero" });
+        await renderInSafeArea(<RoleScreen />, handoff);
+        await layOut();
+        await act(async () => handoff.store.setState({ phase: "idle", bar: "hero" }));
+
+        isFocused = true; // pushed as the rise starts
+        await act(async () => {
+          handoff.progress.value = 0.25;
+          handoff.store.setState({ phase: "rising" });
+        });
+        await appear();
+        await advance(transitionMs * 2);
+        expect(root().transform[0].translateY).toBeCloseTo(464 * 0.75, 5);
+        expect(root().opacity).toBe(0); // on the panel, under Welcome's fading actions
+      });
+
+      it("a back during the rise whose navigation never lands: back in, and taking taps", async () => {
+        const add = jest.spyOn(BackHandler, "addEventListener").mockImplementation(() => ({
+          remove: jest.fn(),
+        }));
+        handoff.store.setState({ phase: "rising" });
+        await renderInSafeArea(<RoleScreen />, handoff);
+        await layOut();
+        await act(async () => {
+          focus();
+        });
+        const onBack = add.mock.calls[0][1] as () => boolean;
+        await act(async () => {
+          onBack(); // before the content entered
+        });
+        await advance(transitionMs * 1.5);
+        expect(router.back).toHaveBeenCalledTimes(1);
+
+        await advance(handoffMaxMs + transitionMs * 2);
+        expect(root().opacity).toBe(1);
+        expect(pointerEvents()).toBe("auto");
+        add.mockRestore();
+      });
+
+      it("a prefetched screen (not focused) is left alone however long it waits", async () => {
+        jest.mocked(useIsFocused).mockReturnValue(false);
+        handoff.store.setState({ phase: "idle", bar: "hero" });
+        await renderInSafeArea(<RoleScreen />, handoff);
+        await layOut();
+        await advance(handoffMaxMs * 3);
+        expect(root().opacity).toBe(0);
+      });
     });
   });
 });

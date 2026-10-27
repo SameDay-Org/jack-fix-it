@@ -4,11 +4,13 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import Settings, get_app_settings
 from app.db import get_session
 from app.errors import ErrorResponse
 from app.modules.auth.permissions import CustomerUser, ProUser
 from app.modules.quotes.schemas import CustomerQuote, CustomerQuoteList, QuoteCreate, QuoteOut
 from app.modules.quotes.service import QuoteService
+from app.queue import JobQueue, get_job_queue
 
 router = APIRouter(prefix="/pros/me/opportunities", tags=["pros"])
 # The customer's side: the quotes on their own requests (#188, #189).
@@ -19,8 +21,12 @@ def _error(description: str) -> dict[str, Any]:
     return {"model": ErrorResponse, "description": description}
 
 
-def get_quote_service(session: Annotated[AsyncSession, Depends(get_session)]) -> QuoteService:
-    return QuoteService(session)
+def get_quote_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> QuoteService:
+    return QuoteService(session, queue, settings.job_enqueue_timeout_seconds)
 
 
 @router.post(

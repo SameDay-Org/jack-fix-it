@@ -9,6 +9,8 @@ from typing import Annotated, Final
 
 from pydantic import AfterValidator, BeforeValidator, StringConstraints
 
+from app.redaction import KnownValues, redact_text
+
 NAME_MAX_LENGTH: Final = 60
 # Allowed besides letters (and the combining marks of decomposed accents): space, hyphen,
 # apostrophe (ASCII, and the typographic one phone keyboards type) and period.
@@ -58,3 +60,17 @@ def public_name(first_name: str | None, last_name: str | None) -> str | None:
     if initial is None:
         return None
     return f"{first_name} {initial.upper()}."
+
+
+def safe_public_name(
+    first_name: str | None, last_name: str | None, known: KnownValues
+) -> str | None:
+    """public_name, or None when it shows a contact detail (app.redaction): the account's own
+    email or phone (`known`), then every pattern ("repair.example.com", a phone spelled out).
+    Contacts stay hidden before payment and names are editable, so this runs on every read,
+    which covers names stored before any check at write time (#194). Withheld, never partly
+    masked: a name with a mask reads as a broken profile, and None is already a valid value."""
+    name = public_name(first_name, last_name)
+    if name is None or redact_text(name, known).redacted:
+        return None
+    return name

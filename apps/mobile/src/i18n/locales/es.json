@@ -100,5 +100,52 @@
     "headline": "Pase lo que pase en casa, lo {{word}}.",
     "words": ["arreglamos", "limpiamos", "pintamos", "podamos", "mudamos"],
     "skip": "Saltar introducción"
+  },
+  "media": {
+    "add": "Añadir fotos",
+    "addMore": "Añadir más",
+    "emptyTitle": "Aún no hay fotos",
+    "emptyBodyPhotos": "Añade hasta {{max}} fotos.",
+    "emptyBodyMedia": "Añade hasta {{max}} fotos o videos.",
+    "count": "Añadidos: {{count}} de {{max}}",
+    "limitReached": "Ya añadiste el máximo.",
+    "photo": "Foto {{number}}",
+    "video": "Video {{number}}",
+    "status": {
+      "preparing": "Preparando…",
+      "uploading": "Subiendo… {{percent}} %",
+      "done": "Listo",
+      "failed": "No se pudo subir. Revisa tu conexión e inténtalo de nuevo.",
+      "rejected": "Este archivo no se puede subir.",
+      "tooLarge": "Este video pesa más de {{size}} MB.",
+      "sizeUnknown": "No pudimos comprobar el tamaño de este video, así que no se puede subir. Prueba con otro video.",
+      "unsupported": "Este formato de video no es compatible."
+    },
+    "retry": "Reintentar",
+    "remove": "Quitar",
+    "source": {
+      "title": "Añadir fotos",
+      "body": "Usa la cámara o elige entre las fotos de este teléfono.",
+      "camera": "Tomar una foto",
+      "library": "Elegir de la galería",
+      "titleMedia": "Añadir fotos o videos",
+      "bodyMedia": "Usa la cámara o elige fotos y videos de este teléfono."
+    },
+    "permission": {
+      "cameraTitle": "El acceso a la cámara está desactivado",
+      "cameraBody": "Para tomar fotos aquí, permite el acceso a la cámara en Configuración.",
+      "openSettings": "Abrir Configuración",
+      "notNow": "Ahora no"
+    },
+    "addMedia": "Añadir fotos o videos",
+    "emptyTitleMedia": "Aún no hay fotos ni videos",
+    "pickFailed": "No se pudo abrir la cámara ni tus fotos. Inténtalo de nuevo.",
+    "videoTile": "Video",
+    "itemRetry": "Reintentar {{name}}",
+    "itemRemove": "Quitar {{name}}"
+  },
+  "permissions": {
+    "camera": "Jack usa la cámara para tomar fotos de lo que hay que arreglar.",
+    "photos": "Jack usa las fotos que eliges para mostrar lo que hay que arreglar."
   }
 }

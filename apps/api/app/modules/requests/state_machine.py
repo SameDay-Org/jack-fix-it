@@ -89,12 +89,15 @@ _ACTOR_KIND_BY_ROLE: Final = {
 
 @dataclass(frozen=True)
 class LockedRequest:
-    """What a caller deciding a transition needs, read under the row lock."""
+    """What a caller deciding a transition needs, read under the row lock, plus what it
+    announces after its commit (#55): the customer and the public code, ids only."""
 
     id: uuid.UUID
     status: RequestStatus
     category_id: uuid.UUID | None
     address_id: uuid.UUID
+    customer_id: uuid.UUID
+    public_code: str
 
 
 class RequestStateMachine:
@@ -109,7 +112,14 @@ class RequestStateMachine:
         request = await self._requests.get_for_update(request_id)
         if request is None:
             return None
-        return LockedRequest(request.id, request.status, request.category_id, request.address_id)
+        return LockedRequest(
+            request.id,
+            request.status,
+            request.category_id,
+            request.address_id,
+            request.customer_id,
+            request.public_code,
+        )
 
     async def transition(
         self, request_id: uuid.UUID, to: RequestStatus, actor: UserAccount | SystemActor
