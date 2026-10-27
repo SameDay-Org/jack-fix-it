@@ -104,8 +104,8 @@ class Settings(BaseSettings):
     # Longest wait on Redis for one limit check (past it the request goes through: fail open)
     # or one password-reset code operation (past it the reset fails).
     rate_limit_timeout_seconds: float = Field(default=0.5, gt=0)
-    # Longest wait on Redis to queue a background job from a request (#48); past it the request
-    # still succeeds and the failure is logged.
+    # Longest wait on Redis to queue background work: dispatch from a request (#48) and the event
+    # pushes (#55); past it the action still succeeds and the failure is logged.
     job_enqueue_timeout_seconds: float = Field(default=2.0, gt=0)
     # Keys the HMAC that turns an email or phone into a rate-limit key (#137). Required in
     # staging and production; elsewhere a documented, non-secret development key is used.

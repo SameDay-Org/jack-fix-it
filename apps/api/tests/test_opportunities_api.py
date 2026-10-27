@@ -313,8 +313,8 @@ async def test_unauthenticated_401(db_client: httpx.AsyncClient, storage: FakeSt
 async def test_response_never_contains_customer_contact_or_street(
     db_client: httpx.AsyncClient, db_session: AsyncSession, world: World, storage: FakeStorage
 ) -> None:
-    # Real media attached: their keys hold the customer's id (u/<customer id>/...), and pros get
-    # no media until #173 serves sanitized copies.
+    # Real media attached: their keys hold the customer's id (u/<customer id>/...). Their safe
+    # copies are not made yet (pending), so nothing is listed or signed (#173 part 2).
     request_id = await make_request(db_session, world)
     db_session.add_all(
         RequestMedia(
@@ -354,8 +354,11 @@ async def test_response_never_contains_customer_contact_or_street(
             assert key not in keys, key
         for key in ("assigned_agent_id", "next_action", "first_contact_at", "last_contact_at"):
             assert key not in keys, key
-        for key in ("media", "media_count", "url", "file_key"):
+        for key in ("media_count", "file_key", "safe_key"):
             assert key not in keys, key
+    assert "media" not in _keys(listing.json())  # the list shows no media (#173)
+    assert detail.json()["media"] == []
+    assert detail.json()["media_pending"] == 2
     assert storage.gets == []  # nothing was signed for the pro
     assert set(detail.json()) == {
         "dispatch_id",
@@ -368,6 +371,8 @@ async def test_response_never_contains_customer_contact_or_street(
         "sent_at",
         "viewed_at",
         "text_redacted",
+        "media",
+        "media_pending",
     }
 
 
@@ -404,6 +409,15 @@ DETAIL = {
     "sent_at": T0.isoformat(),
     "viewed_at": None,
     "text_redacted": False,
+    "media": [
+        {
+            "kind": "photo",
+            "content_type": "image/jpeg",
+            "url": "https://storage.example.invalid/get/m/0.jpg",
+            "expires_at": T0.isoformat(),
+        }
+    ],
+    "media_pending": 0,
 }
 
 
@@ -431,6 +445,7 @@ def _with_extra(document: dict[str, object], path: tuple[str | int, ...]) -> dic
         (OpportunityDetail, DETAIL, ()),
         (OpportunityDetail, DETAIL, ("category",)),
         (OpportunityDetail, DETAIL, ("location",)),
+        (OpportunityDetail, DETAIL, ("media", 0)),
     ],
     ids=lambda value: "/".join(map(str, value)) if isinstance(value, tuple) else None,
 )

@@ -49,11 +49,16 @@ from app.modules.requests.errors import (
 )
 from app.modules.requests.media_copies import enqueue_sanitize
 from app.modules.requests.models import (
+    MediaSafeStatus,
     RequestMedia,
-    RequestMediaKind,
     RequestOrigin,
     RequestStatus,
     ServiceRequest,
+)
+from app.modules.requests.models import (
+    # Part of this service's interface (SafeMedia.kind): other modules take it from here, never
+    # from requests.models (ADR 0003).
+    RequestMediaKind as RequestMediaKind,
 )
 from app.modules.requests.repository import ServiceRequestRepository
 from app.modules.requests.schemas import (
@@ -336,6 +341,23 @@ def _has_nul(value: JsonValue) -> bool:
     return False
 
 
+class CustomerRequestReader:
+    """A customer's own request for other modules (ADR 0003): its status, for the quotes the
+    customer compares (#188)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._requests = ServiceRequestRepository(session)
+
+    async def own_status(self, user: UserAccount, request_id: uuid.UUID) -> RequestStatus:
+        """The status of the caller's request. 404 for an unknown request and for another
+        customer's, the same body as GET /requests/{id}: an id reveals nothing."""
+        request = await self._requests.get(request_id)
+        if request is None:
+            raise NotFoundError
+        ensure_owner(request.customer_id, user)
+        return request.status
+
+
 # What a pro sees before a job (#49): the work, the place coarsely, never the customer.
 OPEN_FOR_QUOTES: Final = frozenset({RequestStatus.FINDING_PRO, RequestStatus.QUOTE_READY})
 
@@ -344,9 +366,9 @@ OPEN_FOR_QUOTES: Final = frozenset({RequestStatus.FINDING_PRO, RequestStatus.QUO
 class RequestForPro:
     """A request as a dispatched pro may see it: no customer, contact, street, coordinates,
     attribution (utm) or BDC fields. The area is the ZIP and its service area's canonical city
-    until the job is paid (#49), never the city the customer typed (#172). No
-    media either: stored photos and videos carry the customer's id in their keys and their
-    original metadata (GPS), so pros get sanitized copies only, with #173.
+    until the job is paid (#49), never the city the customer typed (#172). No media here:
+    stored photos and videos carry the customer's id in their keys and their original metadata
+    (GPS), so pros get the privacy-safe copies only, through ProRequestReader.safe_media (#173).
 
     The customer's free text is redacted (app.redaction): their own email, phone and street are
     masked first in any formatting, then every contact pattern, in the description and in every
@@ -367,6 +389,27 @@ class RequestForPro:
     @property
     def text_redacted(self) -> bool:
         return self.description_redacted or self.answers_redacted
+
+
+@dataclass(frozen=True)
+class SafeMedia:
+    """A photo or video's privacy-safe copy (#173), as a pro may be shown it. It has no
+    original key (file_key), so nothing built on it can sign the customer's file. The key is
+    the row's as stored: the signer still checks it (opportunities.sign_safe_media)."""
+
+    id: uuid.UUID
+    kind: RequestMediaKind
+    safe_key: str | None
+    content_type: str | None
+
+
+@dataclass(frozen=True)
+class ProMedia:
+    """A request's media for a pro (#173): the ready safe copies, oldest first, and how many
+    are still being made. A failed copy is neither listed nor counted: it is never served."""
+
+    ready: tuple[SafeMedia, ...]
+    pending: int
 
 
 def media_keys_among(keys: Collection[str]) -> Select[str]:
@@ -424,6 +467,24 @@ class ProRequestReader:
                 answers_redacted=answers_redacted,
             )
         return views
+
+    async def safe_media(self, request_id: uuid.UUID) -> ProMedia:
+        """The request's media as a pro may see it (ProMedia), in one statement. Call it for a
+        request the pro may open: it does not check that."""
+        rows = await self._requests.safe_media_of(request_id)
+        return ProMedia(
+            ready=tuple(
+                SafeMedia(
+                    id=row.id,
+                    kind=row.kind,
+                    safe_key=row.safe_key,
+                    content_type=row.safe_content_type,
+                )
+                for row in rows
+                if row.safe_status is MediaSafeStatus.READY
+            ),
+            pending=sum(row.safe_status is MediaSafeStatus.PENDING for row in rows),
+        )
 
     @staticmethod
     def _area(request_id: uuid.UUID, zip_code: str, cities: Mapping[str, str]) -> AddressArea:

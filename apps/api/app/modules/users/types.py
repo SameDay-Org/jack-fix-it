@@ -21,7 +21,8 @@ class UserStatus(StrEnum):
 
 @dataclass(frozen=True)
 class ContactPoints:
-    """A user's email and phone. PII: only for masking them in text (#172), never logged."""
+    """A user's email and phone. PII: only for masking them in text shown to the other party
+    (#172, #188), never logged or returned."""
 
     email: str
     phone: str | None

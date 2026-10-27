@@ -43,6 +43,21 @@ class UserRepository:
         statement = select(User.id, User.email, User.phone).where(User.id.in_(user_ids))
         return [(row[0], row[1], row[2]) for row in (await self._session.execute(statement)).all()]
 
+    async def names(
+        self, user_ids: Collection[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, str | None, str | None, str, str | None]]:
+        """(id, first_name, last_name, email, phone) only: the contacts withhold a name that
+        shows one (names.safe_public_name)."""
+        if not user_ids:
+            return []
+        statement = select(User.id, User.first_name, User.last_name, User.email, User.phone).where(
+            User.id.in_(user_ids)
+        )
+        return [
+            (row[0], row[1], row[2], row[3], row[4])
+            for row in (await self._session.execute(statement)).all()
+        ]
+
     async def get_by_email(self, email: str, *, lock: bool = False) -> User | None:
         """`lock`: FOR NO KEY UPDATE until the transaction ends, reading the row as last
         committed (populate_existing, not the copy an earlier read left in the session). Not

@@ -489,7 +489,8 @@ export interface paths {
         };
         /**
          * Open one of my opportunities
-         * @description The full request, without its photos for now (sanitized copies come with #173). The
+         * @description The full request, with its photos and videos as privacy-safe copies (no location or
+         *     other metadata) behind short-lived signed URLs, and how many are still being prepared. The
          *     first open records that the pro saw it (viewed, viewed_at); opening it again changes
          *     nothing.
          */
@@ -518,6 +519,29 @@ export interface paths {
          *     request makes it Quote Ready for the customer.
          */
         post: operations["submit_quote_v1_pros_me_opportunities__dispatch_id__quote_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/requests/{request_id}/quotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compare the quotes on one of my service requests
+         * @description The quotes the customer can choose from: the pending ones not yet expired, and the
+         *     accepted one while the payment is pending. Empty until the request is Quote Ready, and
+         *     once it is closed. Each shows the price, what it includes (contact details masked), the
+         *     duration, the proposed start, when it expires, and the pro's public card.
+         */
+        get: operations["list_request_quotes_v1_requests__request_id__quotes_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -744,6 +768,49 @@ export interface components {
             state: string;
             /** Zips */
             zips: components["schemas"]["ZipOut"][];
+        };
+        /**
+         * CustomerQuote
+         * @description A quote on the customer's request (#188). `scope` arrives with contact details masked
+         *     (app.redaction): the pro's own email and phone, then every contact pattern.
+         */
+        CustomerQuote: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Amount Cents */
+            amount_cents: number;
+            /** Scope */
+            scope: string;
+            /** Duration Minutes */
+            duration_minutes: number;
+            /**
+             * Proposed Start At
+             * Format: date-time
+             */
+            proposed_start_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            status: components["schemas"]["QuoteStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            pro: components["schemas"]["QuotePro"];
+        };
+        /** CustomerQuoteList */
+        CustomerQuoteList: {
+            /**
+             * Items
+             * @description The accepted quote, if any, and the pending ones not yet expired: cheapest first, then oldest.
+             */
+            items: components["schemas"]["CustomerQuote"][];
         };
         /** DependencyChecks */
         DependencyChecks: {
@@ -1048,6 +1115,16 @@ export interface components {
              * @description True when contact details were masked in the description or the answers (shown as •••): the customer is reached through the app.
              */
             text_redacted: boolean;
+            /**
+             * Media
+             * @description The photos and videos ready to show, oldest first.
+             */
+            media: components["schemas"]["OpportunityMedia"][];
+            /**
+             * Media Pending
+             * @description How many more photos and videos are still being prepared.
+             */
+            media_pending: number;
         };
         /**
          * OpportunityLocation
@@ -1065,6 +1142,29 @@ export interface components {
              * @description The official city of the ZIP's service area; null when the area is no longer served. Never the text the customer typed.
              */
             city: string | null;
+        };
+        /**
+         * OpportunityMedia
+         * @description A photo or video of the request: its privacy-safe copy (#173), without location or other
+         *     metadata, under a key that names no one.
+         */
+        OpportunityMedia: {
+            kind: components["schemas"]["RequestMediaKind"];
+            /**
+             * Content Type
+             * @description The copy's media type, e.g. image/jpeg.
+             */
+            content_type: string;
+            /**
+             * Url
+             * @description Presigned GET URL.
+             */
+            url: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
         };
         /** OpportunityPage */
         OpportunityPage: {
@@ -1289,6 +1389,42 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * QuotePro
+         * @description The pro behind a quote, as the customer sees them before paying: never a contact, a
+         *     document, the photo or an internal id (the account, Stripe).
+         */
+        QuotePro: {
+            /**
+             * Id
+             * Format: uuid
+             * @description The pro's profile id.
+             */
+            id: string;
+            /**
+             * Name
+             * @description The first name and the last name's initial, e.g. "María P."; null when the pro has not set both names, or when the name shows a contact detail (an email, a phone, a domain...): withheld before payment, never partly masked.
+             */
+            name: string | null;
+            /**
+             * Rating Avg
+             * @description The average rating as a decimal string; null before the first review.
+             * @example 4.80
+             */
+            rating_avg: string | null;
+            /**
+             * Jobs Count
+             * @description Jobs completed on the platform.
+             */
+            jobs_count: number;
+            /** Years Of Experience */
+            years_of_experience: number | null;
+            /**
+             * Verified
+             * @description The platform approved the pro's verification.
+             */
+            verified: boolean;
         };
         /**
          * QuoteStatus
@@ -3052,6 +3188,64 @@ export interface operations {
             };
             /** @description not_configured: quoting is not configured yet (the quote lifetime is not set, or a quote cap is set to an invalid value). */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_request_quotes_v1_requests__request_id__quotes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteList"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers have service requests. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no request of the caller with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

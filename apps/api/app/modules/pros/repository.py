@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Collection, Sequence
+from decimal import Decimal
 
 from sqlalchemy import Select, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -46,6 +47,26 @@ class ProProfileRepository:
         return await self._session.scalar(
             select(ProProfile.id).where(ProProfile.user_id == user_id)
         )
+
+    async def public_fields(
+        self, pro_ids: Collection[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, uuid.UUID, Decimal | None, int, int | None, ProVerificationStatus]]:
+        """(id, user_id, rating_avg, jobs_count, years_of_experience, verification_status) only:
+        never the bio, the photo key or the Stripe account."""
+        if not pro_ids:
+            return []
+        statement = select(
+            ProProfile.id,
+            ProProfile.user_id,
+            ProProfile.rating_avg,
+            ProProfile.jobs_count,
+            ProProfile.years_of_experience,
+            ProProfile.verification_status,
+        ).where(ProProfile.id.in_(pro_ids))
+        return [
+            (row[0], row[1], row[2], row[3], row[4], row[5])
+            for row in (await self._session.execute(statement)).all()
+        ]
 
     async def insert_if_missing(self, user_id: uuid.UUID) -> bool:
         """Creates the user's empty profile (pending); True when this call created it.

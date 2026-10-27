@@ -1,4 +1,4 @@
-"""Masking contact details in free text (#172 now, chat #72 later): one shared redactor.
+"""Masking contact details in free text (#172, quote scopes #188, chat #72 later): one redactor.
 
 Before payment, a pro sees the customer's request but never how to reach them (context doc:
 contacts stay hidden to prevent disintermediation; ZIP + city only until paid). Customers
@@ -802,7 +802,8 @@ _KNOWN_SKIPPABLE: Final = (
 
 @dataclass(frozen=True)
 class KnownValues:
-    """A customer's own contact details for one request, masked before the patterns run. PII:
+    """A party's own contact details, masked before the patterns run: the customer's in their
+    request shown to pros (#172), the pro's in their quote shown to the customer (#188). PII:
     never logged or returned."""
 
     emails: tuple[str, ...] = ()

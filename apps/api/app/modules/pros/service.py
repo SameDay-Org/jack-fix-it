@@ -26,12 +26,13 @@ from app.modules.pros.errors import (
     InvalidProfileError,
     InvalidServiceAreaError,
 )
-from app.modules.pros.models import ProProfile
+from app.modules.pros.models import ProProfile, ProVerificationStatus
 from app.modules.pros.repository import ProDocumentRepository, ProProfileRepository
 from app.modules.pros.schemas import PhotoOut, ProProfileOut, ProProfileUpdate
 from app.modules.service_areas.service import ServiceAreaService
 from app.modules.uploads.schemas import UploadPurpose
 from app.modules.uploads.service import owned_upload
+from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount
 
 logger = logging.getLogger(__name__)
@@ -44,9 +45,26 @@ class DispatchCandidate:
     rating_avg: Decimal | None  # NULL until the first review
 
 
+@dataclass(frozen=True)
+class ProCard:
+    """What a customer may see of a pro next to their quote (#188): no contact, documents,
+    photo or Stripe account. `user_id` is for the caller's own lookups (masking the pro's
+    contact details), never for a response."""
+
+    pro_id: uuid.UUID
+    user_id: uuid.UUID
+    # "María P." (users.names.safe_public_name); None when a name is missing or shows a contact
+    name: str | None
+    rating_avg: Decimal | None  # NULL until the first review
+    jobs_count: int
+    years_of_experience: int | None
+    verified: bool  # verification approved
+
+
 class ProService:
     def __init__(self, session: AsyncSession) -> None:
         self._profiles = ProProfileRepository(session)
+        self._users = UserService(session)
 
     @staticmethod
     def photo_keys_among(keys: Collection[str]) -> Select[str | None]:
@@ -63,6 +81,24 @@ class ProService:
     async def get_profile_id_for_user(self, user_id: uuid.UUID) -> uuid.UUID | None:
         """The pro_profiles.id of a user, or None when the user has no pro profile."""
         return await self._profiles.get_id_by_user_id(user_id)
+
+    async def cards(self, pro_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, ProCard]:
+        """The public card of each pro among `pro_ids`, by profile id: two queries (the
+        profiles, then their names), whatever the count."""
+        rows = await self._profiles.public_fields(pro_ids)
+        names = await self._users.public_names([row[1] for row in rows])
+        return {
+            pro_id: ProCard(
+                pro_id=pro_id,
+                user_id=user_id,
+                name=names.get(user_id),
+                rating_avg=rating_avg,
+                jobs_count=jobs_count,
+                years_of_experience=years,
+                verified=status is ProVerificationStatus.APPROVED,
+            )
+            for pro_id, user_id, rating_avg, jobs_count, years, status in rows
+        }
 
     async def dispatch_candidates(
         self, category_id: uuid.UUID, service_area_ids: Collection[uuid.UUID]

@@ -1,4 +1,4 @@
-"""Quote submission by a dispatched pro (D9.3, #50).
+"""Quotes: a dispatched pro submits one (D9.3, #50); the customer compares them (D10.1, #188).
 
 A pro quotes through their own dispatch. After locking the request (the state machine's row
 lock, so two quotes on one request take turns) it checks, in this order:
@@ -11,7 +11,18 @@ lock, so two quotes on one request take turns) it checks, in this order:
   to an invalid value is not "no cap": 503 not_configured, like a missing TTL.
 Then, in the caller's transaction: the quote (pending, expires_at = now + TTL), the dispatch
 marked quoted, and the first quote moves the request from finding_pro to quote_ready (SYSTEM).
+Once that commits, the customer gets a new quote push (#55); a push that cannot be queued is
+logged, never undone.
 The amount is the pro's own price in cents, stored as given; fees are #58.
+
+The customer reads the quotes of their own request (else 404, the same body as the request
+itself) while it shows the quote screen (quote_ready, and accepted while the payment is
+pending: docs/glossary.md); any other status lists nothing. Listed: the accepted quote and the
+pending ones before their expires_at, whether or not the expiry worker (#51) has marked them.
+Contacts stay hidden before payment, so the scope is redacted (app.redaction): the pro's own
+email and phone first, then every pattern. The stored scope is unchanged. The pro's public
+name goes through the same check and is withheld (null) when it shows a contact (#194).
+
 Logs carry ids only: never the scope text or the amount.
 """
 
@@ -26,29 +37,48 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.errors import NotFoundError
 from app.modules.dispatch.service import DispatchService
 from app.modules.jobs.service import SYSTEM
+from app.modules.notifications.events import push_new_quote
 from app.modules.pros.service import ProService
 from app.modules.quotes.errors import NotQuotableError, QuoteExistsError, QuoteOutOfBoundsError
 from app.modules.quotes.models import Quote
 from app.modules.quotes.repository import QuoteRepository
-from app.modules.quotes.schemas import QuoteCreate, QuoteOut
+from app.modules.quotes.schemas import (
+    CustomerQuote,
+    CustomerQuoteList,
+    QuoteCreate,
+    QuoteOut,
+    QuotePro,
+)
+from app.modules.requests.service import CustomerRequestReader
 from app.modules.requests.state_machine import RequestStateMachine, RequestStatus
 from app.modules.settings.errors import SettingMalformedError, SettingNotConfiguredError
 from app.modules.settings.service import QUOTE_TTL_HOURS, SettingsService
+from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount
+from app.queue import JobQueue
+from app.redaction import KnownValues, redact_text
 
 logger = logging.getLogger(__name__)
 
 _OPEN_FOR_QUOTES: Final = frozenset({RequestStatus.FINDING_PRO, RequestStatus.QUOTE_READY})
+# Where the customer sees the quote screen: "accepted" keeps it while the payment is pending.
+_QUOTE_SCREEN: Final = frozenset({RequestStatus.QUOTE_READY, RequestStatus.ACCEPTED})
 
 
 class QuoteService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self, session: AsyncSession, queue: JobQueue, enqueue_timeout_seconds: float
+    ) -> None:
         self._session = session
+        self._queue = queue
+        self._enqueue_timeout = enqueue_timeout_seconds
         self._quotes = QuoteRepository(session)
         self._dispatches = DispatchService(session)
         self._requests = RequestStateMachine(session)
         self._settings = SettingsService(session)
         self._pros = ProService(session)
+        self._customer_requests = CustomerRequestReader(session)
+        self._users = UserService(session)
 
     async def submit(
         self, user: UserAccount, dispatch_id: uuid.UUID, data: QuoteCreate
@@ -109,7 +139,60 @@ class QuoteService:
                 "first_quote": first,
             },
         )
+        await push_new_quote(
+            self._queue,
+            customer_id=request.customer_id,
+            quote_id=quote.id,
+            request_id=request.id,
+            public_code=request.public_code,
+            timeout_seconds=self._enqueue_timeout,
+        )
         return QuoteOut.model_validate(quote, from_attributes=True)
+
+    async def list_for_customer(
+        self, user: UserAccount, request_id: uuid.UUID
+    ) -> CustomerQuoteList:
+        """The quotes the customer compares on their own request (see the module doc). One
+        query each for the request, its quotes, the pros, their names and their contact
+        points, whatever the count."""
+        status = await self._customer_requests.own_status(user, request_id)
+        if status not in _QUOTE_SCREEN:
+            return CustomerQuoteList(items=[])
+        quotes = await self._quotes.open_of_request(request_id, datetime.now(UTC))
+        cards = await self._pros.cards({quote.pro_id for quote in quotes})
+        # The pros' own details, for the known-value pass only: never logged or returned.
+        contacts = await self._users.contact_points({card.user_id for card in cards.values()})
+        items: list[CustomerQuote] = []
+        for quote in quotes:
+            card = cards[quote.pro_id]
+            contact = contacts.get(card.user_id)
+            known = KnownValues(
+                emails=(contact.email,) if contact else (),
+                phones=(contact.phone,) if contact and contact.phone else (),
+            )
+            items.append(
+                CustomerQuote(
+                    id=quote.id,
+                    amount_cents=quote.amount_cents,
+                    scope=redact_text(quote.scope, known).text,
+                    duration_minutes=quote.duration_minutes,
+                    proposed_start_at=quote.proposed_start_at,
+                    expires_at=quote.expires_at,
+                    status=quote.status,
+                    created_at=quote.created_at,
+                    pro=QuotePro(
+                        id=card.pro_id,
+                        name=card.name,
+                        rating_avg=(
+                            None if card.rating_avg is None else format(card.rating_avg, ".2f")
+                        ),
+                        jobs_count=card.jobs_count,
+                        years_of_experience=card.years_of_experience,
+                        verified=card.verified,
+                    ),
+                )
+            )
+        return CustomerQuoteList(items=items)
 
     async def _check_caps(self, data: QuoteCreate) -> None:
         try:

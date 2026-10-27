@@ -41,3 +41,41 @@ export class LocalCleanupError extends Error {
     this.name = "LocalCleanupError";
   }
 }
+
+/**
+ * The API refused to hand out an upload URL: `403` (`upload_forbidden`, `forbidden`: this role
+ * cannot upload for the purpose) or `422` (`upload_invalid`: type or size not allowed). Asking
+ * again with the same file gets the same answer, so nothing retries it.
+ */
+export class UploadRejectedError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string | undefined,
+  ) {
+    super(`The upload was refused with status ${status}${code ? ` (${code})` : ""}`);
+    this.name = "UploadRejectedError";
+  }
+}
+
+/** Why a file's PUT to storage failed: refused (`status`), no answer (`network`), too slow (`timeout`). */
+export type UploadFailure = "status" | "network" | "timeout";
+
+/**
+ * The storage did not take the file: it answered with a non-2xx `status`, the connection failed,
+ * or the PUT outlasted `EXPO_PUBLIC_UPLOAD_TIMEOUT_MS`. Nothing about the file or its URL is kept.
+ */
+export class UploadFailedError extends Error {
+  constructor(
+    readonly reason: UploadFailure,
+    readonly status?: number,
+  ) {
+    super(
+      reason === "status"
+        ? `The storage refused the file with status ${status ?? "unknown"}`
+        : reason === "timeout"
+          ? "The upload timed out"
+          : "The upload failed before the storage answered",
+    );
+    this.name = "UploadFailedError";
+  }
+}
