@@ -26,6 +26,7 @@ from app.modules.users.types import UserAccount, UserRole
 from tests.conftest import LOCK_WAIT_DEADLINE_SECONDS, backend_pid, wait_until_blocked
 from tests.helpers import as_status_writer
 from tests.test_quotes_api import quotes_of, status_of
+from tests.test_requests_api import ENQUEUE_TIMEOUT, RecordingQueue
 
 
 @dataclass(frozen=True)
@@ -139,8 +140,12 @@ async def accept_at_once(
         try:
             async with asyncio.timeout(2 * LOCK_WAIT_DEADLINE_SECONDS):
                 return await asyncio.gather(
-                    QuoteService(one).accept(committed.customer, committed.request_id, first_quote),
-                    QuoteService(two).accept(committed.customer, committed.request_id, second),
+                    QuoteService(one, RecordingQueue(), ENQUEUE_TIMEOUT).accept(
+                        committed.customer, committed.request_id, first_quote
+                    ),
+                    QuoteService(two, RecordingQueue(), ENQUEUE_TIMEOUT).accept(
+                        committed.customer, committed.request_id, second
+                    ),
                     return_exceptions=True,
                 )
         except TimeoutError:

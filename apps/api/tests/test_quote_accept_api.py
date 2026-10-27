@@ -22,6 +22,7 @@ from app.modules.requests.state_machine import RequestStateMachine
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole
 from app.observability import JsonFormatter
+from app.queue import get_job_queue
 from tests.test_opportunities_api import NOT_FOUND, World, build_world, make_request
 from tests.test_quote_list_api import (
     FORBIDDEN,
@@ -36,7 +37,7 @@ from tests.test_quote_list_api import (
     quoting_pro,
 )
 from tests.test_quotes_api import quotes_of, status_of
-from tests.test_requests_api import make_caller
+from tests.test_requests_api import ENQUEUE_TIMEOUT, RecordingQueue, make_caller
 
 NOT_ACCEPTABLE = {
     "error": {
@@ -46,6 +47,14 @@ NOT_ACCEPTABLE = {
 }
 # What every log record carries without an `extra`: the rest of a record is the event's own.
 _RECORD_FIELDS = set(logging.makeLogRecord({}).__dict__) | {"message", "asctime"}
+
+
+@pytest.fixture(autouse=True)
+def queue(app: FastAPI) -> RecordingQueue:
+    """QuoteService takes the new quote push's queue (#55): recorded, never Redis."""
+    recorder = RecordingQueue()
+    app.dependency_overrides[get_job_queue] = lambda: recorder
+    return recorder
 
 
 @pytest.fixture
@@ -266,7 +275,7 @@ async def test_expiry_boundary_is_already_expired(
     request_id, [quote_id], _ = await open_request(db_session, world, count=1)
     stored = await db_session.get(Quote, quote_id)
     assert stored is not None
-    service = QuoteService(db_session)
+    service = QuoteService(db_session, RecordingQueue(), ENQUEUE_TIMEOUT)
     actor = await customer_account(db_session, world)
 
     def frozen_at(moment: datetime) -> type[datetime]:
@@ -468,7 +477,9 @@ async def test_acceptance_is_atomic(
     actor = await customer_account(db_session, world)
     savepoint = await db_session.begin_nested()  # the request's transaction
     with pytest.raises(RuntimeError):
-        await QuoteService(db_session).accept(actor, request_id, quote_id)
+        await QuoteService(db_session, RecordingQueue(), ENQUEUE_TIMEOUT).accept(
+            actor, request_id, quote_id
+        )
     await savepoint.rollback()
 
     assert seen == [(RequestStatus.ACCEPTED, {quote_id: QuoteStatus.ACCEPTED})]
