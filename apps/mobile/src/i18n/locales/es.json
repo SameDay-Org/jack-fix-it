@@ -69,7 +69,7 @@
     "phoneVerified": "Verificado",
     "headline": "¿Qué está pasando en <accent>casa</accent>?",
     "support": "Cuéntaselo a Jack. Nosotros nos encargamos del resto.",
-    "tellJack": "Cuéntale a Jack qué pasó",
+    "tellJack": "Dile a Jack qué pasó",
     "categoriesTitle": "O elige una categoría",
     "categoriesLoading": "Cargando categorías",
     "categoriesFailed": "No pudimos cargar las categorías.",
@@ -79,7 +79,7 @@
     "title": "Cuenta"
   },
   "request": {
-    "title": "Cuéntale a Jack qué pasó"
+    "title": "Dile a Jack qué pasó"
   },
   "phone": {
     "title": "Verifica tu teléfono",

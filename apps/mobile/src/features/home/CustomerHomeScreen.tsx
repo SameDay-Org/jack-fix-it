@@ -1,13 +1,11 @@
 import { Trans, useTranslation } from "react-i18next";
 import { ScrollView, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useSession } from "@/api";
 import { Button, Screen } from "@/components/ui";
 import { AccountButton } from "@/features/account/AccountButton";
 import { useOpenPhoneStepAfterSignUp } from "@/features/phone/useOpenPhoneStepAfterSignUp";
 import { startRequest } from "@/features/request";
-import { continuousCorners } from "@/theme";
 
 import { CategoryChips } from "./CategoryChips";
 
@@ -21,7 +19,6 @@ import { CategoryChips } from "./CategoryChips";
 export function CustomerHomeScreen() {
   const { t } = useTranslation();
   const { user } = useSession();
-  const { bottom } = useSafeAreaInsets();
   const phoneStepOffered = useOpenPhoneStepAfterSignUp();
 
   if (!user) return null;
@@ -33,8 +30,7 @@ export function CustomerHomeScreen() {
     );
   }
 
-  // The light panel runs to the bottom edge and pads the home indicator itself: the screen's own
-  // bottom padding would be the navy page.
+  // No bottom edge: the categories panel pads the home indicator itself.
   return (
     <Screen bar="hero" edges={[]} testID="customer-home">
       <ScrollView contentContainerClassName="flex-grow">
@@ -58,13 +54,7 @@ export function CustomerHomeScreen() {
             testID="home-tell-jack"
           />
         </View>
-        <View
-          style={continuousCorners}
-          className="flex-grow rounded-t-xl bg-gray-50 px-4 pb-6 pt-6"
-        >
-          <CategoryChips />
-          <View style={{ height: bottom }} />
-        </View>
+        <CategoryChips />
       </ScrollView>
     </Screen>
   );

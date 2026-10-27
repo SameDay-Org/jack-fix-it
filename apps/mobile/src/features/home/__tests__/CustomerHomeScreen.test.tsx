@@ -151,7 +151,14 @@ describe("CustomerHomeScreen", () => {
     await fireEvent.press(tellJack()); // the hero keeps working
     expect(router.push).toHaveBeenCalledWith("/request/new");
 
+    const retry = deferred<typeof CATEGORIES>();
+    jest.mocked(apiGet).mockReturnValueOnce(retry.promise);
     await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
+
+    // In flight, the chip skeletons come back in place of the message.
+    expect(await screen.findByRole("progressbar", { name: "Loading categories" })).toBeTruthy();
+    expect(screen.queryByText("We couldn't load the categories.")).toBeNull();
+    await act(async () => retry.resolve(CATEGORIES));
 
     await waitFor(() => expect(chipNames()).toHaveLength(5));
     expect(apiGet).toHaveBeenCalledTimes(2);

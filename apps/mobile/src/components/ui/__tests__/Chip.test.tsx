@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react-native";
-import { StyleSheet } from "react-native";
+import { Dimensions, StyleSheet } from "react-native";
 
 import { bubbleShadow, pressedTransform } from "@/theme";
 
@@ -12,6 +12,8 @@ describe("Chip", () => {
     await render(<Chip label="Painting" onPress={jest.fn()} />);
 
     expect(chip()).toHaveTextContent("Painting");
+    // One line: Android hid the second half of a label that measured as one line (see Chip.tsx).
+    expect(screen.getByText("Painting").props.numberOfLines).toBe(1);
     expect(chip().props.accessibilityState).toMatchObject({ disabled: false });
     expect(chip().props.className).toContain("min-h-12"); // the 48 dp target
     expect(chip().props.className).toContain("rounded-pill");
@@ -43,13 +45,17 @@ describe("Chip", () => {
 });
 
 describe("ChipSkeleton", () => {
-  it("has the chip's shape and an invisible label line of the given width", async () => {
+  it("has the chip's shape and an invisible label line of the given width, scaled with the font", async () => {
     await render(<ChipSkeleton labelWidth={96} testID="skeleton" />);
 
     const shape = screen.getByTestId("skeleton-shape");
     expect(shape.props.className).toContain("min-h-12");
     expect(shape.props.className).toContain("rounded-pill");
     expect(screen.queryByRole("button")).toBeNull();
-    expect(StyleSheet.flatten(screen.getByText(" ").props.style)).toMatchObject({ width: 96 });
+    const { fontScale } = Dimensions.get("window");
+    expect(fontScale).not.toBe(1); // the scaling is visible in this environment
+    expect(StyleSheet.flatten(screen.getByText(" ").props.style)).toMatchObject({
+      width: 96 * fontScale,
+    });
   });
 });
