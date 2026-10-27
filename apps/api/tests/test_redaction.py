@@ -5,7 +5,6 @@ come back unchanged (and not flagged). The module docstring lists the known gaps
 """
 
 import random
-import time
 
 import pytest
 
@@ -18,6 +17,7 @@ from app.redaction import (
     redact_text,
 )
 from tests.glue_variants import all_glue_cases
+from tests.helpers import seconds_without_gc
 
 POSITIVE: list[tuple[str, list[str]]] = [
     # Emails: plain, spaced, spelled out (EN and ES), bracketed.
@@ -546,10 +546,9 @@ def test_a_unit_or_direction_alone_stays_unmasked(line: str, text: str) -> None:
     "text", ["n " * 1000, "n, " * 666, "n. " * 666, "N.E. " * 400, "north n " * 250, "100 n " * 333]
 )
 def test_hostile_inputs_against_odd_street_lines_finish_quickly(line: str, text: str) -> None:
-    started = time.perf_counter()
-    redact_text(text[:2000], KnownValues(streets=(line,)))
+    known = KnownValues(streets=(line,))
 
-    assert time.perf_counter() - started < 0.25
+    assert seconds_without_gc(lambda: redact_text(text[:2000], known)) < 0.25
 
 
 # Round 5 review (#172): the known street became a token scan. A dotted direction without its
@@ -668,14 +667,8 @@ def test_long_or_repetitive_streets_finish_quickly(line: str, text: str) -> None
     known = KnownValues(streets=(line,))
     text = text[:2000]
 
-    started = time.perf_counter()
-    redact_known(text, known)
-    known_seconds = time.perf_counter() - started
-    started = time.perf_counter()
-    redact_text(text, known)
-
-    assert known_seconds < 0.05
-    assert time.perf_counter() - started < 0.25
+    assert seconds_without_gc(lambda: redact_known(text, known)) < 0.05
+    assert seconds_without_gc(lambda: redact_text(text, known)) < 0.25
 
 
 # The scan reads word pieces and judges what stands between them: a period, a slash or an
@@ -905,10 +898,7 @@ HOSTILE: list[str] = [
 def test_hostile_inputs_finish_quickly(text: str) -> None:
     # Both passes, with known values that look like the hostile runs.
     assert len(text) <= 2100
-    started = time.perf_counter()
-    redact_text(text, KNOWN)
-
-    assert time.perf_counter() - started < 0.25
+    assert seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25
 
 
 @pytest.mark.parametrize(
@@ -916,7 +906,4 @@ def test_hostile_inputs_finish_quickly(text: str) -> None:
     ["3 0 5 " * 333, "742 " * 500, "evergreen " * 200, "3-0-5-" * 333, "jane.doe77 at " * 140],
 )
 def test_hostile_inputs_against_the_known_values_finish_quickly(text: str) -> None:
-    started = time.perf_counter()
-    redact_text(text, KNOWN)
-
-    assert time.perf_counter() - started < 0.25
+    assert seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25

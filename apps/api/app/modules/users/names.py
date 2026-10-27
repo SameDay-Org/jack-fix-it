@@ -9,6 +9,8 @@ from typing import Annotated, Final
 
 from pydantic import AfterValidator, BeforeValidator, StringConstraints
 
+from app.redaction import KnownValues, redact_text
+
 NAME_MAX_LENGTH: Final = 60
 # Allowed besides letters (and the combining marks of decomposed accents): space, hyphen,
 # apostrophe (ASCII, and the typographic one phone keyboards type) and period.
@@ -50,10 +52,25 @@ PersonName = Annotated[
 
 def public_name(first_name: str | None, last_name: str | None) -> str | None:
     """How a pro shows publicly: the first name and the last name's initial, "María P."
-    None when either name is missing. Not exposed yet: the public pro profile (#53) uses it."""
+    None when either name is missing. Customers see it on a pro's quote (#188); the public pro
+    profile (#53) will show it too."""
     if not first_name or not last_name:
         return None
     initial = next((char for char in last_name if _is_letter(char)), None)
     if initial is None:
         return None
     return f"{first_name} {initial.upper()}."
+
+
+def safe_public_name(
+    first_name: str | None, last_name: str | None, known: KnownValues
+) -> str | None:
+    """public_name, or None when it shows a contact detail (app.redaction): the account's own
+    email or phone (`known`), then every pattern ("repair.example.com", a phone spelled out).
+    Contacts stay hidden before payment and names are editable, so this runs on every read,
+    which covers names stored before any check at write time (#194). Withheld, never partly
+    masked: a name with a mask reads as a broken profile, and None is already a valid value."""
+    name = public_name(first_name, last_name)
+    if name is None or redact_text(name, known).redacted:
+        return None
+    return name

@@ -53,3 +53,40 @@ class QuoteOut(BaseModel):
     expires_at: datetime
     status: QuoteStatus
     created_at: datetime
+
+
+class QuotePro(BaseModel):
+    """The pro behind a quote, as the customer sees them before paying: never a contact, a
+    document, the photo or an internal id (the account, Stripe)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: uuid.UUID = Field(description="The pro's profile id.")
+    name: str | None = Field(
+        description='The first name and the last name\'s initial, e.g. "María P."; null when '
+        "the pro has not set both names, or when the name shows a contact detail (an email, a "
+        "phone, a domain...): withheld before payment, never partly masked."
+    )
+    rating_avg: str | None = Field(
+        examples=["4.80"],
+        description="The average rating as a decimal string; null before the first review.",
+    )
+    jobs_count: int = Field(description="Jobs completed on the platform.")
+    years_of_experience: int | None
+    verified: bool = Field(description="The platform approved the pro's verification.")
+
+
+class CustomerQuote(QuoteOut):
+    """A quote on the customer's request (#188). `scope` arrives with contact details masked
+    (app.redaction): the pro's own email and phone, then every contact pattern."""
+
+    pro: QuotePro
+
+
+class CustomerQuoteList(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[CustomerQuote] = Field(
+        description="The accepted quote, if any, and the pending ones not yet expired: cheapest "
+        "first, then oldest."
+    )

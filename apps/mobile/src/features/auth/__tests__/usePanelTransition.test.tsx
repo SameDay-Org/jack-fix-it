@@ -23,7 +23,25 @@ jest.mock("expo-router", () => ({
   },
   useFocusEffect: jest.fn(),
   useNavigation: jest.fn(),
+  // The router's queue (`router.push` is queued and runs after a render): a test sets it busy.
+  unstable_useIsNavigating: () =>
+    jest
+      .requireActual<typeof import("react")>("react")
+      .useSyncExternalStore(mockRouterQueue.subscribe, () => mockRouterQueue.pending),
 }));
+
+const mockRouterQueue = {
+  pending: false,
+  listeners: new Set<() => void>(),
+  subscribe(listener: () => void) {
+    mockRouterQueue.listeners.add(listener);
+    return () => mockRouterQueue.listeners.delete(listener);
+  },
+  set(pending: boolean) {
+    mockRouterQueue.pending = pending;
+    mockRouterQueue.listeners.forEach((listener) => listener());
+  },
+};
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
   "react-native-safe-area-context",
@@ -93,6 +111,7 @@ beforeEach(() => {
   jest.mocked(useFocusEffect).mockClear();
   // The push normally moves focus away; a test that wants a push that did nothing says so.
   jest.mocked(useNavigation).mockReturnValue({ isFocused: () => false } as never);
+  mockRouterQueue.pending = false;
 });
 afterEach(() => jest.useRealTimers());
 
@@ -448,5 +467,69 @@ describe("a sign-in leaves the auth flow without going back (#175 round 2)", () 
 
     expect(router.push).not.toHaveBeenCalled();
     expect(atRest()).toEqual(REST);
+  });
+});
+
+// #193: expo-router queues `router.push` and runs it after a render, behind whatever it is still
+// building (the screen Welcome prefetches after a sign-out or a back). Welcome stays focused until
+// the push lands; the settle check took that for a push that did nothing and lowered the panel,
+// and the destination arrived with nothing under it to ride: invisible, on top, taking every tap.
+describe("a push the router has not run yet at the settle check (#193)", () => {
+  const nav = { focused: true };
+  const pushLands = () =>
+    act(async () => {
+      nav.focused = false;
+      mockRouterQueue.set(false);
+    });
+  beforeEach(() => {
+    jest.replaceProperty(Platform, "OS", "android");
+    nav.focused = true;
+    jest.mocked(useNavigation).mockReturnValue({ isFocused: () => nav.focused } as never);
+    // The push is queued: Welcome stays focused and the router busy until it runs.
+    jest.mocked(router.push).mockImplementation(() => mockRouterQueue.set(true));
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it("keeps the panel up for the destination, however late the push lands", async () => {
+    await renderWelcome();
+    await act(async () => fireEvent.press(getStarted()));
+    await advance(panelRiseMs * 3); // the settle check comes and goes while the router is busy
+    expect(panelY()).toBeCloseTo(-TRAVEL, 0);
+    expect(handoff.store.getState().phase).toBe("risen");
+
+    await pushLands();
+    await advance(panelRiseMs * 3);
+    expect(panelY()).toBeCloseTo(-TRAVEL, 0); // the destination still rides a risen panel
+    expect(handoff.progress.value).toBe(1);
+    expect(handoff.store.getState().phase).toBe("risen");
+  });
+
+  it("a push that did nothing still lowers the panel, once the router is idle", async () => {
+    await renderWelcome();
+    await act(async () => fireEvent.press(getStarted()));
+    await advance(panelRiseMs * 3);
+    expect(panelY()).toBeCloseTo(-TRAVEL, 0);
+
+    await act(async () => mockRouterQueue.set(false)); // done, and Welcome is still the screen
+    await advance(panelRiseMs * 1.5);
+    expect(panelY()).toBeCloseTo(0, 0);
+    expect(handoff.store.getState().phase).toBe("idle");
+    await act(async () => fireEvent.press(getStarted())); // and the user can try again
+    expect(router.push).toHaveBeenCalledTimes(2);
+  });
+
+  it("a back while the router is still busy cancels the pending check", async () => {
+    await renderWelcome();
+    await act(async () => fireEvent.press(getStarted()));
+    await advance(panelRiseMs * 3); // the check is waiting for the router
+    await refocus(); // back before the router is idle: the panel lowers, the check is dropped
+    await advance(panelRiseMs * 1.5);
+    expect(panelY()).toBeCloseTo(0, 0);
+
+    await act(async () => fireEvent.press(getStarted())); // a new rise, its own check not due yet
+    await advance(panelRiseMs / 2);
+    await act(async () => mockRouterQueue.set(false)); // the router idles with Welcome focused
+    expect(handoff.store.getState().phase).not.toBe("idle"); // no stale check lowered it
+    expect(router.push).toHaveBeenCalledTimes(2);
   });
 });

@@ -525,6 +525,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/requests/{request_id}/quotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compare the quotes on one of my service requests
+         * @description The quotes the customer can choose from: the pending ones not yet expired, and the
+         *     accepted one while the payment is pending. Empty until the request is Quote Ready, and
+         *     once it is closed. Each shows the price, what it includes (contact details masked), the
+         *     duration, the proposed start, when it expires, and the pro's public card.
+         */
+        get: operations["list_request_quotes_v1_requests__request_id__quotes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/devices": {
         parameters: {
             query?: never;
@@ -745,6 +768,49 @@ export interface components {
             state: string;
             /** Zips */
             zips: components["schemas"]["ZipOut"][];
+        };
+        /**
+         * CustomerQuote
+         * @description A quote on the customer's request (#188). `scope` arrives with contact details masked
+         *     (app.redaction): the pro's own email and phone, then every contact pattern.
+         */
+        CustomerQuote: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Amount Cents */
+            amount_cents: number;
+            /** Scope */
+            scope: string;
+            /** Duration Minutes */
+            duration_minutes: number;
+            /**
+             * Proposed Start At
+             * Format: date-time
+             */
+            proposed_start_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            status: components["schemas"]["QuoteStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            pro: components["schemas"]["QuotePro"];
+        };
+        /** CustomerQuoteList */
+        CustomerQuoteList: {
+            /**
+             * Items
+             * @description The accepted quote, if any, and the pending ones not yet expired: cheapest first, then oldest.
+             */
+            items: components["schemas"]["CustomerQuote"][];
         };
         /** DependencyChecks */
         DependencyChecks: {
@@ -1323,6 +1389,42 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * QuotePro
+         * @description The pro behind a quote, as the customer sees them before paying: never a contact, a
+         *     document, the photo or an internal id (the account, Stripe).
+         */
+        QuotePro: {
+            /**
+             * Id
+             * Format: uuid
+             * @description The pro's profile id.
+             */
+            id: string;
+            /**
+             * Name
+             * @description The first name and the last name's initial, e.g. "María P."; null when the pro has not set both names, or when the name shows a contact detail (an email, a phone, a domain...): withheld before payment, never partly masked.
+             */
+            name: string | null;
+            /**
+             * Rating Avg
+             * @description The average rating as a decimal string; null before the first review.
+             * @example 4.80
+             */
+            rating_avg: string | null;
+            /**
+             * Jobs Count
+             * @description Jobs completed on the platform.
+             */
+            jobs_count: number;
+            /** Years Of Experience */
+            years_of_experience: number | null;
+            /**
+             * Verified
+             * @description The platform approved the pro's verification.
+             */
+            verified: boolean;
         };
         /**
          * QuoteStatus
@@ -3086,6 +3188,64 @@ export interface operations {
             };
             /** @description not_configured: quoting is not configured yet (the quote lifetime is not set, or a quote cap is set to an invalid value). */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_request_quotes_v1_requests__request_id__quotes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteList"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers have service requests. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no request of the caller with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

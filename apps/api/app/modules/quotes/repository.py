@@ -1,9 +1,10 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import exists, select
+from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.quotes.models import Quote
+from app.modules.quotes.models import Quote, QuoteStatus
 
 
 class QuoteRepository:
@@ -13,6 +14,22 @@ class QuoteRepository:
     async def exists_for(self, request_id: uuid.UUID, pro_id: uuid.UUID) -> bool:
         statement = select(exists().where(Quote.request_id == request_id, Quote.pro_id == pro_id))
         return bool(await self._session.scalar(statement))
+
+    async def open_of_request(self, request_id: uuid.UUID, now: datetime) -> list[Quote]:
+        """The request's accepted quote and its pending ones still before expires_at (whether
+        or not the expiry worker has marked them yet), cheapest first, then oldest, then by id."""
+        statement = (
+            select(Quote)
+            .where(
+                Quote.request_id == request_id,
+                or_(
+                    Quote.status == QuoteStatus.ACCEPTED,
+                    and_(Quote.status == QuoteStatus.PENDING, Quote.expires_at > now),
+                ),
+            )
+            .order_by(Quote.amount_cents, Quote.created_at, Quote.id)
+        )
+        return list((await self._session.scalars(statement)).all())
 
     async def add(self, quote: Quote) -> Quote:
         """Inserts now (flush): a second quote by the pro on the request fails here, on the
