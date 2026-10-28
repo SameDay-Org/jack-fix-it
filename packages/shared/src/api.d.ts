@@ -405,6 +405,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/geo/reverse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The address at a device position
+         * @description The parts of the US street address at the device position, for the "use my location"
+         *     button of the address book, and whether that ZIP is served. Nothing is stored.
+         */
+        post: operations["reverse_geocode_v1_geo_reverse_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pros/me": {
         parameters: {
             query?: never;
@@ -1621,6 +1642,51 @@ export interface components {
             /** Media Count */
             media_count: number;
         };
+        /**
+         * ReverseAddressOut
+         * @description The US street address at the position, and whether its ZIP is a served area.
+         */
+        ReverseAddressOut: {
+            /**
+             * Line1
+             * @description "<number> <street>", or the street alone without a number.
+             */
+            line1: string;
+            /** City */
+            city: string;
+            /**
+             * State
+             * @description The 2-letter state code.
+             */
+            state: string;
+            /**
+             * Zip Code
+             * @description 5 digits (ZIP+4 is trimmed).
+             */
+            zip_code: string;
+            /**
+             * Served
+             * @description Whether an active service area covers the ZIP.
+             */
+            served: boolean;
+        };
+        /**
+         * ReversePositionIn
+         * @description A device position. Strict: numbers only (no strings or booleans), finite, in range,
+         *     and nothing but the two coordinates.
+         */
+        ReversePositionIn: {
+            /**
+             * Lat
+             * @description Latitude, degrees.
+             */
+            lat: number;
+            /**
+             * Lng
+             * @description Longitude, degrees.
+             */
+            lng: number;
+        };
         /** ServedCheckOut */
         ServedCheckOut: {
             /**
@@ -2820,6 +2886,86 @@ export interface operations {
                 headers: {
                     /** @description Seconds until the current limit window ends. */
                     "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    reverse_geocode_v1_geo_reverse_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReversePositionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReverseAddressOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired access token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers look up their position. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description location_not_resolved: no US street address at this position. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: lat must be in [-90, 90] and lng in [-180, 180], both finite numbers (not strings or booleans), and nothing else in the body. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many lookups; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description geocoding_unavailable: the geocoding provider is not configured or not reachable. */
+            503: {
+                headers: {
                     [name: string]: unknown;
                 };
                 content: {

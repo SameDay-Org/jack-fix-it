@@ -1294,6 +1294,111 @@
         }
       }
     },
+    "/v1/geo/reverse": {
+      "post": {
+        "tags": [
+          "geo"
+        ],
+        "summary": "The address at a device position",
+        "description": "The parts of the US street address at the device position, for the \"use my location\"\nbutton of the address book, and whether that ZIP is served. Nothing is stored.",
+        "operationId": "reverse_geocode_v1_geo_reverse_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReversePositionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReverseAddressOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: lat must be in [-90, 90] and lng in [-180, 180], both finite numbers (not strings or booleans), and nothing else in the body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers look up their position.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "location_not_resolved: no US street address at this position.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many lookups; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "geocoding_unavailable: the geocoding provider is not configured or not reachable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/v1/pros/me": {
       "get": {
         "tags": [
@@ -4264,6 +4369,70 @@
           "media_count"
         ],
         "title": "RequestSummary"
+      },
+      "ReverseAddressOut": {
+        "properties": {
+          "line1": {
+            "type": "string",
+            "title": "Line1",
+            "description": "\"<number> <street>\", or the street alone without a number."
+          },
+          "city": {
+            "type": "string",
+            "title": "City"
+          },
+          "state": {
+            "type": "string",
+            "title": "State",
+            "description": "The 2-letter state code."
+          },
+          "zip_code": {
+            "type": "string",
+            "title": "Zip Code",
+            "description": "5 digits (ZIP+4 is trimmed)."
+          },
+          "served": {
+            "type": "boolean",
+            "title": "Served",
+            "description": "Whether an active service area covers the ZIP."
+          }
+        },
+        "type": "object",
+        "required": [
+          "line1",
+          "city",
+          "state",
+          "zip_code",
+          "served"
+        ],
+        "title": "ReverseAddressOut",
+        "description": "The US street address at the position, and whether its ZIP is a served area."
+      },
+      "ReversePositionIn": {
+        "properties": {
+          "lat": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Lat",
+            "description": "Latitude, degrees."
+          },
+          "lng": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Lng",
+            "description": "Longitude, degrees."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "lat",
+          "lng"
+        ],
+        "title": "ReversePositionIn",
+        "description": "A device position. Strict: numbers only (no strings or booleans), finite, in range,\nand nothing but the two coordinates."
       },
       "ServedCheckOut": {
         "properties": {

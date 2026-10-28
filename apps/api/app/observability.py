@@ -78,6 +78,8 @@ def configure_logging(level: str) -> None:
     logging.getLogger("uvicorn.access").disabled = True
     # httpx logs every outgoing request at INFO with the full URL, query string included.
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    # httpcore, under httpx, names the host of every connection at DEBUG.
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     # At DEBUG, botocore logs the canonical request and the signature of every presigned URL:
     # enough to rebuild a working URL from the logs. s3transfer logs each transfer's bucket,
     # object key and local path, and Pillow every EXIF value it reads (an artist's name, GPS):
