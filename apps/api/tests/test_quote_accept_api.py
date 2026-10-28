@@ -561,6 +561,17 @@ async def dispatched(
     return [row.id for row in rows]
 
 
+# An amount no uuid or timestamp in a log line would hold by chance (unlike 10_000).
+AMOUNT_PROBE = 73_918_264
+
+
+async def probe_amount(session: AsyncSession, quote_id: uuid.UUID) -> None:
+    stored = await session.get(Quote, quote_id)
+    assert stored is not None
+    stored.amount_cents = AMOUNT_PROBE
+    await session.flush()
+
+
 def spy_enqueue_timeouts(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     """The timeout of each push the events queue, recorded; the real enqueue still runs."""
     timeouts: list[float] = []
@@ -583,6 +594,7 @@ async def test_accepting_a_quote_pushes_the_pro_once(
 ) -> None:
     request_id, [other, chosen], pros = await open_request(db_session, world, count=2)
     [_, dispatch_id] = await dispatched(db_session, request_id, pros)
+    await probe_amount(db_session, chosen)
     code = await public_code_of(db_session, request_id)
     timeouts = spy_enqueue_timeouts(monkeypatch)
     record_commits(monkeypatch)
@@ -610,7 +622,7 @@ async def test_accepting_a_quote_pushes_the_pro_once(
     assert events(caplog, "quote_accepted_push_skipped") == []
     # No personal data in the logs: no name, amount, scope or contact.
     output = "\n".join(JsonFormatter().format(record) for record in caplog.records)
-    for secret in (pros[1].email, "María", "Pérez", "10001", "Replace the faucet", code):
+    for secret in (pros[1].email, "María", "Pérez", str(AMOUNT_PROBE), "Replace the faucet", code):
         assert secret not in output, secret
     assert await statuses(db_session, request_id) == (
         RequestStatus.ACCEPTED,
@@ -722,6 +734,7 @@ async def test_accept_survives_a_failed_push_enqueue(
     app.dependency_overrides[get_job_queue] = lambda: broken
     request_id, [quote_id], pros = await open_request(db_session, world, count=1)
     await dispatched(db_session, request_id, pros)
+    await probe_amount(db_session, quote_id)
     code = await public_code_of(db_session, request_id)
 
     with caplog.at_level(logging.DEBUG):
@@ -744,7 +757,7 @@ async def test_accept_survives_a_failed_push_enqueue(
     assert payload["user_id"] == str(pros[0].user_id)
     assert payload["message_id"] == f"quote_accepted:{quote_id}"
     output = "\n".join(JsonFormatter().format(r) for r in caplog.records)
-    for secret in (pros[0].email, "María", "Pérez", "10000", "Replace the faucet", code):
+    for secret in (pros[0].email, "María", "Pérez", str(AMOUNT_PROBE), "Replace the faucet", code):
         assert secret not in output, secret
 
 
