@@ -330,21 +330,21 @@ async def send_push(
             await deps.store.record(message_id, lost)
             logger.warning("push_outcome_unknown", extra={**extra, "count": len(lost)})
             recipients = {**recipients, **lost}
-        if muted:
-            silenced = {
-                device_id: replace(recipient, status=Status.MUTED)
-                for device_id, recipient in recipients.items()
-                if recipient.status is Status.PENDING
-            }
-            if silenced:
-                await deps.store.record(message_id, silenced)
+        # The group is off for push (#217): the devices still to send never get it.
+        silenced = {
+            device_id: replace(recipient, status=Status.MUTED)
+            for device_id, recipient in recipients.items()
+            if muted and recipient.status is Status.PENDING
+        }
+        if silenced:
+            await deps.store.record(message_id, silenced)
             logger.info("push_muted", extra={**extra, "group": str(group), "count": len(silenced)})
             recipients = {**recipients, **silenced}
     except (RedisError, OSError, SQLAlchemyError):
         raise _retry(deps, attempt, extra) from None
     due = [t for t in targets if _status(recipients, t.device_id) is Status.PENDING]
     if not due and not any(r.status is Status.DEAD for r in recipients.values()):
-        if not muted:
+        if not silenced:
             logger.info("push_already_sent" if recipients else "push_no_devices", extra=extra)
         return
 
