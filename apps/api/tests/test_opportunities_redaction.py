@@ -6,7 +6,6 @@ are checked on their serialized values. The customer's own view keeps the text a
 """
 
 import logging
-import time
 import uuid
 from typing import Any
 
@@ -28,6 +27,7 @@ from app.rate_limit import get_rate_limiter
 from app.redaction import MASK
 from tests.conftest import InMemoryRateLimiter
 from tests.glue_variants import glue_sample
+from tests.helpers import async_best_seconds_without_gc
 from tests.test_intake_questions import labels, option
 from tests.test_opportunities_api import BASE, Pro, dispatch, make_pro
 from tests.test_requests_api import (
@@ -392,18 +392,17 @@ async def test_a_street_of_repeated_suffixes_does_not_slow_a_read(
         street="100 " + " ".join(["St"] * 25),
     )
 
-    # The best of three reads: a busy test machine can stall one read; backtracking would make
-    # every read take seconds.
-    timings = []
-    for _ in range(3):
-        started = time.perf_counter()
+    async def read() -> None:
         response = await db_client.get(
             BASE if route == "list" else f"{BASE}/{dispatch_id}", headers=pro.caller.headers
         )
-        timings.append(time.perf_counter() - started)
         assert response.status_code == 200, response.text
 
-    assert min(timings) < 0.25, f"{source}/{route}: {min(timings):.3f} s"
+    # The best of three reads: a busy test machine can stall one read; backtracking would make
+    # every read take seconds.
+    seconds = await async_best_seconds_without_gc(read)
+
+    assert seconds < 0.25, f"{source}/{route}: {seconds:.3f} s"
 
 
 @pytest.mark.parametrize(("line", "text", "number", "name"), glue_sample(30))

@@ -10,12 +10,12 @@ import httpx
 import pytest
 from alembic import command
 from alembic.config import Config
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from sqlalchemy import URL, delete, make_url, pool, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import Settings
-from app.db import get_session
+from app.db import Base, get_session
 from app.main import create_app
 from app.modules.auth.models import RefreshToken
 from app.modules.users.models import User
@@ -151,18 +151,25 @@ def test_database_url() -> URL:
     return url
 
 
+async def _rolled_back_session(request: Request) -> AsyncIterator[AsyncSession]:
+    """db_client's get_session: the test's session, which the fixture puts on the app's state.
+    One function for every test on purpose: FastAPI caches each dependency callable it calls
+    (4096 entries), so a closure per test kept each test's session, connection, engine and
+    dialect alive long after the test (#196)."""
+    session: AsyncSession = request.app.state.rolled_back_session
+    yield session
+
+
 @pytest.fixture
 async def db_client(app: FastAPI, db_session: AsyncSession) -> AsyncIterator[httpx.AsyncClient]:
     """The HTTP client with get_session replaced by the rolled-back test session."""
-
-    async def test_session() -> AsyncIterator[AsyncSession]:
-        yield db_session
-
-    app.dependency_overrides[get_session] = test_session
+    app.state.rolled_back_session = db_session
+    app.dependency_overrides[get_session] = _rolled_back_session
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         yield client
     app.dependency_overrides.pop(get_session, None)
+    del app.state.rolled_back_session
 
 
 @pytest.fixture
@@ -185,6 +192,11 @@ async def db_session(test_database_url: URL) -> AsyncIterator[AsyncSession]:
                 await transaction.rollback()
     finally:
         await engine.dispose()
+        # Each flush's compiled INSERT and UPDATE is cached on the mapper, keyed by the
+        # engine's dialect. A new engine per test means a new dialect, so the entries can never
+        # be hit again, yet each mapper kept ~150 of them with the dialects they hold (#196).
+        for mapper in Base.registry.mappers:
+            mapper._compiled_cache.clear()
 
 
 # Real commits on separate connections: the rolled-back db_session cannot show either.
