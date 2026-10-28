@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Collection, Sequence
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import Select, delete, func, select, update
@@ -75,6 +76,31 @@ class ProProfileRepository:
             (row[0], row[1], row[2], row[3], row[4], row[5])
             for row in (await self._session.execute(statement)).all()
         ]
+
+    async def public_details(
+        self, pro_id: uuid.UUID
+    ) -> tuple[str | None, datetime, list[uuid.UUID]] | None:
+        """(bio, created_at, category ids) of one profile, in one query, for the profile a
+        customer sees (#53): never the photo key, the documents, the service areas or the
+        Stripe account. None when there is no such profile."""
+        statement = (
+            select(
+                ProProfile.bio,
+                ProProfile.created_at,
+                func.array_agg(ProCategory.category_id).filter(
+                    ProCategory.category_id.is_not(None)
+                ),
+            )
+            .outerjoin(ProCategory, ProCategory.pro_id == ProProfile.id)
+            .where(ProProfile.id == pro_id)
+            .group_by(ProProfile.id)
+        )
+        row = (await self._session.execute(statement)).one_or_none()
+        if row is None:
+            return None
+        bio, created_at, category_ids = row
+        # array_agg over no row is NULL.
+        return bio, created_at, list(category_ids or [])
 
     async def insert_if_missing(self, user_id: uuid.UUID) -> bool:
         """Creates the user's empty profile (pending); True when this call created it.
