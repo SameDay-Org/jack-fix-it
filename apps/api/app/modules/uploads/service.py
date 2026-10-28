@@ -121,6 +121,23 @@ class UploadConfig:
 
 
 @dataclass(frozen=True)
+class UploadKey:
+    """What a well-formed upload key says: whose file it is and what for."""
+
+    owner_id: uuid.UUID
+    purpose: UploadPurpose
+
+
+def parse_upload_key(key: str) -> UploadKey | None:
+    """The owner and purpose of a well-formed upload key (KEY_PATTERN); None for any other key.
+    For the sweep of uploads no row references (#191)."""
+    match = KEY_PATTERN.fullmatch(key)
+    if match is None:
+        return None
+    return UploadKey(owner_id=uuid.UUID(match["user_id"]), purpose=UploadPurpose(match["purpose"]))
+
+
+@dataclass(frozen=True)
 class OwnedUpload:
     """A file a feature may attach: its key and the content type its extension stands for."""
 
