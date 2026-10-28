@@ -44,12 +44,18 @@ Then, in one transaction: the quote accepted, and the request quote_ready -> acc
 its state machine (CUSTOMER). The other quotes stay pending: after a failed payment the customer
 may pick another (#61), and rejecting them belongs to the payment's success. No money moves
 here: the payment attaches to this step (#58), and the job is created once it succeeds (#61).
+Once that commits, the quote's pro gets a quote accepted push (#55) that opens their dispatch
+of the request (#49); the repeat sends none. A quote whose pro has no dispatch of the request
+(quotes come from one, so it should not happen) gets no push: no other screen of the pro's
+shows the job, so it is logged with ids and skipped. A push that cannot be queued is logged,
+never undone.
 
 Logs carry ids only: never the scope text or the amount.
 """
 
 import logging
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -61,8 +67,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.errors import NotFoundError
 from app.modules.dispatch.service import DispatchService
 from app.modules.jobs.service import SYSTEM
-from app.modules.notifications.events import push_new_quote
-from app.modules.pros.service import ProService
+from app.modules.notifications.events import push_new_quote, push_quote_accepted
+from app.modules.pros.service import ProCard, ProService
 from app.modules.quotes.errors import (
     NotQuotableError,
     QuoteExistsError,
@@ -232,10 +238,11 @@ class QuoteService:
                 raise NotFoundError
             [item] = replayed
             return item
-        shown = await self._for_customer([quote], hireable_only=True)
-        if not shown:
+        cards = await self._pros.hireable_cards({quote.pro_id})
+        card = cards.get(quote.pro_id)
+        if card is None:
             raise QuoteNotAcceptableError  # the pro can no longer be hired
-        [item] = shown
+        [item] = await self._present([quote], cards)
         if (
             request.status is not RequestStatus.QUOTE_READY
             or quote.status is not QuoteStatus.PENDING
@@ -245,15 +252,25 @@ class QuoteService:
         if not await self._quotes.mark_accepted(quote.id):
             raise QuoteNotAcceptableError  # pragma: no cover - checked above, under the locks
         await self._requests.transition(request.id, RequestStatus.ACCEPTED, user)
+        dispatch_id = await self._dispatches.dispatch_id_for(request.id, quote.pro_id)
         await self._session.commit()
-        logger.info(
-            "quote_accepted",
-            extra={
-                "quote_id": str(quote.id),
-                "service_request_id": str(request.id),
-                "pro_id": str(quote.pro_id),
-            },
-        )
+        ids = {
+            "quote_id": str(quote.id),
+            "service_request_id": str(request.id),
+            "pro_id": str(quote.pro_id),
+        }
+        logger.info("quote_accepted", extra=ids)
+        if dispatch_id is None:
+            logger.warning("quote_accepted_push_skipped", extra=ids)
+        else:
+            await push_quote_accepted(
+                self._queue,
+                pro_user_id=card.user_id,
+                quote_id=quote.id,
+                dispatch_id=dispatch_id,
+                public_code=request.public_code,
+                timeout_seconds=self._enqueue_timeout,
+            )
         return item.model_copy(update={"status": QuoteStatus.ACCEPTED})
 
     async def _listed(self, user: UserAccount, request_id: uuid.UUID) -> list[Quote]:
@@ -274,6 +291,13 @@ class QuoteService:
         cards = await (
             self._pros.hireable_cards(pro_ids) if hireable_only else self._pros.cards(pro_ids)
         )
+        return await self._present(quotes, cards)
+
+    async def _present(
+        self, quotes: list[Quote], cards: Mapping[uuid.UUID, ProCard]
+    ) -> list[CustomerQuote]:
+        """The quotes as their customer sees them, in the given order, leaving out those whose
+        pro has no card in `cards`. One query for the pros' contact points."""
         # The pros' own details, for the known-value pass only: never logged or returned.
         contacts = await self._users.contact_points({card.user_id for card in cards.values()})
         items: list[CustomerQuote] = []

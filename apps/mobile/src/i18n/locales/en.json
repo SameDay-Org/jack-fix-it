@@ -66,7 +66,20 @@
     "logOut": "Log out",
     "verifyPhone": "Verify your phone",
     "phone": "Phone",
-    "phoneVerified": "Verified"
+    "phoneVerified": "Verified",
+    "headline": "What's going on at <accent>home</accent>?",
+    "support": "Tell Jack. We'll take care of the rest.",
+    "tellJack": "Tell Jack What Happened",
+    "categoriesTitle": "Or pick a category",
+    "categoriesLoading": "Loading categories",
+    "categoriesFailed": "We couldn't load the categories.",
+    "retry": "Try again"
+  },
+  "account": {
+    "title": "Account"
+  },
+  "request": {
+    "title": "Tell Jack what happened"
   },
   "phone": {
     "title": "Verify your phone",
