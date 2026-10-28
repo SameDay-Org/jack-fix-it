@@ -1,17 +1,24 @@
 """POST /v1/requests/{request_id}/quotes/{quote_id}/accept: the customer accepts a quote (D10.1,
 #189)."""
 
+import asyncio
+import json
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
 import pytest
 from fastapi import FastAPI
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import Settings
+from app.modules.dispatch.models import DispatchStatus, RequestDispatch
 from app.modules.jobs.service import SystemActor
+from app.modules.notifications import events as push_events
+from app.modules.notifications.service import enqueue_push
 from app.modules.pros.models import ProProfile, ProVerificationStatus
 from app.modules.quotes import service as quote_service
 from app.modules.quotes.errors import QuoteNotAcceptableError
@@ -23,7 +30,9 @@ from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole
 from app.observability import JsonFormatter
 from app.queue import get_job_queue
-from tests.test_opportunities_api import NOT_FOUND, World, build_world, make_request
+from tests.conftest import make_settings
+from tests.test_dispatch import record_commits
+from tests.test_opportunities_api import NOT_FOUND, T0, World, build_world, make_request
 from tests.test_quote_list_api import (
     FORBIDDEN,
     INVALID_TOKEN,
@@ -36,7 +45,7 @@ from tests.test_quote_list_api import (
     path,
     quoting_pro,
 )
-from tests.test_quotes_api import quotes_of, status_of
+from tests.test_quotes_api import public_code_of, quotes_of, status_of
 from tests.test_requests_api import ENQUEUE_TIMEOUT, RecordingQueue, make_caller
 
 NOT_ACCEPTABLE = {
@@ -49,9 +58,15 @@ NOT_ACCEPTABLE = {
 _RECORD_FIELDS = set(logging.makeLogRecord({}).__dict__) | {"message", "asctime"}
 
 
+@pytest.fixture
+def settings() -> Settings:
+    # A short enqueue bound, so a hung Redis ends the quote accepted push quickly.
+    return make_settings(job_enqueue_timeout_seconds=ENQUEUE_TIMEOUT)
+
+
 @pytest.fixture(autouse=True)
 def queue(app: FastAPI) -> RecordingQueue:
-    """QuoteService takes the new quote push's queue (#55): recorded, never Redis."""
+    """The quote accepted push's queue (#55): recorded, never Redis."""
     recorder = RecordingQueue()
     app.dependency_overrides[get_job_queue] = lambda: recorder
     return recorder
@@ -526,6 +541,250 @@ async def test_acceptance_is_atomic(
         RequestStatus.QUOTE_READY,
         {quote_id: QuoteStatus.PENDING},
     )
+
+
+# The quote accepted push (D10.4, #55)
+
+
+async def dispatched(
+    session: AsyncSession, request_id: uuid.UUID, pros: list[QuotingPro]
+) -> list[uuid.UUID]:
+    """The quoting pros' dispatches of the request, quoted: where their quotes came from."""
+    rows = [
+        RequestDispatch(
+            request_id=request_id, pro_id=pro.profile_id, status=DispatchStatus.QUOTED, sent_at=T0
+        )
+        for pro in pros
+    ]
+    session.add_all(rows)
+    await session.flush()
+    return [row.id for row in rows]
+
+
+# An amount no uuid or timestamp in a log line would hold by chance (unlike 10_000).
+AMOUNT_PROBE = 73_918_264
+
+
+async def probe_amount(session: AsyncSession, quote_id: uuid.UUID) -> None:
+    stored = await session.get(Quote, quote_id)
+    assert stored is not None
+    stored.amount_cents = AMOUNT_PROBE
+    await session.flush()
+
+
+def spy_enqueue_timeouts(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """The timeout of each push the events queue, recorded; the real enqueue still runs."""
+    timeouts: list[float] = []
+
+    async def recorded(*args: Any, **kwargs: Any) -> bool:
+        timeouts.append(kwargs["timeout_seconds"])
+        return await enqueue_push(*args, **kwargs)
+
+    monkeypatch.setattr(push_events, "enqueue_push", recorded)
+    return timeouts
+
+
+async def test_accepting_a_quote_pushes_the_pro_once(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    queue: RecordingQueue,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    request_id, [other, chosen], pros = await open_request(db_session, world, count=2)
+    [_, dispatch_id] = await dispatched(db_session, request_id, pros)
+    await probe_amount(db_session, chosen)
+    code = await public_code_of(db_session, request_id)
+    timeouts = spy_enqueue_timeouts(monkeypatch)
+    record_commits(monkeypatch)
+
+    with caplog.at_level(logging.DEBUG):
+        response = await accept(db_client, world, request_id, chosen)
+
+    assert response.status_code == 200, response.text
+    # To the chosen pro's user, never the other pro or the customer.
+    assert queue.jobs == {
+        f"push:quote_accepted:{chosen}": (
+            "send_push",
+            (
+                str(pros[1].user_id),
+                f"quote_accepted:{chosen}",
+                "push.quote_accepted.title",
+                "push.quote_accepted.body",
+                {"public_code": code},
+                f"/opportunities/{dispatch_id}",
+            ),
+        )
+    }
+    assert queue.before == ["commit"]  # queued after the acceptance's commit, once
+    assert timeouts == [ENQUEUE_TIMEOUT]  # the configured bound, not the default
+    assert events(caplog, "quote_accepted_push_skipped") == []
+    # No personal data in the logs: no name, amount, scope or contact.
+    output = "\n".join(JsonFormatter().format(record) for record in caplog.records)
+    for secret in (pros[1].email, "María", "Pérez", str(AMOUNT_PROBE), "Replace the faucet", code):
+        assert secret not in output, secret
+    assert await statuses(db_session, request_id) == (
+        RequestStatus.ACCEPTED,
+        {other: QuoteStatus.PENDING, chosen: QuoteStatus.ACCEPTED},
+    )
+
+
+async def test_replaying_an_acceptance_sends_no_push(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    queue: RecordingQueue,
+) -> None:
+    request_id, [chosen], pros = await open_request(db_session, world, count=1)
+    await dispatched(db_session, request_id, pros)
+    assert (await accept(db_client, world, request_id, chosen)).status_code == 200
+    assert len(queue.before) == 1
+    queue.jobs.clear()
+    queue.before.clear()
+
+    again = await accept(db_client, world, request_id, chosen)
+
+    assert again.status_code == 200
+    # Not even a deduplicated enqueue: the replay never calls the push.
+    assert queue.before == []
+    assert queue.jobs == {}
+
+
+@pytest.mark.parametrize(
+    "refusal", ["another_customer", "expired", "another_quote_accepted", "pro_not_hireable"]
+)
+async def test_refused_acceptances_send_no_push(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    queue: RecordingQueue,
+    refusal: str,
+) -> None:
+    request_id, [first, second], pros = await open_request(db_session, world, count=2)
+    await dispatched(db_session, request_id, pros)
+    headers = customer(world)
+    expected = 409
+    if refusal == "another_customer":
+        headers = (await make_caller(db_session, UserRole.CUSTOMER)).headers
+        expected = 404
+    elif refusal == "expired":
+        stored = await db_session.get(Quote, second)
+        assert stored is not None
+        stored.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        await db_session.flush()
+    elif refusal == "another_quote_accepted":
+        assert (await accept(db_client, world, request_id, first)).status_code == 200
+        queue.jobs.clear()
+        queue.before.clear()
+    else:
+        profile = await db_session.get(ProProfile, pros[1].profile_id)
+        assert profile is not None
+        profile.payouts_enabled = False
+        await db_session.flush()
+
+    response = await db_client.post(accept_path(request_id, second), headers=headers)
+
+    assert response.status_code == expected
+    assert queue.before == []
+    assert queue.jobs == {}
+
+
+async def test_no_push_when_the_commit_fails(
+    db_session: AsyncSession, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request_id, [quote_id], pros = await open_request(db_session, world, count=1)
+    await dispatched(db_session, request_id, pros)
+    actor = await customer_account(db_session, world)
+    recorder = RecordingQueue()
+
+    async def fail(self: AsyncSession) -> None:
+        raise RuntimeError("synthetic commit failure")
+
+    savepoint = await db_session.begin_nested()  # the request's transaction
+    monkeypatch.setattr(AsyncSession, "commit", fail)
+    with pytest.raises(RuntimeError):
+        await QuoteService(db_session, recorder, ENQUEUE_TIMEOUT).accept(
+            actor, request_id, quote_id
+        )
+    monkeypatch.undo()
+    await savepoint.rollback()
+
+    assert recorder.before == []
+    assert recorder.jobs == {}
+    assert await statuses(db_session, request_id) == (
+        RequestStatus.QUOTE_READY,
+        {quote_id: QuoteStatus.PENDING},
+    )
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [RecordingQueue(failure=RedisError("down")), RecordingQueue(hang=True)],
+    ids=["redis_error", "timeout"],
+)
+async def test_accept_survives_a_failed_push_enqueue(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    broken: RecordingQueue,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app.dependency_overrides[get_job_queue] = lambda: broken
+    request_id, [quote_id], pros = await open_request(db_session, world, count=1)
+    await dispatched(db_session, request_id, pros)
+    await probe_amount(db_session, quote_id)
+    code = await public_code_of(db_session, request_id)
+
+    with caplog.at_level(logging.DEBUG):
+        response = await asyncio.wait_for(accept(db_client, world, request_id, quote_id), 5)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "accepted"
+    assert len(broken.before) == 1  # the push was tried, once
+    assert await statuses(db_session, request_id) == (
+        RequestStatus.ACCEPTED,
+        {quote_id: QuoteStatus.ACCEPTED},
+    )
+    # Logged with ids only: the pro's user and the message (the event's kind and id).
+    [record] = events(caplog, "push_enqueue_failed")
+    payload = json.loads(JsonFormatter().format(record))
+    assert set(payload) - {"timestamp", "level", "logger", "message", "request_id"} == {
+        "user_id",
+        "message_id",
+    }
+    assert payload["user_id"] == str(pros[0].user_id)
+    assert payload["message_id"] == f"quote_accepted:{quote_id}"
+    output = "\n".join(JsonFormatter().format(r) for r in caplog.records)
+    for secret in (pros[0].email, "María", "Pérez", str(AMOUNT_PROBE), "Replace the faucet", code):
+        assert secret not in output, secret
+
+
+async def test_a_quote_without_a_dispatch_is_accepted_and_its_push_skipped(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    queue: RecordingQueue,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Quotes come from a dispatch, so this should not happen. No other screen of the pro's
+    shows the job, so there is no deep link to fall back to: logged with ids, no push."""
+    request_id, [quote_id], pros = await open_request(db_session, world, count=1)
+
+    with caplog.at_level(logging.DEBUG):
+        response = await accept(db_client, world, request_id, quote_id)
+
+    assert response.status_code == 200
+    assert queue.before == []
+    [skipped] = events(caplog, "quote_accepted_push_skipped")
+    assert skipped.levelno == logging.WARNING
+    extra = {key: value for key, value in skipped.__dict__.items() if key not in _RECORD_FIELDS}
+    assert extra == {
+        "quote_id": str(quote_id),
+        "service_request_id": str(request_id),
+        "pro_id": str(pros[0].profile_id),
+    }
 
 
 # The contract

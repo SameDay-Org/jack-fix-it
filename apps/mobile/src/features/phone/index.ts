@@ -7,3 +7,4 @@ export {
   withdrawPhoneStepOffer,
 } from "./phoneFlow";
 export { PhoneEntryScreen } from "./PhoneEntryScreen";
+export { useOpenPhoneStepAfterSignUp } from "./useOpenPhoneStepAfterSignUp";

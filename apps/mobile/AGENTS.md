@@ -42,6 +42,14 @@ rules apply.
   sent as E.164; the code in the kit's `CodeInput` (one-time-code autofill), auto-submitted at 6
   digits, resend after `EXPO_PUBLIC_OTP_RESEND_SECONDS`. The number travels in the flow store,
   never in a route. A sign-up lands on it with "Skip for now"; home offers it until verified.
+- Customer home (D8.1, #43): `/` (`HomeScreen`, `src/features/home`) shows customers
+  `CustomerHomeScreen` (navy hero, one primary "Tell Jack What Happened", category `Chip`s from
+  `useCategories`: one load per session, no silent retries, skeletons shaped like the chips) and
+  everyone else `HomePlaceholderScreen` until #38. Both start a request through `startRequest(slug |
+null)` (`src/features/request`, a vanilla Zustand draft; never the route), which pushes
+  `/request/new` (placeholder until #45). The avatar opens `/account` (`src/features/account`:
+  identity, phone, log out). Every home opens the phone step after a sign-up through
+  `useOpenPhoneStepAfterSignUp`.
 - Launch intro (D18, #147): every start draws `LaunchIntro` (`src/features/launch`) over the
   gate: the navy hero with `WordRotator` (`src/components/ui`) rolling the headline's verb on
   the UI thread, width tweened so the sentence never jumps, one static screen-reader label, tap
