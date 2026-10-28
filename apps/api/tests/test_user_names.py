@@ -212,6 +212,30 @@ def test_ordinary_names_are_not_contacts(name: str) -> None:
     assert not redact_contacts(name).redacted
 
 
+@pytest.mark.parametrize(
+    ("refused", "spaced"),
+    [
+        # "de" is a TLD the domain pattern never spares.
+        ("Ma.de Lourdes", "Ma. de Lourdes"),
+        ("Fco.de Asís", "Fco. de Asís"),
+        # "br" then an accented letter ends the TLD mid-word.
+        ("Ma.Brígida", "Ma. Brígida"),
+        # A word TLD is spared only after a lowercase letter, not an initial.
+        ("S.Dev Kumar", "S. Dev Kumar"),
+        # A payment platform followed by an id with a period.
+        ("Zelle Jr.", "Zelle Jr"),
+    ],
+)
+def test_known_limitation_unspaced_forms_refused_spaced_forms_accepted(
+    refused: str, spaced: str
+) -> None:
+    """Known limitation (#198, Foreman decision): the redactor masks these, so they are refused;
+    typed with a space they pass. Pinned so a later redactor change shows up on purpose."""
+    with pytest.raises(ValidationError):
+        NAME.validate_python(refused)
+    assert NAME.validate_python(spaced) == spaced
+
+
 # Register
 
 
