@@ -14,7 +14,7 @@ from app.config import Settings
 from app.modules.users.models import User
 from app.modules.users.names import PersonName, public_name, safe_public_name
 from app.observability import JsonFormatter
-from app.redaction import KnownValues
+from app.redaction import KnownValues, redact_contacts
 from tests.test_auth_api import EMAIL, VALIDATION_ERROR, get_user, register
 from tests.test_create_staff_user import PASSWORD as STAFF_PASSWORD
 from tests.test_create_staff_user import STORED_EMAIL as STAFF_EMAIL
@@ -153,6 +153,65 @@ def test_safe_public_name_withholds_the_accounts_own_email_and_phone() -> None:
         assert safe_public_name(first, "Gómez", KnownValues()) == f"{first} G."
 
 
+# Contacts refused at write time (#198)
+
+# More shapes that pass the letter rule and that redact_contacts masks today. A bare handle
+# after a platform word ("instagram jdoe") is one of its known gaps, so the id here has a dot.
+MORE_CONTACT_NAMES = (
+    "luis arroba gmail punto com",
+    "www.example.com",
+    "jdoe at gmail",
+    "jdoe en hotmail",
+    "tres cero cinco cinco cinco cinco cero uno nueve nueve",
+    "instagram jdoe.fix",
+    "example dot com",
+    "linktr.ee",
+)
+
+
+@pytest.mark.parametrize("raw", CONTACT_NAMES + MORE_CONTACT_NAMES)
+def test_name_validation_rejects_contacts(raw: str) -> None:
+    with pytest.raises(ValidationError) as refused:
+        NAME.validate_python(raw)
+
+    # Pydantic attaches the input to every error; the message itself never repeats it.
+    assert raw not in refused.value.json(include_input=False)
+    assert "contact" in refused.value.errors()[0]["msg"]
+
+
+# Fixture names only: what people are called, as they type it.
+ORDINARY_NAMES = (
+    "María José", "O'Neil", "O\N{RIGHT SINGLE QUOTATION MARK}Neil", "Jr.", "Jean-Luc",
+    "de la Cruz", "Zoë", "Zoe\N{COMBINING DIAERESIS}", "李", "a" * 60,
+    "María", "O'Brien", "St. John", "D'Angelo", "D\N{RIGHT SINGLE QUOTATION MARK}Angelo",
+    "J.R.", "Ñúñez", "Mary-Kate",
+    # Hispanic compound surnames
+    "García Márquez", "Pérez de la Rosa", "Rodríguez-Ortiz", "Fernández y López",
+    "de los Santos", "María de los Ángeles", "San Martín", "Peña Nieto",
+    # Haitian
+    "Jean-Baptiste", "Pierre-Louis", "Dieudonné", "Saint-Fleur", "Fils-Aimé", "St. Fleur",
+    # Brazilian
+    "João", "Gonçalves", "da Silva", "dos Santos", "Conceição", "Assunção",
+    # Anglo
+    "Smith-Jones", "Mary Ann", "McAllister", "Atwood", "Comfort",
+    # Vietnamese
+    "Nguyễn", "Trần", "Phạm Văn", "Thị Hương", "Nguyen Van",
+    # Chinese, romanized
+    "Zhang Wei", "Ouyang", "Au-Yeung", "Li",
+    # Words the patterns look for, alone or inside a name
+    "Dot", "Dotson", "Cruz Dot", "Will", "Mac", "MacDonald", "Van", "Van der Berg", "Del",
+    "Del Río", "del Valle", "Uno", "Cinco", "Ocho",
+    # Initials with periods
+    "J.", "A. B.", "J. R. R.", "C.S.", "Ma. Cristina", "Wm.",
+)  # fmt: skip
+
+
+@pytest.mark.parametrize("name", ORDINARY_NAMES)
+def test_ordinary_names_are_not_contacts(name: str) -> None:
+    assert NAME.validate_python(name) == name
+    assert not redact_contacts(name).redacted
+
+
 # Register
 
 
@@ -202,6 +261,20 @@ async def test_register_with_an_invalid_name_422(db_client: httpx.AsyncClient) -
 
     assert response.status_code == 422
     assert response.json() == VALIDATION_ERROR
+
+
+@pytest.mark.parametrize("field", ["first_name", "last_name"])
+@pytest.mark.parametrize("contact", CONTACT_NAMES)
+async def test_register_with_a_contact_name_422(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, field: str, contact: str
+) -> None:
+    names = {"first_name": FIRST, "last_name": LAST, field: contact}
+
+    response = await register(db_client, **names)
+
+    assert response.status_code == 422
+    assert response.json() == VALIDATION_ERROR
+    assert await db_session.scalar(select(User.id).where(User.email == EMAIL)) is None
 
 
 # PATCH /v1/auth/me
@@ -274,6 +347,25 @@ async def test_patch_me_requires_both_when_unset(
     assert (user.first_name, user.last_name) == (None, None)
 
 
+@pytest.mark.parametrize("field", ["first_name", "last_name"])
+@pytest.mark.parametrize("contact", CONTACT_NAMES)
+async def test_patch_me_with_a_contact_name_422(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, field: str, contact: str
+) -> None:
+    headers = await signed_in(db_client, first_name="Ana", last_name="Pérez")
+
+    alone = await patch_me(db_client, headers, {field: contact})
+    both = await patch_me(
+        db_client, headers, {"first_name": FIRST, "last_name": LAST, field: contact}
+    )
+
+    assert alone.status_code == both.status_code == 422
+    assert alone.json() == both.json() == VALIDATION_ERROR
+    user = await get_user(db_session)
+    await db_session.refresh(user)
+    assert (user.first_name, user.last_name) == ("Ana", "Pérez")
+
+
 @pytest.mark.parametrize("header", [None, "Bearer not-a-token"], ids=["missing", "invalid"])
 async def test_patch_me_unauthenticated_401(
     db_client: httpx.AsyncClient, header: str | None
@@ -332,6 +424,25 @@ async def test_staff_cli_refuses_invalid_names(
     assert "x" * 61 not in terminal.text
 
 
+@pytest.mark.parametrize("flag", ["--first-name", "--last-name"])
+@pytest.mark.parametrize("contact", CONTACT_NAMES)
+async def test_staff_cli_refuses_a_contact_name(
+    db_session: AsyncSession, settings: Settings, flag: str, contact: str
+) -> None:
+    terminal = Terminal(environ={"STAFF_PASSWORD": STAFF_PASSWORD})
+    names = {"--first-name": "Ana", "--last-name": LAST, flag: contact}
+
+    code = await staff_cli(
+        db_session, settings, terminal, "--email", STAFF_EMAIL, "--role", "agent",
+        "--password-env", "STAFF_PASSWORD", *(part for pair in names.items() for part in pair),
+    )  # fmt: skip
+
+    assert code == 1
+    assert await user_by_email(db_session) is None
+    assert "contact details" in terminal.text
+    assert contact not in terminal.text
+
+
 # Logs
 
 
@@ -349,3 +460,22 @@ async def test_no_names_in_logs(
     output = "\n".join(str(json.loads(JsonFormatter().format(record))) for record in caplog.records)
     for name in ("María", "José", "O'Neil", "Pérez", "Zoë", "Núñez", "Bad1", "Solo"):
         assert name not in output
+
+
+async def test_no_contact_names_in_logs(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.DEBUG):
+        headers = await signed_in(db_client, first_name="Ana", last_name="Pérez")
+        for contact in CONTACT_NAMES:
+            await patch_me(db_client, headers, {"first_name": contact})
+            await register(
+                db_client, email="other@example.com", first_name=contact, last_name="Pérez"
+            )
+
+    assert caplog.records
+    output = "\n".join(str(json.loads(JsonFormatter().format(record))) for record in caplog.records)
+    for contact in CONTACT_NAMES:
+        assert contact not in output
+    for piece in ("repair.example", "example dot com", "zero one nine nine"):
+        assert piece not in output

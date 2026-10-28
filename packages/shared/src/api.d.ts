@@ -996,12 +996,12 @@ export interface components {
         MeUpdateRequest: {
             /**
              * First Name
-             * @description 1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. Both or neither.
+             * @description 1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. No contact details (an email, phone number, website or handle, even spelled out). Both or neither.
              */
             first_name?: string | null;
             /**
              * Last Name
-             * @description 1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. Both or neither.
+             * @description 1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. No contact details (an email, phone number, website or handle, even spelled out). Both or neither.
              */
             last_name?: string | null;
         };
@@ -1481,12 +1481,12 @@ export interface components {
             locale: "en" | "es";
             /**
              * First Name
-             * @description 1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. Both or neither.
+             * @description 1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. No contact details (an email, phone number, website or handle, even spelled out). Both or neither.
              */
             first_name?: string | null;
             /**
              * Last Name
-             * @description 1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. Both or neither.
+             * @description 1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. No contact details (an email, phone number, website or handle, even spelled out). Both or neither.
              */
             last_name?: string | null;
         };
