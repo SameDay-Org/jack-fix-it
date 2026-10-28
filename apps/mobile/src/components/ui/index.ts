@@ -26,6 +26,8 @@ export { SheetContent } from "./SheetContent";
 export type { SheetContentProps } from "./SheetContent";
 export { Skeleton } from "./Skeleton";
 export type { SkeletonProps } from "./Skeleton";
+export { TextSkeleton } from "./TextSkeleton";
+export type { TextSkeletonProps } from "./TextSkeleton";
 export { StatusBadge } from "./StatusBadge";
 export type { StatusBadgeProps, StatusTone } from "./StatusBadge";
 export { dismissToast, showToast, useToast } from "./toast";

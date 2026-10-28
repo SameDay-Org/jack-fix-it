@@ -160,5 +160,62 @@
   "permissions": {
     "camera": "Jack usa la cámara para tomar fotos de lo que hay que arreglar.",
     "photos": "Jack usa las fotos que eliges para mostrar lo que hay que arreglar."
+  },
+  "quotes": {
+    "title": "Tus presupuestos",
+    "subtitle": "Compáralos y acepta el que te convenga.",
+    "loading": "Cargando presupuestos",
+    "span": {
+      "minutes": "{{minutes}} min",
+      "hours": "{{hours}} h",
+      "hoursMinutes": "{{hours}} h {{minutes}} min"
+    },
+    "duration": "Aprox. {{span}}",
+    "starts": "Empieza el {{date}}",
+    "expiresIn": "Vence en {{span}}",
+    "expiresOn": "Vence el {{date}}",
+    "expired": "Vencido",
+    "accepted": "Aceptado",
+    "acceptedNote": "Presupuesto aceptado. Lo siguiente es el pago.",
+    "proFallback": "Profesional de Jack",
+    "verified": "Verificado por Jack Fix It",
+    "ratingNew": "Nuevo",
+    "rated": "Calificación {{rating}}",
+    "notRated": "Aún sin calificaciones",
+    "jobs_one": "{{count}} trabajo",
+    "jobs_other": "{{count}} trabajos",
+    "years_one": "{{count}} año de experiencia",
+    "years_other": "{{count}} años de experiencia",
+    "included": "Qué incluye",
+    "more": "Más",
+    "less": "Menos",
+    "moreLabel": "Más, ver todo lo que incluye",
+    "lessLabel": "Menos, ver menos de lo que incluye",
+    "accept": "Aceptar",
+    "acceptLabel": "Aceptar el presupuesto de {{pro}} por {{price}}",
+    "notAcceptable": "Este presupuesto ya no se puede aceptar.",
+    "refreshFailed": "No se pudo actualizar. Revisa tu conexión e inténtalo de nuevo.",
+    "empty": {
+      "title": "Aún no hay presupuestos",
+      "body": "Los presupuestos de los profesionales aparecen aquí a medida que llegan. Desliza hacia abajo para buscar nuevos."
+    },
+    "error": {
+      "title": "No pudimos cargar los presupuestos",
+      "body": "Revisa tu conexión e inténtalo de nuevo.",
+      "retry": "Intentar de nuevo"
+    },
+    "notFound": {
+      "title": "Solicitud no encontrada",
+      "body": "No encontramos esta solicitud en tu cuenta.",
+      "home": "Ir al inicio"
+    },
+    "confirm": {
+      "title": "¿Aceptar este presupuesto?",
+      "from": "De {{pro}}",
+      "accept": "Aceptar presupuesto",
+      "notNow": "Ahora no",
+      "failed": "No pudimos aceptar el presupuesto. Revisa tu conexión e inténtalo de nuevo.",
+      "acceptLabel": "Aceptar presupuesto de {{pro}} por {{price}}"
+    }
   }
 }

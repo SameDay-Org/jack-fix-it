@@ -160,5 +160,62 @@
   "permissions": {
     "camera": "Jack uses the camera to take photos of what needs fixing.",
     "photos": "Jack uses the photos you choose to show what needs fixing."
+  },
+  "quotes": {
+    "title": "Your quotes",
+    "subtitle": "Compare them and accept the one that fits.",
+    "loading": "Loading quotes",
+    "span": {
+      "minutes": "{{minutes}} min",
+      "hours": "{{hours}} h",
+      "hoursMinutes": "{{hours}} h {{minutes}} min"
+    },
+    "duration": "About {{span}}",
+    "starts": "Starts {{date}}",
+    "expiresIn": "Expires in {{span}}",
+    "expiresOn": "Expires {{date}}",
+    "expired": "Expired",
+    "accepted": "Accepted",
+    "acceptedNote": "Quote accepted. Payment comes next.",
+    "proFallback": "Jack pro",
+    "verified": "Verified by Jack Fix It",
+    "ratingNew": "New",
+    "rated": "Rated {{rating}}",
+    "notRated": "No ratings yet",
+    "jobs_one": "{{count}} job",
+    "jobs_other": "{{count}} jobs",
+    "years_one": "{{count}} year of experience",
+    "years_other": "{{count}} years of experience",
+    "included": "What's included",
+    "more": "More",
+    "less": "Less",
+    "moreLabel": "More, show all of what's included",
+    "lessLabel": "Less, show less of what's included",
+    "accept": "Accept",
+    "acceptLabel": "Accept the quote from {{pro}} for {{price}}",
+    "notAcceptable": "This quote can't be accepted anymore.",
+    "refreshFailed": "Couldn't refresh. Check your connection and try again.",
+    "empty": {
+      "title": "No quotes yet",
+      "body": "Quotes from pros show up here as they arrive. Pull down to check for new ones."
+    },
+    "error": {
+      "title": "We couldn't load the quotes",
+      "body": "Check your connection and try again.",
+      "retry": "Try again"
+    },
+    "notFound": {
+      "title": "Request not found",
+      "body": "We couldn't find this request on your account.",
+      "home": "Go to home"
+    },
+    "confirm": {
+      "title": "Accept this quote?",
+      "from": "From {{pro}}",
+      "accept": "Accept quote",
+      "notNow": "Not now",
+      "failed": "We couldn't accept the quote. Check your connection and try again.",
+      "acceptLabel": "Accept quote from {{pro}} for {{price}}"
+    }
   }
 }
