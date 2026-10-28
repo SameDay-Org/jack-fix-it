@@ -197,15 +197,29 @@
     "viewProfileLabel": "Ver el perfil de {{pro}}",
     "profile": {
       "loading": "Cargando perfil",
-      "new": "Nuevo en Jack Fix It",
-      "about": "Acerca de",
-      "services": "Servicios",
       "memberSince": "Miembro desde {{month}}",
+      "stats": {
+        "rating": "calificación",
+        "notRated": "aún sin calificaciones",
+        "jobs_one": "trabajo hecho",
+        "jobs_other": "trabajos hechos",
+        "years_one": "año de experiencia",
+        "years_other": "años de experiencia"
+      },
+      "newPro": {
+        "named": "{{name}} acaba de llegar a Jack Fix It.",
+        "unnamed": "Este profesional acaba de llegar a Jack Fix It.",
+        "joined": "Se unió en {{month}} y todavía no ha completado ningún trabajo aquí.",
+        "verified": "Como todos los profesionales de Jack Fix It, pasó la verificación antes de poder enviarte un presupuesto."
+      },
+      "about": "Acerca de",
+      "services": "Qué hace",
+      "trust": "Verificado por Jack Fix It: nuestro equipo revisó la información y los documentos de este profesional y aprobó su perfil antes de que pudiera enviarte un presupuesto.",
       "accept": "Aceptar por {{price}}",
+      "backToQuotes": "Volver a los presupuestos",
       "gone": {
         "title": "Este presupuesto ya no está disponible",
-        "body": "Venció o fue retirado, así que no se puede mostrar el perfil del profesional.",
-        "back": "Volver a los presupuestos"
+        "body": "Venció o fue retirado, así que no se puede mostrar el perfil del profesional."
       },
       "error": {
         "title": "No pudimos cargar este perfil"

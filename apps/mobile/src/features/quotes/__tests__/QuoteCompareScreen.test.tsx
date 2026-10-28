@@ -170,6 +170,19 @@ describe("QuoteCompareScreen", () => {
     expect(card(MARIA).getByText("Ver perfil")).toBeTruthy();
   });
 
+  it("a link that landed here with a profile param opens that pro's profile over the list", async () => {
+    navigation.setParams({ id: REQUEST_ID, profile: MARIA.id });
+    await renderWithQuery(<App />);
+    await screen.findByText("$250");
+
+    expect(router.push).toHaveBeenCalledTimes(1);
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/requests/[id]/quotes/[quoteId]/pro",
+      params: { id: REQUEST_ID, quoteId: MARIA.id },
+    });
+    expect(screen.queryByTestId("accept-quote-sheet")).toBeNull();
+  });
+
   it("each card reads as one label: pro, verified, price, start and the rest", async () => {
     await renderWithQuery(<App />);
     await screen.findByText("$250");

@@ -136,12 +136,16 @@ type PushedHref = { pathname: string; params: Record<string, string> };
  */
 const nav = {
   sheet: null as SheetParams | null,
+  /** The screen's own params when a test sets them (a link's `profile`). */
+  params: null as Record<string, string> | null,
   focused: true,
   navigating: false,
   listeners: new Set<() => void>(),
 };
 
-function update(change: Partial<Pick<typeof nav, "sheet" | "focused" | "navigating">>): void {
+function update(
+  change: Partial<Pick<typeof nav, "sheet" | "params" | "focused" | "navigating">>,
+): void {
   Object.assign(nav, change);
   nav.listeners.forEach((listener) => listener());
 }
@@ -155,7 +159,8 @@ export const navigation = {
   useSheet: () => useSyncExternalStore(subscribe, () => nav.sheet),
   setFocused: (focused: boolean) => update({ focused }),
   setNavigating: (navigating: boolean) => update({ navigating }),
-  reset: () => update({ sheet: null, focused: true, navigating: false }),
+  setParams: (params: Record<string, string> | null) => update({ params }),
+  reset: () => update({ sheet: null, params: null, focused: true, navigating: false }),
 };
 
 const useIsNavigating = () => useSyncExternalStore(subscribe, () => nav.navigating);
@@ -171,7 +176,7 @@ export const routerMock = {
     canGoBack: jest.fn(() => true),
     dismissTo: jest.fn(),
   },
-  useLocalSearchParams: () => nav.sheet ?? { id: REQUEST_ID },
+  useLocalSearchParams: () => nav.sheet ?? nav.params ?? { id: REQUEST_ID },
   unstable_useIsNavigating: useIsNavigating,
   // Runs the effect on every focus and cleans it up on blur, as React Navigation does.
   useFocusEffect: (effect: () => void | (() => void)) => {

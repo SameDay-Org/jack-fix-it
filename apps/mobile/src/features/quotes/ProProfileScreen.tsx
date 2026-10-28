@@ -1,21 +1,20 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo } from "react";
+import { Fragment, useEffect, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, Text, useWindowDimensions, View } from "react-native";
 import Animated from "react-native-reanimated";
 
 import { CategoryIcon } from "@/components/icons";
-import { Button, Card, Screen, StatusBadge, TextSkeleton, useSkeletonPulse } from "@/components/ui";
+import { Button, Screen, StatusBadge, TextSkeleton, useSkeletonPulse } from "@/components/ui";
 import { BackButton, backToPrevious } from "@/features/auth/components/BackButton";
 import { categoryName } from "@/features/home/useCategories";
 import { continuousCorners } from "@/theme";
 
 import { useExpiryClock } from "./expiry";
-import { formatMoney, formatMonth, formatRating, joinFacts } from "./format";
+import { formatMoney, formatMonth, formatRating } from "./format";
 import { acceptHref, useGuardedPush } from "./navigation";
 import { displayName, quoteStateOf } from "./quoteText";
-import { StateCard } from "./StateCard";
 import { isGone, useProProfile, type ProPublicProfile } from "./useProProfile";
 import {
   quotesQueryKey,
@@ -26,11 +25,13 @@ import {
 
 /**
  * The public profile of the pro behind one quote (`/requests/[id]/quotes/[quoteId]/pro`, pushed
- * over the comparison): what a customer may see before payment (#53), and nothing else. The name
- * or the neutral label, the verified badge, the rating with the jobs done (or "New"), the years
- * of experience, the bio (contacts masked by the API), the categories and the month the pro
- * joined. While the quote is still open in the cached list, Accept opens the same confirmation
- * as the card. A 404 means the quote left the comparison (expired, withdrawn): the list under
+ * over the comparison): what a customer may see before payment (#53), and nothing else, as one
+ * page rather than a card. The name leads with the verified seal beside it and the month the pro
+ * joined under it; then the figures (rating, jobs done, years) as numerals over small labels,
+ * or, for a pro with no job done here yet, a plain-spoken note instead; the bio as body text;
+ * the categories with their icons; and one line on what verified means. The bar at the bottom
+ * holds Accept for the price while the quote is still open in the cached list, and the way back
+ * to the quotes. A 404 means the quote left the comparison (expired, withdrawn): the list under
  * this screen is invalidated so its card goes too. The skeleton has the loaded rows, so nothing
  * jumps when the profile arrives.
  */
@@ -45,21 +46,21 @@ export function ProProfileScreen() {
   useInvalidateQuotes(requestId, gone);
 
   return (
-    <Screen bar="light" testID="pro-profile-screen">
-      <ScrollView contentContainerClassName="flex-grow gap-6 px-4 pb-6 pt-2">
+    <Screen bar="light" className="bg-white" testID="pro-profile-screen">
+      <ScrollView contentContainerClassName="flex-grow px-4 pb-6 pt-2">
         <BackButton />
         {data ? (
           <Profile profile={data} />
         ) : gone ? (
-          <StateCard
+          <ProfileState
             title={t("quotes.profile.gone.title")}
             body={t("quotes.profile.gone.body")}
-            action={t("quotes.profile.gone.back")}
+            action={t("quotes.profile.backToQuotes")}
             onAction={backToPrevious}
             testID="pro-profile-gone"
           />
         ) : shownError ? (
-          <StateCard
+          <ProfileState
             title={t("quotes.profile.error.title")}
             body={t("quotes.error.body")}
             action={t("quotes.error.retry")}
@@ -71,18 +72,30 @@ export function ProProfileScreen() {
           <ProfileSkeleton />
         )}
       </ScrollView>
-      {data && quote ? (
-        // Below the scrolling profile, so a long bio never hides the way to accept.
-        <View className="px-4 pb-4 pt-2">
+      {data ? (
+        // Under the scrolling page, so a long bio never hides the way to accept or back.
+        <View
+          className="gap-2 border-t border-gray-500/15 bg-white px-4 pb-4 pt-3"
+          testID="pro-profile-bar"
+        >
+          {quote ? (
+            <Button
+              label={t("quotes.profile.accept", { price: formatMoney(quote.amount_cents) })}
+              accessibilityLabel={t("quotes.acceptLabel", {
+                pro: displayName(t, data.name),
+                price: formatMoney(quote.amount_cents),
+              })}
+              size="lg"
+              onPress={() => push(acceptHref(requestId, quote.id))}
+              testID="pro-profile-accept"
+            />
+          ) : null}
           <Button
-            label={t("quotes.profile.accept", { price: formatMoney(quote.amount_cents) })}
-            accessibilityLabel={t("quotes.acceptLabel", {
-              pro: displayName(t, data.name),
-              price: formatMoney(quote.amount_cents),
-            })}
+            label={t("quotes.profile.backToQuotes")}
+            variant="ghost"
             size="lg"
-            onPress={() => push(acceptHref(requestId, quote.id))}
-            testID="pro-profile-accept"
+            onPress={backToPrevious}
+            testID="pro-profile-back"
           />
         </View>
       ) : null}
@@ -114,87 +127,154 @@ function useInvalidateQuotes(requestId: string, gone: boolean): void {
 
 /** The icon beside a category's name: the glyphs read at 32 and 48, and 24 keeps a tag one line tall. */
 const TAG_ICON = 24;
-
 // One recipe for a category tag and its placeholder: a pill with the icon box and the name.
 const TAG = "max-w-full flex-row items-center gap-2 rounded-pill py-2 pl-2 pr-3";
 const TAG_LABEL = "text-callout font-semibold";
+// Running copy (the bio, the new-pro note): the body size with an open line height, as prose reads.
+const PROSE = "text-body leading-7";
+/** A thin rule between the figures. */
+const RULE = "w-px bg-gray-500/15";
 
 type ProfileProps = { profile: ProPublicProfile };
 
-/** The profile in one bubble, in the order a screen reader should take it. */
+/** The profile as one page, in the order a screen reader should take it. */
 function Profile({ profile }: ProfileProps) {
   const { t } = useTranslation();
-  const rating = formatRating(profile.rating_avg);
-  const jobs = t("quotes.jobs", { count: profile.jobs_count });
-  // "★ 4.8 · 23 jobs" once there is a rating and a job; "New on Jack Fix It" before either.
-  const track =
-    rating !== null && profile.jobs_count > 0
-      ? {
-          text: joinFacts([`★ ${rating}`, jobs]),
-          label: `${t("quotes.rated", { rating })}, ${jobs}`,
-        }
-      : { text: t("quotes.profile.new"), label: undefined };
+  const since = formatMonth(profile.member_since);
+  const name = displayName(t, profile.name);
   const years =
     profile.years_of_experience === null
       ? null
-      : t("quotes.years", { count: profile.years_of_experience });
+      : figure(
+          profile.years_of_experience,
+          t("quotes.profile.stats.years", { count: profile.years_of_experience }),
+        );
 
   return (
-    <Card className="gap-5" testID="pro-profile">
-      <View className="gap-2">
-        <Text
-          accessibilityRole="header"
-          className="text-title-1 text-navy-900"
-          testID="pro-profile-name"
-        >
-          {displayName(t, profile.name)}
-        </Text>
-        {profile.verified ? (
-          <StatusBadge label={t("quotes.verified")} tone="brand" testID="pro-profile-verified" />
-        ) : null}
-      </View>
-      <View className="gap-1">
-        <Text
-          accessibilityLabel={track.label}
-          className="text-headline text-navy-900"
-          testID="pro-profile-track"
-        >
-          {track.text}
-        </Text>
-        {years !== null ? (
-          <Text className="text-callout text-gray-500" testID="pro-profile-years">
-            {years}
+    <View className="gap-8 pt-2">
+      <View className="gap-1" testID="pro-profile-hero">
+        <View className="flex-row flex-wrap items-center gap-x-3 gap-y-2">
+          <Text
+            accessibilityRole="header"
+            className="text-display text-navy-900"
+            testID="pro-profile-name"
+          >
+            {name}
           </Text>
-        ) : null}
-      </View>
-      {profile.bio !== null ? (
-        <View
-          style={continuousCorners}
-          className="gap-1 rounded-md bg-gray-50 p-3"
-          testID="pro-profile-bio"
-        >
-          <Text accessibilityRole="header" className="text-caption text-gray-500">
-            {t("quotes.profile.about")}
-          </Text>
-          <Text className="text-callout text-navy-900">{profile.bio}</Text>
+          {profile.verified ? (
+            <StatusBadge label={t("quotes.verified")} tone="brand" testID="pro-profile-verified" />
+          ) : null}
         </View>
+        <Text className="text-callout text-gray-500" testID="pro-profile-member-since">
+          {t("quotes.profile.memberSince", { month: since })}
+        </Text>
+      </View>
+      {profile.jobs_count > 0 ? (
+        <Figures profile={profile} years={years} />
+      ) : (
+        // No job done here yet: said plainly, with the years when the pro gave them.
+        <View className="gap-6">
+          <Text className={`${PROSE} text-navy-900`} testID="pro-profile-new">
+            {[
+              profile.name === null
+                ? t("quotes.profile.newPro.unnamed")
+                : t("quotes.profile.newPro.named", { name }),
+              t("quotes.profile.newPro.joined", { month: since }),
+              profile.verified ? t("quotes.profile.newPro.verified") : null,
+            ]
+              .filter((sentence) => sentence !== null)
+              .join(" ")}
+          </Text>
+          {years ? <FiguresRow cells={[years]} label={years.spoken} /> : null}
+        </View>
+      )}
+      {profile.bio !== null ? (
+        <Section title={t("quotes.profile.about")}>
+          <Text className={`${PROSE} text-navy-900`} testID="pro-profile-bio">
+            {profile.bio}
+          </Text>
+        </Section>
       ) : null}
       {profile.categories.length > 0 ? (
-        <View className="gap-2" testID="pro-profile-categories">
-          <Text accessibilityRole="header" className="text-caption text-gray-500">
-            {t("quotes.profile.services")}
-          </Text>
+        <Section title={t("quotes.profile.services")} testID="pro-profile-categories">
           <View className="flex-row flex-wrap gap-2">
             {profile.categories.map((category) => (
               <CategoryTag key={category.id} category={category} />
             ))}
           </View>
-        </View>
+        </Section>
       ) : null}
-      <Text className="text-footnote text-gray-500" testID="pro-profile-member-since">
-        {t("quotes.profile.memberSince", { month: formatMonth(profile.member_since) })}
+      {profile.verified ? (
+        <Text className="text-footnote text-gray-500" testID="pro-profile-trust">
+          {t("quotes.profile.trust")}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+type Figure = {
+  /** The numeral, as shown. */
+  value: string;
+  /** The small label under it, already in the right number. */
+  label: string;
+  /** The figure as a screen reader says it. */
+  spoken: string;
+};
+
+/** A count with its label: "23" over "jobs done", read "23 jobs done". */
+const figure = (count: number, label: string): Figure => ({
+  value: String(count),
+  label,
+  spoken: `${count} ${label}`,
+});
+
+/** The rating with the jobs done, and the years when given: numerals over labels, one row. */
+function Figures({ profile, years }: ProfileProps & { years: Figure | null }) {
+  const { t } = useTranslation();
+  const rating = formatRating(profile.rating_avg);
+  const cells = [
+    rating === null
+      ? { value: "—", label: t("quotes.profile.stats.notRated"), spoken: t("quotes.notRated") }
+      : {
+          value: `${rating} ★`,
+          label: t("quotes.profile.stats.rating"),
+          spoken: t("quotes.rated", { rating }),
+        },
+    figure(profile.jobs_count, t("quotes.profile.stats.jobs", { count: profile.jobs_count })),
+    ...(years ? [years] : []),
+  ];
+  return <FiguresRow cells={cells} label={cells.map((cell) => cell.spoken).join(", ")} />;
+}
+
+/** Evenly spaced figures with thin rules between them; read as one sentence. */
+function FiguresRow({ cells, label }: { cells: Figure[]; label: string }) {
+  return (
+    <View accessible accessibilityLabel={label} className="flex-row" testID="pro-profile-figures">
+      {cells.map((cell, index) => (
+        <Fragment key={cell.label}>
+          {index > 0 ? <View className={RULE} /> : null}
+          <View className="flex-1 items-center gap-1 px-2">
+            <Text className="text-title-1 text-navy-900">{cell.value}</Text>
+            <Text className="text-center text-caption text-gray-500">{cell.label}</Text>
+          </View>
+        </Fragment>
+      ))}
+    </View>
+  );
+}
+
+type SectionProps = { title: string; children: ReactNode; testID?: string };
+
+/** A titled part of the page. */
+function Section({ title, children, testID }: SectionProps) {
+  return (
+    <View className="gap-3" testID={testID}>
+      <Text accessibilityRole="header" className="text-headline text-navy-900">
+        {title}
       </Text>
-    </Card>
+      {children}
+    </View>
   );
 }
 
@@ -217,17 +297,52 @@ function CategoryTag({ category }: CategoryTagProps) {
   );
 }
 
+type ProfileStateProps = {
+  title: string;
+  body: string;
+  action: string;
+  onAction: () => void;
+  /** The action is under way: its button shows a spinner and ignores taps. */
+  busy?: boolean;
+  testID: string;
+};
+
+/** What happened and what to do next, as the page itself. */
+function ProfileState({ title, body, action, onAction, busy, testID }: ProfileStateProps) {
+  return (
+    <View className="gap-6 pt-2" testID={testID}>
+      <View className="gap-2">
+        <Text accessibilityRole="header" className="text-title-1 text-navy-900">
+          {title}
+        </Text>
+        <Text className={`${PROSE} text-gray-500`}>{body}</Text>
+      </View>
+      <Button
+        label={action}
+        onPress={onAction}
+        loading={busy}
+        className="self-start"
+        testID={`${testID}-action`}
+      />
+    </View>
+  );
+}
+
 /** Label widths of the tag placeholders at font scale 1: a short and a long launch category name. */
 const TAG_WIDTHS = [64, 120] as const;
+/** The numeral placeholders' width at font scale 1 ("4.8 ★"). */
+const FIGURE_WIDTH = 56;
+const FIGURES = 3;
 
 /**
- * The profile's rows before it arrives: every line a `TextSkeleton` of the type that replaces it
- * (the badge's row padded like the badge), a three-line bio block, two tag-shaped pills and the
- * member line, so the loaded bubble takes the same space at any font scale. Read as one
- * "Loading profile" indicator.
+ * The page's rows before the profile arrives: every line a `TextSkeleton` of the type that
+ * replaces it (the badge's row padded like the badge), three figures, a three-line bio, two
+ * tag-shaped pills and a two-line note, so the loaded page takes the same space at any font
+ * scale. Read as one "Loading profile" indicator.
  */
 function ProfileSkeleton() {
   const { t } = useTranslation();
+  const { fontScale } = useWindowDimensions();
   return (
     <View
       accessible
@@ -235,41 +350,52 @@ function ProfileSkeleton() {
       accessibilityLabel={t("quotes.profile.loading")}
       testID="pro-profile-loading"
     >
-      <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        <Card className="gap-5">
-          <View className="gap-2">
-            <TextSkeleton type="title-1" width="55%" />
-            <View className="w-1/2 py-1" testID="pro-profile-skeleton-badge">
+      <View
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        className="gap-8 pt-2"
+      >
+        <View className="gap-1">
+          <View className="flex-row flex-wrap items-center gap-x-3 gap-y-2">
+            <TextSkeleton type="display" width="45%" />
+            <View className="w-1/3 py-1" testID="pro-profile-skeleton-badge">
               <TextSkeleton type="caption" />
             </View>
           </View>
-          <View className="gap-1">
-            <TextSkeleton type="headline" width="45%" />
-            <TextSkeleton type="callout" width="55%" />
+          <TextSkeleton type="callout" width="50%" />
+        </View>
+        <View className="flex-row">
+          {Array.from({ length: FIGURES }, (_, index) => (
+            <Fragment key={index}>
+              {index > 0 ? <View className={RULE} /> : null}
+              <View className="flex-1 items-center gap-1 px-2">
+                <TextSkeleton type="title-1" width={FIGURE_WIDTH * fontScale} />
+                <TextSkeleton type="caption" width="70%" />
+              </View>
+            </Fragment>
+          ))}
+        </View>
+        <View className="gap-3">
+          <TextSkeleton type="headline" width="25%" />
+          {/* One block, no gap: the lines of one wrapped text sit flush. */}
+          <View testID="pro-profile-skeleton-bio">
+            <TextSkeleton type="body" />
+            <TextSkeleton type="body" />
+            <TextSkeleton type="body" width="70%" />
           </View>
-          <View
-            style={continuousCorners}
-            className="gap-1 rounded-md bg-gray-50 p-3"
-            testID="pro-profile-skeleton-bio"
-          >
-            <TextSkeleton type="caption" width="25%" />
-            {/* One block, no gap: the lines of one wrapped text sit flush. */}
-            <View>
-              <TextSkeleton type="callout" />
-              <TextSkeleton type="callout" />
-              <TextSkeleton type="callout" width="70%" />
-            </View>
+        </View>
+        <View className="gap-3">
+          <TextSkeleton type="headline" width="35%" />
+          <View className="flex-row flex-wrap gap-2">
+            {TAG_WIDTHS.map((width) => (
+              <TagSkeleton key={width} labelWidth={width} />
+            ))}
           </View>
-          <View className="gap-2">
-            <TextSkeleton type="caption" width="30%" />
-            <View className="flex-row flex-wrap gap-2">
-              {TAG_WIDTHS.map((width) => (
-                <TagSkeleton key={width} labelWidth={width} />
-              ))}
-            </View>
-          </View>
-          <TextSkeleton type="footnote" width="50%" />
-        </Card>
+        </View>
+        <View testID="pro-profile-skeleton-trust">
+          <TextSkeleton type="footnote" />
+          <TextSkeleton type="footnote" width="60%" />
+        </View>
       </View>
     </View>
   );

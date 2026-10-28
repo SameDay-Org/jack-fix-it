@@ -1,7 +1,7 @@
 import "@/i18n";
 
 import { act, renderRouter, screen } from "expo-router/testing-library";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, type Href } from "expo-router";
 import { createElement } from "react";
 import { Text } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -14,6 +14,7 @@ import RequestLayout, {
 import AuthLayout, { unstable_settings } from "../../../app/(auth)/_layout";
 import { METRICS, SIGNED_OUT } from "../../auth/__tests__/helpers";
 import { SessionGate } from "../../auth/SessionGate";
+import { redirectSystemPath, useProfileFromLink } from "../links";
 import { QUOTES, REQUEST_ID } from "./helpers";
 
 // A session that changes under the mounted router, as a restore that ends signed in does.
@@ -62,6 +63,13 @@ function ProfileStub() {
   return <Text>{`profile stub ${id} ${quoteId}`}</Text>;
 }
 
+/** The comparison's frame: the real link handling around a stub body. */
+function CompareStub() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  useProfileFromLink(id);
+  return <Text>{`compare stub ${id}`}</Text>;
+}
+
 // The real gate, groups and request stack around stub screens: what the link resolves to.
 const routes = {
   _layout: () =>
@@ -71,30 +79,31 @@ const routes = {
   "(app)/_layout": { default: AppLayout, unstable_settings: appSettings },
   "(app)/index": () => <Text>home stub</Text>,
   "(app)/requests/[id]/_layout": { default: RequestLayout, unstable_settings: requestSettings },
-  "(app)/requests/[id]/index": () => <Text>compare stub</Text>,
+  "(app)/requests/[id]/index": CompareStub,
   "(app)/requests/[id]/quotes/[quoteId]/pro": ProfileStub,
 };
 
 const SIGNED_IN: MockSession = { ...SESSION_SIGNED_OUT, status: "signedIn", user };
+const profileShown = () => screen.getByText(`profile stub ${REQUEST_ID} ${QUOTE_ID}`);
 
 beforeEach(() => {
   mockSession.state = SESSION_SIGNED_OUT;
 });
 
 describe("the pro profile link", () => {
-  it("resolves on a cold start once the session is restored, with back to the comparison", async () => {
+  it("resolves on a cold start once the session is restored, with the comparison under it", async () => {
     mockSession.state = { ...SESSION_SIGNED_OUT, status: "restoring" };
     const result = await renderRouter(routes, { initialUrl: LINK });
     expect(screen.queryByText(/profile stub/)).toBeNull(); // the gate holds the launch frame
 
     await act(async () => mockSession.set(SIGNED_IN));
     expect(result.getPathname()).toBe(LINK);
-    expect(screen.getByText(`profile stub ${REQUEST_ID} ${QUOTE_ID}`)).toBeTruthy();
+    expect(profileShown()).toBeTruthy();
 
-    // The comparison is under the profile even when the link opened the profile directly.
+    // The request stack's anchor: the comparison is under the profile the link opened.
     await act(async () => router.back());
     expect(result.getPathname()).toBe(COMPARE);
-    expect(screen.getByText("compare stub")).toBeTruthy();
+    expect(screen.getByText(`compare stub ${REQUEST_ID}`)).toBeTruthy();
   });
 
   it("resolves on a warm start, signed in, with the comparison under it", async () => {
@@ -102,10 +111,29 @@ describe("the pro profile link", () => {
     const result = await renderRouter(routes, { initialUrl: LINK });
 
     expect(result.getPathname()).toBe(LINK);
-    expect(screen.getByText(`profile stub ${REQUEST_ID} ${QUOTE_ID}`)).toBeTruthy();
-    expect(router.canGoBack()).toBe(true);
+    expect(profileShown()).toBeTruthy();
     await act(async () => router.back());
     expect(result.getPathname()).toBe(COMPARE);
+  });
+
+  it("a link reaching the running app lands on the comparison, which opens the profile", async () => {
+    mockSession.state = SIGNED_IN;
+    const result = await renderRouter(routes, { initialUrl: "/" });
+    expect(screen.getByText("home stub")).toBeTruthy();
+
+    // What `+native-intent` makes of the link, then what the comparison does with it.
+    const landing = redirectSystemPath({ path: LINK, initial: false });
+    expect(landing).toBe(`${COMPARE}?profile=${QUOTE_ID}`);
+    await act(async () => router.push(landing as Href)); // what the running app gets as a string
+    expect(result.getPathname()).toBe(LINK);
+    expect(profileShown()).toBeTruthy();
+
+    await act(async () => router.back());
+    expect(result.getPathname()).toBe(COMPARE);
+    expect(screen.getByText(`compare stub ${REQUEST_ID}`)).toBeTruthy();
+    await act(async () => router.back());
+    expect(result.getPathname()).toBe("/");
+    expect(screen.getByText("home stub")).toBeTruthy();
   });
 
   it("lands on welcome while signed out", async () => {
