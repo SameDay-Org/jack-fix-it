@@ -2923,7 +2923,7 @@
               }
             ],
             "title": "First Name",
-            "description": "1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. Both or neither."
+            "description": "1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. No contact details (an email, phone number, website or handle, even spelled out). Both or neither."
           },
           "last_name": {
             "anyOf": [
@@ -2937,7 +2937,7 @@
               }
             ],
             "title": "Last Name",
-            "description": "1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. Both or neither."
+            "description": "1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. No contact details (an email, phone number, website or handle, even spelled out). Both or neither."
           }
         },
         "additionalProperties": false,
@@ -3879,7 +3879,7 @@
               }
             ],
             "title": "First Name",
-            "description": "1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. Both or neither."
+            "description": "1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. No contact details (an email, phone number, website or handle, even spelled out). Both or neither."
           },
           "last_name": {
             "anyOf": [
@@ -3893,7 +3893,7 @@
               }
             ],
             "title": "Last Name",
-            "description": "1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. Both or neither."
+            "description": "1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. No contact details (an email, phone number, website or handle, even spelled out). Both or neither."
           }
         },
         "type": "object",
