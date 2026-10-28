@@ -95,5 +95,12 @@ class ServiceAreaService:
         """True when the ZIP (5 digits or ZIP+4) is an active service area."""
         return await self._areas.is_active_zip(zip5(zip_code))
 
+    async def served_zips(self, zip_codes: Collection[str]) -> set[str]:
+        """The ZIPs among `zip_codes` (5 digits or ZIP+4, returned as given) whose 5 digits are
+        an active service area. One query whatever the count, so a list of addresses costs
+        the same with none or many (#214)."""
+        active = await self._areas.active_zips({zip5(zip_code) for zip_code in zip_codes})
+        return {zip_code for zip_code in zip_codes if zip5(zip_code) in active}
+
     async def check(self, zip_code: str) -> ServedCheckOut:
         return ServedCheckOut(zip_code=zip5(zip_code), served=await self.is_served(zip_code))

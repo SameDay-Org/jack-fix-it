@@ -3,10 +3,12 @@
 from fastapi import APIRouter
 
 from app.errors import ErrorResponse
+from app.modules.addresses.router import router as addresses_router
 from app.modules.auth.router import router as auth_router
 from app.modules.categories.router import router as categories_router
 from app.modules.devices.router import router as devices_router
 from app.modules.dispatch.router import router as opportunities_router
+from app.modules.geo.router import router as geo_router
 from app.modules.pros.router import router as pros_router
 from app.modules.quotes.router import customer_router as customer_quotes_router
 from app.modules.quotes.router import router as quotes_router
@@ -25,9 +27,11 @@ v1_router.include_router(uploads_router)
 v1_router.include_router(requests_router)
 v1_router.include_router(categories_router)
 v1_router.include_router(service_areas_router)
+v1_router.include_router(geo_router)
 v1_router.include_router(pros_router)
 v1_router.include_router(opportunities_router)
 v1_router.include_router(quotes_router)
 v1_router.include_router(customer_quotes_router)
 v1_router.include_router(devices_router)
 v1_router.include_router(waitlist_router)
+v1_router.include_router(addresses_router)
