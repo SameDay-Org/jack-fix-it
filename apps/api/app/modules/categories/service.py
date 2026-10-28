@@ -96,6 +96,13 @@ class CategoryService:
             for row in await self._categories.get_many(ids)
         ]
 
+    async def active_summaries(self, ids: Collection[uuid.UUID]) -> list[CategorySummary]:
+        """The active categories among these ids, by slug, in one query."""
+        return [
+            CategorySummary(id=row.id, slug=row.slug, names=row.names)
+            for row in await self._categories.get_many(ids, active_only=True)
+        ]
+
     async def any_requires_license(self, ids: Collection[uuid.UUID]) -> bool:
         """True when at least one of these categories requires a license (active or not)."""
         return await self._categories.any_requires_license(ids)

@@ -102,4 +102,19 @@ describe("Welcome after a sign-in and a sign-out (#175 round 2)", () => {
     await advance(panelRiseMs * 2);
     expect(result.getPathname()).toBe("/role");
   });
+
+  it("a sign-out whose local delete failed shows its message on the Welcome it lands on", async () => {
+    mockSession.state = { ...SESSION_SIGNED_OUT, status: "signedIn", user };
+    const result = await renderRouter(routes, { initialUrl: "/" });
+    expect(screen.getByText("app stub")).toBeTruthy();
+
+    // The sign-out switches groups at once; the failed delete is recorded a moment later.
+    await act(async () => mockSession.set(SESSION_SIGNED_OUT));
+    await act(async () => mockSession.set({ ...SESSION_SIGNED_OUT, cleanupPending: true }));
+
+    expect(result.getPathname()).toBe("/welcome");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Signed out. Some data couldn't be cleared from this device.",
+    );
+  });
 });

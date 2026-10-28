@@ -8,7 +8,13 @@ from app.config import Settings, get_app_settings
 from app.db import get_session
 from app.errors import ErrorResponse
 from app.modules.auth.permissions import CustomerUser, ProUser
-from app.modules.quotes.schemas import CustomerQuote, CustomerQuoteList, QuoteCreate, QuoteOut
+from app.modules.quotes.schemas import (
+    CustomerQuote,
+    CustomerQuoteList,
+    ProPublicProfile,
+    QuoteCreate,
+    QuoteOut,
+)
 from app.modules.quotes.service import QuoteService
 from app.queue import JobQueue, get_job_queue
 
@@ -85,6 +91,33 @@ async def list_request_quotes(
     once it is closed. Each shows the price, what it includes (contact details masked), the
     duration, the proposed start, when it expires, and the pro's public card."""
     return await quotes.list_for_customer(user, request_id)
+
+
+@customer_router.get(
+    "/{request_id}/quotes/{quote_id}/pro",
+    response_model=ProPublicProfile,
+    summary="See the public profile of the pro behind a quote",
+    responses={
+        status.HTTP_401_UNAUTHORIZED: _error("invalid_token: missing, invalid or expired token."),
+        status.HTTP_403_FORBIDDEN: _error("forbidden: only customers see the pros who quoted."),
+        status.HTTP_404_NOT_FOUND: _error(
+            "not_found: no request of the caller with this id, or the quotes listed on it now "
+            "do not include this one (another request's, expired, withdrawn or rejected, the "
+            "request off the quote screen, or a pro who can no longer be hired)."
+        ),
+    },
+)
+async def get_quote_pro(
+    request_id: uuid.UUID,
+    quote_id: uuid.UUID,
+    user: CustomerUser,
+    quotes: Annotated[QuoteService, Depends(get_quote_service)],
+) -> ProPublicProfile:
+    """The pro behind one of the quotes the customer can choose from, as the comparison list
+    shows them, plus their bio (contact details masked), their active categories and the month
+    they joined. Available exactly while the list shows the quote. Never a contact, a document,
+    the photo, the service areas or payout details: contacts stay hidden before payment."""
+    return await quotes.pro_profile(user, request_id, quote_id)
 
 
 @customer_router.post(

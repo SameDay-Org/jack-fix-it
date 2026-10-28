@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react-native";
 import { StyleSheet } from "react-native";
 
+import { FALLBACK_GLYPH } from "@/components/icons";
 import { tokens, withOpacity } from "@/theme";
 
 import { IconTile } from "../IconTile";
@@ -36,10 +37,14 @@ describe("IconTile", () => {
     expect(StyleSheet.flatten(tile().props.style)).toMatchObject({ width: 56, height: 56 });
   });
 
-  it("an unknown slug keeps the empty tile, so a grid never shifts", async () => {
+  it("an unknown slug shows the generic mark in the same tile, so a grid never shifts or shows a hole", async () => {
     await render(<IconTile slug="plumbing" testID="tile" />);
 
     expect(StyleSheet.flatten(tile().props.style)).toMatchObject({ width: 56, height: 56 });
-    expect(icon()).toHaveLength(0);
+    expect(icon()).toHaveLength(1);
+    const paths = icon()[0].queryAll((node) => node.type === "RNSVGPath");
+    expect(paths.filter((node) => node.props.stroke != null).map((node) => node.props.d)).toEqual(
+      FALLBACK_GLYPH.strokes,
+    );
   });
 });

@@ -34,12 +34,20 @@ type SuccessBody<Operation> = Operation extends { responses: infer Responses }
 export type GetResponse<P extends GetPath> = SuccessBody<paths[P]["get"]>;
 export type PostResponse<P extends PostPath> = SuccessBody<paths[P]["post"]>;
 
-/** The JSON request body a POST path takes. */
+/** The JSON request body a POST path takes; `undefined` for one that takes none (a quote's accept). */
 export type PostBody<P extends PostPath> = paths[P]["post"] extends {
   requestBody: { content: { "application/json": infer Body } };
 }
   ? Body
+  : undefined;
+
+/** The `{name}` segments an operation declares, e.g. `{ request_id: string }`; `never` when it has none. */
+type PathParams<Operation> = Operation extends { parameters: { path: infer Params } }
+  ? Params
   : never;
+
+export type GetParams<P extends GetPath> = PathParams<paths[P]["get"]>;
+export type PostParams<P extends PostPath> = PathParams<paths[P]["post"]>;
 
 type Method = "GET" | "POST";
 
@@ -49,7 +57,27 @@ export type SendOptions = {
   body?: unknown;
   accessToken?: string;
   signal?: AbortSignal;
+  /** Values for the path's `{name}` segments. */
+  params?: Readonly<Record<string, string>>;
 };
+
+const PATH_PARAM = /\{(\w+)\}/g;
+const DOT_SEGMENT = /^\.{1,2}$/;
+
+/**
+ * Puts each `{name}` segment of an OpenAPI path in place, percent-encoded, so a value (an id from
+ * a deep link, say) is always exactly one segment: it can add no `/`, `?` or `#`, and a `.` or `..`
+ * that URL resolution would collapse is refused.
+ */
+export function fillPath(path: string, params: Readonly<Record<string, string>> = {}): string {
+  return path.replace(PATH_PARAM, (_, name: string) => {
+    const value = params[name];
+    if (value === undefined || value === "" || DOT_SEGMENT.test(value)) {
+      throw new Error(`Invalid value for the path parameter "${name}"`);
+    }
+    return encodeURIComponent(value);
+  });
+}
 
 /** Joins the path onto the API base URL and refuses anything that lands on another host. */
 function resolveUrl(path: string): URL {
@@ -91,7 +119,7 @@ export async function sendRequest<T>(
   options: SendOptions = {},
 ): Promise<T> {
   throwIfAborted(options.signal);
-  const url = resolveUrl(path);
+  const url = resolveUrl(fillPath(path, options.params));
   const headers: Record<string, string> = { Accept: "application/json" };
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
   if (options.accessToken) headers.Authorization = `Bearer ${options.accessToken}`;

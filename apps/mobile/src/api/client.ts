@@ -2,9 +2,11 @@ import { ApiError, SessionExpiredError } from "./errors";
 import {
   sendRequest,
   throwIfAborted,
+  type GetParams,
   type GetPath,
   type GetResponse,
   type PostBody,
+  type PostParams,
   type PostPath,
   type PostResponse,
 } from "./http";
@@ -16,26 +18,43 @@ export type RequestOptions = {
   signal?: AbortSignal;
 };
 
+/**
+ * The options argument for a path: optional when the path has no `{name}` segments, required with
+ * `params` when it has, e.g. `{ params: { request_id } }` for `/v1/requests/{request_id}/quotes`.
+ */
+export type OptionsFor<Params> = [Params] extends [never]
+  ? [options?: RequestOptions]
+  : [options: RequestOptions & { params: Params }];
+
+type SentOptions = RequestOptions & { params?: Readonly<Record<string, string>> };
+
 const INVALID_TOKEN = "invalid_token";
 
 /** Typed GET. Paths are the OpenAPI keys; a full URL is not one of them. */
 export function apiGet<P extends GetPath>(
   path: P,
-  options: RequestOptions = {},
+  ...[options]: OptionsFor<GetParams<P>>
 ): Promise<GetResponse<P>> {
-  return withSession(options, (accessToken) =>
-    sendRequest<GetResponse<P>>("GET", path, { accessToken, signal: options.signal }),
+  const { params, ...session }: SentOptions = options ?? {};
+  return withSession(session, (accessToken) =>
+    sendRequest<GetResponse<P>>("GET", path, { accessToken, signal: session.signal, params }),
   );
 }
 
-/** Typed POST with a JSON body. */
+/** Typed POST with a JSON body (`undefined` for a path that takes none). */
 export function apiPost<P extends PostPath>(
   path: P,
   body: PostBody<P>,
-  options: RequestOptions = {},
+  ...[options]: OptionsFor<PostParams<P>>
 ): Promise<PostResponse<P>> {
-  return withSession(options, (accessToken) =>
-    sendRequest<PostResponse<P>>("POST", path, { body, accessToken, signal: options.signal }),
+  const { params, ...session }: SentOptions = options ?? {};
+  return withSession(session, (accessToken) =>
+    sendRequest<PostResponse<P>>("POST", path, {
+      body,
+      accessToken,
+      signal: session.signal,
+      params,
+    }),
   );
 }
 

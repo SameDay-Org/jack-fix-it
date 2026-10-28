@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from app.errors import ErrorResponse
+from app.modules.addresses.router import router as addresses_router
 from app.modules.auth.router import router as auth_router
 from app.modules.categories.router import router as categories_router
 from app.modules.devices.router import router as devices_router
@@ -33,3 +34,4 @@ v1_router.include_router(quotes_router)
 v1_router.include_router(customer_quotes_router)
 v1_router.include_router(devices_router)
 v1_router.include_router(waitlist_router)
+v1_router.include_router(addresses_router)

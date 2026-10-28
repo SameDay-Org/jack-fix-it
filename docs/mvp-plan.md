@@ -271,7 +271,7 @@ Entrega: contas criadas, repositório no ar, board pronto.
 ### Dia 2 — Design
 
 - [ ] **D2.1** Design system da marca: azul-marinho profundo + verde-limão, branco e cinza claro (decided 2026-10-20 by Cesar, docs/design/README.md, ADR 0008), tipografia, espaçamentos, raios, ícones — #18
-- [ ] **D2.2** Protótipo das telas-chave no Figma: boas-vindas, home do cliente, criar pedido, orçamentos, acompanhamento do job, feed do profissional, detalhe do job, perfil, avaliação — #19
+- [ ] **D2.2** Protótipo das telas-chave no Figma: boas-vindas, home do cliente, criar pedido, orçamentos, acompanhamento do job, feed do profissional, detalhe do job, perfil, avaliação; estrutura de abas (Home, History, Account), caderno de endereços, Account/Settings, home do profissional (carteira + oportunidades) e History com recibos — #19
 - [ ] **D2.3** Definir estados vazios, de carregamento e de erro — #19
 - [ ] **D2.4** Validar o protótipo com o Guilherme (30 min), que cuida da marca — #19
 
@@ -332,8 +332,8 @@ Entrega: profissional aprovado e apto a receber.
 
 ### Dia 8 — Pedido do cliente
 
-- [ ] **D8.1** Home do cliente com o campo "What's going on at home?" em destaque e as categorias como opção secundária — #43
-- [ ] **D8.2** Pedido em etapas: o que aconteceu (texto, fotos, vídeo, categoria opcional) → perguntas de contexto → local (ZIP, endereço com Google Places, data e horário) → revisão — #45, #42
+- [ ] **D8.1** Home do cliente com o campo "What's going on at home?" em destaque e as categorias como opção secundária — #43, #216
+- [ ] **D8.2** Pedido em etapas: o que aconteceu (texto, fotos, vídeo, categoria opcional) → perguntas de contexto → local (ZIP, endereço com Google Places, data e horário) → revisão — #45, #42, #214, #215
 - [ ] **D8.3** Perguntas de contexto lidas da categoria (JSON editável no admin), prontas para as 5 categorias do lançamento — #44
 - [ ] **D8.4** Checagem de ZIP atendido (Broward primeiro) e lista de espera para quem está fora — #46
 - [ ] **D8.5** Confirmação "Jack is on it" com número do pedido e lista "Meus pedidos" com os status do cliente — #47
@@ -343,7 +343,7 @@ Entrega: pedido criado com texto, mídia, perguntas de contexto e endereço.
 ### Dia 9 — Distribuição e orçamentos
 
 - [ ] **D9.1** Distribuição: profissionais aprovados, da categoria, com o ZIP do pedido, ordenados por nota e tempo de resposta; envia para até N — #48
-- [ ] **D9.2** Feed de oportunidades no app do profissional, com detalhe e fotos do pedido — #49
+- [ ] **D9.2** Feed de oportunidades no app do profissional, com detalhe e fotos do pedido — #49, #219
 - [ ] **D9.3** Envio de orçamento: valor fechado, o que inclui, duração estimada, data e horário — #50
 - [ ] **D9.4** Expiração de orçamentos e pedidos pelo worker, com alerta ao BDC quando ninguém responde — #51
 
@@ -378,7 +378,7 @@ Entrega: cliente paga e o job aparece agendado para os dois lados.
 - [ ] **D12.1** Máquina de estados no backend, com transições válidas e histórico em `job_events` — #60
 - [ ] **D12.2** App do profissional: agenda, "a caminho", check-in com localização e hora, fotos de antes, concluir com fotos de depois — #63
 - [ ] **D12.3** App do cliente: linha do tempo do job atualizada por push e refetch — #64
-- [ ] **D12.4** Notificação em cada mudança de status — #65
+- [ ] **D12.4** Notificação em cada mudança de status — #65, #217
 
 Entrega: job vai de agendado a concluído pelo profissional.
 
@@ -388,7 +388,7 @@ Entrega: job vai de agendado a concluído pelo profissional.
 - [ ] **D13.2** Auto-confirmação em 48 h por tarefa agendada no worker — #67
 - [ ] **D13.3** Transferência para a conta do profissional, com idempotência e registro em `transfers` — #68
 - [ ] **D13.4** Cancelamento pelo cliente ou pelo profissional, com regra de reembolso — #69
-- [ ] **D13.5** Tela de ganhos do profissional — #70
+- [ ] **D13.5** Tela de ganhos do profissional — #70, #218
 
 Entrega: dinheiro de teste chega à conta Express do profissional.
 
@@ -437,7 +437,7 @@ Entrega: tráfego pago já pode apontar para a landing.
 
 ### Dia 18 — Acabamento visual
 
-- [ ] **D18.1** Revisão tela a tela contra o protótipo: espaçamento, tipografia, contraste — #90
+- [ ] **D18.1** Revisão tela a tela contra o protótipo: espaçamento, tipografia, contraste — #90, #213
 - [ ] **D18.2** Skeletons, estados vazios ilustrados, mensagens de erro claras, microanimações — #90
 - [ ] **D18.3** Ícone do app, splash screen, screenshots e textos das lojas — #91
 - [ ] **D18.4** Templates de e-mail e SMS com a marca — #92
@@ -531,7 +531,7 @@ Depois do lançamento, a prioridade é o que aumenta confiança e ticket médio,
 
 | Fase               | Funcionalidades                                                                                                                                                                                                     | Issue |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
-| v1.1 (mês 2)       | Rastreamento do profissional no mapa, preço tabelado para limpeza (por quartos e banheiros), reagendamento, gorjeta                                                                                                 | #103  |
+| v1.1 (mês 2)       | Rastreamento do profissional no mapa e aviso de "chegando", preço tabelado para limpeza (por quartos e banheiros), reagendamento, gorjeta                                                                           | #103  |
 | v1.2 (meses 3 e 4) | Background check com Checkr, pagamento por marcos em jobs grandes, cupons e indicação, categorias de alto valor (HVAC, elétrica, encanamento, telhado)                                                              | #104  |
 | v2 (meses 4 a 6)   | Classificação do pedido e entrada por voz com IA, análise das conversas do BDC, planos recorrentes, "My Home" (histórico da casa), contas B2B (property managers, hosts de Airbnb), apps separados se fizer sentido | #105  |
 

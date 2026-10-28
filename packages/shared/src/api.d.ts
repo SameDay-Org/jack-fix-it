@@ -569,6 +569,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/requests/{request_id}/quotes/{quote_id}/pro": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * See the public profile of the pro behind a quote
+         * @description The pro behind one of the quotes the customer can choose from, as the comparison list
+         *     shows them, plus their bio (contact details masked), their active categories and the month
+         *     they joined. Available exactly while the list shows the quote. Never a contact, a document,
+         *     the photo, the service areas or payout details: contacts stay hidden before payment.
+         */
+        get: operations["get_quote_pro_v1_requests__request_id__quotes__quote_id__pro_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/requests/{request_id}/quotes/{quote_id}/accept": {
         parameters: {
             query?: never;
@@ -642,6 +665,57 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/v1/addresses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List my saved addresses
+         * @description The caller's address book: the default first, then the oldest first. `served` tells
+         *     whether the ZIP has an active service area; when it does not, offer the waitlist.
+         */
+        get: operations["list_saved_addresses_v1_addresses_get"];
+        put?: never;
+        /**
+         * Save an address
+         * @description Adds an address to the caller's book. The first one is the default; `is_default` makes
+         *     the new one the default instead. An unserved ZIP is saved too, with `served` false.
+         */
+        post: operations["create_saved_address_v1_addresses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/addresses/{address_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a saved address
+         * @description Removes one of the caller's addresses. Requests created from it are not affected.
+         */
+        delete: operations["delete_saved_address_v1_addresses__address_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Edit a saved address
+         * @description Changes any subset of the fields of one of the caller's addresses. `is_default: true`
+         *     moves the default here. A request created from this address keeps its own copy.
+         */
+        patch: operations["update_saved_address_v1_addresses__address_id__patch"];
         trace?: never;
     };
 }
@@ -1374,6 +1448,61 @@ export interface components {
             service_area_ids?: string[];
         };
         /**
+         * ProPublicProfile
+         * @description The public profile of the pro behind a quote the customer can choose (#53), before
+         *     paying: the card's fields, the bio, the categories and the month the pro joined. Never a
+         *     contact, a document, the photo, the service areas, payouts or an internal id (the account,
+         *     Stripe).
+         */
+        ProPublicProfile: {
+            /**
+             * Id
+             * Format: uuid
+             * @description The pro's profile id.
+             */
+            id: string;
+            /**
+             * Name
+             * @description The first name and the last name's initial, e.g. "María P."; null when the pro has not set both names, or when the name shows a contact detail (an email, a phone, a domain...): withheld before payment, never partly masked.
+             */
+            name: string | null;
+            /**
+             * Rating Avg
+             * @description The average rating as a decimal string; null before the first review.
+             * @example 4.80
+             */
+            rating_avg: string | null;
+            /**
+             * Jobs Count
+             * @description Jobs completed on the platform.
+             */
+            jobs_count: number;
+            /** Years Of Experience */
+            years_of_experience: number | null;
+            /**
+             * Verified
+             * @description The platform approved the pro's verification.
+             */
+            verified: boolean;
+            /**
+             * Bio
+             * @description What the pro wrote about their work, with contact details masked (app.redaction), as in a quote's scope: the pro's own email and phone, then every contact pattern; null when the pro wrote none.
+             */
+            bio: string | null;
+            /**
+             * Categories
+             * @description The active categories the pro works in, by slug.
+             */
+            categories: components["schemas"]["CategorySummary"][];
+            /**
+             * Member Since
+             * Format: date
+             * @description The first day of the month the pro joined: month precision only.
+             * @example 2026-10-01
+             */
+            member_since: string;
+        };
+        /**
          * ProVerificationStatus
          * @enum {string}
          */
@@ -1686,6 +1815,108 @@ export interface components {
              * @description Longitude, degrees.
              */
             lng: number;
+        };
+        /**
+         * SavedAddressIn
+         * @description A saved address: the address fields, its label, optional coordinates (both or neither)
+         *     and whether it becomes the default. The customer's first address is the default anyway.
+         */
+        SavedAddressIn: {
+            /** Line1 */
+            line1: string;
+            /** Line2 */
+            line2?: string | null;
+            /** City */
+            city: string;
+            /**
+             * State
+             * @description Two uppercase letters, e.g. FL.
+             */
+            state: string;
+            /**
+             * Zip Code
+             * @description 5 digits or ZIP+4.
+             */
+            zip_code: string;
+            /**
+             * Label
+             * @description The customer's own name for it, e.g. "Home" or "Casa 2".
+             */
+            label: string;
+            /** Lat */
+            lat?: number | null;
+            /** Lng */
+            lng?: number | null;
+            /**
+             * Is Default
+             * @default false
+             */
+            is_default: boolean;
+        };
+        /**
+         * SavedAddressList
+         * @description The caller's saved addresses: the default first, then the oldest first.
+         */
+        SavedAddressList: {
+            /** Items */
+            items: components["schemas"]["SavedAddressOut"][];
+        };
+        /** SavedAddressOut */
+        SavedAddressOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Label */
+            label: string;
+            /** Line1 */
+            line1: string;
+            /** Line2 */
+            line2: string | null;
+            /** City */
+            city: string;
+            /** State */
+            state: string;
+            /** Zip Code */
+            zip_code: string;
+            /** Lat */
+            lat: number | null;
+            /** Lng */
+            lng: number | null;
+            /** Is Default */
+            is_default: boolean;
+            /**
+             * Served
+             * @description True when the ZIP has an active service area; otherwise the app offers the waitlist.
+             */
+            served: boolean;
+        };
+        /**
+         * SavedAddressPatch
+         * @description Any subset of the fields. A field left out stays as it is. `line2` sent as null is
+         *     cleared; so are `lat` and `lng`, sent as null together. `is_default` can only be true here:
+         *     the default moves by making another address the default, never by unsetting one.
+         */
+        SavedAddressPatch: {
+            /** Label */
+            label?: string | null;
+            /** Line1 */
+            line1?: string | null;
+            /** Line2 */
+            line2?: string | null;
+            /** City */
+            city?: string | null;
+            /** State */
+            state?: string | null;
+            /** Zip Code */
+            zip_code?: string | null;
+            /** Lat */
+            lat?: number | null;
+            /** Lng */
+            lng?: number | null;
+            /** Is Default */
+            is_default?: true | null;
         };
         /** ServedCheckOut */
         ServedCheckOut: {
@@ -3426,6 +3657,65 @@ export interface operations {
             };
         };
     };
+    get_quote_pro_v1_requests__request_id__quotes__quote_id__pro_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProPublicProfile"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers see the pros who quoted. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no request of the caller with this id, or the quotes listed on it now do not include this one (another request's, expired, withdrawn or rejected, the request off the quote screen, or a pro who can no longer be hired). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     accept_quote_v1_requests__request_id__quotes__quote_id__accept_post: {
         parameters: {
             query?: never;
@@ -3631,6 +3921,273 @@ export interface operations {
                 };
             };
             /** @description rate_limited: too many requests; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_saved_addresses_v1_addresses_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedAddressList"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers keep saved addresses. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_saved_address_v1_addresses_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SavedAddressIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedAddressOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers keep saved addresses. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description address_limit_reached: the caller already keeps the most addresses allowed; address_label_taken: the caller already has an address with this label, ignoring case. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a label empty, longer than 30 characters, with a control or format character or a contact detail; an address field out of format; lat or lng alone or out of range. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many saved-address writes; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_saved_address_v1_addresses__address_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                address_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. If it was the default, the oldest remaining address is. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers keep saved addresses. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description address_not_found: no saved address of the caller with this id (another user's id answers the same). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: an address_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many saved-address writes; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_saved_address_v1_addresses__address_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                address_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SavedAddressPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedAddressOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers keep saved addresses. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description address_not_found: no saved address of the caller with this id (another user's id answers the same). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description address_label_taken: the caller already has an address with this label, ignoring case. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a label empty, longer than 30 characters, with a control or format character or a contact detail; an address field out of format; lat or lng alone or out of range; is_default false (make another address the default instead); a required field null; an address_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many saved-address writes; retry later. */
             429: {
                 headers: {
                     /** @description Seconds until the current limit window ends. */
