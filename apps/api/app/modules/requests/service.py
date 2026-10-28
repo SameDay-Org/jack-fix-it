@@ -412,6 +412,12 @@ class ProMedia:
     pending: int
 
 
+def media_keys_among(keys: Collection[str]) -> Select[str]:
+    """The upload keys among `keys` that a request's media hold, as a statement: the uploads
+    module's sweep of unreferenced uploads (#191) runs it with the other referencing columns."""
+    return ServiceRequestRepository.media_keys_among(keys)
+
+
 class ProRequestReader:
     """Read-only access for the pro opportunities (#49), through this module (ADR 0003)."""
 
