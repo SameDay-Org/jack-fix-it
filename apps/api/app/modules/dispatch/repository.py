@@ -120,6 +120,14 @@ class DispatchRepository:
         )
         return (await self._session.scalars(statement)).one_or_none()
 
+    async def id_for(self, request_id: uuid.UUID, pro_id: uuid.UUID) -> uuid.UUID | None:
+        """The id of the pro's dispatch of the request (one at most: UNIQUE (request_id,
+        pro_id)), in any status."""
+        statement = select(RequestDispatch.id).where(
+            RequestDispatch.request_id == request_id, RequestDispatch.pro_id == pro_id
+        )
+        return await self._session.scalar(statement)
+
     async def mark_quoted(self, dispatch_id: uuid.UUID, now: datetime) -> bool:
         """sent or viewed -> quoted, with the pro's answer time; a conditional UPDATE, so it
         happens once. False when the dispatch was no longer active."""

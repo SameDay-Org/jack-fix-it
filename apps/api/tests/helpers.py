@@ -2,8 +2,8 @@
 
 import gc
 import time
-from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from typing import Final
 
 from sqlalchemy import text
@@ -17,20 +17,61 @@ FIXTURES_TOKEN: Final = "fixtures"
 _IN_FAILED_TRANSACTION: Final = "25P02"
 
 
-def seconds_without_gc(work: Callable[[], object]) -> float:
-    """Wall-clock seconds of work() with the cyclic garbage collector paused. A full collection
-    walks every live object of the test process (over a million late in the suite) and took up
-    to 0.86 s on CI: when it fires inside a timed call, it measures the suite's heap, not the
-    code under test (#194). Backtracking still shows: the code itself runs slowly."""
+# Timed runs per measurement: a busy test machine can stall one run; backtracking would make
+# every run slow (#196).
+TIMED_RUNS: Final = 3
+
+
+@contextmanager
+def gc_paused() -> Iterator[None]:
+    """The cyclic garbage collector off inside the block, and back to its previous state after,
+    even when the block raises. A full collection walks every live object of the test process
+    (over a million late in the suite) and took up to 0.86 s on CI: when it fires inside a timed
+    call, it measures the suite's heap, not the code under test (#194)."""
     was_enabled = gc.isenabled()
     gc.disable()
     try:
-        started = time.perf_counter()
-        work()
-        return time.perf_counter() - started
+        yield
     finally:
         if was_enabled:
             gc.enable()
+
+
+def seconds_without_gc(
+    work: Callable[[], object], *, clock: Callable[[], float] = time.perf_counter
+) -> float:
+    """Wall-clock seconds of work() with the collector paused (gc_paused). Backtracking still
+    shows: the code itself runs slowly. clock is a seam for test_helpers.py, which scripts the
+    readings instead of sleeping."""
+    with gc_paused():
+        started = clock()
+        work()
+        return clock() - started
+
+
+async def async_seconds_without_gc(
+    work: Callable[[], Awaitable[object]], *, clock: Callable[[], float] = time.perf_counter
+) -> float:
+    """seconds_without_gc for a coroutine: the collector is paused for the timed await only."""
+    with gc_paused():
+        started = clock()
+        await work()
+        return clock() - started
+
+
+def best_seconds_without_gc(
+    work: Callable[[], object], *, clock: Callable[[], float] = time.perf_counter
+) -> float:
+    """The fastest of TIMED_RUNS runs of work(), each timed by seconds_without_gc. One stalled
+    run cannot fail a limit; a regression that slows every run still does."""
+    return min(seconds_without_gc(work, clock=clock) for _ in range(TIMED_RUNS))
+
+
+async def async_best_seconds_without_gc(
+    work: Callable[[], Awaitable[object]], *, clock: Callable[[], float] = time.perf_counter
+) -> float:
+    """best_seconds_without_gc for a coroutine."""
+    return min([await async_seconds_without_gc(work, clock=clock) for _ in range(TIMED_RUNS)])
 
 
 @asynccontextmanager
