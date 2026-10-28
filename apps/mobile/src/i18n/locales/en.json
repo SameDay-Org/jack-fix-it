@@ -193,6 +193,24 @@
     "lessLabel": "Less, show less of what's included",
     "accept": "Accept",
     "acceptLabel": "Accept the quote from {{pro}} for {{price}}",
+    "viewProfile": "View profile",
+    "viewProfileLabel": "View {{pro}}'s profile",
+    "profile": {
+      "loading": "Loading profile",
+      "new": "New on Jack Fix It",
+      "about": "About",
+      "services": "Services",
+      "memberSince": "Member since {{month}}",
+      "accept": "Accept for {{price}}",
+      "gone": {
+        "title": "This quote is no longer available",
+        "body": "It expired or was withdrawn, so this pro's profile can't be shown.",
+        "back": "Back to quotes"
+      },
+      "error": {
+        "title": "We couldn't load this profile"
+      }
+    },
     "notAcceptable": "This quote can't be accepted anymore.",
     "refreshFailed": "Couldn't refresh. Check your connection and try again.",
     "empty": {

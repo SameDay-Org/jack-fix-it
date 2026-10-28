@@ -193,6 +193,24 @@
     "lessLabel": "Menos, ver menos de lo que incluye",
     "accept": "Aceptar",
     "acceptLabel": "Aceptar el presupuesto de {{pro}} por {{price}}",
+    "viewProfile": "Ver perfil",
+    "viewProfileLabel": "Ver el perfil de {{pro}}",
+    "profile": {
+      "loading": "Cargando perfil",
+      "new": "Nuevo en Jack Fix It",
+      "about": "Acerca de",
+      "services": "Servicios",
+      "memberSince": "Miembro desde {{month}}",
+      "accept": "Aceptar por {{price}}",
+      "gone": {
+        "title": "Este presupuesto ya no está disponible",
+        "body": "Venció o fue retirado, así que no se puede mostrar el perfil del profesional.",
+        "back": "Volver a los presupuestos"
+      },
+      "error": {
+        "title": "No pudimos cargar este perfil"
+      }
+    },
     "notAcceptable": "Este presupuesto ya no se puede aceptar.",
     "refreshFailed": "No se pudo actualizar. Revisa tu conexión e inténtalo de nuevo.",
     "empty": {

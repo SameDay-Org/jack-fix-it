@@ -65,6 +65,19 @@ export function formatRating(
   }).format(rating);
 }
 
+/**
+ * A month with its year ("October 2026", "octubre de 2026") from a date at month precision.
+ * Read as a calendar date, not an instant: the first of the month at UTC midnight is the day
+ * before in every American time zone, which would name the month before.
+ */
+export function formatMonth(isoDate: string, locale: string = formatLocale()): string {
+  return new Intl.DateTimeFormat(locale, {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(isoDate));
+}
+
 /** A date and time in the device's time zone: "Thu, Oct 30, 9:00 AM". */
 export function formatDateTime(iso: string, locale: string = formatLocale()): string {
   return new Intl.DateTimeFormat(locale, {

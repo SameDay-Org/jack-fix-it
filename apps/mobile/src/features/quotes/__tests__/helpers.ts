@@ -123,10 +123,12 @@ export const renderWithQuery = (ui: ReactElement, client: QueryClient = newQuery
   });
 
 type SheetParams = { id: string; quote: string };
+type PushedHref = { pathname: string; params: Record<string, string> };
 
 /**
- * A stand-in for the router: `push` to the accept sheet opens it (the test's harness renders it),
- * `back` closes it; the screen is focused unless a test blurs it. The router reads as idle
+ * A stand-in for the router: `push` to the accept sheet opens it (the test's harness renders it;
+ * a push anywhere else is only recorded), `back` closes it; the screen is focused unless a test
+ * blurs it. The router reads as idle
  * (`unstable_useIsNavigating` false) unless a test says a transition is under way with
  * `navigation.setNavigating(true)` and lands it with `false`, as the real router does around a
  * push or a back. Use it as the `expo-router` mock:
@@ -160,8 +162,13 @@ const useIsNavigating = () => useSyncExternalStore(subscribe, () => nav.navigati
 
 export const routerMock = {
   router: {
-    push: jest.fn((href: { params: SheetParams }) => update({ sheet: href.params })),
+    push: jest.fn((href: PushedHref) => {
+      if (href.pathname === "/requests/[id]/accept") {
+        update({ sheet: href.params as SheetParams });
+      }
+    }),
     back: jest.fn(() => update({ sheet: null })),
+    canGoBack: jest.fn(() => true),
     dismissTo: jest.fn(),
   },
   useLocalSearchParams: () => nav.sheet ?? { id: REQUEST_ID },

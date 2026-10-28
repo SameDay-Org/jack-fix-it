@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
 
 import { Button, Card, Skeleton, StatusBadge, TextSkeleton } from "@/components/ui";
-import { continuousCorners } from "@/theme";
+import { continuousCorners, tokens } from "@/theme";
 
 import { useQuoteText, type QuoteState } from "./quoteText";
 import { ScopeText } from "./ScopeText";
@@ -15,6 +15,7 @@ type QuoteCardProps = {
   /** The time the labels are drawn at (see `useExpiryClock`). */
   now: number;
   onAccept: (quote: CustomerQuote) => void;
+  onViewProfile: (quote: CustomerQuote) => void;
 };
 
 // Shown to sighted users only: the card's summary label already says it.
@@ -25,11 +26,12 @@ const VISUAL_ONLY = {
 
 /**
  * One quote as a white bubble. The summary (price, duration, start, the pro) reads as one label;
- * the scope and the Accept button stay separate controls. The price leads because it is what
- * customers compare first; one quote's Accept is a secondary pill, since a list of them shares
- * the screen and the confirmation carries the primary action.
+ * the pro's "View profile", the scope and the Accept button stay separate controls. The price
+ * leads because it is what customers compare first; one quote's Accept is a secondary pill,
+ * since a list of them shares the screen and the confirmation carries the primary action, and
+ * "View profile" is a ghost under the pro's name, in every state of the quote.
  */
-export function QuoteCard({ quote, state, now, onAccept }: QuoteCardProps) {
+export function QuoteCard({ quote, state, now, onAccept, onViewProfile }: QuoteCardProps) {
   const { t } = useTranslation();
   const text = useQuoteText(quote, state, now);
   const testID = `quote-${quote.id}`;
@@ -69,6 +71,16 @@ export function QuoteCard({ quote, state, now, onAccept }: QuoteCardProps) {
           <Text className="text-footnote text-gray-500">{text.stats}</Text>
         </View>
       </View>
+      {/* The ghost pill's padding pulls the label back to the text edge and into the card's
+          rhythm, while the 48 dp target stays. */}
+      <Button
+        label={t("quotes.viewProfile")}
+        accessibilityLabel={t("quotes.viewProfileLabel", { pro: text.pro })}
+        variant="ghost"
+        onPress={() => onViewProfile(quote)}
+        className="-my-3 -ml-5 self-start"
+        testID={`${testID}-profile`}
+      />
       <ScopeText scope={quote.scope} testID={`${testID}-scope`} />
       <QuoteFooter state={state} expiry={text.expiry} testID={testID}>
         <Button
@@ -128,12 +140,15 @@ function QuoteFooter({ state, expiry, children, testID }: QuoteFooterProps) {
 
 /** Pill-shaped like the Accept button: the kit's medium size (min-h-12) and about its width. */
 const ACCEPT_PLACEHOLDER = { width: 96, height: 48 } as const;
+/** About the width of "View profile" in the headline style, at the ghost's label height. */
+const PROFILE_PLACEHOLDER = { width: 88, height: tokens.fontSize.headline.size } as const;
 
 /**
  * A card-shaped placeholder with the loaded card's rows: every line is a `TextSkeleton` of the
  * same type style, so each row is exactly as tall as the text that replaces it, at any font
  * scale. The verified badge has its row too (the list only shows quotes from approved pros, so
- * every listed card has one), padded like the badge. A typical scope takes two lines here.
+ * every listed card has one), padded like the badge, and so does the "View profile" ghost (its
+ * own height, not a text line). A typical scope takes two lines here.
  */
 export function QuoteCardSkeleton({ testID }: { testID?: string }) {
   return (
@@ -151,6 +166,9 @@ export function QuoteCardSkeleton({ testID }: { testID?: string }) {
           </View>
           <TextSkeleton type="footnote" width="70%" />
         </View>
+      </View>
+      <View className="-my-3 min-h-12 justify-center" testID={testID && `${testID}-profile`}>
+        <Skeleton {...PROFILE_PLACEHOLDER} />
       </View>
       <View style={continuousCorners} className="gap-1 rounded-md bg-gray-50 p-3">
         <TextSkeleton type="caption" width="35%" />
