@@ -1,4 +1,5 @@
-import { Stack } from "expo-router";
+import { Stack, useNavigationContainerRef } from "expo-router";
+import { useLayoutEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Text } from "react-native";
 
@@ -16,7 +17,7 @@ import { OfflineScreen } from "./OfflineScreen";
  * slow restore never shows a blank. A restore that could not reach the server shows the offline
  * screen instead of asking for a login the device may not need. Signed in goes to `(app)`,
  * everyone else to `(auth)`, deep links included: a protected group redirects to the other
- * group's entry.
+ * group's entry. A sign-in or a sign-out switches groups in one commit (see `GroupStack`).
  */
 export function SessionGate() {
   const { t } = useTranslation();
@@ -36,7 +37,33 @@ export function SessionGate() {
   }
   if (restoreFailure === "offline") return <OfflineScreen />;
 
-  const signedIn = status === "signedIn";
+  return <GroupStack group={status === "signedIn" ? "(app)" : "(auth)"} />;
+}
+
+type Group = "(app)" | "(auth)";
+
+/**
+ * The two protected groups, with `group` the one the session belongs in. A guard alone would
+ * switch them in two steps: the group on screen turns into a redirect that renders nothing, and
+ * the router replaces it a few renders later, so a sign-out showed plain navy for a second
+ * before Welcome (#177). Instead the guards follow `shown`, and when the session changes groups
+ * a layout effect replaces the group and moves the guards together: React commits that before
+ * the frame is drawn, so the group that leaves stays on screen until the one that arrives is
+ * built. The group that leaves renders once more with the new session meanwhile; that render is
+ * never drawn, and its screens render nothing without a user.
+ */
+function GroupStack({ group }: { group: Group }) {
+  const navigation = useNavigationContainerRef();
+  const [shown, setShown] = useState(group);
+
+  useLayoutEffect(() => {
+    if (shown === group) return;
+    // Synchronous: `dispatch` queues the action for a later render, as the redirect does.
+    navigation.dispatchSync({ type: "REPLACE", payload: { name: group } });
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the guards must change in the same commit as the navigation state above, which lives outside React; a layout effect's update lands before paint.
+    setShown(group);
+  }, [group, navigation, shown]);
+
   return (
     <Stack
       screenOptions={{
@@ -46,10 +73,10 @@ export function SessionGate() {
         contentStyle: { backgroundColor: tokens.colors["navy-900"] },
       }}
     >
-      <Stack.Protected guard={signedIn} redirectTo="/(auth)/welcome">
+      <Stack.Protected guard={shown === "(app)"} redirectTo="/(auth)/welcome">
         <Stack.Screen name="(app)" />
       </Stack.Protected>
-      <Stack.Protected guard={!signedIn} redirectTo="/">
+      <Stack.Protected guard={shown === "(auth)"} redirectTo="/">
         <Stack.Screen name="(auth)" />
       </Stack.Protected>
     </Stack>
