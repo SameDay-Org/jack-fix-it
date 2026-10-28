@@ -182,7 +182,8 @@ describe("QuoteCompareScreen", () => {
     );
 
     const accepted = { ...WITHHELD, status: "accepted" as const };
-    jest.mocked(apiGet).mockResolvedValue(list([accepted, MARIA, DAN]));
+    // The API lists the accepted quote among the others by price (#188).
+    jest.mocked(apiGet).mockResolvedValue(list([MARIA, accepted, DAN]));
     await act(async () => answer.resolve(accepted));
 
     expect(router.back).toHaveBeenCalledTimes(1);
@@ -191,7 +192,7 @@ describe("QuoteCompareScreen", () => {
       "Quote accepted. Payment comes next.",
     );
     await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
-    expect(cardIds()[0]).toBe(`quote-${WITHHELD.id}`);
+    expect(cardIds()).toEqual([WITHHELD, MARIA, DAN].map((item) => `quote-${item.id}`));
     expect(card(WITHHELD).getByText("Accepted")).toBeTruthy();
     expect(
       card(WITHHELD).getByText("Quote accepted. Payment comes next.", {
@@ -203,7 +204,8 @@ describe("QuoteCompareScreen", () => {
 
   it("an accepted quote on open shows first and no Accept buttons", async () => {
     const accepted = { ...DAN, status: "accepted" as const };
-    jest.mocked(apiGet).mockResolvedValue(list([accepted, MARIA, WITHHELD]));
+    // Last in the API's answer; first on screen, and the others keep the API's order.
+    jest.mocked(apiGet).mockResolvedValue(list([MARIA, WITHHELD, accepted]));
     await renderWithQuery(<App />);
     await screen.findByText("$120");
 

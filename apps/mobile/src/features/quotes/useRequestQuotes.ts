@@ -12,9 +12,20 @@ export type CustomerQuoteList = ApiSchema<"CustomerQuoteList">;
 export const quotesQueryKey = (requestId: string) => ["requests", requestId, "quotes"] as const;
 
 /**
- * The quotes on one of the customer's requests, in the API's order: the accepted one first, then
- * the pending ones, cheapest first. A failure shows at once with a retry rather than behind a
- * skeleton, and a 404 never improves by asking again.
+ * The accepted quote on top (#190 AC4), every other one where the API put it. The API orders the
+ * whole list cheapest first, the accepted quote included (#188); nothing else is re-sorted.
+ */
+export const acceptedFirst = (list: CustomerQuoteList): CustomerQuoteList => ({
+  items: [
+    ...list.items.filter((quote) => quote.status === "accepted"),
+    ...list.items.filter((quote) => quote.status !== "accepted"),
+  ],
+});
+
+/**
+ * The quotes on one of the customer's requests: the accepted one first, then the others in the
+ * API's order (cheapest first). The cache keeps the API's answer as it came. A failure shows at
+ * once with a retry rather than behind a skeleton, and a 404 never improves by asking again.
  */
 export const quotesQueryOptions = (requestId: string) =>
   queryOptions({
@@ -25,6 +36,7 @@ export const quotesQueryOptions = (requestId: string) =>
         signal,
         params: { request_id: requestId },
       }),
+    select: acceptedFirst,
     retry: false,
   });
 

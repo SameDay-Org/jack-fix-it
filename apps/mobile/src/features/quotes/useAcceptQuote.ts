@@ -24,9 +24,9 @@ function outcomeOf(error: unknown): Exclude<AcceptOutcome, "accepted"> {
   return "failed";
 }
 
-/** The list as the API orders it once `accepted` is: the accepted quote first, the rest unchanged. */
+/** The cached list with the accepted quote in its place, as the API will list it next. */
 const withAccepted = (list: CustomerQuoteList, accepted: CustomerQuote): CustomerQuoteList => ({
-  items: [accepted, ...list.items.filter((quote) => quote.id !== accepted.id)],
+  items: list.items.map((quote) => (quote.id === accepted.id ? accepted : quote)),
 });
 
 /**

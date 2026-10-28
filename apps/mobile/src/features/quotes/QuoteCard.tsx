@@ -43,7 +43,9 @@ export function QuoteCard({ quote, state, now, onAccept }: QuoteCardProps) {
         testID={`${testID}-summary`}
       >
         <View className="flex-row items-start justify-between gap-3">
-          <View className="shrink gap-1">
+          {/* Full width, not fit-content: Android can wrap a one-line text measured to fit by a
+              sub-pixel ("Jack pro" broke in two at 160 dpi). */}
+          <View className="flex-1 gap-1">
             <Text className="text-title-1 text-navy-900">{text.price}</Text>
             <Text className="text-callout text-gray-500">{text.duration}</Text>
             <Text className="text-callout text-gray-500">{text.start}</Text>
@@ -56,7 +58,7 @@ export function QuoteCard({ quote, state, now, onAccept }: QuoteCardProps) {
             />
           ) : null}
         </View>
-        <View className="items-start gap-1">
+        <View className="gap-1">
           <Text className="text-headline text-navy-900">{text.pro}</Text>
           {quote.pro.verified ? (
             <StatusBadge label={t("quotes.verified")} tone="brand" testID={`${testID}-verified`} />
@@ -107,7 +109,8 @@ function QuoteFooter({ state, expiry, children, testID }: QuoteFooterProps) {
     );
   }
   return (
-    <View className="min-h-12 flex-row flex-wrap items-center justify-between gap-3">
+    // The expiry wraps beside the button rather than pushing it to a line of its own.
+    <View className="min-h-12 flex-row items-center justify-between gap-3">
       <Text
         {...VISUAL_ONLY}
         className="shrink text-footnote text-gray-500"
@@ -148,8 +151,11 @@ export function QuoteCardSkeleton({ testID }: { testID?: string }) {
       </View>
       <View style={continuousCorners} className="gap-1 rounded-md bg-gray-50 p-3">
         <TextSkeleton type="caption" width="35%" />
-        <TextSkeleton type="callout" />
-        <TextSkeleton type="callout" width="60%" />
+        {/* One block, no gap: the lines of one wrapped text sit flush. */}
+        <View>
+          <TextSkeleton type="callout" />
+          <TextSkeleton type="callout" width="60%" />
+        </View>
       </View>
       <View className="min-h-12 flex-row items-center justify-between gap-3">
         <View className="shrink grow">
