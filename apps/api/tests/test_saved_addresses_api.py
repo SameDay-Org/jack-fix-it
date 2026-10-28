@@ -352,8 +352,8 @@ async def test_duplicate_label_case_insensitive_is_refused(
         ("Casa 2", 201, "Casa 2"),
         ("Casa da praia", 201, "Casa da praia"),
         ("Trabajo", 201, "Trabajo"),
-        ("Apt 4B", 201, "Apt 4B"),
-        ("Office #2", 201, "Office #2"),
+        ("Apt 4B", 422, None),  # a unit is masked by the redactor, as on develop (#224 r2)
+        ("Office #2", 422, None),
         ("a" * 30, 201, "a" * 30),
         ("  Casa   de   mamá ", 201, "Casa de mamá"),
     ],
@@ -781,7 +781,7 @@ def test_openapi_documents_every_error_code(app: FastAPI) -> None:
 # Review round 1 (#224): contact handles, invisible fillers, the write limit, and races
 
 
-HANDLE_LABELS = [
+CONTACT_LABELS = [
     "\uff04testperson",  # FULLWIDTH DOLLAR SIGN: a cashtag
     "\ufe69testperson",  # SMALL DOLLAR SIGN
     "$name",
@@ -793,13 +793,26 @@ HANDLE_LABELS = [
     "@work.fixit",
     "@5pm.fixit",
     "@home" + chr(0x0335) + "fixit",  # a combining mark glued to the exempt word
+    # Round 2: a run of separators, and separators in a compatibility form.
+    "@home--fixit",
+    "@home..fixit",
+    "@home._fixit",
+    "@home" + chr(0xFF3F) + "fixit",  # FULLWIDTH LOW LINE: "_" under NFKC
+    "@home" + chr(0xFE4D) + "fixit",  # DASHED LOW LINE: "_" under NFKC
+    "@home" + chr(0x2010) + "fixit",  # HYPHEN
+    "@home" + chr(0x2024) + "fixit",  # ONE DOT LEADER: "." under NFKC
+    # Round 2: a phone glued to a unit marker, which the skipped unit step used to catch.
+    "APT3055550199",
+    "UNIT3055550199",
+    "SUITE3055550199",
+    "PO BOX3055550199",
 ]
 
 
 @pytest.mark.parametrize("method", ["post", "patch"])
 @pytest.mark.parametrize(
     "label",
-    HANDLE_LABELS,
+    CONTACT_LABELS,
     ids=[
         "fullwidth_dollar",
         "small_dollar",
@@ -812,9 +825,20 @@ HANDLE_LABELS = [
         "at_work_dot",
         "at_time_dot",
         "at_home_mark",
+        "at_home_two_dashes",
+        "at_home_two_dots",
+        "at_home_dot_underscore",
+        "at_home_fullwidth_low_line",
+        "at_home_dashed_low_line",
+        "at_home_hyphen",
+        "at_home_dot_leader",
+        "apt_phone",
+        "unit_phone",
+        "suite_phone",
+        "po_box_phone",
     ],
 )
-async def test_label_rejects_contact_handles(
+async def test_label_rejects_contacts(
     db_client: httpx.AsyncClient,
     db_session: AsyncSession,
     served: None,
@@ -847,9 +871,19 @@ async def test_label_invisible_fillers(
         await create(db_client, headers, label=filler)
         for filler in ("\u3164", "\u2800", "\u115f\u1160", " \u034f ", "\u0301\u0301")
     ]
-    cafe = await create(db_client, headers, label="Cafe\u0301")  # NFD: e + combining acute
-    cafe_again = await create(db_client, headers, label="Café")  # NFC
-    moved = await patch(db_client, headers, cafe.json()["id"], label="Home\ufe0f")
+    cafe = await create(db_client, headers, label="Cafe" + chr(0x0301))  # NFD: e + acute
+    cafe_again = await create(db_client, headers, label="Caf" + chr(0x00E9))  # NFC
+    # A filler between the "e" and its accent (#224 round 2): removed before composition, so
+    # the label composes and collides with "Café".
+    split = [
+        await create(db_client, headers, label="Cafe" + filler + chr(0x0301))
+        for filler in (chr(0x034F), chr(0xFE0F), chr(0x3164))
+    ]
+    moved = await patch(db_client, headers, cafe.json()["id"], label="Home" + chr(0xFE0F))
+    moved_split = await patch(
+        db_client, headers, home.json()["id"], label="Cafe" + chr(0x034F) + chr(0x0301)
+    )
+    jose = await create(db_client, headers, label="Jose" + chr(0xFE0F) + chr(0x0301))
 
     assert home.status_code == 201
     assert [r.status_code for r in (joiner, selector, supplement)] == [409] * 3
@@ -857,10 +891,19 @@ async def test_label_invisible_fillers(
     assert [r.status_code for r in blank] == [422] * 5
     assert blank[0].json() == VALIDATION_ERROR
     assert cafe.status_code == 201
-    assert cafe.json()["label"] == "Café"
+    assert cafe.json()["label"] == "Caf" + chr(0x00E9)
     assert cafe_again.status_code == 409
+    assert [r.status_code for r in split] == [409] * 3
+    assert split[0].json() == LABEL_TAKEN
     assert moved.status_code == 409
-    assert sorted(row.label for row in await rows(db_session, user_id)) == ["Café", "Home"]
+    assert moved_split.status_code == 409
+    assert jose.status_code == 201
+    assert jose.json()["label"] == "Jos" + chr(0x00E9)  # stored composed
+    assert sorted(row.label for row in await rows(db_session, user_id)) == [
+        "Caf" + chr(0x00E9),
+        "Home",
+        "Jos" + chr(0x00E9),
+    ]
 
 
 async def test_saved_address_writes_rate_limited(db_session: AsyncSession, served: None) -> None:

@@ -66,17 +66,18 @@ COORDINATE_PLACES: Final = 6
 
 
 def _canonical(value: object) -> object:
-    """The label as stored: composed (NFC, so "Café" typed with a combining accent equals
-    "Café"), without invisible fillers (app.redaction.INVISIBLE_FILLERS: letters and marks
-    the control check misses, #224 review), trimmed, each run of spaces one. So "Home" and
-    "Home\u034f" are the same label, and "\u3164" or combining marks alone are blank. Control,
-    format and line-break characters (NUL, tab, newline, zero-width space...) are refused, not
-    collapsed: the rule of a person's name (users.names), since the BDC panel will show labels
-    too."""
+    """The label as stored: without invisible fillers (app.redaction.INVISIBLE_FILLERS:
+    letters and marks the control check misses, #224 review), then composed (NFC, so "Café"
+    typed with a combining accent equals "Café", also with a filler between the "e" and its
+    accent: the filler is gone before composition), trimmed, each run of spaces one. So "Home"
+    and "Home" + U+034F are the same label, and U+3164 or combining marks alone are blank.
+    Control, format and line-break characters (NUL, tab, newline, zero-width space...) are
+    refused, not collapsed: the rule of a person's name (users.names), since the BDC panel
+    will show labels too."""
     if not isinstance(value, str):
         return value
-    value = unicodedata.normalize("NFC", value)
     value = "".join(char for char in value if char not in INVISIBLE_FILLERS)
+    value = unicodedata.normalize("NFC", value)
     if all(unicodedata.category(char).startswith("M") or char.isspace() for char in value):
         return ""  # nothing visible to attach to: blank
     if any(unicodedata.category(char)[0] == "C" or char in _LINE_BREAKS for char in value):
@@ -85,11 +86,11 @@ def _canonical(value: object) -> object:
 
 
 def _no_contacts(value: str) -> str:
-    """Refuses a label in which app.redaction masks a way to reach someone (an email, a phone,
-    a URL, a handle, or one spelled out): a label is the owner's own text, but staff will read
-    it. A street or a unit in the label ("Apt 4B") is fine: it names the address stored next
-    to it."""
-    if redact_contacts(value, addresses=False).redacted:
+    """Refuses a label in which app.redaction masks a contact detail (an email, a phone, a URL,
+    a handle, or one spelled out, and a street or a unit: "Apt 4B" is refused, since skipping
+    the unit step let a phone glued to a unit marker through, #224 review): a label is the
+    owner's own text, but staff will read it."""
+    if redact_contacts(value).redacted:
         raise ValueError("a label has no contact details")
     return value
 

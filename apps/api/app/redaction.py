@@ -71,7 +71,10 @@ INVISIBLE_FILLERS: Final = frozenset(
 # Characters folded to their ASCII form (NFKC) when that form is one ASCII letter, digit or one
 # of "@$#.-/()": fullwidth and small forms (U+FF20, U+FF04, U+FE69), mathematical letters
 # and digits, circled digits. Superscript and subscript digits only in a run of three or more
-# ("call ³⁰⁵..."), so "ft²" stays.
+# ("call ³⁰⁵..."), so "ft²" stays. The low lines and the dot leaders are not folded here: an
+# ASCII "_" or "..." glued to a domain hides it ("see_gmail.com" and "jack...fixit.com" are
+# known gaps) while the typed form keeps the boundary; the handle pattern accepts them as
+# typed instead (_SEPARATOR_FORMS).
 _FOLDABLE: Final = re.compile(r"[a-zA-Z0-9@$#.\-/()]")
 # Spanish ordinal indicators stay as typed ("1º piso", "Nº").
 _KEEP_AS_IS: Final = frozenset((chr(0x00AA), chr(0x00BA)))
@@ -102,7 +105,8 @@ _ODD_MARKS: Final = "_*|~" + chr(0x00B7) + chr(0x2022)
 _ODD_SEPARATOR: Final = re.compile(
     rf"(?<=\d)(?:[{re.escape(_ODD_MARKS)}]|[^\x00-\x7f\w\s]){{1,3}}(?=\d)"
 )
-_DASH_CODES: Final = (*range(0x2010, 0x2016), 0x2212, 0xFE58, 0xFE63, 0xFF0D)
+# Dashes of every width, the minus sign and its superscript and subscript forms read as "-".
+_DASH_CODES: Final = (*range(0x2010, 0x2016), 0x207B, 0x208B, 0x2212, 0xFE58, 0xFE63, 0xFF0D)
 _DASHES: Final = re.compile("[" + "".join(map(chr, _DASH_CODES)) + "]")
 
 # --- Emails ----------------------------------------------------------------------------------
@@ -227,9 +231,16 @@ _NOT_AN_ID: Final = frozenset(
      "bien", "mejor", "gratis", "privado", "privada", "nuevo", "nueva", "empty", "gone"}
 )  # fmt: skip
 # "@name" and "$cashtag", but not "@5pm", "@noon", "@home", "@tomorrow", a price or a currency.
-# An exempt time, measure or word must be the whole token: "@home.fixit", "@home-fixit" and
-# "@home_fixit" are handles (#224 review), while "@home.", "@home!" and "@home " stay. A
-# combining mark glued to the word ("@home\u0335fixit") continues it too: \w skips marks.
+# A handle token is letters, digits and runs of ".", "_" and "-" (_HANDLE_BODY, as the
+# platforms accept it), the separators also in their compatibility forms as typed
+# (_SEPARATOR_FORMS: the low lines whose NFKC form is "_", the dot leaders and the ellipsis
+# whose NFKC form is a run of "."; the dashes are already "-" and U+2024 already "." after
+# _clean). A time, a measure or a word after "@" is exempt only when it is the whole token:
+# _BODY_END refuses whatever would continue the token, a word character (letters, digits,
+# "_"), a combining mark glued to the word (\w skips marks: "@home" + U+0335 + "fixit") or
+# a run of separators followed by a word character. So "@home", "@home.", "@home!" and
+# "@home " stay, while "@home.fixit", "@home--fixit", "@home._fixit", "@home_fixit" and
+# "@home" + U+FF3F + "fixit" are handles (#224 review, rounds 1 and 2).
 _MARK_RANGES: Final = (
     (0x0300, 0x036F),
     (0x1AB0, 0x1AFF),
@@ -238,12 +249,17 @@ _MARK_RANGES: Final = (
     (0xFE20, 0xFE2F),
 )
 _MARKS: Final = "".join(f"{chr(low)}-{chr(high)}" for low, high in _MARK_RANGES)
-_WHOLE_WORD: Final = rf"(?!\w|[.-]\w|[{_MARKS}])"
+_SEPARATOR_FORMS: Final = "".join(
+    map(chr, (0xFE33, 0xFE34, 0xFE4D, 0xFE4E, 0xFE4F, 0xFF3F, 0x2025, 0x2026, 0xFE19, 0xFE30))
+)
+_SEPARATORS: Final = rf"._\-{_SEPARATOR_FORMS}"
+_HANDLE_BODY: Final = rf"[a-z0-9_](?:[a-z0-9{_SEPARATORS}]{{0,28}}[a-z0-9_])?"
+_BODY_END: Final = rf"(?![\w{_MARKS}]|[{_SEPARATORS}]+\w)"
 AT_HANDLE: Final = re.compile(
-    rf"(?<![\w.@])@(?:\s(?=[\w.-]*[\d_.]))?(?!\d{{1,2}}(?:[:.]\d{{1,3}})?\s*(?:[ap]\.?m\.?)?{_WHOLE_WORD}|"
-    rf"\d+(?:\.\d+)?\s*(?:ft|in|cm|mm|m|hrs?|h|mins?|hours?){_WHOLE_WORD}|"
-    rf"(?:noon|night|home|work|casa|today|tomorrow|tonight|ma(?:ñ|n)ana){_WHOLE_WORD})"
-    r"[a-z0-9_](?:[a-z0-9_.-]{0,28}[a-z0-9_])?",
+    rf"(?<![\w.@])@(?:\s(?=[\w.-]*[\d_.]))?(?!\d{{1,2}}(?:[:.]\d{{1,3}})?\s*(?:[ap]\.?m\.?)?{_BODY_END}|"
+    rf"\d+(?:\.\d+)?\s*(?:ft|in|cm|mm|m|hrs?|h|mins?|hours?){_BODY_END}|"
+    rf"(?:noon|night|home|work|casa|today|tomorrow|tonight|ma(?:ñ|n)ana){_BODY_END})"
+    rf"{_HANDLE_BODY}",
     _FLAGS,
 )
 CASHTAG: Final = re.compile(r"(?<![\w$])\$(?!(?-i:[A-Z]{3})\b)[a-z][a-z0-9_-]{1,19}\b", _FLAGS)
@@ -411,16 +427,11 @@ class RedactionResult:
     redacted: bool  # True when at least one contact detail was masked
 
 
-def redact_contacts(text: str, *, addresses: bool = True) -> RedactionResult:
-    """`text` with every contact detail it recognizes replaced by MASK (see the module doc).
-
-    `addresses=False` leaves street addresses, units and PO boxes alone and masks only the ways
-    to reach someone (emails, phones, URLs, handles): for text that names an address the reader
-    already sees, such as a saved address's label ("Apt 4B", #214).
-    """
+def redact_contacts(text: str) -> RedactionResult:
+    """`text` with every contact detail it recognizes replaced by MASK (see the module doc)."""
     cleaned = _clean(text)
     masked = 0
-    for pattern, replace in _STEPS if addresses else _CONTACT_STEPS:
+    for pattern, replace in _STEPS:
         cleaned, count = _substitute(pattern, replace, cleaned)
         masked += count
     return RedactionResult(cleaned, masked > 0)
@@ -726,9 +737,7 @@ def _is_latin_mobile(joined: str, count: int) -> bool:
 # Order matters: emails and URLs before the handles and domains inside them; phones before
 # platform handles, so "whatsapp 305 555 0199" loses the whole number; masks hold no letter or
 # digit, so a later pattern never matches inside an earlier mask.
-_Steps = tuple[tuple[re.Pattern[str], _Replace], ...]
-# The ways to reach someone: what redact_contacts(addresses=False) masks.
-_CONTACT_STEPS: Final[_Steps] = (
+_STEPS: Final[tuple[tuple[re.Pattern[str], _Replace], ...]] = (
     (SPACED_LETTERS_EMAIL, _mask),
     (PLAIN_EMAIL, _mask),
     (SPACED_EMAIL, _mask),
@@ -742,15 +751,12 @@ _CONTACT_STEPS: Final[_Steps] = (
     (REVERSE_HANDLE, _mask_reverse_handle),
     (AT_HANDLE, _mask),
     (CASHTAG, _mask),
-)
-_ADDRESS_STEPS: Final[_Steps] = (
     (STREET, _mask_street),
     (REVERSED_STREET, _mask_reversed_street),
     (GRID_OR_HIGHWAY, _mask),
     (SPANISH_STREET, _mask),
     (UNIT_OR_BOX, _mask),
 )
-_STEPS: Final[_Steps] = _CONTACT_STEPS + _ADDRESS_STEPS
 
 
 # --- Known values ----------------------------------------------------------------------------
