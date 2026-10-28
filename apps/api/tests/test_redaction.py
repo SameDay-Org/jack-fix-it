@@ -5,10 +5,14 @@ come back unchanged (and not flagged). The module docstring lists the known gaps
 """
 
 import random
+import sys
+import unicodedata
+from typing import Literal
 
 import pytest
 
 from app.redaction import (
+    _MARK_RANGES,
     MASK,
     KnownValues,
     RedactionResult,
@@ -424,6 +428,103 @@ def test_a_separator_form_next_to_a_contact_keeps_its_boundary(separator: str) -
         assert result.redacted is True, ascii(text)
         for contact in ("fixit.com", "gmail.com", "@jdoe"):
             assert contact not in result.text, ascii(text)
+
+
+# Every combining mark continues the token (#229, the #224 round-3 reviews): the five Latin
+# and generic blocks of the round-1 fix left a Cyrillic, Hebrew, Arabic, Thai, Devanagari,
+# ideographic or musical mark as a boundary, so "@home" + U+0483 + "fixit" read as "@home".
+# Me marks are dropped by _clean, so only Mn and Mc are probed.
+COMBINING_MARKS = [
+    (chr(0x0335), "latin_short_stroke"),  # the #224 probe, inside the old ranges
+    (chr(0x0483), "cyrillic_titlo"),
+    (chr(0x05B0), "hebrew_sheva"),
+    (chr(0x0610), "arabic_sign"),
+    (chr(0x0E31), "thai_mai_han_akat"),
+    (chr(0x093F), "devanagari_vowel_sign_i_mc"),
+    (chr(0x302A), "ideographic_level_tone"),
+    (chr(0x1D167), "musical_tremolo"),
+]
+MARKS = [mark for mark, _ in COMBINING_MARKS]
+MARK_IDS = [name for _, name in COMBINING_MARKS]
+# Every exempt token shape of AT_HANDLE, in ASCII (the handle body is ASCII, so "@mañana" +
+# a mark is detected but masked up to the "ñ": a known gap of the body, not of the marks).
+EXEMPT_WORDS = [
+    "home", "work", "casa", "noon", "night", "today", "tomorrow", "tonight", "manana", "5pm", "6ft"
+]  # fmt: skip
+
+
+@pytest.mark.parametrize("word", EXEMPT_WORDS)
+@pytest.mark.parametrize("mark", MARKS, ids=MARK_IDS)
+def test_exempt_word_glued_to_any_combining_mark_is_a_handle(mark: str, word: str) -> None:
+    handle = f"@{word}{mark}fixit"
+
+    assert redact_contacts(handle) == RedactionResult(MASK, True), ascii(handle)
+    assert redact_contacts(f"find me {handle} today") == RedactionResult(
+        f"find me {MASK} today", True
+    ), ascii(handle)
+
+
+def test_mark_set_matches_unicodedata() -> None:
+    """_MARK_RANGES is a generated constant (a scan of every code point at import costs about
+    180 ms): the Mn and Mc ranges of this Python's unicodedata. A Python with a newer Unicode
+    fails here; paste the ranges from the message into redaction.py and update its comment."""
+    expected: list[tuple[int, int]] = []
+    low: int | None = None
+    for code in range(sys.maxunicode + 1):
+        if unicodedata.category(chr(code)) in ("Mn", "Mc"):
+            if low is None:
+                low = code
+        elif low is not None:
+            expected.append((low, code - 1))
+            low = None
+
+    assert tuple(expected) == _MARK_RANGES, (
+        f"regenerate _MARK_RANGES for Unicode {unicodedata.unidata_version}: "
+        + ", ".join(f"(0x{lo:04X}, 0x{hi:04X})" for lo, hi in expected)
+    )
+
+
+@pytest.mark.parametrize("mark", MARKS, ids=MARK_IDS)
+def test_non_exempt_handle_with_mark_masked_whole(mark: str) -> None:
+    """The mark and what follows it belong to the handle: no readable piece of it is left
+    ("@bob" + U+05B0 + "smith" used to come back as the mask followed by "smith")."""
+    for handle in (
+        f"@bob{mark}smith",
+        f"@bob{mark}{mark}smith",
+        f"@b{mark}o{mark}b",
+        f"@bobsmith{mark}",
+        f"@bob{mark}.smith",
+    ):
+        assert redact_contacts(handle) == RedactionResult(MASK, True), ascii(handle)
+        assert redact_contacts(f"ping {handle} now") == RedactionResult(f"ping {MASK} now", True), (
+            ascii(handle)
+        )
+
+
+ACCENTED_WORDS = [
+    "café",
+    "mañana",
+    "João",
+    "Ñandú",
+    "crème brûlée",
+    "नमस्ते",  # Devanagari, with a virama and a vowel sign
+    "مَرْحَبًا",  # Arabic, with harakat
+    "שָלוֹם",  # Hebrew, with points
+    "สวัสดี",  # Thai, with U+0E31 and U+0E35
+]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize("word", ACCENTED_WORDS, ids=[ascii(w) for w in ACCENTED_WORDS])
+def test_accented_words_untouched(word: str, form: Literal["NFC", "NFD"]) -> None:
+    """Marks on ordinary words, composed or decomposed, with and without "@home" next to them.
+    The output is the NFC form of the input (_clean normalizes) and nothing is masked."""
+    for text in (f"Fix the {word} sink", f"{word} @home by {word}", f"@home, {word}!"):
+        typed = unicodedata.normalize(form, text)
+
+        result = redact_contacts(typed)
+
+        assert result == RedactionResult(unicodedata.normalize("NFC", typed), False), ascii(typed)
 
 
 @pytest.mark.parametrize("prefix", ["APT", "UNIT", "SUITE", "STE", "PO BOX"])
@@ -1016,4 +1117,26 @@ def test_hostile_inputs_finish_quickly(text: str) -> None:
     ["3 0 5 " * 333, "742 " * 500, "evergreen " * 200, "3-0-5-" * 333, "jane.doe77 at " * 140],
 )
 def test_hostile_inputs_against_the_known_values_finish_quickly(text: str) -> None:
+    assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "@home" + chr(0x0483) * 5000 + "fixit",
+        "@home" + chr(0x05B0) * 5000,
+        ("@home" + chr(0x0610)) * 400,
+        "@" + ("a" + chr(0x0E31)) * 1000,
+        ("x" + chr(0x0483) + ".") * 700,
+    ],
+    ids=[
+        "5000_marks_then_fixit",
+        "5000_marks",
+        "home_mark_x400",
+        "letter_mark_x1000",
+        "mark_dot_x700",
+    ],
+)
+def test_many_marks_after_exempt_word_is_fast(text: str) -> None:
+    """The mark runs are possessive (_MARKED) and the body counts characters, not marks."""
     assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25

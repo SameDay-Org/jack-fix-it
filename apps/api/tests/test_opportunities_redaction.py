@@ -326,6 +326,16 @@ ROUND4_CASES = [
         "+13055550199",
         "123 Main Street NW",
     ),
+    # #229: an exempt word glued to a mark outside the Latin blocks is a handle, as with
+    # "@home.fixit"; the whole token goes, so "fixit" never reaches the pro.
+    (
+        "handle-glued-to-cyrillic-mark",
+        "Repair the leaking kitchen sink, find me @home" + chr(0x0483) + "fixit.",
+        "fixit",
+        "test@example.invalid",
+        "+13055550199",
+        "742 Evergreen Terrace",
+    ),
 ]
 
 
