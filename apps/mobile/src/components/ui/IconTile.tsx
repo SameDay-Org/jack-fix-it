@@ -6,15 +6,18 @@ import { continuousCorners, tokens, withOpacity, type Radius } from "@/theme";
 export type IconTileSize = "md" | "lg";
 
 export type IconTileProps = {
-  /** The category slug; a slug without a glyph keeps the empty tile, so a grid never shifts. */
+  /** The category slug; a slug without a glyph shows the generic mark, so a grid never shifts or shows a hole. */
   slug: string;
   size?: IconTileSize;
   testID?: string;
 };
 
-// The two icon sizes the glyphs are drawn for, each centered with a margin on the 4-pt grid (12 and
-// 16 dp), and the radius token that keeps the squircle in step with the tile.
-const TILE: Record<IconTileSize, { side: number; icon: number; radius: Radius }> = {
+/**
+ * The two icon sizes the glyphs are drawn for, each centered with a margin on the 4-pt grid (12 and
+ * 16 dp), and the radius token that keeps the squircle in step with the tile. Exported so a
+ * placeholder can reserve exactly a tile's footprint.
+ */
+export const ICON_TILE: Record<IconTileSize, { side: number; icon: number; radius: Radius }> = {
   md: { side: 56, icon: 32, radius: "md" },
   lg: { side: 80, icon: 48, radius: "lg" },
 };
@@ -26,7 +29,7 @@ const TINT = withOpacity("green-500", TINT_OPACITY);
 
 /** A category icon centered in a squircle tile. Decorative: the card around it names the category. */
 export function IconTile({ slug, size = "md", testID }: IconTileProps) {
-  const tile = TILE[size];
+  const tile = ICON_TILE[size];
 
   return (
     <View
@@ -42,7 +45,7 @@ export function IconTile({ slug, size = "md", testID }: IconTileProps) {
         },
       ]}
     >
-      <CategoryIcon slug={slug} size={tile.icon} />
+      <CategoryIcon slug={slug} size={tile.icon} fallback />
     </View>
   );
 }

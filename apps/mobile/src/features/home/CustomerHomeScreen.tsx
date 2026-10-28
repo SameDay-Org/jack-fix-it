@@ -7,7 +7,7 @@ import { AccountButton } from "@/features/account/AccountButton";
 import { useOpenPhoneStepAfterSignUp } from "@/features/phone/useOpenPhoneStepAfterSignUp";
 import { startRequest } from "@/features/request";
 
-import { CategoryChips } from "./CategoryChips";
+import { CategoryCards } from "./CategoryCards";
 
 /**
  * The customer's home: a navy hero that asks what is going on and offers one action, telling
@@ -54,7 +54,7 @@ export function CustomerHomeScreen() {
             testID="home-tell-jack"
           />
         </View>
-        <CategoryChips />
+        <CategoryCards />
       </ScrollView>
     </Screen>
   );
