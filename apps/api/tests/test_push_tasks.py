@@ -32,6 +32,8 @@ from app.integrations.expo_push import (
 )
 from app.modules.devices.models import Device, DevicePlatform
 from app.modules.devices.service import DeviceService
+from app.modules.notifications.models import NotificationPreference
+from app.modules.notifications.preferences import PREFERENCE_GROUPS
 from app.modules.notifications.push_tasks import (
     PushStateNotStoredError,
     PushStore,
@@ -702,3 +704,109 @@ async def test_lost_outcome_write_on_the_last_try_fails_the_job(
 
     assert sent_to(sender) == {OK: 1}
     assert await statuses(redis, prefix) == ["in_flight"]  # never sent again
+
+
+# Notification preferences (#217): checked when the message runs.
+
+
+def kind_keys(kind: str) -> dict[str, str]:
+    return {"title_key": f"push.{kind}.title", "body_key": f"push.{kind}.body"}
+
+
+QUOTE = kind_keys("new_quote")
+
+
+async def set_preference(
+    session: AsyncSession, user: User, group: str, enabled: bool, channel: str = "push"
+) -> None:
+    row = await session.get(NotificationPreference, (user.id, group, channel))
+    if row is None:
+        session.add(
+            NotificationPreference(user_id=user.id, group=group, channel=channel, enabled=enabled)
+        )
+    else:
+        row.enabled = enabled
+    await session.flush()
+
+
+async def test_send_push_muted_group_sends_nothing(
+    ctx: dict[str, Any],
+    db_session: AsyncSession,
+    sender: FakeSender,
+    redis: Redis,
+    prefix: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    user = await make_user(db_session, "en", BUSY, OK)
+    await set_preference(db_session, user, "quotes_and_opportunities", False)
+
+    with caplog.at_level(logging.DEBUG):
+        await push(ctx, user, "quote:1", **QUOTE)
+
+    assert sender.sent == []
+    assert await statuses(redis, prefix, "quote:1") == ["muted", "muted"]
+    [record] = [r for r in caplog.records if r.message == "push_muted"]
+    assert record.__dict__["user_id"] == str(user.id)
+    assert record.__dict__["group"] == "quotes_and_opportunities"
+    assert record.__dict__["count"] == 2
+    assert {r.message for r in caplog.records} & {"push_no_devices", "push_already_sent"} == set()
+    output = "\n".join(JsonFormatter().format(r) for r in caplog.records)
+    for text in ("JF-000124", "new quote", "A pro sent"):
+        assert text not in output
+    # Turned back on: a retry of the muted message still sends nothing (no resend).
+    await set_preference(db_session, user, "quotes_and_opportunities", True)
+    await push({**ctx, "job_try": 2}, user, "quote:1", **QUOTE)
+    assert sender.sent == []
+    # A new message of the group goes out again.
+    await push(ctx, user, "quote:2", **QUOTE)
+    assert sent_to(sender) == {BUSY: 1, OK: 1}
+
+
+async def test_receipt_resend_while_muted_sends_nothing(
+    ctx: dict[str, Any],
+    db_session: AsyncSession,
+    sender: FakeSender,
+    queue: FakeQueue,
+    redis: Redis,
+    prefix: str,
+) -> None:
+    user = await make_user(db_session, "en", BUSY, OK)
+    await push(ctx, user, "quote:1", **QUOTE)
+    sender.receipts = {f"ticket-{BUSY}": Receipt(ok=False, error=RATE_LIMITED)}
+    await set_preference(db_session, user, "quotes_and_opportunities", False)
+
+    await check_push_receipts(ctx)
+    assert set(queue.jobs) == {"push:quote:1"}
+    await push(ctx, user, "quote:1", **QUOTE)  # the worker runs the queued job
+
+    assert sent_to(sender) == {BUSY: 1, OK: 1}  # the first send only
+    assert sorted(await statuses(redis, prefix, "quote:1")) == ["accepted", "muted"]
+
+
+async def test_send_push_default_and_enabled_send(
+    ctx: dict[str, Any], db_session: AsyncSession, sender: FakeSender
+) -> None:
+    by_default = await make_user(db_session, "en", "ExponentPushToken[default]")
+    chose_on = await make_user(db_session, "en", "ExponentPushToken[on]")
+    await set_preference(db_session, chose_on, "job_updates", True)
+    # Another group, or another channel of the group, turned off mutes nothing here.
+    await set_preference(db_session, chose_on, "quotes_and_opportunities", False)
+    await set_preference(db_session, chose_on, "marketing", False, channel="email")
+
+    await push(ctx, by_default, "request:1", **kind_keys("new_request"))
+    await push(ctx, chose_on, "accepted:1", **kind_keys("quote_accepted"))
+
+    assert sent_to(sender) == {"ExponentPushToken[default]": 1, "ExponentPushToken[on]": 1}
+
+
+async def test_test_push_never_muted(
+    ctx: dict[str, Any], db_session: AsyncSession, sender: FakeSender
+) -> None:
+    user = await make_user(db_session, "en", OK)
+    for spec in PREFERENCE_GROUPS:  # every pair off, the locked ones too (written directly)
+        for channel in spec.channels:
+            await set_preference(db_session, user, spec.group, False, channel=channel)
+
+    await push(ctx, user)  # push.test.*
+
+    assert sent_to(sender) == {OK: 1}
