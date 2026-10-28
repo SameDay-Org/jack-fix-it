@@ -548,6 +548,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/requests/{request_id}/quotes/{quote_id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept a quote on one of my service requests
+         * @description Accepts one quote of the request: the quote becomes accepted and the request moves to
+         *     accepted, where the payment follows; the other quotes stay pending. Calling it again for the
+         *     accepted quote returns it unchanged, and changes nothing, even if its pro can no longer be
+         *     hired: that repeat comes first, then a new acceptance checks the pro (approved, payouts
+         *     enabled). The response is the quote as listed, its scope masked; its pro card shows the
+         *     pro's current verification.
+         */
+        post: operations["accept_quote_v1_requests__request_id__quotes__quote_id__accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/devices": {
         parameters: {
             query?: never;
@@ -3237,6 +3262,74 @@ export interface operations {
             };
             /** @description not_found: no request of the caller with this id. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    accept_quote_v1_requests__request_id__quotes__quote_id__accept_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuote"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers accept quotes. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no request of the caller with this id, or no quote with this id on it. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description quote_not_acceptable, for a new acceptance only: its pro can no longer be hired; the request already accepted another quote or is not Quote Ready; or the quote was rejected, withdrawn or expired, or is past its expires_at. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

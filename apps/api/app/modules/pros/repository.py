@@ -16,6 +16,12 @@ from app.modules.pros.models import (
     ProVerificationStatus,
 )
 
+# Only an approved profile with payouts enabled receives requests (context doc section 5).
+_RECEIVES_REQUESTS = (
+    ProProfile.verification_status == ProVerificationStatus.APPROVED,
+    ProProfile.payouts_enabled,
+)
+
 
 class ProProfileRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -31,8 +37,7 @@ class ProProfileRepository:
             ProServiceArea.service_area_id.in_(service_area_ids)
         )
         statement = select(ProProfile).where(
-            ProProfile.verification_status == ProVerificationStatus.APPROVED,
-            ProProfile.payouts_enabled,
+            *_RECEIVES_REQUESTS,
             ProProfile.id.in_(in_category),
             ProProfile.id.in_(in_areas),
         )
@@ -49,12 +54,15 @@ class ProProfileRepository:
         )
 
     async def public_fields(
-        self, pro_ids: Collection[uuid.UUID]
+        self, pro_ids: Collection[uuid.UUID], *, hireable_only: bool
     ) -> list[tuple[uuid.UUID, uuid.UUID, Decimal | None, int, int | None, ProVerificationStatus]]:
         """(id, user_id, rating_avg, jobs_count, years_of_experience, verification_status) only:
-        never the bio, the photo key or the Stripe account."""
+        never the bio, the photo key or the Stripe account. With `hireable_only`, only the pros
+        who still receive requests (approved, payouts enabled): the others cannot be hired or
+        paid out (#189)."""
         if not pro_ids:
             return []
+        hireable = _RECEIVES_REQUESTS if hireable_only else ()
         statement = select(
             ProProfile.id,
             ProProfile.user_id,
@@ -62,7 +70,7 @@ class ProProfileRepository:
             ProProfile.jobs_count,
             ProProfile.years_of_experience,
             ProProfile.verification_status,
-        ).where(ProProfile.id.in_(pro_ids))
+        ).where(ProProfile.id.in_(pro_ids), *hireable)
         return [
             (row[0], row[1], row[2], row[3], row[4], row[5])
             for row in (await self._session.execute(statement)).all()
