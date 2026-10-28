@@ -3,14 +3,20 @@ import { Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button, Card, Chip, ChipSkeleton } from "@/components/ui";
+import { deviceLocale } from "@/features/auth/locale";
 import { startRequest } from "@/features/request";
 import { continuousCorners } from "@/theme";
 
 import { categoryName, useCategories } from "./useCategories";
 
-// Label widths of the loading chips: the launch categories' English names as measured on the
-// device, in the API's order, so the placeholders break into rows the way the chips will.
-const PLACEHOLDER_LABEL_WIDTHS = [84, 120, 156, 152, 64];
+// Label widths of the loading chips, in dp at font scale 1, per language the chips render in:
+// they follow the seeded catalog (the 5 launch categories, in the API's order) as measured on the
+// Android emulator, so the placeholders break into rows the way the chips will. Update them with
+// the seed.
+const PLACEHOLDER_LABEL_WIDTHS: Record<ReturnType<typeof deviceLocale>, readonly number[]> = {
+  en: [83, 121, 158, 152, 64],
+  es: [183, 145, 177, 159, 55],
+};
 
 /**
  * The secondary way into a request: one chip per category. Loading shows chip-shaped skeletons,
@@ -50,7 +56,7 @@ export function CategoryChips() {
               accessibilityElementsHidden
               className="flex-row flex-wrap gap-3"
             >
-              {PLACEHOLDER_LABEL_WIDTHS.map((width, index) => (
+              {PLACEHOLDER_LABEL_WIDTHS[deviceLocale()].map((width, index) => (
                 <ChipSkeleton
                   key={index}
                   labelWidth={width}

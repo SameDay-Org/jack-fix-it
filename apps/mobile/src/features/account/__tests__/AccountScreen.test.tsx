@@ -103,7 +103,7 @@ describe("AccountScreen", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Log out" })).toBeTruthy());
   });
 
-  it("a failed local delete still signs out to welcome", async () => {
+  it("a failed local delete is handled: the screen neither throws nor stays loading", async () => {
     jest.mocked(logout).mockRejectedValue(new LocalCleanupError());
     jest.mocked(useSession).mockReturnValue(signedIn());
 

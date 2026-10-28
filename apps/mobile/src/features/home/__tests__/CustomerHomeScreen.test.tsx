@@ -2,6 +2,7 @@ import i18n from "@/i18n";
 
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { router } from "expo-router";
+import { Dimensions, StyleSheet } from "react-native";
 
 import { ApiError, apiGet, NetworkError, useSession } from "@/api";
 import { requestDraftStore } from "@/features/request";
@@ -29,6 +30,38 @@ const chipNames = () =>
     .getAllByRole("button")
     .filter((button) => String(button.props.testID).startsWith("home-category-"))
     .map((button) => button.props.accessibilityLabel as string);
+
+// The emulator's chip row: 320 dp less the panel's 16 dp padding on each side, chips 12 dp apart
+// (gap-3). A chip and its skeleton pad the label by 16 dp on each side (px-4).
+const ROW_WIDTH = 288;
+const CHIP_GAP = 12;
+const CHIP_PADDING = 32;
+
+/** Items per row when a flex-wrap row of ROW_WIDTH lays out items of these widths in order. */
+function rowsOf(widths: readonly number[]): number[] {
+  const rows: number[] = [];
+  let used = 0;
+  for (const width of widths) {
+    if (rows.length > 0 && used + CHIP_GAP + width <= ROW_WIDTH) {
+      rows.push((rows.pop() ?? 0) + 1);
+      used += CHIP_GAP + width;
+    } else {
+      rows.push(1);
+      used = width;
+    }
+  }
+  return rows;
+}
+
+// Loaded chip widths in dp on the 320 dp Android emulator (uiautomator bounds of the seeded launch
+// catalog, in the API's order), from jack-evidence/issue-43 51, 53, 55 and 57. Android 15 grows
+// the 17 sp label by about 1.23 at font scale 1.3, less than the skeletons' 1.3.
+const DEVICE_CHIPS = [
+  { language: "en", fontScale: 1, widths: [115, 153, 190, 184, 96] },
+  { language: "en", fontScale: 1.3, widths: [134, 181, 227, 219, 111] },
+  { language: "es", fontScale: 1, widths: [215, 177, 209, 191, 87] },
+  { language: "es", fontScale: 1.3, widths: [258, 211, 251, 228, 100] },
+];
 
 describe("CustomerHomeScreen", () => {
   beforeEach(() => {
@@ -83,6 +116,32 @@ describe("CustomerHomeScreen", () => {
     await waitFor(() => expect(chipNames()).toHaveLength(5));
     expect(screen.queryByRole("progressbar")).toBeNull();
   });
+
+  it.each(DEVICE_CHIPS)(
+    "loading skeletons break into the same rows as the $language chips at font scale $fontScale",
+    async ({ language, fontScale, widths }) => {
+      const window = Dimensions.get("window");
+      const dimensions = jest.spyOn(Dimensions, "get").mockReturnValue({ ...window, fontScale });
+      try {
+        await act(() => i18n.changeLanguage(language));
+        jest.mocked(apiGet).mockReturnValue(deferred<typeof CATEGORIES>().promise);
+        await renderWithQuery(<CustomerHomeScreen />);
+
+        const shapes = screen.getAllByTestId(/^home-category-skeleton-\d+-shape$/, {
+          includeHiddenElements: true,
+        });
+        shapes.forEach((shape) => expect(shape.props.className).toContain("px-4"));
+        const skeletons = screen
+          .getAllByText(" ", { includeHiddenElements: true })
+          .map((line) => Number(StyleSheet.flatten(line.props.style).width) + CHIP_PADDING);
+
+        expect(skeletons).toHaveLength(widths.length);
+        expect(rowsOf(skeletons)).toEqual(rowsOf(widths));
+      } finally {
+        dimensions.mockRestore();
+      }
+    },
+  );
 
   it("lists categories in API order with localized names (en)", async () => {
     await renderWithQuery(<CustomerHomeScreen />);
