@@ -100,6 +100,21 @@ describe("the session gate switching groups (#177)", () => {
     expect(commits.at(-1)).toEqual(["welcome"]);
   });
 
+  it("leaving the offline screen for another account mounts Welcome in the same commit", async () => {
+    // A restore that could not reach the server: the groups are not mounted yet, and the router
+    // still has the launch URL's group focused.
+    mockSession.state = { ...SESSION_SIGNED_OUT, restoreFailure: "offline" };
+    const result = await renderRouter(routes, { initialUrl: "/" });
+    commits = [];
+
+    await act(async () => mockSession.set(SESSION_SIGNED_OUT)); // "Log in with another account"
+
+    expect(result.getPathname()).toBe("/welcome");
+    expect(commits.length).toBeGreaterThan(0);
+    expect(commits).not.toContainEqual([]);
+    expect(commits.at(-1)).toEqual(["welcome"]);
+  });
+
   it("a sign-in mounts home in the commit that takes the auth screen away", async () => {
     mockSession.state = SESSION_SIGNED_OUT;
     const result = await renderRouter(routes, { initialUrl: "/login" });
