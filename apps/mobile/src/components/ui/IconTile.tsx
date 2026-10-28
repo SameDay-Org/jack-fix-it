@@ -1,6 +1,6 @@
 import { View } from "react-native";
 
-import { CategoryIcon } from "@/components/icons";
+import { CategoryIcon, type Glyph } from "@/components/icons";
 import { continuousCorners, tokens, withOpacity, type Radius } from "@/theme";
 
 export type IconTileSize = "md" | "lg";
@@ -8,6 +8,8 @@ export type IconTileSize = "md" | "lg";
 export type IconTileProps = {
   /** The category slug; a slug without a glyph keeps the empty tile, so a grid never shifts. */
   slug: string;
+  /** A glyph drawn instead of the slug's (see `CategoryIcon`). */
+  glyph?: Glyph;
   size?: IconTileSize;
   testID?: string;
 };
@@ -25,7 +27,7 @@ const TINT_OPACITY = 0.12;
 const TINT = withOpacity("green-500", TINT_OPACITY);
 
 /** A category icon centered in a squircle tile. Decorative: the card around it names the category. */
-export function IconTile({ slug, size = "md", testID }: IconTileProps) {
+export function IconTile({ slug, glyph, size = "md", testID }: IconTileProps) {
   const tile = TILE[size];
 
   return (
@@ -42,7 +44,7 @@ export function IconTile({ slug, size = "md", testID }: IconTileProps) {
         },
       ]}
     >
-      <CategoryIcon slug={slug} size={tile.icon} />
+      <CategoryIcon slug={slug} glyph={glyph} size={tile.icon} />
     </View>
   );
 }

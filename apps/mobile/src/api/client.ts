@@ -9,6 +9,7 @@ import {
   type PostParams,
   type PostPath,
   type PostResponse,
+  type QueryParams,
 } from "./http";
 import { getAccessToken, isCurrentGeneration, refreshSession, sessionGeneration } from "./session";
 
@@ -16,6 +17,8 @@ export type RequestOptions = {
   /** Attach the session's bearer token; on `401 invalid_token`, refresh and retry once. */
   auth?: boolean;
   signal?: AbortSignal;
+  /** Query-string values, e.g. `{ limit: 20, cursor }` on a paged list; `undefined` ones are left out. */
+  query?: QueryParams;
 };
 
 /**
@@ -35,9 +38,14 @@ export function apiGet<P extends GetPath>(
   path: P,
   ...[options]: OptionsFor<GetParams<P>>
 ): Promise<GetResponse<P>> {
-  const { params, ...session }: SentOptions = options ?? {};
+  const { params, query, ...session }: SentOptions = options ?? {};
   return withSession(session, (accessToken) =>
-    sendRequest<GetResponse<P>>("GET", path, { accessToken, signal: session.signal, params }),
+    sendRequest<GetResponse<P>>("GET", path, {
+      accessToken,
+      signal: session.signal,
+      params,
+      query,
+    }),
   );
 }
 
@@ -47,13 +55,14 @@ export function apiPost<P extends PostPath>(
   body: PostBody<P>,
   ...[options]: OptionsFor<PostParams<P>>
 ): Promise<PostResponse<P>> {
-  const { params, ...session }: SentOptions = options ?? {};
+  const { params, query, ...session }: SentOptions = options ?? {};
   return withSession(session, (accessToken) =>
     sendRequest<PostResponse<P>>("POST", path, {
       body,
       accessToken,
       signal: session.signal,
       params,
+      query,
     }),
   );
 }
