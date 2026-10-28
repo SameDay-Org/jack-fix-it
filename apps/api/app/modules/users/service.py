@@ -44,6 +44,12 @@ class UserService:
         """The ids among `user_ids` of active (not suspended) accounts with `role`."""
         return await self._users.active_ids_with_role(user_ids, role)
 
+    async def ids_with_role(
+        self, user_ids: Collection[uuid.UUID], role: UserRole
+    ) -> set[uuid.UUID]:
+        """The ids among `user_ids` of accounts with `role`, whatever their status."""
+        return await self._users.ids_with_role(user_ids, role)
+
     async def contact_points(
         self, user_ids: Collection[uuid.UUID]
     ) -> dict[uuid.UUID, ContactPoints]:

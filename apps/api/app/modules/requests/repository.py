@@ -137,6 +137,11 @@ class ServiceRequestRepository:
         return list((await self._session.scalars(statement)).all())
 
     @staticmethod
+    def media_keys_among(keys: Collection[str]) -> Select[str]:
+        """The file keys among `keys` that request media hold, for another module's query."""
+        return select(RequestMedia.file_key).where(RequestMedia.file_key.in_(keys))
+
+    @staticmethod
     def ids_with_status(statuses: Collection[RequestStatus]) -> Select[uuid.UUID]:
         """A subquery of the ids of requests in these statuses, for another module's query."""
         return select(ServiceRequest.id).where(ServiceRequest.status.in_(statuses))

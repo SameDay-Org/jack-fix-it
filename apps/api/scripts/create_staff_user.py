@@ -177,7 +177,7 @@ def _names(first: str | None, last: str | None) -> tuple[str | None, str | None]
     except (ValueError, ValidationError):
         raise StaffUserError(
             f"--first-name and --last-name go together, each 1 to {NAME_MAX_LENGTH} letters, "
-            "spaces, hyphens, apostrophes or periods."
+            "spaces, hyphens, apostrophes or periods, with no contact details."
         ) from None
 
 

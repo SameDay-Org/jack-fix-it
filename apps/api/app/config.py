@@ -10,6 +10,8 @@ from starlette.requests import Request
 
 AppEnv = Literal["development", "test", "staging", "production"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+# What the orphan upload sweep does (#191): nothing, count only, or delete.
+OrphanUploadMode = Literal["off", "dry_run", "delete"]
 
 _ASYNC_SCHEME = "postgresql+asyncpg://"
 _SYNC_SCHEMES = ("postgres://", "postgresql://")
@@ -132,6 +134,14 @@ class Settings(BaseSettings):
     upload_max_image_bytes: int = Field(default=10 * MIB, gt=0)
     upload_max_video_bytes: int = Field(default=100 * MIB, gt=0)
     upload_max_document_bytes: int = Field(default=15 * MIB, gt=0)
+    # The worker's sweep of uploads no row references (#191): what it does (dry_run only counts
+    # and logs; delete removes them), the age an upload must reach before it may count as
+    # orphaned, how often it runs (a cron, in minutes of the hour), and the longest one run may
+    # take (ARQ stops it there; the next run starts over).
+    orphan_upload_mode: OrphanUploadMode = "dry_run"
+    orphan_upload_min_age_hours: int = Field(default=24, ge=1)
+    orphan_upload_sweep_minutes: int = Field(default=60, ge=1, le=60)
+    orphan_upload_sweep_timeout_seconds: int = Field(default=1_800, gt=0)
     # Phone verification by SMS code through Twilio Verify (D4.3, #26). Required in staging and
     # production; without them, the phone endpoints answer a generic 500.
     twilio_account_sid: str | None = None
@@ -213,6 +223,11 @@ class Settings(BaseSettings):
     # counts as final; also the most runs ARQ gives one send_push job.
     push_max_attempts: int = Field(default=5, gt=0)
     push_max_devices_per_user: int = Field(default=10, gt=0)
+    # Quote expiry (D9.4, #51): how often the worker expires quotes past their expires_at (a
+    # cron, in minutes of the hour), and the longest one run may take. Two runs that overlap
+    # are safe (each request is locked), so the timeout only bounds a stuck run.
+    quote_expiry_sweep_minutes: int = Field(default=5, ge=1, le=60)
+    quote_expiry_timeout_seconds: int = Field(default=240, gt=0)
     # Waitlist (D8.4, #46): joins per client IP and per contact (email or phone, hashed), per
     # AUTH_RATE_LIMIT_WINDOW_SECONDS.
     waitlist_join_limit: int = Field(default=5, gt=0)

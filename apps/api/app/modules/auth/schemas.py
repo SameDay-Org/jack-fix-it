@@ -33,7 +33,8 @@ NormalizedEmail = Annotated[
 
 _NAME_RULES = (
     f"1 to {NAME_MAX_LENGTH} characters after trimming (inner spaces collapsed): letters, "
-    "spaces, hyphens, apostrophes and periods. Both or neither."
+    "spaces, hyphens, apostrophes and periods. No contact details (an email, phone number, "
+    "website or handle, even spelled out). Both or neither."
 )
 
 

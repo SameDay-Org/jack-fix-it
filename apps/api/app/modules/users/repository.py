@@ -23,6 +23,14 @@ class UserRepository:
         )
         return set((await self._session.scalars(statement)).all())
 
+    async def ids_with_role(
+        self, user_ids: Collection[uuid.UUID], role: UserRole
+    ) -> set[uuid.UUID]:
+        if not user_ids:
+            return set()
+        statement = select(User.id).where(User.id.in_(user_ids), User.role == role)
+        return set((await self._session.scalars(statement)).all())
+
     async def get_by_id(self, user_id: uuid.UUID) -> User | None:
         return await self._session.get(User, user_id)
 

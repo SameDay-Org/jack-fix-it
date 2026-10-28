@@ -9,7 +9,7 @@ from typing import Annotated, Final
 
 from pydantic import AfterValidator, BeforeValidator, StringConstraints
 
-from app.redaction import KnownValues, redact_text
+from app.redaction import KnownValues, redact_contacts, redact_text
 
 NAME_MAX_LENGTH: Final = 60
 # Allowed besides letters (and the combining marks of decomposed accents): space, hyphen,
@@ -42,11 +42,22 @@ def _letters(value: str) -> str:
     return value
 
 
+def _no_contacts(value: str) -> str:
+    """Refuses a name in which app.redaction masks anything ("repair.example.com", a phone
+    spelled out, #198): public_name shows it to customers before payment, when contacts stay
+    hidden. The account's own email and phone are left to safe_public_name, which also covers
+    names stored before this check."""
+    if redact_contacts(value).redacted:
+        raise ValueError("a name has no contact details")
+    return value
+
+
 PersonName = Annotated[
     str,
     BeforeValidator(_collapse_spaces),
     StringConstraints(min_length=1, max_length=NAME_MAX_LENGTH),
     AfterValidator(_letters),
+    AfterValidator(_no_contacts),
 ]
 
 

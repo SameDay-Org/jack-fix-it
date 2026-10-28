@@ -396,7 +396,7 @@ def test_worker_registers_the_tasks_and_the_cron() -> None:
     assert task.name == "send_push"
     assert task.keep_result_s == 0  # a resend can queue the message's job id again
     assert task.max_tries == Settings().push_max_attempts
-    [job] = WorkerSettings.cron_jobs
+    [job] = [j for j in WorkerSettings.cron_jobs if j.name == "cron:check_push_receipts"]
     assert job.coroutine is check_push_receipts
     assert every(15) == {0, 15, 30, 45}
     assert every(60) == {0}
