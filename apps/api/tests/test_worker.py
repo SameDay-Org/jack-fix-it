@@ -13,8 +13,11 @@ from sqlalchemy.exc import ProgrammingError
 
 from app.config import Settings, get_settings
 from app.modules.dispatch.tasks import dispatch_request
+from app.modules.notifications.push_tasks import check_push_receipts
+from app.modules.quotes.tasks import expire_quotes
 from app.modules.requests.tasks import SANITIZE_SPARE_TRIES
-from app.worker import WorkerSettings
+from app.modules.uploads.tasks import sweep_orphan_uploads
+from app.worker import WorkerSettings, every
 
 
 @pytest.fixture
@@ -72,18 +75,49 @@ def test_registration_keeps_names_tries_and_timeouts() -> None:
     }
 
 
-def test_cron_jobs_and_their_minutes() -> None:
-    crons = {job.name: (job.minute, job.timeout_s) for job in WorkerSettings.cron_jobs}
-    settings = get_settings()
+def test_cron_jobs_keep_names_cadences_and_timeouts() -> None:
+    crons = {
+        job.name: (job.coroutine, job.minute, job.timeout_s, job.max_tries)
+        for job in WorkerSettings.cron_jobs
+    }
 
-    # None: the worker's own default timeout.
+    # max_tries 1: ARQ's own default for a cron; the next run is the retry.
     assert crons == {
-        "cron:check_push_receipts": (set(range(0, 60, settings.push_receipt_check_minutes)), None),
+        "cron:check_push_receipts": (
+            check_push_receipts,
+            every(get_settings().push_receipt_check_minutes),
+            None,
+            1,
+        ),
         "cron:sweep_orphan_uploads": (
-            set(range(0, 60, settings.orphan_upload_sweep_minutes)),
-            settings.orphan_upload_sweep_timeout_seconds,
+            sweep_orphan_uploads,
+            every(get_settings().orphan_upload_sweep_minutes),
+            get_settings().orphan_upload_sweep_timeout_seconds,
+            1,
+        ),
+        "cron:expire_quotes": (
+            expire_quotes,
+            every(get_settings().quote_expiry_sweep_minutes),
+            get_settings().quote_expiry_timeout_seconds,
+            1,
         ),
     }
+
+
+def test_worker_registers_expire_quotes_without_results(
+    worker_module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The cadence and the timeout come from the settings, read when the worker starts.
+    monkeypatch.setenv("QUOTE_EXPIRY_SWEEP_MINUTES", "20")
+    monkeypatch.setenv("QUOTE_EXPIRY_TIMEOUT_SECONDS", "111")
+    get_settings.cache_clear()
+    module = importlib.reload(worker_module)
+
+    [job] = [j for j in module.WorkerSettings.cron_jobs if j.coroutine is expire_quotes]
+    assert job.name == "cron:expire_quotes"
+    assert (job.keep_result_s, job.keep_result_forever) == (0, False)
+    assert job.minute == {0, 20, 40}
+    assert job.timeout_s == 111
 
 
 @pytest.fixture
