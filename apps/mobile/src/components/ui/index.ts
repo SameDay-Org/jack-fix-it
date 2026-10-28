@@ -8,6 +8,8 @@ export { ChoiceCard } from "./ChoiceCard";
 export type { ChoiceCardProps } from "./ChoiceCard";
 export { GlassSurface, useLiquidGlass } from "./GlassSurface";
 export type { GlassShape, GlassSurfaceProps, GlassTone } from "./GlassSurface";
+export { IconTile } from "./IconTile";
+export type { IconTileProps, IconTileSize } from "./IconTile";
 export { Input } from "./Input";
 export type { InputHandle, InputProps } from "./Input";
 export { PasswordInput } from "./PasswordInput";
