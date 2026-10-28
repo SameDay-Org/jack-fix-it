@@ -561,7 +561,10 @@ export interface paths {
          * Accept a quote on one of my service requests
          * @description Accepts one quote of the request: the quote becomes accepted and the request moves to
          *     accepted, where the payment follows; the other quotes stay pending. Calling it again for the
-         *     accepted quote returns it unchanged. The response is the quote as listed, its scope masked.
+         *     accepted quote returns it unchanged, and changes nothing, even if its pro can no longer be
+         *     hired: that repeat comes first, then a new acceptance checks the pro (approved, payouts
+         *     enabled). The response is the quote as listed, its scope masked; its pro card shows the
+         *     pro's current verification.
          */
         post: operations["accept_quote_v1_requests__request_id__quotes__quote_id__accept_post"];
         delete?: never;
@@ -3325,7 +3328,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description quote_not_acceptable: the request already accepted another quote or is not Quote Ready; the quote was rejected, withdrawn or expired, or is past its expires_at; or its pro can no longer be hired. */
+            /** @description quote_not_acceptable, for a new acceptance only: its pro can no longer be hired; the request already accepted another quote or is not Quote Ready; or the quote was rejected, withdrawn or expired, or is past its expires_at. */
             409: {
                 headers: {
                     [name: string]: unknown;

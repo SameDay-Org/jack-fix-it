@@ -336,26 +336,65 @@ async def test_ineligible_pro_quote_is_not_acceptable(
     assert [item["id"] for item in listed] == [str(kept)]
 
 
-async def test_accepted_quote_of_a_pro_no_longer_hireable_is_409(
-    db_client: httpx.AsyncClient, db_session: AsyncSession, world: World
+@pytest.mark.parametrize(
+    ("verification", "payouts_enabled"),
+    [
+        (ProVerificationStatus.PENDING, True),
+        (ProVerificationStatus.REJECTED, True),
+        (ProVerificationStatus.APPROVED, False),
+    ],
+)
+async def test_repeat_of_an_acceptance_wins_over_a_pro_no_longer_hireable(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    caplog: pytest.LogCaptureFixture,
+    verification: ProVerificationStatus,
+    payouts_enabled: bool,
 ) -> None:
-    """A retry once the pro lost their payouts: the quote is accepted, but it cannot be paid, so
-    it is neither listed nor confirmed again (the list and the accept agree)."""
-    request_id, [quote_id], pros = await open_request(db_session, world, count=1)
-    assert (await accept(db_client, world, request_id, quote_id)).status_code == 200
-    profile = await db_session.get(ProProfile, pros[0].profile_id)
-    assert profile is not None
-    profile.payouts_enabled = False
+    """A retry once the pro lost their approval or payouts: the acceptance already happened, so
+    the repeat answers it again and changes nothing (Cesar's decision on #189: replay wins). The
+    payment checks the pro again (#58, #61). The list still leaves the quote out."""
+    request_id, [other, chosen], pros = await open_request(db_session, world, count=2)
+    # The pro's own email in the scope: the repeat masks it too, the pro read unfiltered.
+    stored = await db_session.get(Quote, chosen)
+    assert stored is not None
+    stored.scope = f"Replace the valve, write to {pros[1].email}"
     await db_session.flush()
 
-    response = await accept(db_client, world, request_id, quote_id)
+    with caplog.at_level(logging.INFO):
+        first = await accept(db_client, world, request_id, chosen)
+        profile = await db_session.get(ProProfile, pros[1].profile_id)
+        assert profile is not None
+        profile.verification_status = verification
+        profile.payouts_enabled = payouts_enabled
+        await db_session.flush()
+        with counted_statements(db_session) as statements:
+            again = await accept(db_client, world, request_id, chosen)
 
-    assert response.status_code == 409
-    assert response.json() == NOT_ACCEPTABLE
+    assert (first.status_code, again.status_code) == (200, 200), again.text
+    # The same body, but the pro card's verification is the pro's current one: a badge for a
+    # verification since withdrawn would claim what is no longer true.
+    approved = verification is ProVerificationStatus.APPROVED
+    expected = first.json()
+    expected["pro"]["verified"] = approved
+    assert again.json() == expected
+    assert expected["pro"]["name"] is not None
+    assert again.json()["scope"] == "Replace the valve, write to •••"
+    if approved:
+        assert again.content == first.content
     assert await statuses(db_session, request_id) == (
         RequestStatus.ACCEPTED,
-        {quote_id: QuoteStatus.ACCEPTED},
+        {other: QuoteStatus.PENDING, chosen: QuoteStatus.ACCEPTED},
     )
+    writes = [
+        sql for sql in statements if sql.lstrip().upper().startswith(("UPDATE", "INSERT", "DELETE"))
+    ]
+    assert writes == []
+    assert len(events(caplog, "quote_accepted")) == 1
+    assert len(events(caplog, "request_status_changed")) == 1
+    listed = (await db_client.get(path(request_id), headers=customer(world))).json()["items"]
+    assert [item["id"] for item in listed] == [str(other)]
 
 
 @pytest.mark.parametrize(

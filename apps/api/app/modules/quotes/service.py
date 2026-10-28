@@ -26,11 +26,13 @@ email and phone first, then every pattern. The stored scope is unchanged. The pr
 name goes through the same check and is withheld (null) when it shows a contact (#194).
 
 The customer accepts one of those quotes. After their own request (else 404) and locking it,
-then the quote (else 404, the same body, for a quote of another request):
-- the quote's pro can still be hired: else 409 quote_not_acceptable;
+then the quote (else 404, the same body, for a quote of another request), in this order:
 - the request already accepted this very quote: 200 with it again, nothing written or logged
-  (idempotent);
-- else the request is quote_ready, and the quote pending before its expires_at: else 409
+  (idempotent), even when its pro can no longer be hired. The repeat changes nothing, and the
+  payment checks the pro again (#58, #61). Its pro card shows the pro's current verification;
+- else, a new acceptance: the quote's pro can still be hired (approved, payouts enabled): else
+  409 quote_not_acceptable;
+- the request is quote_ready, and the quote pending before its expires_at: else 409
   quote_not_acceptable. One accepted quote per request: the request lock serializes them.
 Then, in one transaction: the quote accepted, and the request quote_ready -> accepted through
 its state machine (CUSTOMER). The other quotes stay pending: after a failed payment the customer
@@ -178,7 +180,7 @@ class QuoteService:
         if status not in _QUOTE_SCREEN:
             return CustomerQuoteList(items=[])
         quotes = await self._quotes.open_of_request(request_id, datetime.now(UTC))
-        return CustomerQuoteList(items=await self._for_customer(quotes))
+        return CustomerQuoteList(items=await self._for_customer(quotes, hireable_only=True))
 
     async def accept(
         self, user: UserAccount, request_id: uuid.UUID, quote_id: uuid.UUID
@@ -192,12 +194,17 @@ class QuoteService:
             raise NotFoundError
         if quote is None:
             raise NotFoundError
-        shown = await self._for_customer([quote])
+        if request.status is RequestStatus.ACCEPTED and quote.status is QuoteStatus.ACCEPTED:
+            # The repeat of a completed acceptance, before the eligibility of a new one.
+            replayed = await self._for_customer([quote], hireable_only=False)
+            if not replayed:  # pragma: no cover - quotes.pro_id is a foreign key
+                raise NotFoundError
+            [item] = replayed
+            return item
+        shown = await self._for_customer([quote], hireable_only=True)
         if not shown:
             raise QuoteNotAcceptableError  # the pro can no longer be hired
         [item] = shown
-        if request.status is RequestStatus.ACCEPTED and quote.status is QuoteStatus.ACCEPTED:
-            return item
         if (
             request.status is not RequestStatus.QUOTE_READY
             or quote.status is not QuoteStatus.PENDING
@@ -218,11 +225,16 @@ class QuoteService:
         )
         return item.model_copy(update={"status": QuoteStatus.ACCEPTED})
 
-    async def _for_customer(self, quotes: list[Quote]) -> list[CustomerQuote]:
-        """The quotes as their customer sees them, in the given order, leaving out those whose
-        pro can no longer be hired. One query each for the pros, their names and their contact
-        points, whatever the count."""
-        cards = await self._pros.hireable_cards({quote.pro_id for quote in quotes})
+    async def _for_customer(
+        self, quotes: list[Quote], *, hireable_only: bool
+    ) -> list[CustomerQuote]:
+        """The quotes as their customer sees them, in the given order; with `hireable_only`,
+        leaving out those whose pro can no longer be hired. One query each for the pros, their
+        names and their contact points, whatever the count."""
+        pro_ids = {quote.pro_id for quote in quotes}
+        cards = await (
+            self._pros.hireable_cards(pro_ids) if hireable_only else self._pros.cards(pro_ids)
+        )
         # The pros' own details, for the known-value pass only: never logged or returned.
         contacts = await self._users.contact_points({card.user_id for card in cards.values()})
         items: list[CustomerQuote] = []

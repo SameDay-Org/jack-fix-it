@@ -1916,7 +1916,7 @@
           "quotes"
         ],
         "summary": "Accept a quote on one of my service requests",
-        "description": "Accepts one quote of the request: the quote becomes accepted and the request moves to\naccepted, where the payment follows; the other quotes stay pending. Calling it again for the\naccepted quote returns it unchanged. The response is the quote as listed, its scope masked.",
+        "description": "Accepts one quote of the request: the quote becomes accepted and the request moves to\naccepted, where the payment follows; the other quotes stay pending. Calling it again for the\naccepted quote returns it unchanged, and changes nothing, even if its pro can no longer be\nhired: that repeat comes first, then a new acceptance checks the pro (approved, payouts\nenabled). The response is the quote as listed, its scope masked; its pro card shows the\npro's current verification.",
         "operationId": "accept_quote_v1_requests__request_id__quotes__quote_id__accept_post",
         "security": [
           {
@@ -1997,7 +1997,7 @@
             }
           },
           "409": {
-            "description": "quote_not_acceptable: the request already accepted another quote or is not Quote Ready; the quote was rejected, withdrawn or expired, or is past its expires_at; or its pro can no longer be hired.",
+            "description": "quote_not_acceptable, for a new acceptance only: its pro can no longer be hired; the request already accepted another quote or is not Quote Ready; or the quote was rejected, withdrawn or expired, or is past its expires_at.",
             "content": {
               "application/json": {
                 "schema": {

@@ -99,9 +99,9 @@ async def list_request_quotes(
             "not_found: no request of the caller with this id, or no quote with this id on it."
         ),
         status.HTTP_409_CONFLICT: _error(
-            "quote_not_acceptable: the request already accepted another quote or is not Quote "
-            "Ready; the quote was rejected, withdrawn or expired, or is past its expires_at; or "
-            "its pro can no longer be hired."
+            "quote_not_acceptable, for a new acceptance only: its pro can no longer be hired; "
+            "the request already accepted another quote or is not Quote Ready; or the quote was "
+            "rejected, withdrawn or expired, or is past its expires_at."
         ),
     },
 )
@@ -113,5 +113,8 @@ async def accept_quote(
 ) -> CustomerQuote:
     """Accepts one quote of the request: the quote becomes accepted and the request moves to
     accepted, where the payment follows; the other quotes stay pending. Calling it again for the
-    accepted quote returns it unchanged. The response is the quote as listed, its scope masked."""
+    accepted quote returns it unchanged, and changes nothing, even if its pro can no longer be
+    hired: that repeat comes first, then a new acceptance checks the pro (approved, payouts
+    enabled). The response is the quote as listed, its scope masked; its pro card shows the
+    pro's current verification."""
     return await quotes.accept(user, request_id, quote_id)

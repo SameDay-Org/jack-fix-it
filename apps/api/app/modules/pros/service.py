@@ -85,9 +85,20 @@ class ProService:
     async def hireable_cards(self, pro_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, ProCard]:
         """The public card of each pro among `pro_ids` who can still be hired, by profile id:
         approved with payouts enabled, like the pros who receive requests (#189). A pro left
-        out cannot be paid out, so their quote is neither listed nor accepted. Two queries (the
-        profiles, then their names), whatever the count."""
-        rows = await self._profiles.public_fields(pro_ids)
+        out cannot be paid out, so their quote is neither listed nor newly accepted. Two
+        queries (the profiles, then their names), whatever the count."""
+        return await self._cards(pro_ids, hireable_only=True)
+
+    async def cards(self, pro_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, ProCard]:
+        """The public card of each pro among `pro_ids`, by profile id, whether or not they can
+        still be hired: the repeat of a completed acceptance (#189). `verified` is the pro's
+        current verification. Two queries, whatever the count."""
+        return await self._cards(pro_ids, hireable_only=False)
+
+    async def _cards(
+        self, pro_ids: Collection[uuid.UUID], *, hireable_only: bool
+    ) -> dict[uuid.UUID, ProCard]:
+        rows = await self._profiles.public_fields(pro_ids, hireable_only=hireable_only)
         names = await self._users.public_names([row[1] for row in rows])
         return {
             pro_id: ProCard(
