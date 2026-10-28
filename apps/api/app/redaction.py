@@ -51,14 +51,28 @@ _APOSTROPHES: Final = "'" + chr(0x2019)
 # --- Cleaning --------------------------------------------------------------------------------
 # Characters dropped before matching: format characters (zero-width spaces, joiners, soft
 # hyphen, bidi controls; Unicode category Cf), enclosing marks such as the keycap (Me), and a
-# few fillers.
-_FILLERS: Final = frozenset(
-    chr(code) for code in (0x034F, 0x115F, 0x1160, 0x3164, *range(0xFE00, 0xFE10))
+# few fillers: the combining grapheme joiner, the Hangul fillers, the blank braille cell, the
+# variation selectors (also the Mongolian and the supplementary ones). Shared with the saved
+# address label (addresses.schemas), which drops them before its own checks.
+INVISIBLE_FILLERS: Final = frozenset(
+    chr(code)
+    for code in (
+        0x034F,
+        0x115F,
+        0x1160,
+        0x2800,
+        0x3164,
+        0xFFA0,
+        *range(0x180B, 0x180E),
+        *range(0xFE00, 0xFE10),
+        *range(0xE0100, 0xE01F0),
+    )
 )
 # Characters folded to their ASCII form (NFKC) when that form is one ASCII letter, digit or one
-# of "@.-/()": fullwidth forms, mathematical letters and digits, circled digits. Superscript
-# and subscript digits only in a run of three or more ("call ³⁰⁵..."), so "ft²" stays.
-_FOLDABLE: Final = re.compile(r"[a-zA-Z0-9@.\-/()]")
+# of "@$#.-/()": fullwidth and small forms (U+FF20, U+FF04, U+FE69), mathematical letters
+# and digits, circled digits. Superscript and subscript digits only in a run of three or more
+# ("call ³⁰⁵..."), so "ft²" stays.
+_FOLDABLE: Final = re.compile(r"[a-zA-Z0-9@$#.\-/()]")
 # Spanish ordinal indicators stay as typed ("1º piso", "Nº").
 _KEEP_AS_IS: Final = frozenset((chr(0x00AA), chr(0x00BA)))
 _SCRIPT_DIGITS: Final = frozenset(
@@ -213,10 +227,22 @@ _NOT_AN_ID: Final = frozenset(
      "bien", "mejor", "gratis", "privado", "privada", "nuevo", "nueva", "empty", "gone"}
 )  # fmt: skip
 # "@name" and "$cashtag", but not "@5pm", "@noon", "@home", "@tomorrow", a price or a currency.
+# An exempt time, measure or word must be the whole token: "@home.fixit", "@home-fixit" and
+# "@home_fixit" are handles (#224 review), while "@home.", "@home!" and "@home " stay. A
+# combining mark glued to the word ("@home\u0335fixit") continues it too: \w skips marks.
+_MARK_RANGES: Final = (
+    (0x0300, 0x036F),
+    (0x1AB0, 0x1AFF),
+    (0x1DC0, 0x1DFF),
+    (0x20D0, 0x20FF),
+    (0xFE20, 0xFE2F),
+)
+_MARKS: Final = "".join(f"{chr(low)}-{chr(high)}" for low, high in _MARK_RANGES)
+_WHOLE_WORD: Final = rf"(?!\w|[.-]\w|[{_MARKS}])"
 AT_HANDLE: Final = re.compile(
-    r"(?<![\w.@])@(?:\s(?=[\w.-]*[\d_.]))?(?!\d{1,2}(?::\d\d)?\s*(?:[ap]\.?m\.?)?\b|"
-    r"\d+\s*(?:ft|in|cm|mm|m|hrs?|h|mins?|hours?)\b|"
-    r"(?:noon|night|home|work|casa|today|tomorrow|tonight|ma(?:ñ|n)ana)\b)"
+    rf"(?<![\w.@])@(?:\s(?=[\w.-]*[\d_.]))?(?!\d{{1,2}}(?:[:.]\d{{1,3}})?\s*(?:[ap]\.?m\.?)?{_WHOLE_WORD}|"
+    rf"\d+(?:\.\d+)?\s*(?:ft|in|cm|mm|m|hrs?|h|mins?|hours?){_WHOLE_WORD}|"
+    rf"(?:noon|night|home|work|casa|today|tomorrow|tonight|ma(?:ñ|n)ana){_WHOLE_WORD})"
     r"[a-z0-9_](?:[a-z0-9_.-]{0,28}[a-z0-9_])?",
     _FLAGS,
 )
@@ -385,11 +411,16 @@ class RedactionResult:
     redacted: bool  # True when at least one contact detail was masked
 
 
-def redact_contacts(text: str) -> RedactionResult:
-    """`text` with every contact detail it recognizes replaced by MASK (see the module doc)."""
+def redact_contacts(text: str, *, addresses: bool = True) -> RedactionResult:
+    """`text` with every contact detail it recognizes replaced by MASK (see the module doc).
+
+    `addresses=False` leaves street addresses, units and PO boxes alone and masks only the ways
+    to reach someone (emails, phones, URLs, handles): for text that names an address the reader
+    already sees, such as a saved address's label ("Apt 4B", #214).
+    """
     cleaned = _clean(text)
     masked = 0
-    for pattern, replace in _STEPS:
+    for pattern, replace in _STEPS if addresses else _CONTACT_STEPS:
         cleaned, count = _substitute(pattern, replace, cleaned)
         masked += count
     return RedactionResult(cleaned, masked > 0)
@@ -400,7 +431,7 @@ def _clean(text: str) -> str:
     chars: list[str] = []
     for index, char in enumerate(text):
         category = unicodedata.category(char)
-        if category in ("Cf", "Me") or char in _FILLERS:
+        if category in ("Cf", "Me") or char in INVISIBLE_FILLERS:
             continue
         if category == "Mn" and (not chars or not chars[-1].isalpha()):
             continue  # a mark on a digit or a symbol ("3̅0̅5̅"), not an accent on a letter
@@ -695,7 +726,9 @@ def _is_latin_mobile(joined: str, count: int) -> bool:
 # Order matters: emails and URLs before the handles and domains inside them; phones before
 # platform handles, so "whatsapp 305 555 0199" loses the whole number; masks hold no letter or
 # digit, so a later pattern never matches inside an earlier mask.
-_STEPS: Final[tuple[tuple[re.Pattern[str], _Replace], ...]] = (
+_Steps = tuple[tuple[re.Pattern[str], _Replace], ...]
+# The ways to reach someone: what redact_contacts(addresses=False) masks.
+_CONTACT_STEPS: Final[_Steps] = (
     (SPACED_LETTERS_EMAIL, _mask),
     (PLAIN_EMAIL, _mask),
     (SPACED_EMAIL, _mask),
@@ -709,12 +742,15 @@ _STEPS: Final[tuple[tuple[re.Pattern[str], _Replace], ...]] = (
     (REVERSE_HANDLE, _mask_reverse_handle),
     (AT_HANDLE, _mask),
     (CASHTAG, _mask),
+)
+_ADDRESS_STEPS: Final[_Steps] = (
     (STREET, _mask_street),
     (REVERSED_STREET, _mask_reversed_street),
     (GRID_OR_HIGHWAY, _mask),
     (SPANISH_STREET, _mask),
     (UNIT_OR_BOX, _mask),
 )
+_STEPS: Final[_Steps] = _CONTACT_STEPS + _ADDRESS_STEPS
 
 
 # --- Known values ----------------------------------------------------------------------------

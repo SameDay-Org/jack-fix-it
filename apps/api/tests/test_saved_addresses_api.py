@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import delete, event, select, update
+from sqlalchemy import delete, event, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -25,10 +25,19 @@ from app.modules.dispatch.models import DispatchStatus, RequestDispatch
 from app.modules.pros.models import ProProfile
 from app.modules.requests.models import RequestStatus, ServiceRequest
 from app.modules.service_areas.models import ServiceArea
+from app.modules.service_areas.service import ServiceAreaService
 from app.modules.users.types import UserRole
 from app.observability import JsonFormatter
 from app.queue import get_job_queue
-from tests.conftest import Committed, backend_pid, make_app, make_settings
+from app.rate_limit import get_rate_limiter, window_position
+from tests.conftest import (
+    LOCK_WAIT_DEADLINE_SECONDS,
+    Committed,
+    InMemoryRateLimiter,
+    backend_pid,
+    make_app,
+    make_settings,
+)
 from tests.helpers import as_status_writer
 from tests.test_auth_api import register as register_account
 from tests.test_devices_api import caller, wait_until_blocking
@@ -61,6 +70,9 @@ LABEL_TAKEN = {
 }
 VALIDATION_ERROR = {"error": {"code": "validation_error", "message": "The request is invalid."}}
 FORBIDDEN = {"error": {"code": "forbidden", "message": "You do not have access to this resource."}}
+RATE_LIMITED = {"error": {"code": "rate_limited", "message": "Too many requests. Try again later."}}
+WRITE_LIMIT, WRITE_WINDOW = 5, 600
+NOW = 1_800_000_000.0  # a fixed clock, so no test straddles two rate-limit windows
 
 
 @pytest.fixture
@@ -336,8 +348,12 @@ async def test_duplicate_label_case_insensitive_is_refused(
         ("www.example.com", 422, None),
         ("contact at example dot com", 422, None),
         ("Mom's", 201, "Mom's"),
+        ("Mom's house", 201, "Mom's house"),
         ("Casa 2", 201, "Casa 2"),
+        ("Casa da praia", 201, "Casa da praia"),
         ("Trabajo", 201, "Trabajo"),
+        ("Apt 4B", 201, "Apt 4B"),
+        ("Office #2", 201, "Office #2"),
         ("a" * 30, 201, "a" * 30),
         ("  Casa   de   mamá ", 201, "Casa de mamá"),
     ],
@@ -354,8 +370,12 @@ async def test_duplicate_label_case_insensitive_is_refused(
         "url",
         "spelled_email",
         "apostrophe",
+        "apostrophe_words",
         "digit",
+        "portuguese",
         "spanish",
+        "unit",
+        "unit_hash",
         "max_length",
         "collapsed_spaces",
     ],
@@ -738,9 +758,9 @@ def test_openapi_documents_every_error_code(app: FastAPI) -> None:
         return documented
 
     assert set(responses(BASE, "get")) == {"200", "401", "403", "422"}
-    assert set(responses(BASE, "post")) == {"201", "401", "403", "409", "422"}
-    assert set(responses(item, "patch")) == {"200", "401", "403", "404", "409", "422"}
-    assert set(responses(item, "delete")) == {"204", "401", "403", "404", "422"}
+    assert set(responses(BASE, "post")) == {"201", "401", "403", "409", "422", "429"}
+    assert set(responses(item, "patch")) == {"200", "401", "403", "404", "409", "422", "429"}
+    assert set(responses(item, "delete")) == {"204", "401", "403", "404", "422", "429"}
     conflict = responses(BASE, "post")["409"]["description"]
     assert "address_limit_reached" in conflict
     assert "address_label_taken" in conflict
@@ -748,8 +768,287 @@ def test_openapi_documents_every_error_code(app: FastAPI) -> None:
     for method in ("patch", "delete"):
         assert "address_not_found" in responses(item, method)["404"]["description"]
     for path, method in ((BASE, "post"), (item, "patch"), (item, "delete")):
-        for status in ("401", "403", "404", "409", "422"):
+        limited = responses(path, method)["429"]
+        assert "rate_limited" in limited["description"]
+        assert limited["headers"]["Retry-After"]["schema"] == {"type": "integer"}
+        for status in ("401", "403", "404", "409", "422", "429"):
             documented = responses(path, method).get(status)
             if documented is not None:
                 schema = documented["content"]["application/json"]["schema"]
                 assert schema == {"$ref": "#/components/schemas/ErrorResponse"}
+
+
+# Review round 1 (#224): contact handles, invisible fillers, the write limit, and races
+
+
+HANDLE_LABELS = [
+    "\uff04testperson",  # FULLWIDTH DOLLAR SIGN: a cashtag
+    "\ufe69testperson",  # SMALL DOLLAR SIGN
+    "$name",
+    "\uff20name",  # FULLWIDTH COMMERCIAL AT
+    "@name.com",
+    "@home.fixit",
+    "@home_fixit",
+    "@home-fixit",
+    "@work.fixit",
+    "@5pm.fixit",
+    "@home" + chr(0x0335) + "fixit",  # a combining mark glued to the exempt word
+]
+
+
+@pytest.mark.parametrize("method", ["post", "patch"])
+@pytest.mark.parametrize(
+    "label",
+    HANDLE_LABELS,
+    ids=[
+        "fullwidth_dollar",
+        "small_dollar",
+        "dollar",
+        "fullwidth_at",
+        "at_domain",
+        "at_home_dot",
+        "at_home_underscore",
+        "at_home_dash",
+        "at_work_dot",
+        "at_time_dot",
+        "at_home_mark",
+    ],
+)
+async def test_label_rejects_contact_handles(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    served: None,
+    method: str,
+    label: str,
+) -> None:
+    user_id, headers = await caller(db_session)
+    if method == "post":
+        response = await create(db_client, headers, label=label)
+    else:
+        home = (await create(db_client, headers)).json()
+        response = await patch(db_client, headers, home["id"], label=label)
+
+    assert response.status_code == 422
+    assert response.json() == VALIDATION_ERROR
+    labels = [row.label for row in await rows(db_session, user_id)]
+    assert labels == ([] if method == "post" else ["Home"])
+
+
+async def test_label_invisible_fillers(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, served: None
+) -> None:
+    user_id, headers = await caller(db_session)
+
+    home = await create(db_client, headers)  # "Home"
+    joiner = await create(db_client, headers, label="Home\u034f")
+    selector = await create(db_client, headers, label="Home\ufe0f")
+    supplement = await create(db_client, headers, label="Ho\U000e0100me")
+    blank = [
+        await create(db_client, headers, label=filler)
+        for filler in ("\u3164", "\u2800", "\u115f\u1160", " \u034f ", "\u0301\u0301")
+    ]
+    cafe = await create(db_client, headers, label="Cafe\u0301")  # NFD: e + combining acute
+    cafe_again = await create(db_client, headers, label="Café")  # NFC
+    moved = await patch(db_client, headers, cafe.json()["id"], label="Home\ufe0f")
+
+    assert home.status_code == 201
+    assert [r.status_code for r in (joiner, selector, supplement)] == [409] * 3
+    assert joiner.json() == LABEL_TAKEN
+    assert [r.status_code for r in blank] == [422] * 5
+    assert blank[0].json() == VALIDATION_ERROR
+    assert cafe.status_code == 201
+    assert cafe.json()["label"] == "Café"
+    assert cafe_again.status_code == 409
+    assert moved.status_code == 409
+    assert sorted(row.label for row in await rows(db_session, user_id)) == ["Café", "Home"]
+
+
+async def test_saved_address_writes_rate_limited(db_session: AsyncSession, served: None) -> None:
+    app = make_app(
+        make_settings(
+            saved_addresses_max_per_user=MAX,
+            saved_address_write_limit=WRITE_LIMIT,
+            saved_address_write_window_seconds=WRITE_WINDOW,
+        )
+    )
+    limiter = InMemoryRateLimiter(clock=lambda: NOW)
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+
+    async def test_session() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_session] = test_session
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        ana_id, ana = await caller(db_session)
+        bruno_id, bruno = await caller(db_session)
+        home = await create(client, ana)
+        renamed = await patch(client, ana, home.json()["id"], label="Casa")
+        work = await create(client, ana, label="Work")
+        deleted = await client.delete(f"{BASE}/{work.json()['id']}", headers=ana)
+        again = await create(client, ana, label="Work")  # the fifth write: the limit
+        limited_patch = await patch(client, ana, home.json()["id"], label="Home")
+        limited_post = await create(client, ana, label="Beach")
+        limited_delete = await client.delete(f"{BASE}/{again.json()['id']}", headers=ana)
+        reads = await client.get(BASE, headers=ana)
+        other = await create(client, bruno)
+
+    statuses = [r.status_code for r in (home, renamed, work, deleted, again)]
+    assert statuses == [201, 200, 201, 204, 201]
+    for limited in (limited_patch, limited_post, limited_delete):
+        assert limited.status_code == 429
+        assert limited.json() == RATE_LIMITED
+        assert int(limited.headers["Retry-After"]) >= 1
+    assert reads.status_code == 200  # reads are not limited
+    assert [item["label"] for item in reads.json()["items"]] == ["Casa", "Work"]
+    assert other.status_code == 201  # another customer has their own budget
+    index, _ = window_position(NOW, WRITE_WINDOW)
+    assert limiter.counts == {  # the key is the user id only
+        f"saved_address_write:{ana_id}:{index}": WRITE_LIMIT + 3,
+        f"saved_address_write:{bruno_id}:{index}": 1,
+    }
+
+
+async def committed_customer(
+    committed: Committed, labels: list[str]
+) -> tuple[uuid.UUID, dict[str, str], dict[str, str]]:
+    """A registered customer with `labels` as committed addresses, the first the default and
+    the oldest: the user id, the auth headers and each label's address id."""
+    account = (await register_account(committed.client, email=committed.email)).json()
+    user_id = uuid.UUID(account["user"]["id"])
+    headers = {"Authorization": f"Bearer {account['access_token']}"}
+    ids: dict[str, str] = {}
+    async with committed.sessions() as session:
+        for n, label in enumerate(labels):
+            row = SavedAddress(
+                user_id=user_id,
+                label=label,
+                line1="742 Evergreen Terrace",
+                city="Orlando",
+                state="FL",
+                zip_code=SERVED_ZIP,
+                is_default=n == 0,
+            )
+            session.add(row)
+            await session.flush()
+            await age(session, str(row.id), n)
+            ids[label] = str(row.id)
+        await session.commit()
+    return user_id, headers, ids
+
+
+async def purge(committed: Committed, user_id: uuid.UUID) -> None:
+    async with committed.sessions() as session:
+        await session.execute(delete(SavedAddress).where(SavedAddress.user_id == user_id))
+        await session.commit()
+
+
+def hold_first_get_own(committed: Committed, monkeypatch: pytest.MonkeyPatch) -> list[uuid.UUID]:
+    """SavedAddressRepository.get_own holds the first caller's transaction, its user lock
+    taken, until Postgres reports another backend waiting on that lock. Returns the list that
+    receives the held caller's address id. Without the lock the second caller never waits and
+    both read the same state."""
+    held: list[uuid.UUID] = []
+    get_own = SavedAddressRepository.get_own
+
+    async def get_own_then_hold(
+        self: SavedAddressRepository, owner_id: uuid.UUID, address_id: uuid.UUID
+    ) -> SavedAddress | None:
+        row = await get_own(self, owner_id, address_id)
+        if not held:
+            held.append(address_id)
+            await wait_until_blocking(committed.sessions, holder=await backend_pid(self._session))
+        return row
+
+    monkeypatch.setattr(SavedAddressRepository, "get_own", get_own_then_hold)
+    return held
+
+
+async def test_concurrent_default_moves_leave_one_default(
+    committed: Committed, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user_id, headers, ids = await committed_customer(committed, ["Home", "Work", "Beach"])
+    held = hold_first_get_own(committed, monkeypatch)
+    try:
+        responses = await asyncio.gather(
+            patch(committed.client, headers, ids["Work"], is_default=True),
+            patch(committed.client, headers, ids["Beach"], is_default=True),
+        )
+
+        assert [r.status_code for r in responses] == [200, 200]
+        assert [r.json()["is_default"] for r in responses] == [True, True]
+        async with committed.sessions() as reader:
+            defaults = {row.label: row.is_default for row in await rows(reader, user_id)}
+        # The holder commits first; the move that waited on the lock commits last and wins.
+        [first] = held
+        last = "Beach" if str(first) == ids["Work"] else "Work"
+        assert defaults == {"Home": False, "Work": last == "Work", "Beach": last == "Beach"}
+    finally:
+        await purge(committed, user_id)
+
+
+async def test_deleting_the_default_racing_a_default_move(
+    committed: Committed, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user_id, headers, ids = await committed_customer(committed, ["Home", "Work"])
+    held = hold_first_get_own(committed, monkeypatch)
+    try:
+        deleted, moved = await asyncio.gather(
+            committed.client.delete(f"{BASE}/{ids['Home']}", headers=headers),
+            patch(committed.client, headers, ids["Work"], is_default=True),
+        )
+
+        # Either order ends the same: Work is the one address and the default, whether the
+        # delete promoted it or the move made it so before the delete found nothing to promote.
+        assert (deleted.status_code, moved.status_code) == (204, 200)
+        assert moved.json()["is_default"] is True
+        assert len(held) == 1
+        async with committed.sessions() as reader:
+            stored = await rows(reader, user_id)
+        assert [(row.label, row.is_default) for row in stored] == [("Work", True)]
+    finally:
+        await purge(committed, user_id)
+
+
+ADVISORY_LOCKS = text(
+    "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'"
+    " AND database = (SELECT oid FROM pg_database WHERE datname = current_database())"
+)
+
+
+@pytest.mark.parametrize("write", ["create", "update"])
+async def test_rollback_after_a_flushed_write_releases_the_lock(
+    committed: Committed, monkeypatch: pytest.MonkeyPatch, write: str
+) -> None:
+    user_id, headers, ids = await committed_customer(committed, ["Home"])
+    failed_once: list[bool] = []
+    is_served = ServiceAreaService.is_served
+
+    async def fail_after_flush(self: ServiceAreaService, zip_code: str) -> bool:
+        # The service asks whether the ZIP is served after the row was flushed, before the
+        # commit: the first write fails there, once.
+        if not failed_once:
+            failed_once.append(True)
+            raise RuntimeError("storage failed after the flush")
+        return await is_served(self, zip_code)
+
+    monkeypatch.setattr(ServiceAreaService, "is_served", fail_after_flush)
+    try:
+        if write == "create":
+            failed = await create(committed.client, headers, label="Work")
+        else:
+            failed = await patch(committed.client, headers, ids["Home"], label="Casa")
+
+        assert failed.status_code == 500
+        async with committed.sessions() as reader:
+            stored = await rows(reader, user_id)
+            advisory = await reader.scalar(ADVISORY_LOCKS)
+        assert [(row.label, row.is_default) for row in stored] == [("Home", True)]
+        assert advisory == 0  # the user's lock went with the rollback
+        # So the next write by the same customer goes through without waiting.
+        retried = await asyncio.wait_for(
+            create(committed.client, headers, label="Work"), LOCK_WAIT_DEADLINE_SECONDS
+        )
+        assert retried.status_code == 201
+    finally:
+        await purge(committed, user_id)

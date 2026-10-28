@@ -102,6 +102,16 @@ POSITIVE: list[tuple[str, list[str]]] = [
     ("My snap is juanfix305, roof tiles missing", ["juanfix305"]),
     ("my cashapp is $jdoe-99", ["jdoe"]),
     ("whatsapp me at jdoe99", ["jdoe99"]),
+    # Handle sigils in fullwidth or small form, and handles that start with an exempt word
+    # (#224 review): "@home" is a place, "@home.fixit" is an account.
+    ("pay \uff04testperson please", ["testperson"]),  # FULLWIDTH DOLLAR SIGN
+    ("cashapp \ufe69jdoe", ["jdoe"]),  # SMALL DOLLAR SIGN
+    ("insta \uff20jdoe", ["jdoe"]),  # FULLWIDTH COMMERCIAL AT
+    ("find me @home.fixit", ["home.fixit"]),
+    ("find me @home_fixit", ["home_fixit"]),
+    ("find me @home-fixit", ["home-fixit"]),
+    ("find me @work.fixit305", ["work.fixit305"]),
+    ("find me @5pm.fixit", ["5pm.fixit"]),
     # Addresses in South Florida forms.
     ("I'm at 2000 Ponce de Leon Blvd, Coral Gables", ["2000 Ponce", "Leon Blvd"]),
     ("200 E Las Olas Blvd", ["200 E", "Las Olas"]),
@@ -171,6 +181,14 @@ NEGATIVE: list[str] = [
     "We are 2 blocks off Bird Rd, the AC is a 2018 Trane 2.5 ton.",
     "come @5pm please",
     "I'm @home all day after 3",
+    "I'm @home. Call first",
+    "I'm @home! Come by",
+    "I'm @work today, @casa tomorrow",
+    "be there @5.30",
+    "takes @2.5 hrs",
+    "free @5 a.m. tomorrow",
+    "10 pcs @1.5 each",
+    "meet @12.3",
     "saw your ad on facebook last week",
     "te mando fotos por whatsapp mañana",
     "Send me a WhatsApp with the price",
@@ -322,6 +340,44 @@ def test_a_lone_superscript_stays_as_typed() -> None:
     text = "120 ft" + chr(0x00B2) + " of tile"
 
     assert redact_contacts(text).text == text
+
+
+@pytest.mark.parametrize(
+    ("sigil", "ascii_sigil"),
+    [("\uff04", "$"), ("\ufe69", "$"), ("\uff20", "@"), ("\ufe6b", "@")],
+    ids=["fullwidth_dollar", "small_dollar", "fullwidth_at", "small_at"],
+)
+def test_handle_sigils_fold_to_ascii_and_are_redacted(sigil: str, ascii_sigil: str) -> None:
+    folded = redact_contacts(f"reach me at {ascii_sigil}testperson")
+    exotic = redact_contacts(f"reach me at {sigil}testperson")
+
+    assert folded.redacted is True
+    assert exotic == folded == RedactionResult(f"reach me at {MASK}", True)
+
+
+@pytest.mark.parametrize("word", ["home", "work", "casa", "noon", "tomorrow", "5pm"])
+def test_an_exempt_word_is_only_exempt_as_a_whole_token(word: str) -> None:
+    for whole in (f"@{word}", f"@{word}.", f"@{word}!", f"@{word} ", f"I'm @{word}, ok"):
+        assert redact_contacts(whole) == RedactionResult(whole, False), whole
+    overlay = chr(0x0335)  # a combining mark glued to the word
+    for handle in (
+        f"@{word}.fixit",
+        f"@{word}_fixit",
+        f"@{word}-fixit",
+        f"@{word}.fix.it",
+        f"@{word}{overlay}fixit",
+    ):
+        result = redact_contacts(handle)
+        assert result.redacted is True, handle
+        assert f"@{word}" not in result.text, handle
+
+
+def test_without_addresses_only_ways_to_reach_someone_are_masked() -> None:
+    for label in ("Apt 4B", "Office #2", "742 Evergreen Terrace", "PO Box 12", "Casa 2"):
+        assert redact_contacts(label, addresses=False) == RedactionResult(label, False), label
+        assert redact_contacts(label).redacted is (label != "Casa 2"), label
+    for contact in ("@home.fixit", "\uff04jdoe", "jdoe@gmail.com", "305-555-0199", "jdoe.com"):
+        assert redact_contacts(contact, addresses=False) == RedactionResult(MASK, True), contact
 
 
 @pytest.mark.parametrize(("text", "secrets"), POSITIVE, ids=[t[:40] for t, _ in POSITIVE])

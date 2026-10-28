@@ -12,7 +12,7 @@ from pydantic import (
     model_validator,
 )
 
-from app.redaction import redact_contacts
+from app.redaction import INVISIBLE_FILLERS, redact_contacts
 
 # Postgres text cannot store U+0000: refuse it here (422), not in the database (500).
 NO_NUL = r"^[^\x00]*$"
@@ -65,28 +65,38 @@ _LINE_BREAKS: Final = frozenset("\N{LINE SEPARATOR}\N{PARAGRAPH SEPARATOR}")
 COORDINATE_PLACES: Final = 6
 
 
-def _collapse_spaces(value: object) -> object:
-    """Trims, and turns each run of spaces into one. Control, format and line-break characters
-    (NUL, tab, newline, zero-width space...) are refused, not collapsed: the rule of a person's
-    name (users.names), since the BDC panel will show labels too."""
+def _canonical(value: object) -> object:
+    """The label as stored: composed (NFC, so "Café" typed with a combining accent equals
+    "Café"), without invisible fillers (app.redaction.INVISIBLE_FILLERS: letters and marks
+    the control check misses, #224 review), trimmed, each run of spaces one. So "Home" and
+    "Home\u034f" are the same label, and "\u3164" or combining marks alone are blank. Control,
+    format and line-break characters (NUL, tab, newline, zero-width space...) are refused, not
+    collapsed: the rule of a person's name (users.names), since the BDC panel will show labels
+    too."""
     if not isinstance(value, str):
         return value
+    value = unicodedata.normalize("NFC", value)
+    value = "".join(char for char in value if char not in INVISIBLE_FILLERS)
+    if all(unicodedata.category(char).startswith("M") or char.isspace() for char in value):
+        return ""  # nothing visible to attach to: blank
     if any(unicodedata.category(char)[0] == "C" or char in _LINE_BREAKS for char in value):
         raise ValueError("a label has no control, format or line-break characters")
     return " ".join(value.split())
 
 
 def _no_contacts(value: str) -> str:
-    """Refuses a label in which app.redaction masks anything (an email, a phone, a URL, or one
-    spelled out): a label is the owner's own text, but staff will read it."""
-    if redact_contacts(value).redacted:
+    """Refuses a label in which app.redaction masks a way to reach someone (an email, a phone,
+    a URL, a handle, or one spelled out): a label is the owner's own text, but staff will read
+    it. A street or a unit in the label ("Apt 4B") is fine: it names the address stored next
+    to it."""
+    if redact_contacts(value, addresses=False).redacted:
         raise ValueError("a label has no contact details")
     return value
 
 
 AddressLabel = Annotated[
     str,
-    BeforeValidator(_collapse_spaces),
+    BeforeValidator(_canonical),
     StringConstraints(min_length=1, max_length=LABEL_MAX_LENGTH),
     AfterValidator(_no_contacts),
     Field(description='The customer\'s own name for it, e.g. "Home" or "Casa 2".'),

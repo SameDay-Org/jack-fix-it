@@ -17,6 +17,7 @@ from app.modules.addresses.schemas import (
 from app.modules.addresses.service import SavedAddressService
 from app.modules.auth.permissions import CustomerUser
 from app.modules.service_areas.service import ServiceAreaService
+from app.rate_limit import RateLimiter, enforce_limit, get_rate_limiter
 
 router = APIRouter(prefix="/addresses", tags=["addresses"])
 
@@ -50,6 +51,35 @@ _FIELDS = (
     "control or format character or a contact detail; an address field out of format; lat or "
     "lng alone or out of range"
 )
+_RATE_LIMITED: dict[int | str, dict[str, Any]] = {
+    status.HTTP_429_TOO_MANY_REQUESTS: {
+        **_error("rate_limited: too many saved-address writes; retry later."),
+        "headers": {
+            "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {"type": "integer"},
+            }
+        },
+    },
+}
+
+
+async def limit_saved_address_writes(
+    user: CustomerUser,
+    limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> None:
+    """SAVED_ADDRESS_WRITE_LIMIT creates, edits and deletes together, per customer, per
+    SAVED_ADDRESS_WRITE_WINDOW_SECONDS: the four-address cap bounds the rows, not the churn
+    (#224 review). Reads are not limited."""
+    await enforce_limit(
+        limiter,
+        "saved_address_write",
+        str(user.id),
+        limit=settings.saved_address_write_limit,
+        window_seconds=settings.saved_address_write_window_seconds,
+        timeout_seconds=settings.rate_limit_timeout_seconds,
+    )
 
 
 @router.get(
@@ -72,6 +102,7 @@ async def list_saved_addresses(
     status_code=status.HTTP_201_CREATED,
     response_model=SavedAddressOut,
     summary="Save an address",
+    dependencies=[Depends(limit_saved_address_writes)],
     responses={
         **_ACCESS,
         status.HTTP_409_CONFLICT: _error(
@@ -79,6 +110,7 @@ async def list_saved_addresses(
             f"{_LABEL_TAKEN}."
         ),
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(f"{_FIELDS}."),
+        **_RATE_LIMITED,
     },
 )
 async def create_saved_address(
@@ -95,6 +127,7 @@ async def create_saved_address(
     "/{address_id}",
     response_model=SavedAddressOut,
     summary="Edit a saved address",
+    dependencies=[Depends(limit_saved_address_writes)],
     responses={
         **_ACCESS,
         status.HTTP_404_NOT_FOUND: _NOT_FOUND,
@@ -103,6 +136,7 @@ async def create_saved_address(
             f"{_FIELDS}; is_default false (make another address the default instead); a "
             "required field null; an address_id that is not a UUID."
         ),
+        **_RATE_LIMITED,
     },
 )
 async def update_saved_address(
@@ -121,6 +155,7 @@ async def update_saved_address(
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
     summary="Delete a saved address",
+    dependencies=[Depends(limit_saved_address_writes)],
     responses={
         status.HTTP_204_NO_CONTENT: {
             "description": "Deleted. If it was the default, the oldest remaining address is."
@@ -130,6 +165,7 @@ async def update_saved_address(
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
             "validation_error: an address_id that is not a UUID."
         ),
+        **_RATE_LIMITED,
     },
 )
 async def delete_saved_address(
