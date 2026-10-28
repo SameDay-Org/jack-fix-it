@@ -50,10 +50,13 @@ class CategoryRepository:
         statement = select(Category.id).where(Category.id.in_(ids), Category.active)
         return set((await self._session.scalars(statement)).all())
 
-    async def get_many(self, ids: Collection[uuid.UUID]) -> list[Category]:
+    async def get_many(
+        self, ids: Collection[uuid.UUID], *, active_only: bool = False
+    ) -> list[Category]:
         if not ids:
             return []
-        statement = select(Category).where(Category.id.in_(ids)).order_by(Category.slug)
+        active = (Category.active,) if active_only else ()
+        statement = select(Category).where(Category.id.in_(ids), *active).order_by(Category.slug)
         return list((await self._session.scalars(statement)).all())
 
     async def any_requires_license(self, ids: Collection[uuid.UUID]) -> bool:

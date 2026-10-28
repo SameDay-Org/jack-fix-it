@@ -25,6 +25,12 @@ Contacts stay hidden before payment, so the scope is redacted (app.redaction): t
 email and phone first, then every pattern. The stored scope is unchanged. The pro's public
 name goes through the same check and is withheld (null) when it shows a contact (#194).
 
+The customer reads the public profile of the pro behind one of those quotes (#53) only while
+the list shows that quote, with the same reads and the same pro filter; else 404, the same body
+as the request itself. The accepted quote of a pro who can no longer be hired is not listed, so
+its profile is 404 too: the acceptance's replay (below) is not the list. The bio is redacted
+like the scope; the profile's creation shows as its month only.
+
 The customer accepts one of those quotes. After their own request (else 404) and locking it,
 then the quote (else 404, the same body, for a quote of another request), in this order:
 - the request already accepted this very quote: 200 with it again, nothing written or logged
@@ -46,6 +52,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Final
 
 from sqlalchemy.exc import IntegrityError
@@ -67,6 +74,7 @@ from app.modules.quotes.repository import QuoteRepository
 from app.modules.quotes.schemas import (
     CustomerQuote,
     CustomerQuoteList,
+    ProPublicProfile,
     QuoteCreate,
     QuoteOut,
     QuotePro,
@@ -76,7 +84,7 @@ from app.modules.requests.state_machine import RequestStateMachine, RequestStatu
 from app.modules.settings.errors import SettingMalformedError, SettingNotConfiguredError
 from app.modules.settings.service import QUOTE_TTL_HOURS, SettingsService
 from app.modules.users.service import UserService
-from app.modules.users.types import UserAccount
+from app.modules.users.types import ContactPoints, UserAccount
 from app.queue import JobQueue
 from app.redaction import KnownValues, redact_text
 
@@ -177,11 +185,33 @@ class QuoteService:
         """The quotes the customer compares on their own request (see the module doc). One
         query each for the request, its quotes, the pros, their names and their contact
         points, whatever the count."""
-        status = await self._customer_requests.own_status(user, request_id)
-        if status not in _QUOTE_SCREEN:
-            return CustomerQuoteList(items=[])
-        quotes = await self._quotes.open_of_request(request_id, datetime.now(UTC))
+        quotes = await self._listed(user, request_id)
         return CustomerQuoteList(items=await self._for_customer(quotes, hireable_only=True))
+
+    async def pro_profile(
+        self, user: UserAccount, request_id: uuid.UUID, quote_id: uuid.UUID
+    ) -> ProPublicProfile:
+        """The public profile of the pro behind a quote the list shows now (see the module
+        doc); else 404. One query each for the request, its quotes, the pro, their name, their
+        bio with their category ids, the categories and their contact points."""
+        quote = next((q for q in await self._listed(user, request_id) if q.id == quote_id), None)
+        details = await self._pros.hireable_details(quote.pro_id) if quote else None
+        if details is None:
+            raise NotFoundError
+        card = details.card
+        # The pro's own details, for the known-value pass only: never logged or returned.
+        contact = (await self._users.contact_points({card.user_id})).get(card.user_id)
+        return ProPublicProfile(
+            id=card.pro_id,
+            name=card.name,
+            rating_avg=_rating(card.rating_avg),
+            jobs_count=card.jobs_count,
+            years_of_experience=card.years_of_experience,
+            verified=card.verified,
+            bio=None if details.bio is None else redact_text(details.bio, _known(contact)).text,
+            categories=details.categories,
+            member_since=details.created_at.astimezone(UTC).date().replace(day=1),
+        )
 
     async def accept(
         self, user: UserAccount, request_id: uuid.UUID, quote_id: uuid.UUID
@@ -226,6 +256,14 @@ class QuoteService:
         )
         return item.model_copy(update={"status": QuoteStatus.ACCEPTED})
 
+    async def _listed(self, user: UserAccount, request_id: uuid.UUID) -> list[Quote]:
+        """The quotes the list may show on the caller's own request (else 404), before the pro
+        filter: none outside the quote screen."""
+        status = await self._customer_requests.own_status(user, request_id)
+        if status not in _QUOTE_SCREEN:
+            return []
+        return await self._quotes.open_of_request(request_id, datetime.now(UTC))
+
     async def _for_customer(
         self, quotes: list[Quote], *, hireable_only: bool
     ) -> list[CustomerQuote]:
@@ -243,11 +281,7 @@ class QuoteService:
             card = cards.get(quote.pro_id)
             if card is None:
                 continue
-            contact = contacts.get(card.user_id)
-            known = KnownValues(
-                emails=(contact.email,) if contact else (),
-                phones=(contact.phone,) if contact and contact.phone else (),
-            )
+            known = _known(contacts.get(card.user_id))
             items.append(
                 CustomerQuote(
                     id=quote.id,
@@ -261,9 +295,7 @@ class QuoteService:
                     pro=QuotePro(
                         id=card.pro_id,
                         name=card.name,
-                        rating_avg=(
-                            None if card.rating_avg is None else format(card.rating_avg, ".2f")
-                        ),
+                        rating_avg=_rating(card.rating_avg),
                         jobs_count=card.jobs_count,
                         years_of_experience=card.years_of_experience,
                         verified=card.verified,
@@ -284,6 +316,19 @@ class QuoteService:
             max_duration is not None and data.duration_minutes > max_duration
         ):
             raise QuoteOutOfBoundsError
+
+
+def _known(contact: ContactPoints | None) -> KnownValues:
+    """The pro's own email and phone, masked before the patterns run (app.redaction)."""
+    return KnownValues(
+        emails=(contact.email,) if contact else (),
+        phones=(contact.phone,) if contact and contact.phone else (),
+    )
+
+
+def _rating(value: Decimal | None) -> str | None:
+    """The average rating as a decimal string, never the raw Decimal."""
+    return None if value is None else format(value, ".2f")
 
 
 @dataclass(frozen=True)

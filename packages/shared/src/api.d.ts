@@ -548,6 +548,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/requests/{request_id}/quotes/{quote_id}/pro": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * See the public profile of the pro behind a quote
+         * @description The pro behind one of the quotes the customer can choose from, as the comparison list
+         *     shows them, plus their bio (contact details masked), their active categories and the month
+         *     they joined. Available exactly while the list shows the quote. Never a contact, a document,
+         *     the photo, the service areas or payout details: contacts stay hidden before payment.
+         */
+        get: operations["get_quote_pro_v1_requests__request_id__quotes__quote_id__pro_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/requests/{request_id}/quotes/{quote_id}/accept": {
         parameters: {
             query?: never;
@@ -1351,6 +1374,61 @@ export interface components {
              * @description Replaces the set: active service areas, no duplicates, up to PRO_MAX_SERVICE_AREAS.
              */
             service_area_ids?: string[];
+        };
+        /**
+         * ProPublicProfile
+         * @description The public profile of the pro behind a quote the customer can choose (#53), before
+         *     paying: the card's fields, the bio, the categories and the month the pro joined. Never a
+         *     contact, a document, the photo, the service areas, payouts or an internal id (the account,
+         *     Stripe).
+         */
+        ProPublicProfile: {
+            /**
+             * Id
+             * Format: uuid
+             * @description The pro's profile id.
+             */
+            id: string;
+            /**
+             * Name
+             * @description The first name and the last name's initial, e.g. "María P."; null when the pro has not set both names, or when the name shows a contact detail (an email, a phone, a domain...): withheld before payment, never partly masked.
+             */
+            name: string | null;
+            /**
+             * Rating Avg
+             * @description The average rating as a decimal string; null before the first review.
+             * @example 4.80
+             */
+            rating_avg: string | null;
+            /**
+             * Jobs Count
+             * @description Jobs completed on the platform.
+             */
+            jobs_count: number;
+            /** Years Of Experience */
+            years_of_experience: number | null;
+            /**
+             * Verified
+             * @description The platform approved the pro's verification.
+             */
+            verified: boolean;
+            /**
+             * Bio
+             * @description What the pro wrote about their work, with contact details masked (app.redaction), as in a quote's scope: the pro's own email and phone, then every contact pattern; null when the pro wrote none.
+             */
+            bio: string | null;
+            /**
+             * Categories
+             * @description The active categories the pro works in, by slug.
+             */
+            categories: components["schemas"]["CategorySummary"][];
+            /**
+             * Member Since
+             * Format: date
+             * @description The first day of the month the pro joined: month precision only.
+             * @example 2026-10-01
+             */
+            member_since: string;
         };
         /**
          * ProVerificationStatus
@@ -3261,6 +3339,65 @@ export interface operations {
                 };
             };
             /** @description not_found: no request of the caller with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_quote_pro_v1_requests__request_id__quotes__quote_id__pro_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProPublicProfile"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers see the pros who quoted. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no request of the caller with this id, or the quotes listed on it now do not include this one (another request's, expired, withdrawn or rejected, the request off the quote screen, or a pro who can no longer be hired). */
             404: {
                 headers: {
                     [name: string]: unknown;

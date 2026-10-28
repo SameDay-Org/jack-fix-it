@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.integrations.storage import Storage
+from app.modules.categories.schemas import CategorySummary
 from app.modules.categories.service import CategoryService
 from app.modules.pros.errors import (
     InvalidCategoryError,
@@ -61,10 +62,23 @@ class ProCard:
     verified: bool  # verification approved
 
 
+@dataclass(frozen=True)
+class ProPublicDetails:
+    """The profile a customer may see of a pro who quoted them (#53): the card, plus the bio as
+    the pro wrote it (the caller masks its contacts), when the profile was created and its
+    active categories. No photo, documents, service areas or Stripe account."""
+
+    card: ProCard
+    bio: str | None
+    created_at: datetime
+    categories: list[CategorySummary]  # active ones only, by slug
+
+
 class ProService:
     def __init__(self, session: AsyncSession) -> None:
         self._profiles = ProProfileRepository(session)
         self._users = UserService(session)
+        self._categories = CategoryService(session)
 
     @staticmethod
     def photo_keys_among(keys: Collection[str]) -> Select[str | None]:
@@ -94,6 +108,23 @@ class ProService:
         still be hired: the repeat of a completed acceptance (#189). `verified` is the pro's
         current verification. Two queries, whatever the count."""
         return await self._cards(pro_ids, hireable_only=False)
+
+    async def hireable_details(self, pro_id: uuid.UUID) -> ProPublicDetails | None:
+        """The public profile of a pro who can still be hired, by profile id; None for any
+        other, with the same rule as `hireable_cards` (#53). Four queries (the card's two, the
+        bio with the category ids, then the categories), whatever the pro has; three when they
+        list no category."""
+        card = (await self.hireable_cards({pro_id})).get(pro_id)
+        details = await self._profiles.public_details(pro_id) if card else None
+        if card is None or details is None:
+            return None
+        bio, created_at, category_ids = details
+        return ProPublicDetails(
+            card=card,
+            bio=bio,
+            created_at=created_at,
+            categories=await self._categories.active_summaries(category_ids),
+        )
 
     async def _cards(
         self, pro_ids: Collection[uuid.UUID], *, hireable_only: bool

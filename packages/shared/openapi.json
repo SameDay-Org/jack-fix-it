@@ -1910,6 +1910,95 @@
         }
       }
     },
+    "/v1/requests/{request_id}/quotes/{quote_id}/pro": {
+      "get": {
+        "tags": [
+          "quotes"
+        ],
+        "summary": "See the public profile of the pro behind a quote",
+        "description": "The pro behind one of the quotes the customer can choose from, as the comparison list\nshows them, plus their bio (contact details masked), their active categories and the month\nthey joined. Available exactly while the list shows the quote. Never a contact, a document,\nthe photo, the service areas or payout details: contacts stay hidden before payment.",
+        "operationId": "get_quote_pro_v1_requests__request_id__quotes__quote_id__pro_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          },
+          {
+            "name": "quote_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Quote Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProPublicProfile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers see the pros who quoted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no request of the caller with this id, or the quotes listed on it now do not include this one (another request's, expired, withdrawn or rejected, the request off the quote screen, or a pro who can no longer be hired).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/requests/{request_id}/quotes/{quote_id}/accept": {
       "post": {
         "tags": [
@@ -3694,6 +3783,108 @@
         "type": "object",
         "title": "ProProfileUpdate",
         "description": "Only the fields sent change. Verification, payouts, rating and job count are set by the\nplatform: sending them is a 422 (extra=\"forbid\")."
+      },
+      "ProPublicProfile": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id",
+            "description": "The pro's profile id."
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "The first name and the last name's initial, e.g. \"Mar\u00eda P.\"; null when the pro has not set both names, or when the name shows a contact detail (an email, a phone, a domain...): withheld before payment, never partly masked."
+          },
+          "rating_avg": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating Avg",
+            "description": "The average rating as a decimal string; null before the first review.",
+            "examples": [
+              "4.80"
+            ]
+          },
+          "jobs_count": {
+            "type": "integer",
+            "title": "Jobs Count",
+            "description": "Jobs completed on the platform."
+          },
+          "years_of_experience": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Years Of Experience"
+          },
+          "verified": {
+            "type": "boolean",
+            "title": "Verified",
+            "description": "The platform approved the pro's verification."
+          },
+          "bio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bio",
+            "description": "What the pro wrote about their work, with contact details masked (app.redaction), as in a quote's scope: the pro's own email and phone, then every contact pattern; null when the pro wrote none."
+          },
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/CategorySummary"
+            },
+            "type": "array",
+            "title": "Categories",
+            "description": "The active categories the pro works in, by slug."
+          },
+          "member_since": {
+            "type": "string",
+            "format": "date",
+            "title": "Member Since",
+            "description": "The first day of the month the pro joined: month precision only.",
+            "examples": [
+              "2026-10-01"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "rating_avg",
+          "jobs_count",
+          "years_of_experience",
+          "verified",
+          "bio",
+          "categories",
+          "member_since"
+        ],
+        "title": "ProPublicProfile",
+        "description": "The public profile of the pro behind a quote the customer can choose (#53), before\npaying: the card's fields, the bio, the categories and the month the pro joined. Never a\ncontact, a document, the photo, the service areas, payouts or an internal id (the account,\nStripe)."
       },
       "ProVerificationStatus": {
         "type": "string",
