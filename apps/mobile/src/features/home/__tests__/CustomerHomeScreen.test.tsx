@@ -1,6 +1,6 @@
 import i18n from "@/i18n";
 
-import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import { router } from "expo-router";
 import { Dimensions, StyleSheet } from "react-native";
 
@@ -120,8 +120,8 @@ describe("CustomerHomeScreen", () => {
   it.each(DEVICE_CHIPS)(
     "loading skeletons break into the same rows as the $language chips at font scale $fontScale",
     async ({ language, fontScale, widths }) => {
-      const window = Dimensions.get("window");
-      const dimensions = jest.spyOn(Dimensions, "get").mockReturnValue({ ...window, fontScale });
+      const real = Dimensions.get("window");
+      const dimensions = jest.spyOn(Dimensions, "get").mockReturnValue({ ...real, fontScale });
       try {
         await act(() => i18n.changeLanguage(language));
         jest.mocked(apiGet).mockReturnValue(deferred<typeof CATEGORIES>().promise);
@@ -130,12 +130,14 @@ describe("CustomerHomeScreen", () => {
         const shapes = screen.getAllByTestId(/^home-category-skeleton-\d+-shape$/, {
           includeHiddenElements: true,
         });
-        shapes.forEach((shape) => expect(shape.props.className).toContain("px-4"));
-        const skeletons = screen
-          .getAllByText(" ", { includeHiddenElements: true })
-          .map((line) => Number(StyleSheet.flatten(line.props.style).width) + CHIP_PADDING);
+        const skeletons = shapes.map((shape) => {
+          expect(shape.props.className).toContain("px-4");
+          const line = within(shape).getByText(" ", { includeHiddenElements: true });
+          return Number(StyleSheet.flatten(line.props.style).width) + CHIP_PADDING;
+        });
 
         expect(skeletons).toHaveLength(widths.length);
+        skeletons.forEach((width) => expect(Number.isFinite(width)).toBe(true));
         expect(rowsOf(skeletons)).toEqual(rowsOf(widths));
       } finally {
         dimensions.mockRestore();

@@ -48,7 +48,7 @@ const category = (slug: string, names: Record<string, string>, index: number): C
   intake_questions: [],
 });
 
-/** The launch catalog as the API orders it; moving-assembly has no Spanish name. */
+/** The launch catalog as the mocked API returns it (not the seed's slug order); moving-assembly has no Spanish name. */
 export const CATEGORIES: Category[] = [
   category("house-cleaning", { en: "House Cleaning", es: "Limpieza del hogar" }, 1),
   category("handyman", { en: "Handyman", es: "Reparaciones generales" }, 2),
