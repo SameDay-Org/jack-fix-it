@@ -126,7 +126,8 @@ const ACCEPT_PLACEHOLDER = { width: 96, height: 48 } as const;
 /**
  * A card-shaped placeholder with the loaded card's rows: every line is a `TextSkeleton` of the
  * same type style, so each row is exactly as tall as the text that replaces it, at any font
- * scale. A typical scope takes two lines here.
+ * scale. The verified badge has its row too (the list only shows quotes from approved pros, so
+ * every listed card has one), padded like the badge. A typical scope takes two lines here.
  */
 export function QuoteCardSkeleton({ testID }: { testID?: string }) {
   return (
@@ -139,6 +140,9 @@ export function QuoteCardSkeleton({ testID }: { testID?: string }) {
         </View>
         <View className="gap-1">
           <TextSkeleton type="headline" width="40%" />
+          <View className="w-1/2 py-1" testID={testID && `${testID}-badge`}>
+            <TextSkeleton type="caption" />
+          </View>
           <TextSkeleton type="footnote" width="70%" />
         </View>
       </View>

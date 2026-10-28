@@ -264,11 +264,36 @@ describe("QuoteCompareScreen", () => {
     expect(apiPost).toHaveBeenCalledTimes(2);
   });
 
+  it("an answer that lands after the sheet was swiped away is still told", async () => {
+    const answer = deferred<CustomerQuote>();
+    jest.mocked(apiPost).mockReturnValue(answer.promise);
+    await renderWithQuery(<App />);
+    await fireEvent.press(
+      await screen.findByRole("button", { name: "Accept the quote from María P. for $250" }),
+    );
+    await fireEvent.press(screen.getByTestId("accept-quote-confirm"));
+    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
+
+    await act(async () => router.back()); // swiped down while the accept is in flight
+    expect(screen.queryByTestId("accept-quote-sheet")).toBeNull();
+    await act(async () => answer.reject(new ApiError(409, "quote_not_acceptable")));
+
+    await waitFor(() =>
+      expect(toastStore.getState().current?.message).toBe("This quote can't be accepted anymore."),
+    );
+    expect(router.back).toHaveBeenCalledTimes(1); // the swipe only: nothing closed the list
+  });
+
   it("404 shows not found; network error shows retry", async () => {
     jest.mocked(apiGet).mockRejectedValue(new ApiError(404, "not_found"));
     const { unmount } = await renderWithQuery(<App />);
 
     expect(await screen.findByRole("header", { name: "Request not found" })).toBeTruthy();
+    // A request that is not found stays so: coming back to the screen asks nothing again.
+    await act(async () => navigation.setFocused(false));
+    await act(async () => navigation.setFocused(true));
+    expect(apiGet).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("header", { name: "Request not found" })).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Go to home" }));
     expect(router.dismissTo).toHaveBeenCalledWith("/");
     await unmount();
@@ -278,8 +303,17 @@ describe("QuoteCompareScreen", () => {
     expect(await screen.findByRole("header", { name: "We couldn't load the quotes" })).toBeTruthy();
     expect(screen.queryByRole("header", { name: "Request not found" })).toBeNull();
 
-    jest.mocked(apiGet).mockResolvedValue(list(QUOTES));
+    const retried = deferred<CustomerQuoteList>();
+    jest.mocked(apiGet).mockReturnValue(retried.promise);
     await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
+    // The error card stays while the retry runs, its button busy; no skeletons in between.
+    await waitFor(() =>
+      expect(screen.getByTestId("quote-list-error-action").props.accessibilityState).toMatchObject({
+        busy: true,
+      }),
+    );
+    expect(screen.queryByRole("progressbar", { name: "Loading quotes" })).toBeNull();
+    await act(async () => retried.resolve(list(QUOTES)));
     expect(await screen.findByText("$250")).toBeTruthy();
     expect(apiGet).toHaveBeenCalledTimes(2);
   });
@@ -367,12 +401,14 @@ describe("QuoteCompareScreen", () => {
     const skeletons = screen.getAllByTestId(/^quote-skeleton-\d$/, { includeHiddenElements: true });
     expect(skeletons).toHaveLength(2);
 
-    await act(async () => pending.resolve(list([DAN])));
-    await screen.findByText("$120");
+    // A verified pro, like every quote the list endpoint returns (it lists approved pros only).
+    await act(async () => pending.resolve(list([MARIA])));
+    await screen.findByText("$250");
     expect(screen.queryByRole("progressbar")).toBeNull();
 
-    // Row for row, the placeholder lines are the loaded card's text styles (a two-line scope).
-    const loaded = lineStyles(screen.getByTestId(`quote-${DAN.id}`)).flatMap((style) =>
+    // Row for row, the placeholder lines are the loaded card's text styles (a two-line scope),
+    // the verified badge's row included.
+    const loaded = lineStyles(screen.getByTestId(`quote-${MARIA.id}`)).flatMap((style) =>
       style === "scope" ? ["text-callout", "text-callout"] : [style],
     );
     expect(lineStyles(skeletons[0])).toEqual(loaded);
@@ -414,15 +450,23 @@ const TYPE_STYLE = /\btext-(?:display|title-1|title-2|headline|body|callout|foot
 
 /**
  * The type style of each line of text in a card, top to bottom, leaving out what a placeholder
- * does not stand for: button labels, badges and the scope's hidden measuring copy. The visible
- * scope is reported as "scope", since its line count comes from layout.
+ * does not stand for: button labels, the accepted badge and the scope's hidden measuring copy.
+ * The verified badge is one padded row; the visible scope is reported as "scope", since its line
+ * count comes from layout.
  */
 function lineStyles(root: unknown): string[] {
   const styles: string[] = [];
   const walk = (node: HostNode | string) => {
     if (typeof node === "string" || node.props.accessibilityRole === "button") return;
     const testID = String(node.props.testID ?? "");
-    if (testID.endsWith("-measure") || /-(verified|accepted)$/.test(testID)) return;
+    if (testID.endsWith("-measure") || testID.endsWith("-accepted")) return;
+    if (testID.endsWith("-verified") || testID.endsWith("-badge")) {
+      // The badge and its placeholder: the same vertical padding around one caption line.
+      const padded = /py-1/.test(String(node.props.className));
+      const inner = node.children.flatMap((child) => lineStyles(child)).join("+");
+      styles.push(`badge:${padded ? "py-1" : "?"}:${inner}`);
+      return;
+    }
     if (node.type === "Text") {
       styles.push(
         testID.endsWith("-scope")

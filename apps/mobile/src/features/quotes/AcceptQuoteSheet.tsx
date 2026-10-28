@@ -2,9 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AccessibilityInfo, Text, View } from "react-native";
+import { Text, View } from "react-native";
 
-import { Button, SheetContent, showToast, StatusBadge } from "@/components/ui";
+import { Button, SheetContent, StatusBadge } from "@/components/ui";
 
 import { useAcceptQuote, type AcceptOutcome } from "./useAcceptQuote";
 import { quotesQueryOptions } from "./useRequestQuotes";
@@ -37,18 +37,10 @@ export function AcceptQuoteSheet() {
   if (!quote) return null;
   const text = quoteText(t, quote, "open", now);
 
+  // The hook tells the customer how it went; the sheet only closes, or stays to show a failure.
   const onDone = (outcome: AcceptOutcome) => {
-    if (outcome === "failed") {
-      setFailed(true);
-      return;
-    }
-    if (outcome === "signedOut") return; // the session's own screens take over
-    router.back();
-    if (outcome === "accepted") {
-      AccessibilityInfo.announceForAccessibility(t("quotes.acceptedNote"));
-    } else {
-      showToast({ message: t("quotes.notAcceptable"), tone: "danger" });
-    }
+    if (outcome === "failed") setFailed(true);
+    else if (outcome !== "signedOut") router.back(); // signed out: the session's screens take over
   };
 
   const confirm = () => {

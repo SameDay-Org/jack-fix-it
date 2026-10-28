@@ -14,6 +14,7 @@ import {
   isNotFound,
   useRefetchOnReturn,
   useRequestQuotes,
+  useSettledError,
   type CustomerQuote,
 } from "./useRequestQuotes";
 
@@ -39,11 +40,12 @@ const Separator = () => <View className="h-4" />;
 export function QuoteList({ requestId, header, testID = "quote-list" }: QuoteListProps) {
   const { t } = useTranslation();
   const { data, error, refetch, isFetching } = useRequestQuotes(requestId);
-  useRefetchOnReturn(refetch);
+  const shownError = useSettledError(data, error);
+  const notFound = isNotFound(shownError);
+  useRefetchOnReturn(refetch, !notFound);
   const openAccept = useOpenAccept(requestId);
   const [pulling, setPulling] = useState(false);
 
-  const notFound = isNotFound(error);
   const items = data && !notFound ? data.items : NO_QUOTES;
   const anyAccepted = items.some((quote) => quote.status === "accepted");
   const pendingExpiries = useMemo(
@@ -81,7 +83,7 @@ export function QuoteList({ requestId, header, testID = "quote-list" }: QuoteLis
       extraData={now}
       ListHeaderComponent={header}
       ListEmptyComponent={
-        data === undefined && error === null ? (
+        data === undefined && shownError === null ? (
           <QuoteListLoading />
         ) : notFound ? (
           <QuoteListMessage

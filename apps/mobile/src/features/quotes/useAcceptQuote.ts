@@ -1,7 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
+import { AccessibilityInfo } from "react-native";
 
 import { apiPost, ApiError, SessionExpiredError } from "@/api";
+import { showToast } from "@/components/ui";
 
 import { quotesQueryKey, type CustomerQuote, type CustomerQuoteList } from "./useRequestQuotes";
 
@@ -29,12 +32,26 @@ const withAccepted = (list: CustomerQuoteList, accepted: CustomerQuote): Custome
 /**
  * Accepts one quote of the request. The answer goes into the cached list at once, so the screen
  * shows the accepted state as the sheet closes, and the list is refetched after any answer (a 409
- * means it changed). `onDone` runs only while the caller is still mounted, and a second call while
- * one is in flight is ignored, however fast the taps.
+ * means it changed). What the customer is told happens here, not in the caller, so it is told
+ * even when the confirmation was swiped away before the answer: screen readers hear an accept,
+ * a toast says a quote can no longer be accepted, and a failure the closed sheet cannot show
+ * becomes a toast too. `onDone` (closing the sheet, showing a failure in it) runs only while the
+ * caller is still mounted, and a second call while one is in flight is ignored, however fast the
+ * taps.
  */
 export function useAcceptQuote(requestId: string) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const inFlight = useRef(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
   const mutation = useMutation({
     mutationFn: (quoteId: string) =>
       apiPost("/v1/requests/{request_id}/quotes/{quote_id}/accept", undefined, {
@@ -46,6 +63,15 @@ export function useAcceptQuote(requestId: string) {
         quotesQueryKey(requestId),
         (list) => list && withAccepted(list, accepted),
       );
+      AccessibilityInfo.announceForAccessibility(t("quotes.acceptedNote"));
+    },
+    onError: (error) => {
+      const outcome = outcomeOf(error);
+      if (outcome === "notAcceptable") {
+        showToast({ message: t("quotes.notAcceptable"), tone: "danger" });
+      } else if (outcome === "failed" && !mounted.current) {
+        showToast({ message: t("quotes.confirm.failed"), tone: "danger" });
+      }
     },
     // Not awaited: the mutation would hold its answer (and the busy button) until the refetch lands.
     onSettled: () => {
