@@ -1,11 +1,12 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect } from "react";
 
-import { profileHref } from "./navigation";
+import { profileHref, useGuardedPush } from "./navigation";
 
-// A link to a pro's profile, with whatever precedes the path (a scheme on a native build, a
-// leading slash otherwise) kept as it came.
-const PROFILE_LINK = /^(.*?\/?)requests\/([^/?#]+)\/quotes\/([^/?#]+)\/pro\/?(?:[?#].*)?$/;
+// A link to a pro's profile. What precedes the path is kept as it came: the app's scheme on a
+// native build (`jackfixit://requests/…`), Expo Go's host and `/--/`, or the leading slash.
+const PROFILE_LINK =
+  /^((?:[a-z][a-z0-9+.-]*:\/\/(?:[^/]*\/--\/)?)|\/)requests\/([^/?#]+)\/quotes\/([^/?#]+)\/pro\/?(?:[?#].*)?$/;
 
 /**
  * Where a link that reaches the running app lands (`+native-intent`). Expo Router applies a
@@ -25,13 +26,16 @@ export function redirectSystemPath({ path, initial }: { path: string; initial: b
 
 /**
  * Opens the pro's profile over the comparison when a link asked for it (`?profile=<quoteId>`,
- * see `redirectSystemPath`): once per link, as the screen mounts or when a later link changes
- * the quote.
+ * see `redirectSystemPath`): once per link. The param is cleared as the push goes out, so a
+ * later mount of the comparison (back from the profile, a session change) opens nothing again.
  */
 export function useProfileFromLink(requestId: string): void {
   const { profile } = useLocalSearchParams<{ profile?: string }>();
+  const push = useGuardedPush();
 
   useEffect(() => {
-    if (profile) router.push(profileHref(requestId, profile));
-  }, [requestId, profile]);
+    if (!profile) return;
+    router.setParams({ profile: undefined });
+    push(profileHref(requestId, profile));
+  }, [push, requestId, profile]);
 }

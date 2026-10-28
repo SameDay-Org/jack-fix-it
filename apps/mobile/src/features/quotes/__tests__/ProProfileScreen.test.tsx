@@ -44,7 +44,7 @@ const [, MARIA, DAN] = QUOTES;
 const PATH = "/v1/requests/{request_id}/quotes/{quote_id}/pro";
 const BIO = "Licensed plumber. Kitchens and bathrooms, same day when I can. Reach me at [hidden].";
 const TRUST =
-  "Verified by Jack Fix It: our team reviewed this pro's information and documents and approved their profile before they could send you a quote.";
+  "Verified by Jack Fix It: our team reviewed the information and documents this pro provided and approved their profile before they could send you a quote.";
 const PROFILE: ProPublicProfile = {
   id: MARIA.pro.id,
   name: "María P.",
@@ -234,7 +234,7 @@ describe("ProProfileScreen", () => {
     await act(() => i18n.changeLanguage("es"));
     expect(
       screen.getByText(
-        "María P. acaba de llegar a Jack Fix It. Se unió en marzo de 2024 y todavía no ha completado ningún trabajo aquí. Como todos los profesionales de Jack Fix It, pasó la verificación antes de poder enviarte un presupuesto.",
+        "María P. todavía no tiene trabajos completados en Jack Fix It. Se unió en marzo de 2024 y todavía no ha completado ningún trabajo aquí. Como todos los profesionales de Jack Fix It, pasó la verificación antes de poder enviarte un presupuesto.",
       ),
     ).toBeTruthy();
   });

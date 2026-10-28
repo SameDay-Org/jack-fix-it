@@ -176,9 +176,9 @@ function Profile({ profile }: ProfileProps) {
         <View className="gap-6">
           <Text className={`${PROSE} text-navy-900`} testID="pro-profile-new">
             {[
-              profile.name === null
-                ? t("quotes.profile.newPro.unnamed")
-                : t("quotes.profile.newPro.named", { name }),
+              profile.name?.trim()
+                ? t("quotes.profile.newPro.named", { name })
+                : t("quotes.profile.newPro.unnamed"),
               t("quotes.profile.newPro.joined", { month: since }),
               profile.verified ? t("quotes.profile.newPro.verified") : null,
             ]

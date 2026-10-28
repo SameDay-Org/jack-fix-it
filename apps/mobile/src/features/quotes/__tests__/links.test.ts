@@ -15,6 +15,10 @@ describe("redirectSystemPath", () => {
     expect(redirectSystemPath({ path: `jackfixit:/${PROFILE}`, initial: false })).toBe(
       `jackfixit:/${COMPARE}`,
     );
+    // Expo Go: its host, then the path after `/--/`.
+    expect(
+      redirectSystemPath({ path: `exp://192.168.1.20:8081/--${PROFILE}`, initial: false }),
+    ).toBe(`exp://192.168.1.20:8081/--${COMPARE}`);
   });
 
   it("leaves the initial URL and every other path alone", () => {
@@ -29,5 +33,10 @@ describe("redirectSystemPath", () => {
       }),
     ).toBe(`/requests/${REQUEST_ID}/accept?quote=${QUOTE_ID}`);
     expect(redirectSystemPath({ path: "/", initial: false })).toBe("/");
+    // Only the route itself, not a deeper path that happens to contain it.
+    expect(redirectSystemPath({ path: `/admin${PROFILE}`, initial: false })).toBe(
+      `/admin${PROFILE}`,
+    );
+    expect(redirectSystemPath({ path: PROFILE.slice(1), initial: false })).toBe(PROFILE.slice(1));
   });
 });

@@ -181,6 +181,8 @@ describe("QuoteCompareScreen", () => {
       params: { id: REQUEST_ID, quoteId: MARIA.id },
     });
     expect(screen.queryByTestId("accept-quote-sheet")).toBeNull();
+    // Cleared with the push: a later mount of the comparison opens nothing again.
+    expect(router.setParams).toHaveBeenCalledWith({ profile: undefined });
   });
 
   it("each card reads as one label: pro, verified, price, start and the rest", async () => {

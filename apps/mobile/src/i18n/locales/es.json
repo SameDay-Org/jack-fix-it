@@ -207,14 +207,14 @@
         "years_other": "años de experiencia"
       },
       "newPro": {
-        "named": "{{name}} acaba de llegar a Jack Fix It.",
-        "unnamed": "Este profesional acaba de llegar a Jack Fix It.",
+        "named": "{{name}} todavía no tiene trabajos completados en Jack Fix It.",
+        "unnamed": "Este profesional todavía no tiene trabajos completados en Jack Fix It.",
         "joined": "Se unió en {{month}} y todavía no ha completado ningún trabajo aquí.",
         "verified": "Como todos los profesionales de Jack Fix It, pasó la verificación antes de poder enviarte un presupuesto."
       },
-      "about": "Acerca de",
+      "about": "Presentación",
       "services": "Qué hace",
-      "trust": "Verificado por Jack Fix It: nuestro equipo revisó la información y los documentos de este profesional y aprobó su perfil antes de que pudiera enviarte un presupuesto.",
+      "trust": "Verificado por Jack Fix It: nuestro equipo revisó la información y los documentos que este profesional presentó y aprobó su perfil antes de que pudiera enviarte un presupuesto.",
       "accept": "Aceptar por {{price}}",
       "backToQuotes": "Ver presupuestos",
       "gone": {

@@ -174,6 +174,7 @@ export const routerMock = {
     }),
     back: jest.fn(() => update({ sheet: null })),
     canGoBack: jest.fn(() => true),
+    setParams: jest.fn(),
     dismissTo: jest.fn(),
   },
   useLocalSearchParams: () => nav.sheet ?? nav.params ?? { id: REQUEST_ID },
