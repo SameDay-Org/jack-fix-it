@@ -223,7 +223,7 @@ describe("ProProfileScreen", () => {
     expect(screen.getByText("Verificado por Jack Fix It")).toBeTruthy();
     expect(screen.getByText(/^Verificado por Jack Fix It: nuestro equipo/)).toBeTruthy();
     expect(screen.getByText(/^Aceptar por /)).toBeTruthy();
-    expect(screen.getByText("Volver a los presupuestos")).toBeTruthy();
+    expect(screen.getByText("Ver presupuestos")).toBeTruthy();
   });
 
   it("the new-pro note in Spanish is written for a person, not translated word for word", async () => {

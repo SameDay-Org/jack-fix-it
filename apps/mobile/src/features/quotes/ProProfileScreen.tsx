@@ -247,16 +247,27 @@ function Figures({ profile, years }: ProfileProps & { years: Figure | null }) {
   return <FiguresRow cells={cells} label={cells.map((cell) => cell.spoken).join(", ")} />;
 }
 
-/** Evenly spaced figures with thin rules between them; read as one sentence. */
+/**
+ * Evenly spaced figures with thin rules between them; read as one sentence. Full-width lines,
+ * not fit-content: Android can wrap a one-line text measured to fit by a sub-pixel and hide its
+ * tail ("4.8 ★" lost its star at 160 dpi).
+ */
 function FiguresRow({ cells, label }: { cells: Figure[]; label: string }) {
   return (
     <View accessible accessibilityLabel={label} className="flex-row" testID="pro-profile-figures">
       {cells.map((cell, index) => (
         <Fragment key={cell.label}>
           {index > 0 ? <View className={RULE} /> : null}
-          <View className="flex-1 items-center gap-1 px-2">
-            <Text className="text-title-1 text-navy-900">{cell.value}</Text>
-            <Text className="text-center text-caption text-gray-500">{cell.label}</Text>
+          <View className="flex-1 gap-1 px-1">
+            <Text className="text-center text-title-1 text-navy-900">{cell.value}</Text>
+            {/* A label wider than its cell (Spanish at 1.3 on a narrow phone) breaks at a syllable
+                with a hyphen on Android instead of anywhere. */}
+            <Text
+              android_hyphenationFrequency="normal"
+              className="text-center text-caption text-gray-500"
+            >
+              {cell.label}
+            </Text>
           </View>
         </Fragment>
       ))}
@@ -330,8 +341,10 @@ function ProfileState({ title, body, action, onAction, busy, testID }: ProfileSt
 
 /** Label widths of the tag placeholders at font scale 1: a short and a long launch category name. */
 const TAG_WIDTHS = [64, 120] as const;
-/** The numeral placeholders' width at font scale 1 ("4.8 ★"). */
+/** The placeholders' widths at font scale 1: a name in the display type, a numeral ("4.8 ★"), a label. */
+const NAME_WIDTH = 120;
 const FIGURE_WIDTH = 56;
+const LABEL_WIDTH = 48;
 const FIGURES = 3;
 
 /**
@@ -357,7 +370,10 @@ function ProfileSkeleton() {
       >
         <View className="gap-1">
           <View className="flex-row flex-wrap items-center gap-x-3 gap-y-2">
-            <TextSkeleton type="display" width="45%" />
+            {/* In a row, a placeholder takes a set width: a line alone would shrink to nothing. */}
+            <View style={{ width: NAME_WIDTH * fontScale }}>
+              <TextSkeleton type="display" />
+            </View>
             <View className="w-1/3 py-1" testID="pro-profile-skeleton-badge">
               <TextSkeleton type="caption" />
             </View>
@@ -368,9 +384,13 @@ function ProfileSkeleton() {
           {Array.from({ length: FIGURES }, (_, index) => (
             <Fragment key={index}>
               {index > 0 ? <View className={RULE} /> : null}
-              <View className="flex-1 items-center gap-1 px-2">
-                <TextSkeleton type="title-1" width={FIGURE_WIDTH * fontScale} />
-                <TextSkeleton type="caption" width="70%" />
+              <View className="flex-1 items-center gap-1 px-1">
+                <View style={{ width: FIGURE_WIDTH * fontScale }}>
+                  <TextSkeleton type="title-1" />
+                </View>
+                <View style={{ width: LABEL_WIDTH * fontScale }}>
+                  <TextSkeleton type="caption" />
+                </View>
               </View>
             </Fragment>
           ))}

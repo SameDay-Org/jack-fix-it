@@ -216,7 +216,7 @@
       "services": "Qué hace",
       "trust": "Verificado por Jack Fix It: nuestro equipo revisó la información y los documentos de este profesional y aprobó su perfil antes de que pudiera enviarte un presupuesto.",
       "accept": "Aceptar por {{price}}",
-      "backToQuotes": "Volver a los presupuestos",
+      "backToQuotes": "Ver presupuestos",
       "gone": {
         "title": "Este presupuesto ya no está disponible",
         "body": "Venció o fue retirado, así que no se puede mostrar el perfil del profesional."
