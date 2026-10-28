@@ -231,6 +231,11 @@ class Settings(BaseSettings):
     # Waitlist (D8.4, #46): joins per client IP and per contact (email or phone, hashed), per
     # AUTH_RATE_LIMIT_WINDOW_SECONDS.
     waitlist_join_limit: int = Field(default=5, gt=0)
+    # Saved addresses (D8.2, #214): the most one customer may keep in their address book, and
+    # how many writes (create, edit, delete together) one customer may make per window.
+    saved_addresses_max_per_user: int = Field(default=4, gt=0)
+    saved_address_write_limit: int = Field(default=30, gt=0)
+    saved_address_write_window_seconds: int = Field(default=600, gt=0)
 
     @field_validator("database_url")
     @classmethod
