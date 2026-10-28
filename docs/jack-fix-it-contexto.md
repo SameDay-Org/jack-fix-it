@@ -55,7 +55,7 @@ House Cleaning, Handyman, Painting, Lawn & Landscaping, Moving & Assembly. Categ
 
 ### Fica fora (pós-MVP)
 
-Rastreamento do profissional no mapa em tempo real, background check automático (Checkr), entrada por voz, classificação de pedidos com IA, análise de ligações do BDC com IA, telefonia integrada e mascaramento de número, pagamento por marcos, gorjeta, cupons, planos recorrentes, contas B2B, "My Home" (histórico da casa), apps separados para cliente e profissional.
+Rastreamento do profissional no mapa em tempo real e aviso de "chegando" (v1.1, #103), background check automático (Checkr), entrada por voz, classificação de pedidos com IA, análise de ligações do BDC com IA, telefonia integrada e mascaramento de número, pagamento por marcos, gorjeta, cupons, planos recorrentes, contas B2B, "My Home" (histórico da casa), apps separados para cliente e profissional.
 
 ## 5. Perfis e status
 
@@ -93,6 +93,7 @@ Rastreamento do profissional no mapa em tempo real, background check automático
 - **Stripe Connect** com contas **Express** para os profissionais, no modelo **separate charges and transfers**.
 - O cliente paga no aceite do orçamento (PaymentIntent + Payment Sheet no app, com cartão, Apple Pay e Google Pay). O valor fica no saldo da plataforma.
 - Depois da confirmação (ou de 48 h sem resposta), o worker cria a transferência para a conta do profissional: valor − take rate.
+- Os payouts da conta Express para o banco do profissional são automáticos, no calendário padrão do Stripe, sem botão de saque. O app mostra o saldo e os payouts; a conta bancária é gerida no painel do Stripe Express por um login link, e o app nunca guarda dados bancários.
 - Disputa aberta bloqueia o repasse até o admin decidir: liberar, reembolsar parcial ou reembolsar total.
 - Pré-autorização de cartão **não** é usada, porque expira em poucos dias e o job pode ser agendado para semanas depois.
 - Stripe em modo teste até o lançamento.
@@ -176,6 +177,15 @@ O detalhe completo está no plano. Tabelas principais:
 - Hospedagem no Railway Pro: staging na `develop`, produção na `main` (16/10/2026, ADR 0001).
 - Endereço que o profissional vê numa oportunidade: só ZIP e cidade até o job ser pago (decided 2026-10-22 by Cesar, #49).
 - Orçamento expira em 48 horas depois de enviado (decided 2026-10-22 by Cesar, #50).
+- A contratação continua por orçamento: até N profissionais enviam um orçamento com preço fechado, e o cliente compara e aceita um. Do aceite em diante a experiência segue o padrão Uber/iFood: etapas ao vivo, um push a cada etapa e chat (decided 2026-10-28 by Cesar, #220).
+- Mapa ao vivo e aviso de "chegando" ficam para depois do MVP (v1.1, #103). No MVP, a tela do job mostra as etapas ao vivo (a caminho, chegou, em andamento, concluído), um push a cada etapa, o chat e o ETA informado pelo profissional (decided 2026-10-28 by Cesar, #103).
+- Payouts do profissional automáticos, no calendário padrão do Stripe, sem botão de saque. O app mostra o saldo e os payouts; a conta bancária é gerida no painel do Stripe Express por um login link, e o app nunca guarda dados bancários (decided 2026-10-28 by Cesar, #218, #219).
+- Estrutura do app: três abas embaixo para os dois papéis, Home / History (ícone de recibo) / Account (decided 2026-10-28 by Cesar, #213, #214, #215, #216, #217, #218, #219).
+  - Home do cliente: "Hi, [name]", o endereço atual e o caderno de endereços (até 4 endereços com nome, "usar minha localização", editáveis).
+  - History do cliente: o job atual no topo (tela ao vivo), depois os pedidos anteriores.
+  - Home do profissional: a carteira (saldo a caminho e disponível), o job atual e, abaixo deles, as novas oportunidades.
+  - History do profissional: recibos com o detalhamento das taxas.
+  - Account inclui Settings: idioma (EN/ES até a #7 decidir o português), notificações, formas de pagamento e, para o profissional, contas bancárias (pelo link do Stripe Express).
 
 **Pendentes:**
 
@@ -203,4 +213,5 @@ O detalhe completo está no plano. Tabelas principais:
 - **Take rate:** percentual da plataforma em cada job.
 - **GMV:** valor total transacionado.
 - **Repasse / transfer:** pagamento ao profissional pela conta Stripe Express.
+- **Payout:** envio automático do saldo da conta Stripe Express para o banco do profissional.
 - **PITR:** point-in-time recovery do Postgres.
