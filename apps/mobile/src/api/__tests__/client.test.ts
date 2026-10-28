@@ -226,4 +226,79 @@ describe("path parameters", () => {
     expect(call[1]?.body).toBeUndefined();
     expect(callHeader(call, "Content-Type")).toBeUndefined();
   });
+
+  // Signed in, with a value as a deep link could hand it over: the bearer token goes with the
+  // request only because the final URL is on the configured host, so each one must stay there.
+  describe("signed in, a crafted value stays one segment on the configured host", () => {
+    const ACCEPT = "/v1/requests/{request_id}/quotes/{quote_id}/accept";
+
+    beforeEach(() => {
+      sessionStore.setState({
+        status: "signedIn",
+        user,
+        accessToken: "access-1",
+        accessTokenExpiresAt: Date.now() + 900_000,
+        cleanupPending: false,
+      });
+      fetchMock.mockResolvedValue(jsonResponse(200, { items: [] }));
+    });
+
+    it.each([
+      ["an encoded slash", "a%2Fb", "a%252Fb"],
+      ["an encoded dot-dot", "%2e%2e", "%252e%252e"],
+      ["a backslash", "a\\b", "a%5Cb"],
+      ["Unicode", "ñandú 日本", "%C3%B1and%C3%BA%20%E6%97%A5%E6%9C%AC"],
+      [
+        "an absolute URL",
+        "https://evil.invalid/v1/auth/me",
+        "https%3A%2F%2Fevil.invalid%2Fv1%2Fauth%2Fme",
+      ],
+      [
+        "a protocol-relative URL",
+        "//evil.invalid/v1/auth/me",
+        "%2F%2Fevil.invalid%2Fv1%2Fauth%2Fme",
+      ],
+    ])("%s", async (_, value, segment) => {
+      await apiGet(QUOTES, { auth: true, params: { request_id: value } });
+      await apiPost(ACCEPT, undefined, {
+        auth: true,
+        params: { request_id: value, quote_id: "q-1" },
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[0][0]).toBe(`${API_ORIGIN}/v1/requests/${segment}/quotes`);
+      expect(fetchMock.mock.calls[1][0]).toBe(
+        `${API_ORIGIN}/v1/requests/${segment}/quotes/q-1/accept`,
+      );
+      for (const call of fetchMock.mock.calls) {
+        expect(new URL(call[0]).origin).toBe(API_ORIGIN);
+        expect(callHeader(call, "Authorization")).toBe("Bearer access-1");
+      }
+    });
+
+    it("refuses an omitted parameter and sends nothing", async () => {
+      // What a runtime caller could pass past the types: one of the path's parameters missing.
+      const params = { quote_id: "q-1" } as { request_id: string; quote_id: string };
+
+      await expect(apiPost(ACCEPT, undefined, { auth: true, params })).rejects.toThrow(
+        'Invalid value for the path parameter "request_id"',
+      );
+      await expect(apiGet(QUOTES, { auth: true, params })).rejects.toThrow(
+        'Invalid value for the path parameter "request_id"',
+      );
+
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("ignores a harmless extra parameter", async () => {
+      // A runtime caller's extra key is neither a segment nor a query string.
+      const params = { request_id: "r-1", quote_id: "q-1", extra: "../?x=1" };
+
+      await apiPost(ACCEPT, undefined, { auth: true, params });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toBe(`${API_ORIGIN}/v1/requests/r-1/quotes/q-1/accept`);
+      expect(callHeader(fetchMock.mock.calls[0], "Authorization")).toBe("Bearer access-1");
+    });
+  });
 });

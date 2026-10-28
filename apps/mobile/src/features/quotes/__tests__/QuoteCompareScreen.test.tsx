@@ -1,6 +1,7 @@
 import i18n from "@/i18n";
 
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react-native";
 import { router } from "expo-router";
 import {
   AccessibilityInfo,
@@ -16,11 +17,13 @@ import { dismissToast, toastStore } from "@/components/ui/toast";
 import { deferred } from "../../../api/__tests__/helpers";
 import { AcceptQuoteSheet } from "../AcceptQuoteSheet";
 import { QuoteCompareScreen } from "../QuoteCompareScreen";
-import type { CustomerQuote, CustomerQuoteList } from "../useRequestQuotes";
+import { useAcceptQuote } from "../useAcceptQuote";
+import { quotesQueryKey, type CustomerQuote, type CustomerQuoteList } from "../useRequestQuotes";
 import {
   fakeClock,
   freezeClock,
   navigation,
+  newQueryClient,
   NOW,
   quote,
   QUOTES,
@@ -230,6 +233,110 @@ describe("QuoteCompareScreen", () => {
       card(MARIA).getByTestId(`quote-${MARIA.id}-expiry`, { includeHiddenElements: true }),
     ).toBeTruthy();
     expect(acceptButtons()).toEqual([]);
+  });
+
+  /**
+   * Confirms María's quote, lands a refresh with `refreshed` while the POST is in flight (null:
+   * no refresh, her quote stays cached), then answers 200 while the follow-up GET fails. The 200
+   * is the word on the list: her quote is first, accepted, and nothing else can be accepted.
+   */
+  async function acceptWhileRefreshed(refreshed: CustomerQuote[] | null): Promise<void> {
+    const client = newQueryClient();
+    const answer = deferred<CustomerQuote>();
+    jest.mocked(apiPost).mockReturnValue(answer.promise);
+    await renderWithQuery(<App />, client);
+    await fireEvent.press(
+      await screen.findByRole("button", { name: "Accept the quote from María P. for $250" }),
+    );
+    await fireEvent.press(screen.getByTestId("accept-quote-confirm"));
+    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
+
+    if (refreshed) {
+      // A pull from before the sheet lands now, read at the expiry boundary: her row is gone.
+      jest.mocked(apiGet).mockResolvedValueOnce(list(refreshed));
+      await act(async () => pullToRefresh());
+      await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+      expect(screen.queryByTestId(`quote-${MARIA.id}`)).toBeNull();
+    }
+    const fetches = jest.mocked(apiGet).mock.calls.length;
+
+    jest.mocked(apiGet).mockRejectedValue(new NetworkError(false)); // the follow-up GET fails
+    await act(async () => answer.resolve({ ...MARIA, status: "accepted" }));
+
+    expect(router.back).toHaveBeenCalledTimes(1);
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith(
+      "Quote accepted. Payment comes next.",
+    );
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(fetches + 1));
+    await waitFor(() =>
+      expect(client.getQueryState(quotesQueryKey(REQUEST_ID))?.status).toBe("error"),
+    );
+
+    const others = refreshed ?? QUOTES.filter((item) => item.id !== MARIA.id);
+    expect(cardIds()).toEqual([MARIA, ...others].map((item) => `quote-${item.id}`));
+    expect(card(MARIA).getByText("Accepted")).toBeTruthy();
+    expect(acceptButtons()).toEqual([]);
+    expect(screen.queryByTestId("quote-list-error")).toBeNull();
+    expect(screen.queryByText("Accept this quote?")).toBeNull();
+    expect(toastStore.getState().current).toBeNull();
+  }
+
+  it.each([
+    ["another pending quote", [DAN]],
+    ["nothing", []],
+  ])(
+    "upserts the accepted quote when the cache lost it and holds %s; the failed refetch keeps it",
+    async (_, refreshed) => acceptWhileRefreshed(refreshed),
+  );
+
+  it("keeps the accepted quote first with no Accept buttons when the refetch fails", async () =>
+    acceptWhileRefreshed(null));
+
+  it("a 200 with nothing cached still caches the accepted quote", async () => {
+    const accepted = { ...MARIA, status: "accepted" as const };
+    jest.mocked(apiPost).mockResolvedValue(accepted);
+    jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+    const client = newQueryClient();
+    const { result } = await renderHook(() => useAcceptQuote(REQUEST_ID), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+    const onDone = jest.fn();
+
+    await act(async () => result.current.accept(MARIA.id, onDone));
+
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith("accepted"));
+    expect(client.getQueryData(quotesQueryKey(REQUEST_ID))).toEqual(list([accepted]));
+  });
+
+  it("cancelling the confirmation releases the guard, so Accept opens it again", async () => {
+    await renderWithQuery(<App />);
+    const accept = () =>
+      screen.getByRole("button", { name: "Accept the quote from María P. for $250" });
+    await screen.findByText("$250");
+
+    // The push is queued: the router is busy until the sheet lands and the list stays tappable.
+    await fireEvent.press(accept());
+    await act(async () => navigation.setNavigating(true));
+    await fireEvent.press(accept());
+    expect(router.push).toHaveBeenCalledTimes(1);
+    await act(async () => navigation.setNavigating(false)); // the sheet is up
+
+    // Cancel is a transition too; once it lands the list is on top again.
+    await fireEvent.press(screen.getByTestId("accept-quote-cancel"));
+    await act(async () => navigation.setNavigating(true));
+    expect(screen.queryByTestId("accept-quote-sheet")).toBeNull();
+    await act(async () => navigation.setNavigating(false));
+
+    await fireEvent.press(accept());
+    expect(router.push).toHaveBeenCalledTimes(2);
+    expect(router.push).toHaveBeenLastCalledWith({
+      pathname: "/requests/[id]/accept",
+      params: { id: REQUEST_ID, quote: MARIA.id },
+    });
+    expect(screen.getByTestId("accept-quote-sheet")).toBeTruthy();
+    expect(apiPost).not.toHaveBeenCalled();
   });
 
   it("409 shows the not-acceptable message and refetches", async () => {

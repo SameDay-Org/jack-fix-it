@@ -24,10 +24,21 @@ function outcomeOf(error: unknown): Exclude<AcceptOutcome, "accepted"> {
   return "failed";
 }
 
-/** The cached list with the accepted quote in its place, as the API will list it next. */
-const withAccepted = (list: CustomerQuoteList, accepted: CustomerQuote): CustomerQuoteList => ({
-  items: list.items.map((quote) => (quote.id === accepted.id ? accepted : quote)),
-});
+/**
+ * The cached list with the accepted quote in it, as the API will list it next. A 200 is the word
+ * on this quote, whatever the list said a moment ago: it replaces the cached copy when there is
+ * one and goes in when there is none (a refresh that ran during the accept read the list at the
+ * expiry boundary and left it out, or nothing was cached). The others stay as they were.
+ */
+const withAccepted = (
+  list: CustomerQuoteList | undefined,
+  accepted: CustomerQuote,
+): CustomerQuoteList => {
+  const items = list?.items ?? [];
+  return items.some((quote) => quote.id === accepted.id)
+    ? { items: items.map((quote) => (quote.id === accepted.id ? accepted : quote)) }
+    : { items: [accepted, ...items] };
+};
 
 /**
  * Accepts one quote of the request. The answer goes into the cached list at once, so the screen
@@ -59,9 +70,8 @@ export function useAcceptQuote(requestId: string) {
         params: { request_id: requestId, quote_id: quoteId },
       }),
     onSuccess: (accepted) => {
-      queryClient.setQueryData<CustomerQuoteList>(
-        quotesQueryKey(requestId),
-        (list) => list && withAccepted(list, accepted),
+      queryClient.setQueryData<CustomerQuoteList>(quotesQueryKey(requestId), (list) =>
+        withAccepted(list, accepted),
       );
       AccessibilityInfo.announceForAccessibility(t("quotes.acceptedNote"));
     },

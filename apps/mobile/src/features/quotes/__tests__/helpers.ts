@@ -126,16 +126,20 @@ type SheetParams = { id: string; quote: string };
 
 /**
  * A stand-in for the router: `push` to the accept sheet opens it (the test's harness renders it),
- * `back` closes it; the screen is focused unless a test blurs it. Use it as the `expo-router`
- * mock: `jest.mock("expo-router", () => jest.requireActual("./helpers").routerMock)`.
+ * `back` closes it; the screen is focused unless a test blurs it. The router reads as idle
+ * (`unstable_useIsNavigating` false) unless a test says a transition is under way with
+ * `navigation.setNavigating(true)` and lands it with `false`, as the real router does around a
+ * push or a back. Use it as the `expo-router` mock:
+ * `jest.mock("expo-router", () => jest.requireActual("./helpers").routerMock)`.
  */
 const nav = {
   sheet: null as SheetParams | null,
   focused: true,
+  navigating: false,
   listeners: new Set<() => void>(),
 };
 
-function update(change: Partial<Pick<typeof nav, "sheet" | "focused">>): void {
+function update(change: Partial<Pick<typeof nav, "sheet" | "focused" | "navigating">>): void {
   Object.assign(nav, change);
   nav.listeners.forEach((listener) => listener());
 }
@@ -148,8 +152,11 @@ const subscribe = (listener: () => void) => {
 export const navigation = {
   useSheet: () => useSyncExternalStore(subscribe, () => nav.sheet),
   setFocused: (focused: boolean) => update({ focused }),
-  reset: () => update({ sheet: null, focused: true }),
+  setNavigating: (navigating: boolean) => update({ navigating }),
+  reset: () => update({ sheet: null, focused: true, navigating: false }),
 };
+
+const useIsNavigating = () => useSyncExternalStore(subscribe, () => nav.navigating);
 
 export const routerMock = {
   router: {
@@ -158,7 +165,7 @@ export const routerMock = {
     dismissTo: jest.fn(),
   },
   useLocalSearchParams: () => nav.sheet ?? { id: REQUEST_ID },
-  unstable_useIsNavigating: () => false,
+  unstable_useIsNavigating: useIsNavigating,
   // Runs the effect on every focus and cleans it up on blur, as React Navigation does.
   useFocusEffect: (effect: () => void | (() => void)) => {
     const focused = useSyncExternalStore(subscribe, () => nav.focused);
