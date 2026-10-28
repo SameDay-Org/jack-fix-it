@@ -37,32 +37,41 @@ def gc_paused() -> Iterator[None]:
             gc.enable()
 
 
-def seconds_without_gc(work: Callable[[], object]) -> float:
+def seconds_without_gc(
+    work: Callable[[], object], *, clock: Callable[[], float] = time.perf_counter
+) -> float:
     """Wall-clock seconds of work() with the collector paused (gc_paused). Backtracking still
-    shows: the code itself runs slowly."""
+    shows: the code itself runs slowly. clock is a seam for test_helpers.py, which scripts the
+    readings instead of sleeping."""
     with gc_paused():
-        started = time.perf_counter()
+        started = clock()
         work()
-        return time.perf_counter() - started
+        return clock() - started
 
 
-async def async_seconds_without_gc(work: Callable[[], Awaitable[object]]) -> float:
+async def async_seconds_without_gc(
+    work: Callable[[], Awaitable[object]], *, clock: Callable[[], float] = time.perf_counter
+) -> float:
     """seconds_without_gc for a coroutine: the collector is paused for the timed await only."""
     with gc_paused():
-        started = time.perf_counter()
+        started = clock()
         await work()
-        return time.perf_counter() - started
+        return clock() - started
 
 
-def best_seconds_without_gc(work: Callable[[], object]) -> float:
+def best_seconds_without_gc(
+    work: Callable[[], object], *, clock: Callable[[], float] = time.perf_counter
+) -> float:
     """The fastest of TIMED_RUNS runs of work(), each timed by seconds_without_gc. One stalled
     run cannot fail a limit; a regression that slows every run still does."""
-    return min(seconds_without_gc(work) for _ in range(TIMED_RUNS))
+    return min(seconds_without_gc(work, clock=clock) for _ in range(TIMED_RUNS))
 
 
-async def async_best_seconds_without_gc(work: Callable[[], Awaitable[object]]) -> float:
+async def async_best_seconds_without_gc(
+    work: Callable[[], Awaitable[object]], *, clock: Callable[[], float] = time.perf_counter
+) -> float:
     """best_seconds_without_gc for a coroutine."""
-    return min([await async_seconds_without_gc(work) for _ in range(TIMED_RUNS)])
+    return min([await async_seconds_without_gc(work, clock=clock) for _ in range(TIMED_RUNS)])
 
 
 @asynccontextmanager

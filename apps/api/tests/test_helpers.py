@@ -3,7 +3,6 @@ work only, and a best of three ignores one stalled run but not a slow one."""
 
 import asyncio
 import gc
-import time
 from collections.abc import Callable, Iterator
 from typing import Final
 
@@ -17,13 +16,29 @@ from tests.helpers import (
     seconds_without_gc,
 )
 
-# The limit the best of three guards, and a stall longer than it.
+# The limit the best of three guards, a sample under it and a stalled one over it. Dyadic
+# fractions: the fake clock adds and subtracts them exactly, so durations compare with ==.
 LIMIT: Final = 0.25
-STALL: Final = 0.3
+FAST: Final = 0.125
+STALL: Final = 0.5
 
 
 class WorkError(Exception):
     pass
+
+
+class FakeClock:
+    """The clock the best-of-three tests pass to the helpers: it moves only when the work
+    advances it, so each sample's duration is scripted and nothing sleeps (#196). It records
+    whether the collector was on at each reading."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.reads: list[bool] = []
+
+    def __call__(self) -> float:
+        self.reads.append(gc.isenabled())
+        return self.now
 
 
 @pytest.fixture(autouse=True)
@@ -106,47 +121,67 @@ async def test_async_seconds_without_gc_pauses_across_the_await() -> None:
 
 @pytest.mark.parametrize("stalled", range(TIMED_RUNS))
 def test_best_of_three_ignores_one_stalled_run(stalled: int) -> None:
+    gc.enable()
+    clock = FakeClock()
     runs: list[None] = []
 
     def work() -> None:
-        if len(runs) == stalled:
-            time.sleep(STALL)
+        clock.now += STALL if len(runs) == stalled else FAST
         runs.append(None)
 
-    assert best_seconds_without_gc(work) < LIMIT
+    best = best_seconds_without_gc(work, clock=clock)
+
+    assert best == FAST < LIMIT
     assert len(runs) == TIMED_RUNS
+    assert clock.reads == [False] * (2 * TIMED_RUNS)
 
 
 @pytest.mark.parametrize("stalled", range(TIMED_RUNS))
 async def test_async_best_of_three_ignores_one_stalled_run(stalled: int) -> None:
+    gc.enable()
+    clock = FakeClock()
     runs: list[None] = []
 
     async def work() -> None:
-        if len(runs) == stalled:
-            await asyncio.sleep(STALL)
+        clock.now += STALL if len(runs) == stalled else FAST
+        await asyncio.sleep(0)
         runs.append(None)
 
-    assert await async_best_seconds_without_gc(work) < LIMIT
+    best = await async_best_seconds_without_gc(work, clock=clock)
+
+    assert best == FAST < LIMIT
     assert len(runs) == TIMED_RUNS
+    assert clock.reads == [False] * (2 * TIMED_RUNS)
 
 
 def test_best_of_three_fails_when_every_run_is_slow() -> None:
+    gc.enable()
+    clock = FakeClock()
     runs: list[None] = []
 
     def work() -> None:
-        time.sleep(STALL)
+        clock.now += STALL
         runs.append(None)
 
-    assert best_seconds_without_gc(work) > LIMIT
+    best = best_seconds_without_gc(work, clock=clock)
+
+    assert best == STALL > LIMIT
     assert len(runs) == TIMED_RUNS
+    assert clock.reads == [False] * (2 * TIMED_RUNS)
 
 
 async def test_async_best_of_three_fails_when_every_run_is_slow() -> None:
+    gc.enable()
+    clock = FakeClock()
     runs: list[None] = []
 
     async def work() -> None:
-        await asyncio.sleep(STALL)
+        clock.now += STALL
+        await asyncio.sleep(0)
         runs.append(None)
 
-    assert await async_best_seconds_without_gc(work) > LIMIT
+    best = await async_best_seconds_without_gc(work, clock=clock)
+
+    assert best == STALL > LIMIT
     assert len(runs) == TIMED_RUNS
+    assert clock.reads == [False] * (2 * TIMED_RUNS)
