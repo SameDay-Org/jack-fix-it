@@ -12,8 +12,8 @@ export type IconTileProps = {
   testID?: string;
 };
 
-// The icon sizes the glyphs are drawn for, each with a margin that keeps it centered at the same
-// proportion, and the radius token of that size.
+// The two icon sizes the glyphs are drawn for, each centered with a margin on the 4-pt grid (12 and
+// 16 dp), and the radius token that keeps the squircle in step with the tile.
 const TILE: Record<IconTileSize, { side: number; icon: number; radius: Radius }> = {
   md: { side: 56, icon: 32, radius: "md" },
   lg: { side: 80, icon: 48, radius: "lg" },
