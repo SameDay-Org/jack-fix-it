@@ -1,7 +1,7 @@
 import "@/i18n";
 
 import { act, renderRouter } from "expo-router/testing-library";
-import { createElement, Profiler, useLayoutEffect } from "react";
+import { createElement, Profiler, useLayoutEffect, useState } from "react";
 import { Text } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -48,17 +48,21 @@ jest.mock(
 // Which screens are mounted, as of each commit under the gate. A screen's layout effect runs in
 // the commit that mounts it and its cleanup in the one that removes it, both before the
 // Profiler's `onRender` for that commit, so each entry is what that commit puts on screen.
+// `lifecycle` numbers each screen instance, so a screen that is torn down and built again shows.
 const mounted = new Set<string>();
-const mounts: string[] = [];
+const lifecycle: string[] = [];
+let instances = 0;
 let commits: string[][] = [];
 function Marker({ name }: { name: string }) {
+  const [instance] = useState(() => ++instances);
   useLayoutEffect(() => {
     mounted.add(name);
-    mounts.push(name);
+    lifecycle.push(`${name} ${instance} mount`);
     return () => {
       mounted.delete(name);
+      lifecycle.push(`${name} ${instance} unmount`);
     };
-  }, [name]);
+  }, [name, instance]);
   return <Text>{name}</Text>;
 }
 
@@ -80,9 +84,12 @@ const routes = {
   "(app)/index": () => <Marker name="home" />,
 };
 
+afterEach(() => jest.restoreAllMocks());
+
 beforeEach(() => {
   mounted.clear();
-  mounts.length = 0;
+  lifecycle.length = 0;
+  instances = 0;
   commits = [];
 });
 
@@ -91,6 +98,7 @@ describe("the session gate switching groups (#177)", () => {
     mockSession.state = SESSION_SIGNED_IN;
     const result = await renderRouter(routes, { initialUrl: "/" });
     expect(result.getPathname()).toBe("/");
+    expect(lifecycle).toEqual(["home 1 mount"]);
     commits = [];
 
     await act(async () => mockSession.set(SESSION_SIGNED_OUT));
@@ -101,7 +109,34 @@ describe("the session gate switching groups (#177)", () => {
     // a few commits later: those commits held no screen at all (plain navy on the device).
     expect(commits).not.toContainEqual([]);
     expect(commits.at(-1)).toEqual(["welcome"]);
+    // One Welcome, built once: a second replace would tear it down and build another.
+    expect(lifecycle).toEqual(["home 1 mount", "home 1 unmount", "welcome 2 mount"]);
   });
+
+  it.each([
+    ["in the same update", false],
+    ["in a later update", true],
+  ])(
+    "Welcome survives a second signed-out notification %s (the session's cleanup)",
+    async (_when, later) => {
+      mockSession.state = SESSION_SIGNED_IN;
+      const result = await renderRouter(routes, { initialUrl: "/" });
+
+      await act(async () => {
+        mockSession.set(SESSION_SIGNED_OUT);
+        if (!later) mockSession.set({ ...SESSION_SIGNED_OUT, cleanupPending: true });
+      });
+      // Once the switch has landed, a new snapshot of the same session leaves the gate's effect
+      // alone; these cases pin that, whatever the effect comes to depend on.
+      if (later) {
+        await act(async () => mockSession.set({ ...SESSION_SIGNED_OUT, cleanupPending: true }));
+      }
+      await act(async () => mockSession.set(SESSION_SIGNED_OUT));
+
+      expect(result.getPathname()).toBe("/welcome");
+      expect(lifecycle).toEqual(["home 1 mount", "home 1 unmount", "welcome 2 mount"]);
+    },
+  );
 
   it("leaving the offline screen for another account mounts Welcome in the next commit, once", async () => {
     // A restore that could not reach the server: the groups are not mounted yet, and the router
@@ -117,19 +152,42 @@ describe("the session gate switching groups (#177)", () => {
     // the replace from its layout effect is the very next commit, before that one is drawn.
     // Before #177 the redirect's own replace landed two commits later.
     expect(commits.slice(0, 2)).toEqual([[], ["welcome"]]);
-    expect(mounts).toEqual(["welcome"]); // the redirect's queued replace does not remount it
+    expect(lifecycle).toEqual(["welcome 1 mount"]); // the redirect's queued replace does not remount it
   });
 
-  it("a sign-in mounts home in the commit that takes the auth screen away", async () => {
+  it("a sign-in mounts home in the commit that takes the auth screen away, once", async () => {
     mockSession.state = SESSION_SIGNED_OUT;
     const result = await renderRouter(routes, { initialUrl: "/login" });
     expect(result.getPathname()).toBe("/login");
+    expect(lifecycle).toEqual(["welcome 1 mount", "login 2 mount"]); // Welcome is under Login
+    lifecycle.length = 0;
     commits = [];
 
     await act(async () => mockSession.set(SESSION_SIGNED_IN));
+    await act(async () => mockSession.set({ ...SESSION_SIGNED_IN })); // a later snapshot, same group
 
     expect(result.getPathname()).toBe("/");
     expect(commits).not.toContainEqual([]);
     expect(commits.at(-1)).toEqual(["home"]);
+    expect(lifecycle).toEqual(["welcome 1 unmount", "login 2 unmount", "home 3 mount"]);
   });
+
+  it.each([
+    ["signed out", SESSION_SIGNED_OUT, "/welcome", ["welcome 1 mount"]],
+    ["signed in", SESSION_SIGNED_IN, "/", ["home 1 mount"]],
+  ])(
+    // An app launch passes through `restoring` first, so its gate mounts after the router does;
+    // here the session is known in the router's first commit.
+    "a session %s at the router's first commit reads no navigation state before the router has it",
+    async (_status, session, pathname, expected) => {
+      const error = jest.spyOn(console, "error");
+      mockSession.state = session;
+
+      const result = await renderRouter(routes, { initialUrl: "/" });
+
+      expect(result.getPathname()).toBe(pathname);
+      expect(lifecycle).toEqual(expected); // the guards still come from the session
+      expect(error).not.toHaveBeenCalledWith(expect.stringContaining("hasn't been initialized"));
+    },
+  );
 });

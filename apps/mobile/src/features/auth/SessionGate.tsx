@@ -1,5 +1,5 @@
 import { Stack, useNavigationContainerRef } from "expo-router";
-import { useLayoutEffect, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Text } from "react-native";
 
@@ -44,8 +44,13 @@ type Group = "(app)" | "(auth)";
 
 type ContainerRef = ReturnType<typeof useNavigationContainerRef>;
 
-/** The group the gate's stack has focused: the root slot's focused route holds that stack. */
+/**
+ * The group the gate's stack has focused: the root slot's focused route holds that stack. None
+ * while the router mounts with the gate: the container sets its ref after the gate's first layout
+ * effect.
+ */
 function focusedGroup(navigation: ContainerRef): Group | undefined {
+  if (!navigation.isReady()) return undefined;
   const root = navigation.getRootState();
   const stack = root?.routes[root.index]?.state;
   const name = stack?.routes[stack.index ?? stack.routes.length - 1]?.name;
@@ -67,12 +72,22 @@ function focusedGroup(navigation: ContainerRef): Group | undefined {
 function GroupStack({ group }: { group: Group }) {
   const navigation = useNavigationContainerRef();
   const [shown, setShown] = useState(group);
+  // The group of the last replace. Right after it the container can still report the group that
+  // left (its state read refreshes in an effect that runs after this one under Jest), and a second
+  // replace would build the new group's screen again.
+  const replaced = useRef<Group | undefined>(undefined);
 
   useLayoutEffect(() => {
-    const focused = focusedGroup(navigation);
-    if (shown === group && (focused === undefined || focused === group)) return;
+    if (shown === group) {
+      // The guards already match the session: only a stack mounted over the other group's focus
+      // needs the replace, once.
+      if (replaced.current === group) return;
+      const focused = focusedGroup(navigation);
+      if (focused === undefined || focused === group) return;
+    }
     // Synchronous: `dispatch` queues the action for a later render, as the redirect does.
     navigation.dispatchSync({ type: "REPLACE", payload: { name: group } });
+    replaced.current = group;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the guards must change in the same commit as the navigation state dispatched above; an update from a layout effect is committed before paint.
     setShown(group);
   }, [group, navigation, shown]);
