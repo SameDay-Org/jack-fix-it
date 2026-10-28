@@ -1,6 +1,6 @@
 import "@/i18n";
 
-import { act, renderRouter } from "expo-router/testing-library";
+import { act, renderRouter, screen } from "expo-router/testing-library";
 import { createElement, Profiler, useLayoutEffect, useState } from "react";
 import { Text } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -66,6 +66,16 @@ function Marker({ name }: { name: string }) {
   return <Text>{name}</Text>;
 }
 
+// The (app) layout's session shell, what that group holds in a commit without a signed-in
+// session (#205). It is hidden from accessibility, so the query must include hidden elements.
+function shellShown(): boolean {
+  try {
+    return screen.queryByTestId("session-shell", { includeHiddenElements: true }) !== null;
+  } catch {
+    return false; // the router's first commit: the testing library has no screen yet
+  }
+}
+
 const routes = {
   _layout: () =>
     createElement(
@@ -73,7 +83,10 @@ const routes = {
       { initialMetrics: METRICS },
       createElement(
         Profiler,
-        { id: "gate", onRender: () => commits.push([...mounted].sort()) },
+        {
+          id: "gate",
+          onRender: () => commits.push([...mounted, ...(shellShown() ? ["shell"] : [])].sort()),
+        },
         createElement(SessionGate),
       ),
     ),
@@ -106,8 +119,11 @@ describe("the session gate switching groups (#177)", () => {
     expect(result.getPathname()).toBe("/welcome");
     expect(commits.length).toBeGreaterThan(0);
     // Before #177 the guarded home turned into a redirect that renders nothing, and Welcome came
-    // a few commits later: those commits held no screen at all (plain navy on the device).
+    // a few commits later: those commits held no screen at all (plain navy on the device). The
+    // commit that drops home now holds the (app) layout's shell (#205); it is never drawn, since
+    // the replace from the gate's layout effect lands in the next commit, before paint.
     expect(commits).not.toContainEqual([]);
+    expect(commits[0]).toEqual(["shell"]);
     expect(commits.at(-1)).toEqual(["welcome"]);
     // One Welcome, built once: a second replace would tear it down and build another.
     expect(lifecycle).toEqual(["home 1 mount", "home 1 unmount", "welcome 2 mount"]);

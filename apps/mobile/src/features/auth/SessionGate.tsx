@@ -65,9 +65,12 @@ function focusedGroup(navigation: ContainerRef): Group | undefined {
  * a layout effect replaces the group and moves the guards together: React commits that before
  * the frame is drawn, so the group that leaves stays on screen until the one that arrives is
  * built. The group that leaves renders once more with the new session meanwhile; that render is
- * never drawn, and its screens render nothing without a user. A stack mounted while the router
- * has the other group focused (after the offline screen, or a cold start signed out on the
- * launch URL) guards from the session at once, as before, and is replaced the same way.
+ * never drawn, and it holds nothing private: `shown` is presentation state only, and without a
+ * signed-in session the `(app)` layout renders its session shell in place of its screens (see
+ * `AppLayout`), so the first signed-out commit has no private screen, value or control. A stack
+ * mounted while the router has the other group focused (after the offline screen, or a cold
+ * start signed out on the launch URL) guards from the session at once, as before, and is
+ * replaced the same way.
  */
 function GroupStack({ group }: { group: Group }) {
   const navigation = useNavigationContainerRef();
