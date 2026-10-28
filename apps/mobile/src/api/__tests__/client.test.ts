@@ -1,6 +1,5 @@
 import { apiGet, apiPost } from "../client";
 import { ApiError, NetworkError } from "../errors";
-import type { GetPath } from "../http";
 import { sessionStore } from "../session";
 import {
   API_ORIGIN,
@@ -16,6 +15,9 @@ import {
 
 jest.mock("../config", () => jest.requireActual("./helpers").configMock);
 jest.mock("expo-secure-store", () => jest.requireActual("./helpers").secureStoreMock);
+
+/** A string that reached the client at runtime, typed as a GET path without parameters. */
+const asPath = (url: string) => url as "/v1/auth/me";
 
 let fetchMock: FetchMock;
 let consoleWatch: ReturnType<typeof watchConsole>;
@@ -181,13 +183,47 @@ describe("apiGet / apiPost", () => {
       cleanupPending: false,
     });
 
-    await expect(
-      apiGet("https://evil.invalid/v1/auth/me" as GetPath, { auth: true }),
-    ).rejects.toThrow(/outside the configured API host/);
-    await expect(apiGet("//evil.invalid/v1/auth/me" as GetPath, { auth: true })).rejects.toThrow(
+    await expect(apiGet(asPath("https://evil.invalid/v1/auth/me"), { auth: true })).rejects.toThrow(
+      /outside the configured API host/,
+    );
+    await expect(apiGet(asPath("//evil.invalid/v1/auth/me"), { auth: true })).rejects.toThrow(
       /outside the configured API host/,
     );
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("path parameters", () => {
+  const QUOTES = "/v1/requests/{request_id}/quotes";
+
+  it("fills each one, encoded as exactly one segment", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { items: [] }));
+
+    await apiGet(QUOTES, { params: { request_id: "a/b?c#d e" } });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(`${API_ORIGIN}/v1/requests/a%2Fb%3Fc%23d%20e/quotes`);
+  });
+
+  it.each(["..", ".", ""])("refuses %j and sends nothing", async (value) => {
+    await expect(apiGet(QUOTES, { params: { request_id: value } })).rejects.toThrow(
+      'Invalid value for the path parameter "request_id"',
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("posts with no body and no Content-Type to a path that takes none", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, {}));
+
+    await apiPost("/v1/requests/{request_id}/quotes/{quote_id}/accept", undefined, {
+      params: { request_id: "r-1", quote_id: "q-1" },
+    });
+
+    const call = fetchMock.mock.calls[0];
+    expect(call[0]).toBe(`${API_ORIGIN}/v1/requests/r-1/quotes/q-1/accept`);
+    expect(call[1]?.method).toBe("POST");
+    expect(call[1]?.body).toBeUndefined();
+    expect(callHeader(call, "Content-Type")).toBeUndefined();
   });
 });
