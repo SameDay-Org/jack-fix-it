@@ -109,14 +109,13 @@ class ProService:
         current verification. Two queries, whatever the count."""
         return await self._cards(pro_ids, hireable_only=False)
 
-    async def hireable_details(self, pro_id: uuid.UUID) -> ProPublicDetails | None:
-        """The public profile of a pro who can still be hired, by profile id; None for any
-        other, with the same rule as `hireable_cards` (#53). Four queries (the card's two, the
-        bio with the category ids, then the categories), whatever the pro has; three when they
-        list no category."""
-        card = (await self.hireable_cards({pro_id})).get(pro_id)
-        details = await self._profiles.public_details(pro_id) if card else None
-        if card is None or details is None:
+    async def details_of(self, card: ProCard) -> ProPublicDetails | None:
+        """The public profile behind a card the caller took from `hireable_cards` (#53): the
+        caller resolves who may be shown first, so the reads here happen only for a shown pro.
+        Two queries (the bio with the category ids, then the categories), whatever the pro
+        has; one when they list no category. None when the profile is gone."""
+        details = await self._profiles.public_details(card.pro_id)
+        if details is None:  # pragma: no cover - the card was read from this profile just now
             return None
         bio, created_at, category_ids = details
         return ProPublicDetails(

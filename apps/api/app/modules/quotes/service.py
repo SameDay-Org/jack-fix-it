@@ -27,9 +27,11 @@ name goes through the same check and is withheld (null) when it shows a contact 
 
 The customer reads the public profile of the pro behind one of those quotes (#53) only while
 the list shows that quote, with the same reads and the same pro filter; else 404, the same body
-as the request itself. The accepted quote of a pro who can no longer be hired is not listed, so
-its profile is 404 too: the acceptance's replay (below) is not the list. The bio is redacted
-like the scope; the profile's creation shows as its month only.
+as the request itself. The shown quotes are resolved before the asked-for id is looked at, so
+every denial on a request does the same reads and loads nothing the list does not. The
+accepted quote of a pro who can no longer be hired is not listed, so its profile is 404 too:
+the acceptance's replay (below) is not the list. The bio is redacted like the scope; the
+profile's creation shows as its month only.
 
 The customer accepts one of those quotes. After their own request (else 404) and locking it,
 then the quote (else 404, the same body, for a quote of another request), in this order:
@@ -198,13 +200,19 @@ class QuoteService:
         self, user: UserAccount, request_id: uuid.UUID, quote_id: uuid.UUID
     ) -> ProPublicProfile:
         """The public profile of the pro behind a quote the list shows now (see the module
-        doc); else 404. One query each for the request, its quotes, the pro, their name, their
-        bio with their category ids, the categories and their contact points."""
-        quote = next((q for q in await self._listed(user, request_id) if q.id == quote_id), None)
-        details = await self._pros.hireable_details(quote.pro_id) if quote else None
-        if details is None:
+        doc); else 404. The shown quotes come first, with the list's own reads (the request,
+        its quotes, the cards of their pros who can still be hired), and the candidate is
+        matched among them: a denial costs the same reads whether the id is unknown, another
+        request's, expired, withdrawn or a hidden pro's, and loads nothing past the cards.
+        For a shown quote, one query more each for the bio with the category ids, the
+        categories and the pro's contact points."""
+        quotes = await self._listed(user, request_id)
+        cards = await self._pros.hireable_cards({quote.pro_id for quote in quotes})
+        shown = {quote.id: cards[quote.pro_id] for quote in quotes if quote.pro_id in cards}
+        card = shown.get(quote_id)
+        details = await self._pros.details_of(card) if card else None
+        if card is None or details is None:
             raise NotFoundError
-        card = details.card
         # The pro's own details, for the known-value pass only: never logged or returned.
         contact = (await self._users.contact_points({card.user_id})).get(card.user_id)
         return ProPublicProfile(

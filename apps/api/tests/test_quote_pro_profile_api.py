@@ -431,8 +431,14 @@ async def test_profile_is_404_wherever_the_list_would_hide_the_quote(
     assert response.json() == NOT_FOUND
     assert response.content == unknown_request.content  # an id reveals nothing
     listed = await db_client.get(f"/v1/requests/{request_id}/quotes", headers=headers)
-    # The list hides it too: a 404 for a stranger, else not among the items.
-    assert listed.status_code == 404 or str(quote_id) not in listed.text
+    # The list hides it too: a 404 for a stranger, else a list without it. Any other answer
+    # (an error, say) fails here rather than passing for not naming the quote.
+    if case is _another_customers_request:
+        assert listed.status_code == 404
+        assert listed.json() == NOT_FOUND
+    else:
+        assert listed.status_code == 200, listed.text
+        assert str(quote_id) not in {item["id"] for item in listed.json()["items"]}
 
 
 async def test_every_listed_quote_has_a_profile(
@@ -576,9 +582,57 @@ async def test_profile_query_count_is_constant(
         assert len(response.json()["categories"]) == categories
         counts.append(len(statements))
 
-    # The caller's account, the request, its quotes, the pro, their name, their bio with their
-    # category ids, the categories, their contacts.
+    # The caller's account, the request, its quotes, the pros who can still be hired, their
+    # names, the pro's bio with their category ids, the categories, their contacts.
     assert counts == [8, 8]
+
+
+async def test_profile_denials_do_equal_sql_work(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: World
+) -> None:
+    """Vault round 1: whatever hides the asked-for quote, the denial does the list's reads and
+    nothing more, so the work reveals nothing about the id (a hidden pro's quote once cost one
+    read more than an unknown id). The shown quote on the same request opens."""
+    request_id = await make_request(db_session, world, RequestStatus.QUOTE_READY)
+    other = await make_request(db_session, world, RequestStatus.QUOTE_READY)
+    shown = await add_quote(db_session, request_id, await quoting_pro(db_session))
+    lost_approval = await quoting_pro(db_session, verification=ProVerificationStatus.REJECTED)
+    lost_payouts = await quoting_pro(db_session, payouts_enabled=False)
+    candidates = {
+        "unknown": uuid.uuid4(),
+        "foreign": await add_quote(db_session, other, await quoting_pro(db_session)),
+        "expired": await add_quote(
+            db_session, request_id, await quoting_pro(db_session), status=QuoteStatus.EXPIRED
+        ),
+        "withdrawn": await add_quote(
+            db_session, request_id, await quoting_pro(db_session), status=QuoteStatus.WITHDRAWN
+        ),
+        "lost_approval": await add_quote(db_session, request_id, lost_approval),
+        "lost_payouts": await add_quote(db_session, request_id, lost_payouts),
+    }
+    db_session.expunge_all()
+    with counted_statements(db_session) as list_statements:
+        listed = await db_client.get(f"/v1/requests/{request_id}/quotes", headers=customer(world))
+    assert [item["id"] for item in listed.json()["items"]] == [str(shown)]
+
+    counts: dict[str, int] = {}
+    bodies: set[bytes] = set()
+    for name, quote_id in candidates.items():
+        db_session.expunge_all()  # nothing served from the identity map
+        with counted_statements(db_session) as statements:
+            response = await profile_of(db_client, world, request_id, quote_id)
+        assert response.status_code == 404, name
+        assert response.json() == NOT_FOUND, name
+        bodies.add(response.content)
+        counts[name] = len(statements)
+        # Nothing the list does not read: no bio, no categories, no contact points.
+        assert set(statements) <= set(list_statements), name
+
+    assert len(bodies) == 1
+    # The caller's account, the request, its quotes, the pros who can still be hired, their
+    # names: the list's reads before its contact points, for every candidate alike.
+    assert counts == dict.fromkeys(candidates, 5)
+    assert (await profile_of(db_client, world, request_id, shown)).status_code == 200
 
 
 # The contract
