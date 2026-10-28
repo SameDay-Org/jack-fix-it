@@ -38,15 +38,8 @@ const RADIUS: Record<Radius, string> = {
 const PULSE_DURATION_MS = 900;
 const PULSE_MIN_OPACITY = 0.4;
 
-export function Skeleton({
-  width = "100%",
-  height = 16,
-  radius = "sm",
-  circle = false,
-  className,
-  testID,
-}: SkeletonProps) {
-  const { t } = useTranslation();
+/** The placeholder pulse as an animated style; static under Reduce Motion. Every skeleton shape uses it. */
+export function useSkeletonPulse() {
   const reducedMotion = useReducedMotion();
   const opacity = useSharedValue(1);
 
@@ -66,7 +59,19 @@ export function Skeleton({
     };
   }, [opacity, reducedMotion]);
 
-  const animatedStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
+  return useAnimatedStyle(() => ({ opacity: opacity.value }));
+}
+
+export function Skeleton({
+  width = "100%",
+  height = 16,
+  radius = "sm",
+  circle = false,
+  className,
+  testID,
+}: SkeletonProps) {
+  const { t } = useTranslation();
+  const animatedStyle = useSkeletonPulse();
   const shape = circle ? { width: height, height } : { width, height };
 
   return (
