@@ -135,7 +135,7 @@ describe("QuoteCompareScreen", () => {
 
     const summary = screen.getByTestId(`quote-${MARIA.id}-summary`);
     expect(summary.props.accessible).toBe(true);
-    expect(summary.props.accessibilityLabel).toMatch(
+    expect(String(summary.props.accessibilityLabel).replaceAll("\u00A0", " ")).toMatch(
       /^María P\., Verified by Jack Fix It, \$250, Starts .+, About 1 h 30 min, No ratings yet, 12 jobs, 8 years of experience, Expires in 6 h$/,
     );
     // The footer's expiry is in that label already: a screen reader does not read it twice.

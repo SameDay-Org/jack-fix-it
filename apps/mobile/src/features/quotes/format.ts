@@ -33,13 +33,22 @@ export function formatMoney(cents: number, locale: string = formatLocale()): str
   }).format(cents / CENTS_PER_DOLLAR);
 }
 
-/** A span of minutes as "45 min", "2 h" or "1 h 30 min" (the units read the same in ES). */
+const NO_BREAK_SPACE = "\u00A0";
+
+/** The text with no-break spaces, so a line never breaks inside it ("1 h 30 min", "12 jobs"). */
+export const keepTogether = (text: string): string => text.replace(/ /g, NO_BREAK_SPACE);
+
+/** Short facts in one line, "★ 4.8 · 12 jobs": a line may break after a dot, never inside a fact. */
+export const joinFacts = (facts: readonly string[]): string =>
+  facts.map(keepTogether).join(`${NO_BREAK_SPACE}· `);
+
+/** A span of minutes as "45 min", "2 h" or "1 h 30 min" (the units read the same in ES), unbroken. */
 export function formatMinutes(t: TFunction, minutes: number): string {
   const hours = Math.floor(minutes / MINUTES_PER_HOUR);
   const rest = minutes % MINUTES_PER_HOUR;
-  if (hours === 0) return t("quotes.span.minutes", { minutes: rest });
-  if (rest === 0) return t("quotes.span.hours", { hours });
-  return t("quotes.span.hoursMinutes", { hours, minutes: rest });
+  if (hours === 0) return keepTogether(t("quotes.span.minutes", { minutes: rest }));
+  if (rest === 0) return keepTogether(t("quotes.span.hours", { hours }));
+  return keepTogether(t("quotes.span.hoursMinutes", { hours, minutes: rest }));
 }
 
 /** The average rating with one decimal in the app's locale ("4.8", "4,8"); `null` before any review. */

@@ -7,6 +7,9 @@ import { NOW, quote } from "./helpers";
 
 const MINUTE_MS = 60_000;
 const t = i18n.t.bind(i18n);
+const NBSP = "\u00A0";
+/** No-break spaces read as spaces: the assertions below are about the words. */
+const plain = (text: string) => text.replaceAll(NBSP, " ");
 
 afterEach(async () => {
   await i18n.changeLanguage("en");
@@ -29,9 +32,9 @@ describe("format", () => {
   });
 
   it("formats duration, rating and jobs (singular/plural) in EN and ES", async () => {
-    expect(t("quotes.duration", { span: formatMinutes(t, 45) })).toBe("About 45 min");
-    expect(t("quotes.duration", { span: formatMinutes(t, 120) })).toBe("About 2 h");
-    expect(t("quotes.duration", { span: formatMinutes(t, 90) })).toBe("About 1 h 30 min");
+    expect(plain(t("quotes.duration", { span: formatMinutes(t, 45) }))).toBe("About 45 min");
+    expect(plain(t("quotes.duration", { span: formatMinutes(t, 120) }))).toBe("About 2 h");
+    expect(plain(t("quotes.duration", { span: formatMinutes(t, 90) }))).toBe("About 1 h 30 min");
     expect(formatRating("4.80", "en")).toBe("4.8");
     expect(formatRating(null, "en")).toBeNull();
     expect(t("quotes.jobs", { count: 1 })).toBe("1 job");
@@ -41,13 +44,20 @@ describe("format", () => {
     expect(t("quotes.years", { count: 8 })).toBe("8 years of experience");
 
     await i18n.changeLanguage("es");
-    expect(t("quotes.duration", { span: formatMinutes(t, 120) })).toBe("Aprox. 2 h");
-    expect(t("quotes.duration", { span: formatMinutes(t, 90) })).toBe("Aprox. 1 h 30 min");
+    expect(plain(t("quotes.duration", { span: formatMinutes(t, 120) }))).toBe("Aprox. 2 h");
+    expect(plain(t("quotes.duration", { span: formatMinutes(t, 90) }))).toBe("Aprox. 1 h 30 min");
     expect(formatRating("4.80", "es")).toBe("4,8");
     expect(t("quotes.jobs", { count: 1 })).toBe("1 trabajo");
     expect(t("quotes.jobs", { count: 12 })).toBe("12 trabajos");
     expect(t("quotes.years", { count: 1 })).toBe("1 año de experiencia");
     expect(t("quotes.years", { count: 8 })).toBe("8 años de experiencia");
+  });
+
+  it("never breaks a line inside a span or a fact, only after a fact's dot", () => {
+    expect(formatMinutes(t, 90)).toBe(`1${NBSP}h${NBSP}30${NBSP}min`);
+    expect(quoteText(t, quote(1), "open", NOW, "en-US").stats).toBe(
+      `★${NBSP}4.8${NBSP}· 12${NBSP}jobs${NBSP}· 8${NBSP}years${NBSP}of${NBSP}experience`,
+    );
   });
 
   it("writes dates with weekday, month, day and time in the device's time zone", () => {
@@ -74,12 +84,12 @@ describe("format", () => {
   it("reads a card as one sentence: pro, verified, price, start and the rest", () => {
     const text = quoteText(t, quote(1, { amount_cents: 18_050 }), "open", NOW, "en-US");
 
-    expect(text.summary).toMatch(
+    expect(plain(text.summary)).toMatch(
       /^Pro 1\., Verified by Jack Fix It, \$180\.50, Starts .+, About 2 h, Rated 4\.8, 12 jobs, 8 years of experience, Expires in 6 h$/,
     );
-    expect(quoteText(t, quote(2, { pro: { rating_avg: null } }), "open", NOW, "en-US").stats).toBe(
-      "New · 12 jobs · 8 years of experience",
-    );
+    expect(
+      plain(quoteText(t, quote(2, { pro: { rating_avg: null } }), "open", NOW, "en-US").stats),
+    ).toBe("New · 12 jobs · 8 years of experience");
   });
 });
 

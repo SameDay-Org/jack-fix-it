@@ -39,7 +39,7 @@ export function TextSkeleton({ type, width = "100%", testID }: TextSkeletonProps
         importantForAccessibility="no-hide-descendants"
         className={cx(TYPE_CLASS[type], "opacity-0")}
       >
-        {" "}
+        {"\u00A0"}
       </Text>
       <View className="absolute inset-0 justify-center">
         <Skeleton width={width} height={tokens.fontSize[type].size} />

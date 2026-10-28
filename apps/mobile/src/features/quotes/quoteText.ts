@@ -2,7 +2,14 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
 import { expiryAt } from "./expiry";
-import { formatDateTime, formatLocale, formatMinutes, formatMoney, formatRating } from "./format";
+import {
+  formatDateTime,
+  formatLocale,
+  formatMinutes,
+  formatMoney,
+  formatRating,
+  joinFacts,
+} from "./format";
 import type { CustomerQuote } from "./useRequestQuotes";
 
 /**
@@ -64,9 +71,11 @@ export function quoteText(
     pro.years_of_experience === null ? null : t("quotes.years", { count: pro.years_of_experience });
   const expiry = expiryText(t, quote, now, locale);
 
-  const stats = [rating === null ? t("quotes.ratingNew") : `★ ${rating}`, jobs, years]
-    .filter((part) => part !== null)
-    .join(" · ");
+  const stats = joinFacts(
+    [rating === null ? t("quotes.ratingNew") : `★ ${rating}`, jobs, years].filter(
+      (part) => part !== null,
+    ),
+  );
   const summary = [
     name,
     pro.verified ? t("quotes.verified") : null,

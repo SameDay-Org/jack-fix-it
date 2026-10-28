@@ -42,21 +42,22 @@ export function QuoteCard({ quote, state, now, onAccept }: QuoteCardProps) {
         className="gap-3"
         testID={`${testID}-summary`}
       >
-        <View className="flex-row items-start justify-between gap-3">
-          {/* Full width, not fit-content: Android can wrap a one-line text measured to fit by a
-              sub-pixel ("Jack pro" broke in two at 160 dpi). */}
-          <View className="flex-1 gap-1">
-            <Text className="text-title-1 text-navy-900">{text.price}</Text>
-            <Text className="text-callout text-gray-500">{text.duration}</Text>
-            <Text className="text-callout text-gray-500">{text.start}</Text>
+        {/* Full-width lines, not fit-content: Android can wrap a one-line text measured to fit
+            by a sub-pixel ("Jack pro" broke in two at 160 dpi). The Accepted badge shares only
+            the price's row, so the duration and the start keep the card's width. */}
+        <View className="gap-1">
+          <View className="flex-row items-center justify-between gap-3">
+            <Text className="flex-1 text-title-1 text-navy-900">{text.price}</Text>
+            {state === "accepted" ? (
+              <StatusBadge
+                label={t("quotes.accepted")}
+                tone="success"
+                testID={`${testID}-accepted`}
+              />
+            ) : null}
           </View>
-          {state === "accepted" ? (
-            <StatusBadge
-              label={t("quotes.accepted")}
-              tone="success"
-              testID={`${testID}-accepted`}
-            />
-          ) : null}
+          <Text className="text-callout text-gray-500">{text.duration}</Text>
+          <Text className="text-callout text-gray-500">{text.start}</Text>
         </View>
         <View className="gap-1">
           <Text className="text-headline text-navy-900">{text.pro}</Text>
