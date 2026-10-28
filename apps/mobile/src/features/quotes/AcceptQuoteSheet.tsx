@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Text, View } from "react-native";
+import { AccessibilityInfo, Text, View } from "react-native";
 
 import { Button, SheetContent, StatusBadge } from "@/components/ui";
 
@@ -37,10 +37,15 @@ export function AcceptQuoteSheet() {
   if (!quote) return null;
   const text = quoteText(t, quote, "open", now);
 
-  // The hook tells the customer how it went; the sheet only closes, or stays to show a failure.
+  // The hook tells the customer how it went; the sheet only closes, or stays to show a failure,
+  // said aloud on both platforms (a live region alone is Android-only).
   const onDone = (outcome: AcceptOutcome) => {
-    if (outcome === "failed") setFailed(true);
-    else if (outcome !== "signedOut") router.back(); // signed out: the session's screens take over
+    if (outcome === "failed") {
+      setFailed(true);
+      AccessibilityInfo.announceForAccessibility(t("quotes.confirm.failed"));
+    } else if (outcome !== "signedOut") {
+      router.back(); // signed out: the session's screens take over
+    }
   };
 
   const confirm = () => {
@@ -49,7 +54,36 @@ export function AcceptQuoteSheet() {
   };
 
   return (
-    <SheetContent title={t("quotes.confirm.title")} fitToContents testID="accept-quote-sheet">
+    <SheetContent
+      title={t("quotes.confirm.title")}
+      fitToContents
+      testID="accept-quote-sheet"
+      // In the actions slot, the buttons stay in view when a failure lengthens the body. Full
+      // width, one above the other: two pills never squeeze into a row on a narrow phone.
+      actions={
+        <View className="flex-1 gap-3">
+          <Button
+            label={t("quotes.confirm.accept")}
+            accessibilityLabel={t("quotes.confirm.acceptLabel", {
+              pro: text.pro,
+              price: text.price,
+            })}
+            size="lg"
+            loading={sending}
+            onPress={confirm}
+            testID="accept-quote-confirm"
+          />
+          <Button
+            label={t("quotes.confirm.notNow")}
+            variant="ghost"
+            size="lg"
+            disabled={sending}
+            onPress={() => router.back()}
+            testID="accept-quote-cancel"
+          />
+        </View>
+      }
+    >
       <View className="gap-1">
         <Text className="text-title-1 text-navy-900">{text.price}</Text>
         <Text className="text-headline text-navy-900">
@@ -60,31 +94,10 @@ export function AcceptQuoteSheet() {
         <Text className="text-callout text-gray-500">{text.duration}</Text>
       </View>
       {failed ? (
-        <Text
-          accessibilityLiveRegion="polite"
-          className="text-callout text-danger"
-          testID="accept-quote-failed"
-        >
+        <Text className="text-callout text-danger" testID="accept-quote-failed">
           {t("quotes.confirm.failed")}
         </Text>
       ) : null}
-      {/* Full-width, one above the other: two pills never squeeze into a row on a narrow phone. */}
-      <Button
-        label={t("quotes.confirm.accept")}
-        accessibilityLabel={t("quotes.acceptLabel", { pro: text.pro, price: text.price })}
-        size="lg"
-        loading={sending}
-        onPress={confirm}
-        testID="accept-quote-confirm"
-      />
-      <Button
-        label={t("quotes.confirm.notNow")}
-        variant="ghost"
-        size="lg"
-        disabled={sending}
-        onPress={() => router.back()}
-        testID="accept-quote-cancel"
-      />
     </SheetContent>
   );
 }

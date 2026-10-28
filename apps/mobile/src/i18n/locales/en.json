@@ -176,8 +176,8 @@
     "included": "What's included",
     "more": "More",
     "less": "Less",
-    "moreLabel": "Show all of what's included",
-    "lessLabel": "Show less of what's included",
+    "moreLabel": "More, show all of what's included",
+    "lessLabel": "Less, show less of what's included",
     "accept": "Accept",
     "acceptLabel": "Accept the quote from {{pro}} for {{price}}",
     "notAcceptable": "This quote can't be accepted anymore.",
@@ -201,7 +201,8 @@
       "from": "From {{pro}}",
       "accept": "Accept quote",
       "notNow": "Not now",
-      "failed": "We couldn't accept the quote. Check your connection and try again."
+      "failed": "We couldn't accept the quote. Check your connection and try again.",
+      "acceptLabel": "Accept quote from {{pro}} for {{price}}"
     }
   }
 }

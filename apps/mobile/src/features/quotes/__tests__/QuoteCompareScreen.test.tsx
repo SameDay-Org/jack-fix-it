@@ -17,7 +17,16 @@ import { deferred } from "../../../api/__tests__/helpers";
 import { AcceptQuoteSheet } from "../AcceptQuoteSheet";
 import { QuoteCompareScreen } from "../QuoteCompareScreen";
 import type { CustomerQuote, CustomerQuoteList } from "../useRequestQuotes";
-import { fakeClock, freezeClock, navigation, NOW, quote, QUOTES, renderWithQuery } from "./helpers";
+import {
+  fakeClock,
+  freezeClock,
+  navigation,
+  NOW,
+  quote,
+  QUOTES,
+  renderWithQuery,
+  REQUEST_ID,
+} from "./helpers";
 
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../../api/errors"),
@@ -48,7 +57,7 @@ const card = (item: CustomerQuote) => within(screen.getByTestId(`quote-${item.id
 const acceptButtons = () => screen.queryAllByRole("button", { name: /^Accept the quote from/ });
 const list = (items: CustomerQuote[]): CustomerQuoteList => ({ items });
 
-const [MARIA, WITHHELD, DAN] = QUOTES;
+const [WITHHELD, MARIA, DAN] = QUOTES;
 
 beforeEach(() => {
   freezeClock();
@@ -76,7 +85,7 @@ describe("QuoteCompareScreen", () => {
     expect(apiGet).toHaveBeenCalledWith("/v1/requests/{request_id}/quotes", {
       auth: true,
       signal: expect.any(AbortSignal),
-      params: { request_id: MARIA.pro && expect.any(String) },
+      params: { request_id: REQUEST_ID },
     });
 
     const maria = card(MARIA);
@@ -86,7 +95,7 @@ describe("QuoteCompareScreen", () => {
       maria.getByText(/^Starts [A-Z][a-z]{2}, [A-Z][a-z]{2} \d{1,2}, \d{1,2}:00\s[AP]M$/),
     ).toBeTruthy();
     // Seen, not read twice: the summary label says it (next test).
-    expect(maria.getByText("Expires in 6 h", { includeHiddenElements: true })).toBeTruthy();
+    expect(maria.getByText("Expires in 2 h", { includeHiddenElements: true })).toBeTruthy();
     expect(maria.getByText("María P.")).toBeTruthy();
     expect(maria.getByText("New · 12 jobs · 8 years of experience")).toBeTruthy();
     expect(maria.getByText("What's included")).toBeTruthy();
@@ -136,10 +145,10 @@ describe("QuoteCompareScreen", () => {
     const summary = screen.getByTestId(`quote-${MARIA.id}-summary`);
     expect(summary.props.accessible).toBe(true);
     expect(String(summary.props.accessibilityLabel).replaceAll("\u00A0", " ")).toMatch(
-      /^María P\., Verified by Jack Fix It, \$250, Starts .+, About 1 h 30 min, No ratings yet, 12 jobs, 8 years of experience, Expires in 6 h$/,
+      /^María P\., Verified by Jack Fix It, \$250, Starts .+, About 1 h 30 min, No ratings yet, 12 jobs, 8 years of experience, Expires in 2 h$/,
     );
     // The footer's expiry is in that label already: a screen reader does not read it twice.
-    expect(screen.queryByText("Expires in 6 h")).toBeNull();
+    expect(screen.queryByText("Expires in 2 h")).toBeNull();
   });
 
   it("accept asks for confirmation, posts once, ignores double taps and shows the accepted state", async () => {
@@ -155,7 +164,7 @@ describe("QuoteCompareScreen", () => {
     expect(router.push).toHaveBeenCalledTimes(1);
     expect(router.push).toHaveBeenCalledWith({
       pathname: "/requests/[id]/accept",
-      params: { id: expect.any(String), quote: WITHHELD.id },
+      params: { id: REQUEST_ID, quote: WITHHELD.id },
     });
     expect(apiPost).not.toHaveBeenCalled();
 
@@ -164,16 +173,15 @@ describe("QuoteCompareScreen", () => {
     expect(sheet.getByText("$180.50")).toBeTruthy();
     expect(sheet.getByText("From Jack pro")).toBeTruthy();
 
-    const confirm = sheet.getByRole("button", {
-      name: "Accept the quote from Jack pro for $180.50",
-    });
+    // Its name starts with what it shows, so voice control finds it by "Accept quote".
+    const confirm = sheet.getByRole("button", { name: "Accept quote from Jack pro for $180.50" });
     await fireEvent.press(confirm);
     await fireEvent.press(confirm);
     expect(apiPost).toHaveBeenCalledTimes(1);
     expect(apiPost).toHaveBeenCalledWith(
       "/v1/requests/{request_id}/quotes/{quote_id}/accept",
       undefined,
-      { auth: true, params: { request_id: expect.any(String), quote_id: WITHHELD.id } },
+      { auth: true, params: { request_id: REQUEST_ID, quote_id: WITHHELD.id } },
     );
     await waitFor(() =>
       expect(screen.getByTestId("accept-quote-confirm").props.accessibilityState).toMatchObject({
@@ -260,6 +268,11 @@ describe("QuoteCompareScreen", () => {
       await screen.findByText("We couldn't accept the quote. Check your connection and try again."),
     ).toBeTruthy();
     expect(router.back).not.toHaveBeenCalled();
+    // Said aloud on iOS too, and shown once: in the sheet, not as a toast as well.
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith(
+      "We couldn't accept the quote. Check your connection and try again.",
+    );
+    expect(toastStore.getState().current).toBeNull();
 
     await fireEvent.press(screen.getByTestId("accept-quote-confirm"));
     await waitFor(() => expect(router.back).toHaveBeenCalledTimes(1));
@@ -284,6 +297,28 @@ describe("QuoteCompareScreen", () => {
       expect(toastStore.getState().current?.message).toBe("This quote can't be accepted anymore."),
     );
     expect(router.back).toHaveBeenCalledTimes(1); // the swipe only: nothing closed the list
+  });
+
+  it("a network failure after the sheet was swiped away becomes a toast", async () => {
+    const answer = deferred<CustomerQuote>();
+    jest.mocked(apiPost).mockReturnValue(answer.promise);
+    await renderWithQuery(<App />);
+    await fireEvent.press(
+      await screen.findByRole("button", { name: "Accept the quote from María P. for $250" }),
+    );
+    await fireEvent.press(screen.getByTestId("accept-quote-confirm"));
+    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
+
+    await act(async () => router.back());
+    await act(async () => answer.reject(new NetworkError(false)));
+
+    await waitFor(() =>
+      expect(toastStore.getState().current).toMatchObject({
+        message: "We couldn't accept the quote. Check your connection and try again.",
+        tone: "danger",
+      }),
+    );
+    expect(router.back).toHaveBeenCalledTimes(1);
   });
 
   it("404 shows not found; network error shows retry", async () => {
@@ -426,12 +461,16 @@ describe("QuoteCompareScreen", () => {
     expect(scope().props.numberOfLines).toBe(4);
 
     await fireEvent(measure, "textLayout", { nativeEvent: { lines: Array(4).fill({}) } });
-    expect(screen.queryByRole("button", { name: "Show all of what's included" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^More/ })).toBeNull();
 
     await fireEvent(measure, "textLayout", { nativeEvent: { lines: Array(6).fill({}) } });
-    await fireEvent.press(screen.getByRole("button", { name: "Show all of what's included" }));
+    await fireEvent.press(
+      screen.getByRole("button", { name: "More, show all of what's included" }),
+    );
     expect(scope().props.numberOfLines).toBe(0);
-    await fireEvent.press(screen.getByRole("button", { name: "Show less of what's included" }));
+    await fireEvent.press(
+      screen.getByRole("button", { name: "Less, show less of what's included" }),
+    );
     expect(scope().props.numberOfLines).toBe(4);
   });
 });
@@ -450,33 +489,39 @@ function pullToRefresh(): void {
 
 const TYPE_STYLE = /\btext-(?:display|title-1|title-2|headline|body|callout|footnote|caption)\b/;
 
+/** Spacing that shapes a card's height: padding and minimum height always, a gap between 2+ children. */
+const PADDING = /(?:^|\s)(p[ytb]?-\d+|min-h-\d+)(?=\s|$)/g;
+const GAP = /(?:^|\s)(gap(?:-y)?-\d+)(?=\s|$)/g;
+
 /**
- * The type style of each line of text in a card, top to bottom, leaving out what a placeholder
- * does not stand for: button labels, the accepted badge and the scope's hidden measuring copy.
- * The verified badge is one padded row; the visible scope is reported as "scope", since its line
- * count comes from layout.
+ * The rows of a card, top to bottom: each line of text by its type style, and each box's vertical
+ * spacing, leaving out what a placeholder does not stand for: button labels, the accepted badge
+ * and the scope's hidden measuring copy. The verified badge is one padded row; the visible scope
+ * is reported as "scope", since its line count comes from layout.
  */
 function lineStyles(root: unknown): string[] {
   const styles: string[] = [];
   const walk = (node: HostNode | string) => {
     if (typeof node === "string" || node.props.accessibilityRole === "button") return;
     const testID = String(node.props.testID ?? "");
+    const className = String(node.props.className ?? "");
     if (testID.endsWith("-measure") || testID.endsWith("-accepted")) return;
     if (testID.endsWith("-verified") || testID.endsWith("-badge")) {
       // The badge and its placeholder: the same vertical padding around one caption line.
-      const padded = /py-1/.test(String(node.props.className));
+      const padded = /\bpy-1\b/.test(className);
       const inner = node.children.flatMap((child) => lineStyles(child)).join("+");
       styles.push(`badge:${padded ? "py-1" : "?"}:${inner}`);
       return;
     }
     if (node.type === "Text") {
-      styles.push(
-        testID.endsWith("-scope")
-          ? "scope"
-          : (TYPE_STYLE.exec(String(node.props.className))?.[0] ?? "?"),
-      );
+      styles.push(testID.endsWith("-scope") ? "scope" : (TYPE_STYLE.exec(className)?.[0] ?? "?"));
       return;
     }
+    const boxed = [...className.matchAll(PADDING)].map((match) => match[1]);
+    if (node.children.filter((child) => typeof child !== "string").length > 1) {
+      boxed.push(...[...className.matchAll(GAP)].map((match) => match[1]));
+    }
+    if (boxed.length > 0) styles.push(`box:${boxed.join(" ")}`);
     node.children.forEach(walk);
   };
   walk(root as HostNode);

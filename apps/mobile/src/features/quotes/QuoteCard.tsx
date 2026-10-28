@@ -44,10 +44,12 @@ export function QuoteCard({ quote, state, now, onAccept }: QuoteCardProps) {
       >
         {/* Full-width lines, not fit-content: Android can wrap a one-line text measured to fit
             by a sub-pixel ("Jack pro" broke in two at 160 dpi). The Accepted badge shares only
-            the price's row, so the duration and the start keep the card's width. */}
+            the price's row, so the duration and the start keep the card's width; the price is
+            one unbreakable word ("1.250,50 US$"), so the badge wraps below it when both do not
+            fit, rather than the price breaking. */}
         <View className="gap-1">
-          <View className="flex-row items-center justify-between gap-3">
-            <Text className="flex-1 text-title-1 text-navy-900">{text.price}</Text>
+          <View className="flex-row flex-wrap items-center justify-between gap-x-3 gap-y-1">
+            <Text className="text-title-1 text-navy-900">{text.price}</Text>
             {state === "accepted" ? (
               <StatusBadge
                 label={t("quotes.accepted")}

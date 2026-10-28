@@ -43,24 +43,34 @@ export const quote = (n: number, overrides: QuoteOverrides = {}): CustomerQuote 
 });
 
 /**
- * Three quotes in the order the mocked API sends them, which is not by price, so a re-sort would
- * show: María P. (verified, no rating yet), a pro whose name the API withholds, and Dan K. (not
- * verified, one job, no years given).
+ * Three quotes in the order the mocked API sends them. No field runs in order, up or down (id,
+ * price, created_at, expires_at, proposed_start_at), so any client-side sort would show: a pro
+ * whose name the API withholds, María P. (verified, no rating yet), and Dan K. (not verified, one
+ * job, no years given).
  */
 export const QUOTES: CustomerQuote[] = [
   quote(1, {
-    amount_cents: 25_000,
-    duration_minutes: 90,
-    pro: { name: "María P.", rating_avg: null, jobs_count: 12, years_of_experience: 8 },
-  }),
-  quote(2, {
     amount_cents: 18_050,
     duration_minutes: 45,
+    created_at: at(-2),
+    expires_at: at(6),
+    proposed_start_at: at(48),
     pro: { name: null, rating_avg: "4.25", jobs_count: 3, years_of_experience: 1 },
   }),
   quote(3, {
+    amount_cents: 25_000,
+    duration_minutes: 90,
+    created_at: at(-1),
+    expires_at: at(2),
+    proposed_start_at: at(72),
+    pro: { name: "María P.", rating_avg: null, jobs_count: 12, years_of_experience: 8 },
+  }),
+  quote(2, {
     amount_cents: 12_000,
     duration_minutes: 180,
+    created_at: at(-3),
+    expires_at: at(30),
+    proposed_start_at: at(24),
     pro: {
       name: "Dan K.",
       rating_avg: "4.80",

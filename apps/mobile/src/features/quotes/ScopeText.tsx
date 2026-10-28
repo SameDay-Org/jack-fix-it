@@ -53,13 +53,13 @@ export function ScopeText({ scope, testID }: ScopeTextProps) {
         </View>
       </View>
       {overflows ? (
-        // The ghost pill's own padding pulls the label back to the content edge.
+        // Pulled back by the card's padding: the pressed pill stays inside the bubble.
         <Button
           label={t(expanded ? "quotes.less" : "quotes.more")}
           accessibilityLabel={t(expanded ? "quotes.lessLabel" : "quotes.moreLabel")}
           variant="ghost"
           onPress={() => setExpanded((open) => !open)}
-          className="-ml-5 self-start"
+          className="-ml-4 self-start"
           testID={`${testID}-toggle`}
         />
       ) : null}

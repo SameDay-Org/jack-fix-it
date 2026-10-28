@@ -176,8 +176,8 @@
     "included": "Qué incluye",
     "more": "Más",
     "less": "Menos",
-    "moreLabel": "Ver todo lo que incluye",
-    "lessLabel": "Ver menos de lo que incluye",
+    "moreLabel": "Más, ver todo lo que incluye",
+    "lessLabel": "Menos, ver menos de lo que incluye",
     "accept": "Aceptar",
     "acceptLabel": "Aceptar el presupuesto de {{pro}} por {{price}}",
     "notAcceptable": "Este presupuesto ya no se puede aceptar.",
@@ -201,7 +201,8 @@
       "from": "De {{pro}}",
       "accept": "Aceptar presupuesto",
       "notNow": "Ahora no",
-      "failed": "No pudimos aceptar el presupuesto. Revisa tu conexión e inténtalo de nuevo."
+      "failed": "No pudimos aceptar el presupuesto. Revisa tu conexión e inténtalo de nuevo.",
+      "acceptLabel": "Aceptar presupuesto de {{pro}} por {{price}}"
     }
   }
 }
