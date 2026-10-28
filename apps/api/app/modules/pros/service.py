@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -26,7 +27,7 @@ from app.modules.pros.errors import (
     InvalidServiceAreaError,
 )
 from app.modules.pros.models import ProProfile, ProVerificationStatus
-from app.modules.pros.repository import ProProfileRepository
+from app.modules.pros.repository import ProDocumentRepository, ProProfileRepository
 from app.modules.pros.schemas import PhotoOut, ProProfileOut, ProProfileUpdate
 from app.modules.service_areas.service import ServiceAreaService
 from app.modules.uploads.schemas import UploadPurpose
@@ -64,6 +65,18 @@ class ProService:
     def __init__(self, session: AsyncSession) -> None:
         self._profiles = ProProfileRepository(session)
         self._users = UserService(session)
+
+    @staticmethod
+    def photo_keys_among(keys: Collection[str]) -> Select[str | None]:
+        """The upload keys among `keys` that a profile holds as its photo, as a statement (the
+        uploads sweep of unreferenced uploads, #191)."""
+        return ProProfileRepository.photo_keys_among(keys)
+
+    @staticmethod
+    def document_keys_among(keys: Collection[str]) -> Select[str]:
+        """The upload keys among `keys` that a verification document holds, superseded ones
+        too, as a statement (the uploads sweep of unreferenced uploads, #191)."""
+        return ProDocumentRepository.file_keys_among(keys)
 
     async def get_profile_id_for_user(self, user_id: uuid.UUID) -> uuid.UUID | None:
         """The pro_profiles.id of a user, or None when the user has no pro profile."""
