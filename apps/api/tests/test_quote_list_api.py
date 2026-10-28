@@ -104,9 +104,11 @@ async def quoting_pro(
     jobs_count: int = 0,
     years: int | None = None,
     verification: ProVerificationStatus = ProVerificationStatus.APPROVED,
+    payouts_enabled: bool = True,
     email: str | None = None,
 ) -> QuotingPro:
-    """A pro with every private field filled, so a leak would show."""
+    """A pro with every private field filled, so a leak would show. Hireable by default:
+    approved, payouts enabled."""
     pro = await make_pro(session)
     user = await session.get(User, pro.caller.id)
     profile = await session.get(ProProfile, pro.profile_id)
@@ -120,6 +122,7 @@ async def quoting_pro(
     profile.jobs_count = jobs_count
     profile.years_of_experience = years
     profile.verification_status = verification
+    profile.payouts_enabled = payouts_enabled
     profile.bio = "probe-bio-188"
     profile.photo_key = f"{PHOTO_KEY}-{pro.profile_id.hex}"
     profile.stripe_account_id = f"{STRIPE_ID}-{pro.profile_id.hex}"
@@ -535,11 +538,9 @@ async def test_pro_fields(
     rated = await quoting_pro(db_session, rating="4.8", jobs_count=12, years=9)
     new = await quoting_pro(db_session, last_name=None)
     unnamed = await quoting_pro(db_session, first_name=None, last_name=None)
-    pending = await quoting_pro(db_session, verification=ProVerificationStatus.PENDING)
     await add_quote(db_session, request_id, rated, amount=1_000)
     await add_quote(db_session, request_id, new, amount=2_000)
     await add_quote(db_session, request_id, unnamed, amount=3_000)
-    await add_quote(db_session, request_id, pending, amount=4_000)
 
     response = await db_client.get(path(request_id), headers=customer(world))
 
@@ -569,15 +570,41 @@ async def test_pro_fields(
             "years_of_experience": None,
             "verified": True,
         },
-        {
-            "id": str(pending.profile_id),
-            "name": "María P.",
-            "rating_avg": None,
-            "jobs_count": 0,
-            "years_of_experience": None,
-            "verified": False,
-        },
     ]
+
+
+@pytest.mark.parametrize(
+    ("verification", "payouts_enabled"),
+    [
+        (ProVerificationStatus.PENDING, True),
+        (ProVerificationStatus.REJECTED, True),
+        (ProVerificationStatus.APPROVED, False),
+    ],
+)
+async def test_quotes_of_pros_who_cannot_be_hired_are_left_out(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    verification: ProVerificationStatus,
+    payouts_enabled: bool,
+) -> None:
+    """Only approved pros with payouts enabled receive requests (context doc): a pro who lost
+    either since quoting cannot be paid out, so their quote is not offered (#189). Pending and
+    accepted alike: the accepted quote of such a pro cannot be paid either."""
+    request_id = await make_request(db_session, world, RequestStatus.ACCEPTED)
+    hireable = await add_quote(db_session, request_id, await quoting_pro(db_session))
+    lost = await quoting_pro(db_session, verification=verification, payouts_enabled=payouts_enabled)
+    # Cheaper, so it would be listed first.
+    await add_quote(db_session, request_id, lost, amount=1_000)
+    await add_quote(
+        db_session,
+        request_id,
+        await quoting_pro(db_session, verification=verification, payouts_enabled=payouts_enabled),
+        amount=2_000,
+        status=QuoteStatus.ACCEPTED,
+    )
+
+    assert await listed_ids(db_client, world, request_id) == [hireable]
 
 
 @pytest.mark.parametrize(
