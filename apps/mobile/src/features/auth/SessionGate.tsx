@@ -56,19 +56,21 @@ function focusedGroup(navigation: ContainerRef): Group | undefined {
  * The two protected groups, with `group` the one the session belongs in. A guard alone would
  * switch them in two steps: the group on screen turns into a redirect that renders nothing, and
  * the router replaces it a few renders later, so a sign-out showed plain navy for a second
- * before Welcome (#177). Instead the guards follow `shown`, the group on screen (on mount, the
- * one the router has focused, as after the offline screen), and when it is not the session's a
- * layout effect replaces the group and moves the guards together: React commits that before the
- * frame is drawn, so the group that leaves stays on screen until the one that arrives is built.
- * The group that leaves renders once more with the new session meanwhile; that render is never
- * drawn, and its screens render nothing without a user.
+ * before Welcome (#177). Instead the guards follow `shown`, and when the session changes groups
+ * a layout effect replaces the group and moves the guards together: React commits that before
+ * the frame is drawn, so the group that leaves stays on screen until the one that arrives is
+ * built. The group that leaves renders once more with the new session meanwhile; that render is
+ * never drawn, and its screens render nothing without a user. A stack mounted while the router
+ * has the other group focused (after the offline screen, or a cold start signed out on the
+ * launch URL) guards from the session at once, as before, and is replaced the same way.
  */
 function GroupStack({ group }: { group: Group }) {
   const navigation = useNavigationContainerRef();
-  const [shown, setShown] = useState(() => focusedGroup(navigation) ?? group);
+  const [shown, setShown] = useState(group);
 
   useLayoutEffect(() => {
-    if (shown === group) return;
+    const focused = focusedGroup(navigation);
+    if (shown === group && (focused === undefined || focused === group)) return;
     // Synchronous: `dispatch` queues the action for a later render, as the redirect does.
     navigation.dispatchSync({ type: "REPLACE", payload: { name: group } });
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the guards must change in the same commit as the navigation state dispatched above; an update from a layout effect is committed before paint.

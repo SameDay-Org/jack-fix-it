@@ -49,10 +49,12 @@ jest.mock(
 // the commit that mounts it and its cleanup in the one that removes it, both before the
 // Profiler's `onRender` for that commit, so each entry is what that commit puts on screen.
 const mounted = new Set<string>();
+const mounts: string[] = [];
 let commits: string[][] = [];
 function Marker({ name }: { name: string }) {
   useLayoutEffect(() => {
     mounted.add(name);
+    mounts.push(name);
     return () => {
       mounted.delete(name);
     };
@@ -80,6 +82,7 @@ const routes = {
 
 beforeEach(() => {
   mounted.clear();
+  mounts.length = 0;
   commits = [];
 });
 
@@ -100,7 +103,7 @@ describe("the session gate switching groups (#177)", () => {
     expect(commits.at(-1)).toEqual(["welcome"]);
   });
 
-  it("leaving the offline screen for another account mounts Welcome in the same commit", async () => {
+  it("leaving the offline screen for another account mounts Welcome in the next commit, once", async () => {
     // A restore that could not reach the server: the groups are not mounted yet, and the router
     // still has the launch URL's group focused.
     mockSession.state = { ...SESSION_SIGNED_OUT, restoreFailure: "offline" };
@@ -110,9 +113,11 @@ describe("the session gate switching groups (#177)", () => {
     await act(async () => mockSession.set(SESSION_SIGNED_OUT)); // "Log in with another account"
 
     expect(result.getPathname()).toBe("/welcome");
-    expect(commits.length).toBeGreaterThan(0);
-    expect(commits).not.toContainEqual([]);
-    expect(commits.at(-1)).toEqual(["welcome"]);
+    // The commit that mounts the groups guards the focused one (its redirect renders nothing);
+    // the replace from its layout effect is the very next commit, before that one is drawn.
+    // Before #177 the redirect's own replace landed two commits later.
+    expect(commits.slice(0, 2)).toEqual([[], ["welcome"]]);
+    expect(mounts).toEqual(["welcome"]); // the redirect's queued replace does not remount it
   });
 
   it("a sign-in mounts home in the commit that takes the auth screen away", async () => {
