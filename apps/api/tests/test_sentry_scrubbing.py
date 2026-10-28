@@ -4,7 +4,6 @@ import json
 import logging
 import random
 import re
-import time
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -18,6 +17,7 @@ from app import observability
 from app.main import create_app
 from app.observability import JsonFormatter, before_breadcrumb, before_send, init_sentry
 from tests.conftest import make_settings
+from tests.helpers import seconds_without_gc
 
 # A dummy DSN: the in-memory transport below means nothing leaves the process.
 TEST_DSN = "https://public@example.invalid/1"
@@ -314,10 +314,9 @@ def test_before_breadcrumb_message_scrub_scales_linearly(kind: str) -> None:
     # The hook runs on every log record. The quadratic regex took minutes at this size.
     message, _ = ADVERSARIAL_MESSAGES[kind](256_000)
 
-    started = time.perf_counter()
-    before_breadcrumb({"type": "log", "message": message}, {})
+    seconds = seconds_without_gc(lambda: before_breadcrumb({"type": "log", "message": message}, {}))
 
-    assert time.perf_counter() - started < 1
+    assert seconds < 1
 
 
 async def test_captured_event_contains_no_query_values(

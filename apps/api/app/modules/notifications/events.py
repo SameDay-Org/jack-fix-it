@@ -59,6 +59,27 @@ async def push_new_quote(
     )
 
 
+async def push_quote_accepted(
+    queue: JobQueue,
+    *,
+    pro_user_id: uuid.UUID,
+    quote_id: uuid.UUID,
+    dispatch_id: uuid.UUID,
+    public_code: str,
+    timeout_seconds: float,
+) -> None:
+    """To a pro, for their quote the customer accepted (#189); opens their opportunity (#49)."""
+    await _push(
+        queue,
+        pro_user_id,
+        message_id=f"quote_accepted:{quote_id}",
+        kind="quote_accepted",
+        params={"public_code": public_code},
+        deep_link=f"/opportunities/{dispatch_id}",
+        timeout_seconds=timeout_seconds,
+    )
+
+
 async def _push(
     queue: JobQueue,
     user_id: uuid.UUID,

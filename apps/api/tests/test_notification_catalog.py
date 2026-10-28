@@ -193,6 +193,8 @@ NEW_KEYS = (
     "push.new_request.body",
     "push.new_quote.title",
     "push.new_quote.body",
+    "push.quote_accepted.title",
+    "push.quote_accepted.body",
 )
 
 
@@ -202,7 +204,7 @@ def test_catalog_keys_exist_in_en_and_es_with_only_public_code() -> None:
         for key in NEW_KEYS:
             assert copy[key].strip()
             assert catalog.placeholders(copy[key]) <= {"public_code"}
-        for kind in ("new_request", "new_quote"):
+        for kind in ("new_request", "new_quote", "quote_accepted"):
             assert catalog.placeholders(copy[f"push.{kind}.title"]) == set()
             assert catalog.placeholders(copy[f"push.{kind}.body"]) == {"public_code"}
     params = {"public_code": "JF-000124"}
@@ -217,6 +219,23 @@ def test_catalog_keys_exist_in_en_and_es_with_only_public_code() -> None:
         "La solicitud JF-000124 espera tu presupuesto."
     )
     assert catalog.render("es", "push.new_quote.title", params) == "Tienes un nuevo presupuesto"
+
+
+def test_quote_accepted_copy_in_en_and_es() -> None:
+    """To the pro (#55): payment comes after acceptance (#58, #61), so the copy never says
+    the job is booked."""
+    params = {"public_code": "JF-000124"}
+
+    assert catalog.render("en", "push.quote_accepted.title", params) == "Your quote was accepted"
+    assert catalog.render("en", "push.quote_accepted.body", params) == (
+        "The customer accepted your quote for JF-000124. "
+        "We'll confirm the job once payment goes through."
+    )
+    assert catalog.render("es", "push.quote_accepted.title", params) == "Aceptaron tu presupuesto"
+    assert catalog.render("es", "push.quote_accepted.body", params) == (
+        "El cliente aceptó tu presupuesto para JF-000124. "
+        "Confirmaremos el trabajo cuando se procese el pago."
+    )
 
 
 def test_opportunities_deep_link_allowed_and_others_still_refused() -> None:

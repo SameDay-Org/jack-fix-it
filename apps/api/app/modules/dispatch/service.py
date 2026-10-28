@@ -204,6 +204,11 @@ class DispatchService:
         row = await self._dispatches.get_for_pro(dispatch_id, pro_id)
         return ProDispatch(row.id, row.request_id, row.status) if row is not None else None
 
+    async def dispatch_id_for(self, request_id: uuid.UUID, pro_id: uuid.UUID) -> uuid.UUID | None:
+        """The id of the pro's dispatch of the request, in any status (the quote accepted push
+        opens it, #55); None when the request was never dispatched to the pro."""
+        return await self._dispatches.id_for(request_id, pro_id)
+
     async def mark_quoted(self, dispatch_id: uuid.UUID, now: datetime) -> bool:
         """The pro answered with a quote: sent or viewed -> quoted, responded_at = now, in the
         caller's transaction. False when the dispatch was no longer active."""
