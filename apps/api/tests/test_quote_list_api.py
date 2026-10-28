@@ -591,19 +591,24 @@ async def test_pro_fields(
 async def test_contact_in_an_edited_name_withholds_the_name(
     db_client: httpx.AsyncClient, db_session: AsyncSession, world: World, first_name: str
 ) -> None:
-    """Vault #194 B1: an approved pro who has quoted renames themself to a contact through
-    PATCH /v1/auth/me. The name is withheld whole (null), nothing else changes."""
+    """Vault #194 B1: an approved pro who has quoted renames themself to a contact. PATCH
+    /v1/auth/me refuses it since #198, so the name is one stored before that check. The name is
+    withheld whole (null), nothing else changes."""
     request_id = await make_request(db_session, world, RequestStatus.QUOTE_READY)
     pro = await quoting_pro(db_session, rating="4.5", jobs_count=3, years=7)
     await add_quote(db_session, request_id, pro)
     before = (await db_client.get(path(request_id), headers=customer(world))).json()
 
-    renamed = await db_client.patch(
+    refused = await db_client.patch(
         "/v1/auth/me",
         headers=headers_for(pro.user_id, UserRole.PRO),
         json={"first_name": first_name, "last_name": "Perez"},
     )
-    assert renamed.status_code == 200
+    assert refused.status_code == 422
+    user = await db_session.get(User, pro.user_id)
+    assert user is not None
+    user.first_name, user.last_name = first_name, "Perez"
+    await db_session.flush()
     response = await db_client.get(path(request_id), headers=customer(world))
 
     assert response.status_code == 200
