@@ -1,4 +1,4 @@
-"""Typed access to the settings table (D9.1, #48; D9.3, #50).
+"""Typed access to the settings table (D9.1, #48; D9.3, #50; #246).
 
 Each accessor reads the row on every call, with no cache, so an admin's change applies to the
 next use. An invalid value logs `setting_invalid` with the key only (never the value). What a
@@ -10,12 +10,18 @@ missing or invalid row means depends on the setting:
 | `quote_ttl_hours`            | 1..8760     | None (seeded 48, #50) | None                  |
 | `quote_max_amount_cents`     | 1..int4 max | None: no cap          | SettingMalformedError |
 | `quote_max_duration_minutes` | 1..int4 max | None: no cap          | SettingMalformedError |
+| `platform_take_rate_bps`     | 0..10000    | the default, 1500     | SettingMalformedError |
 
 The quote TTL has no default in code: on None the caller refuses to act (not_configured). An
 optional limit is read with `optional_positive_int`: absent means not set (the int4 column
 still bounds it), but a present value that is not a positive int4 (a string, a bool, zero, a
 float, null...) never reads as "no limit". It raises SettingMalformedError, a 503
 not_configured, before anything is written.
+
+The take rate (Cesar, 2026-10-29: 15%, the platform absorbs Stripe's card fee) is not seeded:
+an absent row reads as the default without a log, so an admin's row overrides it. A present
+value outside 0..10000 (or not an int) is never read as 0 or as the default: it raises
+SettingMalformedError, like a malformed cap.
 """
 
 import logging
@@ -40,6 +46,10 @@ QUOTE_MAX_AMOUNT_CENTS: Final = "quote_max_amount_cents"
 QUOTE_MAX_DURATION_MINUTES: Final = "quote_max_duration_minutes"
 _POSITIVE_INT4: Final = range(1, INT4_MAX + 1)
 
+PLATFORM_TAKE_RATE_BPS: Final = "platform_take_rate_bps"
+PLATFORM_TAKE_RATE_BPS_DEFAULT: Final = 1500
+PLATFORM_TAKE_RATE_BPS_ALLOWED: Final = range(0, 10_001)
+
 
 class SettingsService:
     def __init__(self, session: AsyncSession) -> None:
@@ -62,6 +72,19 @@ class SettingsService:
     async def quote_max_duration_minutes(self) -> int | None:
         """The longest estimated duration a quote may state, if the platform sets one."""
         return await self.optional_positive_int(QUOTE_MAX_DURATION_MINUTES)
+
+    async def platform_take_rate_bps(self) -> int:
+        """The platform's share of a quote's amount, in basis points (1500 = 15%): the default
+        when the row is absent. Any other stored value logs `setting_invalid` (the key only) and
+        raises SettingMalformedError: a malformed rate is never read as 0 or as the default."""
+        row = await self._settings.get(PLATFORM_TAKE_RATE_BPS)
+        if row is None:
+            return PLATFORM_TAKE_RATE_BPS_DEFAULT
+        # bool is an int in Python; a JSON true is not a number.
+        if type(row.value) is int and row.value in PLATFORM_TAKE_RATE_BPS_ALLOWED:
+            return row.value
+        logger.warning("setting_invalid", extra={"key": PLATFORM_TAKE_RATE_BPS})
+        raise SettingMalformedError(PLATFORM_TAKE_RATE_BPS)
 
     async def optional_positive_int(self, key: str) -> int | None:
         """An optional setting from 1 to the int4 maximum, such as a cap: None when its row is

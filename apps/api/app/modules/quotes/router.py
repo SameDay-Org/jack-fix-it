@@ -50,12 +50,13 @@ def get_quote_service(
         ),
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
             "validation_error: amount or duration not a positive integer or above the "
-            "platform's cap, scope empty or too long, proposed_start_at not a future time "
-            "with a time zone, or a field the server sets (status, expires_at, pro or request)."
+            "platform's cap, scope empty or too long, approach too long or with a NUL "
+            "character, proposed_start_at not a future time with a time zone, or a field the "
+            "server sets (status, expires_at, pro or request)."
         ),
         status.HTTP_503_SERVICE_UNAVAILABLE: _error(
             "not_configured: quoting is not configured yet (the quote lifetime is not set, "
-            "or a quote cap is set to an invalid value)."
+            "or a quote cap or the platform's take rate is set to an invalid value)."
         ),
     },
 )
@@ -65,9 +66,10 @@ async def submit_quote(
     user: ProUser,
     quotes: Annotated[QuoteService, Depends(get_quote_service)],
 ) -> QuoteOut:
-    """A fixed-price quote: the price in cents, what it includes, the estimated duration and a
-    proposed start. It expires after the platform's quote lifetime. The first quote on a
-    request makes it Quote Ready for the customer."""
+    """A fixed-price quote: the price in cents, what it includes, optionally how the pro will
+    do the job, the estimated duration and a proposed start. It expires after the platform's
+    quote lifetime. The first quote on a request makes it Quote Ready for the customer. The
+    response shows the pro what they will receive: the price minus the platform's fee."""
     return await quotes.submit(user, dispatch_id, data)
 
 
@@ -88,8 +90,9 @@ async def list_request_quotes(
 ) -> CustomerQuoteList:
     """The quotes the customer can choose from: the pending ones not yet expired, and the
     accepted one while the payment is pending. Empty until the request is Quote Ready, and
-    once it is closed. Each shows the price, what it includes (contact details masked), the
-    duration, the proposed start, when it expires, and the pro's public card."""
+    once it is closed. Each shows the price, what it includes and how the pro will do the job
+    (contact details masked), the duration, the proposed start, when it expires, and the pro's
+    public card."""
     return await quotes.list_for_customer(user, request_id)
 
 
@@ -148,6 +151,6 @@ async def accept_quote(
     accepted, where the payment follows; the other quotes stay pending. Calling it again for the
     accepted quote returns it unchanged, and changes nothing, even if its pro can no longer be
     hired: that repeat comes first, then a new acceptance checks the pro (approved, payouts
-    enabled). The response is the quote as listed, its scope masked; its pro card shows the
-    pro's current verification."""
+    enabled). The response is the quote as listed, its scope and approach masked; its pro card
+    shows the pro's current verification."""
     return await quotes.accept(user, request_id, quote_id)

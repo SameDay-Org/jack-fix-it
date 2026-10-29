@@ -5,7 +5,9 @@ open for quotes (finding_pro, quote_ready). Anything else, another pro's include
 same 404, as does a pro without a profile. The request comes through the requests module's
 pro-safe reader (ADR 0003), so no customer, contact, street, coordinates, utm or BDC field
 ever reaches this module; the free text comes with contact details masked (app.redaction).
-Opening one marks the dispatch viewed, once.
+Opening one marks the dispatch viewed, once. The detail carries the platform's take rate
+(#246) for the quote form's preview; a malformed rate is a 503 not_configured, before the
+dispatch is marked viewed.
 
 The detail shows the request's photos and videos as their privacy-safe copies only (#173):
 the reader hands this module no original key (file_key), and sign_safe_media, the one place a
@@ -41,6 +43,7 @@ from app.modules.pros.service import ProService
 from app.modules.requests.errors import InvalidRequestError
 from app.modules.requests.media_copies import SAFE_KEY_PREFIX
 from app.modules.requests.service import ProRequestReader, RequestForPro, SafeMedia
+from app.modules.settings.service import SettingsService
 from app.modules.users.types import UserAccount
 
 logger = logging.getLogger(__name__)
@@ -70,6 +73,7 @@ class OpportunityService:
         self._requests = ProRequestReader(session)
         self._categories = CategoryService(session)
         self._pros = ProService(session)
+        self._settings = SettingsService(session)
         self._storage = storage
         self._config = config
 
@@ -126,6 +130,8 @@ class OpportunityService:
         )
         if dispatch is None or view is None or pro_id is None:
             raise NotFoundError
+        # Before any write: a malformed rate (503, logged by the settings service) marks nothing.
+        take_rate_bps = await self._settings.platform_take_rate_bps()
         first_view = await self._dispatches.mark_viewed(dispatch.id, datetime.now(UTC))
         viewed_at = await self._dispatches.viewed_at(dispatch.id)
         await self._session.commit()
@@ -160,6 +166,7 @@ class OpportunityService:
                 if (signed := sign_safe_media(self._storage, item, ttl, expires_at)) is not None
             ],
             media_pending=media.pending,
+            take_rate_bps=take_rate_bps,
         )
 
     async def _category_summaries(

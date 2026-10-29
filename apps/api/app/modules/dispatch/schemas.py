@@ -88,3 +88,9 @@ class OpportunityDetail(_Out):
     media_pending: int = Field(
         description="How many more photos and videos are still being prepared."
     )
+    take_rate_bps: int = Field(
+        examples=[1500],
+        description="The platform's take rate in basis points (1500 = 15%), for the quote "
+        "form's live 'you'll receive' preview only: the quote's response carries the "
+        "amounts that count.",
+    )

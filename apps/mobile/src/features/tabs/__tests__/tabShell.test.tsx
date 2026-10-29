@@ -149,7 +149,7 @@ describe("the tab shell (#213, D18)", () => {
 
   it.each([
     ["customer", "Browse categories", "customer-home"],
-    ["pro", "Go to Home", "home-screen"],
+    ["pro", "Go to Home", "pro-home"],
   ] as const)("history empty state button switches to Home (%s)", async (role, cta, homeId) => {
     jest.mocked(useSession).mockReturnValue(signedIn({ role }));
     const view = await renderRouter(routes, { initialUrl: "/history" });
