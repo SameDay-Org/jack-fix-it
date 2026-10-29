@@ -2,11 +2,16 @@ import Svg, { Path } from "react-native-svg";
 
 import { tokens } from "@/theme";
 
-import { FALLBACK_GLYPH, GLYPH_STROKE_WIDTH, GLYPH_VIEW_BOX, glyphFor } from "./glyphs";
+import { FALLBACK_GLYPH, GLYPH_STROKE_WIDTH, GLYPH_VIEW_BOX, glyphFor, type Glyph } from "./glyphs";
 
 export type CategoryIconProps = {
   /** The category slug; a slug without a glyph renders nothing, or the generic mark with `fallback`. */
   slug: string;
+  /**
+   * A glyph of the same drawing system painted instead of the slug's: for something that is not a
+   * seeded category (a request filed without one), whose glyph lives with the feature.
+   */
+  glyph?: Glyph;
   /** Width and height in dp. The set is drawn to read at 32 and 48. */
   size?: number;
   /** The stroke color; navy-900 by default. The accent stays green-500. */
@@ -24,12 +29,13 @@ const DEFAULT_SIZE = 32;
  */
 export function CategoryIcon({
   slug,
+  glyph: given,
   size = DEFAULT_SIZE,
   color = tokens.colors["navy-900"],
   fallback = false,
   testID,
 }: CategoryIconProps) {
-  const glyph = glyphFor(slug) ?? (fallback ? FALLBACK_GLYPH : undefined);
+  const glyph = given ?? glyphFor(slug) ?? (fallback ? FALLBACK_GLYPH : undefined);
   if (!glyph) return null;
 
   return (

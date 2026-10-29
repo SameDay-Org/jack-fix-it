@@ -14,6 +14,7 @@ import { user } from "../../../api/__tests__/helpers";
 import AppLayout, { unstable_settings as appSettings } from "../../../app/(app)/_layout";
 import { phoneFlowStore } from "../../phone/phoneFlow";
 import AuthLayout, { unstable_settings } from "../../../app/(auth)/_layout";
+import { TabsLayout } from "../../tabs/TabsLayout";
 import { HomePlaceholderScreen } from "../HomePlaceholderScreen";
 import { SessionGate } from "../SessionGate";
 import { METRICS, SIGNED_OUT } from "./helpers";
@@ -55,7 +56,8 @@ const routes = {
   "(auth)/_layout": { default: AuthLayout, unstable_settings },
   "(auth)/welcome": () => <Text>welcome stub</Text>,
   "(app)/_layout": { default: AppLayout, unstable_settings: appSettings },
-  "(app)/index": () => <Text>app stub</Text>,
+  "(app)/(tabs)/_layout": TabsLayout,
+  "(app)/(tabs)/index": () => <Text>app stub</Text>,
   "(app)/verify-phone/index": () => <Text>phone step stub</Text>,
 };
 
@@ -119,7 +121,7 @@ describe("session gate", () => {
     // Signed in while on an auth screen: the auth guard sends the session home, and home opens
     // the phone step over itself.
     const result = await renderRouter(
-      { ...routes, "(app)/index": HomePlaceholderScreen },
+      { ...routes, "(app)/(tabs)/index": HomePlaceholderScreen },
       { initialUrl: "/welcome" },
     );
 

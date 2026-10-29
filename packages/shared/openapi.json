@@ -1754,7 +1754,7 @@
           "pros"
         ],
         "summary": "Open one of my opportunities",
-        "description": "The full request, with its photos and videos as privacy-safe copies (no location or\nother metadata) behind short-lived signed URLs, and how many are still being prepared. The\nfirst open records that the pro saw it (viewed, viewed_at); opening it again changes\nnothing.",
+        "description": "The full request, with its photos and videos as privacy-safe copies (no location or\nother metadata) behind short-lived signed URLs, and how many are still being prepared, and\nthe platform's take rate for the quote form's preview. The first open records that the pro\nsaw it (viewed, viewed_at); opening it again changes nothing.",
         "operationId": "open_opportunity_v1_pros_me_opportunities__dispatch_id__get",
         "security": [
           {
@@ -1823,6 +1823,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "not_configured: the platform's take rate is set to an invalid value.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1833,7 +1843,7 @@
           "pros"
         ],
         "summary": "Send a quote for one of my opportunities",
-        "description": "A fixed-price quote: the price in cents, what it includes, the estimated duration and a\nproposed start. It expires after the platform's quote lifetime. The first quote on a\nrequest makes it Quote Ready for the customer.",
+        "description": "A fixed-price quote: the price in cents, what it includes, optionally how the pro will\ndo the job, the estimated duration and a proposed start. It expires after the platform's\nquote lifetime. The first quote on a request makes it Quote Ready for the customer. The\nresponse shows the pro what they will receive: the price minus the platform's fee.",
         "operationId": "submit_quote_v1_pros_me_opportunities__dispatch_id__quote_post",
         "security": [
           {
@@ -1874,7 +1884,7 @@
             }
           },
           "422": {
-            "description": "validation_error: amount or duration not a positive integer or above the platform's cap, scope empty or too long, proposed_start_at not a future time with a time zone, or a field the server sets (status, expires_at, pro or request).",
+            "description": "validation_error: amount or duration not a positive integer or above the platform's cap, scope empty or too long, approach too long or with a NUL character, proposed_start_at not a future time with a time zone, or a field the server sets (status, expires_at, pro or request).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1924,7 +1934,7 @@
             }
           },
           "503": {
-            "description": "not_configured: quoting is not configured yet (the quote lifetime is not set, or a quote cap is set to an invalid value).",
+            "description": "not_configured: quoting is not configured yet (the quote lifetime is not set, or a quote cap or the platform's take rate is set to an invalid value).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1942,7 +1952,7 @@
           "quotes"
         ],
         "summary": "Compare the quotes on one of my service requests",
-        "description": "The quotes the customer can choose from: the pending ones not yet expired, and the\naccepted one while the payment is pending. Empty until the request is Quote Ready, and\nonce it is closed. Each shows the price, what it includes (contact details masked), the\nduration, the proposed start, when it expires, and the pro's public card.",
+        "description": "The quotes the customer can choose from: the pending ones not yet expired, and the\naccepted one while the payment is pending. Empty until the request is Quote Ready, and\nonce it is closed. Each shows the price, what it includes and how the pro will do the job\n(contact details masked), the duration, the proposed start, when it expires, and the pro's\npublic card.",
         "operationId": "list_request_quotes_v1_requests__request_id__quotes_get",
         "security": [
           {
@@ -2110,7 +2120,7 @@
           "quotes"
         ],
         "summary": "Accept a quote on one of my service requests",
-        "description": "Accepts one quote of the request: the quote becomes accepted and the request moves to\naccepted, where the payment follows; the other quotes stay pending. Calling it again for the\naccepted quote returns it unchanged, and changes nothing, even if its pro can no longer be\nhired: that repeat comes first, then a new acceptance checks the pro (approved, payouts\nenabled). The response is the quote as listed, its scope masked; its pro card shows the\npro's current verification.",
+        "description": "Accepts one quote of the request: the quote becomes accepted and the request moves to\naccepted, where the payment follows; the other quotes stay pending. Calling it again for the\naccepted quote returns it unchanged, and changes nothing, even if its pro can no longer be\nhired: that repeat comes first, then a new acceptance checks the pro (approved, payouts\nenabled). The response is the quote as listed, its scope and approach masked; its pro card\nshows the pro's current verification.",
         "operationId": "accept_quote_v1_requests__request_id__quotes__quote_id__accept_post",
         "security": [
           {
@@ -2743,6 +2753,108 @@
           }
         }
       }
+    },
+    "/v1/me/notification-preferences": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Get my notification preferences",
+        "description": "Every group with each of its channels: `enabled` is the caller's choice, or the default\nwhen they never changed it. A `locked` channel is always on (account and security).",
+        "operationId": "get_notification_preferences_v1_me_notification_preferences_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPreferences"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Change my notification preferences",
+        "description": "Applies the changes all or nothing and returns every preference, as GET does. Turning a\nlocked channel on is accepted and changes nothing. Pushes muted while a group was off are\nnot sent when it is turned back on.",
+        "operationId": "update_notification_preferences_v1_me_notification_preferences_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationPreferencesPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPreferences"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "preference_locked: a change turns off a locked channel; validation_error: an unknown group or channel, a channel its group does not have, a group and channel twice, no change or more than 20. Either way nothing is stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -3034,6 +3146,38 @@
         ],
         "title": "CategorySummary"
       },
+      "Channel": {
+        "type": "string",
+        "enum": [
+          "push",
+          "email",
+          "sms"
+        ],
+        "title": "Channel"
+      },
+      "ChannelPreference": {
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/Channel"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "locked": {
+            "type": "boolean",
+            "title": "Locked",
+            "description": "Always on: the user cannot turn it off."
+          }
+        },
+        "type": "object",
+        "required": [
+          "channel",
+          "enabled",
+          "locked"
+        ],
+        "title": "ChannelPreference"
+      },
       "CheckStatus": {
         "type": "string",
         "enum": [
@@ -3158,6 +3302,18 @@
             "format": "date-time",
             "title": "Created At"
           },
+          "approach": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approach",
+            "description": "How the pro will do the job, with contact details masked as in the scope; null when the pro wrote none."
+          },
           "pro": {
             "$ref": "#/components/schemas/QuotePro"
           }
@@ -3173,10 +3329,11 @@
           "expires_at",
           "status",
           "created_at",
+          "approach",
           "pro"
         ],
         "title": "CustomerQuote",
-        "description": "A quote on the customer's request (#188). `scope` arrives with contact details masked\n(app.redaction): the pro's own email and phone, then every contact pattern."
+        "description": "A quote on the customer's request (#188). `scope` and `approach` arrive with contact\ndetails masked (app.redaction): the pro's own email and phone, then every contact pattern.\nNever the pro's payout or the platform's fee."
       },
       "CustomerQuoteList": {
         "properties": {
@@ -3462,6 +3619,26 @@
         ],
         "title": "ErrorResponse"
       },
+      "GroupPreferences": {
+        "properties": {
+          "group": {
+            "$ref": "#/components/schemas/PreferenceGroup"
+          },
+          "channels": {
+            "items": {
+              "$ref": "#/components/schemas/ChannelPreference"
+            },
+            "type": "array",
+            "title": "Channels"
+          }
+        },
+        "type": "object",
+        "required": [
+          "group",
+          "channels"
+        ],
+        "title": "GroupPreferences"
+      },
       "IntegerQuestion": {
         "properties": {
           "key": {
@@ -3697,6 +3874,43 @@
         ],
         "title": "MultiChoiceQuestion"
       },
+      "NotificationPreferences": {
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/GroupPreferences"
+            },
+            "type": "array",
+            "title": "Groups"
+          }
+        },
+        "type": "object",
+        "required": [
+          "groups"
+        ],
+        "title": "NotificationPreferences",
+        "description": "Every group, in a fixed order, with each of its channels: the user's choice, or the\ndefault when they never changed it."
+      },
+      "NotificationPreferencesPatch": {
+        "properties": {
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/PreferenceChange"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Changes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "changes"
+        ],
+        "title": "NotificationPreferencesPatch",
+        "description": "1 to MAX_CHANGES changes, each pair once and only a channel its group has."
+      },
       "OpportunityCategory": {
         "properties": {
           "id": {
@@ -3809,6 +4023,14 @@
             "type": "integer",
             "title": "Media Pending",
             "description": "How many more photos and videos are still being prepared."
+          },
+          "take_rate_bps": {
+            "type": "integer",
+            "title": "Take Rate Bps",
+            "description": "The platform's take rate in basis points (1500 = 15%), for the quote form's live 'you'll receive' preview only: the quote's response carries the amounts that count.",
+            "examples": [
+              1500
+            ]
           }
         },
         "additionalProperties": false,
@@ -3825,7 +4047,8 @@
           "viewed_at",
           "text_redacted",
           "media",
-          "media_pending"
+          "media_pending",
+          "take_rate_bps"
         ],
         "title": "OpportunityDetail"
       },
@@ -4091,6 +4314,39 @@
           "expires_at"
         ],
         "title": "PhotoOut"
+      },
+      "PreferenceChange": {
+        "properties": {
+          "group": {
+            "$ref": "#/components/schemas/PreferenceGroup"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/Channel"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "group",
+          "channel",
+          "enabled"
+        ],
+        "title": "PreferenceChange"
+      },
+      "PreferenceGroup": {
+        "type": "string",
+        "enum": [
+          "job_updates",
+          "quotes_and_opportunities",
+          "reminders",
+          "marketing",
+          "account_and_security"
+        ],
+        "title": "PreferenceGroup"
       },
       "ProDocumentStatus": {
         "type": "string",
@@ -4372,6 +4628,21 @@
             "title": "Scope",
             "description": "What the price includes."
           },
+          "approach": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000,
+                "minLength": 1,
+                "pattern": "^[^\\x00]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approach",
+            "description": "How I'll do the job: optional, apart from what the price includes. Trimmed; empty or blank is stored as no note (null)."
+          },
           "duration_minutes": {
             "type": "integer",
             "maximum": 2147483647.0,
@@ -4433,6 +4704,28 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "approach": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approach",
+            "description": "How I'll do the job, as the pro wrote it."
+          },
+          "pro_payout_cents": {
+            "type": "integer",
+            "title": "Pro Payout Cents",
+            "description": "What the pro will receive: the amount minus the platform's fee. The customer pays the amount; the platform absorbs the card fee."
+          },
+          "platform_fee_cents": {
+            "type": "integer",
+            "title": "Platform Fee Cents",
+            "description": "The platform's fee: the amount times the take rate, rounded half up to the cent."
           }
         },
         "additionalProperties": false,
@@ -4445,9 +4738,13 @@
           "proposed_start_at",
           "expires_at",
           "status",
-          "created_at"
+          "created_at",
+          "approach",
+          "pro_payout_cents",
+          "platform_fee_cents"
         ],
-        "title": "QuoteOut"
+        "title": "QuoteOut",
+        "description": "The pro's own quote (#50), with what they will receive (#246). Never sent to the\ncustomer: CustomerQuote does not extend it."
       },
       "QuotePro": {
         "properties": {

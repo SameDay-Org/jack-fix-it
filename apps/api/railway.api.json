@@ -7,7 +7,7 @@
   },
   "deploy": {
     "startCommand": "python -m app.serve",
-    "preDeployCommand": ["alembic upgrade head"],
+    "preDeployCommand": "sh -c 'alembic upgrade head && python -m scripts.seed_categories && python -m scripts.seed_service_areas'",
     "healthcheckPath": "/health",
     "restartPolicyType": "ON_FAILURE"
   }

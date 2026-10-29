@@ -9,20 +9,25 @@ lock, so two quotes on one request take turns) it checks, in this order:
   quote_ready): else 409 not_quotable;
 - the quote TTL is set (settings `quote_ttl_hours`, no default): else 503 not_configured;
 - the amount and the duration are within the platform's caps, when set: else 422. A cap set
-  to an invalid value is not "no cap": 503 not_configured, like a missing TTL.
+  to an invalid value is not "no cap": 503 not_configured, like a missing TTL;
+- the platform's take rate (settings `platform_take_rate_bps`, default 1500) is valid when
+  set: else 503 not_configured, never a fee of 0.
 Then, in the caller's transaction: the quote (pending, expires_at = now + TTL), the dispatch
 marked quoted, and the first quote moves the request from finding_pro to quote_ready (SYSTEM).
 Once that commits, the customer gets a new quote push (#55); a push that cannot be queued is
 logged, never undone.
-The amount is the pro's own price in cents, stored as given; fees are #58.
+The amount is the pro's own price in cents, stored as given. The response shows the pro what
+they will receive: the amount split at the take rate by app.money.split_amount (#246). The split
+is not stored: the job freezes it at payment (#58, #61), with the same function.
 
 The customer reads the quotes of their own request (else 404, the same body as the request
 itself) while it shows the quote screen (quote_ready, and accepted while the payment is
 pending: docs/glossary.md); any other status lists nothing. Listed: the accepted quote and the
 pending ones before their expires_at, whether or not the expiry worker (#51) has marked them,
 of the pros who can still be hired (approved, payouts enabled: the pros who receive requests).
-Contacts stay hidden before payment, so the scope is redacted (app.redaction): the pro's own
-email and phone first, then every pattern. The stored scope is unchanged. The pro's public
+Contacts stay hidden before payment, so the scope and the approach note are redacted
+(app.redaction): the pro's own email and phone first, then every pattern. The stored texts are
+unchanged. The customer never sees the pro's payout or the platform's fee. The pro's public
 name goes through the same check and is withheld (null) when it shows a contact (#194).
 
 The customer reads the public profile of the pro behind one of those quotes (#53) only while
@@ -52,7 +57,7 @@ of the request (#49); the repeat sends none. A quote whose pro has no dispatch o
 shows the job, so it is logged with ids and skipped. A push that cannot be queued is logged,
 never undone.
 
-Logs carry ids only: never the scope text or the amount.
+Logs carry ids only: never the scope or approach text, or the amount.
 """
 
 import logging
@@ -93,6 +98,7 @@ from app.modules.settings.errors import SettingMalformedError, SettingNotConfigu
 from app.modules.settings.service import QUOTE_TTL_HOURS, SettingsService
 from app.modules.users.service import UserService
 from app.modules.users.types import ContactPoints, UserAccount
+from app.money import split_amount
 from app.queue import JobQueue
 from app.redaction import KnownValues, redact_text
 
@@ -141,6 +147,7 @@ class QuoteService:
             logger.error("quote_not_configured", extra={"key": QUOTE_TTL_HOURS})
             raise SettingNotConfiguredError
         await self._check_caps(data)
+        take_rate_bps = await self._take_rate_bps()
 
         now = datetime.now(UTC)
         savepoint = await self._session.begin_nested()
@@ -151,6 +158,7 @@ class QuoteService:
                     pro_id=pro_id,
                     amount_cents=data.amount_cents,
                     scope=data.scope,
+                    approach=data.approach,
                     duration_minutes=data.duration_minutes,
                     proposed_start_at=data.proposed_start_at,
                     expires_at=now + timedelta(hours=ttl_hours),
@@ -185,7 +193,7 @@ class QuoteService:
             public_code=request.public_code,
             timeout_seconds=self._enqueue_timeout,
         )
-        return QuoteOut.model_validate(quote, from_attributes=True)
+        return _for_pro(quote, take_rate_bps)
 
     async def list_for_customer(
         self, user: UserAccount, request_id: uuid.UUID
@@ -319,6 +327,9 @@ class QuoteService:
                     id=quote.id,
                     amount_cents=quote.amount_cents,
                     scope=redact_text(quote.scope, known).text,
+                    approach=(
+                        None if quote.approach is None else redact_text(quote.approach, known).text
+                    ),
                     duration_minutes=quote.duration_minutes,
                     proposed_start_at=quote.proposed_start_at,
                     expires_at=quote.expires_at,
@@ -348,6 +359,32 @@ class QuoteService:
             max_duration is not None and data.duration_minutes > max_duration
         ):
             raise QuoteOutOfBoundsError
+
+    async def _take_rate_bps(self) -> int:
+        try:
+            return await self._settings.platform_take_rate_bps()
+        except SettingMalformedError as error:
+            # Logged by the settings service too (setting_invalid, the key only).
+            logger.error("quote_not_configured", extra={"key": error.key})
+            raise
+
+
+def _for_pro(quote: Quote, take_rate_bps: int) -> QuoteOut:
+    """The pro's own quote, unmasked, with what they will receive at `take_rate_bps`."""
+    split = split_amount(quote.amount_cents, take_rate_bps)
+    return QuoteOut(
+        id=quote.id,
+        amount_cents=quote.amount_cents,
+        scope=quote.scope,
+        approach=quote.approach,
+        duration_minutes=quote.duration_minutes,
+        proposed_start_at=quote.proposed_start_at,
+        expires_at=quote.expires_at,
+        status=quote.status,
+        created_at=quote.created_at,
+        pro_payout_cents=split.pro_payout_cents,
+        platform_fee_cents=split.platform_fee_cents,
+    )
 
 
 def _known(contact: ContactPoints | None) -> KnownValues:

@@ -511,9 +511,9 @@ export interface paths {
         /**
          * Open one of my opportunities
          * @description The full request, with its photos and videos as privacy-safe copies (no location or
-         *     other metadata) behind short-lived signed URLs, and how many are still being prepared. The
-         *     first open records that the pro saw it (viewed, viewed_at); opening it again changes
-         *     nothing.
+         *     other metadata) behind short-lived signed URLs, and how many are still being prepared, and
+         *     the platform's take rate for the quote form's preview. The first open records that the pro
+         *     saw it (viewed, viewed_at); opening it again changes nothing.
          */
         get: operations["open_opportunity_v1_pros_me_opportunities__dispatch_id__get"];
         put?: never;
@@ -535,9 +535,10 @@ export interface paths {
         put?: never;
         /**
          * Send a quote for one of my opportunities
-         * @description A fixed-price quote: the price in cents, what it includes, the estimated duration and a
-         *     proposed start. It expires after the platform's quote lifetime. The first quote on a
-         *     request makes it Quote Ready for the customer.
+         * @description A fixed-price quote: the price in cents, what it includes, optionally how the pro will
+         *     do the job, the estimated duration and a proposed start. It expires after the platform's
+         *     quote lifetime. The first quote on a request makes it Quote Ready for the customer. The
+         *     response shows the pro what they will receive: the price minus the platform's fee.
          */
         post: operations["submit_quote_v1_pros_me_opportunities__dispatch_id__quote_post"];
         delete?: never;
@@ -557,8 +558,9 @@ export interface paths {
          * Compare the quotes on one of my service requests
          * @description The quotes the customer can choose from: the pending ones not yet expired, and the
          *     accepted one while the payment is pending. Empty until the request is Quote Ready, and
-         *     once it is closed. Each shows the price, what it includes (contact details masked), the
-         *     duration, the proposed start, when it expires, and the pro's public card.
+         *     once it is closed. Each shows the price, what it includes and how the pro will do the job
+         *     (contact details masked), the duration, the proposed start, when it expires, and the pro's
+         *     public card.
          */
         get: operations["list_request_quotes_v1_requests__request_id__quotes_get"];
         put?: never;
@@ -607,8 +609,8 @@ export interface paths {
          *     accepted, where the payment follows; the other quotes stay pending. Calling it again for the
          *     accepted quote returns it unchanged, and changes nothing, even if its pro can no longer be
          *     hired: that repeat comes first, then a new acceptance checks the pro (approved, payouts
-         *     enabled). The response is the quote as listed, its scope masked; its pro card shows the
-         *     pro's current verification.
+         *     enabled). The response is the quote as listed, its scope and approach masked; its pro card
+         *     shows the pro's current verification.
          */
         post: operations["accept_quote_v1_requests__request_id__quotes__quote_id__accept_post"];
         delete?: never;
@@ -716,6 +718,33 @@ export interface paths {
          *     moves the default here. A request created from this address keeps its own copy.
          */
         patch: operations["update_saved_address_v1_addresses__address_id__patch"];
+        trace?: never;
+    };
+    "/v1/me/notification-preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get my notification preferences
+         * @description Every group with each of its channels: `enabled` is the caller's choice, or the default
+         *     when they never changed it. A `locked` channel is always on (account and security).
+         */
+        get: operations["get_notification_preferences_v1_me_notification_preferences_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change my notification preferences
+         * @description Applies the changes all or nothing and returns every preference, as GET does. Turning a
+         *     locked channel on is accepted and changes nothing. Pushes muted while a group was off are
+         *     not sent when it is turned back on.
+         */
+        patch: operations["update_notification_preferences_v1_me_notification_preferences_patch"];
         trace?: never;
     };
 }
@@ -852,6 +881,22 @@ export interface components {
             };
         };
         /**
+         * Channel
+         * @enum {string}
+         */
+        Channel: "push" | "email" | "sms";
+        /** ChannelPreference */
+        ChannelPreference: {
+            channel: components["schemas"]["Channel"];
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Locked
+             * @description Always on: the user cannot turn it off.
+             */
+            locked: boolean;
+        };
+        /**
          * CheckStatus
          * @enum {string}
          */
@@ -891,8 +936,9 @@ export interface components {
         };
         /**
          * CustomerQuote
-         * @description A quote on the customer's request (#188). `scope` arrives with contact details masked
-         *     (app.redaction): the pro's own email and phone, then every contact pattern.
+         * @description A quote on the customer's request (#188). `scope` and `approach` arrive with contact
+         *     details masked (app.redaction): the pro's own email and phone, then every contact pattern.
+         *     Never the pro's payout or the platform's fee.
          */
         CustomerQuote: {
             /**
@@ -922,6 +968,11 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Approach
+             * @description How the pro will do the job, with contact details masked as in the scope; null when the pro wrote none.
+             */
+            approach: string | null;
             pro: components["schemas"]["QuotePro"];
         };
         /** CustomerQuoteList */
@@ -1056,6 +1107,12 @@ export interface components {
         ErrorResponse: {
             error: components["schemas"]["ErrorDetail"];
         };
+        /** GroupPreferences */
+        GroupPreferences: {
+            group: components["schemas"]["PreferenceGroup"];
+            /** Channels */
+            channels: components["schemas"]["ChannelPreference"][];
+        };
         /** IntegerQuestion */
         IntegerQuestion: {
             /**
@@ -1181,6 +1238,23 @@ export interface components {
             max_selected?: number | null;
         };
         /**
+         * NotificationPreferences
+         * @description Every group, in a fixed order, with each of its channels: the user's choice, or the
+         *     default when they never changed it.
+         */
+        NotificationPreferences: {
+            /** Groups */
+            groups: components["schemas"]["GroupPreferences"][];
+        };
+        /**
+         * NotificationPreferencesPatch
+         * @description 1 to MAX_CHANGES changes, each pair once and only a channel its group has.
+         */
+        NotificationPreferencesPatch: {
+            /** Changes */
+            changes: components["schemas"]["PreferenceChange"][];
+        };
+        /**
          * OpportunityCategory
          * @description The request's category, as this module shows it: its own strict model, not the shared
          *     CategorySummary, whose extra fields would not be refused.
@@ -1245,6 +1319,12 @@ export interface components {
              * @description How many more photos and videos are still being prepared.
              */
             media_pending: number;
+            /**
+             * Take Rate Bps
+             * @description The platform's take rate in basis points (1500 = 15%), for the quote form's live 'you'll receive' preview only: the quote's response carries the amounts that count.
+             * @example 1500
+             */
+            take_rate_bps: number;
         };
         /**
          * OpportunityLocation
@@ -1393,6 +1473,18 @@ export interface components {
              */
             expires_at: string;
         };
+        /** PreferenceChange */
+        PreferenceChange: {
+            group: components["schemas"]["PreferenceGroup"];
+            channel: components["schemas"]["Channel"];
+            /** Enabled */
+            enabled: boolean;
+        };
+        /**
+         * PreferenceGroup
+         * @enum {string}
+         */
+        PreferenceGroup: "job_updates" | "quotes_and_opportunities" | "reminders" | "marketing" | "account_and_security";
         /**
          * ProDocumentStatus
          * @enum {string}
@@ -1524,6 +1616,11 @@ export interface components {
              */
             scope: string;
             /**
+             * Approach
+             * @description How I'll do the job: optional, apart from what the price includes. Trimmed; empty or blank is stored as no note (null).
+             */
+            approach?: string | null;
+            /**
              * Duration Minutes
              * @description Estimated duration of the work.
              */
@@ -1535,7 +1632,11 @@ export interface components {
              */
             proposed_start_at: string;
         };
-        /** QuoteOut */
+        /**
+         * QuoteOut
+         * @description The pro's own quote (#50), with what they will receive (#246). Never sent to the
+         *     customer: CustomerQuote does not extend it.
+         */
         QuoteOut: {
             /**
              * Id
@@ -1564,6 +1665,21 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Approach
+             * @description How I'll do the job, as the pro wrote it.
+             */
+            approach: string | null;
+            /**
+             * Pro Payout Cents
+             * @description What the pro will receive: the amount minus the platform's fee. The customer pays the amount; the platform absorbs the card fee.
+             */
+            pro_payout_cents: number;
+            /**
+             * Platform Fee Cents
+             * @description The platform's fee: the amount times the take rate, rounded half up to the cent.
+             */
+            platform_fee_cents: number;
         };
         /**
          * QuotePro
@@ -3517,6 +3633,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description not_configured: the platform's take rate is set to an invalid value. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     submit_quote_v1_pros_me_opportunities__dispatch_id__quote_post: {
@@ -3579,7 +3704,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description validation_error: amount or duration not a positive integer or above the platform's cap, scope empty or too long, proposed_start_at not a future time with a time zone, or a field the server sets (status, expires_at, pro or request). */
+            /** @description validation_error: amount or duration not a positive integer or above the platform's cap, scope empty or too long, approach too long or with a NUL character, proposed_start_at not a future time with a time zone, or a field the server sets (status, expires_at, pro or request). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -3588,7 +3713,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description not_configured: quoting is not configured yet (the quote lifetime is not set, or a quote cap is set to an invalid value). */
+            /** @description not_configured: quoting is not configured yet (the quote lifetime is not set, or a quote cap or the platform's take rate is set to an invalid value). */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -4192,6 +4317,86 @@ export interface operations {
                 headers: {
                     /** @description Seconds until the current limit window ends. */
                     "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_notification_preferences_v1_me_notification_preferences_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPreferences"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_notification_preferences_v1_me_notification_preferences_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationPreferencesPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPreferences"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description preference_locked: a change turns off a locked channel; validation_error: an unknown group or channel, a channel its group does not have, a group and channel twice, no change or more than 20. Either way nothing is stored. */
+            422: {
+                headers: {
                     [name: string]: unknown;
                 };
                 content: {

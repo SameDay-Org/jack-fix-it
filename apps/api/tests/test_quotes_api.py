@@ -142,11 +142,14 @@ async def test_dispatched_pro_quotes_201_and_request_moves_to_quote_ready(
         "id",
         "amount_cents",
         "scope",
+        "approach",
         "duration_minutes",
         "proposed_start_at",
         "expires_at",
         "status",
         "created_at",
+        "pro_payout_cents",
+        "platform_fee_cents",
     }
     assert (out["amount_cents"], out["scope"], out["duration_minutes"]) == (AMOUNT, SCOPE, 90)
     assert out["status"] == "pending"

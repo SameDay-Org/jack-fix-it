@@ -50,6 +50,7 @@ ITEM_KEYS = {
     "id",
     "amount_cents",
     "scope",
+    "approach",
     "duration_minutes",
     "proposed_start_at",
     "expires_at",
@@ -462,6 +463,27 @@ async def test_known_values_are_the_quoting_pros_not_another_pros(
     assert [item["scope"] for item in response.json()["items"]] == ["Same day, •••", scope]
 
 
+async def test_scope_with_a_handle_glued_to_a_combining_mark_is_masked(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: World
+) -> None:
+    """ "@home" + U+0483 + "fixit" is a handle, as "@home.fixit" is (#229): the whole token."""
+    request_id = await make_request(db_session, world, RequestStatus.QUOTE_READY)
+    marked = "Same day, find me @home" + chr(0x0483) + "fixit for the key"
+    dotted = "Same day, find me @home.fixit for the key"
+    await add_quote(
+        db_session, request_id, await quoting_pro(db_session), scope=marked, amount=1_000
+    )
+    await add_quote(
+        db_session, request_id, await quoting_pro(db_session), scope=dotted, amount=2_000
+    )
+
+    response = await db_client.get(path(request_id), headers=customer(world))
+
+    assert response.status_code == 200
+    shown = [item["scope"] for item in response.json()["items"]]
+    assert shown == ["Same day, find me ••• for the key"] * 2
+
+
 async def test_known_email_is_the_quoting_pros_not_another_pros(
     db_client: httpx.AsyncClient, db_session: AsyncSession, world: World
 ) -> None:
@@ -764,6 +786,7 @@ def test_response_models_forbid_extra_fields() -> None:
         "id": str(uuid.uuid4()),
         "amount_cents": 1,
         "scope": "x",
+        "approach": None,
         "duration_minutes": 1,
         "proposed_start_at": T0.isoformat(),
         "expires_at": T0.isoformat(),

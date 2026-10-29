@@ -18,6 +18,8 @@ jest.mock("@/api", () => ({
 }));
 jest.mock("expo-router", () => ({
   router: { push: jest.fn(), back: jest.fn(), canGoBack: () => true, replace: jest.fn() },
+  useIsFocused: () => true,
+  useScrollToTop: jest.fn(),
 }));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
@@ -78,13 +80,13 @@ describe("AccountScreen", () => {
     expect(router.push).toHaveBeenCalledWith("/verify-phone");
   });
 
-  it("back returns to the previous screen", async () => {
+  it("a tab root: no back control", async () => {
     jest.mocked(useSession).mockReturnValue(signedIn());
 
     await renderAccount();
-    await fireEvent.press(screen.getByRole("button", { name: "Back" }));
 
-    expect(router.back).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+    expect(screen.queryByTestId("back-button")).toBeNull();
   });
 
   it("log out shows loading and signs out", async () => {

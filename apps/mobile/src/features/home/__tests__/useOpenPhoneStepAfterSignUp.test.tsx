@@ -15,7 +15,11 @@ jest.mock("@/api", () => ({
   useSession: jest.fn(),
   logout: jest.fn(),
 }));
-jest.mock("expo-router", () => ({ router: { push: jest.fn(), dismissTo: jest.fn() } }));
+jest.mock("expo-router", () => ({
+  router: { push: jest.fn(), dismissTo: jest.fn() },
+  useIsFocused: () => true,
+  useScrollToTop: jest.fn(),
+}));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
   "react-native-safe-area-context",
@@ -58,7 +62,7 @@ describe("useOpenPhoneStepAfterSignUp on the customer home", () => {
     await act(() => withdrawPhoneStepOffer());
 
     expect(headline()).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Tell Jack What Happened" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Painting" })).toBeTruthy(); // a category card
     expect(router.push).toHaveBeenCalledTimes(1);
   });
 });

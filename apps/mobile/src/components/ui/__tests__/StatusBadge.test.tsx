@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react-native";
 
-import { StatusBadge, type StatusTone } from "../StatusBadge";
+import { StatusBadge, StatusBadgeSkeleton, type StatusTone } from "../StatusBadge";
 
 const TONES: StatusTone[] = ["neutral", "info", "success", "warning", "danger", "brand"];
 
@@ -31,5 +31,21 @@ describe("StatusBadge", () => {
     expect(badge().props.className).toMatch(/\bbg-warning\b(?!\/)/);
     expect(screen.getByText("Pending").props.className).toContain("text-navy-900");
     expect(screen.getByText("Pending").props.className).not.toMatch(/warning/);
+  });
+
+  it("the skeleton is the same pill around an invisible copy of the label", async () => {
+    await render(<StatusBadgeSkeleton label="Scheduled" testID="badge-skeleton" />);
+
+    const hidden = { includeHiddenElements: true };
+    const text = screen.getByText("Scheduled", hidden);
+    expect(text.props.className).toContain("text-caption");
+    expect(text.props.className).toContain("opacity-0");
+    expect(text.props.importantForAccessibility).toBe("no-hide-descendants");
+    const pill = screen
+      .getByTestId("badge-skeleton", hidden)
+      .queryAll((node) => node.type === "View")[0];
+    expect(pill.props.className).toContain("rounded-pill");
+    expect(pill.props.className).toContain("bg-gray-500/15");
+    expect(screen.queryByRole("text")).toBeNull();
   });
 });

@@ -53,12 +53,16 @@ type Method = "GET" | "POST";
 
 const ACCEPTED = 202;
 
+/** Query-string values; an `undefined` one is left out (an optional cursor on the first page). */
+export type QueryParams = Readonly<Record<string, string | number | undefined>>;
+
 export type SendOptions = {
   body?: unknown;
   accessToken?: string;
   signal?: AbortSignal;
   /** Values for the path's `{name}` segments. */
   params?: Readonly<Record<string, string>>;
+  query?: QueryParams;
 };
 
 const PATH_PARAM = /\{(\w+)\}/g;
@@ -120,6 +124,9 @@ export async function sendRequest<T>(
 ): Promise<T> {
   throwIfAborted(options.signal);
   const url = resolveUrl(fillPath(path, options.params));
+  for (const [name, value] of Object.entries(options.query ?? {})) {
+    if (value !== undefined) url.searchParams.set(name, String(value));
+  }
   const headers: Record<string, string> = { Accept: "application/json" };
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
   if (options.accessToken) headers.Authorization = `Bearer ${options.accessToken}`;
