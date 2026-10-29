@@ -801,6 +801,11 @@ CONTACT_LABELS = [
     "@home" + chr(0xFE4D) + "fixit",  # DASHED LOW LINE: "_" under NFKC
     "@home" + chr(0x2010) + "fixit",  # HYPHEN
     "@home" + chr(0x2024) + "fixit",  # ONE DOT LEADER: "." under NFKC
+    # #229: marks outside the Latin blocks, a spacing mark (Mc) and a mark beyond the BMP.
+    "@home" + chr(0x0483) + "fixit",  # COMBINING CYRILLIC TITLO
+    "@home" + chr(0x05B0) + "fixit",  # HEBREW POINT SHEVA
+    "@home" + chr(0x093F) + "fixit",  # DEVANAGARI VOWEL SIGN I (Mc)
+    "@home" + chr(0x1D167) + "fixit",  # MUSICAL SYMBOL COMBINING TREMOLO-1
     # Round 2: a phone glued to a unit marker, which the skipped unit step used to catch.
     "APT3055550199",
     "UNIT3055550199",
@@ -832,6 +837,10 @@ CONTACT_LABELS = [
         "at_home_dashed_low_line",
         "at_home_hyphen",
         "at_home_dot_leader",
+        "at_home_cyrillic_mark",
+        "at_home_hebrew_mark",
+        "at_home_devanagari_mark",
+        "at_home_musical_mark",
         "apt_phone",
         "unit_phone",
         "suite_phone",
