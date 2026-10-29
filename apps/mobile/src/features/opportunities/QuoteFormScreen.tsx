@@ -24,6 +24,13 @@ import { useSendQuote, type SentQuote } from "./useSendQuote";
 
 type ClosedReason = "gone" | "alreadyQuoted";
 
+/**
+ * Where the pro's send is. While one is `out`, or once it was `answered` for good (sent, closed),
+ * the POST's answer decides what shows: a 404 for the detail then is the quote's own doing (a
+ * quoted dispatch answers 404), not a denial.
+ */
+type SendPhase = "none" | "out" | "answered";
+
 type Step =
   | { kind: "form" }
   | { kind: "review"; failed: boolean }
@@ -43,23 +50,33 @@ export function QuoteFormScreen() {
   const { t } = useTranslation();
   const client = useQueryClient();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [settled, setSettled] = useState(false);
-  const { data, error, refetch, isFetching } = useOpportunity(id, !settled);
+  const [sendPhase, setSendPhase] = useState<SendPhase>("none");
+  // Answered 404 while this screen was up, over a cached or kept detail too: the form closes, the
+  // opportunity is forgotten and nothing here asks for it again, so no later failure can bring the
+  // old detail back. Adjusted while rendering, so not even one more request goes out.
+  const [deniedId, setDeniedId] = useState<string | null>(null);
+  const denied = deniedId === id;
+  const { data, error, refetch, isFetching } = useOpportunity(
+    id,
+    !denied && sendPhase !== "answered",
+  );
   // The form keeps the opportunity it opened with: sending forgets the cached detail.
   const [kept, setKept] = useState<OpportunityDetail | undefined>(data);
-  if (data !== undefined && data !== kept) setKept(data);
-  const opportunity = data ?? kept;
-  const goneOnOpen = opportunity === undefined && isGone(error);
+  if (!denied && sendPhase === "none" && isGone(error)) {
+    setDeniedId(id);
+    setKept(undefined);
+  } else if (!denied && data !== undefined && data !== kept) setKept(data);
 
   useEffect(() => {
-    if (goneOnOpen) void forgetOpportunity(client, id);
-  }, [client, goneOnOpen, id]);
+    if (denied) void forgetOpportunity(client, id);
+  }, [client, denied, id]);
 
-  if (opportunity !== undefined) {
-    return <QuoteFlow opportunity={opportunity} onSettled={() => setSettled(true)} />;
-  }
-  if (goneOnOpen) {
+  if (denied) {
     return <ClosedState reason="gone" onDone={() => router.dismissTo(HOME)} />;
+  }
+  const opportunity = data ?? kept;
+  if (opportunity !== undefined) {
+    return <QuoteFlow opportunity={opportunity} onSendPhase={setSendPhase} />;
   }
   return (
     <Screen bar="light" testID="quote-screen">
@@ -84,8 +101,8 @@ export function QuoteFormScreen() {
 
 type QuoteFlowProps = {
   opportunity: OpportunityDetail;
-  /** The quote went out or the opportunity closed: its detail is not asked for again. */
-  onSettled: () => void;
+  /** The send went out, failed and may go again (`none`), or ended the form (`answered`). */
+  onSendPhase: (phase: SendPhase) => void;
 };
 
 /**
@@ -93,7 +110,7 @@ type QuoteFlowProps = {
  * back from a form with something typed asks before discarding; back from the end goes home, as
  * its button does, since the detail under it is no longer open.
  */
-function QuoteFlow({ opportunity, onSettled }: QuoteFlowProps) {
+function QuoteFlow({ opportunity, onSendPhase }: QuoteFlowProps) {
   const { t } = useTranslation();
   const quote = useQuoteDraft(opportunity.preferred_date);
   const { send, sending } = useSendQuote(opportunity.dispatch_id);
@@ -132,18 +149,22 @@ function QuoteFlow({ opportunity, onSettled }: QuoteFlowProps) {
     if (quote.check()) setStep({ kind: "review", failed: false });
   };
 
-  const sendQuote = () =>
+  const sendQuote = () => {
+    onSendPhase("out");
     send(quoteBody(quote.draft), {
       onSent: (sent) => {
-        onSettled();
+        onSendPhase("answered");
         setStep({ kind: "sent", quote: sent });
         AccessibilityInfo.announceForAccessibility(t("quoteForm.sent.title"));
       },
       onFailed: (failure) => {
         if (failure === "gone" || failure === "alreadyQuoted") {
-          onSettled();
+          onSendPhase("answered");
           setStep({ kind: "closed", reason: failure });
-        } else if (failure === "invalid") {
+          return;
+        }
+        onSendPhase("none");
+        if (failure === "invalid") {
           quote.refused();
           setStep({ kind: "form" });
         } else if (failure === "failed") {
@@ -151,6 +172,7 @@ function QuoteFlow({ opportunity, onSettled }: QuoteFlowProps) {
         }
       },
     });
+  };
 
   switch (step.kind) {
     case "sent":
