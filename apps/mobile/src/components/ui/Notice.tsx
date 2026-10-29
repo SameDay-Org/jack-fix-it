@@ -1,12 +1,5 @@
-import { NavigationContext } from "expo-router/react-navigation";
-import {
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useSyncExternalStore,
-  type ReactNode,
-} from "react";
+import { useIsFocused } from "expo-router";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Text, View } from "react-native";
 
 import { continuousCorners } from "@/theme";
@@ -65,18 +58,11 @@ export function Notice({ tone, title, body, children, className, testID }: Notic
 
 /** Whether the screen holding it is the one in front; true outside a navigator. */
 function useScreenFocused(): boolean {
-  const navigation = useContext(NavigationContext);
-  const subscribe = useCallback(
-    (onChange: () => void) => {
-      if (!navigation) return () => undefined;
-      const offFocus = navigation.addListener("focus", onChange);
-      const offBlur = navigation.addListener("blur", onChange);
-      return () => {
-        offFocus();
-        offBlur();
-      };
-    },
-    [navigation],
-  );
-  return useSyncExternalStore(subscribe, () => navigation?.isFocused() ?? true);
+  // useIsFocused always reads the focus context first, then throws when there is none (a test, the
+  // gallery outside a route): the hook order is the same on every render.
+  try {
+    return useIsFocused();
+  } catch {
+    return true;
+  }
 }
