@@ -30,10 +30,10 @@ letters for digits ("305 555 O199"), commas between phone groups, digits that mi
 numerals, a phone grouping no one uses ("30 55 55 01 99"), a bare handle with no "@", cue or
 digit ("insta jdoe"), a plain word after a weak platform ("my venmo is jdoe"), a display name
 ("find me on facebook as John Doe"), a street with no suffix ("1234 Flagler"), a reversed street
-with lowercase or function-word names, a combining mark inside a TLD or a mail provider's name
-("gmail.c" + U+0483 + "om": the literal lists cannot take marks), and text inside images (#173
-handles media). A 10-digit order or serial number is masked like a phone: hiding a number is
-the safe side.
+with lowercase or function-word names, a mark or a non-ASCII letter inside a TLD or a mail
+provider's name ("gmail.c" + U+0483 + "om", "gmail.cöm": those lists are literal), and text
+inside images (#173 handles media). A 10-digit order or serial number is masked like a phone:
+hiding a number is the safe side.
 
 The patterns are data in this module; it does no I/O and keeps no state. Every pattern is
 anchored so a 2,000-character input (the description limit) is handled in milliseconds.
@@ -218,7 +218,9 @@ _PROVIDERS: Final = (
 )
 # Never start inside a word, a dotted chain or a marked token: a start after a mark would scan
 # the token again from every mark ("a" + U+0483 repeated), so the lookbehind refuses it and the
-# leftmost start takes the whole token, marks included.
+# leftmost start takes the whole token, marks included. A token may begin with a spacing mark
+# (_clean keeps an Mc anywhere: U+093F + "jose@gmail.com"), so every pattern takes _MARKED
+# right after the lookbehind, where that mark is the one legal start.
 _START: Final = rf"(?<![\w.%+@\-{_MARKS}])"
 # Possessive, so a long dotted chain is never re-split; Unicode letters too ("josé.pérez"), and
 # the marks glued to any of its characters ("jo" + U+0483 + "se", #236).
@@ -233,28 +235,34 @@ _STRONG_AT: Final = r"(?:\s*@\s*|\s*[(\[{<]\s*(?:at|arroba)\s*[)\]}>]\s*|\s+arro
 _SPELLED_DOT: Final = r"(?:\.|\s*[(\[{<]\s*(?:dot|punto)\s*[)\]}>]\s*|\s+(?:dot|punto)\s+)"
 _ONLY_SPELLED_DOT: Final = r"(?:\s*[(\[{<]\s*(?:dot|punto)\s*[)\]}>]\s*|\s+(?:dot|punto)\s+)"
 PLAIN_EMAIL: Final = re.compile(
-    rf"{_START}{_LOCAL}@{_LABEL}++(?:[.,]{_LABEL}++)*?[.,][a-z]{{2,}}\b", _FLAGS
+    rf"{_START}{_MARKED}{_LOCAL}@{_LABEL}++(?:[.,]{_LABEL}++)*?[.,][a-z]{{2,}}\b", _FLAGS
 )
 SPACED_EMAIL: Final = re.compile(
-    rf"{_START}{_LOCAL}\s*@\s*{_LABEL}++(?:\s*\.\s*{_LABEL}++)*?\s*\.\s*{_TLD_END}", _FLAGS
+    rf"{_START}{_MARKED}{_LOCAL}\s*@\s*{_LABEL}++(?:\s*\.\s*{_LABEL}++)*?\s*\.\s*{_TLD_END}",
+    _FLAGS,
 )
 # "maria at gmail dot com", "juan dot perez at gmail dot com", "jane (at) outlook.com". With a
 # bare " at " and a plain dot, the local part may not be a common word ("it at Amazon.com").
+# The spelled dots of the local part are bounded: an open repeat backtracks one piece at a time
+# from every word start, quadratic on "a dot " repeated (the domain chain is lazy and runs only
+# after the "at", so it stays open).
 SPELLED_EMAIL: Final = re.compile(
-    rf"{_START}(?P<local>{_LOCAL}(?:{_ONLY_SPELLED_DOT}[\w\-{_MARKS}]++)*)"
+    rf"{_START}{_MARKED}(?P<local>{_LOCAL}(?:{_ONLY_SPELLED_DOT}[\w\-{_MARKS}]++){{0,4}})"
     rf"(?P<at>{_AT}){_LABEL}++(?:{_SPELLED_DOT}{_LABEL}++)*?(?P<dot>{_SPELLED_DOT})"
     rf"(?P<tld>{_TLD_END})",
     _FLAGS,
 )
 # A provider with no TLD, or with a TLD typed loosely ("gmail com", "gmailcom", "gmail,com").
 PROVIDER_EMAIL: Final = re.compile(
-    rf"{_START}(?P<local>{_LOCAL})(?P<at>{_AT}){_PROVIDERS}"
+    rf"{_START}{_MARKED}(?P<local>{_LOCAL})(?P<at>{_AT}){_PROVIDERS}"
     rf"(?:\s*[.,]?\s*(?:dot\s+|punto\s+)?(?:com|net|es|mx)\b)?",
     _FLAGS,
 )
 # "local@word" glued, whatever comes next: an address with its domain cut short. The word ends
 # where a word character would continue it ("jose@acme_x" is the "_" gap), marks included.
-GLUED_EMAIL: Final = re.compile(rf"{_START}[^\W\d_]{_LOCAL}@[^\W\d_]{_LABEL}++(?!\w)", _FLAGS)
+GLUED_EMAIL: Final = re.compile(
+    rf"{_START}{_MARKED}[^\W\d_]{_LOCAL}@[^\W\d_]{_LABEL}++(?!\w)", _FLAGS
+)
 # An email typed letter by letter: "j a n e @ g m a i l . c o m", in any script, each letter
 # with its marks. Before the "@" the letters are taken once, possessively, and after each one
 # the space is tried before the mark class (an atomic choice, never revisited when the "@" is
@@ -277,16 +285,19 @@ _COMMON_WORDS: Final = frozenset(
 )  # fmt: skip
 
 # --- URLs ------------------------------------------------------------------------------------
-# A domain never starts inside a word or a marked token (see _START); its labels are _LABEL,
-# so "gmäil.com", "gm" + U+0483 + "ail.com" and "ñandú.com/x" are masked whole.
+# A domain never starts inside a word or a marked token (see _START), and may begin with a
+# spacing mark; its labels are _LABEL, so "gmäil.com", "gm" + U+0483 + "ail.com" and
+# "ñandú.com/x" are masked whole. An accented word glued to a word TLD by a missing space
+# ("El baño.es muy pequeño") is left alone by _missing_space. The spelled dots are bounded, as
+# in SPELLED_EMAIL.
 _DOMAIN_START: Final = rf"(?<![\w.@\-{_MARKS}])"
 URL: Final = re.compile(
     rf"(?:https?://|\bwww\s*\.\s*)\S+"
-    rf"|{_DOMAIN_START}[^\W_]{_LABEL}*+(?:\.{_LABEL}++)*?\.[a-z]{{2,}}/\S*"
-    rf"|{_DOMAIN_START}[^\W_]{_LABEL}*+(?:\.{_LABEL}++)*?\.(?P<tld>{_TLD_END})"
-    rf"|{_DOMAIN_START}[^\W_]{_LABEL}{{2,}}+\s*\.\s+(?:com|net|org|co|us|io|miami)\b"
-    rf"|{_DOMAIN_START}[^\W_]{_LABEL}{{2,}}+\s+\.\s*(?:com|net|org|co|us|io|miami)\b"
-    rf"|{_DOMAIN_START}{_LABEL}{{2,}}+(?:\s+(?:dot|punto)\s+{_LABEL}++)*\s+(?:dot|punto)\s+"
+    rf"|{_DOMAIN_START}{_MARKED}[^\W_]{_LABEL}*+(?:\.{_LABEL}++)*?\.[a-z]{{2,}}/\S*"
+    rf"|{_DOMAIN_START}{_MARKED}[^\W_]{_LABEL}*+(?:\.{_LABEL}++)*?\.(?P<tld>{_TLD_END})"
+    rf"|{_DOMAIN_START}{_MARKED}[^\W_]{_LABEL}{{2,}}+\s*\.\s+(?:com|net|org|co|us|io|miami)\b"
+    rf"|{_DOMAIN_START}{_MARKED}[^\W_]{_LABEL}{{2,}}+\s+\.\s*(?:com|net|org|co|us|io|miami)\b"
+    rf"|{_DOMAIN_START}{_LABEL}{{2,}}+(?:\s+(?:dot|punto)\s+{_LABEL}++){{0,4}}\s+(?:dot|punto)\s+"
     rf"{_TLD_END}",
     _FLAGS,
 )
@@ -618,10 +629,17 @@ def _mask(match: re.Match[str]) -> str | None:
 
 
 def _missing_space(match: re.Match[str], tld: str) -> bool:
-    """ "cooling.Me and my wife": a word TLD, capitalized, right after a lowercase letter."""
+    """ "cooling.Me and my wife": a word TLD, capitalized, right after a lowercase letter. Or
+    "El baño.es muy pequeño": a word TLD after a label with a non-ASCII letter, which is Spanish
+    or Portuguese typing, not a domain (an accented domain with a path or "www." is still one)."""
+    if tld.lower() not in _WORD_TLDS:
+        return False
     start = match.start("tld")
     before = match.string[start - 2] if start >= 2 else ""
-    return tld.lower() in _WORD_TLDS and tld[0].isupper() and not tld.isupper() and before.islower()
+    if tld[0].isupper() and not tld.isupper() and before.islower():
+        return True
+    label = match.string[match.start() : start - 1].rsplit(".", 1)[-1]
+    return any(char.isalpha() and not char.isascii() for char in label)
 
 
 def _mask_url(match: re.Match[str]) -> str | None:

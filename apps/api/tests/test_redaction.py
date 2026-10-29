@@ -674,6 +674,17 @@ AUDIT_CASES = [
     # SPACED_LETTERS_EMAIL.
     "j o s é @ g m a i l . c o m",
     "j" + TITLO + " a n e @ g m a i l",
+    # A spacing mark before the token (review of #236: the lookbehinds refuse a start after a
+    # mark, so the mark itself must be a legal start) in every email rule and the URL rules.
+    VOWEL_SIGN_I + "jose@gmail.com",
+    VOWEL_SIGN_I + "jose @ gmail . com",
+    VOWEL_SIGN_I + "jose at gmail dot com",
+    VOWEL_SIGN_I + "jose at gmail",
+    VOWEL_SIGN_I + "jose@acme",
+    VOWEL_SIGN_I + "jackfixit.com",
+    VOWEL_SIGN_I + "jackfixit.com/x",
+    VOWEL_SIGN_I + "jackfixit . com",
+    VOWEL_SIGN_I + "jackfixit dot com",
     # URL: a label, a non-ASCII label, the path, the "www." form, a path TLD, the spaced and
     # the spelled dot.
     "gm" + TITLO + "ail.com",
@@ -697,6 +708,21 @@ def test_email_url_mark_audit(text: str) -> None:
         assert redact_contacts(f"write to {text}, thanks") == RedactionResult(
             f"write to {MASK}, thanks", True
         ), ascii(text)
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+def test_an_accented_word_glued_to_a_word_tld_is_a_missing_space(
+    form: Literal["NFC", "NFD"],
+) -> None:
+    """Review of #236: with Unicode letters in the labels, "baño.es" matched the domain rule.
+    A word TLD after a label with a non-ASCII letter is Spanish or Portuguese typing; a domain
+    with such a letter still needs a path, "www." or a non-word TLD."""
+    for text in ("El baño.es muy pequeño", "la cocina está.me gusta", "não.me diga isso"):
+        typed = unicodedata.normalize(form, text)
+
+        assert redact_contacts(typed) == RedactionResult(text, False), ascii(typed)
+    for domain in ("ñandú.com", "baño.es/x", "www.baño.es", "gmäil.com"):
+        assert redact_contacts(f"see {domain}") == RedactionResult(f"see {MASK}", True), domain
 
 
 @pytest.mark.parametrize("prefix", ["APT", "UNIT", "SUITE", "STE", "PO BOX"])
@@ -1335,6 +1361,11 @@ MARKED_LETTER = "é" + chr(0x0483)  # a non-ASCII letter with a mark: 2,500 of t
         MARKED_LETTER * 2500 + ".c",
         (MARKED_LETTER + ".") * 1667,
         MARKED_LETTER * 2500 + " dot x",
+        # Review of #236: a spacing mark at every word start, and the spelled-dot chains.
+        (chr(0x093F) + "a") * 2500,
+        (" " + chr(0x093F)) * 2500,
+        "aé dot " * 714 + "zz",
+        "a punto " * 625,
     ],
     ids=[
         "at_handle",
@@ -1348,10 +1379,15 @@ MARKED_LETTER = "é" + chr(0x0483)  # a non-ASCII letter with a mark: 2,500 of t
         "url_label",
         "url_dotted_labels",
         "url_spelled_dot",
+        "mark_led_tokens",
+        "mark_after_every_space",
+        "accented_dot_chain",
+        "punto_chain",
     ],
 )
 def test_many_unicode_letters_with_marks_are_fast(text: str) -> None:
     """One 5,000-character case per pattern changed in #236: the lookbehinds refuse a start
-    after a mark, so a marked token is scanned once, and the counted bodies stay possessive."""
+    after a mark, so a marked token is scanned once, the counted bodies stay possessive, and
+    the spelled-dot chains are bounded."""
     assert len(text) >= 5000
     assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25
