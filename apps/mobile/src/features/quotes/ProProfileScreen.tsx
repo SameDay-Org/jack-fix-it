@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams } from "expo-router";
-import { Fragment, useEffect, useMemo, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, Text, useWindowDimensions, View } from "react-native";
 import Animated from "react-native-reanimated";
@@ -13,15 +13,16 @@ import { continuousCorners } from "@/theme";
 
 import { useExpiryClock } from "./expiry";
 import { formatMoney, formatMonth, formatRating } from "./format";
-import { acceptHref, useGuardedPush } from "./navigation";
+import { acceptHref, isUuid, useGuardedPush } from "./navigation";
 import { displayName, quoteStateOf } from "./quoteText";
-import { isGone, useProProfile, type ProPublicProfile } from "./useProProfile";
 import {
-  quotesQueryKey,
-  quotesQueryOptions,
-  useSettledError,
-  type CustomerQuote,
-} from "./useRequestQuotes";
+  forgetProProfile,
+  isDenied,
+  isGone,
+  useProProfile,
+  type ProPublicProfile,
+} from "./useProProfile";
+import { quotesQueryOptions, useSettledError, type CustomerQuote } from "./useRequestQuotes";
 
 /**
  * The public profile of the pro behind one quote (`/requests/[id]/quotes/[quoteId]/pro`, pushed
@@ -32,18 +33,35 @@ import {
  * the categories with their icons; and one line on what verified means. The bar at the bottom
  * holds Accept for the price while the quote is still open in the cached list, and the way back
  * to the quotes. A 404 means the quote left the comparison (expired, withdrawn): the list under
- * this screen is invalidated so its card goes too. The skeleton has the loaded rows, so nothing
- * jumps when the profile arrives.
+ * this screen is invalidated so its card goes too. A 404 or 403 also drops the profile an earlier
+ * answer held (`forgetProProfile`). The skeleton has the loaded rows, so nothing jumps when the
+ * profile arrives.
  */
 export function ProProfileScreen() {
   const { t } = useTranslation();
   const { id: requestId, quoteId } = useLocalSearchParams<{ id: string; quoteId: string }>();
-  const { data, error, refetch, isFetching } = useProProfile(requestId, quoteId);
+  const client = useQueryClient();
+  // A link can carry anything here: ids that are not ids ask nothing and read as gone.
+  const valid = isUuid(requestId) && isUuid(quoteId);
+  // Refused (404 or 403) while this screen was up: the profile it held leaves the cache and
+  // nothing here asks for it again, so no later failure can bring it back; the next open starts
+  // afresh. Read while rendering, so the old profile never shows beside the refusal.
+  const key = `${requestId}/${quoteId}`;
+  const [denial, setDenial] = useState<{ key: string; status: number } | null>(null);
+  const deniedHere = denial?.key === key;
+  const profile = useProProfile(requestId, quoteId, valid && !deniedHere);
+  const { error, refetch, isFetching } = profile;
+  const refused = deniedHere ? denial.status : isDenied(error) ? error.status : null;
+  if (refused !== null && !deniedHere) setDenial({ key, status: refused });
+  const data = refused === null ? profile.data : undefined;
   const shownError = useSettledError(data, error);
-  const gone = data === undefined && isGone(shownError);
+  const gone = !valid || refused === 404 || (data === undefined && isGone(shownError));
   const quote = useOpenQuote(requestId, quoteId);
   const push = useGuardedPush();
-  useInvalidateQuotes(requestId, gone);
+
+  useEffect(() => {
+    if (refused !== null) forgetProProfile(client, requestId, quoteId, refused);
+  }, [client, quoteId, refused, requestId]);
 
   return (
     <Screen bar="light" className="bg-white" testID="pro-profile-screen">
@@ -64,7 +82,8 @@ export function ProProfileScreen() {
             title={t("quotes.profile.error.title")}
             body={t("quotes.error.body")}
             action={t("quotes.error.retry")}
-            onAction={() => void refetch()}
+            // After a 403 the screen asks again by enabling the profile it dropped.
+            onAction={() => (refused === null ? void refetch() : setDenial(null))}
             busy={isFetching}
             testID="pro-profile-error"
           />
@@ -115,14 +134,6 @@ function useOpenQuote(requestId: string, quoteId: string): CustomerQuote | null 
   const expiries = useMemo(() => (quote?.status === "pending" ? [quote.expires_at] : []), [quote]);
   const now = useExpiryClock(expiries);
   return quote && quoteStateOf(quote, now, anyAccepted) === "open" ? quote : null;
-}
-
-/** A 404 says the quote left the comparison: the list under this screen is told, so its card goes too. */
-function useInvalidateQuotes(requestId: string, gone: boolean): void {
-  const queryClient = useQueryClient();
-  useEffect(() => {
-    if (gone) void queryClient.invalidateQueries({ queryKey: quotesQueryKey(requestId) });
-  }, [gone, queryClient, requestId]);
 }
 
 /** The icon beside a category's name: the glyphs read at 32 and 48, and 24 keeps a tag one line tall. */

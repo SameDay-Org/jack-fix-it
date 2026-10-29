@@ -23,6 +23,7 @@ import {
   fakeClock,
   freezeClock,
   navigation,
+  screenNavigation,
   newQueryClient,
   NOW,
   quote,
@@ -69,6 +70,7 @@ beforeEach(() => {
   jest.mocked(apiPost).mockReset();
   jest.mocked(router.push).mockClear();
   jest.mocked(router.back).mockClear();
+  screenNavigation.setParams.mockClear();
   jest.mocked(router.dismissTo).mockClear();
   jest.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
 });
@@ -182,7 +184,32 @@ describe("QuoteCompareScreen", () => {
     });
     expect(screen.queryByTestId("accept-quote-sheet")).toBeNull();
     // Cleared with the push: a later mount of the comparison opens nothing again.
-    expect(router.setParams).toHaveBeenCalledWith({ profile: undefined });
+    expect(screenNavigation.setParams).toHaveBeenCalledWith({ profile: undefined });
+  });
+
+  it.each<[string, string | string[]]>([
+    ["repeated", [MARIA.id, MARIA.id]],
+    ["two ids", [MARIA.id, DAN.id]],
+    ["path segments", ["..", "..", "6f1c2a40-0000-4000-8000-000000000999", "quotes", DAN.id]],
+    ["a dot segment", ".."],
+    ["a path", `../../${MARIA.id}`],
+    ["an escape left in", `${MARIA.id}%26profile%3D..`],
+    ["a delimiter", `${MARIA.id}&profile=${DAN.id}`],
+    ["not a UUID", "123"],
+    ["uppercase", MARIA.id.toUpperCase().replace(/0/g, "A")],
+    ["empty", ""],
+  ])("a link's profile param that is %s is cleared and opens nothing", async (_, profile) => {
+    navigation.setParams({ id: REQUEST_ID, profile });
+    await renderWithQuery(<App />);
+    await screen.findByText("$250");
+
+    expect(screenNavigation.setParams).toHaveBeenCalledTimes(1);
+    expect(screenNavigation.setParams).toHaveBeenCalledWith({ profile: undefined });
+    expect(router.push).not.toHaveBeenCalled();
+    // Only the list was asked for: no profile fetch.
+    expect(jest.mocked(apiGet).mock.calls.map(([path]) => path)).toEqual([
+      "/v1/requests/{request_id}/quotes",
+    ]);
   });
 
   it("each card reads as one label: pro, verified, price, start and the rest", async () => {

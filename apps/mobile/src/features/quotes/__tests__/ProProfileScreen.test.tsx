@@ -7,7 +7,7 @@ import { ApiError, apiGet, NetworkError } from "@/api";
 
 import { deferred } from "../../../api/__tests__/helpers";
 import { ProProfileScreen } from "../ProProfileScreen";
-import type { ProPublicProfile } from "../useProProfile";
+import { proProfileQueryKey, type ProPublicProfile } from "../useProProfile";
 import { quotesQueryKey, type CustomerQuote, type CustomerQuoteList } from "../useRequestQuotes";
 import {
   fakeClock,
@@ -26,12 +26,14 @@ jest.mock("@/api", () => ({
   apiGet: jest.fn(),
   apiPost: jest.fn(),
 }));
-// The route's params: the request and María's quote (QUOTES[1]).
+// The route's params: the request and María's quote (QUOTES[1]), unless a test sets others.
+const mockRoute = { params: null as Record<string, string> | null };
 jest.mock("expo-router", () => {
   const helpers = jest.requireActual<typeof import("./helpers")>("./helpers");
   return {
     ...helpers.routerMock,
-    useLocalSearchParams: () => ({ id: helpers.REQUEST_ID, quoteId: helpers.QUOTES[1].id }),
+    useLocalSearchParams: () =>
+      mockRoute.params ?? { id: helpers.REQUEST_ID, quoteId: helpers.QUOTES[1].id },
   };
 });
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
@@ -83,6 +85,7 @@ const texts = () =>
   screen.getAllByText(/.+/).map((node) => String(node.props.children).replaceAll(" ", " "));
 
 beforeEach(() => {
+  mockRoute.params = null;
   freezeClock();
   navigation.reset();
   jest.mocked(apiGet).mockReset().mockResolvedValue(PROFILE);
@@ -234,7 +237,7 @@ describe("ProProfileScreen", () => {
     await act(() => i18n.changeLanguage("es"));
     expect(
       screen.getByText(
-        "María P. todavía no tiene trabajos completados en Jack Fix It. Se unió en marzo de 2024 y todavía no ha completado ningún trabajo aquí. Como todos los profesionales de Jack Fix It, pasó la verificación antes de poder enviarte un presupuesto.",
+        "María P. se está estrenando en Jack Fix It. Se unió en marzo de 2024 y todavía no ha completado ningún trabajo aquí. Como todos los profesionales de Jack Fix It, pasó la verificación antes de poder enviarte un presupuesto.",
       ),
     ).toBeTruthy();
   });
@@ -362,6 +365,110 @@ describe("ProProfileScreen", () => {
     expect(screen.queryByRole("header", { name: "This quote is no longer available" })).toBeNull();
     expect(screen.queryByTestId("pro-profile-hero")).toBeNull();
     expect(screen.queryByTestId("pro-profile-bar")).toBeNull();
+    expect(client.getQueryState(quotesQueryKey(REQUEST_ID))?.isInvalidated).toBe(false);
+  });
+});
+
+describe("a profile the API denies", () => {
+  const KEY = proProfileQueryKey(REQUEST_ID, MARIA.id);
+  const GONE = "This quote is no longer available";
+  const ERROR = "We couldn't load this profile";
+
+  /** A cache holding the comparison, María's quote open in it. */
+  function cachedList() {
+    const client = newQueryClient();
+    client.setQueryData(quotesQueryKey(REQUEST_ID), list(QUOTES));
+    return client;
+  }
+
+  /** María's profile from a 200, Accept and all, then the screen closed: the cache holds it. */
+  async function showThenClose(client: ReturnType<typeof newQueryClient>) {
+    const { unmount } = await renderWithQuery(<ProProfileScreen />, client);
+    expect(await screen.findByRole("header", { name: "María P." })).toBeTruthy();
+    expect(screen.getByTestId("pro-profile-accept")).toBeTruthy();
+    await unmount();
+    expect(client.getQueryData(KEY)).toEqual(PROFILE);
+  }
+
+  /** Nothing of the profile: no name, no figures, no bar, no Accept. */
+  function expectNoProfile() {
+    expect(screen.queryByText("María P.")).toBeNull();
+    expect(screen.queryByTestId("pro-profile-hero")).toBeNull();
+    expect(screen.queryByTestId("pro-profile-bar")).toBeNull();
+    expect(screen.queryByTestId("pro-profile-accept")).toBeNull();
+  }
+
+  /** The cached profile shows again, its refetch answers `status`: the denial replaces it. */
+  async function reopenDenied(client: ReturnType<typeof newQueryClient>, status: 403 | 404) {
+    jest.mocked(apiGet).mockRejectedValue(new ApiError(status, "denied"));
+    const reopened = await renderWithQuery(<ProProfileScreen />, client);
+    expect(await screen.findByRole("header", { name: status === 404 ? GONE : ERROR })).toBeTruthy();
+    expectNoProfile();
+    await waitFor(() => expect(client.getQueryState(KEY)).toBeUndefined());
+    expect(client.getQueryState(quotesQueryKey(REQUEST_ID))?.isInvalidated).toBe(status === 404);
+    await act(async () => undefined);
+    expect(apiGet).toHaveBeenCalledTimes(2); // one ask per open: no loop after the denial
+    return reopened;
+  }
+
+  it.each([
+    [404, "offline", new NetworkError(true)],
+    [404, "a 5xx", new ApiError(503, "unavailable")],
+    [403, "offline", new NetworkError(true)],
+    [403, "a 5xx", new ApiError(503, "unavailable")],
+  ] as const)(
+    "profile cached, then %s, then a reopen %s shows no profile",
+    async (status, _, failure) => {
+      const client = cachedList();
+      await showThenClose(client);
+      const denied = await reopenDenied(client, status);
+      await denied.unmount();
+
+      jest.mocked(apiGet).mockRejectedValue(failure);
+      await renderWithQuery(<ProProfileScreen />, client);
+      expect(await screen.findByRole("header", { name: ERROR })).toBeTruthy();
+      expectNoProfile();
+      expect(client.getQueryData(KEY)).toBeUndefined();
+    },
+  );
+
+  it("a new 200 after a denial shows the profile again", async () => {
+    const client = cachedList();
+    await showThenClose(client);
+    const denied = await reopenDenied(client, 404);
+    await denied.unmount();
+
+    jest.mocked(apiGet).mockResolvedValue(PROFILE);
+    await renderWithQuery(<ProProfileScreen />, client);
+    expect(await screen.findByRole("header", { name: "María P." })).toBeTruthy();
+    expect(screen.getByTestId("pro-profile-accept")).toBeTruthy();
+    expect(client.getQueryData(KEY)).toEqual(PROFILE);
+  });
+
+  it("after a 403, Try again asks once more and a 200 shows the profile", async () => {
+    jest.mocked(apiGet).mockRejectedValue(new ApiError(403, "forbidden"));
+    await renderOver();
+    expect(await screen.findByRole("header", { name: ERROR })).toBeTruthy();
+    await act(async () => undefined);
+    expect(apiGet).toHaveBeenCalledTimes(1);
+
+    jest.mocked(apiGet).mockResolvedValue(PROFILE);
+    await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("header", { name: "María P." })).toBeTruthy();
+    expect(apiGet).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["a dot-segment quote id", { id: REQUEST_ID, quoteId: ".." }],
+    ["a quote id with a delimiter", { id: REQUEST_ID, quoteId: `${MARIA.id}&profile=${DAN.id}` }],
+    ["a dot-segment request id", { id: "..", quoteId: MARIA.id }],
+  ])("a route with %s asks nothing and reads as gone", async (_, params) => {
+    mockRoute.params = params;
+    const { client } = await renderOver();
+
+    expect(await screen.findByRole("header", { name: GONE })).toBeTruthy();
+    expectNoProfile();
+    expect(apiGet).not.toHaveBeenCalled();
     expect(client.getQueryState(quotesQueryKey(REQUEST_ID))?.isInvalidated).toBe(false);
   });
 });

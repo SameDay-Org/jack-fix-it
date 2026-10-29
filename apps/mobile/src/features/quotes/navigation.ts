@@ -3,6 +3,15 @@ import { useCallback, useEffect, useRef } from "react";
 
 type Href = Parameters<typeof router.push>[0];
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * An id as the API writes it (a lowercase UUID). An id from outside the app (a link's path or
+ * query) is checked with it before it reaches a route or a fetch.
+ */
+export const isUuid = (value: unknown): value is string =>
+  typeof value === "string" && UUID.test(value);
+
 /** The confirmation sheet for one quote, over whatever screen opens it. */
 export const acceptHref = (requestId: string, quoteId: string): Href => ({
   pathname: "/requests/[id]/accept",

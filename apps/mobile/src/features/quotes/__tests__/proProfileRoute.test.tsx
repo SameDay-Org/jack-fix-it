@@ -2,7 +2,7 @@ import "@/i18n";
 
 import { act, renderRouter, screen } from "expo-router/testing-library";
 import { router, useLocalSearchParams, type Href } from "expo-router";
-import { createElement } from "react";
+import { createElement, useEffect } from "react";
 import { Text } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -14,7 +14,9 @@ import RequestLayout, {
 import AuthLayout, { unstable_settings } from "../../../app/(auth)/_layout";
 import { METRICS, SIGNED_OUT } from "../../auth/__tests__/helpers";
 import { SessionGate } from "../../auth/SessionGate";
+import { TabsLayout } from "../../tabs/TabsLayout";
 import { redirectSystemPath, useProfileFromLink } from "../links";
+import { isUuid } from "../navigation";
 import { QUOTES, REQUEST_ID } from "./helpers";
 
 // A session that changes under the mounted router, as a restore that ends signed in does.
@@ -54,12 +56,28 @@ jest.mock(
   () => jest.requireActual("react-native-safe-area-context/jest/mock").default,
 );
 
+// The URLs the running app receives, as `expo-linking` hands them to Expo Router's subscription.
+type UrlListener = (event: { url: string }) => void;
+const urlListeners = new Set<UrlListener>();
+Object.assign(jest.requireMock<object>("expo-linking"), {
+  addEventListener: (_type: "url", listener: UrlListener) => {
+    urlListeners.add(listener);
+    return { remove: () => urlListeners.delete(listener) };
+  },
+});
+
 const QUOTE_ID = QUOTES[1].id;
 const LINK = `/requests/${REQUEST_ID}/quotes/${QUOTE_ID}/pro`;
 const COMPARE = `/requests/${REQUEST_ID}`;
 
+/** Every profile the router showed, with its params as the route got them. */
+const profilesShown: { id: unknown; quoteId: unknown }[] = [];
+
 function ProfileStub() {
   const { id, quoteId } = useLocalSearchParams<{ id: string; quoteId: string }>();
+  useEffect(() => {
+    profilesShown.push({ id, quoteId });
+  }, [id, quoteId]);
   return <Text>{`profile stub ${id} ${quoteId}`}</Text>;
 }
 
@@ -77,7 +95,8 @@ const routes = {
   "(auth)/_layout": { default: AuthLayout, unstable_settings },
   "(auth)/welcome": () => <Text>welcome stub</Text>,
   "(app)/_layout": { default: AppLayout, unstable_settings: appSettings },
-  "(app)/index": () => <Text>home stub</Text>,
+  "(app)/(tabs)/_layout": TabsLayout,
+  "(app)/(tabs)/index": () => <Text>home stub</Text>,
   "(app)/requests/[id]/_layout": { default: RequestLayout, unstable_settings: requestSettings },
   "(app)/requests/[id]/index": CompareStub,
   "(app)/requests/[id]/quotes/[quoteId]/pro": ProfileStub,
@@ -88,6 +107,7 @@ const profileShown = () => screen.getByText(`profile stub ${REQUEST_ID} ${QUOTE_
 
 beforeEach(() => {
   mockSession.state = SESSION_SIGNED_OUT;
+  profilesShown.length = 0;
 });
 
 describe("the pro profile link", () => {
@@ -141,5 +161,73 @@ describe("the pro profile link", () => {
 
     expect(result.getPathname()).toBe("/welcome");
     expect(screen.queryByText(/profile stub/)).toBeNull();
+  });
+});
+
+describe("a link that reaches the running app", () => {
+  const OTHER_REQUEST = "6f1c2a40-0000-4000-8000-000000000999";
+  const OTHER_QUOTE = QUOTES[2].id;
+  const landings: string[] = [];
+  // Expo Router's own chain: the native URL, `+native-intent`, the path and search params it
+  // parses, the comparison's push and the href that push resolves to.
+  const withIntent = {
+    ...routes,
+    "+native-intent": {
+      redirectSystemPath: (args: { path: string; initial: boolean }) => {
+        const landing = redirectSystemPath(args);
+        if (!args.initial) landings.push(landing);
+        return landing;
+      },
+    },
+  };
+
+  async function openUrl(url: string) {
+    mockSession.state = SIGNED_IN;
+    landings.length = 0;
+    const result = await renderRouter(withIntent, { initialUrl: "/" });
+    expect(screen.getByText("home stub")).toBeTruthy();
+    expect(urlListeners.size).toBe(1);
+    await act(async () => urlListeners.forEach((listener) => listener({ url })));
+    return result;
+  }
+
+  it("opens the profile over its comparison, once", async () => {
+    const result = await openUrl(`jackfixit:/${LINK}`);
+
+    expect(landings).toEqual([`jackfixit:/${COMPARE}?profile=${QUOTE_ID}`]);
+    expect(result.getPathname()).toBe(LINK);
+    expect(profileShown()).toBeTruthy();
+    expect(profilesShown).toEqual([{ id: REQUEST_ID, quoteId: QUOTE_ID }]);
+    await act(async () => router.back());
+    expect(result.getPathname()).toBe(COMPARE);
+    expect(result.getSearchParams().profile).toBeUndefined();
+  });
+
+  it.each([
+    ["a raw & in the quote id", `${COMPARE}/quotes/${QUOTE_ID}&profile=${OTHER_QUOTE}/pro`],
+    ["an encoded delimiter", `${COMPARE}/quotes/${QUOTE_ID}%26profile%3D../pro`],
+    ["a double encoding", `${COMPARE}/quotes/${QUOTE_ID}%2526profile%253D../pro`],
+    ["an encoded dot segment", `${COMPARE}/quotes/%2E%2E/pro`],
+    ["an extra segment", `${COMPARE}/quotes/${QUOTE_ID}/pro/${OTHER_QUOTE}`],
+    [
+      "a comparison with profile segments",
+      `${COMPARE}?profile=..&profile=..&profile=${OTHER_REQUEST}&profile=quotes&profile=${OTHER_QUOTE}`,
+    ],
+    ["a comparison with a repeated profile", `${COMPARE}?profile=${QUOTE_ID}&profile=${QUOTE_ID}`],
+    ["a comparison with an encoded path", `${COMPARE}?profile=..%2F..%2F${OTHER_REQUEST}`],
+    ["a comparison with an empty profile", `${COMPARE}?profile=`],
+  ])("%s opens no profile it could fetch", async (_, path) => {
+    const url = `jackfixit:/${path}`;
+    const result = await openUrl(url);
+
+    // Not a profile link: it lands exactly as it came.
+    expect(landings).toEqual([url]);
+    // No profile opened for a pair of real ids: what a route got was the link's own text.
+    expect(profilesShown.filter(({ id, quoteId }) => isUuid(id) && isUuid(quoteId))).toEqual([]);
+    // A comparison it reached opened nothing and dropped the param.
+    if (result.getPathname() === COMPARE) {
+      expect(screen.getByText(`compare stub ${REQUEST_ID}`)).toBeTruthy();
+      expect(result.getSearchParams().profile).toBeUndefined();
+    }
   });
 });
