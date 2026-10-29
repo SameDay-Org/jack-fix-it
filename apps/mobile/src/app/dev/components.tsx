@@ -15,6 +15,7 @@ import {
   Skeleton,
   StatusBadge,
   showToast,
+  VerifiedBadge,
   type StatusTone,
 } from "@/components/ui";
 
@@ -117,6 +118,30 @@ function Gallery() {
             {TONES.map((tone) => (
               <StatusBadge key={tone} label={tone} tone={tone} />
             ))}
+          </View>
+        </Section>
+
+        <Section title="VerifiedBadge">
+          {/* The check is a hole: the card's white and the hero's navy both show through it. */}
+          <Card testID="seal-sample-white" className="gap-2">
+            <Text className="text-headline text-navy-900">
+              María P.
+              <VerifiedBadge type="headline" />
+            </Text>
+            <Text className="text-title-1 text-navy-900">
+              Ana G.
+              <VerifiedBadge type="title-1" />
+            </Text>
+          </Card>
+          <View testID="seal-sample-navy" className="gap-2 rounded-lg bg-navy-900 p-4">
+            <Text className="text-headline text-white">
+              María P.
+              <VerifiedBadge type="headline" />
+            </Text>
+            <Text className="text-title-1 text-white">
+              Ana G.
+              <VerifiedBadge type="title-1" />
+            </Text>
           </View>
         </Section>
 
