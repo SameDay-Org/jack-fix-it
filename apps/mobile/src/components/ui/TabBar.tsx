@@ -1,6 +1,7 @@
 import { BottomTabBarHeightCallbackContext, BottomTabBarHeightContext } from "expo-router/js-tabs";
 import { useContext, useLayoutEffect } from "react";
 import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import Animated, { useAnimatedStyle, type SharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { TabIcon, type TabGlyphName } from "@/components/icons";
@@ -24,6 +25,13 @@ export type TabBarItem = {
 export type TabBarProps = {
   /** The tabs, left to right. */
   items: readonly TabBarItem[];
+  /**
+   * How far the bar has slid down out of sight, on the UI thread: 0 in place, 1 below the
+   * screen's bottom edge (a panel rising over the tabs takes the whole screen).
+   */
+  slideOut?: SharedValue<number>;
+  /** Out of sight or on its way: the bar takes no taps and screen readers skip it. */
+  hidden?: boolean;
   testID?: string;
 };
 
@@ -97,9 +105,20 @@ export function useTabBarInset(): number {
  * padding the gesture bar itself. It is absolutely positioned over the screens, which pad it
  * with `useTabBarInset`.
  */
-export function TabBar({ items, testID }: TabBarProps) {
+export function TabBar({ items, slideOut, hidden = false, testID }: TabBarProps) {
   const [geometry, bottom] = useGeometry();
   const reportHeight = useContext(BottomTabBarHeightCallbackContext);
+  // Its whole footprint and the gap its shadow spreads into: nothing of it is left on screen.
+  const slideDistance = geometry.inset + FLOAT_GAP;
+  const slideStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: (slideOut ? slideOut.value : 0) * slideDistance }],
+  }));
+  const hiding = hidden
+    ? ({
+        importantForAccessibility: "no-hide-descendants",
+        accessibilityElementsHidden: true,
+      } as const)
+    : {};
 
   // The navigator's own notion of the bar's height (`useBottomTabBarHeight`) follows the same
   // number the screens pad with.
@@ -122,9 +141,10 @@ export function TabBar({ items, testID }: TabBarProps) {
 
   if (floats()) {
     return (
-      <View
-        pointerEvents="box-none"
-        style={[styles.floating, { bottom: geometry.bottom }]}
+      <Animated.View
+        pointerEvents={hidden ? "none" : "box-none"}
+        style={[styles.floating, { bottom: geometry.bottom }, slideStyle]}
+        {...hiding}
         testID={testID}
       >
         <GlassSurface
@@ -135,18 +155,20 @@ export function TabBar({ items, testID }: TabBarProps) {
         >
           {row}
         </GlassSurface>
-      </View>
+      </Animated.View>
     );
   }
 
   return (
-    <View
+    <Animated.View
+      pointerEvents={hidden ? "none" : "auto"}
       className="bg-white"
-      style={[styles.docked, bubbleShadow, { paddingBottom: bottom }]}
+      style={[styles.docked, bubbleShadow, { paddingBottom: bottom }, slideStyle]}
+      {...hiding}
       testID={testID}
     >
       {row}
-    </View>
+    </Animated.View>
   );
 }
 

@@ -11,14 +11,18 @@ import { useSendRequest, type CreatedRequest, type SendRequest } from "./api";
 import { hasDraftInput, resetDraft, useRequestDraft } from "./requestDraft";
 import { rememberSent } from "./sent";
 
+/** Runs an exit animation, then `then` (the navigation). */
+export type BeforeLeave = (then: () => void) => void;
+
 type RequestFlow = {
   /** The request's photos and videos: one list for the whole flow, so Back never loses them. */
   media: MediaUpload;
   /**
    * Leaves the flow (Back on the first step, Cancel): asks "Discard request?" first when the
-   * customer would lose something.
+   * customer would lose something. `beforeLeave` (the first step's fade back onto Home's panel)
+   * runs once leaving is decided.
    */
-  close: () => void;
+  close: (beforeLeave?: BeforeLeave) => void;
   /** The request went through: the flow gives way to its confirmation. */
   finish: (request: CreatedRequest) => void;
   /**
@@ -99,9 +103,10 @@ function AccountRequestFlow({ userId }: { userId: string | undefined }) {
   const flow = useMemo<RequestFlow>(
     () => ({
       media,
-      close: () => {
+      close: (beforeLeave) => {
         if (sending) return;
-        const leave = () => setEnding({ kind: "left" });
+        const left = () => setEnding({ kind: "left" });
+        const leave = () => (beforeLeave ? beforeLeave(left) : left());
         if (guarded) confirmDiscard(leave);
         else leave();
       },
@@ -118,6 +123,9 @@ function AccountRequestFlow({ userId }: { userId: string | undefined }) {
   return (
     <RequestFlowContext.Provider value={flow}>
       <Stack screenOptions={{ headerShown: false }}>
+        {/* See-through while it rides Home's rising panel (the flow is then a transparent modal
+            over Home): the step paints its own page. */}
+        <Stack.Screen name="new" options={{ contentStyle: { backgroundColor: "transparent" } }} />
         <Stack.Screen name="media-source" options={sheetOptions("fitToContents")} />
       </Stack>
     </RequestFlowContext.Provider>
