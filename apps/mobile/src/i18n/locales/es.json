@@ -195,6 +195,7 @@
     "acceptedNote": "Presupuesto aceptado. Lo siguiente es el pago.",
     "proFallback": "Profesional de Jack",
     "verified": "Verificado por Jack Fix It",
+    "nameVerified": "{{name}}, verificado",
     "ratingNew": "Nuevo",
     "rated": "Calificación {{rating}}",
     "notRated": "Aún sin calificaciones",

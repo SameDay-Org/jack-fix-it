@@ -195,6 +195,7 @@
     "acceptedNote": "Quote accepted. Payment comes next.",
     "proFallback": "Jack pro",
     "verified": "Verified by Jack Fix It",
+    "nameVerified": "{{name}}, verified",
     "ratingNew": "New",
     "rated": "Rated {{rating}}",
     "notRated": "No ratings yet",
