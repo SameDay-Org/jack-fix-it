@@ -8,19 +8,18 @@ import { requestDraftStore } from "@/features/request";
 
 import { deferred } from "../../../api/__tests__/helpers";
 import { CustomerHomeScreen } from "../CustomerHomeScreen";
+import { tokens } from "@/theme";
+
 import { CATEGORIES, newQueryClient, renderWithQuery, signedIn } from "./helpers";
 
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../../api/errors"),
+  onSignOut: jest.fn(),
   apiGet: jest.fn(),
   useSession: jest.fn(),
   logout: jest.fn(),
 }));
-jest.mock("expo-router", () => ({
-  router: { push: jest.fn() },
-  useIsFocused: () => true,
-  useScrollToTop: jest.fn(),
-}));
+jest.mock("expo-router", () => jest.requireActual("./helpers").homeRouterMock());
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
   "react-native-safe-area-context",
@@ -144,15 +143,26 @@ describe("CustomerHomeScreen", () => {
     expect(screen.getByRole("header", { name: "Categorías" })).toBeTruthy();
   });
 
-  it("a category card starts a request with its slug", async () => {
+  it("a category card rises its panel into a request with its slug, once", async () => {
     requestDraftStore.setState({ categorySlug: "painting" }); // an earlier start is replaced
     await renderWithQuery(<CustomerHomeScreen />);
+    const lawn = await screen.findByRole("button", { name: "Lawn & Landscaping" });
+    const handyman = screen.getByRole("button", { name: "Handyman" });
+    jest.useFakeTimers();
 
-    await fireEvent.press(await screen.findByRole("button", { name: "Lawn & Landscaping" }));
+    await fireEvent.press(lawn);
+    await fireEvent.press(handyman); // the panel is already rising into the first one
 
     expect(requestDraftStore.getState().categorySlug).toBe("lawn-landscaping");
+    // Home is out of reach while its panel rises: no taps, nothing for a screen reader.
+    const home = screen.getByTestId("customer-home-scroll", { includeHiddenElements: true });
+    expect(home.props.pointerEvents).toBe("none");
+    expect(home.props.accessibilityElementsHidden).toBe(true);
+    // The panel rises first (usePanelTransition.test.tsx covers the motion); the push follows.
+    await act(async () => jest.advanceTimersByTime(tokens.motion.panelRiseMs * 1.5));
     expect(router.push).toHaveBeenCalledTimes(1);
     expect(router.push).toHaveBeenCalledWith("/request/new");
+    jest.useRealTimers();
   });
 
   it("back on home: the cards are still there, with no refetch and no skeleton", async () => {

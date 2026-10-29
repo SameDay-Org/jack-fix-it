@@ -19,11 +19,19 @@ jest.mock("expo-image-picker", () => ({
   launchCameraAsync: jest.fn(),
   launchImageLibraryAsync: jest.fn(),
 }));
-// The real error classes (instanceof matters); the upload itself is driven by each test.
+// The real error classes (instanceof matters); the upload itself is driven by each test. The
+// session boundary is a stand-in the tests move by hand (the real one: request/accountChange).
+const mockSession = { generation: 1, forgetters: new Set<() => void>() };
 jest.mock("@/api", () => ({
   ...jest.requireActual("@/api/errors"),
   uploadMedia: jest.fn(),
   localFileSize: jest.fn(),
+  sessionGeneration: () => mockSession.generation,
+  isCurrentGeneration: (startedIn: number) => startedIn === mockSession.generation,
+  onSignOut: (forget: () => void) => {
+    mockSession.forgetters.add(forget);
+    return () => mockSession.forgetters.delete(forget);
+  },
 }));
 jest.mock("../compress", () => ({ prepareMedia: jest.fn() }));
 
@@ -364,5 +372,60 @@ describe("useMediaUpload", () => {
     await unmount();
 
     expect(pending[0].options.signal?.aborted).toBe(true);
+  });
+
+  it("the same account signing in again: an item resumed under the new session waits for a retry", async () => {
+    picker.launchImageLibraryAsync.mockResolvedValue(picked(asset(1)));
+    let finishCompressing!: () => void;
+    prepare.mockImplementationOnce(
+      (file: PickedMedia) =>
+        new Promise((resolve) => {
+          finishCompressing = () =>
+            resolve({ uri: `${file.uri}.compressed`, contentType: "image/jpeg", kind: file.kind });
+        }),
+    );
+    const { result } = await render();
+    await act(() => result.current.add("library"));
+
+    // A new session of the same account: no account boundary, so the list stays.
+    mockSession.generation += 1;
+    await act(async () => finishCompressing());
+    await flush();
+
+    expect(upload).not.toHaveBeenCalled();
+    expect(result.current.items[0]).toMatchObject({ status: "failed", failure: "failed" });
+
+    await act(async () => result.current.retry(result.current.items[0].id));
+    await flush();
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(upload).toHaveBeenCalledTimes(1);
+    await act(async () => pending[0].resolve());
+    expect(result.current.keys).toEqual([keyOf("file:///picked/1.jpg.compressed")]);
+  });
+
+  it("the account boundary cancels and drops everything, and the next account starts clean", async () => {
+    picker.launchImageLibraryAsync.mockResolvedValue(picked(asset(1), asset(2)));
+    const { result } = await render();
+    await act(() => result.current.add("library"));
+    await flush();
+    await act(async () => pending[0].resolve());
+    await flush();
+    expect(result.current.keys).toHaveLength(1);
+
+    await act(async () => {
+      mockSession.generation += 1;
+      mockSession.forgetters.forEach((forget) => forget());
+    });
+
+    expect(pending[1].options.signal?.aborted).toBe(true);
+    expect(result.current.items).toEqual([]);
+    expect(result.current.keys).toEqual([]);
+
+    // A fresh queue: the next account's file does not wait behind the old account's work.
+    picker.launchImageLibraryAsync.mockResolvedValue(picked(asset(3)));
+    await act(() => result.current.add("library"));
+    await flush();
+    expect(upload).toHaveBeenCalledTimes(3);
+    expect(pending[2].options.file.uri).toBe("file:///picked/3.jpg.compressed");
   });
 });

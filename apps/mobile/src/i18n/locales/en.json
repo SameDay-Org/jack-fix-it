@@ -123,7 +123,115 @@
     "cancelled": "Cancelled"
   },
   "request": {
-    "title": "Tell Jack what happened"
+    "progress": "Step {{current}} of {{total}}",
+    "cancel": "Cancel",
+    "optionalLabel": "{{label}} (optional)",
+    "counter": "{{length}} / {{max}}",
+    "discard": {
+      "title": "Discard this request?",
+      "body": "Your answers, photos and address will be lost.",
+      "keep": "Keep editing",
+      "confirm": "Discard"
+    },
+    "loadFailed": {
+      "title": "We couldn't load this service",
+      "body": "Check your connection and try again.",
+      "retry": "Try again"
+    },
+    "questions": {
+      "support": "A few quick questions so pros can send you accurate quotes.",
+      "required": "Answer this to continue.",
+      "range": "Enter a number from {{min}} to {{max}}.",
+      "tooFew_one": "Pick at least {{count}}.",
+      "tooFew_other": "Pick at least {{count}}.",
+      "pickUpTo_one": "Pick up to {{count}}.",
+      "pickUpTo_other": "Pick up to {{count}}.",
+      "check": "Some answers are missing. They're marked in red.",
+      "refusedTitle": "Some answers no longer fit",
+      "refusedBody": "The questions for this service changed. Check your answers, then continue."
+    },
+    "describe": {
+      "title": "What's going on?",
+      "support": "Tell us in your own words. Photos or a short video help pros understand the job.",
+      "label": "Describe the job",
+      "required": "Tell us what's going on to continue.",
+      "mediaTitle": "Photos and video",
+      "waiting": "Waiting for your files to finish uploading.",
+      "uploadFailedTitle": "A file didn't upload",
+      "uploadFailedBody": "Try it again or remove it to continue.",
+      "refusedTitle": "We couldn't attach your files",
+      "refusedBody": "Remove them and add them again, or continue without them."
+    },
+    "where": {
+      "title": "Where's the job?",
+      "support": "We use it to find pros who work in your area.",
+      "savedLabel": "Saved addresses",
+      "savedNotServed": "{{address}}. Not in our area yet.",
+      "another": "Use another address",
+      "formTitle": "Another address",
+      "line1": "Street address",
+      "line2": "Apt, suite or unit",
+      "city": "City",
+      "state": "State",
+      "zip": "ZIP code",
+      "errors": {
+        "required": "Fill in this field.",
+        "state": "Use the two-letter code, like FL.",
+        "zip": "Enter a 5-digit ZIP code.",
+        "tooLong": "Keep it to {{max}} characters or fewer."
+      },
+      "check": "Some address fields need a look.",
+      "invalidTitle": "Check the address",
+      "invalidBody": "We couldn't use this address. Fix the marked fields, then send it again.",
+      "notServedTitle": "We're not in this area yet",
+      "notServedBody": "Jack serves a few areas for now. Try another address.",
+      "savedFailed": "We couldn't load your saved addresses.",
+      "savedRetry": "Try again"
+    },
+    "when": {
+      "title": "When works for you?",
+      "support": "Pick a day, or stay flexible: each pro proposes a start time with their quote.",
+      "flexible": "I'm flexible",
+      "flexibleHint": "Any day works for me",
+      "pickDay": "Or pick a day",
+      "today": "Today",
+      "tomorrow": "Tomorrow",
+      "staleTitle": "That day has passed",
+      "staleBody": "Pick another day, or stay flexible."
+    },
+    "review": {
+      "title": "Check your request",
+      "support": "Make sure it's all right before you send it.",
+      "description": "What's going on",
+      "address": "Address",
+      "when": "When",
+      "edit": "Edit",
+      "editAnswers": "Edit your answers",
+      "editDescription": "Edit the description and files",
+      "editAddress": "Edit the address",
+      "editWhen": "Edit the day",
+      "yes": "Yes",
+      "no": "No",
+      "flexible": "I'm flexible: any day works",
+      "mediaCount_one": "{{count}} file attached",
+      "mediaCount_other": "{{count}} files attached",
+      "send": "Send request",
+      "retry": "Try again",
+      "failedTitle": "Your request didn't go through",
+      "failedBody": "Check your connection and try again.",
+      "rateLimitedTitle": "Too many requests in a short time",
+      "rateLimitedBody": "Wait a few minutes, then try again.",
+      "rejectedTitle": "We couldn't send this request",
+      "rejectedBody": "Go back over your answers and try again."
+    },
+    "sent": {
+      "title": "Jack is on it",
+      "summary": "{{category}} at {{place}}",
+      "codeLabel": "Your request code",
+      "next": "Pros nearby will send you quotes. We'll notify you.",
+      "see": "See my request",
+      "home": "Back to Home"
+    }
   },
   "phone": {
     "title": "Verify your phone",

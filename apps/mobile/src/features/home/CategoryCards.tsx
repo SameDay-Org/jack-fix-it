@@ -1,10 +1,17 @@
 import { useCallback, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Text, useWindowDimensions, View, type LayoutChangeEvent } from "react-native";
+import {
+  Text,
+  useWindowDimensions,
+  View,
+  type LayoutChangeEvent,
+  type ViewStyle,
+} from "react-native";
+import Animated, { type AnimatedStyle } from "react-native-reanimated";
 
 import { Button, Card, useTabBarInset } from "@/components/ui";
 import { startRequest } from "@/features/request";
-import { continuousCorners } from "@/theme";
+import { continuousCorners, tokens } from "@/theme";
 
 import {
   CARD_COLUMNS,
@@ -70,6 +77,17 @@ function Grid({ cells, onLayout, testID }: GridProps) {
   );
 }
 
+type CategoryCardsProps = {
+  /** Opens a request in the tapped category (Home rises its panel into it); a push by default. */
+  onOpen?: (slug: string) => void;
+  /** The panel's own motion when it rises into the request (Home's `usePanelTransition`). */
+  panelStyle?: AnimatedStyle<ViewStyle>;
+  /** Its title and cards fade and drift up as the panel rises. */
+  contentStyle?: AnimatedStyle<ViewStyle>;
+  /** The panel's frame in the scroll content: where the rise starts from. */
+  onPanelLayout?: (event: LayoutChangeEvent) => void;
+};
+
 /**
  * The way into a request (#232): a grid of square category cards, two per row. Loading shows
  * card-shaped skeletons in the same cells, a failure says so with a retry (which shows the
@@ -78,11 +96,18 @@ function Grid({ cells, onLayout, testID }: GridProps) {
  * sheet.
  *
  * The light panel runs to the bottom edge and pads the tab bar itself (the screen's own bottom
- * padding would be the navy page), so the last row of cards stays reachable above it.
+ * padding would be the navy page), so the last row of cards stays reachable above it. A card
+ * opens the request flow: on Home the panel rises into its first step (see `CustomerHomeScreen`).
  */
-export function CategoryCards() {
+export function CategoryCards({
+  onOpen = startRequest,
+  panelStyle,
+  contentStyle,
+  onPanelLayout,
+}: CategoryCardsProps) {
   const { t } = useTranslation();
   const bottom = useTabBarInset();
+  const { height: windowHeight } = useWindowDimensions();
   const categories = useCategories();
   const [rowWidth, onGridLayout] = useRowWidth();
   const side = cardSide(rowWidth);
@@ -90,12 +115,29 @@ export function CategoryCards() {
   if (categories.data?.length === 0) return null;
 
   return (
-    <View
-      style={[continuousCorners, { paddingBottom: bottom }]}
+    <Animated.View
+      style={[continuousCorners, { paddingBottom: bottom }, panelStyle]}
+      onLayout={onPanelLayout}
       className="flex-grow rounded-t-xl bg-gray-50"
       testID="home-categories"
     >
-      <View style={{ paddingHorizontal: PANEL_PADDING }} className="gap-4 pb-6 pt-6">
+      {/* Rising, the panel leaves the bottom of the screen: the skirt below it, the page's color,
+          keeps that covered. Its top tucks a corner radius under the panel, so no hairline of the
+          navy page shows where the two meet. */}
+      <View
+        pointerEvents="none"
+        className="absolute left-0 right-0 bg-gray-50"
+        style={{ bottom: -windowHeight, height: windowHeight + tokens.radius.xl }}
+        testID="home-categories-skirt"
+      />
+      <Animated.View
+        style={[{ paddingHorizontal: PANEL_PADDING }, contentStyle]}
+        // Fading as one layer: Android otherwise fades each card and its elevation shadow apart,
+        // and the cards turn into gray blocks.
+        needsOffscreenAlphaCompositing
+        className="gap-4 pb-6 pt-6"
+        testID="home-categories-content"
+      >
         <Text accessibilityRole="header" className="text-title-2 text-navy-900">
           {t("home.categoriesTitle")}
         </Text>
@@ -143,13 +185,13 @@ export function CategoryCards() {
                 slug={category.slug}
                 name={categoryName(category)}
                 side={side}
-                onPress={() => startRequest(category.slug)}
+                onPress={() => onOpen(category.slug)}
                 testID={`home-category-${category.slug}`}
               />
             ))}
           />
         )}
-      </View>
-    </View>
+      </Animated.View>
+    </Animated.View>
   );
 }
