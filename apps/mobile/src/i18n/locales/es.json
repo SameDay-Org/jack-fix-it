@@ -247,6 +247,10 @@
       "body": "Revisa tu conexión e inténtalo de nuevo.",
       "retry": "Intentar de nuevo"
     },
+    "more": {
+      "failed": "No pudimos cargar más solicitudes.",
+      "retry": "Intentar de nuevo"
+    },
     "detail": {
       "loading": "Cargando solicitud",
       "where": "Dónde",
@@ -262,7 +266,9 @@
       "videos_one": "{{count}} video",
       "videos_other": "{{count}} videos",
       "pending_one": "{{count}} más en preparación",
-      "pending_other": "{{count}} más en preparación"
+      "pending_other": "{{count}} más en preparación",
+      "refreshFailed": "No pudimos actualizar las fotos y los videos.",
+      "retry": "Intentar de nuevo"
     },
     "gone": {
       "title": "Esta solicitud ya no está disponible",

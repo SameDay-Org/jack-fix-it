@@ -221,6 +221,50 @@ describe("ProHomeScreen", () => {
     expect(apiGet).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    ["a network error", new NetworkError(false)],
+    ["a 503", new ApiError(503, undefined)],
+  ])(
+    "a next page that fails with %s keeps the cards and offers a retry of that cursor",
+    async (_, error) => {
+      const third = summary(3);
+      jest
+        .mocked(apiGet)
+        .mockResolvedValueOnce(page([FRESH, OPENED], "cursor-2"))
+        .mockRejectedValueOnce(error)
+        .mockRejectedValueOnce(error)
+        .mockResolvedValueOnce(page([third]));
+      await renderWithQuery(<ProHomeScreen />);
+      await findCard(FRESH.dispatch_id);
+      const loaded = [`opportunity-${FRESH.dispatch_id}`, `opportunity-${OPENED.dispatch_id}`];
+
+      await fireEvent(screen.getByTestId("opportunity-list"), "onEndReached");
+      expect(await screen.findByText("We couldn't load more requests.")).toBeTruthy();
+      expect(cardIds()).toEqual(loaded);
+      expect(screen.queryByTestId("opportunity-list-next-page")).toBeNull();
+      // Nearing the end again asks for nothing: the retry is the pro's.
+      await fireEvent(screen.getByTestId("opportunity-list"), "onEndReached");
+      expect(apiGet).toHaveBeenCalledTimes(2);
+
+      // A retry that fails again says so again, with the cards still there.
+      await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
+      await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(3));
+      expect(await screen.findByText("We couldn't load more requests.")).toBeTruthy();
+      expect(cardIds()).toEqual(loaded);
+
+      await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
+      await findCard(third.dispatch_id);
+      expect(apiGet).toHaveBeenLastCalledWith(LIST, {
+        auth: true,
+        signal: expect.any(AbortSignal),
+        query: { limit: OPPORTUNITY_PAGE_SIZE, cursor: "cursor-2" },
+      });
+      expect(cardIds()).toEqual([...loaded, `opportunity-${third.dispatch_id}`]);
+      expect(screen.queryByText("We couldn't load more requests.")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    },
+  );
+
   it("refetches on focus, on foreground and on pull; a failed pull keeps the cards and says so", async () => {
     await renderWithQuery(<ProHomeScreen />);
     await findCard(FRESH.dispatch_id);

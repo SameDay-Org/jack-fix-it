@@ -1,10 +1,11 @@
 import type { ApiSchema } from "@jack/shared";
-import { queryOptions, useQuery } from "@tanstack/react-query";
+import { queryOptions, useQuery, type QueryClient } from "@tanstack/react-query";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useMemo } from "react";
 import { AppState } from "react-native";
 
 import { apiGet, ApiError } from "@/api";
+import { evictOpportunity } from "@/features/pro-home/useOpportunities";
 import { useExpiryClock } from "@/features/quotes/expiry";
 
 export type OpportunityDetail = ApiSchema<"OpportunityDetail">;
@@ -29,11 +30,23 @@ export const opportunityQueryOptions = (dispatchId: string) =>
     retry: false,
   });
 
-export const useOpportunity = (dispatchId: string) => useQuery(opportunityQueryOptions(dispatchId));
+/** The opportunity; with `enabled` false nothing is asked for (a screen that already saw a 404). */
+export const useOpportunity = (dispatchId: string, enabled = true) =>
+  useQuery({ ...opportunityQueryOptions(dispatchId), enabled });
 
 /** Not open for this pro: another pro's, declined, expired or quoted (404). */
 export const isGone = (error: unknown): boolean =>
   error instanceof ApiError && error.status === 404;
+
+/**
+ * The pro may not see it any more (the detail answered 404): its row leaves the list, and its
+ * detail, signed media URLs included, leaves the cache. A later failure cannot show the old
+ * body again; only a new answer can.
+ */
+export function forgetOpportunity(client: QueryClient, dispatchId: string): void {
+  evictOpportunity(client, dispatchId);
+  client.removeQueries({ queryKey: opportunityQueryKey(dispatchId), exact: true });
+}
 
 /** Its signed URL is past `expires_at` at `now`: never shown, fetched again instead. */
 export const mediaExpired = (media: OpportunityMedia, now: number): boolean =>

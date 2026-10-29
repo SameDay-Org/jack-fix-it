@@ -8,6 +8,7 @@ import { ApiError, apiGet, NetworkError } from "@/api";
 
 import { flattenOpportunities, OPPORTUNITIES_QUERY_KEY } from "../../pro-home/useOpportunities";
 import { OpportunityDetailScreen } from "../OpportunityDetailScreen";
+import { opportunityQueryKey } from "../useOpportunity";
 import {
   detail,
   DISPATCH_ID,
@@ -170,6 +171,73 @@ describe("OpportunityDetailScreen", () => {
     expect(await screen.findByText("JF-000124")).toBeTruthy();
     expect(apiGet).toHaveBeenCalledTimes(2);
   });
+
+  it.each([
+    ["a network error", new NetworkError(false)],
+    ["a 500", new ApiError(500, undefined)],
+  ])("after a 404, a later open that ends in %s never shows the old request", async (_, error) => {
+    const client = seededClient();
+    const first = await renderWithQuery(<OpportunityDetailScreen />, client);
+    await screen.findByText("JF-000124");
+    expect(image(0)).toBeTruthy();
+    await first.unmount();
+
+    jest.mocked(apiGet).mockRejectedValueOnce(new ApiError(404, "not_found"));
+    const second = await renderWithQuery(<OpportunityDetailScreen />, client);
+    expect(await screen.findByText("This request is no longer available")).toBeTruthy();
+    expect(screen.queryByTestId("opportunity-body")).toBeNull();
+    // The detail, signed URLs included, left the cache; the list row too.
+    expect(client.getQueryData(opportunityQueryKey(DISPATCH_ID))).toBeUndefined();
+    expect(cachedList(client).map((item) => item.dispatch_id)).toEqual([summary(2).dispatch_id]);
+    expect(apiGet).toHaveBeenCalledTimes(2);
+    // Coming back to the screen asks for nothing more: the denial holds for this open.
+    await act(async () => navigation.setFocused(false));
+    await act(async () => navigation.setFocused(true));
+    await act(async () => jest.advanceTimersByTime(1000));
+    expect(apiGet).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId("opportunity-body")).toBeNull();
+    await second.unmount();
+
+    jest.mocked(apiGet).mockRejectedValueOnce(error);
+    await renderWithQuery(<OpportunityDetailScreen />, client);
+    expect(await screen.findByText("We couldn't load this request")).toBeTruthy();
+    expect(screen.queryByTestId("opportunity-body")).toBeNull();
+    expect(JSON.stringify(screen.toJSON())).not.toContain("media.test.invalid");
+    expect(apiGet).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    ["a network error", new NetworkError(false)],
+    ["a 503", new ApiError(503, undefined)],
+  ])(
+    "a media refresh that fails with %s keeps the text, hides the expired media and offers a retry",
+    async (_, error) => {
+      fakeClock();
+      jest
+        .mocked(apiGet)
+        .mockResolvedValueOnce(detail())
+        .mockRejectedValueOnce(error)
+        .mockResolvedValue(FRESH);
+      await renderWithQuery(<OpportunityDetailScreen />);
+      await screen.findByText("JF-000124");
+      expect(image(0)).toBeTruthy();
+
+      // The URLs pass on the focused screen: the refetch fails.
+      await advanceMinutes(5);
+      await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+      expect(await screen.findByText("We couldn't refresh the photos and videos.")).toBeTruthy();
+      expect(screen.getByTestId("opportunity-description")).toBeTruthy();
+      expect(image(0)).toBeNull();
+      expect(frames()).toHaveLength(0);
+      expect(JSON.stringify(screen.toJSON())).not.toContain("media.test.invalid");
+
+      await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
+      await waitFor(() => expect(image(0)?.props.source).toEqual({ uri: FRESH.media[0]?.url }));
+      expect(apiGet).toHaveBeenCalledTimes(3);
+      expect(screen.queryByText("We couldn't refresh the photos and videos.")).toBeNull();
+      expect(frames()).toHaveLength(0);
+    },
+  );
 
   it("an expired URL is never shown, and the detail is fetched again on focus", async () => {
     fakeClock();

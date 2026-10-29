@@ -5,6 +5,7 @@ import { FlatList, RefreshControl, View } from "react-native";
 
 import { SessionExpiredError } from "@/api";
 import { showToast } from "@/components/ui";
+import { RetryNotice } from "@/features/opportunities/RetryNotice";
 import { StateCard } from "@/features/opportunities/StateCard";
 import { useRefetchOnReturn, useSettledError } from "@/features/quotes/useRequestQuotes";
 import { tokens } from "@/theme";
@@ -45,6 +46,7 @@ export function OpportunityList({ header, testID = "opportunity-list" }: Opportu
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
+    isFetchNextPageError,
   } = useOpportunities();
   const shownError = useSettledError(data, error);
   useRefetchOnReturn(refetch);
@@ -68,8 +70,10 @@ export function OpportunityList({ header, testID = "opportunity-list" }: Opportu
     }
   };
 
+  // Nearing the end asks for the next page once; after a failed page the footer says so and the
+  // retry is the pro's, so a stalled server is not asked again on every scroll.
   const loadMore = () => {
-    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+    if (hasNextPage && !isFetchingNextPage && !isFetchNextPageError) void fetchNextPage();
   };
 
   return (
@@ -103,6 +107,16 @@ export function OpportunityList({ header, testID = "opportunity-list" }: Opportu
         isFetchingNextPage ? (
           <View className="pt-4">
             <OpportunityCardSkeleton testID={`${testID}-next-page`} />
+          </View>
+        ) : isFetchNextPageError ? (
+          // The loaded cards stay; the retry asks for the same cursor again.
+          <View className="pt-4">
+            <RetryNotice
+              message={t("opportunities.more.failed")}
+              action={t("opportunities.more.retry")}
+              onRetry={() => void fetchNextPage()}
+              testID={`${testID}-next-page-error`}
+            />
           </View>
         ) : undefined
       }

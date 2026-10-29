@@ -1,19 +1,22 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, Text, View } from "react-native";
 
 import { Card, IconTile, Screen, Skeleton, TextSkeleton } from "@/components/ui";
 import { BackButton } from "@/features/auth/components/BackButton";
-import { evictOpportunity, markOpportunityViewed } from "@/features/pro-home/useOpportunities";
+import { markOpportunityViewed } from "@/features/pro-home/useOpportunities";
 import { useSettledError } from "@/features/quotes/useRequestQuotes";
 
 import { categoryLabel, categoryTileProps, formatDay, locationLabel, sentAgo } from "./format";
 import { OpportunityMedia } from "./OpportunityMedia";
+import { RetryNotice } from "./RetryNotice";
 import { StateCard } from "./StateCard";
 import {
+  forgetOpportunity,
   isGone,
+  mediaExpired,
   useOpportunity,
   useRefreshExpiredMedia,
   type OpportunityDetail,
@@ -32,19 +35,28 @@ export function OpportunityDetailScreen() {
   const { t } = useTranslation();
   const { id } = useLocalSearchParams<{ id: string }>();
   const client = useQueryClient();
-  const { data, error, refetch, isFetching, dataUpdatedAt } = useOpportunity(id);
+  // Answered 404 while this screen was up: its data leaves the cache and nothing here asks for it
+  // again, so no later failure can bring the old body back. The next open starts afresh. Adjusted
+  // while rendering (state derived from the answer), so not even one more request goes out.
+  const [deniedId, setDeniedId] = useState<string | null>(null);
+  const denied = deniedId === id;
+  const { data, error, refetch, isFetching, dataUpdatedAt } = useOpportunity(id, !denied);
+  if (!denied && isGone(error)) setDeniedId(id);
   const shownError = useSettledError(data, error);
-  const gone = isGone(shownError);
-  const now = useRefreshExpiredMedia(data?.media, dataUpdatedAt, refetch);
+  const gone = denied || isGone(shownError);
+  // After a denial the hook sees no media, so an expiring URL never asks for the denied id again.
+  const now = useRefreshExpiredMedia(denied ? undefined : data?.media, dataUpdatedAt, refetch);
+  // A refetch over a loaded request failed: what is on screen stays, and what went missing says so.
+  const refreshFailed = !gone && data !== undefined && error !== null;
 
   // The server marked it viewed on this open: the list behind this screen drops its "New" at once.
   useEffect(() => {
     if (data) markOpportunityViewed(client, data.dispatch_id);
   }, [client, data]);
-  // No longer open for this pro: the list stops offering it.
+  // No longer open for this pro: the list stops offering it, and its detail is forgotten.
   useEffect(() => {
-    if (gone) evictOpportunity(client, id);
-  }, [client, gone, id]);
+    if (denied) forgetOpportunity(client, id);
+  }, [client, denied, id]);
 
   return (
     <Screen bar="light" testID="opportunity-screen">
@@ -72,20 +84,31 @@ export function OpportunityDetailScreen() {
             testID="opportunity-error"
           />
         ) : (
-          <OpportunityBody opportunity={data} now={now} />
+          <OpportunityBody
+            opportunity={data}
+            now={now}
+            refresh={refreshFailed ? { retry: () => void refetch(), busy: isFetching } : null}
+          />
         )}
       </ScrollView>
     </Screen>
   );
 }
 
+/** A failed refetch of the request, and the way to ask again. */
+type Refresh = { retry: () => void; busy: boolean };
+
 type OpportunityBodyProps = {
   opportunity: OpportunityDetail;
   now: number;
+  refresh: Refresh | null;
 };
 
-function OpportunityBody({ opportunity, now }: OpportunityBodyProps) {
+function OpportunityBody({ opportunity, now, refresh }: OpportunityBodyProps) {
   const { t } = useTranslation();
+  // Expired URLs are never shown; when the refetch that would replace them failed, the notice
+  // takes the tiles' place. Fresh tiles and a failure that cost nothing stay as they are.
+  const mediaMissing = opportunity.media.some((item) => mediaExpired(item, now));
 
   return (
     <View className="gap-6" testID="opportunity-body">
@@ -136,7 +159,31 @@ function OpportunityBody({ opportunity, now }: OpportunityBodyProps) {
           </Text>
         ) : null}
       </View>
-      <OpportunityMedia media={opportunity.media} pending={opportunity.media_pending} now={now} />
+      {refresh && mediaMissing ? (
+        <MediaUnavailable refresh={refresh} />
+      ) : (
+        <OpportunityMedia media={opportunity.media} pending={opportunity.media_pending} now={now} />
+      )}
+    </View>
+  );
+}
+
+/** The media section when its fresh URLs could not be fetched: the heading, what happened, a retry. */
+function MediaUnavailable({ refresh }: { refresh: Refresh }) {
+  const { t } = useTranslation();
+
+  return (
+    <View className="gap-3" testID="opportunity-media-unavailable">
+      <Text accessibilityRole="header" className="text-headline text-navy-900">
+        {t("opportunities.media.title")}
+      </Text>
+      <RetryNotice
+        message={t("opportunities.media.refreshFailed")}
+        action={t("opportunities.media.retry")}
+        onRetry={refresh.retry}
+        busy={refresh.busy}
+        testID="opportunity-media-retry"
+      />
     </View>
   );
 }

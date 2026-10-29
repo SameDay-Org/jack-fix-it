@@ -247,6 +247,10 @@
       "body": "Check your connection and try again.",
       "retry": "Try again"
     },
+    "more": {
+      "failed": "We couldn't load more requests.",
+      "retry": "Try again"
+    },
     "detail": {
       "loading": "Loading request",
       "where": "Where",
@@ -262,7 +266,9 @@
       "videos_one": "{{count}} video",
       "videos_other": "{{count}} videos",
       "pending_one": "{{count}} more being prepared",
-      "pending_other": "{{count}} more being prepared"
+      "pending_other": "{{count}} more being prepared",
+      "refreshFailed": "We couldn't refresh the photos and videos.",
+      "retry": "Try again"
     },
     "gone": {
       "title": "This request is no longer available",

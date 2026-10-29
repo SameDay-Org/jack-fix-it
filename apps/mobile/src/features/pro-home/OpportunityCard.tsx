@@ -2,7 +2,15 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
 
-import { Card, IconTile, Skeleton, StatusBadge, TextSkeleton } from "@/components/ui";
+import {
+  Card,
+  IconTile,
+  Skeleton,
+  StatusBadge,
+  StatusBadgeSkeleton,
+  TextSkeleton,
+} from "@/components/ui";
+import { deviceLocale } from "@/features/auth/locale";
 import {
   categoryLabel,
   categoryTileProps,
@@ -29,8 +37,19 @@ const VISUAL_ONLY = {
 const EXCERPT_LINES = 2;
 /** The icon tile's side (`IconTile` md), for the skeleton. */
 const TILE_SIDE = 56;
-/** About the "New" pill: one caption line with the badge's vertical padding, and its width. */
-const NEW_PLACEHOLDER = { width: 44, height: 24 } as const;
+/**
+ * The name a placeholder's first row holds, in the app's language: the general-repairs category
+ * of the seed (`apps/api/app/modules/categories/seed_data.json`), whose name breaks where most of
+ * the catalog's do on a 320 dp phone at font scale 1: beside the "New" pill in English, above it
+ * in Spanish. A card cannot know its name before it arrives; this reserves the rows it takes
+ * most often.
+ */
+const SAMPLE_CATEGORY: Record<ReturnType<typeof deviceLocale>, string> = {
+  en: "Handyman",
+  es: "Reparaciones generales",
+};
+/** A day whose short form is as wide as they come in either language: a four-letter month, two digits. */
+const SAMPLE_DAY = "2026-09-30";
 
 type CardText = {
   category: string;
@@ -108,22 +127,30 @@ export function OpportunityCard({ opportunity, now, onPress }: OpportunityCardPr
 }
 
 /**
- * A card-shaped placeholder with the loaded card's rows: the tile, the name beside a pill (the
- * newest rows carry "New"), a two-line excerpt and the three footnote lines, each a
- * `TextSkeleton` of the same type style, so the row is as tall as the text that replaces it at
- * any font scale.
+ * A card-shaped placeholder with the loaded card's rows: the tile, the name beside the "New" pill
+ * (the newest rows carry it), a two-line excerpt and the three footnote lines. Each line is a
+ * `TextSkeleton` of the same type style, so it is as tall as the text that replaces it at any
+ * font scale; the two rows that wrap on a narrow phone (the name with its pill, the preferred
+ * date) stand in for a sample of the same words in the same classes, so they break where the
+ * loaded card's will.
  */
 export function OpportunityCardSkeleton({ testID }: { testID?: string }) {
+  const { t } = useTranslation();
+  const preferred = t("opportunities.preferred", { date: formatDay(SAMPLE_DAY) });
+
   return (
     <Card testID={testID}>
       <View className="flex-row gap-3">
         <Skeleton width={TILE_SIDE} height={TILE_SIDE} radius="md" />
         <View className="flex-1 gap-1">
-          <View className="flex-row items-center gap-x-2">
-            <View className="w-1/2">
-              <TextSkeleton type="headline" />
-            </View>
-            <Skeleton {...NEW_PLACEHOLDER} radius="pill" />
+          <View className="flex-row flex-wrap items-center gap-x-2 gap-y-1">
+            <TextSkeleton
+              type="headline"
+              sample={SAMPLE_CATEGORY[deviceLocale()]}
+              className="shrink"
+              testID={testID && `${testID}-category`}
+            />
+            <StatusBadgeSkeleton label={t("opportunities.new")} />
           </View>
           {/* One block, no gap: the two lines of one wrapped text sit flush. */}
           <View>
@@ -131,7 +158,11 @@ export function OpportunityCardSkeleton({ testID }: { testID?: string }) {
             <TextSkeleton type="callout" width="65%" />
           </View>
           <TextSkeleton type="footnote" width="45%" />
-          <TextSkeleton type="footnote" width="60%" />
+          <TextSkeleton
+            type="footnote"
+            sample={preferred}
+            testID={testID && `${testID}-preferred`}
+          />
           <TextSkeleton type="footnote" width="40%" />
         </View>
       </View>
