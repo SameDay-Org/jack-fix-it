@@ -11,6 +11,7 @@ const NOTE_MAX = 120;
 export function FlowKitSample() {
   const [step, setStep] = useState(2);
   const [rooms, setRooms] = useState<number | null>(null);
+  const [baths, setBaths] = useState<number | null>(null);
   const [jobs, setJobs] = useState<string[]>(["Lawn mowing"]);
   const [often, setOften] = useState<"once" | "recurring" | null>(null);
   const [note, setNote] = useState("");
@@ -28,7 +29,7 @@ export function FlowKitSample() {
         onPress={() => setStep((current) => (current % 5) + 1)}
       />
       <Stepper label="Bedrooms" value={rooms} min={0} max={10} onChange={setRooms} />
-      <Stepper label="Bathrooms" value={null} min={1} max={10} onChange={setRooms} invalid />
+      <Stepper label="Bathrooms" value={baths} min={1} max={10} onChange={setBaths} invalid />
       <View className="flex-row flex-wrap gap-2">
         {JOBS.map((job) => (
           <Chip

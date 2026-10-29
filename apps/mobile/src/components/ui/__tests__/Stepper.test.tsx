@@ -1,13 +1,20 @@
 import "@/i18n";
 
-import { fireEvent, render, screen } from "@testing-library/react-native";
+import {
+  fireEvent,
+  isHiddenFromAccessibility,
+  render,
+  screen,
+} from "@testing-library/react-native";
 import { useState } from "react";
 
 import { Stepper } from "../Stepper";
 
 const stepper = () => screen.getByRole("adjustable", { name: "Bedrooms" });
-const plus = () => screen.getByTestId("rooms-increase");
-const minus = () => screen.getByTestId("rooms-decrease");
+// The buttons are hidden from accessibility (touch only), so their queries opt into hidden elements.
+const hidden = { includeHiddenElements: true };
+const plus = () => screen.getByTestId("rooms-increase", hidden);
+const minus = () => screen.getByTestId("rooms-decrease", hidden);
 const value = () => screen.getByTestId("rooms-value");
 
 /** A stepper that keeps its own value, as a screen holding the answer would. */
@@ -85,6 +92,26 @@ describe("Stepper", () => {
     expect(value()).toHaveTextContent("1");
     await act("decrement");
     expect(value()).toHaveTextContent("0");
+  });
+
+  it("screen readers reach exactly one control: the buttons are touch only", async () => {
+    await render(<Harness start={1} />);
+
+    expect(screen.getAllByRole("adjustable")).toHaveLength(1);
+    // Hidden from the accessibility tree, so the default (accessible-only) query cannot reach them.
+    expect(screen.queryByTestId("rooms-increase", { includeHiddenElements: false })).toBeNull();
+    expect(screen.queryByTestId("rooms-decrease", { includeHiddenElements: false })).toBeNull();
+    for (const button of [plus(), minus()]) {
+      expect(isHiddenFromAccessibility(button)).toBe(true);
+      expect(button.props).toMatchObject({
+        accessible: false,
+        focusable: false,
+        importantForAccessibility: "no",
+        accessibilityElementsHidden: true,
+      });
+    }
+    await fireEvent.press(plus()); // touch still works
+    expect(value()).toHaveTextContent("2");
   });
 
   it("takes the danger ring when invalid, and 48 dp buttons either way", async () => {

@@ -25,8 +25,8 @@ const ACTIONS = [{ name: "increment" }, { name: "decrement" }] as const;
 /**
  * A whole number between `min` and `max`, one step at a time: a white pill with round minus and
  * plus buttons around the value. It starts empty (a blank slot, the minus faded); the first plus
- * gives `min`. Screen
- * readers get one adjustable control (swipe up or down) with the value, not three buttons.
+ * gives `min`. Screen readers get one adjustable control (swipe up or down) with the value, not
+ * three buttons.
  */
 export function Stepper({
   label,
@@ -98,11 +98,17 @@ type StepButtonProps = {
   testID?: string;
 };
 
+// Touch only: the stepper itself is the one adjustable control screen readers reach (its
+// increment and decrement actions do what these do), so the buttons stay out of the tree.
 function StepButton({ glyph, disabled, onPress, testID }: StepButtonProps) {
   const [pressed, pressIn, pressOut] = useFlag();
 
   return (
     <Pressable
+      accessible={false}
+      focusable={false}
+      importantForAccessibility="no"
+      accessibilityElementsHidden
       disabled={disabled}
       onPress={onPress}
       onPressIn={pressIn}

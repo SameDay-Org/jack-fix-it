@@ -1,9 +1,10 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { Text, View } from "react-native";
 
 import { continuousCorners } from "@/theme";
 
 import { cx } from "./cx";
+import { announce } from "./focus";
 
 export type NoticeProps = {
   /** `danger`: something stopped the customer; `info`: something to know before going on. */
@@ -16,16 +17,23 @@ export type NoticeProps = {
   testID?: string;
 };
 
-const TONE = {
-  danger: { surface: "bg-danger/10", title: "text-danger" },
-  info: { surface: "bg-navy-900/5", title: "text-navy-900" },
+// Navy text on both tints: danger text over its own 10% tint is under 4.5:1 (about 4.1:1 on
+// white, 4.0:1 on gray-50), so the tint carries the tone. tokens.test.ts holds every pair at AA.
+export const TONE = {
+  danger: { surface: "bg-danger/10", title: "text-navy-900", body: "text-navy-900" },
+  info: { surface: "bg-navy-900/5", title: "text-navy-900", body: "text-navy-900" },
 } as const;
 
 /**
  * A message inside a page, in a soft tinted bubble: what happened in one bold line, what to do
- * next under it, and the action that fixes it when there is one. Read as an alert.
+ * next under it, and the action that fixes it when there is one. An alert that screen readers
+ * announce when it appears and whenever its text changes (the role alone announces nothing on
+ * Android); the action stays its own stop.
  */
 export function Notice({ tone, title, body, children, className, testID }: NoticeProps) {
+  const message = body ? `${title}${/[.!?]$/.test(title) ? "" : "."} ${body}` : title;
+  useEffect(() => announce(message), [message]);
+
   return (
     <View
       accessibilityRole="alert"
@@ -34,7 +42,7 @@ export function Notice({ tone, title, body, children, className, testID }: Notic
       testID={testID}
     >
       <Text className={cx("text-headline", TONE[tone].title)}>{title}</Text>
-      {body ? <Text className="text-callout text-navy-900">{body}</Text> : null}
+      {body ? <Text className={cx("text-callout", TONE[tone].body)}>{body}</Text> : null}
       {children ? <View className="mt-2 flex-row">{children}</View> : null}
     </View>
   );

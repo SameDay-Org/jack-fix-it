@@ -1,9 +1,10 @@
-import type { ComponentRef, ReactNode, Ref } from "react";
-import { Text, TextInput, View, type TextInputProps } from "react-native";
+import { useEffect, useRef, type ComponentRef, type ReactNode, type Ref } from "react";
+import { Platform, Text, TextInput, View, type TextInputProps } from "react-native";
 
 import { bubbleShadow, continuousCorners } from "@/theme";
 
 import { cx } from "./cx";
+import { announce } from "./focus";
 import { useFlag } from "./useFlag";
 
 type PassthroughProps = Pick<
@@ -40,7 +41,11 @@ export type InputProps = PassthroughProps & {
   invalid?: boolean;
   /** A tall field for a few sentences: the text starts at the top and wraps. */
   multiline?: boolean;
-  /** A short note at the end of the message line, such as how many characters are left. */
+  /**
+   * A short note at the end of the message line, such as how many characters are left. Android
+   * reads its changes as a polite live region; iOS has none, so VoiceOver hears it when it appears
+   * and when the text reaches `maxLength`, while the field has focus.
+   */
   counter?: string;
   disabled?: boolean;
   /**
@@ -81,6 +86,7 @@ export function Input({
   className,
   testID,
   onBlur,
+  maxLength,
   ...textInputProps
 }: InputProps) {
   const [focused, focus, blurred] = useFlag();
@@ -91,6 +97,7 @@ export function Input({
   const hasError = Boolean(error);
   const message = error || hint;
   const ring = hasError || invalid ? RING.error : focused ? RING.focused : RING.rest;
+  useCounterAnnouncement(counter, maxLength !== undefined && value.length >= maxLength, focused);
 
   return (
     <View className={className}>
@@ -113,6 +120,7 @@ export function Input({
         <TextInput
           {...textInputProps}
           ref={ref}
+          maxLength={maxLength}
           accessibilityLabel={label}
           accessibilityHint={message}
           accessibilityState={{ disabled }}
@@ -153,4 +161,19 @@ export function Input({
       ) : null}
     </View>
   );
+}
+
+/**
+ * iOS only (Android's live region already reads the counter): announces it at the two moments that
+ * matter while typing, when it first shows and when the text reaches the limit, never per keystroke.
+ * A counter already showing when the field takes focus (a draft read back) stays quiet.
+ */
+function useCounterAnnouncement(counter: string | undefined, atLimit: boolean, focused: boolean) {
+  const previous = useRef({ shown: Boolean(counter), atLimit });
+  useEffect(() => {
+    const before = previous.current;
+    previous.current = { shown: Boolean(counter), atLimit };
+    if (Platform.OS !== "ios" || !focused || !counter) return;
+    if (!before.shown || (atLimit && !before.atLimit)) announce(counter);
+  }, [counter, atLimit, focused]);
 }
