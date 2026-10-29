@@ -15,6 +15,8 @@ jest.mock("expo-glass-effect", () => ({
 }));
 
 const answered = jest.fn<void, [IntakeAnswer | undefined]>();
+// The stepper's buttons are touch only, hidden from accessibility: their queries opt in.
+const HIDDEN = { includeHiddenElements: true };
 
 /** The question with its answer held as the step holds it; `checked` shows its error. */
 function Harness({
@@ -53,17 +55,17 @@ describe("QuestionField", () => {
 
     expect(screen.getByText("Answer this to continue.")).toBeTruthy();
     expect(screen.getByRole("adjustable", { name: "How many rooms?" })).toBeTruthy();
-    expect(screen.getByTestId("question-rooms-stepper-decrease")).toBeDisabled();
+    expect(screen.getByTestId("question-rooms-stepper-decrease", HIDDEN)).toBeDisabled();
 
-    await fireEvent.press(screen.getByTestId("question-rooms-stepper-increase"));
+    await fireEvent.press(screen.getByTestId("question-rooms-stepper-increase", HIDDEN));
     expect(answered).toHaveBeenLastCalledWith(1);
     expect(screen.queryByText("Answer this to continue.")).toBeNull();
 
     for (let press = 0; press < 8; press += 1) {
-      await fireEvent.press(screen.getByTestId("question-rooms-stepper-increase"));
+      await fireEvent.press(screen.getByTestId("question-rooms-stepper-increase", HIDDEN));
     }
     expect(screen.getByTestId("question-rooms-stepper-value")).toHaveTextContent("6");
-    expect(screen.getByTestId("question-rooms-stepper-increase")).toBeDisabled();
+    expect(screen.getByTestId("question-rooms-stepper-increase", HIDDEN)).toBeDisabled();
   });
 
   it("renders a wide whole number as a digits-only field and flags it out of bounds", async () => {

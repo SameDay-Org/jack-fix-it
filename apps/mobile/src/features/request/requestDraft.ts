@@ -113,7 +113,9 @@ export function setTypedAddress(field: keyof AddressFields, value: string): void
 
 /** The server refused the request because of `step`: the flow goes back there and says why. */
 export function refuseStep(refusal: StepRefusal): void {
-  requestDraftStore.setState({ refusal });
+  // A fresh object each time: the step keys its scroll and announcement on it, so a second refusal
+  // for the same reason (the same constant) still counts as a new one.
+  requestDraftStore.setState({ refusal: { ...refusal } });
 }
 
 /** The customer dealt with the server's objection on `step`. */

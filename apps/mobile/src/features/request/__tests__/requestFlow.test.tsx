@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import { createElement } from "react";
-import { Alert, Pressable, Text, type AlertButton } from "react-native";
+import { AccessibilityInfo, Alert, Pressable, Text, type AlertButton } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ApiError, apiGet, apiPost, type SessionUser } from "@/api";
@@ -52,6 +52,25 @@ jest.mock("@/features/media", () => {
       ),
   };
 });
+/** How many times screen readers were told something containing `text`, by either announce API. */
+function spoken(text: string): number {
+  return [
+    ...jest.mocked(AccessibilityInfo.announceForAccessibility).mock.calls,
+    ...jest.mocked(AccessibilityInfo.announceForAccessibilityWithOptions).mock.calls,
+  ].filter(([message]) => message.includes(text)).length;
+}
+
+let announceSpies: jest.SpyInstance[] = [];
+
+beforeEach(() => {
+  announceSpies = [
+    jest.spyOn(AccessibilityInfo, "announceForAccessibility").mockImplementation(),
+    jest.spyOn(AccessibilityInfo, "announceForAccessibilityWithOptions").mockImplementation(),
+  ];
+});
+
+afterEach(() => announceSpies.forEach((spy) => spy.mockRestore()));
+
 jest.mock("expo-image-picker", () => ({}));
 jest.mock("expo-image-manipulator", () => ({}));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
@@ -304,6 +323,7 @@ describe("the request flow", () => {
 
     await waitFor(() => expect(result.getPathname()).toBe("/request/where"));
     expect(screen.getByText("We're not in this area yet")).toBeTruthy();
+    await waitFor(() => expect(spoken("We're not in this area yet")).toBe(1)); // the notice's own
     await waitFor(() => expect(addressLoads()).toBe(loadsBefore + 1));
 
     await fireEvent.press(screen.getByRole("radio", { name: "Use another address" }));
@@ -323,6 +343,24 @@ describe("the request flow", () => {
     });
   });
 
+  it("announces a second refusal for the same reason again, once", async () => {
+    jest
+      .mocked(apiPost)
+      .mockRejectedValueOnce(new ApiError(422, "zip_not_served"))
+      .mockRejectedValueOnce(new ApiError(422, "zip_not_served"));
+    const result = await toReview();
+
+    await press("Send request");
+    await waitFor(() => expect(result.getPathname()).toBe("/request/where"));
+    await waitFor(() => expect(spoken("We're not in this area yet")).toBe(1));
+
+    await press("Continue"); // same address: the notice stays on Where
+    await waitFor(() => expect(result.getPathname()).toBe("/request/review"));
+    await press("Send request");
+    await waitFor(() => expect(result.getPathname()).toBe("/request/where"));
+    await waitFor(() => expect(spoken("We're not in this area yet")).toBe(2));
+  });
+
   it("keeps Review with Try again on a 5xx and sends again from there", async () => {
     jest.mocked(apiPost).mockRejectedValueOnce(new ApiError(503, undefined));
     const result = await toReview();
@@ -331,6 +369,7 @@ describe("the request flow", () => {
 
     await waitFor(() => expect(screen.getByText("Your request didn't go through")).toBeTruthy());
     expect(result.getPathname()).toBe("/request/review");
+    expect(spoken("Your request didn't go through")).toBe(1);
 
     jest.mocked(apiPost).mockResolvedValueOnce(created() as never);
     await press("Try again");
@@ -426,6 +465,9 @@ describe("the request flow", () => {
     await press("Continue");
     expect(screen.getByText("A file didn't upload")).toBeTruthy();
     expect(result.getPathname()).toBe("/request/new");
+    expect(spoken("A file didn't upload")).toBe(1);
+    await press("Continue"); // pressed again while it shows: said again
+    expect(spoken("A file didn't upload")).toBe(2);
 
     await press(/^Remove/);
     expect(remove).toHaveBeenCalledWith("media-1");

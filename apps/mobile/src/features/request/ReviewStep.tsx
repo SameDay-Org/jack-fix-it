@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { router, usePreventRemove } from "expo-router";
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { AccessibilityInfo, Image, Text, View } from "react-native";
+import { Image, Text, View } from "react-native";
 
 import { Button, Notice } from "@/components/ui";
 import { ControlIcon } from "@/components/icons";
@@ -51,10 +51,8 @@ export function ReviewStep({ category, steps }: ReviewStepProps) {
     router.dismissTo(stepHref(refusal.step, steps));
   };
 
-  const fail = (reason: ReviewFailure) => {
-    setFailure(reason);
-    AccessibilityInfo.announceForAccessibility(t(`request.review.${reason}Title`));
-  };
+  // The notice announces itself: onSend clears the failure first, so each one mounts it anew.
+  const fail = (reason: ReviewFailure) => setFailure(reason);
 
   const onSend = () => {
     setFailure(null);

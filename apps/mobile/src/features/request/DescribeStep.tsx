@@ -45,9 +45,11 @@ export function DescribeStep({ steps }: DescribeStepProps) {
     if (next) router.push(stepHref(next, steps));
   };
 
+  // The notice announces itself when it appears; pressed again while it shows, it is said again.
   const holdForFailed = () => {
+    if (failedShown)
+      AccessibilityInfo.announceForAccessibility(t("request.describe.uploadFailedTitle"));
     setFailedShown(true);
-    AccessibilityInfo.announceForAccessibility(t("request.describe.uploadFailedTitle"));
   };
 
   const onContinue = () => {

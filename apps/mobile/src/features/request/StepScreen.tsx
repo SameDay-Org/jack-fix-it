@@ -25,8 +25,9 @@ export type StepScreenProps = {
   scrollRef?: RefObject<ComponentRef<typeof ScrollView> | null>;
   /**
    * The title of the notice the server's refusal put on this step, while it shows. The step, still
-   * mounted at its old scroll position under Review, scrolls back to the top where the notice is,
-   * and screen readers hear it.
+   * mounted at its old scroll position under Review, scrolls back to the top where the notice is.
+   * The notice announces itself when it appears; a repeat refusal for the same reason leaves it
+   * unchanged on screen, so that one is announced here.
    */
   refusal?: string;
   testID: string;
@@ -61,10 +62,15 @@ export function StepScreen({
   const scroll = scrollRef ?? ownScrollRef;
   // Keyed on the refusal itself: a second send refused for the same reason scrolls up again.
   const refused = useRequestDraft((draft) => (draft.refusal?.step === step ? draft.refusal : null));
+  const refusalShown = useRef(false);
   useEffect(() => {
-    if (!refused || !refusal) return;
+    if (!refused || !refusal) {
+      refusalShown.current = false;
+      return;
+    }
     scroll.current?.scrollTo({ y: 0, animated: false });
-    AccessibilityInfo.announceForAccessibility(refusal);
+    if (refusalShown.current) AccessibilityInfo.announceForAccessibility(refusal);
+    refusalShown.current = true;
   }, [refused, refusal, scroll]);
 
   return (
