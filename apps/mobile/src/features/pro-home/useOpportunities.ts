@@ -84,6 +84,10 @@ function updateDenied(client: QueryClient, update: (ids: DeniedIds) => DeniedIds
 export const denyOpportunity = (client: QueryClient, dispatchId: string): void =>
   updateDenied(client, (ids) => (ids.includes(dispatchId) ? ids : [...ids, dispatchId]));
 
+/** Its detail answered 404, and no 200 since. */
+export const isOpportunityDenied = (client: QueryClient, dispatchId: string): boolean =>
+  client.getQueryData<DeniedIds>(DENIED_KEY)?.includes(dispatchId) ?? false;
+
 /** Its detail answered 200: it is open for this pro again. */
 export function allowOpportunity(client: QueryClient, dispatchId: string): void {
   if (client.getQueryData<DeniedIds>(DENIED_KEY)?.includes(dispatchId)) {
@@ -105,13 +109,20 @@ const withoutDenied = <TPageParam>(
         })),
       };
 
-export function useOpportunities() {
-  const { data: denied = NONE_DENIED } = useQuery<DeniedIds>({
+const useDeniedIds = (): DeniedIds =>
+  useQuery<DeniedIds>({
     queryKey: DENIED_KEY,
     queryFn: skipToken,
     staleTime: Infinity,
     gcTime: Infinity,
-  });
+  }).data ?? NONE_DENIED;
+
+/** Its detail answered 404, on any screen, and no 200 since. */
+export const useOpportunityDenied = (dispatchId: string): boolean =>
+  useDeniedIds().includes(dispatchId);
+
+export function useOpportunities() {
+  const denied = useDeniedIds();
   const select = useCallback(
     (data: InfiniteData<OpportunityPage, Cursor>) => withoutDenied(data, denied),
     [denied],
