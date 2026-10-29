@@ -1,7 +1,7 @@
 import "@/i18n";
 
 import type { QueryClient } from "@tanstack/react-query";
-import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { router } from "expo-router";
 import { AccessibilityInfo, Alert, type AlertButton } from "react-native";
 
@@ -117,7 +117,7 @@ const alertButtons = (): AlertButton[] => jest.mocked(Alert.alert).mock.calls[0]
 beforeEach(() => {
   freezeClock();
   navigation.reset();
-  navigation.dispatch.mockClear();
+  navigation.repeated.mockClear();
   jest.mocked(apiGet).mockReset().mockResolvedValue(detail());
   jest.mocked(apiPost).mockReset().mockResolvedValue(sentQuote());
   jest.mocked(router.dismissTo).mockClear();
@@ -148,7 +148,7 @@ describe("QuoteFormScreen: the form", () => {
     expect(receive()).toHaveTextContent("You'll receive $84.99");
     expect(fee()).toHaveTextContent("Jack's fee 15%: $15.00");
 
-    for (const invalid of ["abc", "100.555", "0", ""]) {
+    for (const invalid of ["abc", "100.555", "0", "21474836.48", "99,999,999,999,999", ""]) {
       await typeInto("quote-price", invalid);
       expect(receive()).toBeNull();
       expect(fee()).toBeNull();
@@ -172,7 +172,7 @@ describe("QuoteFormScreen: the form", () => {
     await renderForm();
     await typeInto("quote-price", "1000.5");
     await fireEvent(screen.getByTestId("quote-price"), "blur");
-    expect(screen.getByTestId("quote-price").props.value).toBe("1,000.50");
+    expect(screen.getByTestId("quote-price").props.value).toBe("1000.50");
 
     await typeInto("quote-price", "abc");
     await fireEvent(screen.getByTestId("quote-price"), "blur");
@@ -422,9 +422,14 @@ describe("QuoteFormScreen: leaving", () => {
     const [keep, discard] = alertButtons();
     expect(keep?.text).toBe("Keep editing");
     keep?.onPress?.();
-    expect(navigation.dispatch).not.toHaveBeenCalled();
-    discard?.onPress?.();
-    expect(navigation.dispatch).toHaveBeenCalledWith(GO_BACK);
+    expect(navigation.repeated).not.toHaveBeenCalled();
+    expect(navigation.attemptLeave()).toBe(false);
+
+    await act(async () => discard?.onPress?.());
+    expect(navigation.repeated).toHaveBeenCalledWith(GO_BACK);
+    // The guard stays off once rendered again: nothing asks a second time.
+    expect(navigation.attemptLeave()).toBe(true);
+    expect(Alert.alert).toHaveBeenCalledTimes(2);
   });
 
   it("goes home from the confirmation on back, not to the closed detail", async () => {

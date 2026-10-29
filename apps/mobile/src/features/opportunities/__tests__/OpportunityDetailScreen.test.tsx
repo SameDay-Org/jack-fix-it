@@ -131,11 +131,20 @@ describe("OpportunityDetailScreen", () => {
     expect(screen.queryByTestId("opportunity-send-quote")).toBeNull();
     await screen.findByText("JF-000124");
 
-    await fireEvent.press(screen.getByRole("button", { name: "Send a quote" }));
+    const send = screen.getByRole("button", { name: "Send a quote" });
+    await fireEvent.press(send);
     expect(router.push).toHaveBeenCalledWith({
       pathname: "/opportunities/[id]/quote",
       params: { id: DISPATCH_ID },
     });
+
+    // A second tap while the push is queued opens nothing; once the router is idle it opens again.
+    await fireEvent.press(send);
+    expect(router.push).toHaveBeenCalledTimes(1);
+    await act(async () => navigation.setNavigating(true));
+    await act(async () => navigation.setNavigating(false));
+    await fireEvent.press(send);
+    expect(router.push).toHaveBeenCalledTimes(2);
   });
 
   it("says when contact details were hidden", async () => {

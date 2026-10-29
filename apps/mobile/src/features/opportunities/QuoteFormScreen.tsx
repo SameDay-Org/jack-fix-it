@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { router, useLocalSearchParams, useNavigation, usePreventRemove } from "expo-router";
+import { router, useLocalSearchParams, usePreventRemove } from "expo-router";
 import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { AccessibilityInfo, Alert, KeyboardAvoidingView, ScrollView, View } from "react-native";
@@ -95,19 +95,21 @@ type QuoteFlowProps = {
  */
 function QuoteFlow({ opportunity, onSettled }: QuoteFlowProps) {
   const { t } = useTranslation();
-  const navigation = useNavigation();
   const quote = useQuoteDraft(opportunity.preferred_date);
   const { send, sending } = useSendQuote(opportunity.dispatch_id);
   const [step, setStep] = useState<Step>({ kind: "form" });
   const [leaving, setLeaving] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
   const ended = step.kind === "sent" || step.kind === "closed";
 
   useEffect(() => {
     if (leaving) router.dismissTo(HOME);
   }, [leaving]);
 
-  const guarded = !leaving && (step.kind !== "form" || quote.dirty);
-  usePreventRemove(guarded, ({ data }) => {
+  // expo-router blocks every removal while the guard is on, a replayed one too: a confirmed
+  // discard turns it off and replays the blocked back with `repeat`.
+  const guarded = !leaving && !discarding && (step.kind !== "form" || quote.dirty);
+  usePreventRemove(guarded, ({ repeat }) => {
     if (ended) setLeaving(true);
     else if (step.kind === "review") {
       if (!sending) setStep({ kind: "form" });
@@ -117,7 +119,10 @@ function QuoteFlow({ opportunity, onSettled }: QuoteFlowProps) {
         {
           text: t("quoteForm.discard.confirm"),
           style: "destructive",
-          onPress: () => navigation.dispatch(data.action),
+          onPress: () => {
+            setDiscarding(true);
+            repeat();
+          },
         },
       ]);
     }

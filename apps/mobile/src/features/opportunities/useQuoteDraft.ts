@@ -87,7 +87,7 @@ export function useQuoteDraft(preferredDate: string | null) {
     setProblems(hasProblems(found) ? found : { price: "aboveCap", duration: "aboveCap" });
   };
 
-  /** The price field lost focus: a valid price is rewritten as "1,000.00". */
+  /** The price field lost focus: a valid price is rewritten as "1000.00". */
   const tidyPrice = () => {
     const cents = parsePriceCents(draft.price);
     if (cents !== null && priceText(cents) !== draft.price) change({ price: priceText(cents) });

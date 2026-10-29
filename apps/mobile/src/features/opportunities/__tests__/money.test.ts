@@ -57,16 +57,35 @@ describe("parsePriceCents", () => {
     ["4.35", 435],
     ["12,345,678.99", 1_234_567_899],
     ["0", 0],
+    ["100,5", 10_050],
+    ["100,50", 10_050],
+    ["1,5", 150],
+    ["1,000,5", 100_050],
+    ["9999999999999.99", 999_999_999_999_999],
+    // Three digits after a comma make it a separator, not decimals.
+    ["100,555", 10_055_500],
   ])("%p → %i cents, exactly", (text, cents) => {
     expect(parsePriceCents(text)).toBe(cents);
   });
 
-  it.each(["", "abc", "1,00", "100,5", "100.555", "$100", "-5", ".5", "1e3", "10 0", "1,000,0"])(
-    "%p is not a price",
-    (text) => {
-      expect(parsePriceCents(text)).toBeNull();
-    },
-  );
+  it.each([
+    "",
+    "abc",
+    "100.555",
+    "$100",
+    "-5",
+    ".5",
+    "1e3",
+    "10 0",
+    "1,000,0000",
+    "1,000.5,5",
+    // Past 13 whole digits the cents would not be exact.
+    "99999999999999",
+    "99,999,999,999,999",
+    "999,999,999,999,999.99",
+  ])("%p is not a price", (text) => {
+    expect(parsePriceCents(text)).toBeNull();
+  });
 
   it("never drifts by a cent where float math would", () => {
     // 0.29 * 100 is 28.999999999999996 and 1.15 * 100 is 114.99999999999999 in floating point.
@@ -81,7 +100,7 @@ describe("priceText", () => {
     [10_000, "100.00"],
     [10_050, "100.50"],
     [5, "0.05"],
-    [100_000, "1,000.00"],
+    [100_000, "1000.00"],
   ])("%i cents → %p", (cents, text) => {
     expect(priceText(cents)).toBe(text);
   });

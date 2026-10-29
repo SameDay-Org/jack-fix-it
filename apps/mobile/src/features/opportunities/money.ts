@@ -29,27 +29,36 @@ export function split(amountCents: number, takeRateBps: number): Split {
   return { proPayoutCents: amountCents - fee, platformFeeCents: fee };
 }
 
-// Dollars with optional thousands separators ("1,000" or "1000") and up to two decimals. The
-// whole part is bounded so the cents stay exact integers; anything that large is past the cap.
-const PRICE = /^(\d{1,3}(?:,\d{3}){0,4}|\d{1,13})(?:\.(\d{0,2}))?$/;
+// Dollars with optional thousands separators ("1,000" or "1000") and up to two decimals after a
+// point, or after a comma when one or two digits end the text ("100,5": the decimal key of a
+// Spanish keypad). "1,000" keeps its comma as a separator: three digits follow it.
+const PRICE = /^(\d{1,3}(?:,\d{3})*|\d+)(?:[.](\d{0,2})|,(\d{1,2}))?$/;
+// More whole digits than this and the cents would pass 2^53; anything that large is past the cap.
+const MAX_WHOLE_DIGITS = 13;
 
 /**
- * A typed price in integer cents: "100" → 10000, "100.5" → 10050, "1,000.00" → 100000. Built
- * from the digits, never through a float, so no amount drifts by a cent. `null` when the text is
- * not a price (empty, letters, a misplaced comma, three decimals).
+ * A typed price in integer cents: "100" → 10000, "100.5" and "100,5" → 10050, "1,000.00" →
+ * 100000. Built from the digits, never through a float, so no amount drifts by a cent. `null`
+ * when the text is not a price (empty, letters, a misplaced comma, three decimals, too long).
  */
 export function parsePriceCents(text: string): number | null {
   const match = PRICE.exec(text.trim());
   if (match === null) return null;
-  const [, whole = "", fraction = ""] = match;
-  const dollars = Number(whole.replace(/,/g, ""));
+  const [, grouped = "", point, comma] = match;
+  const whole = grouped.replace(/,/g, "");
+  if (whole.length > MAX_WHOLE_DIGITS) return null;
+  const fraction = point ?? comma ?? "";
+  const dollars = Number(whole);
   const cents = Number(fraction.padEnd(CENT_DIGITS, "0"));
   return dollars * CENTS_PER_DOLLAR + cents;
 }
 
-/** Cents as the field shows them after editing: "1,000.00", always two decimals, no symbol. */
+/**
+ * Cents as the field shows them after editing: "1000.00", always two decimals, no symbol and no
+ * separators, so deleting a digit never leaves a stray comma.
+ */
 export function priceText(cents: number): string {
   const dollars = Math.floor(cents / CENTS_PER_DOLLAR);
   const rest = String(cents % CENTS_PER_DOLLAR).padStart(CENT_DIGITS, "0");
-  return `${dollars.toLocaleString("en-US")}.${rest}`;
+  return `${dollars}.${rest}`;
 }

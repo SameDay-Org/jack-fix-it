@@ -7,7 +7,7 @@ import { BackButton } from "@/features/auth/components/BackButton";
 import { formatMoneyExact, formatRate } from "@/features/quotes/format";
 
 import { formatDay, formatInstantDay, formatTimeOfDay } from "./format";
-import { parsePriceCents, split } from "./money";
+import { MAX_AMOUNT_CENTS, parsePriceCents, split } from "./money";
 import {
   APPROACH_MAX_LENGTH,
   SCOPE_MAX_LENGTH,
@@ -204,7 +204,9 @@ type PayoutPreviewProps = { price: string; takeRateBps: number };
 export function PayoutPreview({ price, takeRateBps }: PayoutPreviewProps) {
   const { t } = useTranslation();
   const cents = parsePriceCents(price);
-  const preview = cents !== null && cents > 0 ? split(cents, takeRateBps) : null;
+  // Past the API's largest amount the server refuses the price: no preview for it either.
+  const preview =
+    cents !== null && cents > 0 && cents <= MAX_AMOUNT_CENTS ? split(cents, takeRateBps) : null;
 
   return (
     <View
