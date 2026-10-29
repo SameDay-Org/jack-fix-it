@@ -390,6 +390,34 @@ async def test_patch_me_with_a_contact_name_422(
     assert (user.first_name, user.last_name) == ("Ana", "Pérez")
 
 
+# #229: an exempt word glued to a mark outside the Latin blocks is a handle, as "@home.fixit"
+# is. At write time the letter rule refuses the "@" first, for both; on read, the redactor
+# withholds a name stored before the checks.
+MARKED_HANDLE = "@home" + chr(0x0483) + "fixit"
+
+
+def test_safe_public_name_withholds_a_handle_glued_to_a_combining_mark() -> None:
+    assert safe_public_name(MARKED_HANDLE, "Pérez", KnownValues()) is None
+    assert safe_public_name("@home.fixit", "Pérez", KnownValues()) is None
+
+
+@pytest.mark.parametrize("field", ["first_name", "last_name"])
+async def test_a_handle_glued_to_a_combining_mark_is_refused_at_write_time(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, field: str
+) -> None:
+    names = {"first_name": FIRST, "last_name": LAST, field: MARKED_HANDLE}
+
+    registered = await register(db_client, **names)
+    headers = await signed_in(db_client, first_name="Ana", last_name="Pérez")
+    patched = await patch_me(db_client, headers, {field: MARKED_HANDLE})
+
+    assert registered.status_code == patched.status_code == 422
+    assert registered.json() == patched.json() == VALIDATION_ERROR
+    user = await get_user(db_session)
+    await db_session.refresh(user)
+    assert (user.first_name, user.last_name) == ("Ana", "Pérez")
+
+
 @pytest.mark.parametrize("header", [None, "Bearer not-a-token"], ids=["missing", "invalid"])
 async def test_patch_me_unauthenticated_401(
     db_client: httpx.AsyncClient, header: str | None
