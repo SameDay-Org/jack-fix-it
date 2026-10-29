@@ -185,13 +185,13 @@ Confirm the exact dashboard steps on the first drill and update this section.
 6. For Sentinel: a project token scoped to the staging environment, and a GitHub token limited
    to issues and pull requests.
 7. After the first deploy of each environment, create the first admin from a shell on the api
-   service: `uv run python -m scripts.create_staff_user` (it asks for the email and the role,
+   service: `python -m scripts.create_staff_user` (it asks for the email and the role,
    and the password twice without echoing it). Public registration never creates staff
    accounts (#155). For a scripted setup: `--email … --role admin --password-env NAME`, with
    the password only in that environment variable.
 8. Seed the launch data from a shell on the api service, after each first deploy and again
-   whenever a seed file changes: `uv run python -m scripts.seed_categories` and
-   `uv run python -m scripts.seed_service_areas`. Both are safe to re-run, because they insert
+   whenever a seed file changes: `python -m scripts.seed_categories` and
+   `python -m scripts.seed_service_areas`. Both are safe to re-run, because they insert
    what is missing and never update a row. Without the service areas, every request is refused
    with `zip_not_served`. The areas are South Florida with Broward active (#9). The sources and
    the rebuild steps are in `apps/api/app/modules/service_areas/SOURCES.md`.
