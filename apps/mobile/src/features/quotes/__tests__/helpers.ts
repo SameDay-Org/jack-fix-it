@@ -25,6 +25,7 @@ export const quote = (n: number, overrides: QuoteOverrides = {}): CustomerQuote 
   id: `00000000-0000-4000-8000-00000000010${n}`,
   amount_cents: 18_000,
   scope: "Replace the kitchen faucet and check the supply lines.",
+  approach: null,
   duration_minutes: 120,
   proposed_start_at: at(48),
   expires_at: at(6),

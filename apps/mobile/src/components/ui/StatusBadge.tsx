@@ -1,6 +1,8 @@
 import { Text, View } from "react-native";
+import Animated from "react-native-reanimated";
 
 import { cx } from "./cx";
+import { useSkeletonPulse } from "./Skeleton";
 
 export type StatusTone = "neutral" | "info" | "success" | "warning" | "danger" | "brand";
 
@@ -25,15 +27,44 @@ export const TONE: Record<StatusTone, { container: string; text: string }> = {
   brand: { container: "bg-green-500", text: "text-navy-900" },
 };
 
+// The pill and its label; StatusBadgeSkeleton below shares both so a loading row never jumps.
+const SHAPE = "self-start rounded-pill px-3 py-1";
+const LABEL = "text-caption";
+
 export function StatusBadge({ label, tone, className, testID }: StatusBadgeProps) {
   return (
-    <View
-      testID={testID}
-      className={cx("self-start rounded-pill px-3 py-1", TONE[tone].container, className)}
-    >
-      <Text accessibilityRole="text" className={cx("text-caption", TONE[tone].text)}>
+    <View testID={testID} className={cx(SHAPE, TONE[tone].container, className)}>
+      <Text accessibilityRole="text" className={cx(LABEL, TONE[tone].text)}>
         {label}
       </Text>
     </View>
+  );
+}
+
+export type StatusBadgeSkeletonProps = {
+  /** The label the badge will carry, invisible: the pill is exactly its size at any font scale. */
+  label: string;
+  testID?: string;
+};
+
+/**
+ * A pill-shaped placeholder of the badge's exact size. Hidden from assistive technology; the
+ * caller labels the loading group once.
+ */
+export function StatusBadgeSkeleton({ label, testID }: StatusBadgeSkeletonProps) {
+  const pulse = useSkeletonPulse();
+
+  return (
+    <Animated.View style={pulse} testID={testID}>
+      <View className={cx(SHAPE, "bg-gray-500/15")}>
+        <Text
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          className={cx(LABEL, "opacity-0")}
+        >
+          {label}
+        </Text>
+      </View>
+    </Animated.View>
   );
 }

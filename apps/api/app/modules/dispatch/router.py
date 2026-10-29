@@ -66,6 +66,9 @@ async def list_opportunities(
             "not_found: no open opportunity of the caller with this id (another pro's, "
             "declined, expired, or the request is closed)."
         ),
+        status.HTTP_503_SERVICE_UNAVAILABLE: _error(
+            "not_configured: the platform's take rate is set to an invalid value."
+        ),
     },
 )
 async def open_opportunity(
@@ -74,7 +77,7 @@ async def open_opportunity(
     opportunities: Annotated[OpportunityService, Depends(get_opportunity_service)],
 ) -> OpportunityDetail:
     """The full request, with its photos and videos as privacy-safe copies (no location or
-    other metadata) behind short-lived signed URLs, and how many are still being prepared. The
-    first open records that the pro saw it (viewed, viewed_at); opening it again changes
-    nothing."""
+    other metadata) behind short-lived signed URLs, and how many are still being prepared, and
+    the platform's take rate for the quote form's preview. The first open records that the pro
+    saw it (viewed, viewed_at); opening it again changes nothing."""
     return await opportunities.open_own(user, dispatch_id)

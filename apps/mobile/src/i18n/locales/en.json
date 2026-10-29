@@ -234,5 +234,68 @@
       "failed": "We couldn't accept the quote. Check your connection and try again.",
       "acceptLabel": "Accept quote from {{pro}} for {{price}}"
     }
+  },
+  "opportunities": {
+    "greeting": "Hi, {{name}}",
+    "greetingNoName": "Hi there",
+    "title": "New opportunities",
+    "loading": "Loading opportunities",
+    "new": "New",
+    "otherCategory": "Other request",
+    "preferred": "Preferred {{date}}",
+    "sentAgo": "Sent {{ago}}",
+    "ago": {
+      "justNow": "just now",
+      "minutes_one": "{{count}} min ago",
+      "minutes_other": "{{count}} min ago",
+      "hours_one": "{{count}} h ago",
+      "hours_other": "{{count}} h ago",
+      "days_one": "{{count}} day ago",
+      "days_other": "{{count}} days ago",
+      "on": "on {{date}}"
+    },
+    "refreshFailed": "Couldn't refresh. Check your connection and try again.",
+    "empty": {
+      "title": "No new requests right now",
+      "body": "New requests near you show up here. Pull down to check again."
+    },
+    "error": {
+      "title": "We couldn't load your opportunities",
+      "body": "Check your connection and try again.",
+      "retry": "Try again"
+    },
+    "more": {
+      "failed": "We couldn't load more requests.",
+      "retry": "Try again"
+    },
+    "detail": {
+      "loading": "Loading request",
+      "where": "Where",
+      "when": "Preferred date",
+      "sent": "Sent",
+      "description": "What's going on",
+      "redacted": "Contact details were hidden."
+    },
+    "media": {
+      "title": "Photos and videos",
+      "photos_one": "{{count}} photo",
+      "photos_other": "{{count}} photos",
+      "videos_one": "{{count}} video",
+      "videos_other": "{{count}} videos",
+      "pending_one": "{{count}} more being prepared",
+      "pending_other": "{{count}} more being prepared",
+      "refreshFailed": "We couldn't refresh the photos and videos.",
+      "retry": "Try again"
+    },
+    "gone": {
+      "title": "This request is no longer available",
+      "body": "It is no longer open for quotes.",
+      "home": "Go to home"
+    },
+    "detailError": {
+      "title": "We couldn't load this request",
+      "body": "Check your connection and try again.",
+      "retry": "Try again"
+    }
   }
 }

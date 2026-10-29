@@ -373,6 +373,7 @@ async def test_response_never_contains_customer_contact_or_street(
         "text_redacted",
         "media",
         "media_pending",
+        "take_rate_bps",
     }
 
 
@@ -418,6 +419,7 @@ DETAIL = {
         }
     ],
     "media_pending": 0,
+    "take_rate_bps": 1500,
 }
 
 

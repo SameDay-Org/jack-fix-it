@@ -205,6 +205,22 @@ describe("path parameters", () => {
     expect(fetchMock.mock.calls[0][0]).toBe(`${API_ORIGIN}/v1/requests/a%2Fb%3Fc%23d%20e/quotes`);
   });
 
+  it("puts query values on the URL, encoded, and leaves undefined ones out", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { items: [], next_cursor: null }));
+
+    await apiGet("/v1/pros/me/opportunities", {
+      query: { limit: 20, cursor: undefined },
+    });
+    await apiGet("/v1/pros/me/opportunities", {
+      query: { limit: 20, cursor: "MjAyNi0xMC0yOA==&x" },
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(`${API_ORIGIN}/v1/pros/me/opportunities?limit=20`);
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      `${API_ORIGIN}/v1/pros/me/opportunities?limit=20&cursor=MjAyNi0xMC0yOA%3D%3D%26x`,
+    );
+  });
+
   it.each(["..", ".", ""])("refuses %j and sends nothing", async (value) => {
     await expect(apiGet(QUOTES, { params: { request_id: value } })).rejects.toThrow(
       'Invalid value for the path parameter "request_id"',

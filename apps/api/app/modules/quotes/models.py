@@ -31,6 +31,8 @@ class Quote(IdTimestampsMixin, Base):
     pro_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("pro_profiles.id"), index=True)
     amount_cents: Mapped[int]
     scope: Mapped[str] = mapped_column(Text)
+    # "How I'll do the job" (#246): optional, shown to the customer masked like the scope.
+    approach: Mapped[str | None] = mapped_column(Text)
     duration_minutes: Mapped[int]
     proposed_start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

@@ -13,6 +13,7 @@ from app.modules.settings.service import (
     DISPATCH_MAX_PROS,
     DISPATCH_MAX_PROS_DEFAULT,
     INT4_MAX,
+    PLATFORM_TAKE_RATE_BPS,
     SettingsService,
 )
 from app.observability import JsonFormatter
@@ -140,3 +141,64 @@ async def test_a_malformed_optional_setting_raises_and_logs_the_key_only(
     assert "value" not in output
     assert "98765" not in output
     assert str(INT4_MAX + 1) not in output
+
+
+# The platform's take rate (#246): absent is the default 1500, malformed is refused.
+
+
+async def put_take_rate(session: AsyncSession, value: JsonValue) -> None:
+    await session.execute(delete(Setting).where(Setting.key == PLATFORM_TAKE_RATE_BPS))
+    session.add(Setting(key=PLATFORM_TAKE_RATE_BPS, value=value))
+    await session.flush()
+
+
+async def test_a_missing_take_rate_is_1500_and_logs_nothing(
+    db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    await db_session.execute(delete(Setting).where(Setting.key == PLATFORM_TAKE_RATE_BPS))
+
+    with caplog.at_level(logging.WARNING):
+        assert await SettingsService(db_session).platform_take_rate_bps() == 1500
+
+    assert invalid_logs(caplog) == []
+
+
+@pytest.mark.parametrize("bound", [0, 1234, 10_000])
+async def test_a_stored_take_rate_is_read(db_session: AsyncSession, bound: int) -> None:
+    await put_take_rate(db_session, bound)
+
+    assert await SettingsService(db_session).platform_take_rate_bps() == bound
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["1500", -1, 10_001, True, False, 1500.0, 1500.5, None, [1500], {"bps": 1500}],
+    ids=[
+        "string",
+        "negative",
+        "above_whole",
+        "true",
+        "false",
+        "whole_float",
+        "float",
+        "null",
+        "list",
+        "object",
+    ],
+)
+async def test_a_malformed_take_rate_raises_and_logs_the_key_only(
+    db_session: AsyncSession, caplog: pytest.LogCaptureFixture, value: JsonValue
+) -> None:
+    await put_take_rate(db_session, value)
+
+    with caplog.at_level(logging.WARNING), pytest.raises(SettingMalformedError) as error:
+        await SettingsService(db_session).platform_take_rate_bps()
+
+    assert error.value.key == PLATFORM_TAKE_RATE_BPS
+    # Never a silent 0 or the default: a 503 not_configured wherever it is not caught.
+    assert (error.value.status_code, error.value.code) == (503, "not_configured")
+    [record] = invalid_logs(caplog)
+    assert record.__dict__["key"] == PLATFORM_TAKE_RATE_BPS
+    output = JsonFormatter().format(record)
+    assert "value" not in output
+    assert "10001" not in output

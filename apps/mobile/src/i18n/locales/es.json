@@ -234,5 +234,68 @@
       "failed": "No pudimos aceptar el presupuesto. Revisa tu conexión e inténtalo de nuevo.",
       "acceptLabel": "Aceptar presupuesto de {{pro}} por {{price}}"
     }
+  },
+  "opportunities": {
+    "greeting": "Hola, {{name}}",
+    "greetingNoName": "Hola",
+    "title": "Nuevas oportunidades",
+    "loading": "Cargando oportunidades",
+    "new": "Nueva",
+    "otherCategory": "Otra solicitud",
+    "preferred": "Fecha preferida {{date}}",
+    "sentAgo": "Enviada {{ago}}",
+    "ago": {
+      "justNow": "hace un momento",
+      "minutes_one": "hace {{count}} min",
+      "minutes_other": "hace {{count}} min",
+      "hours_one": "hace {{count}} h",
+      "hours_other": "hace {{count}} h",
+      "days_one": "hace {{count}} día",
+      "days_other": "hace {{count}} días",
+      "on": "el {{date}}"
+    },
+    "refreshFailed": "No se pudo actualizar. Revisa tu conexión e inténtalo de nuevo.",
+    "empty": {
+      "title": "No hay solicitudes nuevas por ahora",
+      "body": "Las solicitudes cerca de ti aparecen aquí. Desliza hacia abajo para volver a buscar."
+    },
+    "error": {
+      "title": "No pudimos cargar tus oportunidades",
+      "body": "Revisa tu conexión e inténtalo de nuevo.",
+      "retry": "Intentar de nuevo"
+    },
+    "more": {
+      "failed": "No pudimos cargar más solicitudes.",
+      "retry": "Intentar de nuevo"
+    },
+    "detail": {
+      "loading": "Cargando solicitud",
+      "where": "Dónde",
+      "when": "Fecha preferida",
+      "sent": "Enviada",
+      "description": "Qué pasa",
+      "redacted": "Los datos de contacto se ocultaron."
+    },
+    "media": {
+      "title": "Fotos y videos",
+      "photos_one": "{{count}} foto",
+      "photos_other": "{{count}} fotos",
+      "videos_one": "{{count}} video",
+      "videos_other": "{{count}} videos",
+      "pending_one": "{{count}} más en preparación",
+      "pending_other": "{{count}} más en preparación",
+      "refreshFailed": "No pudimos actualizar las fotos y los videos.",
+      "retry": "Intentar de nuevo"
+    },
+    "gone": {
+      "title": "Esta solicitud ya no está disponible",
+      "body": "Ya no está abierta para presupuestos.",
+      "home": "Ir al inicio"
+    },
+    "detailError": {
+      "title": "No pudimos cargar esta solicitud",
+      "body": "Revisa tu conexión e inténtalo de nuevo.",
+      "retry": "Intentar de nuevo"
+    }
   }
 }
