@@ -5,15 +5,18 @@ import { Text, View } from "react-native";
 import { Screen } from "@/components/ui";
 import { BackButton } from "@/features/auth/components/BackButton";
 
+import { useProfileFromLink } from "./links";
 import { QuoteList } from "./QuoteList";
 
 /**
  * The customer's quotes on one request (`/requests/[id]`, where the new-quote push lands): a
- * title and one supporting line, then the quote list, which scrolls them along.
+ * title and one supporting line, then the quote list, which scrolls them along. A link to a pro's
+ * profile lands here and opens the profile over the list (`useProfileFromLink`).
  */
 export function QuoteCompareScreen() {
   const { t } = useTranslation();
   const { id } = useLocalSearchParams<{ id: string }>();
+  useProfileFromLink(id);
 
   return (
     <Screen bar="light" testID="quote-compare-screen">

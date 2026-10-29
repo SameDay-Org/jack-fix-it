@@ -210,6 +210,38 @@
     "lessLabel": "Menos, ver menos de lo que incluye",
     "accept": "Aceptar",
     "acceptLabel": "Aceptar el presupuesto de {{pro}} por {{price}}",
+    "viewProfile": "Ver perfil",
+    "viewProfileLabel": "Ver el perfil de {{pro}}",
+    "profile": {
+      "loading": "Cargando perfil",
+      "memberSince": "Miembro desde {{month}}",
+      "stats": {
+        "rating": "calificación",
+        "notRated": "aún sin calificaciones",
+        "jobs_one": "trabajo hecho",
+        "jobs_other": "trabajos hechos",
+        "years_one": "año de experiencia",
+        "years_other": "años de experiencia"
+      },
+      "newPro": {
+        "named": "{{name}} se está estrenando en Jack Fix It.",
+        "unnamed": "Este profesional se está estrenando en Jack Fix It.",
+        "joined": "Se unió en {{month}} y todavía no ha completado ningún trabajo aquí.",
+        "verified": "Como todos los profesionales de Jack Fix It, pasó la verificación antes de poder enviarte un presupuesto."
+      },
+      "about": "Presentación",
+      "services": "Qué hace",
+      "trust": "Verificado por Jack Fix It: nuestro equipo revisó la información y los documentos que este profesional presentó y aprobó su perfil antes de que pudiera enviarte un presupuesto.",
+      "accept": "Aceptar por {{price}}",
+      "backToQuotes": "Ver presupuestos",
+      "gone": {
+        "title": "Este presupuesto ya no está disponible",
+        "body": "Venció o fue retirado, así que no se puede mostrar el perfil del profesional."
+      },
+      "error": {
+        "title": "No pudimos cargar este perfil"
+      }
+    },
     "notAcceptable": "Este presupuesto ya no se puede aceptar.",
     "refreshFailed": "No se pudo actualizar. Revisa tu conexión e inténtalo de nuevo.",
     "empty": {
