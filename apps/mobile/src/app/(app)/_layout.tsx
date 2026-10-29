@@ -10,9 +10,10 @@ export const unstable_settings = { anchor: "(tabs)" };
 
 /**
  * The signed-in group: the tab shell (D18) and the flows pushed over it. Its screens exist only
- * while a session is signed in, enforced here for all of them rather than screen by screen: without one the layout renders the session shell in place
- * of its stack, so from the first commit of a sign-out, of a refresh the server rejected or of an
- * expired session, no private screen, value or control is in the tree. The gate's switch to
+ * while a session is signed in, enforced here for all of them rather than screen by screen:
+ * without one the layout renders the session shell in place of its stack, so from the first
+ * commit of a sign-out, of a refresh the server rejected or of an expired session, no private
+ * screen, value or control is in the tree. The gate's switch to
  * `(auth)` is the next commit, before that one is drawn (see `GroupStack`); the shell is what this
  * group holds in between, and under the stack's push while Welcome arrives.
  */

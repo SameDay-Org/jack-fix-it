@@ -1,6 +1,7 @@
 import i18n from "@/i18n";
 
 import { act, fireEvent, screen } from "@testing-library/react-native";
+import { StyleSheet } from "react-native";
 import { router } from "expo-router";
 
 import { useSession } from "@/api";
@@ -43,7 +44,11 @@ describe("HistoryScreen (the empty state until #47)", () => {
 
     expect(screen.getByRole("header", { name: "Your requests" })).toBeTruthy();
     expect(screen.getByText("Requests you send will show up here.")).toBeTruthy();
-    expect(screen.queryByTestId("history-card")).toBeNull();
+    // The whole screen, not a card: no raised white bubble (the kit's Card shadow) in the tree.
+    const shadowed = screen
+      .getByTestId("history-screen")
+      .queryAll((node) => StyleSheet.flatten(node.props.style)?.shadowRadius !== undefined);
+    expect(shadowed).toEqual([]);
     await fireEvent.press(screen.getByRole("button", { name: "Browse categories" }));
     expect(router.navigate).toHaveBeenCalledWith("/");
   });

@@ -48,9 +48,14 @@ rules apply.
   card-shaped skeletons never jump) from `useCategories`: one load per session, no silent retries)
   and everyone else `HomePlaceholderScreen` until #38. Every request starts from a card (#232)
   through `startRequest(slug)` (`src/features/request`, a vanilla Zustand draft; never the route),
-  which pushes `/request/new` (placeholder until #45). The avatar opens `/account` (`src/features/account`:
-  identity, phone, log out). Every home opens the phone step after a sign-up through
-  `useOpenPhoneStepAfterSignUp`.
+  which pushes `/request/new` (placeholder until #45). Every home opens the phone step after a
+  sign-up through `useOpenPhoneStepAfterSignUp`.
+- Tab shell (D18, #213): `src/app/(app)` is a Stack anchored on `(tabs)` (Home, History,
+  Account; `src/features/tabs`, `src/features/history`, `src/features/account`). The kit's
+  `TabBar` floats over the tab roots, which drop the `Screen` bottom edge, pad
+  `useTabBarInset()`, pass `ownsStatusBar={useIsFocused()}` and call `useScrollToTop` for a
+  reselect. Flows pushed from a tab are `(app)` screens outside `(tabs)`, so they cover the bar
+  and Back returns to the tab; hardware Back on History or Account goes to Home.
 - Launch intro (D18, #147): every start draws `LaunchIntro` (`src/features/launch`) over the
   gate: the navy hero with `WordRotator` (`src/components/ui`) rolling the headline's verb on
   the UI thread, width tweened so the sentence never jumps, one static screen-reader label, tap

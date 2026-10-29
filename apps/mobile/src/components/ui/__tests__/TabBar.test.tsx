@@ -1,4 +1,5 @@
 import { fireEvent, render, renderHook, screen } from "@testing-library/react-native";
+import { BottomTabBarHeightContext } from "expo-router/js-tabs";
 import { createElement, type ReactNode } from "react";
 import { Dimensions, Platform, StyleSheet } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -160,4 +161,20 @@ describe("useTabBarInset", () => {
 
     expect(result.current).toBe(BOTTOM_INSET);
   });
+
+  it.each(["android", "ios"] as const)(
+    "under a tab navigator it is the bar's footprint for the platform (%s)",
+    async (os) => {
+      jest.replaceProperty(Platform, "OS", os);
+      const underTabs = ({ children }: { children: ReactNode }) =>
+        createElement(
+          BottomTabBarHeightContext.Provider,
+          { value: 0 },
+          createElement(wrapper, null, children),
+        );
+      const { result } = await renderHook(() => useTabBarInset(), { wrapper: underTabs });
+
+      expect(result.current).toBe(tabBarGeometry(fontScale, BOTTOM_INSET, os === "ios").inset);
+    },
+  );
 });

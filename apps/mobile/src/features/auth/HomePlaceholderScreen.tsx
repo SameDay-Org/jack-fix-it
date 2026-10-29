@@ -11,8 +11,8 @@ import { useOpenPhoneStepAfterSignUp } from "@/features/phone/useOpenPhoneStepAf
 
 /**
  * What a signed-in pro (or staff member) sees on the Home tab until their home lands (#38): who
- * they are, as which role, their phone once verified (or the way to verify it), and the way out. The email and the
- * number are shown to their owner only.
+ * they are, as which role, their phone once verified (or the way to verify it), and the way out.
+ * The email and the number are shown to their owner only.
  *
  * Right after a sign-up it opens the phone step over itself, once, and shows only its bare page
  * until then (`useOpenPhoneStepAfterSignUp`).

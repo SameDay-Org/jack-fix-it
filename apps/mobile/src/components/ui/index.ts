@@ -10,7 +10,7 @@ export { ChoiceCard } from "./ChoiceCard";
 export type { ChoiceCardProps } from "./ChoiceCard";
 export { GlassSurface, useLiquidGlass } from "./GlassSurface";
 export type { GlassShape, GlassSurfaceProps, GlassTone } from "./GlassSurface";
-export { ICON_TILE, IconTile } from "./IconTile";
+export { ICON_TILE, ICON_TILE_TINT, IconTile } from "./IconTile";
 export type { IconTileProps, IconTileSize } from "./IconTile";
 export { Input } from "./Input";
 export type { InputHandle, InputProps } from "./Input";

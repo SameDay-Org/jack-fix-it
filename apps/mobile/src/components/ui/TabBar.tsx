@@ -72,10 +72,10 @@ export function tabBarGeometry(
   return { barHeight, bottom: 0, inset: bottomInset + barHeight };
 }
 
-function useGeometry(): TabBarGeometry {
+function useGeometry(): [TabBarGeometry, number] {
   const { fontScale } = useWindowDimensions();
   const { bottom } = useSafeAreaInsets();
-  return tabBarGeometry(fontScale, bottom, floats());
+  return [tabBarGeometry(fontScale, bottom, floats()), bottom];
 }
 
 /**
@@ -84,8 +84,7 @@ function useGeometry(): TabBarGeometry {
  * anywhere else. A screen under the bar drops the `Screen` bottom edge and pads with this.
  */
 export function useTabBarInset(): number {
-  const geometry = useGeometry();
-  const { bottom } = useSafeAreaInsets();
+  const [geometry, bottom] = useGeometry();
   const underTabBar = useContext(BottomTabBarHeightContext) !== undefined;
   return underTabBar ? geometry.inset : bottom;
 }
@@ -99,8 +98,7 @@ export function useTabBarInset(): number {
  * with `useTabBarInset`.
  */
 export function TabBar({ items, testID }: TabBarProps) {
-  const geometry = useGeometry();
-  const { bottom } = useSafeAreaInsets();
+  const [geometry, bottom] = useGeometry();
   const reportHeight = useContext(BottomTabBarHeightCallbackContext);
 
   // The navigator's own notion of the bar's height (`useBottomTabBarHeight`) follows the same
