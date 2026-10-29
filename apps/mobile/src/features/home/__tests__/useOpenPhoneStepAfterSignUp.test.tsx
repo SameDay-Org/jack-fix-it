@@ -58,7 +58,7 @@ describe("useOpenPhoneStepAfterSignUp on the customer home", () => {
     await act(() => withdrawPhoneStepOffer());
 
     expect(headline()).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Tell Jack What Happened" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Painting" })).toBeTruthy(); // a category card
     expect(router.push).toHaveBeenCalledTimes(1);
   });
 });

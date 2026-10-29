@@ -43,13 +43,12 @@ rules apply.
   digits, resend after `EXPO_PUBLIC_OTP_RESEND_SECONDS`. The number travels in the flow store,
   never in a route. A sign-up lands on it with "Skip for now"; home offers it until verified.
 - Customer home (D8.1, #43): `/` (`HomeScreen`, `src/features/home`) shows customers
-  `CustomerHomeScreen` (navy hero, one primary "Tell Jack What Happened", a 2-column grid of
-  square `CategoryCard`s (#208: side from the measured row, icon tile + name, a reserved name slot
-  so the card-shaped skeletons never jump) from `useCategories`: one load per session, no silent
-  retries) and
-  everyone else `HomePlaceholderScreen` until #38. Both start a request through `startRequest(slug |
-null)` (`src/features/request`, a vanilla Zustand draft; never the route), which pushes
-  `/request/new` (placeholder until #45). The avatar opens `/account` (`src/features/account`:
+  `CustomerHomeScreen` (navy hero: headline + support line, over a 2-column grid of square
+  `CategoryCard`s (#208: side from the measured row, icon tile + name, a reserved name slot so the
+  card-shaped skeletons never jump) from `useCategories`: one load per session, no silent retries)
+  and everyone else `HomePlaceholderScreen` until #38. Every request starts from a card (#232)
+  through `startRequest(slug)` (`src/features/request`, a vanilla Zustand draft; never the route),
+  which pushes `/request/new` (placeholder until #45). The avatar opens `/account` (`src/features/account`:
   identity, phone, log out). Every home opens the phone step after a sign-up through
   `useOpenPhoneStepAfterSignUp`.
 - Launch intro (D18, #147): every start draws `LaunchIntro` (`src/features/launch`) over the

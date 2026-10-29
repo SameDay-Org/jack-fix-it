@@ -48,7 +48,6 @@ describe("WelcomeScreen", () => {
     ).toContain("text-green-500");
     expect(screen.getByText("Tell Jack. We'll take care of the rest.")).toBeTruthy();
     expect(screen.getAllByRole("button")).toHaveLength(2);
-    expect(screen.queryByText(/Tell Jack What Happened/i)).toBeNull();
     expect(screen.queryByTestId("welcome-actions-partial-cleanup")).toBeNull();
   });
 

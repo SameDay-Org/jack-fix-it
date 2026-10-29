@@ -68,9 +68,8 @@
     "phone": "Teléfono",
     "phoneVerified": "Verificado",
     "headline": "¿Qué está pasando en <accent>casa</accent>?",
-    "support": "Cuéntaselo a Jack. Nosotros nos encargamos del resto.",
-    "tellJack": "Dile a Jack qué pasó",
-    "categoriesTitle": "O elige una categoría",
+    "support": "Elige una categoría y Jack se encarga del resto.",
+    "categoriesTitle": "Categorías",
     "categoriesLoading": "Cargando categorías",
     "categoriesFailed": "No pudimos cargar las categorías.",
     "retry": "Reintentar"

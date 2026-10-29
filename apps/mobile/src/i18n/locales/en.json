@@ -68,9 +68,8 @@
     "phone": "Phone",
     "phoneVerified": "Verified",
     "headline": "What's going on at <accent>home</accent>?",
-    "support": "Tell Jack. We'll take care of the rest.",
-    "tellJack": "Tell Jack What Happened",
-    "categoriesTitle": "Or pick a category",
+    "support": "Pick a category and Jack takes care of the rest.",
+    "categoriesTitle": "Categories",
     "categoriesLoading": "Loading categories",
     "categoriesFailed": "We couldn't load the categories.",
     "retry": "Try again"
