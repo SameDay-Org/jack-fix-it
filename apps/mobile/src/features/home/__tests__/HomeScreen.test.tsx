@@ -9,20 +9,12 @@ import { CATEGORIES, renderWithQuery, signedIn } from "./helpers";
 
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../../api/errors"),
+  onSignOut: jest.fn(),
   apiGet: jest.fn(),
   useSession: jest.fn(),
   logout: jest.fn(),
 }));
-jest.mock("expo-router", () => {
-  const { useEffect } = jest.requireActual<typeof import("react")>("react");
-  return {
-    router: { push: jest.fn() },
-    useFocusEffect: (effect: () => void | (() => void)) => useEffect(() => effect(), [effect]),
-    unstable_useIsNavigating: () => false,
-    useIsFocused: () => true,
-    useScrollToTop: jest.fn(),
-  };
-});
+jest.mock("expo-router", () => jest.requireActual("./helpers").homeRouterMock());
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
   "react-native-safe-area-context",

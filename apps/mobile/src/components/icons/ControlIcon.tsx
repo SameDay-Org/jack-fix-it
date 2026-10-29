@@ -8,6 +8,8 @@ const CONTROL_GLYPHS = {
   minus: ["M6 12h12"],
   // A play triangle, for a video's thumbnail.
   play: ["M9 6.5v11l8.5-5.5Z"],
+  // A check mark, for a request that went through.
+  check: ["M5.5 12.5l4.5 4.5 8.5-10"],
 } as const satisfies Record<string, readonly string[]>;
 
 export type ControlGlyphName = keyof typeof CONTROL_GLYPHS;

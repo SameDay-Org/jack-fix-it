@@ -5,6 +5,7 @@ import { AccessibilityInfo } from "react-native";
 
 import { apiPost, ApiError, SessionExpiredError } from "@/api";
 import { showToast } from "@/components/ui";
+import { invalidateMyRequests } from "@/features/history/useMyRequests";
 
 import { quotesQueryKey, type CustomerQuote, type CustomerQuoteList } from "./useRequestQuotes";
 
@@ -43,10 +44,10 @@ const withAccepted = (
 /**
  * Accepts one quote of the request. The answer goes into the cached list at once, so the screen
  * shows the accepted state as the sheet closes, and the list is refetched after any answer (a 409
- * means it changed). What the customer is told happens here, not in the caller, so it is told
- * even when the confirmation was swiped away before the answer: screen readers hear an accept,
- * a toast says a quote can no longer be accepted, and a failure the closed sheet cannot show
- * becomes a toast too. `onDone` (closing the sheet, showing a failure in it) runs only while the
+ * means it changed), and so is History's list, whose row shows the request's status. What the
+ * customer is told happens here, not in the caller, so it is told even when the confirmation was
+ * swiped away before the answer: screen readers hear an accept, a toast says a quote can no
+ * longer be accepted, and a failure the closed sheet cannot show becomes a toast too. `onDone` (closing the sheet, showing a failure in it) runs only while the
  * caller is still mounted, and a second call while one is in flight is ignored, however fast the
  * taps.
  */
@@ -86,6 +87,7 @@ export function useAcceptQuote(requestId: string) {
     // Not awaited: the mutation would hold its answer (and the busy button) until the refetch lands.
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: quotesQueryKey(requestId) });
+      void invalidateMyRequests(queryClient);
     },
   });
   const { mutate } = mutation;

@@ -13,6 +13,7 @@ import {
 
 import { ApiError, apiGet, apiPost, NetworkError } from "@/api";
 import { dismissToast, toastStore } from "@/components/ui/toast";
+import { MY_REQUESTS_QUERY_KEY } from "@/features/history/useMyRequests";
 
 import { deferred } from "../../../api/__tests__/helpers";
 import { AcceptQuoteSheet } from "../AcceptQuoteSheet";
@@ -399,6 +400,34 @@ describe("QuoteCompareScreen", () => {
     expect(client.getQueryData(quotesQueryKey(REQUEST_ID))).toEqual(list([accepted]));
   });
 
+  it.each([
+    ["accepted", () => jest.mocked(apiPost).mockResolvedValue({ ...MARIA, status: "accepted" })],
+    [
+      "notAcceptable",
+      () => jest.mocked(apiPost).mockRejectedValue(new ApiError(409, "quote_not_acceptable")),
+    ],
+  ] as const)(
+    "an accept that ends %s marks History's list stale, so its row shows the new status",
+    async (outcome, answerWith) => {
+      answerWith();
+      jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+      const client = newQueryClient();
+      client.setQueryData(MY_REQUESTS_QUERY_KEY, { pages: [], pageParams: [] });
+      const { result } = await renderHook(() => useAcceptQuote(REQUEST_ID), {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      });
+      const onDone = jest.fn();
+      expect(client.getQueryState(MY_REQUESTS_QUERY_KEY)?.isInvalidated).toBe(false);
+
+      await act(async () => result.current.accept(MARIA.id, onDone));
+
+      await waitFor(() => expect(onDone).toHaveBeenCalledWith(outcome));
+      expect(client.getQueryState(MY_REQUESTS_QUERY_KEY)?.isInvalidated).toBe(true);
+    },
+  );
+
   it("cancelling the confirmation releases the guard, so Accept opens it again", async () => {
     await renderWithQuery(<App />);
     const accept = () =>
@@ -700,6 +729,97 @@ describe("QuoteCompareScreen", () => {
       screen.getByRole("button", { name: "Less, show less of what's included" }),
     );
     expect(scope().props.numberOfLines).toBe(4);
+  });
+
+  describe("the pro's approach", () => {
+    const APPROACH = "Shut the water off, swap the cartridge, then test every joint for leaks.";
+    const WITH_APPROACH = { ...MARIA, approach: APPROACH };
+
+    it("shows under the scope, and the card's summary says it once, last", async () => {
+      jest.mocked(apiGet).mockResolvedValue(list([WITH_APPROACH, DAN]));
+      await renderWithQuery(<App />);
+      await screen.findByText("$250");
+
+      const maria = card(MARIA);
+      const note = maria.getByTestId(`quote-${MARIA.id}-approach`, HIDDEN);
+      expect(note.props.children).toBe(APPROACH);
+      expect(maria.getByText("How I'll do it", HIDDEN)).toBeTruthy();
+      // Right after the scope in the card's order.
+      const ids = maria
+        .getAllByTestId(/-(scope|approach)$/, HIDDEN)
+        .map((node) => String(node.props.testID).replace(`quote-${MARIA.id}-`, ""));
+      expect(ids).toEqual(["scope", "approach"]);
+
+      const summary = maria.getByTestId(`quote-${MARIA.id}-summary`);
+      expect(String(summary.props.accessibilityLabel).replaceAll(" ", " ")).toMatch(
+        /, Expires in 2 h, How I'll do it: Shut the water off, swap the cartridge, then test every joint for leaks\.$/,
+      );
+      // The summary says it: the visible copy is hidden from screen readers.
+      expect(maria.queryByText(APPROACH)).toBeNull();
+      expect(maria.queryByText("How I'll do it")).toBeNull();
+      // Dan wrote none.
+      expect(card(DAN).queryByTestId(`quote-${DAN.id}-approach`, HIDDEN)).toBeNull();
+    });
+
+    it("renders nothing, not even its title, when the pro wrote none", async () => {
+      await renderWithQuery(<App />);
+      await screen.findByText("$250");
+
+      expect(screen.queryAllByTestId(/-approach$/, HIDDEN)).toEqual([]);
+      expect(screen.queryByText("How I'll do it", HIDDEN)).toBeNull();
+      const summary = screen.getByTestId(`quote-${MARIA.id}-summary`);
+      expect(String(summary.props.accessibilityLabel)).not.toMatch(/How I'll do it/);
+    });
+
+    it("a long approach shows four lines and Read more expands it in place", async () => {
+      jest.mocked(apiGet).mockResolvedValue(list([WITH_APPROACH]));
+      await renderWithQuery(<App />);
+      await screen.findByText("$250");
+      const note = () => screen.getByTestId(`quote-${MARIA.id}-approach`, HIDDEN);
+      const measure = screen.getByTestId(`quote-${MARIA.id}-approach-measure`, HIDDEN);
+      expect(note().props.numberOfLines).toBe(4);
+
+      await fireEvent(measure, "textLayout", { nativeEvent: { lines: Array(4).fill({}) } });
+      expect(screen.queryByRole("button", { name: /^Read more/ })).toBeNull();
+
+      await fireEvent(measure, "textLayout", { nativeEvent: { lines: Array(5).fill({}) } });
+      await fireEvent.press(
+        screen.getByRole("button", { name: "Read more, show all of how the pro will do the job" }),
+      );
+      expect(note().props.numberOfLines).toBe(0);
+      await fireEvent.press(
+        screen.getByRole("button", { name: "Show less of how the pro will do the job" }),
+      );
+      expect(note().props.numberOfLines).toBe(4);
+      // The scope's toggle is its own: still absent.
+      expect(screen.queryByRole("button", { name: /^More/ })).toBeNull();
+    });
+
+    it.each([
+      ["en", "How I'll do it"],
+      ["es", "Cómo lo haré"],
+    ])("the accept sheet shows it in full, read aloud (%s)", async (language, title) => {
+      await act(() => i18n.changeLanguage(language));
+      jest.mocked(apiGet).mockResolvedValue(list([WITH_APPROACH, DAN]));
+      await renderWithQuery(<App />);
+      await fireEvent.press(await screen.findByTestId(`quote-${MARIA.id}-accept`));
+
+      const sheet = within(screen.getByTestId("accept-quote-sheet"));
+      expect(sheet.getByText(title)).toBeTruthy();
+      const text = sheet.getByText(APPROACH);
+      expect(text.props.testID).toBe("accept-quote-approach-text");
+      expect(text.props.numberOfLines).toBeUndefined();
+    });
+
+    it("the accept sheet shows no approach section when there is none", async () => {
+      jest.mocked(apiGet).mockResolvedValue(list([WITH_APPROACH, DAN]));
+      await renderWithQuery(<App />);
+      await fireEvent.press(await screen.findByTestId(`quote-${DAN.id}-accept`));
+
+      const sheet = within(screen.getByTestId("accept-quote-sheet"));
+      expect(sheet.queryByTestId("accept-quote-approach", HIDDEN)).toBeNull();
+      expect(sheet.queryByText("How I'll do it", HIDDEN)).toBeNull();
+    });
   });
 });
 

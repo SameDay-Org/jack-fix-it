@@ -105,12 +105,33 @@ function ensureNotSigningOut(): void {
   if (isSigningOut()) throw new SessionExpiredError("superseded");
 }
 
+// What features keep of a session outside the Query cache (a sent request's confirmation, a
+// request draft), forgotten with the cache.
+const sessionDataForgetters = new Set<() => void>();
+
+/**
+ * Registers `forget` for data a feature keeps of the signed-in account outside the Query cache. It
+ * runs with the cache clear at the start of every sign-out, and when a sign-in brings another
+ * account. Returns the unregister.
+ */
+export function onSignOut(forget: () => void): () => void {
+  sessionDataForgetters.add(forget);
+  return () => {
+    sessionDataForgetters.delete(forget);
+  };
+}
+
+function forgetSessionData(): void {
+  queryClient?.clear();
+  for (const forget of sessionDataForgetters) forget();
+}
+
 /** Starts a sign-out: new generation, barrier up, memory and cache cleared. Synchronous on purpose. */
 function beginSignOut(): number {
   const startedIn = nextGeneration();
   signingOut = startedIn;
   sessionStore.setState((state) => ({ ...SIGNED_OUT, cleanupPending: state.cleanupPending }));
-  queryClient?.clear();
+  forgetSessionData();
   return startedIn;
 }
 
@@ -133,6 +154,8 @@ function endSignOut(startedIn: number): void {
 async function applyAuth(auth: AuthResponse, startedIn: number): Promise<boolean> {
   const written = await refreshTokenStorage.write(auth.refresh_token, () => isCurrent(startedIn));
   if (!written || !isCurrent(startedIn)) return false;
+  const previous = sessionStore.getState().user;
+  if (previous && previous.id !== auth.user.id) forgetSessionData();
   sessionStore.setState({
     status: "signedIn",
     user: auth.user,
@@ -190,11 +213,11 @@ export function login(body: PostBody<"/v1/auth/login">): Promise<void> {
 }
 
 /**
- * Ends the session. Memory and the Query cache are cleared before the first await; the stored
- * token is then deleted and revoked on the server (best effort), with the barrier up until the
- * revoke settles. Rejects with `LocalCleanupError` when the stored token could not be deleted;
- * `cleanupPending` is set in that case. A sign-in that completes meanwhile owns the session and
- * is left alone.
+ * Ends the session. Memory, the Query cache and what `onSignOut` registered are cleared before the
+ * first await; the stored token is then deleted and revoked on the server (best effort), with the
+ * barrier up until the revoke settles. Rejects with `LocalCleanupError` when the stored token
+ * could not be deleted; `cleanupPending` is set in that case. A sign-in that completes meanwhile
+ * owns the session and is left alone.
  */
 export async function logout(): Promise<void> {
   const startedIn = beginSignOut();

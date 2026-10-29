@@ -14,10 +14,13 @@ export type { UploadFailure } from "./errors";
 export type { GetPath, GetResponse, PostBody, PostPath, PostResponse } from "./http";
 export {
   attachQueryClient,
+  isCurrentGeneration,
   login,
   logout,
+  onSignOut,
   register,
   restoreSession,
+  sessionGeneration,
   setSessionUser,
   useSession,
 } from "./session";
