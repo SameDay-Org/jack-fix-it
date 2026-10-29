@@ -1,10 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
+import { router, unstable_useIsNavigating, useLocalSearchParams } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, Text, View } from "react-native";
 
-import { Card, IconTile, Screen, Skeleton, TextSkeleton } from "@/components/ui";
+import { Button, Card, IconTile, Screen, Skeleton, TextSkeleton } from "@/components/ui";
 import { BackButton } from "@/features/auth/components/BackButton";
 import { markOpportunityViewed } from "@/features/pro-home/useOpportunities";
 import { useSettledError } from "@/features/quotes/useRequestQuotes";
@@ -29,7 +29,8 @@ const FACT_ROWS = 3;
 /**
  * One opportunity, read-only (`/opportunities/[id]`, where the new-request push lands): the
  * request's code and category, the facts a pro may see before payment (city and ZIP, preferred
- * date, when it was sent), the description, and the photos and videos. The quote form is part 2.
+ * date, when it was sent), the description, and the photos and videos. Its one action, "Send a
+ * quote", stays under the scrolling request and opens the quote form over it.
  */
 export function OpportunityDetailScreen() {
   const { t } = useTranslation();
@@ -48,6 +49,7 @@ export function OpportunityDetailScreen() {
   const now = useRefreshExpiredMedia(denied ? undefined : data?.media, dataUpdatedAt, refetch);
   // A refetch over a loaded request failed: what is on screen stays, and what went missing says so.
   const refreshFailed = !gone && data !== undefined && error !== null;
+  const openQuoteForm = useOpenQuoteForm(id);
 
   // The server marked it viewed on this open: the list behind this screen drops its "New" at once.
   useEffect(() => {
@@ -91,8 +93,38 @@ export function OpportunityDetailScreen() {
           />
         )}
       </ScrollView>
+      {data !== undefined && !gone ? (
+        <View className="px-4 pb-4 pt-3">
+          <Button
+            label={t("opportunities.detail.sendQuote")}
+            size="lg"
+            onPress={openQuoteForm}
+            testID="opportunity-send-quote"
+          />
+        </View>
+      ) : null}
     </Screen>
   );
+}
+
+/**
+ * Opens the quote form over the detail. A second tap before it is up opens nothing: the router
+ * queues a push and the detail stays tappable until it lands. Once the router is idle again (the
+ * form is up, or the push came to nothing) the button opens it again.
+ */
+function useOpenQuoteForm(id: string) {
+  const opening = useRef(false);
+  const navigating = unstable_useIsNavigating();
+
+  useEffect(() => {
+    if (!navigating) opening.current = false;
+  }, [navigating]);
+
+  return useCallback(() => {
+    if (opening.current) return;
+    opening.current = true;
+    router.push({ pathname: "/opportunities/[id]/quote", params: { id } });
+  }, [id]);
 }
 
 /** A failed refetch of the request, and the way to ask again. */

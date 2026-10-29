@@ -36,6 +36,8 @@ export { Stepper } from "./Stepper";
 export type { StepperProps } from "./Stepper";
 export { StepProgress } from "./StepProgress";
 export type { StepProgressProps } from "./StepProgress";
+export { ValueStepper } from "./ValueStepper";
+export type { ValueStepperProps } from "./ValueStepper";
 export { StatusBadge, StatusBadgeSkeleton } from "./StatusBadge";
 export type { StatusBadgeProps, StatusBadgeSkeletonProps, StatusTone } from "./StatusBadge";
 export { dismissToast, showToast, useToast } from "./toast";

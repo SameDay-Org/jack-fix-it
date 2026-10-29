@@ -444,6 +444,32 @@ describe("operation generation", () => {
     expect(sessionStore.getState()).toEqual(SIGNED_OUT);
   });
 
+  it("a retry's held error released after logout and a newer login is superseded like a first answer", async () => {
+    signedInWithStaleAccessToken();
+    const held = deferred<Response>();
+    let meCalls = 0;
+    serve({ acceptedPair: 3 });
+    const served = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (url, init) => {
+      if (new URL(url).pathname === ME && ++meCalls === 2) return held.promise;
+      return served!(url, init);
+    });
+
+    const request = apiGet(ME, { auth: true });
+    for (let n = 0; n < 10 && meCalls < 2; n++) await settle();
+    expect(fetchMock.mock.calls.map(callPath)).toEqual([ME, REFRESH, ME]);
+    await logout();
+    await signIn();
+    held.resolve(errorResponse(404, "not_found"));
+
+    await expect(request).rejects.toMatchObject({
+      name: "SessionExpiredError",
+      reason: "superseded",
+    });
+    expect(callsTo(fetchMock, ME)).toHaveLength(2);
+    expect(sessionStore.getState()).toMatchObject({ status: "signedIn", accessToken: "access-3" });
+  });
+
   it("the normal path still does one refresh and one retry", async () => {
     signedInWithStaleAccessToken();
     serve();
