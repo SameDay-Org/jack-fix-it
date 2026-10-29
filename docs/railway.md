@@ -20,8 +20,16 @@ names, so set **Config-as-code file path** in every service's settings.
 | Postgres | Railway Postgres 16 | -                               | -          | -                                   | -             |
 | Redis    | Railway Redis       | -                               | -          | -                                   | -             |
 
-- **api** runs `alembic upgrade head` as its pre-deploy command. A failed migration stops the
-  deploy and the previous version keeps serving.
+- **api** runs these as its pre-deploy command, in order, on every deploy:
+
+  1. `alembic upgrade head`
+  2. `python -m scripts.seed_categories`
+  3. `python -m scripts.seed_service_areas`
+
+  The first failure stops the deploy and the previous version keeps serving. Railway's config
+  schema allows a single pre-deploy entry, so `railway.api.json` chains them with `&&` in one
+  `sh -c` string. The seeds are explained in step 8 of the first-time setup.
+
 - **worker** uses the same image with ARQ as the start command, restart policy `ALWAYS`, and
   no healthcheck. It runs no migrations. A worker task that needs a new table must ship after
   the migration that creates it.
@@ -185,14 +193,17 @@ Confirm the exact dashboard steps on the first drill and update this section.
 6. For Sentinel: a project token scoped to the staging environment, and a GitHub token limited
    to issues and pull requests.
 7. After the first deploy of each environment, create the first admin from a shell on the api
-   service: `uv run python -m scripts.create_staff_user` (it asks for the email and the role,
+   service: `python -m scripts.create_staff_user` (it asks for the email and the role,
    and the password twice without echoing it). Public registration never creates staff
    accounts (#155). For a scripted setup: `--email … --role admin --password-env NAME`, with
    the password only in that environment variable.
-8. Seed the launch data from a shell on the api service, after each first deploy and again
-   whenever a seed file changes: `uv run python -m scripts.seed_categories` and
-   `uv run python -m scripts.seed_service_areas`. Both are safe to re-run, because they insert
-   what is missing and never update a row. Without the service areas, every request is refused
+8. The launch data seeds itself: the api's pre-deploy command (see Services) runs
+   `python -m scripts.seed_categories` and `python -m scripts.seed_service_areas` after the
+   migrations on every deploy, so a changed seed file lands with the deploy that ships it.
+   Running them every time is safe, because they insert what is missing and never update or
+   delete a row. The trade-off: a category deleted from the database comes back on the next
+   deploy. That holds until the admin manages categories (#41); remove the seeds from the
+   pre-deploy command then. Without the service areas, every request is refused
    with `zip_not_served`. The areas are South Florida with Broward active (#9). The sources and
    the rebuild steps are in `apps/api/app/modules/service_areas/SOURCES.md`.
    - **Switching a county on later** (Miami-Dade or Palm Beach): use the admin (#41), or run

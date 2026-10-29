@@ -23,6 +23,7 @@ import { AccountScreen } from "../../account/AccountScreen";
 import { CodeEntryScreen } from "../../phone/CodeEntryScreen";
 import { PhoneEntryScreen } from "../../phone/PhoneEntryScreen";
 import { phoneFlowStore } from "../../phone/phoneFlow";
+import { TabsLayout } from "../../tabs/TabsLayout";
 import { HomePlaceholderScreen } from "../HomePlaceholderScreen";
 import { SessionGate } from "../SessionGate";
 import { METRICS, SIGNED_OUT } from "./helpers";
@@ -130,8 +131,9 @@ const routes = {
   "(auth)/welcome": () => <Text testID="public-welcome">Welcome</Text>,
   "(auth)/login": () => <Text testID="public-login">Login</Text>,
   "(app)/_layout": { default: AppLayout, unstable_settings: appSettings },
-  "(app)/index": HomePlaceholderScreen,
-  "(app)/account": AccountScreen,
+  "(app)/(tabs)/_layout": TabsLayout,
+  "(app)/(tabs)/index": HomePlaceholderScreen,
+  "(app)/(tabs)/account": AccountScreen,
   "(app)/verify-phone/index": PhoneEntryScreen,
   "(app)/verify-phone/code": CodeEntryScreen,
 };

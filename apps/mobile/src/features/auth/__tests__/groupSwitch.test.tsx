@@ -8,6 +8,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { user } from "../../../api/__tests__/helpers";
 import AppLayout, { unstable_settings as appSettings } from "../../../app/(app)/_layout";
 import AuthLayout, { unstable_settings } from "../../../app/(auth)/_layout";
+import { TabsLayout } from "../../tabs/TabsLayout";
 import { SessionGate } from "../SessionGate";
 import { METRICS, SIGNED_OUT } from "./helpers";
 
@@ -94,7 +95,8 @@ const routes = {
   "(auth)/welcome": () => <Marker name="welcome" />,
   "(auth)/login": () => <Marker name="login" />,
   "(app)/_layout": { default: AppLayout, unstable_settings: appSettings },
-  "(app)/index": () => <Marker name="home" />,
+  "(app)/(tabs)/_layout": TabsLayout,
+  "(app)/(tabs)/index": () => <Marker name="home" />,
 };
 
 afterEach(() => jest.restoreAllMocks());
