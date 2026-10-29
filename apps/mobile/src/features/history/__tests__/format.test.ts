@@ -59,7 +59,8 @@ describe("sentDay", () => {
   });
 
   it("counts calendar days across a daylight-saving change", () => {
-    // US clocks fall back on 2026-11-01: that day is 25 hours long where it applies.
+    // Where US daylight saving applies, 2026-03-08 is 23 hours long and 2026-11-01 is 25.
+    expect(sentDay(t, iso(local(3, 8, 9)), local(3, 9, 9), "en-US")).toBe("Yesterday");
     expect(sentDay(t, iso(local(11, 1, 0)), local(11, 2, 23), "en-US")).toBe("Yesterday");
     expect(sentDay(t, iso(local(10, 31, 23)), local(11, 2, 0), "en-US")).toBe("Oct 31");
   });

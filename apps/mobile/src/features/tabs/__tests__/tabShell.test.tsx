@@ -83,7 +83,14 @@ const scrollTo = ScrollView.prototype.scrollTo as jest.Mock;
 beforeEach(() => {
   client = newQueryClient();
   jest.mocked(useSession).mockReturnValue(signedIn({ role: "customer" }));
-  jest.mocked(apiGet).mockReset().mockResolvedValue(CATEGORIES);
+  // The customer's History asks for their requests (#47): none yet, so its empty state shows.
+  jest
+    .mocked(apiGet)
+    .mockReset()
+    .mockImplementation((async (path: string) =>
+      path === "/v1/requests"
+        ? { items: [], next_cursor: null }
+        : CATEGORIES) as unknown as typeof apiGet);
   scrollTo.mockClear();
 });
 
@@ -154,7 +161,8 @@ describe("the tab shell (#213, D18)", () => {
     jest.mocked(useSession).mockReturnValue(signedIn({ role }));
     const view = await renderRouter(routes, { initialUrl: "/history" });
 
-    await fireEvent.press(screen.getByRole("button", { name: cta }));
+    // The customer's empty state shows once their (empty) list has loaded (#47).
+    await fireEvent.press(await screen.findByRole("button", { name: cta }));
 
     expect(view.getPathname()).toBe("/");
     expect(selected()).toEqual([true, false, false]);

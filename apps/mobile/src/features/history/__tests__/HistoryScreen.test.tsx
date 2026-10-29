@@ -18,6 +18,7 @@ import { CATEGORIES, signedIn } from "../../home/__tests__/helpers";
 import {
   freezeClock,
   navigation,
+  NOW,
   newQueryClient,
   renderWithQuery,
 } from "../../opportunities/__tests__/helpers";
@@ -47,14 +48,24 @@ const ROW_ID = /^request-[0-9a-f-]{36}$/;
 
 const [, HANDYMAN, PAINTING] = CATEGORIES;
 
-/** One of the caller's requests; times are relative to the frozen NOW (2026-10-28 14:00 UTC). */
+// Days are the device's: fixtures are set on the local calendar around the frozen NOW
+// (2026-10-28 14:00 UTC), so "Today" and "Yesterday" hold in every time zone.
+const TODAY = new Date(NOW);
+const localDay = (offset: number, hour: number) =>
+  new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate() + offset, hour);
+/** Three days back, as the row writes it ("Oct 25" where NOW falls on Oct 28). */
+const THREE_DAYS_AGO = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(
+  localDay(-3, 9),
+);
+
+/** One of the caller's requests, sent this morning. */
 const request = (n: number, overrides: Partial<RequestSummary> = {}): RequestSummary => ({
   id: `00000000-0000-4000-8000-0000000004${String(n).padStart(2, "0")}`,
   public_code: `JF-0001${String(n).padStart(2, "0")}`,
   status: "quote_ready",
   customer_status: "customerStatus.quoteReady",
   category_id: HANDYMAN?.id ?? null,
-  created_at: "2026-10-28T12:00:00Z",
+  created_at: localDay(0, 9).toISOString(),
   media_count: 2,
   ...overrides,
 });
@@ -68,13 +79,13 @@ const OLDER = request(2, {
   status: "finding_pro",
   customer_status: "customerStatus.findingAPro",
   category_id: PAINTING?.id ?? null,
-  created_at: "2026-10-27T15:00:00Z",
+  created_at: localDay(-1, 15).toISOString(),
 });
 const OLDEST = request(3, {
   status: "cancelled",
   customer_status: "customerStatus.cancelled",
   category_id: null,
-  created_at: "2026-10-25T13:00:00Z",
+  created_at: localDay(-3, 9).toISOString(),
 });
 
 type Catalog = GetResponse<typeof CATALOG>;
@@ -153,15 +164,15 @@ describe("HistoryScreen, customer: the requests (#47)", () => {
     expect(row(OLDER).getByText("Finding a Pro", HIDDEN)).toBeTruthy();
     // Filed without a category: named "Request".
     expect(row(OLDEST).getByText("Request", HIDDEN)).toBeTruthy();
-    expect(row(OLDEST).getByText("JF-000103 · Oct 25", HIDDEN)).toBeTruthy();
+    expect(row(OLDEST).getByText(`JF-000103 · ${THREE_DAYS_AGO}`, HIDDEN)).toBeTruthy();
 
     // One element per row for a screen reader, in the order the row is read.
     expect(screen.getByRole("button", { name: "Handyman, JF-000101, Quote Ready, Today" })).toBe(
       screen.getByTestId(rowOf(NEWEST)),
     );
-    expect(screen.getByRole("button", { name: "Request, JF-000103, Cancelled, Oct 25" })).toBe(
-      screen.getByTestId(rowOf(OLDEST)),
-    );
+    expect(
+      screen.getByRole("button", { name: `Request, JF-000103, Cancelled, ${THREE_DAYS_AGO}` }),
+    ).toBe(screen.getByTestId(rowOf(OLDEST)));
     // A calm list, not cards: no raised white bubble (the kit's Card shadow) anywhere.
     const shadowed = screen
       .getByTestId("history-screen")
@@ -272,8 +283,30 @@ describe("HistoryScreen, customer: the requests (#47)", () => {
     },
   );
 
+  it("a catalog that fails over no requests still shows the empty state: no row needs it", async () => {
+    answers.list = [page([])];
+    answers.catalog = [new NetworkError(false)];
+    await renderWithQuery(<HistoryScreen />);
+
+    expect(await screen.findByTestId("history-empty")).toBeTruthy();
+    expect(screen.queryByText("We couldn't load your requests")).toBeNull();
+  });
+
+  it("a pull over a failed catalog asks for it again, and the rows show", async () => {
+    answers.catalog = [new NetworkError(false), CATEGORIES];
+    await renderWithQuery(<HistoryScreen />);
+    expect(
+      await screen.findByRole("header", { name: "We couldn't load your requests" }),
+    ).toBeTruthy();
+
+    await act(async () => pullToRefresh());
+
+    await findRow(NEWEST);
+    expect(jest.mocked(apiGet).mock.calls.filter(([path]) => path === CATALOG)).toHaveLength(2);
+  });
+
   it("loads the next page on the cursor as the end nears, with no row twice", async () => {
-    const fourth = request(4, { created_at: "2026-10-20T13:00:00Z" });
+    const fourth = request(4, { created_at: localDay(-8, 9).toISOString() });
     // A row on both pages (a page boundary that repeated) shows once.
     answers.list = [page([NEWEST, OLDER], "cursor-2"), page([OLDER, OLDEST, fourth])];
     await renderWithQuery(<HistoryScreen />);

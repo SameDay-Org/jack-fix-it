@@ -31,7 +31,8 @@ const END_REACHED_THRESHOLD = 0.5;
  * (skeleton rows, empty, a full-screen error with a retry, a next-page error under the rows). A
  * virtualized list that loads the next page as the customer nears the end and refreshes on pull,
  * on focus and on foreground; a row opens its request. Rows wait for the category catalog too,
- * since a row names its category: a catalog that fails shows the same error.
+ * since a row names its category: a catalog that fails shows the same error, unless there are
+ * no rows to name (the empty state shows).
  */
 export function RequestList({ header, empty, testID = "request-list" }: RequestListProps) {
   const { t } = useTranslation();
@@ -53,9 +54,11 @@ export function RequestList({ header, empty, testID = "request-list" }: RequestL
   const open = useOpenRequest();
   const [pulling, setPulling] = useState(false);
 
-  const ready = data !== undefined && categories.data !== undefined;
+  const rows = useMemo(() => flattenMyRequests(data), [data]);
+  // Rows name their category, so they wait for the catalog; with no rows there is nothing to name.
+  const ready = data !== undefined && (categories.data !== undefined || rows.length === 0);
   const failed = !ready && (shownError !== null || categoriesError !== null);
-  const items = useMemo(() => (ready ? flattenMyRequests(data) : []), [ready, data]);
+  const items = ready ? rows : [];
   // "Today" is counted as of the answer the rows came in: every refetch moves it on, and no
   // clock ticks during render.
   const now = dataUpdatedAt;
@@ -67,9 +70,10 @@ export function RequestList({ header, empty, testID = "request-list" }: RequestL
   };
 
   // A pull that fails over rows already on screen keeps them and says so; with nothing on screen
-  // the error state says it instead.
+  // the error state says it instead. A catalog that never loaded is asked for again too.
   const refresh = async () => {
     setPulling(true);
+    if (categories.data === undefined) void categories.refetch();
     const result = await refetch();
     setPulling(false);
     const refreshFailed = result.isError && result.data !== undefined;
