@@ -247,6 +247,23 @@ describe("HistoryScreen, customer: the requests (#47)", () => {
     expect(typeStyles(loaded)).toEqual(LINES);
   });
 
+  it.each([
+    ["en", "Handyman"],
+    ["es", "Pintura"],
+  ])(
+    "%s: the skeleton keeps one line for the name, a one-word name of the seed",
+    async (lang, name) => {
+      await act(() => i18n.changeLanguage(lang));
+      answers.list = [deferred<RequestPage>().promise];
+      await renderWithQuery(<HistoryScreen />);
+
+      // "Reparaciones generales" wraps at a large font: a sample of it made every one-line row
+      // shrink when the rows came in. Only the names that wrap grow their row now.
+      const skeleton = within(screen.getByTestId("request-skeleton-0-category", HIDDEN));
+      expect(skeleton.getByText(name, HIDDEN)).toBeTruthy();
+    },
+  );
+
   it("rows wait for the category catalog, so a row never shows without its name", async () => {
     const catalog = deferred<Catalog>();
     answers.catalog = [catalog.promise];

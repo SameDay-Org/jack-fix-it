@@ -17,12 +17,17 @@ import { signedIn } from "../../home/__tests__/helpers";
 import {
   freezeClock,
   navigation,
+  newQueryClient,
   page,
   renderWithQuery,
   summary,
 } from "../../opportunities/__tests__/helpers";
 import { ProHomeScreen } from "../ProHomeScreen";
-import { OPPORTUNITY_PAGE_SIZE, type OpportunityPage } from "../useOpportunities";
+import {
+  markOpportunityViewed,
+  OPPORTUNITY_PAGE_SIZE,
+  type OpportunityPage,
+} from "../useOpportunities";
 
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../../api/errors"),
@@ -111,6 +116,28 @@ describe("ProHomeScreen", () => {
     expect(opened.queryByText("New", HIDDEN)).toBeNull();
     expect(opened.getByText("33010", HIDDEN)).toBeTruthy();
     expect(opened.getByText("Sent 3 days ago", HIDDEN)).toBeTruthy();
+  });
+
+  it("a dispatch sent after another was opened reads New until it is opened too", async () => {
+    const client = newQueryClient();
+    await renderWithQuery(<ProHomeScreen />, client);
+    await findCard(FRESH.dispatch_id);
+
+    // The pro opened FRESH: the detail marks it in the list behind it.
+    await act(async () => markOpportunityViewed(client, FRESH.dispatch_id));
+    await waitFor(() => expect(card(FRESH.dispatch_id).queryByText("New", HIDDEN)).toBeNull());
+
+    const sentLater = summary(3);
+    jest
+      .mocked(apiGet)
+      .mockResolvedValueOnce(page([sentLater, { ...FRESH, viewed: true }, OPENED]));
+    await act(async () => pullToRefresh());
+    await findCard(sentLater.dispatch_id);
+    expect(card(sentLater.dispatch_id).getByText("New", HIDDEN)).toBeTruthy();
+    expect(card(FRESH.dispatch_id).queryByText("New", HIDDEN)).toBeNull();
+
+    await act(async () => markOpportunityViewed(client, sentLater.dispatch_id));
+    await waitFor(() => expect(card(sentLater.dispatch_id).queryByText("New", HIDDEN)).toBeNull());
   });
 
   it("a tap opens the detail once, even when tapped twice before the push lands", async () => {
