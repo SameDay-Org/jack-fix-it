@@ -28,6 +28,8 @@ RUN uv sync --frozen --no-dev
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
+# Operator commands run from a shell on the api service (docs/railway.md, steps 7 and 8).
+COPY scripts ./scripts
 
 RUN useradd --system --uid 10001 --no-create-home app
 USER app
