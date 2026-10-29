@@ -46,12 +46,19 @@ type Ending = { kind: "left" } | { kind: "sent"; id: string };
  * hand-off to the confirmation. Leaving with anything entered asks first, however it is left
  * (Back on the first step, Cancel, Android's back, the iOS edge swipe). The draft goes with the
  * flow: sent, discarded, or taken away by a sign-out.
+ *
+ * The flow belongs to the account that opened it: a sign-in that brings another account mounts a
+ * fresh one, so the old account's uploads, send and leave guard end with it (the draft and the
+ * uploads are also dropped at the session boundary itself, `onSignOut`).
  */
 export function RequestFlowLayout() {
+  const { user } = useSession();
+  return <AccountRequestFlow key={user?.id ?? "signed-out"} userId={user?.id} />;
+}
+
+function AccountRequestFlow({ userId }: { userId: string | undefined }) {
   const { t } = useTranslation();
   const navigation = useNavigation();
-  const { user } = useSession();
-  const userId = user?.id;
   const media = useMediaUpload({ purpose: "request_media" });
   const draftInput = useRequestDraft(hasDraftInput);
   const [ending, setEnding] = useState<Ending | null>(null);
