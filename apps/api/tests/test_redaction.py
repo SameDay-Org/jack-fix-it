@@ -13,13 +13,20 @@ import pytest
 
 from app.redaction import (
     _MARK_RANGES,
+    _SPELLED_EMAILS,
+    _SPELLED_URLS,
     MASK,
     KnownValues,
     RedactionResult,
+    _mask,
+    _Replace,
+    _replacements,
+    _Search,
     redact_contacts,
     redact_known,
     redact_text,
 )
+from tests import redaction_c6facaa as c6facaa
 from tests.glue_variants import all_glue_cases
 from tests.helpers import best_seconds_without_gc
 
@@ -897,10 +904,90 @@ def test_b5_long_spelled_chain_masked_whole(text: str, form: Literal["NFC", "NFD
     ],
 )
 def test_a_dot_word_before_the_at_cue_starts_the_address(text: str) -> None:
-    """An at word is never a piece of the spelled local part, so the search tries the "dot"
-    before it as a local part, as a search from every word start does (base parity)."""
+    """A spaced dot word starts a chain of its own (the words around it are its separators),
+    so the search tries the "dot" before the at cue as a local part, as a search from every
+    word start does (base parity)."""
     first = text.split()[0]
     assert redact_contacts(text) == RedactionResult(f"{first} {MASK}", True)
+
+
+R2_B1_PIECES = [
+    "jose dot dot at acme dot com",
+    "josé dot punto at acme.com",
+    "bob punto punto arroba acme punto com",
+    "jose (dot) dot (at) acme (dot) com",
+    "miweb dot dot dot com",
+    "miweb punto punto punto com",
+]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize("text", R2_B1_PIECES, ids=ascii)
+def test_r2_b1_literal_separator_words_as_pieces(text: str, form: Literal["NFC", "NFD"]) -> None:
+    """A dot word is a piece of the chain as well as its separator, so the chain is masked from
+    its first piece, as on base (round 2 of #240)."""
+    _assert_masked_whole(text, form)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["x (at) pérez.me@b.c (dot) es", "josé arroba baño.es arroba acme punto com"],
+)
+def test_an_address_starting_inside_a_masked_domain_joins_the_mask(text: str) -> None:
+    """An explicit cue masks "x (at) pérez.me" whatever its labels (#240); the address that
+    starts inside that domain and runs past it joins the mask instead of being cut in two."""
+    assert redact_contacts(f"write to {text} thanks") == RedactionResult(
+        f"write to {MASK} thanks", True
+    )
+
+
+_FUZZ_WORDS = [
+    *("jose", "josé", "bob", "acme", "gmail", "miweb", "a", "q", "x1", "jo-se", "_x", "b-"),
+    *("it", "home", "pérez", "ñandú", "-b", "b.c", "+tag", "x%y", "e" + TITLO, TITLO + "a"),
+    *("dot", "dot", "dot", "DOT", "Dot", "punto", "punto", "Punto", "at", "AT", "en"),
+    *("arroba", "com", "com", "es", "me", "Me", "co", "mx", "net", "io"),
+]
+_FUZZ_JOINS = [
+    *(" dot ", " dot ", " dot ", " DOT ", "  dot  ", "\tdot\t", " punto ", " punto "),
+    *(" (dot) ", " [punto] ", " <dot> ", " {punto} ", " (dot)", "(dot) ", ".", ",", " "),
+    *(" at ", " AT ", " arroba ", " (at) ", " [at] ", "@", " @ ", " en "),
+]
+
+
+def _fuzz_chain(rng: random.Random) -> str:
+    words = [rng.choice(_FUZZ_WORDS) for _ in range(rng.randint(1, 11))]
+    text = words[0] + "".join(rng.choice(_FUZZ_JOINS) + word for word in words[1:])
+    if rng.random() < 0.3:
+        text = f"write to {text} thanks"
+    return unicodedata.normalize("NFD", text) if rng.random() < 0.3 else text
+
+
+def _masked(search: _Search, replace: _Replace, text: str) -> set[int]:
+    spans = _replacements(search, replace, text)
+    return {index for start, end, _ in spans for index in range(start, end)}
+
+
+def test_spelled_chain_parity_with_c6facaa() -> None:
+    """Random chains of names, dot words, "(dot)", ".", at cues and TLDs through the spelled
+    email and URL rules and through c6facaa's patterns, from before round 1 of #240: the rules
+    mask every character the old grammar masked, and more where it was bounded."""
+    rng = random.Random(240)  # noqa: S311 - reproducible test data, not secrets
+    rules = [
+        (_SPELLED_EMAILS, c6facaa.SPELLED_EMAIL, c6facaa.mask_spelled_email),
+        (_SPELLED_URLS, c6facaa.SPELLED_URL, c6facaa.mask_spelled_url),
+    ]
+    narrower: list[str] = []
+    masked_by_old = 0
+    for _ in range(3000):
+        text = _fuzz_chain(rng)
+        for search, old, old_replace in rules:
+            old_masked = _masked(old, old_replace, text)
+            masked_by_old += bool(old_masked)
+            if not old_masked <= _masked(search, _mask, text):
+                narrower.append(text)
+
+    assert narrower == []
+    assert masked_by_old >= 500  # the chains do reach the rules
 
 
 @pytest.mark.parametrize(
@@ -1623,5 +1710,41 @@ def test_many_unicode_letters_with_marks_are_fast(text: str) -> None:
 def test_round_one_rules_are_fast(text: str) -> None:
     """One 5,000-character case per rule changed in round 1 of #240: the spelled-dot chains
     are scanned once per run, and the run without marks is one more linear pass."""
+    assert len(text) >= 5000
+    assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "jose " + "dot " * 1250 + "at x",
+        "dot dot at " * 455,
+        "punto punto arroba " * 264,
+        "a dot dot " * 500 + "at x",
+        "dot " * 625 + "at " + "dot " * 625,
+        "a (dot) dot " * 455 + "(at) x",
+        "x dot dot dot " * 358 + "at gmail",
+        "a dot dot dot b dot dot dot " * 179 + "at x",
+        "miweb " + "dot " * 1250,
+        "punto " * 834 + "x",
+        "x" + " arroba ñ punto me" * 300,
+    ],
+    ids=[
+        "dot_run_then_at",
+        "dot_dot_at",
+        "punto_punto_arroba",
+        "piece_dot_dot_at",
+        "dot_run_on_both_sides",
+        "bracketed_and_spaced",
+        "chains_past_their_run",
+        "swapped_chains",
+        "domain_dot_run",
+        "domain_punto_run",
+        "overlapping_addresses",
+    ],
+)
+def test_round_two_dot_word_pieces_are_fast(text: str) -> None:
+    """Round 2 of #240: dot words are pieces again. A dot word read as a piece starts a chain
+    of its own, and each piece is read by one chain only, even past its run."""
     assert len(text) >= 5000
     assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25

@@ -240,7 +240,8 @@ _STRONG_AT: Final = r"(?:\s*@\s*|\s*[(\[{<]\s*(?:at|arroba)\s*[)\]}>]\s*|\s+arro
 _WEAK_AT: Final = re.compile(r"\s+(?:at|en)\s+", _FLAGS)  # everyday words too
 _SPANISH_EN: Final = re.compile(r"\s+en\s+", _FLAGS)
 _SPELLED_DOT: Final = r"(?:\.|\s*[(\[{<]\s*(?:dot|punto)\s*[)\]}>]\s*|\s+(?:dot|punto)\s+)"
-_ONLY_SPELLED_DOT: Final = r"(?:\s*[(\[{<]\s*(?:dot|punto)\s*[)\]}>]\s*|\s+(?:dot|punto)\s+)"
+_BRACKETED_DOT: Final = r"\s*[(\[{<]\s*(?:dot|punto)\s*[)\]}>]\s*"
+_ONLY_SPELLED_DOT: Final = rf"(?:{_BRACKETED_DOT}|\s+(?:dot|punto)\s+)"
 PLAIN_EMAIL: Final = re.compile(
     rf"{_START}{_MARKED}{_LOCAL}@{_LABEL}++(?:[.,]{_LABEL}++)*?[.,][a-z]{{2,}}\b", _FLAGS
 )
@@ -251,19 +252,17 @@ SPACED_EMAIL: Final = re.compile(
 # "maria at gmail dot com", "juan dot perez at gmail dot com", "jane (at) outlook.com". With a
 # bare " at " and a plain dot, the local part may not be a common word ("it at Amazon.com").
 # The local part is a chain of pieces joined by spelled dots, of any length ("a dot b dot c dot
-# d dot e dot f at gmail dot com" is masked whole, #240). Tried from every word start, the
-# chain would be scanned again from each of its pieces (quadratic on "a dot " repeated), so the
-# rule runs through _RunSearch: once per chain (_LOCAL_RUN), from its first piece. A piece is
-# never the dot word itself, so "a dot dot b at gmail dot com" starts at the first "dot", as a
-# search from every word start would. An at word may be a piece ("bob punto at (at) gmail.com"
-# is one address); a dot word right before it is the one start inside a run that can differ
-# ("jose dot at acme (dot) com" is "dot" at "acme"), so it is tried too (_LOCAL_INNER). The
-# domain chain is lazy and runs only after the "at".
-_LOCAL_PIECE: Final = rf"(?!(?:dot|punto)(?![\w.%+\-{_MARKS}])){_MARKED}{_LOCAL}"
+# d dot e dot f at gmail dot com" is masked whole, #240). A dot word or an at word may be a
+# piece too ("jose dot dot at acme dot com", "bob punto at (at) gmail.com"). Tried from every
+# word start, the chain would be scanned again from each of its pieces (quadratic on "a dot "
+# repeated), so the rule runs through _RunSearch, which walks each run once (_LOCAL_HEAD, then
+# _LOCAL_STEP) and tries only the starts that can end differently. The domain chain is lazy
+# and runs only after the "at". A piece may begin with "-" or a mark ("jose dot -b at x.com").
+_LOCAL_PIECE: Final = rf"[\w+\-{_MARKS}][\w.%+\-{_MARKS}]*+"
 _LOCAL_CHAIN: Final = rf"{_LOCAL}(?:{_ONLY_SPELLED_DOT}{_LOCAL_PIECE})*+"
-_LOCAL_RUN: Final = re.compile(rf"{_START}{_MARKED}{_LOCAL_CHAIN}", _FLAGS)
-_LOCAL_INNER: Final = re.compile(
-    rf"(?<=\s)(?:dot|punto)(?=\s+(?:at|arroba|en)(?![\w.%+\-{_MARKS}]))", _FLAGS
+_LOCAL_HEAD: Final = re.compile(rf"{_START}{_MARKED}{_LOCAL}", _FLAGS)
+_LOCAL_STEP: Final = re.compile(
+    rf"(?:\s+(?P<word>dot|punto)\s+|{_BRACKETED_DOT})(?P<piece>{_LOCAL_PIECE})", _FLAGS
 )
 SPELLED_EMAIL: Final = re.compile(
     rf"{_START}{_MARKED}(?P<local>{_LOCAL_CHAIN})"
@@ -318,11 +317,11 @@ URL: Final = re.compile(
     _FLAGS,
 )
 # "jackfixit dot com", "aa dot bb dot cc dot dd dot ee dot ff dot com": a chain of any length,
-# run once per chain (_DOMAIN_RUN) as SPELLED_EMAIL is; its pieces are never the dot word.
-_DOMAIN_PIECE: Final = rf"(?!(?:dot|punto)(?![^\W_]|[\-{_MARKS}])){_LABEL}++"
-_DOMAIN_RUN: Final = re.compile(
-    rf"{_DOMAIN_START}{_LABEL}{{2,}}+(?:\s+(?:dot|punto)\s+{_DOMAIN_PIECE})*+", _FLAGS
-)
+# walked once per run (_DOMAIN_HEAD, then _DOMAIN_STEP) as SPELLED_EMAIL is. A piece may be
+# the dot word ("miweb dot dot dot com").
+_DOMAIN_PIECE: Final = rf"{_LABEL}++"
+_DOMAIN_HEAD: Final = re.compile(rf"{_DOMAIN_START}{_LABEL}{{2,}}+", _FLAGS)
+_DOMAIN_STEP: Final = re.compile(rf"\s+(?P<word>dot|punto)\s+(?P<piece>{_DOMAIN_PIECE})", _FLAGS)
 SPELLED_URL: Final = re.compile(
     rf"{_DOMAIN_START}{_LABEL}{{2,}}+(?:\s+(?:dot|punto)\s+{_DOMAIN_PIECE})*\s+(?:dot|punto)\s+"
     rf"{_TLD_END}",
@@ -588,29 +587,60 @@ class _Search(Protocol):
 
 @dataclass(frozen=True)
 class _RunSearch:
-    """`pattern` tried once per run of `run` (its leading spelled-dot chain), from the run's
-    first piece. A start at a later piece would scan the same chain to the same end and reach
-    the same verdict, so skipping those starts keeps the search linear (#240). The starts that
-    can differ (`inner`, inside the run) are tried after it; each match there is short. `accept`
-    refuses a match here rather than in the replace step, which would try again one character
-    later."""
+    """`pattern` tried on each run of spelled-dot pieces (`head`, then `step` while it
+    matches) from only the starts that can end differently, so the search stays linear (#240).
+    A piece another chain already read ends that chain's way and reaches its verdict, so only
+    a chain's first piece is tried. A spaced dot word read as a piece swaps the roles: the
+    pieces around it become its separators ("jose dot at acme dot com" is "dot" at "acme",
+    "miweb dot dot dot com" ends in "dot dot com"), so it starts a chain of its own, unless one
+    read it already ("dot dot dot"). That chain may run past its run's end; the pieces it read
+    are remembered, so each one is read once. `accept` refuses a match here rather than in the
+    replace step, which would try again one character later."""
 
-    run: re.Pattern[str]
+    head: re.Pattern[str]  # the run's first piece
+    step: re.Pattern[str]  # a spelled dot and the next piece: groups "word" (spaced) and "piece"
     pattern: re.Pattern[str]
     accept: Callable[[re.Match[str]], bool] | None = None
-    inner: re.Pattern[str] | None = None
+    tail: str | None = None  # the group after which an overlapping match may start
 
     def search(self, string: str, pos: int = 0) -> re.Match[str] | None:
-        while (run := self.run.search(string, pos)) is not None:
-            starts = [run.start()]
-            if self.inner is not None:
-                starts += [inner.start() for inner in self.inner.finditer(string, *run.span())]
-            for start in starts:
+        read: set[int] = set()  # where the pieces of the chains tried so far start
+        while (head := self.head.search(string, pos)) is not None:
+            pieces, words, pos = self._chain(string, head)
+            for start in [head.start(), *words]:
+                first = head if start == head.start() else self.head.match(string, start)
+                if start in read or first is None:
+                    continue
+                read.update(pieces if first is head else self._chain(string, first)[0])
                 match = self.pattern.match(string, start)
                 if match is not None and (self.accept is None or self.accept(match)):
                     return match
-            pos = run.end()
         return None
+
+    def _chain(self, string: str, first: re.Match[str]) -> tuple[list[int], list[int], int]:
+        """The chain that `first` begins: where its pieces and its spaced dot words start, and
+        where it ends."""
+        pieces, words, end = [first.start()], [], first.end()
+        while (step := self.step.match(string, end)) is not None:
+            pieces.append(step.start("piece"))
+            if step.group("word") is not None:
+                words.append(step.start("word"))
+            end = step.end()
+        return pieces, words, end
+
+    def mask_end(self, string: str, match: re.Match[str]) -> int:
+        """Where the mask of `match` ends. An accepted match that starts after its `tail` group
+        and before its end runs past it (the domain of "x (at) pérez.me@b.c (dot) es" is the
+        local part of the next address); it joins the mask, so accepting a match never hides
+        one that a search refusing it would have found (#240)."""
+        end = match.end()
+        while (
+            self.tail is not None
+            and (more := self.search(string, match.end(self.tail))) is not None
+            and more.start() < end
+        ):
+            match, end = more, more.end()
+        return end
 
 
 @dataclass(frozen=True)
@@ -704,8 +734,9 @@ def _replacements(search: _Search, replace: _Replace, text: str) -> Iterator[tup
         if replacement is None:
             search_from = match.start() + 1
             continue
-        yield match.start(), match.end(), replacement
-        search_from = max(match.end(), match.start() + 1)
+        end = search.mask_end(text, match) if isinstance(search, _RunSearch) else match.end()
+        yield match.start(), end, replacement
+        search_from = max(end, match.start() + 1)
 
 
 def _apply(text: str, spans: Iterable[tuple[int, int, str]]) -> tuple[str, int]:
@@ -979,8 +1010,10 @@ def _is_latin_mobile(joined: str, count: int) -> bool:
 # Order matters: emails and URLs before the handles and domains inside them; phones before
 # platform handles, so "whatsapp 305 555 0199" loses the whole number; masks hold no letter or
 # digit, so a later pattern never matches inside an earlier mask.
-_SPELLED_EMAILS: Final = _RunSearch(_LOCAL_RUN, SPELLED_EMAIL, _is_spelled_email, _LOCAL_INNER)
-_SPELLED_URLS: Final = _RunSearch(_DOMAIN_RUN, SPELLED_URL)
+_SPELLED_EMAILS: Final = _RunSearch(
+    _LOCAL_HEAD, _LOCAL_STEP, SPELLED_EMAIL, _is_spelled_email, tail="at"
+)
+_SPELLED_URLS: Final = _RunSearch(_DOMAIN_HEAD, _DOMAIN_STEP, SPELLED_URL)
 _STEPS: Final[tuple[tuple[_Search, _Replace], ...]] = (
     (SPACED_LETTERS_EMAIL, _mask),
     (PLAIN_EMAIL, _mask),
