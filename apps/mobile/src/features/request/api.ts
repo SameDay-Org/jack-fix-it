@@ -1,7 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { useCallback, useRef } from "react";
 
-import { apiPost, type PostResponse } from "@/api";
+import { apiPost, isCurrentGeneration, sessionGeneration, type PostResponse } from "@/api";
 
 import { sendFailureOf, type RequestCreate, type SendFailure } from "./send";
 
@@ -30,15 +30,18 @@ export function useSendRequest(): { send: SendRequest; sending: boolean } {
     async (body: RequestCreate, { onSent, onFailed }: SendCallbacks) => {
       if (busy.current) return;
       busy.current = true;
+      // The answer belongs to the session the send started in. One that lands after a sign-out
+      // or another sign-in is dropped: its confirmation or refusal would outlive that session.
+      const startedIn = sessionGeneration();
       let created: CreatedRequest;
       try {
         created = await mutateAsync(body);
       } catch (error) {
         busy.current = false;
-        onFailed(sendFailureOf(error));
+        if (isCurrentGeneration(startedIn)) onFailed(sendFailureOf(error));
         return;
       }
-      onSent(created);
+      if (isCurrentGeneration(startedIn)) onSent(created);
     },
     [mutateAsync],
   );

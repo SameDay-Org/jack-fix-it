@@ -2,6 +2,8 @@ import { router } from "expo-router";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 
+import { onSignOut } from "@/api";
+
 import type { StepId } from "./steps";
 
 /** An answer to one intake question, as its type says: a whole number, an option, options, yes/no or text. */
@@ -26,7 +28,7 @@ export type AddressChoice = { kind: "saved"; id: string } | { kind: "typed" } | 
  * Why the server sent the customer back to a step after a send. The step shows it until the
  * customer changes something there.
  */
-export type RefusalReason = "invalidAnswers" | "invalidMedia" | "zipNotServed";
+export type RefusalReason = "invalidAddress" | "invalidAnswers" | "invalidMedia" | "zipNotServed";
 export type StepRefusal = { step: StepId; reason: RefusalReason };
 
 export type RequestDraft = {
@@ -74,10 +76,14 @@ export function startRequest(categorySlug: string): void {
   router.push("/request/new");
 }
 
-/** Forgets the draft: the flow was sent, discarded or left. */
+/** Forgets the draft: the flow was sent, discarded or left, or the account signed out. */
 export function resetDraft(): void {
   requestDraftStore.setState(EMPTY_DRAFT);
 }
+
+// The address and the answers are the account's: they never outlive its session, even when no
+// flow is on screen to forget them.
+onSignOut(resetDraft);
 
 /** A change on `step` answers the server's objection there. */
 const clearRefusalOn = (draft: RequestDraft, step: StepId): Pick<RequestDraft, "refusal"> => ({

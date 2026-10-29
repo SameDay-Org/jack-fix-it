@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { useTranslation } from "react-i18next";
 import { Alert } from "react-native";
 
+import { useSession } from "@/api";
 import { sheetOptions } from "@/components/ui";
 import { useMediaUpload, type MediaUpload } from "@/features/media";
 
@@ -49,6 +50,8 @@ type Ending = { kind: "left" } | { kind: "sent"; id: string };
 export function RequestFlowLayout() {
   const { t } = useTranslation();
   const navigation = useNavigation();
+  const { user } = useSession();
+  const userId = user?.id;
   const media = useMediaUpload({ purpose: "request_media" });
   const draftInput = useRequestDraft(hasDraftInput);
   const [ending, setEnding] = useState<Ending | null>(null);
@@ -96,13 +99,13 @@ export function RequestFlowLayout() {
         else leave();
       },
       finish: (request) => {
-        rememberSent(request);
+        if (userId !== undefined) rememberSent(request, userId);
         setEnding({ kind: "sent", id: request.id });
       },
       send,
       sending,
     }),
-    [media, guarded, confirmDiscard, send, sending],
+    [media, guarded, confirmDiscard, send, sending, userId],
   );
 
   return (

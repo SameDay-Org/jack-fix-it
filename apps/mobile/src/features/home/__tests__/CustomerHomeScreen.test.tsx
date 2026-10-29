@@ -12,6 +12,7 @@ import { CATEGORIES, newQueryClient, renderWithQuery, signedIn } from "./helpers
 
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../../api/errors"),
+  onSignOut: jest.fn(),
   apiGet: jest.fn(),
   useSession: jest.fn(),
   logout: jest.fn(),

@@ -6,7 +6,13 @@ import { AccessibilityInfo, ScrollView, Text, View } from "react-native";
 import { Button, ChoiceCard, Input, Notice, Skeleton, type InputHandle } from "@/components/ui";
 import { useSavedAddresses } from "@/features/addresses";
 
-import { addressErrors, addressLine, resolveAddress, type AddressError } from "./address";
+import {
+  ADDRESS_MAX,
+  addressErrors,
+  addressLine,
+  resolveAddress,
+  type AddressError,
+} from "./address";
 import {
   chooseAddress,
   setTypedAddress,
@@ -25,7 +31,8 @@ const FORM_GAP = 24;
  * Where the job is. The customer's saved addresses come first as choices (the default one picked,
  * addresses outside the service areas shown but not offered), then "Use another address", which
  * opens the form and scrolls to it; with none saved, the form alone. When the server answered "not in this area",
- * the step says so on top and the customer picks or types another address.
+ * the step says so on top and the customer picks or types another address. When it refused the
+ * typed address itself, the step says so too and marks the fields to fix.
  */
 export function WhereStep({ steps }: { steps: readonly StepId[] }) {
   const { t } = useTranslation();
@@ -33,7 +40,10 @@ export function WhereStep({ steps }: { steps: readonly StepId[] }) {
   const choice = useRequestDraft((draft) => draft.address);
   const typed = useRequestDraft((draft) => draft.typedAddress);
   const notServed = useRequestDraft((draft) => draft.refusal?.reason === "zipNotServed");
+  const addressRefused = useRequestDraft((draft) => draft.refusal?.reason === "invalidAddress");
   const [checked, setChecked] = useState(false);
+  // Sent back from Review: the fields stay marked as the customer fixes them, as after Continue.
+  if (addressRefused && !checked) setChecked(true);
   const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
   // Set when "Use another address" opens the form: its first layout scrolls it into view.
   const revealForm = useRef(false);
@@ -69,7 +79,13 @@ export function WhereStep({ steps }: { steps: readonly StepId[] }) {
         />
       }
       scrollRef={scrollRef}
-      refusal={notServed ? t("request.where.notServedTitle") : undefined}
+      refusal={
+        notServed
+          ? t("request.where.notServedTitle")
+          : addressRefused
+            ? t("request.where.invalidTitle")
+            : undefined
+      }
       testID="request-where"
     >
       {notServed ? (
@@ -78,6 +94,14 @@ export function WhereStep({ steps }: { steps: readonly StepId[] }) {
           title={t("request.where.notServedTitle")}
           body={t("request.where.notServedBody")}
           testID="where-not-served"
+        />
+      ) : null}
+      {addressRefused ? (
+        <Notice
+          tone="danger"
+          title={t("request.where.invalidTitle")}
+          body={t("request.where.invalidBody")}
+          testID="where-invalid"
         />
       ) : null}
       {saved.isPending ? (
@@ -170,8 +194,8 @@ function AddressForm({ fields, errors, zipRefused, titled }: AddressFormProps) {
   const city = useRef<InputHandle>(null);
   const state = useRef<InputHandle>(null);
   const zip = useRef<InputHandle>(null);
-  const message = (error: AddressError | undefined) =>
-    error ? t(`request.where.errors.${error}`) : undefined;
+  const message = (error: AddressError | undefined, max?: number) =>
+    error ? t(`request.where.errors.${error}`, { max }) : undefined;
 
   return (
     <View className="gap-4" testID="where-form">
@@ -184,7 +208,8 @@ function AddressForm({ fields, errors, zipRefused, titled }: AddressFormProps) {
         label={t("request.where.line1")}
         value={fields.line1}
         onChangeText={(value) => setTypedAddress("line1", value)}
-        error={message(errors.line1)}
+        error={message(errors.line1, ADDRESS_MAX.line1)}
+        maxLength={ADDRESS_MAX.line1}
         autoComplete="address-line1"
         textContentType="streetAddressLine1"
         returnKeyType="next"
@@ -197,6 +222,8 @@ function AddressForm({ fields, errors, zipRefused, titled }: AddressFormProps) {
         label={t("request.optionalLabel", { label: t("request.where.line2") })}
         value={fields.line2}
         onChangeText={(value) => setTypedAddress("line2", value)}
+        error={message(errors.line2, ADDRESS_MAX.line2)}
+        maxLength={ADDRESS_MAX.line2}
         autoComplete="address-line2"
         textContentType="streetAddressLine2"
         returnKeyType="next"
@@ -209,7 +236,8 @@ function AddressForm({ fields, errors, zipRefused, titled }: AddressFormProps) {
         label={t("request.where.city")}
         value={fields.city}
         onChangeText={(value) => setTypedAddress("city", value)}
-        error={message(errors.city)}
+        error={message(errors.city, ADDRESS_MAX.city)}
+        maxLength={ADDRESS_MAX.city}
         textContentType="addressCity"
         returnKeyType="next"
         submitBehavior="submit"

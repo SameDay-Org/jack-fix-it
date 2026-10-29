@@ -150,9 +150,12 @@
       "errors": {
         "required": "Fill in this field.",
         "state": "Use the two-letter code, like FL.",
-        "zip": "Enter a 5-digit ZIP code."
+        "zip": "Enter a 5-digit ZIP code.",
+        "tooLong": "Keep it to {{max}} characters or fewer."
       },
       "check": "Some address fields need a look.",
+      "invalidTitle": "Check the address",
+      "invalidBody": "We couldn't use this address. Fix the marked fields, then send it again.",
       "notServedTitle": "We're not in this area yet",
       "notServedBody": "Jack serves a few areas for now. Try another address.",
       "savedFailed": "We couldn't load your saved addresses.",

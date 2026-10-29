@@ -3,6 +3,7 @@ import { useEffect, useRef, type ComponentRef } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, Text, View } from "react-native";
 
+import { useSession } from "@/api";
 import { ControlIcon } from "@/components/icons";
 import { Button, moveAccessibilityFocus, Screen } from "@/components/ui";
 import { categoryName, useCategories } from "@/features/home/useCategories";
@@ -14,12 +15,14 @@ import { sentRequest } from "./sent";
  * "Jack is on it": the request went through. The whole navy screen, not a card: a green seal,
  * the headline, what was asked and where, the request's code to quote to support, one line on what happens next, and the way to the
  * request (its quotes, waiting until the first arrives). The flow is gone from the stack, so Back
- * goes Home. Reached with an id this session did not just send, it opens that request instead.
+ * goes Home. Reached with an id this account did not just send from this session, it opens that
+ * request instead, through the API's owner-checked read.
  */
 export function RequestSentScreen() {
   const { t } = useTranslation();
   const { id } = useLocalSearchParams<{ id?: string }>();
-  const request = sentRequest(id);
+  const { user } = useSession();
+  const request = sentRequest(id, user?.id);
   const categories = useCategories();
   const titleRef = useRef<ComponentRef<typeof Text>>(null);
 

@@ -25,6 +25,13 @@ import { requestDraftStore, startRequest } from "../requestDraft";
 import { created, HANDYMAN, PAINTING, savedAddress } from "./helpers";
 
 const mockSignedIn: { status: "signedIn"; user: SessionUser } = { status: "signedIn", user };
+// The session generation: a test moves it on to stand for a sign-out landing mid-send.
+const mockGeneration = { current: 1 };
+const OTHER_ACCOUNT: SessionUser = {
+  ...user,
+  id: "22222222-2222-4222-8222-222222222222",
+  email: "ben@example.com",
+};
 
 // The flow's upload list, changed by a test inside `act` (an upload finishing, failing, removed).
 const mockMedia: { current: MediaUpload | null; listeners: Set<() => void> } = {
@@ -32,12 +39,22 @@ const mockMedia: { current: MediaUpload | null; listeners: Set<() => void> } = {
   listeners: new Set(),
 };
 
-jest.mock("@/api", () => ({
-  ...jest.requireActual("../../../api/errors"),
-  apiGet: jest.fn(),
-  apiPost: jest.fn(),
-  useSession: () => mockSignedIn,
-}));
+jest.mock("@/api", () => {
+  // What the flow registers to forget at a sign-out (at import, before this file's own consts).
+  const forgetters = new Set<() => void>();
+  return {
+    ...jest.requireActual("../../../api/errors"),
+    onSignOut: (forget: () => void) => forgetters.add(forget),
+    mockSignOut: () => forgetters.forEach((forget) => forget()),
+    apiGet: jest.fn(),
+    apiPost: jest.fn(),
+    useSession: () => mockSignedIn,
+    sessionGeneration: () => mockGeneration.current,
+    isCurrentGeneration: (startedIn: number) => startedIn === mockGeneration.current,
+  };
+});
+/** Forgets what the flow keeps of the session, as a sign-out does: each test starts after one. */
+const signOut = () => jest.requireMock<{ mockSignOut: () => void }>("@/api").mockSignOut();
 jest.mock("@/features/media", () => {
   const { useSyncExternalStore } = jest.requireActual<typeof import("react")>("react");
   return {
@@ -222,6 +239,9 @@ beforeEach(() => {
         : { items: [HOME_ADDRESS, UNSERVED] }) as unknown as typeof apiGet);
   jest.mocked(apiPost).mockReset();
   jest.spyOn(Alert, "alert").mockReset();
+  mockSignedIn.user = user;
+  mockGeneration.current = 1;
+  signOut();
 });
 
 describe("the request flow", () => {
@@ -310,6 +330,130 @@ describe("the request flow", () => {
 
     await waitFor(() => expect(result.getPathname()).toBe(`/requests/${created().id}`));
     expect(screen.getByText(`request ${created().id}`)).toBeTruthy();
+  });
+
+  it("shows the confirmation only to the account that sent it", async () => {
+    jest.mocked(apiPost).mockResolvedValue(created() as never);
+    const result = await toReview();
+    await press("Send request");
+    await waitFor(() => expect(result.getPathname()).toBe("/request/sent"));
+    await press("Back to Home");
+    await waitFor(() => expect(result.getPathname()).toBe("/"));
+
+    // Another account on the same running app follows the confirmation's link.
+    mockSignedIn.user = OTHER_ACCOUNT;
+    await act(async () => router.push({ pathname: "/request/sent", params: { id: created().id } }));
+
+    await waitFor(() => expect(result.getPathname()).toBe(`/requests/${created().id}`));
+    expect(screen.getByText(`request ${created().id}`)).toBeTruthy();
+    expect(screen.queryByText("JF-000124")).toBeNull();
+    expect(screen.queryByText(/12 Main St/)).toBeNull();
+  });
+
+  it("drops an answer that lands after the session it was sent in ended", async () => {
+    const sending = deferred<ReturnType<typeof created>>();
+    jest.mocked(apiPost).mockReturnValue(sending.promise as never);
+    const result = await toReview();
+    await press("Send request");
+
+    // The sign-out lands between the client's own session check and the flow's callback.
+    mockGeneration.current = 2;
+    await act(async () => sending.resolve(created()));
+
+    expect(result.getPathname()).toBe("/request/review");
+    await act(async () => router.push({ pathname: "/request/sent", params: { id: created().id } }));
+    await waitFor(() => expect(result.getPathname()).toBe(`/requests/${created().id}`));
+    expect(screen.queryByText("JF-000124")).toBeNull();
+  });
+
+  it("takes a street, unit and city as long as the API does and refuses longer ones inline", async () => {
+    const result = await toReview();
+    await press("Edit the address");
+    await waitFor(() => expect(result.getPathname()).toBe("/request/where"));
+    await fireEvent.press(screen.getByRole("radio", { name: "Use another address" }));
+    const field = (testID: string) => screen.getByTestId(testID);
+    expect(field("where-line1").props.maxLength).toBe(255);
+    expect(field("where-line2").props.maxLength).toBe(255);
+    expect(field("where-city").props.maxLength).toBe(128);
+
+    // What gets past a field's own limit (an autofill, a paste on some keyboards) meets the check.
+    await fireEvent.changeText(field("where-line1"), "a".repeat(256));
+    await fireEvent.changeText(field("where-line2"), "b".repeat(256));
+    await fireEvent.changeText(field("where-city"), "c".repeat(129));
+    await fireEvent.changeText(field("where-state"), "NJ");
+    await fireEvent.changeText(field("where-zip"), "07102");
+    await press("Continue");
+
+    expect(result.getPathname()).toBe("/request/where");
+    expect(field("where-line1").props.accessibilityHint).toBe(
+      "Keep it to 255 characters or fewer.",
+    );
+    expect(field("where-line2").props.accessibilityHint).toBe(
+      "Keep it to 255 characters or fewer.",
+    );
+    expect(field("where-city").props.accessibilityHint).toBe("Keep it to 128 characters or fewer.");
+
+    await fireEvent.changeText(field("where-line1"), "a".repeat(255));
+    await fireEvent.changeText(field("where-line2"), "b".repeat(255));
+    await fireEvent.changeText(field("where-city"), "c".repeat(128));
+    expect(field("where-line1").props.accessibilityHint).toBeUndefined();
+    await press("Continue");
+    await waitFor(() => expect(result.getPathname()).toBe("/request/review"));
+
+    jest.mocked(apiPost).mockResolvedValueOnce(created() as never);
+    await press("Send request");
+    await waitFor(() => expect(result.getPathname()).toBe("/request/sent"));
+    expect(posted()[0].body).toMatchObject({
+      address: { line1: "a".repeat(255), line2: "b".repeat(255), city: "c".repeat(128) },
+    });
+  });
+
+  it("goes back to Where with the field marked when the API refuses the typed address", async () => {
+    jest.mocked(apiPost).mockRejectedValueOnce(new ApiError(422, "validation_error"));
+    const result = await toReview();
+    // A typed address the form's check would refuse reaches Review (the check and the API's rules
+    // drifting apart, say). The API's validation_error names no field.
+    await act(async () =>
+      requestDraftStore.setState({
+        address: { kind: "typed" },
+        typedAddress: {
+          line1: "a".repeat(256),
+          line2: "",
+          city: "Newark",
+          state: "NJ",
+          zipCode: "07102",
+        },
+      }),
+    );
+
+    await press("Send request");
+
+    await waitFor(() => expect(result.getPathname()).toBe("/request/where"));
+    expect(screen.getByText("Check the address")).toBeTruthy();
+    await waitFor(() => expect(spoken("Check the address")).toBe(1));
+    const line1 = screen.getByTestId("where-line1");
+    expect(line1.props.accessibilityHint).toBe("Keep it to 255 characters or fewer.");
+    expect(screen.getByTestId("where-city").props.accessibilityHint).toBeUndefined();
+
+    await fireEvent.changeText(line1, "1 Broad St");
+    expect(screen.queryByText("Check the address")).toBeNull();
+    await press("Continue");
+    await waitFor(() => expect(result.getPathname()).toBe("/request/review"));
+
+    jest.mocked(apiPost).mockResolvedValueOnce(created() as never);
+    await press("Send request");
+    await waitFor(() => expect(result.getPathname()).toBe("/request/sent"));
+    expect(posted()[1].body).toMatchObject({ address: { line1: "1 Broad St", city: "Newark" } });
+  });
+
+  it("keeps a validation_error on Review when the address passes the form's check", async () => {
+    jest.mocked(apiPost).mockRejectedValueOnce(new ApiError(422, "validation_error"));
+    const result = await toReview();
+
+    await press("Send request");
+
+    await waitFor(() => expect(screen.getByText("We couldn't send this request")).toBeTruthy());
+    expect(result.getPathname()).toBe("/request/review");
   });
 
   it("goes back to Where with 'not in this area' on zip_not_served, then sends the new address", async () => {

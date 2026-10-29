@@ -3,6 +3,10 @@ import { router } from "expo-router";
 import { requestDraftStore, startRequest } from "../requestDraft";
 
 jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
+jest.mock(
+  "../../../api/config",
+  () => jest.requireActual("../../../api/__tests__/helpers").configMock,
+);
 
 describe("startRequest", () => {
   beforeEach(() => {

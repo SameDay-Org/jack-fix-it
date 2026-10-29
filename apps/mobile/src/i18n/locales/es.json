@@ -150,9 +150,12 @@
       "errors": {
         "required": "Completa este campo.",
         "state": "Usa el código de dos letras, como FL.",
-        "zip": "Escribe un código postal de 5 dígitos."
+        "zip": "Escribe un código postal de 5 dígitos.",
+        "tooLong": "Usa {{max}} caracteres como máximo."
       },
       "check": "Revisa algunos campos de la dirección.",
+      "invalidTitle": "Revisa la dirección",
+      "invalidBody": "No pudimos usar esta dirección. Corrige los campos marcados y vuelve a enviarla.",
       "notServedTitle": "Aún no llegamos a esta zona",
       "notServedBody": "Por ahora Jack atiende pocas zonas. Prueba con otra dirección.",
       "savedFailed": "No pudimos cargar tus direcciones guardadas.",

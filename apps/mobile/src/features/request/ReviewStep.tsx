@@ -11,7 +11,13 @@ import { CATEGORIES_QUERY_KEY, categoryName, type Category } from "@/features/ho
 import type { MediaItem } from "@/features/media";
 import { tokens } from "@/theme";
 
-import { addressLine, resolveAddress, savedAddressBody, typedAddressBody } from "./address";
+import {
+  addressErrors,
+  addressLine,
+  resolveAddress,
+  savedAddressBody,
+  typedAddressBody,
+} from "./address";
 import { answerText } from "./answerText";
 import { refuseStep, useRequestDraft, type RequestDraft, type StepRefusal } from "./requestDraft";
 import { useRequestFlowContext } from "./RequestFlowLayout";
@@ -20,6 +26,8 @@ import { StepScreen } from "./StepScreen";
 import { stepHref, type StepId } from "./steps";
 
 type ReviewFailure = "failed" | "rateLimited" | "rejected";
+
+const ADDRESS_REFUSED: StepRefusal = { step: "where", reason: "invalidAddress" };
 
 type ReviewStepProps = { category: Category; steps: readonly StepId[] };
 
@@ -61,7 +69,13 @@ export function ReviewStep({ category, steps }: ReviewStepProps) {
       onFailed: (outcome) => {
         if (outcome.kind === "signedOut") return; // the session's own screens take over
         if (outcome.kind === "retry") return fail(outcome.reason);
-        if (outcome.kind === "rejected") return fail("rejected");
+        if (outcome.kind === "rejected") {
+          // The API's validation_error names no field. When the typed address fails the form's
+          // own check, Where marks what to fix: sending the same body again would fail the same way.
+          const typedInvalid =
+            resolved.kind === "typed" && Object.keys(addressErrors(draft.typedAddress)).length > 0;
+          return typedInvalid ? backTo(ADDRESS_REFUSED) : fail("rejected");
+        }
         // What the server knows better: which ZIPs are served, the category's questions (also
         // when a category that asked none now does: its steps change with the refetch).
         if (outcome.refusal.reason === "zipNotServed") {

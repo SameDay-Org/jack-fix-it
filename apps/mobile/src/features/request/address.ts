@@ -6,7 +6,14 @@ import type { AddressChoice, AddressFields } from "./requestDraft";
 type AddressIn = PostBody<"/v1/requests">["address"];
 
 /** Why a typed field cannot go yet. */
-export type AddressError = "required" | "state" | "zip";
+export type AddressError = "required" | "tooLong" | "state" | "zip";
+
+/**
+ * The most characters the API takes (AddressIn's maxLength, after it trims) for the street, the
+ * unit and the city. Counted here in UTF-16 units, as the inputs' `maxLength` counts them: never
+ * fewer than the API's code points, so nothing accepted here is too long for it.
+ */
+export const ADDRESS_MAX = { line1: 255, line2: 255, city: 128 } as const;
 
 // What the API takes (AddressIn): a two-letter state and a 5-digit ZIP (ZIP+4 is not offered).
 const STATE = /^[A-Za-z]{2}$/;
@@ -17,8 +24,13 @@ export function addressErrors(
   fields: AddressFields,
 ): Partial<Record<keyof AddressFields, AddressError>> {
   const errors: Partial<Record<keyof AddressFields, AddressError>> = {};
-  if (!fields.line1.trim()) errors.line1 = "required";
-  if (!fields.city.trim()) errors.city = "required";
+  const line1 = fields.line1.trim();
+  if (!line1) errors.line1 = "required";
+  else if (line1.length > ADDRESS_MAX.line1) errors.line1 = "tooLong";
+  if (fields.line2.trim().length > ADDRESS_MAX.line2) errors.line2 = "tooLong";
+  const city = fields.city.trim();
+  if (!city) errors.city = "required";
+  else if (city.length > ADDRESS_MAX.city) errors.city = "tooLong";
   const state = fields.state.trim();
   if (!state) errors.state = "required";
   else if (!STATE.test(state)) errors.state = "state";
