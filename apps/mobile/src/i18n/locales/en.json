@@ -182,6 +182,7 @@
     },
     "sent": {
       "title": "Jack is on it",
+      "summary": "{{category}} at {{place}}",
       "codeLabel": "Your request code",
       "next": "Pros nearby will send you quotes. We'll notify you.",
       "see": "See my request",

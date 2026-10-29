@@ -182,6 +182,7 @@
     },
     "sent": {
       "title": "Jack ya está en ello",
+      "summary": "{{category}} en {{place}}",
       "codeLabel": "Tu código de solicitud",
       "next": "Los profesionales cercanos te enviarán presupuestos. Te avisaremos.",
       "see": "Ver mi solicitud",

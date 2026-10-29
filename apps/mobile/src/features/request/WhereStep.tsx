@@ -1,7 +1,7 @@
 import { router } from "expo-router";
-import { useRef, useState } from "react";
+import { useRef, useState, type ComponentRef } from "react";
 import { useTranslation } from "react-i18next";
-import { AccessibilityInfo, Text, View } from "react-native";
+import { AccessibilityInfo, ScrollView, Text, View } from "react-native";
 
 import { Button, ChoiceCard, Input, Notice, Skeleton, type InputHandle } from "@/components/ui";
 import { useSavedAddresses } from "@/features/addresses";
@@ -18,11 +18,13 @@ import { nextStep, stepHref, type StepId } from "./steps";
 
 // Saved addresses are at most four (#214); two placeholder rows hold the place while they load.
 const SKELETON_ROWS = 2;
+// Space kept above the form when "Use another address" scrolls to it (the step's gap-6).
+const FORM_GAP = 24;
 
 /**
  * Where the job is. The customer's saved addresses come first as choices (the default one picked,
  * addresses outside the service areas shown but not offered), then "Use another address", which
- * opens the form; with none saved, the form alone. When the server answered "not in this area",
+ * opens the form and scrolls to it; with none saved, the form alone. When the server answered "not in this area",
  * the step says so on top and the customer picks or types another address.
  */
 export function WhereStep({ steps }: { steps: readonly StepId[] }) {
@@ -32,6 +34,9 @@ export function WhereStep({ steps }: { steps: readonly StepId[] }) {
   const typed = useRequestDraft((draft) => draft.typedAddress);
   const notServed = useRequestDraft((draft) => draft.refusal?.reason === "zipNotServed");
   const [checked, setChecked] = useState(false);
+  const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
+  // Set when "Use another address" opens the form: its first layout scrolls it into view.
+  const revealForm = useRef(false);
   const savedItems = saved.data?.items ?? [];
   const resolved = resolveAddress(choice, saved.data?.items);
   const showForm = resolved.kind === "typed";
@@ -63,6 +68,7 @@ export function WhereStep({ steps }: { steps: readonly StepId[] }) {
           testID="where-continue"
         />
       }
+      scrollRef={scrollRef}
       refusal={notServed ? t("request.where.notServedTitle") : undefined}
       testID="request-where"
     >
@@ -120,18 +126,29 @@ export function WhereStep({ steps }: { steps: readonly StepId[] }) {
           <ChoiceCard
             title={t("request.where.another")}
             selected={showForm}
-            onPress={() => chooseAddress({ kind: "typed" })}
+            onPress={() => {
+              revealForm.current = !showForm;
+              chooseAddress({ kind: "typed" });
+            }}
             testID="where-another"
           />
         </View>
       ) : null}
       {showForm && !saved.isPending ? (
-        <AddressForm
-          fields={typed}
-          errors={errors}
-          zipRefused={notServed}
-          titled={savedItems.length > 0}
-        />
+        <View
+          onLayout={({ nativeEvent }) => {
+            if (!revealForm.current) return;
+            revealForm.current = false;
+            scrollRef.current?.scrollTo({ y: nativeEvent.layout.y - FORM_GAP, animated: true });
+          }}
+        >
+          <AddressForm
+            fields={typed}
+            errors={errors}
+            zipRefused={notServed}
+            titled={savedItems.length > 0}
+          />
+        </View>
       ) : null}
     </StepScreen>
   );
