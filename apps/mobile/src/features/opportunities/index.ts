@@ -9,6 +9,7 @@ export {
 export type { OpportunityCategory, OpportunityLocation } from "./format";
 export { OpportunityDetailScreen } from "./OpportunityDetailScreen";
 export { OpportunityMedia } from "./OpportunityMedia";
+export { QuoteFormScreen } from "./QuoteFormScreen";
 export type { OpportunityMediaProps } from "./OpportunityMedia";
 export { StateCard } from "./StateCard";
 export type { StateCardProps } from "./StateCard";

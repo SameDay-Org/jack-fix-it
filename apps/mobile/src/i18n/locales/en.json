@@ -334,7 +334,8 @@
       "when": "Preferred date",
       "sent": "Sent",
       "description": "What's going on",
-      "redacted": "Contact details were hidden."
+      "redacted": "Contact details were hidden.",
+      "sendQuote": "Send a quote"
     },
     "media": {
       "title": "Photos and videos",
@@ -353,6 +354,93 @@
       "home": "Go to home"
     },
     "detailError": {
+      "title": "We couldn't load this request",
+      "body": "Check your connection and try again.",
+      "retry": "Try again"
+    }
+  },
+  "quoteForm": {
+    "title": "Your quote",
+    "subtitle": "One fixed price for the whole job. The customer compares quotes and picks one.",
+    "loading": "Loading your quote form",
+    "price": {
+      "label": "Price (USD)",
+      "hint": "The customer pays exactly this.",
+      "required": "Enter your price.",
+      "invalid": "Enter a price like 120 or 120.50.",
+      "aboveCap": "Above the most Jack allows for one quote."
+    },
+    "payout": {
+      "receive": "You'll receive {{amount}}",
+      "fee": "Jack's fee {{rate}}: {{amount}}"
+    },
+    "scope": {
+      "label": "What's included",
+      "hint": "The work, the parts and the cleanup your price covers.",
+      "required": "Say what your price includes."
+    },
+    "approach": {
+      "label": "How I'll do the job (optional)",
+      "hint": "Explain your approach, materials, and anything the customer should know. Don't share phone numbers or emails; the chat opens after hiring."
+    },
+    "duration": {
+      "title": "How long it takes",
+      "hours": "Hours",
+      "minutes": "Minutes",
+      "hoursValue": "{{count}} h",
+      "minutesValue": "{{count}} min",
+      "lessHours": "One hour less",
+      "moreHours": "One hour more",
+      "lessMinutes": "{{count}} minutes less",
+      "moreMinutes": "{{count}} minutes more",
+      "required": "Add how long the job takes.",
+      "aboveCap": "Above the most Jack allows for one quote."
+    },
+    "start": {
+      "title": "Proposed start",
+      "day": "Day",
+      "time": "Time",
+      "earlierDay": "Day before",
+      "laterDay": "Day after",
+      "earlierTime": "{{count}} minutes earlier",
+      "laterTime": "{{count}} minutes later",
+      "preferred": "The customer prefers {{date}}.",
+      "past": "Pick a start that is still ahead."
+    },
+    "review": {
+      "action": "Review quote",
+      "fix": "Check the fields marked in red.",
+      "title": "Review your quote",
+      "subtitle": "Check it before you send it: a sent quote can't be changed.",
+      "summary": "Send quote for {{price}} · you'll receive {{payout}}",
+      "duration": "Duration",
+      "start": "Start",
+      "send": "Send quote",
+      "edit": "Edit",
+      "failed": "We couldn't send your quote. Check your connection and try again.",
+      "retry": "Try again"
+    },
+    "sent": {
+      "title": "Quote sent",
+      "price": "Your price",
+      "receive": "You'll receive",
+      "body": "We'll let you know if the customer accepts.",
+      "home": "Back to home"
+    },
+    "closed": {
+      "goneTitle": "This request is no longer available",
+      "goneBody": "It closed before your quote went out, so nothing was sent.",
+      "quotedTitle": "You already quoted this request",
+      "quotedBody": "There is one quote per pro on each request. We'll let you know if the customer accepts.",
+      "home": "See opportunities"
+    },
+    "discard": {
+      "title": "Discard this quote?",
+      "body": "What you entered will be lost.",
+      "keep": "Keep editing",
+      "confirm": "Discard"
+    },
+    "error": {
       "title": "We couldn't load this request",
       "body": "Check your connection and try again.",
       "retry": "Try again"
