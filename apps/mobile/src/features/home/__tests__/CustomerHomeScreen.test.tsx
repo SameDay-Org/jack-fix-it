@@ -23,7 +23,6 @@ jest.mock(
   () => jest.requireActual("react-native-safe-area-context/jest/mock").default,
 );
 
-const tellJack = () => screen.getByRole("button", { name: "Tell Jack What Happened" });
 const cardNames = () =>
   screen
     .getAllByRole("button")
@@ -42,28 +41,42 @@ describe("CustomerHomeScreen", () => {
     await act(() => i18n.changeLanguage("en"));
   });
 
-  it("shows the headline, support line and one primary action", async () => {
+  it("home has no tell-jack button and shows the new support line", async () => {
     await renderWithQuery(<CustomerHomeScreen />);
     await screen.findByRole("button", { name: "Painting" });
 
-    expect(screen.getByRole("header", { name: "What's going on at home?" })).toBeTruthy();
-    expect(screen.getByText("Tell Jack. We'll take care of the rest.")).toBeTruthy();
-    expect(tellJack()).toBeTruthy();
-    // The kit's primary pill is the only green surface: cards and the account button are not primary.
+    expect(screen.getByText("Pick a category and Jack takes care of the rest.")).toBeTruthy();
+    expect(screen.queryByTestId("home-tell-jack")).toBeNull();
+    expect(screen.queryByRole("button", { name: /tell jack/i })).toBeNull();
+    expect(screen.queryByText(/tell jack/i)).toBeNull();
+    expect(screen.queryByLabelText(/tell jack/i)).toBeNull();
+    // No primary pill is left on home: the cards are the way in.
     const primary = screen
       .getAllByRole("button")
       .filter((button) => String(button.props.className).includes("bg-green-500"));
-    expect(primary).toEqual([tellJack()]);
+    expect(primary).toEqual([]);
+    // Reading order: headline, support line, categories title, then the cards.
+    const headers = screen.getAllByRole("header");
+    expect(headers).toHaveLength(2);
+    expect(headers[0]).toHaveTextContent("What's going on at home?");
+    expect(headers[1]).toHaveTextContent("Categories");
+    const texts = screen.getAllByText(/./).map((node) => node.props.children);
+    expect(texts.indexOf("Pick a category and Jack takes care of the rest.")).toBeLessThan(
+      texts.indexOf("Categories"),
+    );
   });
 
-  it("tell jack clears the draft category and opens the request start", async () => {
-    requestDraftStore.setState({ categorySlug: "painting" });
+  it("home has no tell-jack button and shows the new support line (es)", async () => {
+    await act(() => i18n.changeLanguage("es"));
     await renderWithQuery(<CustomerHomeScreen />);
+    await screen.findByRole("button", { name: "Pintura" });
 
-    await fireEvent.press(tellJack());
-
-    expect(requestDraftStore.getState().categorySlug).toBeNull();
-    expect(router.push).toHaveBeenCalledWith("/request/new");
+    expect(screen.getByRole("header", { name: "¿Qué está pasando en casa?" })).toBeTruthy();
+    expect(screen.getByText("Elige una categoría y Jack se encarga del resto.")).toBeTruthy();
+    expect(screen.getByRole("header", { name: "Categorías" })).toBeTruthy();
+    expect(screen.queryByTestId("home-tell-jack")).toBeNull();
+    expect(screen.queryByText(/dile a jack/i)).toBeNull();
+    expect(screen.queryByLabelText(/dile a jack/i)).toBeNull();
   });
 
   it("shows card skeletons while categories load", async () => {
@@ -71,7 +84,7 @@ describe("CustomerHomeScreen", () => {
     jest.mocked(apiGet).mockReturnValue(pending.promise);
     await renderWithQuery(<CustomerHomeScreen />);
 
-    expect(screen.getByRole("header", { name: "Or pick a category" })).toBeTruthy();
+    expect(screen.getByRole("header", { name: "Categories" })).toBeTruthy();
     expect(screen.getByRole("progressbar", { name: "Loading categories" })).toBeTruthy();
     expect(
       screen.getAllByTestId(/^home-category-skeleton-\d+$/, { includeHiddenElements: true }),
@@ -110,15 +123,17 @@ describe("CustomerHomeScreen", () => {
       "Jardinería y paisajismo",
       "Moving & Assembly",
     ]);
-    expect(screen.getByRole("header", { name: "O elige una categoría" })).toBeTruthy();
+    expect(screen.getByRole("header", { name: "Categorías" })).toBeTruthy();
   });
 
-  it("pressing a card starts a request for its slug", async () => {
+  it("a category card starts a request with its slug", async () => {
+    requestDraftStore.setState({ categorySlug: "painting" }); // an earlier start is replaced
     await renderWithQuery(<CustomerHomeScreen />);
 
     await fireEvent.press(await screen.findByRole("button", { name: "Lawn & Landscaping" }));
 
     expect(requestDraftStore.getState().categorySlug).toBe("lawn-landscaping");
+    expect(router.push).toHaveBeenCalledTimes(1);
     expect(router.push).toHaveBeenCalledWith("/request/new");
   });
 
@@ -147,9 +162,7 @@ describe("CustomerHomeScreen", () => {
     expect(await screen.findByText("We couldn't load the categories.")).toBeTruthy();
     expect(cardNames()).toEqual([]);
     expect(apiGet).toHaveBeenCalledTimes(1); // no silent retries behind the message
-
-    await fireEvent.press(tellJack()); // the hero keeps working
-    expect(router.push).toHaveBeenCalledWith("/request/new");
+    expect(screen.getByRole("header", { name: "What's going on at home?" })).toBeTruthy(); // the hero stays
 
     const retry = deferred<typeof CATEGORIES>();
     jest.mocked(apiGet).mockReturnValueOnce(retry.promise);
@@ -170,8 +183,9 @@ describe("CustomerHomeScreen", () => {
     await renderWithQuery(<CustomerHomeScreen />);
 
     await waitFor(() => expect(screen.queryByTestId("home-categories")).toBeNull());
-    expect(screen.queryByText("Or pick a category")).toBeNull();
-    expect(tellJack()).toBeTruthy();
+    expect(screen.queryByText("Categories")).toBeNull();
+    expect(screen.getByRole("header", { name: "What's going on at home?" })).toBeTruthy();
+    expect(screen.getByText("Pick a category and Jack takes care of the rest.")).toBeTruthy();
   });
 
   it("the account button opens /account", async () => {

@@ -53,7 +53,7 @@ describe("RequestStartPlaceholderScreen", () => {
     expect(screen.getByTestId("request-start-category")).toHaveTextContent("Limpieza del hogar");
   });
 
-  it("shows no category when the request started from Tell Jack", async () => {
+  it("a direct link with no draft (no start on home before it) shows the title alone", async () => {
     await renderWithQuery(<RequestStartPlaceholderScreen />, loadedClient());
 
     expect(screen.getByRole("header", { name: "Tell Jack what happened" })).toBeTruthy();
