@@ -511,9 +511,9 @@ export interface paths {
         /**
          * Open one of my opportunities
          * @description The full request, with its photos and videos as privacy-safe copies (no location or
-         *     other metadata) behind short-lived signed URLs, and how many are still being prepared. The
-         *     first open records that the pro saw it (viewed, viewed_at); opening it again changes
-         *     nothing.
+         *     other metadata) behind short-lived signed URLs, and how many are still being prepared, and
+         *     the platform's take rate for the quote form's preview. The first open records that the pro
+         *     saw it (viewed, viewed_at); opening it again changes nothing.
          */
         get: operations["open_opportunity_v1_pros_me_opportunities__dispatch_id__get"];
         put?: never;
@@ -535,9 +535,10 @@ export interface paths {
         put?: never;
         /**
          * Send a quote for one of my opportunities
-         * @description A fixed-price quote: the price in cents, what it includes, the estimated duration and a
-         *     proposed start. It expires after the platform's quote lifetime. The first quote on a
-         *     request makes it Quote Ready for the customer.
+         * @description A fixed-price quote: the price in cents, what it includes, optionally how the pro will
+         *     do the job, the estimated duration and a proposed start. It expires after the platform's
+         *     quote lifetime. The first quote on a request makes it Quote Ready for the customer. The
+         *     response shows the pro what they will receive: the price minus the platform's fee.
          */
         post: operations["submit_quote_v1_pros_me_opportunities__dispatch_id__quote_post"];
         delete?: never;
@@ -557,8 +558,9 @@ export interface paths {
          * Compare the quotes on one of my service requests
          * @description The quotes the customer can choose from: the pending ones not yet expired, and the
          *     accepted one while the payment is pending. Empty until the request is Quote Ready, and
-         *     once it is closed. Each shows the price, what it includes (contact details masked), the
-         *     duration, the proposed start, when it expires, and the pro's public card.
+         *     once it is closed. Each shows the price, what it includes and how the pro will do the job
+         *     (contact details masked), the duration, the proposed start, when it expires, and the pro's
+         *     public card.
          */
         get: operations["list_request_quotes_v1_requests__request_id__quotes_get"];
         put?: never;
@@ -607,8 +609,8 @@ export interface paths {
          *     accepted, where the payment follows; the other quotes stay pending. Calling it again for the
          *     accepted quote returns it unchanged, and changes nothing, even if its pro can no longer be
          *     hired: that repeat comes first, then a new acceptance checks the pro (approved, payouts
-         *     enabled). The response is the quote as listed, its scope masked; its pro card shows the
-         *     pro's current verification.
+         *     enabled). The response is the quote as listed, its scope and approach masked; its pro card
+         *     shows the pro's current verification.
          */
         post: operations["accept_quote_v1_requests__request_id__quotes__quote_id__accept_post"];
         delete?: never;
@@ -934,8 +936,9 @@ export interface components {
         };
         /**
          * CustomerQuote
-         * @description A quote on the customer's request (#188). `scope` arrives with contact details masked
-         *     (app.redaction): the pro's own email and phone, then every contact pattern.
+         * @description A quote on the customer's request (#188). `scope` and `approach` arrive with contact
+         *     details masked (app.redaction): the pro's own email and phone, then every contact pattern.
+         *     Never the pro's payout or the platform's fee.
          */
         CustomerQuote: {
             /**
@@ -965,6 +968,11 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Approach
+             * @description How the pro will do the job, with contact details masked as in the scope; null when the pro wrote none.
+             */
+            approach: string | null;
             pro: components["schemas"]["QuotePro"];
         };
         /** CustomerQuoteList */
@@ -1311,6 +1319,12 @@ export interface components {
              * @description How many more photos and videos are still being prepared.
              */
             media_pending: number;
+            /**
+             * Take Rate Bps
+             * @description The platform's take rate in basis points (1500 = 15%), for the quote form's live 'you'll receive' preview only: the quote's response carries the amounts that count.
+             * @example 1500
+             */
+            take_rate_bps: number;
         };
         /**
          * OpportunityLocation
@@ -1602,6 +1616,11 @@ export interface components {
              */
             scope: string;
             /**
+             * Approach
+             * @description How I'll do the job: optional, apart from what the price includes. Trimmed; empty or blank is stored as no note (null).
+             */
+            approach?: string | null;
+            /**
              * Duration Minutes
              * @description Estimated duration of the work.
              */
@@ -1613,7 +1632,11 @@ export interface components {
              */
             proposed_start_at: string;
         };
-        /** QuoteOut */
+        /**
+         * QuoteOut
+         * @description The pro's own quote (#50), with what they will receive (#246). Never sent to the
+         *     customer: CustomerQuote does not extend it.
+         */
         QuoteOut: {
             /**
              * Id
@@ -1642,6 +1665,21 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Approach
+             * @description How I'll do the job, as the pro wrote it.
+             */
+            approach: string | null;
+            /**
+             * Pro Payout Cents
+             * @description What the pro will receive: the amount minus the platform's fee. The customer pays the amount; the platform absorbs the card fee.
+             */
+            pro_payout_cents: number;
+            /**
+             * Platform Fee Cents
+             * @description The platform's fee: the amount times the take rate, rounded half up to the cent.
+             */
+            platform_fee_cents: number;
         };
         /**
          * QuotePro
@@ -3595,6 +3633,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description not_configured: the platform's take rate is set to an invalid value. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     submit_quote_v1_pros_me_opportunities__dispatch_id__quote_post: {
@@ -3657,7 +3704,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description validation_error: amount or duration not a positive integer or above the platform's cap, scope empty or too long, proposed_start_at not a future time with a time zone, or a field the server sets (status, expires_at, pro or request). */
+            /** @description validation_error: amount or duration not a positive integer or above the platform's cap, scope empty or too long, approach too long or with a NUL character, proposed_start_at not a future time with a time zone, or a field the server sets (status, expires_at, pro or request). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -3666,7 +3713,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description not_configured: quoting is not configured yet (the quote lifetime is not set, or a quote cap is set to an invalid value). */
+            /** @description not_configured: quoting is not configured yet (the quote lifetime is not set, or a quote cap or the platform's take rate is set to an invalid value). */
             503: {
                 headers: {
                     [name: string]: unknown;
