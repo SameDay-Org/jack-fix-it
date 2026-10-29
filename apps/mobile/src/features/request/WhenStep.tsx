@@ -155,7 +155,8 @@ function DayBubble({ day, locale, relative, selected, onLayout }: DayBubbleProps
           : [bubbleShadow, continuousCorners]
       }
       className={cx(
-        "min-w-16 items-center gap-0.5 rounded-lg px-3 py-3",
+        // One width for every day at the default size; a longer label ("Tomorrow") grows its own.
+        "min-w-20 items-center gap-0.5 rounded-lg px-2 py-3",
         selected ? "bg-navy-900" : "bg-white",
       )}
       testID={`when-day-${day}`}

@@ -132,6 +132,9 @@ export function CategoryCards({
       />
       <Animated.View
         style={[{ paddingHorizontal: PANEL_PADDING }, contentStyle]}
+        // Fading as one layer: Android otherwise fades each card and its elevation shadow apart,
+        // and the cards turn into gray blocks.
+        needsOffscreenAlphaCompositing
         className="gap-4 pb-6 pt-6"
         testID="home-categories-content"
       >
