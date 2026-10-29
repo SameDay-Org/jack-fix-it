@@ -302,6 +302,38 @@
     "lessLabel": "Less, show less of what's included",
     "accept": "Accept",
     "acceptLabel": "Accept the quote from {{pro}} for {{price}}",
+    "viewProfile": "View profile",
+    "viewProfileLabel": "View {{pro}}'s profile",
+    "profile": {
+      "loading": "Loading profile",
+      "memberSince": "Member since {{month}}",
+      "stats": {
+        "rating": "rating",
+        "notRated": "no ratings yet",
+        "jobs_one": "job done",
+        "jobs_other": "jobs done",
+        "years_one": "year of experience",
+        "years_other": "years of experience"
+      },
+      "newPro": {
+        "named": "{{name}} is new to Jack Fix It.",
+        "unnamed": "This pro is new to Jack Fix It.",
+        "joined": "They joined in {{month}} and haven't completed a job here yet.",
+        "verified": "Like every pro on Jack Fix It, they were verified before they could send you a quote."
+      },
+      "about": "About",
+      "services": "What they do",
+      "trust": "Verified by Jack Fix It: our team reviewed the information and documents this pro provided and approved their profile before they could send you a quote.",
+      "accept": "Accept for {{price}}",
+      "backToQuotes": "Back to quotes",
+      "gone": {
+        "title": "This quote is no longer available",
+        "body": "It expired or was withdrawn, so this pro's profile can't be shown."
+      },
+      "error": {
+        "title": "We couldn't load this profile"
+      }
+    },
     "notAcceptable": "This quote can't be accepted anymore.",
     "refreshFailed": "Couldn't refresh. Check your connection and try again.",
     "empty": {

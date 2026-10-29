@@ -7,6 +7,7 @@ describe("StepProgress", () => {
     await render(<StepProgress current={2} total={5} label="Step 2 of 5" testID="progress" />);
 
     const bar = screen.getByRole("progressbar", { name: "Step 2 of 5" });
+    expect(bar.props.accessibilityValue).toEqual({ min: 0, max: 5, now: 2 });
     expect(bar.props.accessible).toBe(true);
     expect(screen.getByText("Step 2 of 5")).toBeTruthy();
     const segments = [1, 2, 3, 4, 5].map((n) => screen.getByTestId(`progress-segment-${n}`));

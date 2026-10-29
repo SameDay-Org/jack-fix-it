@@ -1,15 +1,17 @@
-import { router, unstable_useIsNavigating } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { router } from "expo-router";
+import { useMemo, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { FlatList, RefreshControl, Text, View } from "react-native";
+import { FlatList, RefreshControl, View } from "react-native";
 
 import { SessionExpiredError } from "@/api";
-import { Button, Card, showToast } from "@/components/ui";
+import { showToast } from "@/components/ui";
 import { tokens } from "@/theme";
 
 import { useExpiryClock } from "./expiry";
+import { acceptHref, profileHref, useGuardedPush } from "./navigation";
 import { QuoteCard, QuoteCardSkeleton } from "./QuoteCard";
 import { quoteStateOf } from "./quoteText";
+import { StateCard } from "./StateCard";
 import {
   isNotFound,
   useRefetchOnReturn,
@@ -35,7 +37,8 @@ const Separator = () => <View className="h-4" />;
  * The quotes on one request, compared and accepted: one card each in the API's order (never
  * re-sorted), with every state designed (skeletons, empty, not found, error with retry). It is a
  * virtualized list that refreshes on pull, on focus and on foreground; Accept opens the
- * confirmation sheet (`/requests/[id]/accept`).
+ * confirmation sheet (`/requests/[id]/accept`) and "View profile" the pro's public profile
+ * (`/requests/[id]/quotes/[quoteId]/pro`), one push at a time.
  */
 export function QuoteList({ requestId, header, testID = "quote-list" }: QuoteListProps) {
   const { t } = useTranslation();
@@ -43,7 +46,7 @@ export function QuoteList({ requestId, header, testID = "quote-list" }: QuoteLis
   const shownError = useSettledError(data, error);
   const notFound = isNotFound(shownError);
   useRefetchOnReturn(refetch, !notFound);
-  const openAccept = useOpenAccept(requestId);
+  const push = useGuardedPush();
   const [pulling, setPulling] = useState(false);
 
   const items = data && !notFound ? data.items : NO_QUOTES;
@@ -76,7 +79,8 @@ export function QuoteList({ requestId, header, testID = "quote-list" }: QuoteLis
           quote={item}
           state={quoteStateOf(item, now, anyAccepted)}
           now={now}
-          onAccept={openAccept}
+          onAccept={(quote) => push(acceptHref(requestId, quote.id))}
+          onViewProfile={(quote) => push(profileHref(requestId, quote.id))}
         />
       )}
       // Rows depend on the clock too: a passing minute or an expiry redraws them.
@@ -86,7 +90,7 @@ export function QuoteList({ requestId, header, testID = "quote-list" }: QuoteLis
         data === undefined && shownError === null ? (
           <QuoteListLoading />
         ) : notFound ? (
-          <QuoteListMessage
+          <StateCard
             title={t("quotes.notFound.title")}
             body={t("quotes.notFound.body")}
             action={t("quotes.notFound.home")}
@@ -94,7 +98,7 @@ export function QuoteList({ requestId, header, testID = "quote-list" }: QuoteLis
             testID={`${testID}-not-found`}
           />
         ) : data === undefined ? (
-          <QuoteListMessage
+          <StateCard
             title={t("quotes.error.title")}
             body={t("quotes.error.body")}
             action={t("quotes.error.retry")}
@@ -103,7 +107,7 @@ export function QuoteList({ requestId, header, testID = "quote-list" }: QuoteLis
             testID={`${testID}-error`}
           />
         ) : (
-          <QuoteListMessage
+          <StateCard
             title={t("quotes.empty.title")}
             body={t("quotes.empty.body")}
             testID={`${testID}-empty`}
@@ -121,32 +125,6 @@ export function QuoteList({ requestId, header, testID = "quote-list" }: QuoteLis
         />
       }
     />
-  );
-}
-
-/**
- * Opens the confirmation for a quote. A second tap before the sheet is up opens nothing: the
- * router queues a push and the list stays tappable until it lands. Once the router is idle again
- * (the sheet is up, or the push came to nothing) Accept works again.
- */
-function useOpenAccept(requestId: string) {
-  const opening = useRef(false);
-  const navigating = unstable_useIsNavigating();
-
-  useEffect(() => {
-    if (!navigating) opening.current = false;
-  }, [navigating]);
-
-  return useCallback(
-    (quote: CustomerQuote) => {
-      if (opening.current) return;
-      opening.current = true;
-      router.push({
-        pathname: "/requests/[id]/accept",
-        params: { id: requestId, quote: quote.id },
-      });
-    },
-    [requestId],
   );
 }
 
@@ -170,33 +148,5 @@ function QuoteListLoading() {
         ))}
       </View>
     </View>
-  );
-}
-
-type QuoteListMessageProps = {
-  title: string;
-  body: string;
-  /** The one thing to do next, when there is one. */
-  action?: string;
-  onAction?: () => void;
-  /** The action is under way: its button shows a spinner and ignores taps. */
-  busy?: boolean;
-  testID: string;
-};
-
-/** A state in a bubble: what happened, and what to do next. */
-function QuoteListMessage({ title, body, action, onAction, busy, testID }: QuoteListMessageProps) {
-  return (
-    <Card testID={testID} className="gap-4">
-      <View className="gap-1">
-        <Text accessibilityRole="header" className="text-headline text-navy-900">
-          {title}
-        </Text>
-        <Text className="text-callout text-gray-500">{body}</Text>
-      </View>
-      {action && onAction ? (
-        <Button label={action} onPress={onAction} loading={busy} testID={`${testID}-action`} />
-      ) : null}
-    </Card>
   );
 }

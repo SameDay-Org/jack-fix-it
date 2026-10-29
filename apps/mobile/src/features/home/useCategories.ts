@@ -21,7 +21,10 @@ export const useCategories = () =>
     retry: false,
   });
 
-/** The name in the app's language, falling back to English (and to the slug if a name is missing). */
-export function categoryName(category: Category): string {
+/**
+ * The name in the app's language, falling back to English (and to the slug if a name is missing).
+ * Any category shape with names, so a summary on another resource (a pro's categories) reads the same.
+ */
+export function categoryName(category: Pick<Category, "slug" | "names">): string {
   return category.names[deviceLocale()] ?? category.names.en ?? category.slug;
 }

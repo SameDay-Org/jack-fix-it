@@ -21,6 +21,7 @@ export function StepProgress({ current, total, label, testID }: StepProgressProp
       accessible
       accessibilityRole="progressbar"
       accessibilityLabel={label}
+      accessibilityValue={{ min: 0, max: total, now: current }}
       className="gap-2"
       testID={testID}
     >
