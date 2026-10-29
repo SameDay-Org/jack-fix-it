@@ -43,6 +43,10 @@ PUBLIC_ROUTES: Final[frozenset[tuple[str, str]]] = frozenset(
         # Out of the served area, a web visitor joins the waitlist without an account; a valid
         # bearer, if sent, links the entry to the user. Rate-limited per IP and per contact.
         ("POST", "/v1/waitlist"),
+        # Stripe sends the pro's browser here after onboarding (#39): a browser carries no
+        # token. Static pages that link back to the app; they read nothing and echo nothing.
+        ("GET", "/v1/payouts/onboarding/return"),
+        ("GET", "/v1/payouts/onboarding/refresh"),
     }
 )
 

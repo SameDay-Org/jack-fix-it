@@ -7,6 +7,7 @@ from tests.conftest import (
     TEST_RATE_LIMIT_SETTINGS,
     TEST_REFRESH_SETTINGS,
     TEST_STORAGE_SETTINGS,
+    TEST_STRIPE_SETTINGS,
     TEST_TWILIO_SETTINGS,
     make_settings,
 )
@@ -82,6 +83,7 @@ def test_jwt_secret_required_in_staging_and_production(app_env: str) -> None:
         **TEST_RATE_LIMIT_SETTINGS,
         **TEST_REFRESH_SETTINGS,
         **TEST_EMAIL_SETTINGS,
+        **TEST_STRIPE_SETTINGS,
     )
     assert settings.jwt_secret is not None
 
@@ -114,7 +116,11 @@ def test_secret_required_in_staging_and_production(app_env: str) -> None:
     assert short not in str(too_short.value)
     assert "32 characters" in str(missing.value)
     settings = make_settings(
-        **deployed, **TEST_RATE_LIMIT_SETTINGS, **TEST_REFRESH_SETTINGS, **TEST_EMAIL_SETTINGS
+        **deployed,
+        **TEST_RATE_LIMIT_SETTINGS,
+        **TEST_REFRESH_SETTINGS,
+        **TEST_EMAIL_SETTINGS,
+        **TEST_STRIPE_SETTINGS,
     )
     assert settings.rate_limit_key_secret is not None
 
@@ -215,6 +221,7 @@ def test_s3_settings_required_in_staging_and_production(app_env: str, missing: s
         **TEST_RATE_LIMIT_SETTINGS,
         **TEST_REFRESH_SETTINGS,
         **TEST_EMAIL_SETTINGS,
+        **TEST_STRIPE_SETTINGS,
     )
     assert settings.s3_bucket == TEST_STORAGE_SETTINGS["s3_bucket"]
 
@@ -282,6 +289,7 @@ def test_twilio_settings_required_in_staging_and_production(app_env: str, missin
         **TEST_RATE_LIMIT_SETTINGS,
         **TEST_REFRESH_SETTINGS,
         **TEST_EMAIL_SETTINGS,
+        **TEST_STRIPE_SETTINGS,
     )
     assert settings.twilio_verify_service_sid == TEST_TWILIO_SETTINGS["twilio_verify_service_sid"]
 
@@ -343,6 +351,7 @@ def test_resend_settings_required_in_staging_and_production(app_env: str, missin
         **TEST_RATE_LIMIT_SETTINGS,
         **TEST_REFRESH_SETTINGS,
         **TEST_EMAIL_SETTINGS,
+        **TEST_STRIPE_SETTINGS,
     }
 
     for absent in (None, ""):
@@ -377,3 +386,68 @@ def test_password_reset_settings_defaults() -> None:
     assert settings.password_reset_daily_limit == 5
     assert settings.password_reset_daily_window_seconds == 86_400
     assert settings.resend_timeout_seconds == 5
+
+
+# Fixture values only: shaped like Stripe keys, but not keys.
+LIVE_KEYS = ("sk_live_fixture-not-a-key", "rk_live_fixture-not-a-key")
+
+
+@pytest.mark.parametrize("app_env", ["staging", "production"])
+def test_settings_stripe_required_and_live_key_refused(app_env: str) -> None:
+    complete: dict[str, object] = {
+        "app_env": app_env,
+        "jwt_secret": "s" * 32,
+        **TEST_STORAGE_SETTINGS,
+        **TEST_TWILIO_SETTINGS,
+        **TEST_RATE_LIMIT_SETTINGS,
+        **TEST_REFRESH_SETTINGS,
+        **TEST_EMAIL_SETTINGS,
+        **TEST_STRIPE_SETTINGS,
+    }
+    assert make_settings(**complete).public_api_url == TEST_STRIPE_SETTINGS["public_api_url"]
+
+    for missing in ("stripe_secret_key", "public_api_url"):
+        for absent in (None, ""):
+            with pytest.raises(ValidationError, match=missing.upper()) as error:
+                make_settings(**{**complete, missing: absent})
+            # The error names the variable but never prints a value.
+            assert "fixture-not-a-real-key" not in str(error.value)
+    with pytest.raises(ValidationError, match="PUBLIC_API_URL must use https"):
+        make_settings(**{**complete, "public_api_url": "http://api.example.invalid"})
+
+    for live in LIVE_KEYS:
+        if app_env == "production":
+            assert make_settings(**{**complete, "stripe_secret_key": live}).stripe_secret_key
+        else:
+            with pytest.raises(ValidationError, match="live key") as error:
+                make_settings(**{**complete, "stripe_secret_key": live})
+            assert live not in str(error.value)
+
+
+@pytest.mark.parametrize("app_env", ["development", "test"])
+def test_stripe_settings_optional_in_development(app_env: str) -> None:
+    settings = make_settings(app_env=app_env, stripe_secret_key="", public_api_url="")
+    assert (settings.stripe_secret_key, settings.public_api_url) == (None, None)
+    local = make_settings(app_env=app_env, public_api_url="http://localhost:8000/")
+    assert local.public_api_url == "http://localhost:8000"  # http allowed here, no slash
+    assert local.payouts_onboarding_app_url == "jackfixit://payouts"
+    # Stripe stays in test mode until launch: a live key works in production only.
+    for live in LIVE_KEYS:
+        with pytest.raises(ValidationError, match="live key"):
+            make_settings(app_env=app_env, stripe_secret_key=live)
+
+
+@pytest.mark.parametrize(
+    "url", ["api.example.invalid", "ftp://api.example.invalid", "https://", "https://a.b/?x=1"]
+)
+def test_public_api_url_must_be_absolute_http(url: str) -> None:
+    with pytest.raises(ValidationError, match="PUBLIC_API_URL"):
+        make_settings(public_api_url=url)
+
+
+@pytest.mark.parametrize(
+    "url", ["jackfixit://payouts?x=1", "jackfixit://payouts#x", "javascript:alert(1)", "a b://c"]
+)
+def test_payouts_app_url_takes_no_query(url: str) -> None:
+    with pytest.raises(ValidationError, match="PAYOUTS_ONBOARDING_APP_URL"):
+        make_settings(payouts_onboarding_app_url=url)

@@ -124,6 +124,22 @@ class ProProfileRepository:
             statement = statement.with_for_update().execution_options(populate_existing=True)
         return await self._session.scalar(statement)
 
+    async def set_stripe_account_id(self, pro_id: uuid.UUID, account_id: str) -> None:
+        await self._session.execute(
+            update(ProProfile)
+            .where(ProProfile.id == pro_id)
+            .values(stripe_account_id=account_id, updated_at=func.now())
+        )
+
+    async def set_payouts_enabled(self, pro_id: uuid.UUID, enabled: bool) -> bool:
+        """True when the stored value changed; a profile that already matches is not written."""
+        result = await self._session.execute(
+            update(ProProfile)
+            .where(ProProfile.id == pro_id, ProProfile.payouts_enabled.is_distinct_from(enabled))
+            .values(payouts_enabled=enabled, updated_at=func.now())
+        )
+        return bool(result.rowcount)  # type: ignore[attr-defined]  # CursorResult of an UPDATE
+
     async def category_ids(self, pro_id: uuid.UUID) -> list[uuid.UUID]:
         statement = select(ProCategory.category_id).where(ProCategory.pro_id == pro_id)
         return list((await self._session.scalars(statement)).all())

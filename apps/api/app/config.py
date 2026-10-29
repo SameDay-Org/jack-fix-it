@@ -3,6 +3,7 @@
 import re
 from functools import lru_cache
 from typing import Annotated, Literal, Self
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -44,6 +45,12 @@ REFRESH_ROTATION_SECRET_MIN_LENGTH = 32
 # Email through Resend (D4.3, #27): deployed environments must be able to send.
 _EMAIL_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
 _EMAIL_SETTINGS: tuple[str, ...] = ("resend_api_key", "email_from")
+# Stripe Connect payouts (D7.1, #39): deployed environments must reach Stripe, and Stripe must
+# reach the API's public onboarding pages over https.
+_STRIPE_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
+_STRIPE_SETTINGS: tuple[str, ...] = ("stripe_secret_key", "public_api_url")
+# Stripe stays in test mode until launch (ADR 0005): a live key works in production only.
+_STRIPE_LIVE_KEY_PREFIXES = ("sk_live_", "rk_live_")
 # Upper bound on passwords (NIST 800-63B allows a cap); also bounds the Argon2 input.
 PASSWORD_MAX_LENGTH = 128
 
@@ -73,6 +80,14 @@ def parse_codecs(value: str) -> list[str]:
 def parse_cors_origins(value: str) -> list[str]:
     """Split a CSV of origins; ignore blanks and trailing slashes."""
     return [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
+
+
+def check_public_api_url(value: str) -> str:
+    """An absolute http(s) URL with no query or fragment, without its trailing slash."""
+    url = urlsplit(value)
+    if url.scheme not in ("http", "https") or not url.netloc or url.query or url.fragment:
+        raise ValueError("PUBLIC_API_URL must be an absolute http(s) URL with no query")
+    return value.rstrip("/")
 
 
 class Settings(BaseSettings):
@@ -244,6 +259,21 @@ class Settings(BaseSettings):
     saved_addresses_max_per_user: int = Field(default=4, gt=0)
     saved_address_write_limit: int = Field(default=30, gt=0)
     saved_address_write_window_seconds: int = Field(default=600, gt=0)
+    # Pro payouts through Stripe Connect Express (D7.1, #39; ADR 0005). Required in staging and
+    # production; without the key, the payout endpoints answer 503. Seconds one Stripe call may
+    # take, and the SDK's retries of a call that failed on the network, a 409, 429 or 5xx (with
+    # the same idempotency key); 0 fails at once, and the app's retry is safe.
+    stripe_secret_key: SecretStr | None = None
+    stripe_timeout_seconds: float = Field(default=10.0, gt=0)
+    stripe_max_network_retries: int = Field(default=0, ge=0)
+    # The API's public base URL, such as https://api.example.com: Stripe sends the pro's browser
+    # back to its onboarding pages there. Required with Stripe in staging and production (https).
+    public_api_url: str | None = None
+    # Where those pages send the browser on: the app's link, plus ?result=return or refresh.
+    payouts_onboarding_app_url: str = "jackfixit://payouts"
+    # Onboarding links one pro may ask for per window.
+    payouts_onboarding_link_limit: int = Field(default=10, gt=0)
+    payouts_onboarding_link_window_seconds: int = Field(default=600, gt=0)
 
     @field_validator("database_url")
     @classmethod
@@ -295,11 +325,26 @@ class Settings(BaseSettings):
         "email_from",
         "expo_access_token",
         "google_maps_api_key",
+        "stripe_secret_key",
+        "public_api_url",
         mode="before",
     )
     @classmethod
     def _empty_is_none(cls, value: object) -> object:
         return None if value == "" else value
+
+    @field_validator("public_api_url")
+    @classmethod
+    def _check_public_api_url(cls, value: str | None) -> str | None:
+        return None if value is None else check_public_api_url(value)
+
+    @field_validator("payouts_onboarding_app_url")
+    @classmethod
+    def _check_app_url(cls, value: str) -> str:
+        # The pages append ?result=...: a query or fragment here would break the link.
+        if not re.fullmatch(r"[a-z][a-z0-9+.-]*://[^\s?#\"'<>]*", value):
+            raise ValueError("PAYOUTS_ONBOARDING_APP_URL must be a URL with no query or fragment")
+        return value
 
     @property
     def media_sanitize_row_budget_seconds(self) -> float:
@@ -403,6 +448,26 @@ class Settings(BaseSettings):
         missing = [name.upper() for name in _EMAIL_SETTINGS if getattr(self, name) is None]
         if missing:
             raise ValueError(f"{', '.join(missing)} must be set when APP_ENV is {self.app_env}")
+        return self
+
+    @model_validator(mode="after")
+    def _require_stripe_when_deployed(self) -> Self:
+        if self.app_env not in _STRIPE_REQUIRED_IN:
+            return self
+        missing = [name.upper() for name in _STRIPE_SETTINGS if getattr(self, name) is None]
+        if missing:
+            raise ValueError(f"{', '.join(missing)} must be set when APP_ENV is {self.app_env}")
+        if not (self.public_api_url or "").startswith("https://"):
+            raise ValueError(f"PUBLIC_API_URL must use https when APP_ENV is {self.app_env}")
+        return self
+
+    @model_validator(mode="after")
+    def _refuse_live_stripe_key_outside_production(self) -> Self:
+        key = self.stripe_secret_key.get_secret_value() if self.stripe_secret_key else ""
+        if self.app_env != "production" and key.startswith(_STRIPE_LIVE_KEY_PREFIXES):
+            raise ValueError(
+                f"STRIPE_SECRET_KEY is a live key; it is refused when APP_ENV is {self.app_env}"
+            )
         return self
 
 

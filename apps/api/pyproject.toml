@@ -20,6 +20,7 @@ dependencies = [
     "redis>=5.3.1",
     "sentry-sdk>=2.72.0",
     "sqlalchemy[asyncio]>=2.1.5",
+    "stripe==16.1.0",
     "uvicorn>=0.54.0",
 ]
 
@@ -75,4 +76,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-addopts = "-ra"
+# stripe_live (D7.5, #39) calls Stripe's test mode: deselected here, so CI never runs it; select
+# it with `-m stripe_live` and a test-mode STRIPE_SECRET_KEY in the environment.
+addopts = "-ra -m 'not stripe_live'"
+markers = ["stripe_live: calls the real Stripe API in test mode (opt-in, never in CI)"]

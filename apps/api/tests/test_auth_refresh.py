@@ -29,6 +29,7 @@ from tests.conftest import (
     TEST_JWT_SECRET,
     TEST_RATE_LIMIT_SETTINGS,
     TEST_STORAGE_SETTINGS,
+    TEST_STRIPE_SETTINGS,
     TEST_TWILIO_SETTINGS,
     Committed,
     backend_pid,
@@ -732,6 +733,7 @@ def test_secret_required_when_deployed(app_env: AppEnv) -> None:
         **TEST_TWILIO_SETTINGS,
         **TEST_RATE_LIMIT_SETTINGS,
         **TEST_EMAIL_SETTINGS,
+        **TEST_STRIPE_SETTINGS,
     }
     short = "r" * 31
 

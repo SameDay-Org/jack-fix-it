@@ -1643,6 +1643,178 @@
         ]
       }
     },
+    "/v1/pros/me/payouts/onboarding-link": {
+      "post": {
+        "tags": [
+          "payouts"
+        ],
+        "summary": "Get a payout onboarding link",
+        "description": "A single-use link to Stripe's hosted onboarding, where the pro enters the details\nStripe needs to pay them out. The first call creates the pro's payout account (one per pro,\never); later calls reuse it. Stripe sends the browser back to the app when the pro is done\nor the link has expired; then read GET /v1/pros/me/payouts.",
+        "operationId": "create_onboarding_link_v1_pros_me_payouts_onboarding_link_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingLinkOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros have a payout account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "payments_error: Stripe refused the call, e.g. for an account deleted on its side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "payments_unavailable: payments are not configured, or Stripe is not reachable; nothing changed, retry later.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many onboarding links; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/pros/me/payouts": {
+      "get": {
+        "tags": [
+          "payouts"
+        ],
+        "summary": "My payout status",
+        "description": "Where the pro's payout onboarding stands, read from Stripe on each call. Only a pro with\npayouts enabled receives requests.",
+        "operationId": "get_payouts_status_v1_pros_me_payouts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayoutsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros have a payout account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "payments_error: Stripe refused the call, e.g. for an account deleted on its side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "payments_unavailable: payments are not configured, or Stripe is not reachable; nothing changed, retry later.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/v1/pros/me/opportunities": {
       "get": {
         "tags": [
@@ -3911,6 +4083,26 @@
         "title": "NotificationPreferencesPatch",
         "description": "1 to MAX_CHANGES changes, each pair once and only a channel its group has."
       },
+      "OnboardingLinkOut": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "Single-use Stripe-hosted onboarding page; open it in a browser."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "expires_at"
+        ],
+        "title": "OnboardingLinkOut"
+      },
       "OpportunityCategory": {
         "properties": {
           "id": {
@@ -4257,6 +4449,34 @@
           "new_password"
         ],
         "title": "PasswordResetRequest"
+      },
+      "PayoutsOut": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/PayoutsStatus",
+            "description": "not_started: no payout account yet; incomplete: Stripe still needs information; in_review: everything is submitted and Stripe is checking it; enabled: payouts are on."
+          },
+          "payouts_enabled": {
+            "type": "boolean",
+            "title": "Payouts Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "payouts_enabled"
+        ],
+        "title": "PayoutsOut"
+      },
+      "PayoutsStatus": {
+        "type": "string",
+        "enum": [
+          "not_started",
+          "incomplete",
+          "in_review",
+          "enabled"
+        ],
+        "title": "PayoutsStatus"
       },
       "PhoneSendRequest": {
         "properties": {
