@@ -44,6 +44,40 @@ describe("Chip", () => {
   });
 });
 
+describe("Chip as a multi-select toggle", () => {
+  const toggle = () => screen.getByRole("checkbox", { name: "Ceilings" });
+
+  it("is a checkbox with its checked state, filled navy with white text while selected", async () => {
+    await render(<Chip label="Ceilings" selected={false} onPress={jest.fn()} />);
+
+    expect(toggle().props.accessibilityState).toMatchObject({ checked: false, disabled: false });
+    expect(toggle().props.className).toContain("bg-white");
+    expect(screen.getByText("Ceilings").props.className).toContain("text-navy-900");
+  });
+
+  it("fills the chip while selected and keeps its 48 dp shape", async () => {
+    await render(<Chip label="Ceilings" selected onPress={jest.fn()} />);
+
+    expect(toggle().props.accessibilityState).toMatchObject({ checked: true });
+    expect(toggle().props.className).toContain("bg-navy-900");
+    expect(toggle().props.className).toContain("min-h-12");
+    expect(screen.getByText("Ceilings").props.className).toContain("text-white");
+  });
+
+  it("reads the hint after the label, and a plain chip stays a button without a checked state", async () => {
+    await render(
+      <>
+        <Chip label="Ceilings" hint="Flat or textured ceilings" selected onPress={jest.fn()} />
+        <Chip label="Painting" onPress={jest.fn()} />
+      </>,
+    );
+
+    expect(toggle().props.accessibilityHint).toBe("Flat or textured ceilings");
+    expect(chip().props.accessibilityRole).toBe("button");
+    expect(chip().props.accessibilityState?.checked).toBeUndefined();
+  });
+});
+
 describe("ChipSkeleton", () => {
   it("has the chip's shape and an invisible label line of the given width, scaled with the font", async () => {
     await render(<ChipSkeleton labelWidth={96} testID="skeleton" />);

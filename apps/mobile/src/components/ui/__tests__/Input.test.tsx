@@ -136,4 +136,57 @@ describe("Input", () => {
     expect(row.children).toHaveLength(2);
     expect(screen.getByText("Show")).toBeTruthy();
   });
+
+  it("multiline: a tall field whose text starts at the top", async () => {
+    await render(
+      <Input label="Email" value="" onChangeText={jest.fn()} multiline testID="email" />,
+    );
+
+    expect(field().props.multiline).toBe(true);
+    expect(field().props.textAlignVertical).toBe("top");
+    expect(field().props.className).toContain("min-h-32");
+    expect(bubble().props.className).toContain("items-start");
+  });
+
+  it("a single-line field stays centered in its bubble", async () => {
+    await render(<Input label="Email" value="" onChangeText={jest.fn()} testID="email" />);
+
+    expect(field().props.multiline).toBe(false);
+    expect(field().props.textAlignVertical).toBeUndefined();
+    expect(bubble().props.className).toContain("items-center");
+  });
+
+  it("shows the counter at the end of the message line, read politely, beside the hint", async () => {
+    await render(
+      <Input
+        label="Email"
+        value="x"
+        onChangeText={jest.fn()}
+        hint="Optional"
+        counter="1,850 / 2,000"
+        maxLength={2000}
+        testID="email"
+      />,
+    );
+
+    const counter = screen.getByTestId("email-counter");
+    expect(counter).toHaveTextContent("1,850 / 2,000");
+    expect(counter.props.accessibilityLiveRegion).toBe("polite");
+    expect(screen.getByText("Optional")).toBeTruthy();
+    expect(field().props.maxLength).toBe(2000);
+  });
+
+  it("calls onBlur and still drops the focus ring", async () => {
+    const onBlur = jest.fn();
+    await render(
+      <Input label="Email" value="" onChangeText={jest.fn()} onBlur={onBlur} testID="email" />,
+    );
+
+    await fireEvent(field(), "focus");
+    expect(bubble().props.className).toContain("border-green-700");
+    await fireEvent(field(), "blur");
+
+    expect(onBlur).toHaveBeenCalledTimes(1);
+    expect(bubble().props.className).toContain("border-transparent");
+  });
 });

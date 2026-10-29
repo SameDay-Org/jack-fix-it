@@ -10,7 +10,8 @@
     "hide": "Ocultar",
     "showPassword": "Mostrar contraseña",
     "hidePassword": "Ocultar contraseña",
-    "dismiss": "Cerrar"
+    "dismiss": "Cerrar",
+    "notSet": "Sin elegir"
   },
   "welcome": {
     "support": "Cuéntaselo a Jack. Nosotros nos encargamos del resto.",

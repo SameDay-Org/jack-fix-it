@@ -4,6 +4,7 @@ import { useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { ScrollView, Text, View } from "react-native";
 
 import { FloatingBar } from "@/components/dev/FloatingBar";
+import { FlowKitSample } from "@/components/dev/FlowKitSample";
 import { HeroSample } from "@/components/dev/HeroSample";
 import {
   Avatar,
@@ -88,6 +89,10 @@ function Gallery() {
             keyboardType="number-pad"
           />
           <Input label="Disabled" value="Read only" onChangeText={noop} disabled />
+        </Section>
+
+        <Section title="Flow controls">
+          <FlowKitSample />
         </Section>
 
         <Section title="Card">
