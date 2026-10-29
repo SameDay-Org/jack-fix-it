@@ -1,10 +1,11 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated, Final
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from app.modules.addresses.schemas import NO_NUL
+from app.modules.categories.schemas import CategorySummary
 from app.modules.quotes.models import QuoteStatus
 from app.modules.settings.service import INT4_MAX
 
@@ -74,6 +75,26 @@ class QuotePro(BaseModel):
     jobs_count: int = Field(description="Jobs completed on the platform.")
     years_of_experience: int | None
     verified: bool = Field(description="The platform approved the pro's verification.")
+
+
+class ProPublicProfile(QuotePro):
+    """The public profile of the pro behind a quote the customer can choose (#53), before
+    paying: the card's fields, the bio, the categories and the month the pro joined. Never a
+    contact, a document, the photo, the service areas, payouts or an internal id (the account,
+    Stripe)."""
+
+    bio: str | None = Field(
+        description="What the pro wrote about their work, with contact details masked "
+        "(app.redaction), as in a quote's scope: the pro's own email and phone, then every "
+        "contact pattern; null when the pro wrote none."
+    )
+    categories: list[CategorySummary] = Field(
+        description="The active categories the pro works in, by slug."
+    )
+    member_since: date = Field(
+        examples=["2026-10-01"],
+        description="The first day of the month the pro joined: month precision only.",
+    )
 
 
 class CustomerQuote(QuoteOut):

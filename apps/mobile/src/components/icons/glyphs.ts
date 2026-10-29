@@ -73,6 +73,24 @@ export const CATEGORY_GLYPHS = {
 
 export type CategorySlug = keyof typeof CATEGORY_GLYPHS;
 
+// The four 8-unit rounded squares of a generic "categories" mark, 2 units apart on a 3-unit margin.
+const SQUARE_TOP_LEFT = "M5 3h4a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z";
+
+/**
+ * The glyph for a category without one of its own (a slug an admin added after this set was
+ * drawn): a neutral 2x2 grid in the same system, so a tile never shows a hole. The accent fills
+ * the first square.
+ */
+export const FALLBACK_GLYPH: Glyph = {
+  accent: SQUARE_TOP_LEFT,
+  strokes: [
+    SQUARE_TOP_LEFT,
+    "M15 3h4a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z",
+    "M5 13h4a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2Z",
+    "M15 13h4a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2Z",
+  ],
+};
+
 /** The glyph for a slug; `undefined` for a slug without one (a category added later by an admin). */
 export function glyphFor(slug: string): Glyph | undefined {
   // Own keys only: "constructor" or "toString" must not reach Object.prototype.

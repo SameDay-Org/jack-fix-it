@@ -2,10 +2,10 @@ import Svg, { Path } from "react-native-svg";
 
 import { tokens } from "@/theme";
 
-import { GLYPH_STROKE_WIDTH, GLYPH_VIEW_BOX, glyphFor, type Glyph } from "./glyphs";
+import { FALLBACK_GLYPH, GLYPH_STROKE_WIDTH, GLYPH_VIEW_BOX, glyphFor, type Glyph } from "./glyphs";
 
 export type CategoryIconProps = {
-  /** The category slug; a slug without a glyph renders nothing. */
+  /** The category slug; a slug without a glyph renders nothing, or the generic mark with `fallback`. */
   slug: string;
   /**
    * A glyph of the same drawing system painted instead of the slug's: for something that is not a
@@ -16,6 +16,8 @@ export type CategoryIconProps = {
   size?: number;
   /** The stroke color; navy-900 by default. The accent stays green-500. */
   color?: string;
+  /** Draw the generic 2x2 mark for a slug without a glyph, where a blank would read as a hole (tiles). */
+  fallback?: boolean;
   testID?: string;
 };
 
@@ -30,9 +32,10 @@ export function CategoryIcon({
   glyph: given,
   size = DEFAULT_SIZE,
   color = tokens.colors["navy-900"],
+  fallback = false,
   testID,
 }: CategoryIconProps) {
-  const glyph = given ?? glyphFor(slug);
+  const glyph = given ?? glyphFor(slug) ?? (fallback ? FALLBACK_GLYPH : undefined);
   if (!glyph) return null;
 
   return (

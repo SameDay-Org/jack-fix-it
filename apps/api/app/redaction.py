@@ -51,14 +51,31 @@ _APOSTROPHES: Final = "'" + chr(0x2019)
 # --- Cleaning --------------------------------------------------------------------------------
 # Characters dropped before matching: format characters (zero-width spaces, joiners, soft
 # hyphen, bidi controls; Unicode category Cf), enclosing marks such as the keycap (Me), and a
-# few fillers.
-_FILLERS: Final = frozenset(
-    chr(code) for code in (0x034F, 0x115F, 0x1160, 0x3164, *range(0xFE00, 0xFE10))
+# few fillers: the combining grapheme joiner, the Hangul fillers, the blank braille cell, the
+# variation selectors (also the Mongolian and the supplementary ones). Shared with the saved
+# address label (addresses.schemas), which drops them before its own checks.
+INVISIBLE_FILLERS: Final = frozenset(
+    chr(code)
+    for code in (
+        0x034F,
+        0x115F,
+        0x1160,
+        0x2800,
+        0x3164,
+        0xFFA0,
+        *range(0x180B, 0x180E),
+        *range(0xFE00, 0xFE10),
+        *range(0xE0100, 0xE01F0),
+    )
 )
 # Characters folded to their ASCII form (NFKC) when that form is one ASCII letter, digit or one
-# of "@.-/()": fullwidth forms, mathematical letters and digits, circled digits. Superscript
-# and subscript digits only in a run of three or more ("call ³⁰⁵..."), so "ft²" stays.
-_FOLDABLE: Final = re.compile(r"[a-zA-Z0-9@.\-/()]")
+# of "@$#.-/()": fullwidth and small forms (U+FF20, U+FF04, U+FE69), mathematical letters
+# and digits, circled digits. Superscript and subscript digits only in a run of three or more
+# ("call ³⁰⁵..."), so "ft²" stays. The low lines and the dot leaders are not folded here: an
+# ASCII "_" or "..." glued to a domain hides it ("see_gmail.com" and "jack...fixit.com" are
+# known gaps) while the typed form keeps the boundary; the handle pattern accepts them as
+# typed instead (_SEPARATOR_FORMS).
+_FOLDABLE: Final = re.compile(r"[a-zA-Z0-9@$#.\-/()]")
 # Spanish ordinal indicators stay as typed ("1º piso", "Nº").
 _KEEP_AS_IS: Final = frozenset((chr(0x00AA), chr(0x00BA)))
 _SCRIPT_DIGITS: Final = frozenset(
@@ -88,7 +105,8 @@ _ODD_MARKS: Final = "_*|~" + chr(0x00B7) + chr(0x2022)
 _ODD_SEPARATOR: Final = re.compile(
     rf"(?<=\d)(?:[{re.escape(_ODD_MARKS)}]|[^\x00-\x7f\w\s]){{1,3}}(?=\d)"
 )
-_DASH_CODES: Final = (*range(0x2010, 0x2016), 0x2212, 0xFE58, 0xFE63, 0xFF0D)
+# Dashes of every width, the minus sign and its superscript and subscript forms read as "-".
+_DASH_CODES: Final = (*range(0x2010, 0x2016), 0x207B, 0x208B, 0x2212, 0xFE58, 0xFE63, 0xFF0D)
 _DASHES: Final = re.compile("[" + "".join(map(chr, _DASH_CODES)) + "]")
 
 # --- Emails ----------------------------------------------------------------------------------
@@ -213,11 +231,35 @@ _NOT_AN_ID: Final = frozenset(
      "bien", "mejor", "gratis", "privado", "privada", "nuevo", "nueva", "empty", "gone"}
 )  # fmt: skip
 # "@name" and "$cashtag", but not "@5pm", "@noon", "@home", "@tomorrow", a price or a currency.
+# A handle token is letters, digits and runs of ".", "_" and "-" (_HANDLE_BODY, as the
+# platforms accept it), the separators also in their compatibility forms as typed
+# (_SEPARATOR_FORMS: the low lines whose NFKC form is "_", the dot leaders and the ellipsis
+# whose NFKC form is a run of "."; the dashes are already "-" and U+2024 already "." after
+# _clean). A time, a measure or a word after "@" is exempt only when it is the whole token:
+# _BODY_END refuses whatever would continue the token, a word character (letters, digits,
+# "_"), a combining mark glued to the word (\w skips marks: "@home" + U+0335 + "fixit") or
+# a run of separators followed by a word character. So "@home", "@home.", "@home!" and
+# "@home " stay, while "@home.fixit", "@home--fixit", "@home._fixit", "@home_fixit" and
+# "@home" + U+FF3F + "fixit" are handles (#224 review, rounds 1 and 2).
+_MARK_RANGES: Final = (
+    (0x0300, 0x036F),
+    (0x1AB0, 0x1AFF),
+    (0x1DC0, 0x1DFF),
+    (0x20D0, 0x20FF),
+    (0xFE20, 0xFE2F),
+)
+_MARKS: Final = "".join(f"{chr(low)}-{chr(high)}" for low, high in _MARK_RANGES)
+_SEPARATOR_FORMS: Final = "".join(
+    map(chr, (0xFE33, 0xFE34, 0xFE4D, 0xFE4E, 0xFE4F, 0xFF3F, 0x2025, 0x2026, 0xFE19, 0xFE30))
+)
+_SEPARATORS: Final = rf"._\-{_SEPARATOR_FORMS}"
+_HANDLE_BODY: Final = rf"[a-z0-9_](?:[a-z0-9{_SEPARATORS}]{{0,28}}[a-z0-9_])?"
+_BODY_END: Final = rf"(?![\w{_MARKS}]|[{_SEPARATORS}]+\w)"
 AT_HANDLE: Final = re.compile(
-    r"(?<![\w.@])@(?:\s(?=[\w.-]*[\d_.]))?(?!\d{1,2}(?::\d\d)?\s*(?:[ap]\.?m\.?)?\b|"
-    r"\d+\s*(?:ft|in|cm|mm|m|hrs?|h|mins?|hours?)\b|"
-    r"(?:noon|night|home|work|casa|today|tomorrow|tonight|ma(?:ñ|n)ana)\b)"
-    r"[a-z0-9_](?:[a-z0-9_.-]{0,28}[a-z0-9_])?",
+    rf"(?<![\w.@])@(?:\s(?=[\w.-]*[\d_.]))?(?!\d{{1,2}}(?:[:.]\d{{1,3}})?\s*(?:[ap]\.?m\.?)?{_BODY_END}|"
+    rf"\d+(?:\.\d+)?\s*(?:ft|in|cm|mm|m|hrs?|h|mins?|hours?){_BODY_END}|"
+    rf"(?:noon|night|home|work|casa|today|tomorrow|tonight|ma(?:ñ|n)ana){_BODY_END})"
+    rf"{_HANDLE_BODY}",
     _FLAGS,
 )
 CASHTAG: Final = re.compile(r"(?<![\w$])\$(?!(?-i:[A-Z]{3})\b)[a-z][a-z0-9_-]{1,19}\b", _FLAGS)
@@ -400,7 +442,7 @@ def _clean(text: str) -> str:
     chars: list[str] = []
     for index, char in enumerate(text):
         category = unicodedata.category(char)
-        if category in ("Cf", "Me") or char in _FILLERS:
+        if category in ("Cf", "Me") or char in INVISIBLE_FILLERS:
             continue
         if category == "Mn" and (not chars or not chars[-1].isalpha()):
             continue  # a mark on a digit or a symbol ("3̅0̅5̅"), not an accent on a letter

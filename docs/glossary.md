@@ -148,6 +148,12 @@ admin releases it or refunds partially or fully.
 **Transfer** (repasse): the payment from the platform balance to the pro's Stripe Express
 account: job amount minus the take rate.
 
+**Payout**: Stripe's automatic move of the pro's Express balance to their bank, on Stripe's
+default schedule. There is no withdraw button, and the app never stores bank details.
+
+**Address book** (caderno de endereços): a customer's saved addresses, up to 4, each with a
+name ("Home", "Work"). Separate from the address a request stores.
+
 **Take rate**: the platform's percentage of each completed job. Value pending (#2).
 
 **Service area**: a region → city → ZIP entry stored in the database; it decides where requests

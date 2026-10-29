@@ -4,7 +4,7 @@ import { processColor } from "react-native";
 import { tokens } from "@/theme";
 
 import { CategoryIcon } from "../CategoryIcon";
-import { CATEGORY_GLYPHS, GLYPH_STROKE_WIDTH } from "../glyphs";
+import { CATEGORY_GLYPHS, FALLBACK_GLYPH, GLYPH_STROKE_WIDTH } from "../glyphs";
 
 // The launch categories, in display order. Keep in step with
 // apps/api/app/modules/categories/seed_data.json: a new seeded slug needs a glyph.
@@ -43,6 +43,25 @@ describe("CategoryIcon", () => {
       expect(screen.toJSON()).toBeNull();
     },
   );
+
+  it.each(["plumbing", "", "constructor", "toString"])(
+    "an unknown slug with `fallback` renders the generic mark in the same system (%j)",
+    async (slug) => {
+      await render(<CategoryIcon slug={slug} fallback testID="icon" />);
+
+      expect(strokes()).toHaveLength(FALLBACK_GLYPH.strokes.length);
+      expect(strokes().map((path) => path.props.d)).toEqual(FALLBACK_GLYPH.strokes);
+      expect(accents()).toHaveLength(1);
+      expect(accents()[0].props.d).toBe(FALLBACK_GLYPH.accent);
+      expect(svg().props.importantForAccessibility).toBe("no-hide-descendants");
+    },
+  );
+
+  it("a known slug ignores `fallback`", async () => {
+    await render(<CategoryIcon slug="painting" fallback testID="icon" />);
+
+    expect(strokes().map((path) => path.props.d)).toEqual(CATEGORY_GLYPHS.painting.strokes);
+  });
 
   it("the icon is hidden from screen readers", async () => {
     await render(<CategoryIcon slug="painting" testID="icon" />);

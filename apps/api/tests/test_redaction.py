@@ -102,6 +102,16 @@ POSITIVE: list[tuple[str, list[str]]] = [
     ("My snap is juanfix305, roof tiles missing", ["juanfix305"]),
     ("my cashapp is $jdoe-99", ["jdoe"]),
     ("whatsapp me at jdoe99", ["jdoe99"]),
+    # Handle sigils in fullwidth or small form, and handles that start with an exempt word
+    # (#224 review): "@home" is a place, "@home.fixit" is an account.
+    ("pay \uff04testperson please", ["testperson"]),  # FULLWIDTH DOLLAR SIGN
+    ("cashapp \ufe69jdoe", ["jdoe"]),  # SMALL DOLLAR SIGN
+    ("insta \uff20jdoe", ["jdoe"]),  # FULLWIDTH COMMERCIAL AT
+    ("find me @home.fixit", ["home.fixit"]),
+    ("find me @home_fixit", ["home_fixit"]),
+    ("find me @home-fixit", ["home-fixit"]),
+    ("find me @work.fixit305", ["work.fixit305"]),
+    ("find me @5pm.fixit", ["5pm.fixit"]),
     # Addresses in South Florida forms.
     ("I'm at 2000 Ponce de Leon Blvd, Coral Gables", ["2000 Ponce", "Leon Blvd"]),
     ("200 E Las Olas Blvd", ["200 E", "Las Olas"]),
@@ -171,6 +181,14 @@ NEGATIVE: list[str] = [
     "We are 2 blocks off Bird Rd, the AC is a 2018 Trane 2.5 ton.",
     "come @5pm please",
     "I'm @home all day after 3",
+    "I'm @home. Call first",
+    "I'm @home! Come by",
+    "I'm @work today, @casa tomorrow",
+    "be there @5.30",
+    "takes @2.5 hrs",
+    "free @5 a.m. tomorrow",
+    "10 pcs @1.5 each",
+    "meet @12.3",
     "saw your ad on facebook last week",
     "te mando fotos por whatsapp mañana",
     "Send me a WhatsApp with the price",
@@ -322,6 +340,98 @@ def test_a_lone_superscript_stays_as_typed() -> None:
     text = "120 ft" + chr(0x00B2) + " of tile"
 
     assert redact_contacts(text).text == text
+
+
+@pytest.mark.parametrize(
+    ("sigil", "ascii_sigil"),
+    [("\uff04", "$"), ("\ufe69", "$"), ("\uff20", "@"), ("\ufe6b", "@")],
+    ids=["fullwidth_dollar", "small_dollar", "fullwidth_at", "small_at"],
+)
+def test_handle_sigils_fold_to_ascii_and_are_redacted(sigil: str, ascii_sigil: str) -> None:
+    folded = redact_contacts(f"reach me at {ascii_sigil}testperson")
+    exotic = redact_contacts(f"reach me at {sigil}testperson")
+
+    assert folded.redacted is True
+    assert exotic == folded == RedactionResult(f"reach me at {MASK}", True)
+
+
+@pytest.mark.parametrize("word", ["home", "work", "casa", "noon", "tomorrow", "5pm"])
+def test_an_exempt_word_is_only_exempt_as_a_whole_token(word: str) -> None:
+    for whole in (f"@{word}", f"@{word}.", f"@{word}!", f"@{word} ", f"I'm @{word}, ok"):
+        assert redact_contacts(whole) == RedactionResult(whole, False), whole
+    overlay = chr(0x0335)  # a combining mark glued to the word
+    for handle in (
+        f"@{word}.fixit",
+        f"@{word}_fixit",
+        f"@{word}-fixit",
+        f"@{word}.fix.it",
+        f"@{word}--fixit",
+        f"@{word}..fixit",
+        f"@{word}._fixit",
+        f"@{word}{overlay}fixit",
+    ):
+        result = redact_contacts(handle)
+        assert result.redacted is True, handle
+        assert f"@{word}" not in result.text, handle
+
+
+# Every compatibility form of a handle separator reaches the handle pattern (#224 round 2):
+# the fullwidth and presentation-form low lines (NFKC "_"), the dot leaders and the ellipsis
+# (NFKC ".", "..", "..."), the hyphen and the superscript minus (dashes).
+SEPARATOR_FORMS = [
+    ("--", "two_dashes"),
+    ("..", "two_dots"),
+    ("._", "dot_underscore"),
+    (chr(0xFF3F), "fullwidth_low_line"),
+    (chr(0xFE4D), "dashed_low_line"),
+    (chr(0xFE33), "vertical_low_line"),
+    (chr(0xFE4F), "wavy_low_line"),
+    (chr(0x2010), "hyphen"),
+    (chr(0x2024), "one_dot_leader"),
+    (chr(0x2025), "two_dot_leader"),
+    (chr(0x2026), "ellipsis"),
+    (chr(0xFE19), "vertical_ellipsis"),
+    (chr(0x207B), "superscript_minus"),
+]
+
+
+@pytest.mark.parametrize(
+    "separator", [form for form, _ in SEPARATOR_FORMS], ids=[name for _, name in SEPARATOR_FORMS]
+)
+def test_an_exempt_word_joined_to_more_by_any_separator_form_is_a_handle(separator: str) -> None:
+    handle = f"@home{separator}x"
+
+    assert redact_contacts(handle) == RedactionResult(MASK, True), ascii(handle)
+    assert redact_contacts(f"find me {handle} today") == RedactionResult(
+        f"find me {MASK} today", True
+    ), ascii(handle)
+
+
+# The typed forms, not ASCII ones: "jack..fixit.com", "see_gmail.com" and "jdoe@.gmail.com"
+# are known gaps of the email and domain patterns (U+2024 already folds to "." in _clean).
+BOUNDARY_FORMS = [(form, name) for form, name in SEPARATOR_FORMS if not form.isascii()]
+BOUNDARY_FORMS.remove((chr(0x2024), "one_dot_leader"))
+
+
+@pytest.mark.parametrize(
+    "separator", [form for form, _ in BOUNDARY_FORMS], ids=[name for _, name in BOUNDARY_FORMS]
+)
+def test_a_separator_form_next_to_a_contact_keeps_its_boundary(separator: str) -> None:
+    """The low lines and the dot leaders are not folded for every pattern: as typed they keep
+    the boundary before a domain or a handle, as ASCII they would fall into the known gaps."""
+    for text in (f"jack{separator}fixit.com", f"jdoe@{separator}gmail.com", f"x{separator}@jdoe"):
+        result = redact_contacts(text)
+        assert result.redacted is True, ascii(text)
+        for contact in ("fixit.com", "gmail.com", "@jdoe"):
+            assert contact not in result.text, ascii(text)
+
+
+@pytest.mark.parametrize("prefix", ["APT", "UNIT", "SUITE", "STE", "PO BOX"])
+def test_a_phone_glued_to_a_unit_marker_is_masked(prefix: str) -> None:
+    # Standalone, as a label is: inside a sentence the unit step leaves "unit 2 is not cooling"
+    # alone, and a phone glued to a unit marker there is a documented gap of the phone step.
+    assert redact_contacts(f"{prefix}3055550199") == RedactionResult(MASK, True)
+    assert redact_contacts(f"{prefix} 3055550199") == RedactionResult(f"{prefix} {MASK}", True)
 
 
 @pytest.mark.parametrize(("text", "secrets"), POSITIVE, ids=[t[:40] for t, _ in POSITIVE])

@@ -178,6 +178,14 @@ class Settings(BaseSettings):
     request_create_window_seconds: int = Field(default=3_600, gt=0)
     request_list_default_limit: int = Field(default=20, gt=0)
     request_list_max_limit: int = Field(default=50, gt=0)
+    # Reverse geocoding through Google (D8.2, #215): the device position becomes an address.
+    # The key is optional in every environment until the Google Cloud account exists (#14);
+    # without it POST /v1/geo/reverse answers 503. Seconds one call may take, and lookups per
+    # customer per window.
+    google_maps_api_key: SecretStr | None = None
+    geocoding_timeout_seconds: float = Field(default=5.0, gt=0)
+    geo_reverse_limit: int = Field(default=30, gt=0)
+    geo_reverse_window_seconds: int = Field(default=600, gt=0)
     # Privacy-safe copies of request photos and videos (#173), made by the worker. Runs one
     # sanitize job gets, the delay before a retry, the longest one step of a file's copy may take
     # (its download, image transform, ffmpeg or ffprobe run, or upload), the most pixels an image
@@ -231,6 +239,11 @@ class Settings(BaseSettings):
     # Waitlist (D8.4, #46): joins per client IP and per contact (email or phone, hashed), per
     # AUTH_RATE_LIMIT_WINDOW_SECONDS.
     waitlist_join_limit: int = Field(default=5, gt=0)
+    # Saved addresses (D8.2, #214): the most one customer may keep in their address book, and
+    # how many writes (create, edit, delete together) one customer may make per window.
+    saved_addresses_max_per_user: int = Field(default=4, gt=0)
+    saved_address_write_limit: int = Field(default=30, gt=0)
+    saved_address_write_window_seconds: int = Field(default=600, gt=0)
 
     @field_validator("database_url")
     @classmethod
@@ -281,6 +294,7 @@ class Settings(BaseSettings):
         "resend_api_key",
         "email_from",
         "expo_access_token",
+        "google_maps_api_key",
         mode="before",
     )
     @classmethod
