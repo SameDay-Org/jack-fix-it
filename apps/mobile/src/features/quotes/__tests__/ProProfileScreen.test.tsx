@@ -2,8 +2,10 @@ import i18n from "@/i18n";
 
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import { router } from "expo-router";
+import { Dimensions } from "react-native";
 
 import { ApiError, apiGet, NetworkError } from "@/api";
+import { tokens } from "@/theme";
 
 import { deferred } from "../../../api/__tests__/helpers";
 import { ProProfileScreen } from "../ProProfileScreen";
@@ -80,9 +82,17 @@ async function renderOver(items: CustomerQuote[] | null = QUOTES) {
   return { client, unmount };
 }
 
-/** Every visible text, top to bottom. */
+/** Every visible text, top to bottom: its own strings, without an inline seal. */
 const texts = () =>
-  screen.getAllByText(/.+/).map((node) => String(node.props.children).replaceAll(" ", " "));
+  screen.getAllByText(/.+/).map((node) =>
+    [node.props.children]
+      .flat()
+      .filter((child) => typeof child === "string" || typeof child === "number")
+      .join("")
+      .replaceAll(" ", " "),
+  );
+// The seal hides itself from accessibility, so queries for it opt into hidden elements.
+const HIDDEN = { includeHiddenElements: true };
 
 beforeEach(() => {
   mockRoute.params = null;
@@ -101,7 +111,7 @@ afterEach(async () => {
 describe("ProProfileScreen", () => {
   it("shows every field as one page, in reading order, for exactly this quote's pro", async () => {
     await renderOver();
-    expect(await screen.findByRole("header", { name: "María P." })).toBeTruthy();
+    expect(await screen.findByRole("header", { name: "María P., verified" })).toBeTruthy();
 
     expect(apiGet).toHaveBeenCalledWith(PATH, {
       auth: true,
@@ -122,7 +132,6 @@ describe("ProProfileScreen", () => {
     expect(texts()).toEqual([
       "Back",
       "María P.",
-      "Verified by Jack Fix It",
       "Member since March 2024",
       "4.8 ★",
       "rating",
@@ -205,11 +214,35 @@ describe("ProProfileScreen", () => {
     expect(screen.queryByTestId("pro-profile-figures")).toBeNull();
     expect(screen.queryByRole("header", { name: "About" })).toBeNull();
     expect(screen.queryByRole("header", { name: "What they do" })).toBeNull();
-    expect(screen.queryByText("Verified by Jack Fix It")).toBeNull();
+    expect(screen.queryByTestId("pro-profile-verified", HIDDEN)).toBeNull();
     expect(screen.queryByTestId("pro-profile-trust")).toBeNull();
     expect(
       screen.getByRole("button", { name: "Accept the quote from Jack pro for $250" }),
     ).toBeTruthy();
+  });
+
+  it("ProProfileScreen shows the seal for a verified pro, none for unverified", async () => {
+    const { unmount } = await renderOver();
+    const name = await screen.findByRole("header", { name: "María P., verified" });
+    // Inline after the name, sized as the name's type, and hidden: the header says "verified" once.
+    const seal = screen.getByTestId("pro-profile-verified", HIDDEN);
+    expect(seal.parent).toBe(name);
+    expect(name.props.className).toContain("text-display");
+    const { fontScale } = Dimensions.get("window");
+    expect(seal.props.style).toMatchObject({
+      height: Math.round(tokens.fontSize.display.size * fontScale),
+    });
+    expect(screen.queryByTestId("pro-profile-verified")).toBeNull();
+    // The pill is gone; only the trust line at the end says what verified means.
+    expect(screen.queryByText("Verified by Jack Fix It", HIDDEN)).toBeNull();
+    await unmount();
+
+    jest.mocked(apiGet).mockResolvedValue({ ...PROFILE, verified: false });
+    await renderOver();
+    const plain = await screen.findByRole("header", { name: "María P." });
+    expect(plain.props.accessibilityLabel).toBeUndefined();
+    expect(screen.queryByTestId("pro-profile-verified", HIDDEN)).toBeNull();
+    expect(screen.queryByLabelText(/verified/)).toBeNull();
   });
 
   it("the copy, the month and the categories follow the app's language", async () => {
@@ -223,7 +256,7 @@ describe("ProProfileScreen", () => {
     expect(screen.getByText("años de experiencia")).toBeTruthy();
     expect(screen.getByLabelText("Reparaciones")).toBeTruthy();
     expect(screen.getByRole("header", { name: "Qué hace" })).toBeTruthy();
-    expect(screen.getByText("Verificado por Jack Fix It")).toBeTruthy();
+    expect(screen.getByRole("header", { name: "María P., verificado" })).toBeTruthy();
     expect(screen.getByText(/^Verificado por Jack Fix It: nuestro equipo/)).toBeTruthy();
     expect(screen.getByText(/^Aceptar por /)).toBeTruthy();
     expect(screen.getByText("Ver presupuestos")).toBeTruthy();
@@ -232,7 +265,7 @@ describe("ProProfileScreen", () => {
   it("the new-pro note in Spanish is written for a person, not translated word for word", async () => {
     jest.mocked(apiGet).mockResolvedValue({ ...PROFILE, jobs_count: 0 });
     await renderOver();
-    await screen.findByRole("header", { name: "María P." });
+    await screen.findByRole("header", { name: "María P., verified" });
 
     await act(() => i18n.changeLanguage("es"));
     expect(
@@ -270,7 +303,7 @@ describe("ProProfileScreen", () => {
   ])("shows no Accept when the quote is %s, only the way back", async (_, items) => {
     await renderOver(items);
 
-    expect(await screen.findByRole("header", { name: "María P." })).toBeTruthy();
+    expect(await screen.findByRole("header", { name: "María P., verified" })).toBeTruthy();
     expect(screen.queryByTestId("pro-profile-accept")).toBeNull();
     expect(screen.queryByRole("button", { name: /^Accept/ })).toBeNull();
     expect(screen.getByRole("button", { name: "Back to quotes" })).toBeTruthy();
@@ -291,7 +324,7 @@ describe("ProProfileScreen", () => {
     expect(screen.getByTestId("pro-profile-accept")).toBeTruthy();
     await act(async () => jest.advanceTimersByTime(60_000));
     expect(screen.queryByTestId("pro-profile-accept")).toBeNull();
-    expect(screen.getByRole("header", { name: "María P." })).toBeTruthy(); // the profile stays
+    expect(screen.getByRole("header", { name: "María P., verified" })).toBeTruthy(); // the profile stays
   });
 
   it("the skeleton has the loaded rows, and no bar until the profile is on screen", async () => {
@@ -305,7 +338,7 @@ describe("ProProfileScreen", () => {
     const placeholders = lineStyles(screen.getByTestId("pro-profile-loading"));
 
     await act(async () => pending.resolve(PROFILE));
-    await screen.findByRole("header", { name: "María P." });
+    await screen.findByRole("header", { name: "María P., verified" });
     expect(screen.queryByRole("progressbar")).toBeNull();
     const loaded = lineStyles(screen.getByTestId("pro-profile-screen")).filter(
       (style) => !style.startsWith("bar:"),
@@ -351,7 +384,7 @@ describe("ProProfileScreen", () => {
     );
     expect(screen.queryByRole("progressbar")).toBeNull();
     await act(async () => retried.resolve(PROFILE));
-    expect(await screen.findByRole("header", { name: "María P." })).toBeTruthy();
+    expect(await screen.findByRole("header", { name: "María P., verified" })).toBeTruthy();
     expect(apiGet).toHaveBeenCalledTimes(2);
   });
 
@@ -384,7 +417,7 @@ describe("a profile the API denies", () => {
   /** María's profile from a 200, Accept and all, then the screen closed: the cache holds it. */
   async function showThenClose(client: ReturnType<typeof newQueryClient>) {
     const { unmount } = await renderWithQuery(<ProProfileScreen />, client);
-    expect(await screen.findByRole("header", { name: "María P." })).toBeTruthy();
+    expect(await screen.findByRole("header", { name: "María P., verified" })).toBeTruthy();
     expect(screen.getByTestId("pro-profile-accept")).toBeTruthy();
     await unmount();
     expect(client.getQueryData(KEY)).toEqual(PROFILE);
@@ -440,7 +473,7 @@ describe("a profile the API denies", () => {
 
     jest.mocked(apiGet).mockResolvedValue(PROFILE);
     await renderWithQuery(<ProProfileScreen />, client);
-    expect(await screen.findByRole("header", { name: "María P." })).toBeTruthy();
+    expect(await screen.findByRole("header", { name: "María P., verified" })).toBeTruthy();
     expect(screen.getByTestId("pro-profile-accept")).toBeTruthy();
     expect(client.getQueryData(KEY)).toEqual(PROFILE);
   });
@@ -454,7 +487,7 @@ describe("a profile the API denies", () => {
 
     jest.mocked(apiGet).mockResolvedValue(PROFILE);
     await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
-    expect(await screen.findByRole("header", { name: "María P." })).toBeTruthy();
+    expect(await screen.findByRole("header", { name: "María P., verified" })).toBeTruthy();
     expect(apiGet).toHaveBeenCalledTimes(2);
   });
 
@@ -498,12 +531,6 @@ function lineStyles(root: unknown): string[] {
     const className = String(node.props.className ?? "");
     if (testID.endsWith("-bar")) {
       styles.push("bar:");
-      return;
-    }
-    if (testID.endsWith("-verified") || testID.endsWith("-badge")) {
-      const padded = /\bpy-1\b/.test(className);
-      const inner = node.children.flatMap((child) => lineStyles(child)).join("+");
-      styles.push(`badge:${padded ? "py-1" : "?"}:${inner}`);
       return;
     }
     if (testID.endsWith("-bio") || testID.endsWith("-trust")) {

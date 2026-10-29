@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
 
-import { Button, Card, Skeleton, StatusBadge, TextSkeleton } from "@/components/ui";
+import { Button, Card, Skeleton, StatusBadge, TextSkeleton, VerifiedBadge } from "@/components/ui";
 import { continuousCorners, tokens } from "@/theme";
 
 import { useQuoteText, type QuoteState } from "./quoteText";
@@ -64,10 +64,12 @@ export function QuoteCard({ quote, state, now, onAccept, onViewProfile }: QuoteC
           <Text className="text-callout text-gray-500">{text.start}</Text>
         </View>
         <View className="gap-1">
-          <Text className="text-headline text-navy-900">{text.pro}</Text>
-          {quote.pro.verified ? (
-            <StatusBadge label={t("quotes.verified")} tone="brand" testID={`${testID}-verified`} />
-          ) : null}
+          <Text className="text-headline text-navy-900">
+            {text.pro}
+            {quote.pro.verified ? (
+              <VerifiedBadge type="headline" testID={`${testID}-verified`} />
+            ) : null}
+          </Text>
           <Text className="text-footnote text-gray-500">{text.stats}</Text>
         </View>
       </View>
@@ -146,9 +148,8 @@ const PROFILE_PLACEHOLDER = { width: 88, height: tokens.fontSize.headline.size }
 /**
  * A card-shaped placeholder with the loaded card's rows: every line is a `TextSkeleton` of the
  * same type style, so each row is exactly as tall as the text that replaces it, at any font
- * scale. The verified badge has its row too (the list only shows quotes from approved pros, so
- * every listed card has one), padded like the badge, and so does the "View profile" ghost (its
- * own height, not a text line). A typical scope takes two lines here.
+ * scale. The verified seal needs no row: it sits inside the name's line. The "View profile" ghost
+ * has its own row (its own height, not a text line). A typical scope takes two lines here.
  */
 export function QuoteCardSkeleton({ testID }: { testID?: string }) {
   return (
@@ -161,9 +162,6 @@ export function QuoteCardSkeleton({ testID }: { testID?: string }) {
         </View>
         <View className="gap-1">
           <TextSkeleton type="headline" width="40%" />
-          <View className="w-1/2 py-1" testID={testID && `${testID}-badge`}>
-            <TextSkeleton type="caption" />
-          </View>
           <TextSkeleton type="footnote" width="70%" />
         </View>
       </View>

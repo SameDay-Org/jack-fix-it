@@ -6,3 +6,4 @@ export { TabIcon } from "./TabIcon";
 export type { TabIconProps } from "./TabIcon";
 export { TAB_GLYPHS } from "./tabGlyphs";
 export type { TabGlyphName } from "./tabGlyphs";
+export { VERIFIED_SEAL_PATH, VERIFIED_SEAL_VIEW_BOX } from "./verifiedSeal";

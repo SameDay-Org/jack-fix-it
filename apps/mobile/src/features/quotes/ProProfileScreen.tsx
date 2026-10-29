@@ -6,7 +6,7 @@ import { ScrollView, Text, useWindowDimensions, View } from "react-native";
 import Animated from "react-native-reanimated";
 
 import { CategoryIcon } from "@/components/icons";
-import { Button, Screen, StatusBadge, TextSkeleton, useSkeletonPulse } from "@/components/ui";
+import { Button, Screen, TextSkeleton, useSkeletonPulse, VerifiedBadge } from "@/components/ui";
 import { BackButton, backToPrevious } from "@/features/auth/components/BackButton";
 import { categoryName } from "@/features/home/useCategories";
 import { continuousCorners } from "@/theme";
@@ -164,18 +164,16 @@ function Profile({ profile }: ProfileProps) {
   return (
     <View className="gap-8 pt-2">
       <View className="gap-1" testID="pro-profile-hero">
-        <View className="flex-row flex-wrap items-center gap-x-3 gap-y-2">
-          <Text
-            accessibilityRole="header"
-            className="text-display text-navy-900"
-            testID="pro-profile-name"
-          >
-            {name}
-          </Text>
-          {profile.verified ? (
-            <StatusBadge label={t("quotes.verified")} tone="brand" testID="pro-profile-verified" />
-          ) : null}
-        </View>
+        {/* The seal is hidden from screen readers: the header's label says "verified" once. */}
+        <Text
+          accessibilityRole="header"
+          accessibilityLabel={profile.verified ? t("quotes.nameVerified", { name }) : undefined}
+          className="text-display text-navy-900"
+          testID="pro-profile-name"
+        >
+          {name}
+          {profile.verified ? <VerifiedBadge type="display" testID="pro-profile-verified" /> : null}
+        </Text>
         <Text className="text-callout text-gray-500" testID="pro-profile-member-since">
           {t("quotes.profile.memberSince", { month: since })}
         </Text>
@@ -360,8 +358,8 @@ const FIGURES = 3;
 
 /**
  * The page's rows before the profile arrives: every line a `TextSkeleton` of the type that
- * replaces it (the badge's row padded like the badge), three figures, a three-line bio, two
- * tag-shaped pills and a two-line note, so the loaded page takes the same space at any font
+ * replaces it (the seal sits inside the name's line, so it has no row), three figures, a
+ * three-line bio, two tag-shaped pills and a two-line note, so the loaded page takes the same space at any font
  * scale. Read as one "Loading profile" indicator.
  */
 function ProfileSkeleton() {
@@ -380,14 +378,8 @@ function ProfileSkeleton() {
         className="gap-8 pt-2"
       >
         <View className="gap-1">
-          <View className="flex-row flex-wrap items-center gap-x-3 gap-y-2">
-            {/* In a row, a placeholder takes a set width: a line alone would shrink to nothing. */}
-            <View style={{ width: NAME_WIDTH * fontScale }}>
-              <TextSkeleton type="display" />
-            </View>
-            <View className="w-1/3 py-1" testID="pro-profile-skeleton-badge">
-              <TextSkeleton type="caption" />
-            </View>
+          <View style={{ width: NAME_WIDTH * fontScale }}>
+            <TextSkeleton type="display" />
           </View>
           <TextSkeleton type="callout" width="50%" />
         </View>
