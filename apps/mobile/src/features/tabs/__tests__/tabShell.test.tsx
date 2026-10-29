@@ -19,6 +19,7 @@ import { TabsLayout } from "../TabsLayout";
 
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../../api/errors"),
+  onSignOut: jest.fn(),
   apiGet: jest.fn(),
   useSession: jest.fn(),
   logout: jest.fn(),

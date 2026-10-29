@@ -33,8 +33,9 @@ export type PanelGeometry = {
 type Params = {
   reduceMotion: boolean;
   /**
-   * Where the panel can rise to. Prefetched (mounted, not shown) whenever Welcome is focused at
-   * rest, so a push only has to attach a screen that is already built.
+   * Where the panel can rise to that can be built ahead: prefetched (mounted, not shown) whenever
+   * the panel's screen is focused at rest, so a push only has to attach a screen that is already
+   * built. Home passes none: the request flow is built for the category tapped.
    */
   destinations: Href[];
 };
@@ -52,10 +53,10 @@ export type PanelTransition = {
   busy: boolean;
   setGeometry: (geometry: PanelGeometry) => void;
   /**
-   * Rise and navigate once; ignored while busy. The push goes out as the rise starts on Android
-   * and as it ends on iOS; under Reduce Motion, at once.
+   * Rise and navigate once; ignored while busy (false then). The push goes out as the rise starts
+   * on Android and as it ends on iOS; under Reduce Motion, at once.
    */
-  go: (href: Href) => void;
+  go: (href: Href) => boolean;
 };
 
 /**
@@ -135,7 +136,8 @@ export function usePanelTransition({ reduceMotion, destinations }: Params): Pane
     if (!isCurrent(startedIn)) return;
     busyRef.current = false;
     setBusy(false);
-    if (lastDestination.current) router.prefetch(lastDestination.current);
+    const last = lastDestination.current;
+    if (last && destinations.includes(last)) router.prefetch(last);
     lastDestination.current = null;
   };
 
@@ -193,7 +195,7 @@ export function usePanelTransition({ reduceMotion, destinations }: Params): Pane
   };
 
   const go = (href: Href) => {
-    if (busyRef.current) return;
+    if (busyRef.current) return false;
     busyRef.current = true;
     setBusy(true);
     lastDestination.current = href;
@@ -201,7 +203,7 @@ export function usePanelTransition({ reduceMotion, destinations }: Params): Pane
     const startedIn = ++generation.current;
     if (reduceMotion) {
       risen(href, startedIn);
-      return;
+      return true;
     }
     setRisePhase("rising");
     const under = pushesUnderRise(Platform.OS);
@@ -215,6 +217,7 @@ export function usePanelTransition({ reduceMotion, destinations }: Params): Pane
     );
     // After the rise has started, so a push that throws lowers a panel that is already moving.
     if (under) navigate(href);
+    return true;
   };
 
   // Focused again after the destination went away: the reverse of the rise. The focus effect

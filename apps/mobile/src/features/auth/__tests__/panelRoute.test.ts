@@ -1,6 +1,6 @@
 import { tokens } from "@/theme";
 
-import { pushesUnderRise, risenFromWelcome } from "../panelRoute";
+import { panelRiseOptions, pushesUnderRise, risenFromWelcome } from "../panelRoute";
 
 describe("risenFromWelcome", () => {
   it("Android: a transparent modal with no stack motion, so Welcome keeps painting under it", () => {
@@ -24,5 +24,12 @@ describe("risenFromWelcome", () => {
     expect(risenFromWelcome(undefined, "android")).toEqual({ animation: "default" });
     expect(risenFromWelcome({}, "ios")).toEqual({ animation: "default" });
     expect(risenFromWelcome({ role: "pro" }, "android")).toEqual({ animation: "default" });
+  });
+});
+
+describe("panelRiseOptions", () => {
+  it("is what any panel rise gives the screen it opens (Home's into the request flow too)", () => {
+    expect(panelRiseOptions("android")).toEqual(risenFromWelcome({ from: "welcome" }, "android"));
+    expect(panelRiseOptions("ios")).toEqual(risenFromWelcome({ from: "welcome" }, "ios"));
   });
 });

@@ -1,7 +1,14 @@
 import * as ImagePicker from "expo-image-picker";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { uploadMedia, UploadRejectedError, type UploadPurpose } from "@/api";
+import {
+  isCurrentGeneration,
+  onSignOut,
+  sessionGeneration,
+  uploadMedia,
+  UploadRejectedError,
+  type UploadPurpose,
+} from "@/api";
 
 import { prepareMedia, type MediaKind, type PickedMedia, type PreparedMedia } from "./compress";
 import { mediaConfig } from "./config";
@@ -63,7 +70,13 @@ const VIDEO_PURPOSES: ReadonlySet<UploadPurpose> = new Set<UploadPurpose>(["requ
 const RETRYABLE: ReadonlySet<MediaFailure> = new Set<MediaFailure>(["failed"]);
 
 /** What the hook keeps per item beyond what the screen shows. */
-type Entry = { picked: PickedMedia; prepared?: PreparedMedia; controller?: AbortController };
+type Entry = {
+  picked: PickedMedia;
+  prepared?: PreparedMedia;
+  controller?: AbortController;
+  /** The session generation the item was picked (or last retried) in: it works for that one only. */
+  generation: number;
+};
 
 export const isRetryable = (failure: MediaFailure | null): boolean =>
   failure !== null && RETRYABLE.has(failure);
@@ -87,7 +100,8 @@ function toPicked(asset: ImagePicker.ImagePickerAsset): PickedMedia {
  * Picks photos (and, for request media, videos), prepares each one (`prepareMedia`) and uploads
  * it (`uploadMedia`), keeping a list of items with their status, progress and key. Files are
  * processed one at a time, in order, so a slow phone never decodes ten photos at once. Unmounting
- * cancels whatever is in flight.
+ * cancels whatever is in flight. The list belongs to the signed-in account: a sign-out, or a
+ * sign-in that brings another account, cancels and drops it.
  */
 export function useMediaUpload({
   purpose,
@@ -113,6 +127,21 @@ export function useMediaUpload({
     };
   }, []);
 
+  // The account boundary: everything picked under the old account, running, waiting its turn or
+  // done, is cancelled and dropped with its previews and keys, and a fresh queue starts, so
+  // nothing of it is shown, counted, attached or uploaded for the next one.
+  useEffect(
+    () =>
+      onSignOut(() => {
+        entries.current.forEach((entry) => entry.controller?.abort());
+        entries.current.clear();
+        queue.current = Promise.resolve();
+        setItems([]);
+        setPermissionDenied(null);
+      }),
+    [],
+  );
+
   const update = useCallback((id: string, patch: Partial<MediaItem>) => {
     if (!mounted.current) return;
     setItems((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)));
@@ -124,6 +153,14 @@ export function useMediaUpload({
       const controller = entry?.controller;
       // Removed, or the screen left, while it waited its turn.
       if (!entry || !controller || controller.signal.aborted) return;
+      // Every step belongs to the session the item was picked in. One that resumes under another
+      // (a sign-in under way, or done) stops there: nothing is uploaded or recorded for it, and the
+      // item waits for a retry (the same account) or the account boundary's clear (another one).
+      const superseded = () => !isCurrentGeneration(entry.generation);
+      const abandon = () => {
+        controller.abort();
+        update(id, { status: "failed", progress: 0, failure: "failed" });
+      };
       try {
         if (!entry.prepared) {
           update(id, { status: "compressing", progress: 0, failure: null });
@@ -131,16 +168,21 @@ export function useMediaUpload({
           if (controller.signal.aborted) return;
           entry.prepared = prepared;
         }
+        if (superseded()) return abandon();
         update(id, { status: "uploading", progress: 0, failure: null });
         const { key } = await uploadMedia({
           purpose,
           file: entry.prepared,
           signal: controller.signal,
-          onProgress: (progress) => update(id, { progress }),
+          onProgress: (progress) => {
+            if (!superseded()) update(id, { progress });
+          },
         });
+        if (superseded()) return abandon();
         update(id, { status: "done", progress: 1, key });
       } catch (error) {
         if (controller.signal.aborted) return; // removed or unmounted: nothing to show
+        if (superseded()) return abandon();
         update(id, { status: "failed", failure: describeFailure(error) });
       }
     },
@@ -168,12 +210,14 @@ export function useMediaUpload({
       if (pickingNow.current || remaining === 0) return;
       pickingNow.current = true;
       setPicking(true);
+      // What the picker returns belongs to the session that opened it, and to no later one.
+      const startedIn = sessionGeneration();
       try {
         let result: ImagePicker.ImagePickerResult;
         if (source === "camera") {
           const permission = await ImagePicker.requestCameraPermissionsAsync();
           if (!permission.granted) {
-            if (mounted.current) setPermissionDenied("camera");
+            if (mounted.current && isCurrentGeneration(startedIn)) setPermissionDenied("camera");
             return;
           }
           result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], exif: false });
@@ -187,12 +231,12 @@ export function useMediaUpload({
             exif: false,
           });
         }
-        if (result.canceled || !mounted.current) return;
+        if (result.canceled || !mounted.current || !isCurrentGeneration(startedIn)) return;
 
         const added = result.assets.slice(0, remaining).map((asset) => {
           const id = `media-${(nextId.current += 1)}`;
           const picked = toPicked(asset);
-          entries.current.set(id, { picked });
+          entries.current.set(id, { picked, generation: startedIn });
           const item: MediaItem = {
             id,
             kind: picked.kind,
@@ -217,9 +261,13 @@ export function useMediaUpload({
   const retry = useCallback(
     (id: string) => {
       const item = items.find((candidate) => candidate.id === id);
-      if (!item || item.status !== "failed" || !isRetryable(item.failure)) return;
+      const entry = entries.current.get(id);
+      if (!entry || !item || item.status !== "failed" || !isRetryable(item.failure)) return;
+      // The list survives only the same account signing in again (the account boundary clears it
+      // for any other), so the retry may run for the current session: keep the two together.
+      entry.generation = sessionGeneration();
       // A file that was already prepared goes straight back to uploading.
-      const prepared = Boolean(entries.current.get(id)?.prepared);
+      const prepared = Boolean(entry.prepared);
       update(id, { status: prepared ? "uploading" : "compressing", progress: 0, failure: null });
       enqueue(id);
     },

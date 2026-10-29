@@ -96,7 +96,115 @@
     }
   },
   "request": {
-    "title": "Dile a Jack qué pasó"
+    "progress": "Paso {{current}} de {{total}}",
+    "cancel": "Cancelar",
+    "optionalLabel": "{{label}} (opcional)",
+    "counter": "{{length}} / {{max}}",
+    "discard": {
+      "title": "¿Descartar esta solicitud?",
+      "body": "Se perderán tus respuestas, fotos y dirección.",
+      "keep": "Seguir editando",
+      "confirm": "Descartar"
+    },
+    "loadFailed": {
+      "title": "No pudimos cargar este servicio",
+      "body": "Revisa tu conexión e inténtalo de nuevo.",
+      "retry": "Intentar de nuevo"
+    },
+    "questions": {
+      "support": "Unas preguntas rápidas para que los profesionales te envíen presupuestos precisos.",
+      "required": "Responde esto para continuar.",
+      "range": "Escribe un número del {{min}} al {{max}}.",
+      "tooFew_one": "Elige al menos {{count}}.",
+      "tooFew_other": "Elige al menos {{count}}.",
+      "pickUpTo_one": "Elige hasta {{count}}.",
+      "pickUpTo_other": "Elige hasta {{count}}.",
+      "check": "Faltan algunas respuestas. Están marcadas en rojo.",
+      "refusedTitle": "Algunas respuestas ya no encajan",
+      "refusedBody": "Las preguntas de este servicio cambiaron. Revisa tus respuestas y continúa."
+    },
+    "describe": {
+      "title": "¿Qué está pasando?",
+      "support": "Cuéntanos con tus palabras. Las fotos o un video corto ayudan a los profesionales a entender el trabajo.",
+      "label": "Describe el trabajo",
+      "required": "Cuéntanos qué pasa para continuar.",
+      "mediaTitle": "Fotos y video",
+      "waiting": "Esperando a que terminen de subirse tus archivos.",
+      "uploadFailedTitle": "Un archivo no se subió",
+      "uploadFailedBody": "Vuelve a intentarlo o quítalo para continuar.",
+      "refusedTitle": "No pudimos adjuntar tus archivos",
+      "refusedBody": "Quítalos y vuelve a añadirlos, o continúa sin ellos."
+    },
+    "where": {
+      "title": "¿Dónde es el trabajo?",
+      "support": "La usamos para encontrar profesionales que trabajan en tu zona.",
+      "savedLabel": "Direcciones guardadas",
+      "savedNotServed": "{{address}}. Aún no llegamos a esta zona.",
+      "another": "Usar otra dirección",
+      "formTitle": "Otra dirección",
+      "line1": "Dirección",
+      "line2": "Apartamento, suite o unidad",
+      "city": "Ciudad",
+      "state": "Estado",
+      "zip": "Código postal",
+      "errors": {
+        "required": "Completa este campo.",
+        "state": "Usa el código de dos letras, como FL.",
+        "zip": "Escribe un código postal de 5 dígitos.",
+        "tooLong": "Usa {{max}} caracteres como máximo."
+      },
+      "check": "Revisa algunos campos de la dirección.",
+      "invalidTitle": "Revisa la dirección",
+      "invalidBody": "No pudimos usar esta dirección. Corrige los campos marcados y vuelve a enviarla.",
+      "notServedTitle": "Aún no llegamos a esta zona",
+      "notServedBody": "Por ahora Jack atiende pocas zonas. Prueba con otra dirección.",
+      "savedFailed": "No pudimos cargar tus direcciones guardadas.",
+      "savedRetry": "Intentar de nuevo"
+    },
+    "when": {
+      "title": "¿Cuándo te viene bien?",
+      "support": "Elige un día o déjalo abierto: cada profesional propone una hora de inicio con su presupuesto.",
+      "flexible": "Soy flexible",
+      "flexibleHint": "Cualquier día me sirve",
+      "pickDay": "O elige un día",
+      "today": "Hoy",
+      "tomorrow": "Mañana",
+      "staleTitle": "Ese día ya pasó",
+      "staleBody": "Elige otro día o déjalo abierto."
+    },
+    "review": {
+      "title": "Revisa tu solicitud",
+      "support": "Asegúrate de que todo esté bien antes de enviarla.",
+      "description": "Qué está pasando",
+      "address": "Dirección",
+      "when": "Cuándo",
+      "edit": "Editar",
+      "editAnswers": "Editar tus respuestas",
+      "editDescription": "Editar la descripción y los archivos",
+      "editAddress": "Editar la dirección",
+      "editWhen": "Editar el día",
+      "yes": "Sí",
+      "no": "No",
+      "flexible": "Soy flexible: cualquier día me sirve",
+      "mediaCount_one": "{{count}} archivo adjunto",
+      "mediaCount_other": "{{count}} archivos adjuntos",
+      "send": "Enviar solicitud",
+      "retry": "Intentar de nuevo",
+      "failedTitle": "Tu solicitud no se envió",
+      "failedBody": "Revisa tu conexión e inténtalo de nuevo.",
+      "rateLimitedTitle": "Demasiadas solicitudes en poco tiempo",
+      "rateLimitedBody": "Espera unos minutos y vuelve a intentarlo.",
+      "rejectedTitle": "No pudimos enviar esta solicitud",
+      "rejectedBody": "Repasa tus respuestas y vuelve a intentarlo."
+    },
+    "sent": {
+      "title": "Jack ya está en ello",
+      "summary": "{{category}} en {{place}}",
+      "codeLabel": "Tu código de solicitud",
+      "next": "Los profesionales cercanos te enviarán presupuestos. Te avisaremos.",
+      "see": "Ver mi solicitud",
+      "home": "Volver al inicio"
+    }
   },
   "phone": {
     "title": "Verifica tu teléfono",

@@ -16,6 +16,7 @@ import { CATEGORIES, renderWithQuery } from "./helpers";
 
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../../api/errors"),
+  onSignOut: jest.fn(),
   apiGet: jest.fn(),
 }));
 jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
