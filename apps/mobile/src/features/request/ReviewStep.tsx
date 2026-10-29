@@ -19,6 +19,7 @@ import {
   typedAddressBody,
 } from "./address";
 import { answerText } from "./answerText";
+import { formatLongDay, isPastDay } from "./dates";
 import { refuseStep, useRequestDraft, type RequestDraft, type StepRefusal } from "./requestDraft";
 import { useRequestFlowContext } from "./RequestFlowLayout";
 import { requestBody } from "./send";
@@ -28,12 +29,13 @@ import { stepHref, type StepId } from "./steps";
 type ReviewFailure = "failed" | "rateLimited" | "rejected";
 
 const ADDRESS_REFUSED: StepRefusal = { step: "where", reason: "invalidAddress" };
+const DATE_STALE: StepRefusal = { step: "when", reason: "staleDate" };
 
 type ReviewStepProps = { category: Category; steps: readonly StepId[] };
 
 /**
  * Everything the request says, in plain words, before it goes: the answers, the description and its
- * files and the address, each with an Edit link back to its step. Send shows its progress
+ * files, the address and the day, each with an Edit link back to its step. Send shows its progress
  * and takes one press; what the server refuses sends the customer to the step that can fix it, and
  * anything else stays here with "Try again".
  */
@@ -62,7 +64,11 @@ export function ReviewStep({ category, steps }: ReviewStepProps) {
   // The notice announces itself: onSend clears the failure first, so each one mounts it anew.
   const fail = (reason: ReviewFailure) => setFailure(reason);
 
+  const dateStale = () => draft.preferredDate !== null && isPastDay(draft.preferredDate);
+
   const onSend = () => {
+    // A day chosen before midnight has passed meanwhile: the API would refuse it.
+    if (dateStale()) return backTo(DATE_STALE);
     setFailure(null);
     void send(requestBody({ draft, category, address, mediaKeys: media.keys }), {
       onSent: finish,
@@ -74,7 +80,9 @@ export function ReviewStep({ category, steps }: ReviewStepProps) {
           // own check, Where marks what to fix: sending the same body again would fail the same way.
           const typedInvalid =
             resolved.kind === "typed" && Object.keys(addressErrors(draft.typedAddress)).length > 0;
-          return typedInvalid ? backTo(ADDRESS_REFUSED) : fail("rejected");
+          if (typedInvalid) return backTo(ADDRESS_REFUSED);
+          // Midnight passed while the request was on its way.
+          return dateStale() ? backTo(DATE_STALE) : fail("rejected");
         }
         // What the server knows better: which ZIPs are served, the category's questions (also
         // when a category that asked none now does: its steps change with the refetch).
@@ -149,6 +157,19 @@ export function ReviewStep({ category, steps }: ReviewStepProps) {
           <Text className="text-headline text-navy-900">{resolved.address.label}</Text>
         ) : null}
         <Text className="text-body text-navy-900">{addressLine(address)}</Text>
+      </ReviewSection>
+      <ReviewSection
+        locked={sending}
+        title={t("request.review.when")}
+        editLabel={t("request.review.editWhen")}
+        onEdit={() => router.dismissTo(stepHref("when", steps))}
+        testID="review-when"
+      >
+        <Text className="text-body text-navy-900">
+          {draft.preferredDate === null
+            ? t("request.review.flexible")
+            : formatLongDay(draft.preferredDate, locale)}
+        </Text>
       </ReviewSection>
     </StepScreen>
   );

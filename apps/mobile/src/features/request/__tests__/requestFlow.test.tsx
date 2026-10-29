@@ -16,11 +16,13 @@ import DescribeRoute from "../../../app/(app)/request/(flow)/describe";
 import FlowLayout from "../../../app/(app)/request/(flow)/_layout";
 import NewRoute from "../../../app/(app)/request/(flow)/new";
 import ReviewRoute from "../../../app/(app)/request/(flow)/review";
+import WhenRoute from "../../../app/(app)/request/(flow)/when";
 import WhereRoute from "../../../app/(app)/request/(flow)/where";
 import SentRoute from "../../../app/(app)/request/sent";
 import { METRICS } from "../../auth/__tests__/helpers";
 import { CATEGORIES_QUERY_KEY } from "../../home/useCategories";
 import { TabsLayout } from "../../tabs/TabsLayout";
+import { formatLongDay, offeredDays } from "../dates";
 import { requestDraftStore, startRequest } from "../requestDraft";
 import { created, HANDYMAN, PAINTING, savedAddress } from "./helpers";
 
@@ -194,6 +196,7 @@ const routes = {
   "(app)/request/(flow)/new": NewRoute,
   "(app)/request/(flow)/describe": DescribeRoute,
   "(app)/request/(flow)/where": WhereRoute,
+  "(app)/request/(flow)/when": WhenRoute,
   "(app)/request/(flow)/review": ReviewRoute,
   "(app)/request/sent": SentRoute,
   "(app)/requests/[id]": RequestStub,
@@ -210,7 +213,14 @@ async function start(card: "Painting card" | "Handyman card") {
   return result;
 }
 
-/** Painting from home to Review: Ceiling, a description, the default saved address. */
+/** From Where's Continue, on through When ("I'm flexible", its default) to Review. */
+async function throughWhen(result: Awaited<ReturnType<typeof renderRouter>>) {
+  await waitFor(() => expect(result.getPathname()).toBe("/request/when"));
+  await press("Continue");
+  await waitFor(() => expect(result.getPathname()).toBe("/request/review"));
+}
+
+/** Painting from home to Review: Ceiling, a description, the default saved address, any day. */
 async function toReview() {
   const result = await start("Painting card");
   await fireEvent.press(screen.getByRole("radio", { name: "Ceiling" }));
@@ -221,7 +231,7 @@ async function toReview() {
   await waitFor(() => expect(result.getPathname()).toBe("/request/where"));
   await waitFor(() => expect(screen.getByRole("radio", { name: "Home" })).toBeChecked());
   await press("Continue");
-  await waitFor(() => expect(result.getPathname()).toBe("/request/review"));
+  await throughWhen(result);
   return result;
 }
 
@@ -251,7 +261,7 @@ describe("the request flow", () => {
     jest.mocked(apiPost).mockReturnValue(sending.promise as never);
     const result = await start("Painting card");
 
-    expect(screen.getByRole("header", { name: "Step 1 of 4. Painting" })).toBeTruthy();
+    expect(screen.getByRole("header", { name: "Step 1 of 5. Painting" })).toBeTruthy();
     await press("Continue");
     expect(result.getPathname()).toBe("/request/new");
     expect(screen.getByText("Answer this to continue.")).toBeTruthy();
@@ -259,7 +269,7 @@ describe("the request flow", () => {
     await fireEvent.press(screen.getByRole("radio", { name: "Ceiling" }));
     await press("Continue");
     await waitFor(() => expect(result.getPathname()).toBe("/request/describe"));
-    expect(screen.getByRole("header", { name: "Step 2 of 4. What's going on?" })).toBeTruthy();
+    expect(screen.getByRole("header", { name: "Step 2 of 5. What's going on?" })).toBeTruthy();
     await press("Continue");
     expect(screen.getByText("Tell us what's going on to continue.")).toBeTruthy();
     await fireEvent.changeText(screen.getByTestId("describe-text"), "Water stain on the ceiling");
@@ -270,12 +280,25 @@ describe("the request flow", () => {
     expect(screen.getByRole("radio", { name: "Mom's" })).toBeDisabled();
     await press("Continue");
 
+    await waitFor(() => expect(result.getPathname()).toBe("/request/when"));
+    expect(screen.getByRole("header", { name: "Step 4 of 5. When works for you?" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "I'm flexible" })).toBeChecked();
+    const day = offeredDays(2)[1];
+    await fireEvent.press(screen.getByTestId(`when-day-${day}`));
+    expect(screen.getByTestId(`when-day-${day}`)).toBeChecked();
+    expect(screen.getByRole("radio", { name: "I'm flexible" })).not.toBeChecked();
+    expect(screen.getByTestId("when-chosen")).toHaveTextContent(formatLongDay(day, "en"));
+    await press("Continue");
+
     await waitFor(() => expect(result.getPathname()).toBe("/request/review"));
-    expect(screen.getByRole("header", { name: "Step 4 of 4. Check your request" })).toBeTruthy();
+    expect(screen.getByRole("header", { name: "Step 5 of 5. Check your request" })).toBeTruthy();
     expect(screen.getByTestId("review-answer-surface")).toHaveTextContent(/Ceiling/);
     expect(screen.getByTestId("review-answer-furnished")).toHaveTextContent(/No/);
     expect(screen.getByLabelText("1 file attached")).toBeTruthy();
     expect(screen.getByTestId("review-address")).toHaveTextContent(/12 Main St, Newark, NJ 07102/);
+    expect(screen.getByTestId("review-when")).toHaveTextContent(
+      new RegExp(formatLongDay(day, "en")),
+    );
 
     await press("Send request");
     await press("Send request");
@@ -299,6 +322,7 @@ describe("the request flow", () => {
             state: "NJ",
             zip_code: "07102",
           },
+          preferred_date: day,
           intake_answers: { surface: "ceiling", furnished: false },
           media_keys: ["uploads/1.jpg"],
         },
@@ -398,7 +422,7 @@ describe("the request flow", () => {
     await fireEvent.changeText(field("where-city"), "c".repeat(128));
     expect(field("where-line1").props.accessibilityHint).toBeUndefined();
     await press("Continue");
-    await waitFor(() => expect(result.getPathname()).toBe("/request/review"));
+    await throughWhen(result);
 
     jest.mocked(apiPost).mockResolvedValueOnce(created() as never);
     await press("Send request");
@@ -438,7 +462,7 @@ describe("the request flow", () => {
     await fireEvent.changeText(line1, "1 Broad St");
     expect(screen.queryByText("Check the address")).toBeNull();
     await press("Continue");
-    await waitFor(() => expect(result.getPathname()).toBe("/request/review"));
+    await throughWhen(result);
 
     jest.mocked(apiPost).mockResolvedValueOnce(created() as never);
     await press("Send request");
@@ -477,7 +501,7 @@ describe("the request flow", () => {
     await fireEvent.changeText(screen.getByTestId("where-state"), "NJ");
     await fireEvent.changeText(screen.getByTestId("where-zip"), "07102");
     await press("Continue");
-    await waitFor(() => expect(result.getPathname()).toBe("/request/review"));
+    await throughWhen(result);
 
     jest.mocked(apiPost).mockResolvedValueOnce(created() as never);
     await press("Send request");
@@ -499,7 +523,7 @@ describe("the request flow", () => {
     await waitFor(() => expect(spoken("We're not in this area yet")).toBe(1));
 
     await press("Continue"); // same address: the notice stays on Where
-    await waitFor(() => expect(result.getPathname()).toBe("/request/review"));
+    await throughWhen(result);
     await press("Send request");
     await waitFor(() => expect(result.getPathname()).toBe("/request/where"));
     await waitFor(() => expect(spoken("We're not in this area yet")).toBe(2));
@@ -519,6 +543,48 @@ describe("the request flow", () => {
     await press("Try again");
     await waitFor(() => expect(result.getPathname()).toBe("/request/sent"));
     expect(apiPost).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends a day gone by back to When, where flexible clears it", async () => {
+    const result = await toReview();
+    expect(screen.getByTestId("review-when")).toHaveTextContent(/I'm flexible: any day works/);
+    // The customer picked a day before midnight; it has passed since.
+    await act(async () => requestDraftStore.setState({ preferredDate: "2020-01-01" }));
+
+    await press("Send request");
+
+    await waitFor(() => expect(result.getPathname()).toBe("/request/when"));
+    expect(apiPost).not.toHaveBeenCalled();
+    expect(screen.getByText("That day has passed")).toBeTruthy();
+    await waitFor(() => expect(spoken("That day has passed")).toBe(1));
+    expect(screen.queryByTestId("when-chosen")).toBeNull();
+
+    await fireEvent.press(screen.getByRole("radio", { name: "I'm flexible" }));
+    expect(screen.queryByText("That day has passed")).toBeNull();
+    await press("Continue");
+    await waitFor(() => expect(result.getPathname()).toBe("/request/review"));
+    jest.mocked(apiPost).mockResolvedValueOnce(created() as never);
+    await press("Send request");
+    await waitFor(() => expect(result.getPathname()).toBe("/request/sent"));
+    expect(posted()[0].body).not.toHaveProperty("preferred_date");
+  });
+
+  it("edits the day from Review and keeps it across Back", async () => {
+    const result = await toReview();
+    await press("Edit the day");
+    await waitFor(() => expect(result.getPathname()).toBe("/request/when"));
+    const day = offeredDays(3)[2];
+    await fireEvent.press(screen.getByTestId(`when-day-${day}`));
+    await press("Back");
+    await waitFor(() => expect(result.getPathname()).toBe("/request/where"));
+    await press("Continue");
+    await waitFor(() => expect(result.getPathname()).toBe("/request/when"));
+    expect(screen.getByTestId(`when-day-${day}`)).toBeChecked();
+    await press("Continue");
+    await waitFor(() => expect(result.getPathname()).toBe("/request/review"));
+    expect(screen.getByTestId("review-when")).toHaveTextContent(
+      new RegExp(formatLongDay(day, "en")),
+    );
   });
 
   it("keeps the draft across Back, and asks before discarding it", async () => {
@@ -566,7 +632,7 @@ describe("the request flow", () => {
   it("leaves without asking when nothing was entered", async () => {
     const result = await start("Handyman card");
 
-    expect(screen.getByRole("header", { name: "Step 1 of 3. What's going on?" })).toBeTruthy();
+    expect(screen.getByRole("header", { name: "Step 1 of 4. What's going on?" })).toBeTruthy();
     await press("Back");
 
     await waitFor(() => expect(result.getPathname()).toBe("/"));

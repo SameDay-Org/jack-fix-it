@@ -28,7 +28,8 @@ export type AddressChoice = { kind: "saved"; id: string } | { kind: "typed" } | 
  * Why the server sent the customer back to a step after a send. The step shows it until the
  * customer changes something there.
  */
-export type RefusalReason = "invalidAddress" | "invalidAnswers" | "invalidMedia" | "zipNotServed";
+export type RefusalReason =
+  "invalidAddress" | "invalidAnswers" | "invalidMedia" | "staleDate" | "zipNotServed";
 export type StepRefusal = { step: StepId; reason: RefusalReason };
 
 export type RequestDraft = {
@@ -39,6 +40,8 @@ export type RequestDraft = {
   description: string;
   address: AddressChoice;
   typedAddress: AddressFields;
+  /** A day as YYYY-MM-DD, or null for "I'm flexible". */
+  preferredDate: string | null;
   refusal: StepRefusal | null;
 };
 
@@ -56,6 +59,7 @@ const EMPTY_DRAFT: RequestDraft = {
   description: "",
   address: null,
   typedAddress: EMPTY_ADDRESS,
+  preferredDate: null,
   refusal: null,
 };
 
@@ -117,6 +121,10 @@ export function setTypedAddress(field: keyof AddressFields, value: string): void
   }));
 }
 
+export function setPreferredDate(preferredDate: string | null): void {
+  requestDraftStore.setState((draft) => ({ preferredDate, ...clearRefusalOn(draft, "when") }));
+}
+
 /** The server refused the request because of `step`: the flow goes back there and says why. */
 export function refuseStep(refusal: StepRefusal): void {
   // A fresh object each time: the step keys its scroll and announcement on it, so a second refusal
@@ -136,7 +144,8 @@ export function hasDraftInput(draft: RequestDraft): boolean {
     Object.keys(draft.answers).length > 0 ||
     draft.description.trim() !== "" ||
     draft.address !== null ||
-    typed
+    typed ||
+    draft.preferredDate !== null
   );
 }
 

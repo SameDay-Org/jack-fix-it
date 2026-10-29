@@ -19,6 +19,7 @@ const DRAFT: RequestDraft = {
   description: "  Water stain on the ceiling  ",
   address: null,
   typedAddress: { line1: "", line2: "", city: "", state: "", zipCode: "" },
+  preferredDate: null,
   refusal: null,
 };
 
@@ -46,6 +47,13 @@ describe("requestBody", () => {
       intake_answers: { surface: "ceiling", furnished: false },
       media_keys: ["uploads/b.jpg", "uploads/a.mp4"],
     });
+  });
+  it("sends the chosen day as YYYY-MM-DD and leaves it out when flexible", () => {
+    const parts = { category: PAINTING, address: ADDRESS, mediaKeys: [] };
+    expect(
+      requestBody({ ...parts, draft: { ...DRAFT, preferredDate: "2026-11-03" } }).preferred_date,
+    ).toBe("2026-11-03");
+    expect(requestBody({ ...parts, draft: DRAFT })).not.toHaveProperty("preferred_date");
   });
 });
 

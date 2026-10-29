@@ -58,6 +58,7 @@ const EMPTY = {
   description: "",
   address: null,
   typedAddress: EMPTY_ADDRESS,
+  preferredDate: null,
   refusal: null,
 };
 
@@ -84,6 +85,7 @@ function sendAndStartAnotherAsA(): void {
       state: "NJ",
       zipCode: "07102",
     },
+    preferredDate: "2026-11-03",
   });
 }
 

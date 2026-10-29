@@ -3,7 +3,7 @@ import type { Href } from "expo-router";
 import type { Category } from "@/features/home/useCategories";
 
 /** The request flow's steps, in order. */
-export type StepId = "questions" | "describe" | "where" | "review";
+export type StepId = "questions" | "describe" | "where" | "when" | "review";
 
 // The flow's first screen is always `/request/new` (where home's category card lands); the
 // questions are first unless the category asks none.
@@ -11,12 +11,13 @@ const ROUTES = {
   questions: "/request/new",
   describe: "/request/describe",
   where: "/request/where",
+  when: "/request/when",
   review: "/request/review",
 } as const satisfies Record<StepId, Href>;
 
 /** The steps a request in `category` goes through: the questions only when it has some. */
 export function stepsFor(category: Pick<Category, "intake_questions">): readonly StepId[] {
-  const rest: StepId[] = ["describe", "where", "review"];
+  const rest: StepId[] = ["describe", "where", "when", "review"];
   return category.intake_questions.length > 0 ? ["questions", ...rest] : rest;
 }
 
