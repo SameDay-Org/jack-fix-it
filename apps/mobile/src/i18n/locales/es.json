@@ -114,13 +114,13 @@
     "reviewing": "En revisión",
     "findingAPro": "Buscando un profesional",
     "quoteReady": "Presupuesto listo",
-    "scheduled": "Programado",
+    "scheduled": "Programada",
     "professionalOnTheWay": "Profesional en camino",
     "inProgress": "En curso",
     "waitingForConfirmation": "Esperando confirmación",
-    "completed": "Completado",
+    "completed": "Completada",
     "needsAttention": "Requiere atención",
-    "cancelled": "Cancelado"
+    "cancelled": "Cancelada"
   },
   "request": {
     "title": "Dile a Jack qué pasó"

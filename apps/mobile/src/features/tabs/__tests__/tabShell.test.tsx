@@ -205,6 +205,12 @@ describe("the tab shell (#213, D18)", () => {
 
     await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ y: 0, animated: true }));
 
+    await fireEvent.press(screen.getByTestId("tab-history"));
+    await screen.findByRole("button", { name: "Browse categories" });
+    scrollTo.mockClear();
+    await fireEvent.press(screen.getByTestId("tab-history"));
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ y: 0, animated: true }));
+
     await fireEvent.press(screen.getByTestId("tab-account"));
     scrollTo.mockClear();
     await fireEvent.press(screen.getByTestId("tab-account"));

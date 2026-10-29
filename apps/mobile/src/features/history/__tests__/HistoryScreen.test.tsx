@@ -23,7 +23,12 @@ import {
   renderWithQuery,
 } from "../../opportunities/__tests__/helpers";
 import { HistoryScreen } from "../HistoryScreen";
-import { MY_REQUESTS_PAGE_SIZE, type RequestPage, type RequestSummary } from "../useMyRequests";
+import {
+  invalidateMyRequests,
+  MY_REQUESTS_PAGE_SIZE,
+  type RequestPage,
+  type RequestSummary,
+} from "../useMyRequests";
 
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../../api/errors"),
@@ -32,7 +37,11 @@ jest.mock("@/api", () => ({
 }));
 jest.mock("expo-router", () => {
   const { routerMock } = jest.requireActual("../../opportunities/__tests__/helpers");
-  return { ...routerMock, router: { ...routerMock.router, navigate: jest.fn() } };
+  return {
+    ...routerMock,
+    router: { ...routerMock.router, navigate: jest.fn() },
+    useScrollToTop: jest.fn(),
+  };
 });
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
@@ -191,6 +200,8 @@ describe("HistoryScreen, customer: the requests (#47)", () => {
     expect(row(OLDER).getByText("Buscando un profesional", HIDDEN)).toBeTruthy();
     expect(row(OLDER).getByText("JF-000102 · Ayer", HIDDEN)).toBeTruthy();
     expect(row(OLDEST).getByText("Solicitud", HIDDEN)).toBeTruthy();
+    // The status agrees with "solicitud".
+    expect(row(OLDEST).getByText("Cancelada", HIDDEN)).toBeTruthy();
     expect(
       screen.getByRole("button", { name: "Pintura, JF-000102, Buscando un profesional, Ayer" }),
     ).toBeTruthy();
@@ -355,6 +366,35 @@ describe("HistoryScreen, customer: the requests (#47)", () => {
     });
     expect(rowIds()).toEqual([...loaded, rowOf(OLDEST)]);
     expect(screen.queryByText("We couldn't load more requests.")).toBeNull();
+  });
+
+  it("nearing the end during a refresh waits for it: the new statuses stay, then the next page loads", async () => {
+    const client = newQueryClient();
+    const refreshed = deferred<RequestPage>();
+    answers.list = [page([NEWEST, OLDER], "cursor-2"), refreshed.promise, page([OLDEST])];
+    await renderWithQuery(<HistoryScreen />, client);
+    await findRow(NEWEST);
+
+    // A quote accepted elsewhere: the list refreshes and its first page is held.
+    await act(async () => void invalidateMyRequests(client));
+    await waitFor(() => expect(listCalls()).toHaveLength(2));
+    await fireEvent(screen.getByTestId("request-list"), "onEndReached");
+    expect(listCalls()).toHaveLength(2);
+
+    await act(async () =>
+      refreshed.resolve(
+        page([{ ...NEWEST, customer_status: "customerStatus.cancelled" }, OLDER], "cursor-2"),
+      ),
+    );
+    await waitFor(() => expect(row(NEWEST).getByText("Cancelled", HIDDEN)).toBeTruthy());
+    await findRow(OLDEST);
+    expect(apiGet).toHaveBeenLastCalledWith(LIST, {
+      auth: true,
+      signal: expect.any(AbortSignal),
+      query: { limit: MY_REQUESTS_PAGE_SIZE, cursor: "cursor-2" },
+    });
+    expect(listCalls()).toHaveLength(3);
+    expect(row(NEWEST).getByText("Cancelled", HIDDEN)).toBeTruthy();
   });
 
   it("refetches on focus, on foreground and on pull; a failed pull keeps the rows and says so", async () => {

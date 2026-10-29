@@ -1,5 +1,14 @@
-import { router, unstable_useIsNavigating } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { router, unstable_useIsNavigating, useScrollToTop } from "expo-router";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentRef,
+  type ReactElement,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { FlatList, RefreshControl, Text, View } from "react-native";
 
@@ -11,7 +20,12 @@ import { useRefetchOnReturn, useSettledError } from "@/features/quotes/useReques
 import { tokens } from "@/theme";
 
 import { RequestRow, RequestRowSeparator, RequestRowSkeleton } from "./RequestRow";
-import { flattenMyRequests, useMyRequests, type RequestSummary } from "./useMyRequests";
+import {
+  flattenMyRequests,
+  MY_REQUESTS_QUERY_KEY,
+  useMyRequests,
+  type RequestSummary,
+} from "./useMyRequests";
 
 export type RequestListProps = {
   /** Scrolls above the rows and every state: the screen's title. */
@@ -32,7 +46,7 @@ const END_REACHED_THRESHOLD = 0.5;
  * virtualized list that loads the next page as the customer nears the end and refreshes on pull,
  * on focus and on foreground; a row opens its request. Rows wait for the category catalog too,
  * since a row names its category: a catalog that fails shows the same error, unless there are
- * no rows to name (the empty state shows).
+ * no rows to name (the empty state shows). A tab root: pressing History again scrolls it to the top.
  */
 export function RequestList({ header, empty, testID = "request-list" }: RequestListProps) {
   const { t } = useTranslation();
@@ -53,6 +67,9 @@ export function RequestList({ header, empty, testID = "request-list" }: RequestL
   useRefetchOnReturn(refetch);
   const open = useOpenRequest();
   const [pulling, setPulling] = useState(false);
+  const listRef = useRef<ComponentRef<typeof FlatList<RequestSummary>>>(null);
+  useScrollToTop(listRef);
+  const nextPage = useNextPageAfterRefresh(fetchNextPage);
 
   const rows = useMemo(() => flattenMyRequests(data), [data]);
   // Rows name their category, so they wait for the catalog; with no rows there is nothing to name.
@@ -82,14 +99,20 @@ export function RequestList({ header, empty, testID = "request-list" }: RequestL
     }
   };
 
+  // The next page, or its retry; never one that cancels a refresh.
+  const askMore = () => {
+    if (hasNextPage) nextPage();
+  };
+
   // Nearing the end asks for the next page once; after a failed page the footer says so and the
   // retry is the customer's, so a stalled server is not asked again on every scroll.
   const loadMore = () => {
-    if (hasNextPage && !isFetchingNextPage && !isFetchNextPageError) void fetchNextPage();
+    if (!isFetchNextPageError) askMore();
   };
 
   return (
     <FlatList
+      ref={listRef}
       testID={testID}
       data={items}
       keyExtractor={(request) => request.id}
@@ -122,7 +145,7 @@ export function RequestList({ header, empty, testID = "request-list" }: RequestL
             <RetryNotice
               message={t("history.customer.more.failed")}
               action={t("history.customer.more.retry")}
-              onRetry={() => void fetchNextPage()}
+              onRetry={askMore}
               testID={`${testID}-next-page-error`}
             />
           </View>
@@ -142,6 +165,38 @@ export function RequestList({ header, empty, testID = "request-list" }: RequestL
       }
     />
   );
+}
+
+/**
+ * Asks for the next page without ever cancelling a refresh of the list (focus, pull, an
+ * invalidation): TanStack would drop the refresh and the old statuses would stay on screen. A page
+ * asked for during a refresh is fetched once the refresh settles. The query is read directly,
+ * since a refresh that just started may not have rendered yet.
+ */
+function useNextPageAfterRefresh(
+  fetchNextPage: (options: { cancelRefetch: boolean }) => Promise<unknown>,
+): () => void {
+  const client = useQueryClient();
+  const waiting = useRef<(() => void) | null>(null);
+  useEffect(() => () => waiting.current?.(), []);
+
+  return useCallback(() => {
+    const cache = client.getQueryCache();
+    const query = cache.find({ queryKey: MY_REQUESTS_QUERY_KEY, exact: true });
+    const fetch = () => void fetchNextPage({ cancelRefetch: false });
+    if (query?.state.fetchStatus !== "fetching") return fetch();
+    // A page on its way already, or one waiting for the refresh: nothing more to ask.
+    if (query.state.fetchMeta?.fetchMore || waiting.current) return;
+    const stop = cache.subscribe((event) => {
+      if (event.query !== query) return;
+      const removed = event.type === "removed";
+      if (!removed && query.state.fetchStatus === "fetching") return;
+      stop();
+      waiting.current = null;
+      if (!removed) fetch();
+    });
+    waiting.current = stop;
+  }, [client, fetchNextPage]);
 }
 
 /**
