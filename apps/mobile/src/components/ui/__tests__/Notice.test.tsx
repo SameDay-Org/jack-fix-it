@@ -1,10 +1,17 @@
-import { act, fireEvent, render, screen } from "@testing-library/react-native";
-import { NavigationContext } from "expo-router/react-navigation";
-import type { ComponentProps } from "react";
+import { fireEvent, render, screen } from "@testing-library/react-native";
+import { useIsFocused } from "expo-router";
 import { AccessibilityInfo } from "react-native";
 
 import { Button } from "../Button";
 import { Notice } from "../Notice";
+
+// Outside a navigator expo-router's hook throws, as it does here by default; a test that puts the
+// notice on a screen returns that screen's focus instead.
+jest.mock("expo-router", () => ({
+  useIsFocused: jest.fn(() => {
+    throw new Error("Couldn't find a focus context.");
+  }),
+}));
 
 let announce: jest.SpyInstance;
 
@@ -81,41 +88,27 @@ describe("Notice", () => {
 
   it("waits until its screen is in front: a notice under another screen speaks on its return", async () => {
     // A screen kept mounted under another one, as a stack keeps the steps behind Review.
-    const listeners = new Set<() => void>();
     let focused = false;
-    const navigation = {
-      isFocused: () => focused,
-      addListener: (_event: "focus" | "blur", listener: () => void) => {
-        listeners.add(listener);
-        return () => listeners.delete(listener);
-      },
-    } as unknown as NonNullable<ComponentProps<typeof NavigationContext.Provider>["value"]>;
-    const setFocused = (next: boolean) =>
-      act(() => {
-        focused = next;
-        listeners.forEach((listener) => listener());
-      });
-    const notice = (title: string) => (
-      <NavigationContext.Provider value={navigation}>
-        <Notice tone="danger" title={title} />
-      </NavigationContext.Provider>
-    );
-
+    jest.mocked(useIsFocused).mockImplementation(() => focused);
+    const notice = (title: string) => <Notice tone="danger" title={title} />;
     const { rerender } = await render(notice("We're not in this area yet"));
+    const show = async (next: boolean, title = "We're not in this area yet") => {
+      focused = next;
+      await rerender(notice(title)); // a focus change re-renders the screen
+    };
     expect(announce).not.toHaveBeenCalled();
 
-    await setFocused(true);
+    await show(true);
     expect(announce).toHaveBeenCalledTimes(1);
     expect(announce).toHaveBeenLastCalledWith("We're not in this area yet", { queue: true });
 
-    await setFocused(false); // away and back with the same text: said once only
-    await setFocused(true);
+    await show(false); // away and back with the same text: said once only
+    await show(true);
     expect(announce).toHaveBeenCalledTimes(1);
 
-    await setFocused(false);
-    await rerender(notice("Something went wrong")); // changed while away: said on return
+    await show(false, "Something went wrong"); // changed while away: said on return
     expect(announce).toHaveBeenCalledTimes(1);
-    await setFocused(true);
+    await show(true, "Something went wrong");
     expect(announce).toHaveBeenCalledTimes(2);
   });
 });
