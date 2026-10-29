@@ -186,7 +186,10 @@ describe("Input", () => {
         .mockImplementation();
     });
 
-    afterEach(() => announce.mockRestore());
+    afterEach(() => {
+      announce.mockRestore();
+      jest.restoreAllMocks(); // Platform.OS
+    });
 
     // The field as a screen drives it: the counter shows from 9 characters (90% of the limit).
     const typed = (value: string) => (

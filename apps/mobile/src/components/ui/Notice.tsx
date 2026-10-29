@@ -1,4 +1,12 @@
-import { useEffect, type ReactNode } from "react";
+import { NavigationContext } from "expo-router/react-navigation";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { Text, View } from "react-native";
 
 import { continuousCorners } from "@/theme";
@@ -28,11 +36,18 @@ export const TONE = {
  * A message inside a page, in a soft tinted bubble: what happened in one bold line, what to do
  * next under it, and the action that fixes it when there is one. An alert that screen readers
  * announce when it appears and whenever its text changes (the role alone announces nothing on
- * Android); the action stays its own stop.
+ * Android), once its screen is the one in front: a notice that shows on a screen kept mounted
+ * under another waits until that screen comes back. The action stays its own stop.
  */
 export function Notice({ tone, title, body, children, className, testID }: NoticeProps) {
   const message = body ? `${title}${/[.!?]$/.test(title) ? "" : "."} ${body}` : title;
-  useEffect(() => announce(message), [message]);
+  const focused = useScreenFocused();
+  const announced = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focused || announced.current === message) return;
+    announced.current = message;
+    announce(message);
+  }, [focused, message]);
 
   return (
     <View
@@ -46,4 +61,22 @@ export function Notice({ tone, title, body, children, className, testID }: Notic
       {children ? <View className="mt-2 flex-row">{children}</View> : null}
     </View>
   );
+}
+
+/** Whether the screen holding it is the one in front; true outside a navigator. */
+function useScreenFocused(): boolean {
+  const navigation = useContext(NavigationContext);
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      if (!navigation) return () => undefined;
+      const offFocus = navigation.addListener("focus", onChange);
+      const offBlur = navigation.addListener("blur", onChange);
+      return () => {
+        offFocus();
+        offBlur();
+      };
+    },
+    [navigation],
+  );
+  return useSyncExternalStore(subscribe, () => navigation?.isFocused() ?? true);
 }
