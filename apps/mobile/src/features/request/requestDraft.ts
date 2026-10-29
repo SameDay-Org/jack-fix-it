@@ -93,6 +93,14 @@ export function startRequest(categorySlug: string, rise?: (href: Href) => boolea
   setFlowRisen(before.risen);
 }
 
+/**
+ * Forgets a start whose flow never mounted (Home's panel lowered after a push that went nowhere).
+ * A flow that did mount has forgotten it already, on its way out.
+ */
+export function forgetUnopenedRequest(): void {
+  if (flowRisen()) resetDraft();
+}
+
 /** Forgets the draft: the flow was sent, discarded or left, or the account signed out. */
 export function resetDraft(): void {
   requestDraftStore.setState(EMPTY_DRAFT);

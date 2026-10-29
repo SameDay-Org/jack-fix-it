@@ -17,9 +17,15 @@ function RouterTabBar({ state, emitter, navigateToTab }: BottomTabBarProps) {
   const { t } = useTranslation();
   // Home's categories panel rising into a request: the bar slides away over the first half of the
   // rise, as the panel's cards fade, and comes back as the panel lowers.
+  // Only over Home: a panel left up under another tab (a link that opened it from outside) must
+  // not take the bar with it.
   const { progress } = usePanelHandoffContext();
   const { phase } = usePanelHandoff();
-  const slideOut = useDerivedValue(() => Math.min(1, progress.value / CONTENT_FROM));
+  const onHome = tabFor(state.routes[state.index]?.name ?? "")?.route === "index";
+  const slideOut = useDerivedValue(
+    () => (onHome ? Math.min(1, progress.value / CONTENT_FROM) : 0),
+    [onHome],
+  );
 
   const items = state.routes.flatMap((route, index): TabBarItem[] => {
     const tab = tabFor(route.name);
@@ -47,7 +53,14 @@ function RouterTabBar({ state, emitter, navigateToTab }: BottomTabBarProps) {
     ];
   });
 
-  return <TabBar items={items} slideOut={slideOut} hidden={phase !== "idle"} testID="tab-bar" />;
+  return (
+    <TabBar
+      items={items}
+      slideOut={slideOut}
+      hidden={onHome && phase !== "idle"}
+      testID="tab-bar"
+    />
+  );
 }
 
 const renderTabBar = (props: BottomTabBarProps) => <RouterTabBar {...props} />;

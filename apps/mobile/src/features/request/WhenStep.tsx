@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { useMemo, useRef, type ComponentRef } from "react";
+import { useRef, type ComponentRef } from "react";
 import { useTranslation } from "react-i18next";
 import { AccessibilityInfo, Pressable, ScrollView, Text, View } from "react-native";
 
@@ -85,7 +85,9 @@ type DayStripProps = { selected: string | null; locale: string };
 /** The offered days as a row of bubbles that scrolls sideways, the chosen one filled navy. */
 function DayStrip({ selected, locale }: DayStripProps) {
   const { t } = useTranslation();
-  const days = useMemo(() => offeredDays(requestConfig.dateDays), []);
+  // Every render: the step stays mounted under Review, and a send refused after midnight comes
+  // back to a strip that must start at the new first day (it is a few dozen strings).
+  const days = offeredDays(requestConfig.dateDays);
   const today = localToday();
   const tomorrow = addDays(today, 1);
   const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);

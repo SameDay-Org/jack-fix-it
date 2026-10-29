@@ -8,6 +8,7 @@ import { useReducedMotion } from "react-native-reanimated";
 import { apiGet, useSession } from "@/api";
 import { createPanelHandoff, type PanelHandoff } from "@/features/auth";
 import { requestDraftStore } from "@/features/request";
+import { flowRisen } from "@/features/request/rise";
 import { tokens } from "@/theme";
 
 import { CustomerHomeScreen } from "../CustomerHomeScreen";
@@ -159,6 +160,19 @@ describe("Home's categories panel rises into the request", () => {
 
     expect(router.push).toHaveBeenCalledWith(FIRST_STEP);
     expect(requestDraftStore.getState().categorySlug).toBe("painting");
+  });
+
+  it("a rise whose push went nowhere lowers again and drops the start it made", async () => {
+    jest.mocked(useNavigation).mockReturnValue({ isFocused: () => true } as never);
+    await renderHome();
+
+    await act(async () => fireEvent.press(card("Painting")));
+    expect(flowRisen()).toBe(true);
+    await advance(panelRiseMs * 4); // risen, the push, the check, the lowering
+
+    expect(panelTranslate()).toBeCloseTo(0, 0);
+    expect(flowRisen()).toBe(false);
+    expect(requestDraftStore.getState().categorySlug).toBeNull();
   });
 
   it("Reduce Motion: no rise, the request opens at once", async () => {

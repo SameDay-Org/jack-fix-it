@@ -633,21 +633,29 @@ describe("the request flow", () => {
     const backHandlers = jest.spyOn(BackHandler, "addEventListener");
     client.setQueryData(CATEGORIES_QUERY_KEY, [PAINTING, HANDYMAN]);
     const result = await renderRouter(routes, { initialUrl: "/" });
+    const beforeFlow = backHandlers.mock.calls.length;
     await act(async () => openRisen("painting"));
     await waitFor(() => expect(result.getPathname()).toBe("/request/new"));
     await waitFor(() => expect(risenStep().props.pointerEvents).toBe("auto"), { timeout: 3000 });
     await fireEvent.press(screen.getByRole("radio", { name: "Ceiling" }));
 
-    // Android's back runs through the flow's close: the draft asks first.
-    const [, onBack] = backHandlers.mock.calls.at(-1) as [string, () => boolean];
+    // The risen step listens to Android's back itself, and runs it through the flow's close: the
+    // draft asks first, before any fade (an exit-then-back would fade the step out, then ask).
+    const flowHandlers = backHandlers.mock.calls.slice(beforeFlow);
+    expect(flowHandlers.map(([event]) => event)).toContain("hardwareBackPress");
+    const [, onBack] = flowHandlers.at(-1) as [string, () => boolean];
     let handled = false;
     await act(async () => {
       handled = onBack();
     });
     expect(handled).toBe(true);
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
     const buttons = () => jest.mocked(Alert.alert).mock.lastCall?.[2] as AlertButton[];
     expect(buttons().map((button) => button.text)).toEqual(["Keep editing", "Discard"]);
+    // "Keep editing": the step is still in, taking taps.
+    await act(async () => buttons()[0].onPress?.());
     expect(result.getPathname()).toBe("/request/new");
+    expect(risenStep().props.pointerEvents).toBe("auto");
 
     await press("Back"); // the Back button asks the same
     expect(Alert.alert).toHaveBeenCalledTimes(2);

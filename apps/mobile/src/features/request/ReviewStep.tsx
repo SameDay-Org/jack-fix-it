@@ -81,7 +81,8 @@ export function ReviewStep({ category, steps }: ReviewStepProps) {
           const typedInvalid =
             resolved.kind === "typed" && Object.keys(addressErrors(draft.typedAddress)).length > 0;
           if (typedInvalid) return backTo(ADDRESS_REFUSED);
-          // Midnight passed while the request was on its way.
+          // Midnight passed while the request was on its way. (A phone clock behind the server's
+          // still sees the day as open: that refusal stays the generic one.)
           return dateStale() ? backTo(DATE_STALE) : fail("rejected");
         }
         // What the server knows better: which ZIPs are served, the category's questions (also

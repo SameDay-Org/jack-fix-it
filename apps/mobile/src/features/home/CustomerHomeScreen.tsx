@@ -1,5 +1,5 @@
 import { useIsFocused, useScrollToTop, type Href } from "expo-router";
-import { useRef, type ComponentRef } from "react";
+import { useEffect, useRef, type ComponentRef } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { ScrollView, Text, type LayoutChangeEvent } from "react-native";
 import Animated, { useAnimatedStyle, useReducedMotion } from "react-native-reanimated";
@@ -9,7 +9,7 @@ import { useSession } from "@/api";
 import { Screen } from "@/components/ui";
 import { CONTENT_FROM, usePanelTransition } from "@/features/auth";
 import { useOpenPhoneStepAfterSignUp } from "@/features/phone/useOpenPhoneStepAfterSignUp";
-import { startRequest } from "@/features/request";
+import { forgetUnopenedRequest, startRequest } from "@/features/request";
 import { tokens } from "@/theme";
 
 import { CategoryCards } from "./CategoryCards";
@@ -46,6 +46,13 @@ export function CustomerHomeScreen() {
     reduceMotion,
     destinations: NO_PREFETCH,
   });
+  // Back at rest after a rise: if the push went nowhere (no flow mounted to forget it), the start
+  // it made is dropped, so nothing of it rides into a later way in.
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    if (wasBusy.current && !busy) forgetUnopenedRequest();
+    wasBusy.current = busy;
+  }, [busy]);
   // Where the panel starts: its top in the scroll content, less how far the page is scrolled.
   const panelY = useRef(0);
   const scrollY = useRef(0);
