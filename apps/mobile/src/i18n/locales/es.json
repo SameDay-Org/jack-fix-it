@@ -307,7 +307,8 @@
       "when": "Fecha preferida",
       "sent": "Enviada",
       "description": "Qué pasa",
-      "redacted": "Los datos de contacto se ocultaron."
+      "redacted": "Los datos de contacto se ocultaron.",
+      "sendQuote": "Enviar una cotización"
     },
     "media": {
       "title": "Fotos y videos",
@@ -326,6 +327,93 @@
       "home": "Ir al inicio"
     },
     "detailError": {
+      "title": "No pudimos cargar esta solicitud",
+      "body": "Revisa tu conexión e inténtalo de nuevo.",
+      "retry": "Intentar de nuevo"
+    }
+  },
+  "quoteForm": {
+    "title": "Tu cotización",
+    "subtitle": "Un precio fijo por todo el trabajo. El cliente compara cotizaciones y elige una.",
+    "loading": "Cargando el formulario de cotización",
+    "price": {
+      "label": "Precio (USD)",
+      "hint": "El cliente paga exactamente esto.",
+      "required": "Escribe tu precio.",
+      "invalid": "Escribe un precio como 120 o 120.50.",
+      "aboveCap": "Supera lo máximo que Jack permite por cotización."
+    },
+    "payout": {
+      "receive": "Recibirás {{amount}}",
+      "fee": "Comisión de Jack {{rate}}: {{amount}}"
+    },
+    "scope": {
+      "label": "Qué incluye",
+      "hint": "El trabajo, las piezas y la limpieza que cubre tu precio.",
+      "required": "Indica qué incluye tu precio."
+    },
+    "approach": {
+      "label": "Cómo haré el trabajo (opcional)",
+      "hint": "Explica tu método, los materiales y lo que el cliente deba saber. No compartas teléfonos ni correos; el chat se abre después de la contratación."
+    },
+    "duration": {
+      "title": "Cuánto tarda",
+      "hours": "Horas",
+      "minutes": "Minutos",
+      "hoursValue": "{{count}} h",
+      "minutesValue": "{{count}} min",
+      "lessHours": "Una hora menos",
+      "moreHours": "Una hora más",
+      "lessMinutes": "{{count}} minutos menos",
+      "moreMinutes": "{{count}} minutos más",
+      "required": "Indica cuánto tarda el trabajo.",
+      "aboveCap": "Supera lo máximo que Jack permite por cotización."
+    },
+    "start": {
+      "title": "Inicio propuesto",
+      "day": "Día",
+      "time": "Hora",
+      "earlierDay": "Día anterior",
+      "laterDay": "Día siguiente",
+      "earlierTime": "{{count}} minutos antes",
+      "laterTime": "{{count}} minutos después",
+      "preferred": "El cliente prefiere el {{date}}.",
+      "past": "Elige un inicio que aún no haya pasado."
+    },
+    "review": {
+      "action": "Revisar cotización",
+      "fix": "Revisa los campos marcados en rojo.",
+      "title": "Revisa tu cotización",
+      "subtitle": "Revísala antes de enviarla: una cotización enviada no se puede cambiar.",
+      "summary": "Enviar cotización por {{price}} · recibirás {{payout}}",
+      "duration": "Duración",
+      "start": "Inicio",
+      "send": "Enviar cotización",
+      "edit": "Editar",
+      "failed": "No pudimos enviar tu cotización. Revisa tu conexión e inténtalo de nuevo.",
+      "retry": "Intentar de nuevo"
+    },
+    "sent": {
+      "title": "Cotización enviada",
+      "price": "Tu precio",
+      "receive": "Recibirás",
+      "body": "Te avisaremos si el cliente la acepta.",
+      "home": "Volver al inicio"
+    },
+    "closed": {
+      "goneTitle": "Esta solicitud ya no está disponible",
+      "goneBody": "Se cerró antes de que saliera tu cotización, así que no se envió nada.",
+      "quotedTitle": "Ya cotizaste esta solicitud",
+      "quotedBody": "Cada profesional envía una cotización por solicitud. Te avisaremos si el cliente la acepta.",
+      "home": "Ver oportunidades"
+    },
+    "discard": {
+      "title": "¿Descartar esta cotización?",
+      "body": "Se perderá lo que escribiste.",
+      "keep": "Seguir editando",
+      "confirm": "Descartar"
+    },
+    "error": {
       "title": "No pudimos cargar esta solicitud",
       "body": "Revisa tu conexión e inténtalo de nuevo.",
       "retry": "Intentar de nuevo"
