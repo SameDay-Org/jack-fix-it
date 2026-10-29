@@ -6,7 +6,7 @@ import { Button, Card, Skeleton, StatusBadge, TextSkeleton, VerifiedBadge } from
 import { continuousCorners, tokens } from "@/theme";
 
 import { useQuoteText, type QuoteState } from "./quoteText";
-import { ScopeText } from "./ScopeText";
+import { ApproachText, ScopeText } from "./QuoteNotes";
 import type { CustomerQuote } from "./useRequestQuotes";
 
 type QuoteCardProps = {
@@ -84,6 +84,9 @@ export function QuoteCard({ quote, state, now, onAccept, onViewProfile }: QuoteC
         testID={`${testID}-profile`}
       />
       <ScopeText scope={quote.scope} testID={`${testID}-scope`} />
+      {quote.approach ? (
+        <ApproachText approach={quote.approach} testID={`${testID}-approach`} />
+      ) : null}
       <QuoteFooter state={state} expiry={text.expiry} testID={testID}>
         <Button
           label={t("quotes.accept")}
