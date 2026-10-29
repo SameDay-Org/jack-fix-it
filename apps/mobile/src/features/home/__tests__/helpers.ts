@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react-native";
-import { createElement, type ReactElement, type ReactNode } from "react";
+import { createElement, useEffect, type ReactElement, type ReactNode } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import type { SessionUser } from "@/api";
+import type { PanelHandoff } from "@/features/auth";
 import type { Category } from "@/features/home/useCategories";
 
 import { user } from "../../../api/__tests__/helpers";
@@ -17,16 +18,45 @@ export const newQueryClient = () =>
   new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
 
 /**
- * Renders a screen under the safe area (the test file mocks the module) and a Query cache, as a
- * wrapper so `rerender` keeps both.
+ * `expo-router` for a home screen rendered on its own: focused, with nothing navigating, and the
+ * router's calls recorded. `jest.mock("expo-router", () => jest.requireActual("./helpers").homeRouterMock())`.
  */
-export const renderWithQuery = (ui: ReactElement, client: QueryClient = newQueryClient()) =>
+export function homeRouterMock() {
+  return {
+    router: { push: jest.fn(), dismissTo: jest.fn(), prefetch: jest.fn() },
+    useIsFocused: () => true,
+    useScrollToTop: jest.fn(),
+    useNavigation: () => ({ isFocused: () => true, addListener: () => () => undefined }),
+    useFocusEffect: (effect: () => void | (() => void)) => useEffect(() => effect(), [effect]),
+    unstable_useIsNavigating: () => false,
+  };
+}
+
+// Loaded when a test renders, not with this file: an `expo-router` mock factory loads this file,
+// and the auth feature imports `expo-router` itself.
+const panelHandoffProvider = () =>
+  jest.requireActual<typeof import("@/features/auth")>("@/features/auth").PanelHandoffProvider;
+
+/**
+ * Renders a screen under the safe area (the test file mocks the module), a Query cache and the
+ * `(app)` group's panel hand-off, as a wrapper so `rerender` keeps them.
+ */
+export const renderWithQuery = (
+  ui: ReactElement,
+  client: QueryClient = newQueryClient(),
+  /** The hand-off a test drives and reads; a new one at rest by default. */
+  handoff?: PanelHandoff,
+) =>
   render(ui, {
     wrapper: ({ children }: { children: ReactNode }) =>
       createElement(
         SafeAreaProvider,
         { initialMetrics: METRICS },
-        createElement(QueryClientProvider, { client }, children),
+        createElement(
+          QueryClientProvider,
+          { client },
+          createElement(panelHandoffProvider(), { value: handoff }, children),
+        ),
       ),
   });
 

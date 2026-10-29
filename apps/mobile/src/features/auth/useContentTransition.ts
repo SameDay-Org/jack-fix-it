@@ -39,6 +39,11 @@ type Params = {
   reduceMotion: boolean;
   /** The screen's title; screen-reader focus lands on it once the content is in. */
   titleRef: RefObject<ComponentRef<typeof Text> | null>;
+  /**
+   * What Android's hardware back does with the exit, for a screen that decides how it is left (the
+   * request flow's first step asks before discarding a draft). By default: the exit, then back.
+   */
+  onHardwareBack?: (exit: (then: () => void) => void) => void;
 };
 
 export type ContentTransition = {
@@ -85,6 +90,7 @@ export function useContentTransition({
   animate,
   reduceMotion,
   titleRef,
+  onHardwareBack,
 }: Params): ContentTransition {
   const { transitionMs, slidePx, panelRiseMs, handoffMaxMs } = tokens.motion;
   const { xl } = tokens.radius;
@@ -340,14 +346,18 @@ export function useContentTransition({
   // focused one: a screen pushed on top (sign-up over Role) owns its own back. The listener reads
   // the latest `exit` through a ref, so the focus effect keeps its identity.
   const exitRef = useRef(exit);
+  const onHardwareBackRef = useRef(onHardwareBack);
   useEffect(() => {
     exitRef.current = exit;
+    onHardwareBackRef.current = onHardwareBack;
   });
   useFocusEffect(
     useCallback(() => {
       if (!animate) return;
       const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-        exitRef.current(backToPrevious);
+        const exitThen = (then: () => void) => exitRef.current(then);
+        if (onHardwareBackRef.current) onHardwareBackRef.current(exitThen);
+        else exitThen(backToPrevious);
         return true;
       });
       return () => subscription.remove();

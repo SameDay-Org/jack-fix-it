@@ -4,7 +4,15 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import { createElement } from "react";
-import { AccessibilityInfo, Alert, Pressable, Text, type AlertButton } from "react-native";
+import {
+  AccessibilityInfo,
+  Alert,
+  BackHandler,
+  Platform,
+  Pressable,
+  Text,
+  type AlertButton,
+} from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ApiError, apiGet, apiPost, type SessionUser } from "@/api";
@@ -20,10 +28,12 @@ import WhenRoute from "../../../app/(app)/request/(flow)/when";
 import WhereRoute from "../../../app/(app)/request/(flow)/where";
 import SentRoute from "../../../app/(app)/request/sent";
 import { METRICS } from "../../auth/__tests__/helpers";
+import { panelRiseOptions } from "../../auth/panelRoute";
 import { CATEGORIES_QUERY_KEY } from "../../home/useCategories";
 import { TabsLayout } from "../../tabs/TabsLayout";
 import { formatLongDay, offeredDays } from "../dates";
 import { requestDraftStore, startRequest } from "../requestDraft";
+import { requestFlowOptions } from "../rise";
 import { created, HANDYMAN, PAINTING, savedAddress } from "./helpers";
 
 const mockSignedIn: { status: "signedIn"; user: SessionUser } = { status: "signedIn", user };
@@ -170,6 +180,17 @@ function HomeStub() {
     </>
   );
 }
+
+/** The first step's risen wrapper, while it shows. */
+const risenStep = () =>
+  screen.getByTestId("request-questions-risen", { includeHiddenElements: true });
+
+/** Opens the request as Home's categories panel does: risen, the panel's push. */
+const openRisen = (slug: string) =>
+  startRequest(slug, (href) => {
+    router.push(href);
+    return true;
+  });
 
 function RequestStub() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -585,6 +606,56 @@ describe("the request flow", () => {
     expect(screen.getByTestId("review-when")).toHaveTextContent(
       new RegExp(formatLongDay(day, "en")),
     );
+  });
+
+  it("gives the flow the panel rise when a category card opens it, the push otherwise", async () => {
+    client.setQueryData(CATEGORIES_QUERY_KEY, [PAINTING, HANDYMAN]);
+    const result = await renderRouter(routes, { initialUrl: "/" });
+
+    await act(async () => openRisen("painting"));
+    await waitFor(() => expect(result.getPathname()).toBe("/request/new"));
+    expect(requestFlowOptions()).toEqual(panelRiseOptions(Platform.OS));
+    expect(requestFlowOptions()).not.toEqual({ animation: "default" });
+    // In on its own: no panel rose under it here, so the entrance's fail-safe brings it in.
+    await waitFor(() => expect(risenStep().props.pointerEvents).toBe("auto"), { timeout: 3000 });
+
+    await press("Back");
+    await waitFor(() => expect(result.getPathname()).toBe("/"), { timeout: 3000 });
+    await press("Painting card"); // a plain push
+    await waitFor(() => expect(result.getPathname()).toBe("/request/new"));
+    expect(requestFlowOptions()).toEqual({ animation: "default" });
+    expect(
+      screen.queryByTestId("request-questions-risen", { includeHiddenElements: true }),
+    ).toBeNull();
+  });
+
+  it("asks before discarding a risen draft too, and fades out onto the panel on Back or Android's back", async () => {
+    const backHandlers = jest.spyOn(BackHandler, "addEventListener");
+    client.setQueryData(CATEGORIES_QUERY_KEY, [PAINTING, HANDYMAN]);
+    const result = await renderRouter(routes, { initialUrl: "/" });
+    await act(async () => openRisen("painting"));
+    await waitFor(() => expect(result.getPathname()).toBe("/request/new"));
+    await waitFor(() => expect(risenStep().props.pointerEvents).toBe("auto"), { timeout: 3000 });
+    await fireEvent.press(screen.getByRole("radio", { name: "Ceiling" }));
+
+    // Android's back runs through the flow's close: the draft asks first.
+    const [, onBack] = backHandlers.mock.calls.at(-1) as [string, () => boolean];
+    let handled = false;
+    await act(async () => {
+      handled = onBack();
+    });
+    expect(handled).toBe(true);
+    const buttons = () => jest.mocked(Alert.alert).mock.lastCall?.[2] as AlertButton[];
+    expect(buttons().map((button) => button.text)).toEqual(["Keep editing", "Discard"]);
+    expect(result.getPathname()).toBe("/request/new");
+
+    await press("Back"); // the Back button asks the same
+    expect(Alert.alert).toHaveBeenCalledTimes(2);
+    await act(async () => buttons()[1].onPress?.());
+    // The step fades out onto the panel, then the flow goes (and Home lowers its panel).
+    await waitFor(() => expect(result.getPathname()).toBe("/"), { timeout: 3000 });
+    expect(requestDraftStore.getState().categorySlug).toBeNull();
+    backHandlers.mockRestore();
   });
 
   it("keeps the draft across Back, and asks before discarding it", async () => {

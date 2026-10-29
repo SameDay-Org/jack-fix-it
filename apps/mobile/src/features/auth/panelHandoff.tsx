@@ -58,10 +58,11 @@ export function createPanelHandoff(): PanelHandoff {
 const PanelHandoffContext = createContext<PanelHandoff | null>(null);
 
 /**
- * Scopes the hand-off to the auth flow: the `(auth)` layout mounts it, so a sign-in, which removes
- * the whole group without going back, takes the state with it, and the next Welcome (after a
- * sign-out or an expired session) starts from a new hand-off at rest. Module-level values had
- * outlived the group and brought Welcome back fully raised, with no way in.
+ * Scopes the hand-off to a route group: the `(auth)` layout mounts one for Welcome's panel and the
+ * `(app)` layout one for Home's, so a sign-in or a sign-out, which removes the whole group without
+ * going back, takes the state with it, and the next Welcome or Home starts from a new hand-off at
+ * rest. Module-level values had outlived the group and brought Welcome back fully raised, with no
+ * way in.
  */
 export function PanelHandoffProvider({
   children,
@@ -76,11 +77,11 @@ export function PanelHandoffProvider({
   return <PanelHandoffContext.Provider value={handoff}>{children}</PanelHandoffContext.Provider>;
 }
 
-/** The auth flow's hand-off. Welcome, Role and Login live under `PanelHandoffProvider`. */
+/** The group's hand-off: `PanelHandoffProvider` in the `(auth)` or the `(app)` layout. */
 export function usePanelHandoffContext(): PanelHandoff {
   const handoff = useContext(PanelHandoffContext);
   if (!handoff)
-    throw new Error("usePanelHandoffContext needs PanelHandoffProvider ((auth) layout)");
+    throw new Error("usePanelHandoffContext needs PanelHandoffProvider ((auth) or (app) layout)");
   return handoff;
 }
 

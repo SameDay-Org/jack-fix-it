@@ -1,9 +1,10 @@
-import { router } from "expo-router";
+import { router, type Href } from "expo-router";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 
 import { onSignOut } from "@/api";
 
+import { flowRisen, setFlowRisen } from "./rise";
 import type { StepId } from "./steps";
 
 /** An answer to one intake question, as its type says: a whole number, an option, options, yes/no or text. */
@@ -70,19 +71,32 @@ const EMPTY_DRAFT: RequestDraft = {
  */
 export const requestDraftStore = createStore<RequestDraft>()(() => EMPTY_DRAFT);
 
+const FIRST_STEP = "/request/new" satisfies Href;
+
 /**
  * Starts a new request from the category picked on home (every request starts from one, #232).
- * Replaces whatever an earlier start left, and opens the request's first step. The choice
- * travels in this store, never in the route.
+ * Replaces whatever an earlier start left, and opens the request's first step: a push, or with
+ * `rise`, Home's panel rising into it (which says whether it started). The choice travels in this
+ * store, never in the route.
  */
-export function startRequest(categorySlug: string): void {
+export function startRequest(categorySlug: string, rise?: (href: Href) => boolean): void {
+  const before = { draft: requestDraftStore.getState(), risen: flowRisen() };
   requestDraftStore.setState({ ...EMPTY_DRAFT, categorySlug });
-  router.push("/request/new");
+  setFlowRisen(rise !== undefined);
+  if (!rise) {
+    router.push(FIRST_STEP);
+    return;
+  }
+  // Not started (the panel is already rising into another start): that start keeps its draft.
+  if (rise(FIRST_STEP)) return;
+  requestDraftStore.setState(before.draft);
+  setFlowRisen(before.risen);
 }
 
 /** Forgets the draft: the flow was sent, discarded or left, or the account signed out. */
 export function resetDraft(): void {
   requestDraftStore.setState(EMPTY_DRAFT);
+  setFlowRisen(false);
 }
 
 // The address and the answers are the account's: they never outlive its session, even when no
