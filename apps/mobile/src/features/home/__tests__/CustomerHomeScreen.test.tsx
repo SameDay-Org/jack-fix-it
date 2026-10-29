@@ -29,6 +29,16 @@ const cardNames = () =>
     .filter((button) => String(button.props.testID).startsWith("home-category-"))
     .map((button) => button.props.accessibilityLabel as string);
 
+/** Every text run in the rendered tree, in tree order (the order a screen reader walks). */
+const textRuns = (node: unknown, runs: string[] = []): string[] => {
+  if (typeof node === "string") runs.push(node);
+  else if (Array.isArray(node)) node.forEach((child) => textRuns(child, runs));
+  else if (node && typeof node === "object" && "children" in node) {
+    textRuns((node as { children: unknown }).children, runs);
+  }
+  return runs;
+};
+
 describe("CustomerHomeScreen", () => {
   beforeEach(() => {
     jest.mocked(useSession).mockReturnValue(signedIn());
@@ -60,10 +70,14 @@ describe("CustomerHomeScreen", () => {
     expect(headers).toHaveLength(2);
     expect(headers[0]).toHaveTextContent("What's going on at home?");
     expect(headers[1]).toHaveTextContent("Categories");
-    const texts = screen.getAllByText(/./).map((node) => node.props.children);
-    expect(texts.indexOf("Pick a category and Jack takes care of the rest.")).toBeLessThan(
-      texts.indexOf("Categories"),
+    const runs = textRuns(screen.toJSON());
+    const at = (text: string) => runs.indexOf(text);
+    expect(at("What's going on at ")).toBeGreaterThan(-1); // the headline's first run
+    expect(at("What's going on at ")).toBeLessThan(
+      at("Pick a category and Jack takes care of the rest."),
     );
+    expect(at("Pick a category and Jack takes care of the rest.")).toBeLessThan(at("Categories"));
+    expect(at("Categories")).toBeLessThan(at("House Cleaning")); // the first card
   });
 
   it("home has no tell-jack button and shows the new support line (es)", async () => {

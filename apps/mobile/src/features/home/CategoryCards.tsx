@@ -72,7 +72,7 @@ function Grid({ cells, onLayout, testID }: GridProps) {
 }
 
 /**
- * The secondary way into a request: a grid of square category cards, two per row. Loading shows
+ * The way into a request (#232): a grid of square category cards, two per row. Loading shows
  * card-shaped skeletons in the same cells, a failure says so with a retry (which shows the
  * skeletons again: a query with no data goes back to pending), and an empty catalog hides the
  * whole section, panel included: the hero then fills the page instead of sitting over a blank

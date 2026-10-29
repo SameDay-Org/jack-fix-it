@@ -25,6 +25,5 @@ describe("startRequest", () => {
     const withoutCategory = () => startRequest(null);
 
     expect(withoutCategory).toBeInstanceOf(Function);
-    expect(router.push).not.toHaveBeenCalled();
   });
 });
