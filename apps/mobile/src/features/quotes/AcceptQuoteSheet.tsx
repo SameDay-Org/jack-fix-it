@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AccessibilityInfo, Text, View } from "react-native";
 
-import { Button, SheetContent, StatusBadge } from "@/components/ui";
+import { Button, SheetContent, VerifiedBadge } from "@/components/ui";
 
 import { useAcceptQuote, type AcceptOutcome } from "./useAcceptQuote";
 import { quotesQueryOptions } from "./useRequestQuotes";
@@ -36,6 +36,7 @@ export function AcceptQuoteSheet() {
 
   if (!quote) return null;
   const text = quoteText(t, quote, "open", now);
+  const from = t("quotes.confirm.from", { pro: text.pro });
 
   // The hook tells the customer how it went; the sheet only closes, or stays to show a failure,
   // said aloud on both platforms (a live region alone is Android-only).
@@ -86,10 +87,19 @@ export function AcceptQuoteSheet() {
     >
       <View className="gap-1">
         <Text className="text-title-1 text-navy-900">{text.price}</Text>
-        <Text className="text-headline text-navy-900">
-          {t("quotes.confirm.from", { pro: text.pro })}
+        {/* The seal is hidden from screen readers, so the line's label says "verified" once. */}
+        <Text
+          className="text-headline text-navy-900"
+          accessibilityLabel={
+            quote.pro.verified ? t("quotes.nameVerified", { name: from }) : undefined
+          }
+          testID="accept-quote-pro"
+        >
+          {from}
+          {quote.pro.verified ? (
+            <VerifiedBadge type="headline" testID="accept-quote-verified" />
+          ) : null}
         </Text>
-        {quote.pro.verified ? <StatusBadge label={t("quotes.verified")} tone="brand" /> : null}
         <Text className="text-callout text-gray-500">{text.start}</Text>
         <Text className="text-callout text-gray-500">{text.duration}</Text>
       </View>

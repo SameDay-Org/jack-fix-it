@@ -23,6 +23,7 @@ import {
   fakeClock,
   freezeClock,
   navigation,
+  screenNavigation,
   newQueryClient,
   NOW,
   quote,
@@ -57,6 +58,10 @@ function App() {
 const CARD_ID = /^quote-[0-9a-f-]{36}$/;
 const cardIds = () => screen.queryAllByTestId(CARD_ID).map((card) => card.props.testID as string);
 const card = (item: CustomerQuote) => within(screen.getByTestId(`quote-${item.id}`));
+// The seal hides itself from accessibility, so queries for it opt into hidden elements.
+const HIDDEN = { includeHiddenElements: true };
+// A verified pro's name, as its Text holds it: the seal's word joiner glues the seal to it.
+const sealed = (name: string) => `${name}\u2060`;
 const acceptButtons = () => screen.queryAllByRole("button", { name: /^Accept the quote from/ });
 const list = (items: CustomerQuote[]): CustomerQuoteList => ({ items });
 
@@ -69,6 +74,7 @@ beforeEach(() => {
   jest.mocked(apiPost).mockReset();
   jest.mocked(router.push).mockClear();
   jest.mocked(router.back).mockClear();
+  screenNavigation.setParams.mockClear();
   jest.mocked(router.dismissTo).mockClear();
   jest.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
 });
@@ -99,7 +105,7 @@ describe("QuoteCompareScreen", () => {
     ).toBeTruthy();
     // Seen, not read twice: the summary label says it (next test).
     expect(maria.getByText("Expires in 2 h", { includeHiddenElements: true })).toBeTruthy();
-    expect(maria.getByText("María P.")).toBeTruthy();
+    expect(maria.getByText(sealed("María P."))).toBeTruthy();
     expect(maria.getByText("New · 12 jobs · 8 years of experience")).toBeTruthy();
     expect(maria.getByText("What's included")).toBeTruthy();
     expect(maria.getByTestId(`quote-${MARIA.id}-scope`).props.children).toBe(MARIA.scope);
@@ -119,7 +125,7 @@ describe("QuoteCompareScreen", () => {
     await renderWithQuery(<App />);
     await screen.findByText("$250");
 
-    expect(card(WITHHELD).getByText("Jack pro")).toBeTruthy();
+    expect(card(WITHHELD).getByText(sealed("Jack pro"))).toBeTruthy();
     expect(card(MARIA).getByText(/^New · /)).toBeTruthy();
     expect(card(MARIA).getByLabelText(/, No ratings yet, /)).toBeTruthy();
     expect(
@@ -127,18 +133,101 @@ describe("QuoteCompareScreen", () => {
     ).toBeTruthy();
 
     await act(() => i18n.changeLanguage("es"));
-    expect(card(WITHHELD).getByText("Profesional de Jack")).toBeTruthy();
+    expect(card(WITHHELD).getByText(sealed("Profesional de Jack"))).toBeTruthy();
     expect(card(MARIA).getByText(/^Nuevo · 12 trabajos · 8 años de experiencia$/)).toBeTruthy();
   });
 
-  it("the verified badge shows only when verified", async () => {
+  it("QuoteCard shows the seal only for verified pros", async () => {
     await renderWithQuery(<App />);
     await screen.findByText("$250");
 
-    expect(card(MARIA).getByText("Verified by Jack Fix It")).toBeTruthy();
-    expect(card(WITHHELD).getByText("Verified by Jack Fix It")).toBeTruthy();
-    expect(card(DAN).queryByText("Verified by Jack Fix It")).toBeNull();
+    for (const item of [MARIA, WITHHELD]) {
+      expect(card(item).getByTestId(`quote-${item.id}-verified`, HIDDEN)).toBeTruthy();
+    }
+    expect(card(DAN).queryByTestId(`quote-${DAN.id}-verified`, HIDDEN)).toBeNull();
+    expect(card(DAN).getByText("Dan K.")).toBeTruthy();
     expect(card(DAN).queryByLabelText(/Verified/)).toBeNull();
+    // The seal replaced the text pill: no card shows "Verified" as text, its summary says it.
+    expect(screen.queryByText(/Verified/, HIDDEN)).toBeNull();
+  });
+
+  it("the seal sits inside the name's line, right after the name", async () => {
+    await renderWithQuery(<App />);
+    await screen.findByText("$250");
+
+    const seal = screen.getByTestId(`quote-${MARIA.id}-verified`, HIDDEN);
+    const name = card(MARIA).getByText(sealed("María P."));
+    expect(seal.parent).toBe(name);
+    expect(name.props.className).toContain("text-headline");
+  });
+
+  it("View profile opens the pro's profile with both ids, named after the pro", async () => {
+    await renderWithQuery(<App />);
+    await screen.findByText("$250");
+
+    const view = card(MARIA).getByRole("button", { name: "View María P.'s profile" });
+    expect(within(view).getByText("View profile")).toBeTruthy();
+    await fireEvent.press(view);
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/requests/[id]/quotes/[quoteId]/pro",
+      params: { id: REQUEST_ID, quoteId: MARIA.id },
+    });
+    expect(screen.queryByTestId("accept-quote-sheet")).toBeNull();
+    // One push at a time: Accept tapped before the profile landed opens nothing, and works
+    // again once the router is idle.
+    const accept = card(MARIA).getByRole("button", { name: /^Accept the quote from María/ });
+    await fireEvent.press(accept);
+    expect(router.push).toHaveBeenCalledTimes(1);
+    await act(async () => navigation.setNavigating(true));
+    await act(async () => navigation.setNavigating(false));
+    await fireEvent.press(accept);
+    expect(router.push).toHaveBeenCalledTimes(2);
+
+    // Named as the card names the pro: the neutral label when the API withholds the name.
+    expect(card(WITHHELD).getByRole("button", { name: "View Jack pro's profile" })).toBeTruthy();
+    await act(() => i18n.changeLanguage("es"));
+    expect(card(MARIA).getByRole("button", { name: "Ver el perfil de María P." })).toBeTruthy();
+    expect(card(MARIA).getByText("Ver perfil")).toBeTruthy();
+  });
+
+  it("a link that landed here with a profile param opens that pro's profile over the list", async () => {
+    navigation.setParams({ id: REQUEST_ID, profile: MARIA.id });
+    await renderWithQuery(<App />);
+    await screen.findByText("$250");
+
+    expect(router.push).toHaveBeenCalledTimes(1);
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/requests/[id]/quotes/[quoteId]/pro",
+      params: { id: REQUEST_ID, quoteId: MARIA.id },
+    });
+    expect(screen.queryByTestId("accept-quote-sheet")).toBeNull();
+    // Cleared with the push: a later mount of the comparison opens nothing again.
+    expect(screenNavigation.setParams).toHaveBeenCalledWith({ profile: undefined });
+  });
+
+  it.each<[string, string | string[]]>([
+    ["repeated", [MARIA.id, MARIA.id]],
+    ["two ids", [MARIA.id, DAN.id]],
+    ["path segments", ["..", "..", "6f1c2a40-0000-4000-8000-000000000999", "quotes", DAN.id]],
+    ["a dot segment", ".."],
+    ["a path", `../../${MARIA.id}`],
+    ["an escape left in", `${MARIA.id}%26profile%3D..`],
+    ["a delimiter", `${MARIA.id}&profile=${DAN.id}`],
+    ["not a UUID", "123"],
+    ["uppercase", MARIA.id.toUpperCase().replace(/0/g, "A")],
+    ["empty", ""],
+  ])("a link's profile param that is %s is cleared and opens nothing", async (_, profile) => {
+    navigation.setParams({ id: REQUEST_ID, profile });
+    await renderWithQuery(<App />);
+    await screen.findByText("$250");
+
+    expect(screenNavigation.setParams).toHaveBeenCalledTimes(1);
+    expect(screenNavigation.setParams).toHaveBeenCalledWith({ profile: undefined });
+    expect(router.push).not.toHaveBeenCalled();
+    // Only the list was asked for: no profile fetch.
+    expect(jest.mocked(apiGet).mock.calls.map(([path]) => path)).toEqual([
+      "/v1/requests/{request_id}/quotes",
+    ]);
   });
 
   it("each card reads as one label: pro, verified, price, start and the rest", async () => {
@@ -174,7 +263,7 @@ describe("QuoteCompareScreen", () => {
     const sheet = within(screen.getByTestId("accept-quote-sheet"));
     expect(sheet.getByText("Accept this quote?")).toBeTruthy();
     expect(sheet.getByText("$180.50")).toBeTruthy();
-    expect(sheet.getByText("From Jack pro")).toBeTruthy();
+    expect(sheet.getByLabelText("From Jack pro, verified")).toBeTruthy();
 
     // Its name starts with what it shows, so voice control finds it by "Accept quote".
     const confirm = sheet.getByRole("button", { name: "Accept quote from Jack pro for $180.50" });
@@ -337,6 +426,38 @@ describe("QuoteCompareScreen", () => {
     });
     expect(screen.getByTestId("accept-quote-sheet")).toBeTruthy();
     expect(apiPost).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["en", "From María P., verified"],
+    ["es", "De María P., verificado"],
+  ])(
+    "AcceptQuoteSheet shows the seal after a verified pro's name (%s)",
+    async (language, label) => {
+      await act(() => i18n.changeLanguage(language));
+      await renderWithQuery(<App />);
+      await fireEvent.press(await screen.findByTestId(`quote-${MARIA.id}-accept`));
+
+      const sheet = within(screen.getByTestId("accept-quote-sheet"));
+      const line = sheet.getByTestId("accept-quote-pro");
+      // One element, read once: the line's label says "verified" and the seal is hidden.
+      expect(sheet.getByLabelText(label)).toBe(line);
+      expect(sheet.getByTestId("accept-quote-verified", HIDDEN).parent).toBe(line);
+      expect(sheet.queryByTestId("accept-quote-verified")).toBeNull();
+      expect(sheet.queryByText(/Verified|Verificado/, HIDDEN)).toBeNull();
+    },
+  );
+
+  it("AcceptQuoteSheet shows no seal for an unverified pro", async () => {
+    await renderWithQuery(<App />);
+    await fireEvent.press(await screen.findByTestId(`quote-${DAN.id}-accept`));
+
+    const sheet = within(screen.getByTestId("accept-quote-sheet"));
+    const line = sheet.getByTestId("accept-quote-pro");
+    // Read as shown: no label of its own, so no "verified" either.
+    expect(sheet.getByText("From Dan K.")).toBe(line);
+    expect(line.props.accessibilityLabel).toBeUndefined();
+    expect(sheet.queryByTestId("accept-quote-verified", HIDDEN)).toBeNull();
   });
 
   it("409 shows the not-acceptable message and refetches", async () => {
@@ -526,7 +647,7 @@ describe("QuoteCompareScreen", () => {
     await act(async () => jest.advanceTimersByTime(30_000)); // María's countdown ticks
     await act(async () => jest.advanceTimersByTime(30_000)); // Ana's quote expires
     expect(within(ana()).getByText("Expired", { includeHiddenElements: true })).toBeTruthy();
-    expect(within(ana()).queryByRole("button")).toBeNull();
+    expect(within(ana()).queryByRole("button", { name: /^Accept/ })).toBeNull();
     expect(screen.getByTestId(`quote-${soon.id}-summary`).props.accessibilityLabel).toMatch(
       /, Expired$/,
     );
@@ -550,8 +671,8 @@ describe("QuoteCompareScreen", () => {
     await screen.findByText("$250");
     expect(screen.queryByRole("progressbar")).toBeNull();
 
-    // Row for row, the placeholder lines are the loaded card's text styles (a two-line scope),
-    // the verified badge's row included.
+    // Row for row, the placeholder lines are the loaded card's text styles (a two-line scope).
+    // The verified seal sits inside the name's line, so neither has a badge row.
     const loaded = lineStyles(screen.getByTestId(`quote-${MARIA.id}`)).flatMap((style) =>
       style === "scope" ? ["text-callout", "text-callout"] : [style],
     );
@@ -603,23 +724,24 @@ const GAP = /(?:^|\s)(gap(?:-y)?-\d+)(?=\s|$)/g;
 /**
  * The rows of a card, top to bottom: each line of text by its type style, and each box's vertical
  * spacing, leaving out what a placeholder does not stand for: button labels, the accepted badge
- * and the scope's hidden measuring copy. The verified badge is one padded row; the visible scope
- * is reported as "scope", since its line count comes from layout.
+ * and the scope's hidden measuring copy. The View profile ghost is one 48 dp row; the visible
+ * scope is reported as "scope", since its line count comes from layout.
  */
 function lineStyles(root: unknown): string[] {
   const styles: string[] = [];
   const walk = (node: HostNode | string) => {
-    if (typeof node === "string" || node.props.accessibilityRole === "button") return;
+    if (typeof node === "string") return;
     const testID = String(node.props.testID ?? "");
     const className = String(node.props.className ?? "");
-    if (testID.endsWith("-measure") || testID.endsWith("-accepted")) return;
-    if (testID.endsWith("-verified") || testID.endsWith("-badge")) {
-      // The badge and its placeholder: the same vertical padding around one caption line.
-      const padded = /\bpy-1\b/.test(className);
-      const inner = node.children.flatMap((child) => lineStyles(child)).join("+");
-      styles.push(`badge:${padded ? "py-1" : "?"}:${inner}`);
+    if (testID.endsWith("-profile")) {
+      // The View profile ghost (a button) and its placeholder: the same 48 dp row, pulled in the
+      // same way.
+      const pulled = /(?:^|\s)-my-3(?=\s|$)/.test(className) && /\bmin-h-12\b/.test(className);
+      styles.push(`profile:${pulled ? "-my-3 min-h-12" : "?"}`);
       return;
     }
+    if (node.props.accessibilityRole === "button") return;
+    if (testID.endsWith("-measure") || testID.endsWith("-accepted")) return;
     if (node.type === "Text") {
       styles.push(testID.endsWith("-scope") ? "scope" : (TYPE_STYLE.exec(className)?.[0] ?? "?"));
       return;
