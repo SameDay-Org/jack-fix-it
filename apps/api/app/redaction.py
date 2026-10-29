@@ -245,9 +245,13 @@ _NOT_AN_ID: Final = frozenset(
 # Cyrillic, Hebrew or Arabic mark continues the token as a Latin one does ("@home" + U+0483
 # + "fixit", #229); the enclosing marks (Me) are dropped by _clean. _MARK_RANGES is generated
 # from the unicodedata of Python 3.12 (Unicode 15.0): a scan of every code point at import
-# costs about 180 ms, so the tuple is committed and test_mark_set_matches_unicodedata rebuilds
-# it, failing on any difference after a Python upgrade. _HANDLE_BODY also takes the marks
-# glued to its own characters (_MARKED), so "@bob" + U+05B0 + "smith" is masked whole.
+# costs a few hundred ms, so the tuple is committed and test_mark_set_matches_unicodedata
+# rebuilds it, failing on any difference after a Python upgrade. _HANDLE_BODY also takes the
+# marks glued to its own characters (_MARKED), so "@bob" + U+05B0 + "smith" is masked whole.
+# A spacing mark (Mc) survives _clean after a separator or the "@" too, so a run of
+# separators followed by a mark continues the token ("@home." + U+093F + "fixit") and the
+# "@" may carry marks before the body ("@" + U+093F + "bobsmith"), also in the spaced form
+# ("@ bob" + U+0483 + ".smith").
 _MARK_RANGES: Final = (
     (0x0300, 0x036F), (0x0483, 0x0487), (0x0591, 0x05BD), (0x05BF, 0x05BF), (0x05C1, 0x05C2),
     (0x05C4, 0x05C5), (0x05C7, 0x05C7), (0x0610, 0x061A), (0x064B, 0x065F), (0x0670, 0x0670),
@@ -328,9 +332,9 @@ _SEPARATORS: Final = rf"._\-{_SEPARATOR_FORMS}"
 _HANDLE_BODY: Final = (
     rf"[a-z0-9_]{_MARKED}(?:(?:[a-z0-9{_SEPARATORS}]{_MARKED}){{0,28}}[a-z0-9_]{_MARKED})?"
 )
-_BODY_END: Final = rf"(?![\w{_MARKS}]|[{_SEPARATORS}]+\w)"
+_BODY_END: Final = rf"(?![\w{_MARKS}]|[{_SEPARATORS}]+[\w{_MARKS}])"
 AT_HANDLE: Final = re.compile(
-    rf"(?<![\w.@])@(?:\s(?=[\w.-]*[\d_.]))?(?!\d{{1,2}}(?:[:.]\d{{1,3}})?\s*(?:[ap]\.?m\.?)?{_BODY_END}|"
+    rf"(?<![\w.@])@{_MARKED}(?:\s(?=[\w.\-{_MARKS}]*[\d_.]))?(?!\d{{1,2}}(?:[:.]\d{{1,3}})?\s*(?:[ap]\.?m\.?)?{_BODY_END}|"
     rf"\d+(?:\.\d+)?\s*(?:ft|in|cm|mm|m|hrs?|h|mins?|hours?){_BODY_END}|"
     rf"(?:noon|night|home|work|casa|today|tomorrow|tonight|ma(?:ñ|n)ana){_BODY_END})"
     rf"{_HANDLE_BODY}",

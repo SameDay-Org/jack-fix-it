@@ -527,6 +527,45 @@ def test_accented_words_untouched(word: str, form: Literal["NFC", "NFD"]) -> Non
         assert result == RedactionResult(unicodedata.normalize("NFC", typed), False), ascii(typed)
 
 
+# Review of #229: a spacing mark (Mc) is kept by _clean after a separator or the "@" (an Mn
+# there is dropped), so those positions continue the token too.
+SPACING_MARKS = [
+    (chr(0x093F), "devanagari_vowel_sign_i"),
+    (chr(0x0903), "devanagari_visarga"),
+    (chr(0x0BBE), "tamil_vowel_sign_aa"),
+    (chr(0x1D16D), "musical_combining_augmentation_dot"),
+]
+
+
+@pytest.mark.parametrize(
+    "mark", [mark for mark, _ in SPACING_MARKS], ids=[name for _, name in SPACING_MARKS]
+)
+def test_spacing_mark_after_a_separator_or_the_at_sign_is_part_of_the_handle(mark: str) -> None:
+    for handle in (
+        f"@home.{mark}fixit",
+        f"@home-{mark}fixit",
+        f"@home..{mark}fixit",
+        f"@5.{mark}fixit",
+        f"@{mark}bobsmith",
+        f"@{mark}home.fixit",
+        f"@{mark}home{mark}fixit",
+    ):
+        assert redact_contacts(handle) == RedactionResult(MASK, True), ascii(handle)
+        assert redact_contacts(f"find me {handle} today") == RedactionResult(
+            f"find me {MASK} today", True
+        ), ascii(handle)
+    for whole in (f"@{mark}home", f"@{mark}5pm", f"@{mark}", f"@{mark} home"):
+        assert redact_contacts(whole) == RedactionResult(whole, False), ascii(whole)
+
+
+def test_spaced_handle_with_a_mark_is_masked() -> None:
+    """The spaced form "@ bob.smith" keeps its parity with the glued one when a mark sits in
+    the id."""
+    for text in ("@ bob" + chr(0x0483) + ".smith", "@ bob." + chr(0x093F) + "smith"):
+        assert redact_contacts(text) == RedactionResult(MASK, True), ascii(text)
+    assert redact_contacts("@ home" + chr(0x0483)) == RedactionResult("@ home" + chr(0x0483), False)
+
+
 @pytest.mark.parametrize("prefix", ["APT", "UNIT", "SUITE", "STE", "PO BOX"])
 def test_a_phone_glued_to_a_unit_marker_is_masked(prefix: str) -> None:
     # Standalone, as a label is: inside a sentence the unit step leaves "unit 2 is not cooling"
@@ -1123,18 +1162,22 @@ def test_hostile_inputs_against_the_known_values_finish_quickly(text: str) -> No
 @pytest.mark.parametrize(
     "text",
     [
-        "@home" + chr(0x0483) * 5000 + "fixit",
-        "@home" + chr(0x05B0) * 5000,
-        ("@home" + chr(0x0610)) * 400,
-        "@" + ("a" + chr(0x0E31)) * 1000,
-        ("x" + chr(0x0483) + ".") * 700,
+        "@home" + chr(0x093F) * 5000 + "fixit",  # Mc: _clean keeps the run, _MARKED takes it
+        "@home" + chr(0x0483) * 5000 + "fixit",  # Mn: _clean keeps one mark after a letter
+        "@home" + chr(0x093F) * 5000,
+        ("@home" + chr(0x093F)) * 400,
+        "@" + ("a" + chr(0x093F)) * 1000,
+        ("x" + chr(0x093F) + ".") * 700,
+        "@" + ("1" + chr(0x093F) + ".") * 700,
     ],
     ids=[
-        "5000_marks_then_fixit",
-        "5000_marks",
-        "home_mark_x400",
-        "letter_mark_x1000",
-        "mark_dot_x700",
+        "5000_mc_then_fixit",
+        "5000_mn_then_fixit",
+        "5000_mc",
+        "home_mc_x400",
+        "letter_mc_x1000",
+        "letter_mc_dot_x700",
+        "digit_mc_dot_x700",
     ],
 )
 def test_many_marks_after_exempt_word_is_fast(text: str) -> None:
