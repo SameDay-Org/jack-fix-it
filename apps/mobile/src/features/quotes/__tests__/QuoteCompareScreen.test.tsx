@@ -13,6 +13,7 @@ import {
 
 import { ApiError, apiGet, apiPost, NetworkError } from "@/api";
 import { dismissToast, toastStore } from "@/components/ui/toast";
+import { MY_REQUESTS_QUERY_KEY } from "@/features/history/useMyRequests";
 
 import { deferred } from "../../../api/__tests__/helpers";
 import { AcceptQuoteSheet } from "../AcceptQuoteSheet";
@@ -398,6 +399,34 @@ describe("QuoteCompareScreen", () => {
     await waitFor(() => expect(onDone).toHaveBeenCalledWith("accepted"));
     expect(client.getQueryData(quotesQueryKey(REQUEST_ID))).toEqual(list([accepted]));
   });
+
+  it.each([
+    ["accepted", () => jest.mocked(apiPost).mockResolvedValue({ ...MARIA, status: "accepted" })],
+    [
+      "notAcceptable",
+      () => jest.mocked(apiPost).mockRejectedValue(new ApiError(409, "quote_not_acceptable")),
+    ],
+  ] as const)(
+    "an accept that ends %s marks History's list stale, so its row shows the new status",
+    async (outcome, answerWith) => {
+      answerWith();
+      jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+      const client = newQueryClient();
+      client.setQueryData(MY_REQUESTS_QUERY_KEY, { pages: [], pageParams: [] });
+      const { result } = await renderHook(() => useAcceptQuote(REQUEST_ID), {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      });
+      const onDone = jest.fn();
+      expect(client.getQueryState(MY_REQUESTS_QUERY_KEY)?.isInvalidated).toBe(false);
+
+      await act(async () => result.current.accept(MARIA.id, onDone));
+
+      await waitFor(() => expect(onDone).toHaveBeenCalledWith(outcome));
+      expect(client.getQueryState(MY_REQUESTS_QUERY_KEY)?.isInvalidated).toBe(true);
+    },
+  );
 
   it("cancelling the confirmation releases the guard, so Accept opens it again", async () => {
     await renderWithQuery(<App />);
