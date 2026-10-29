@@ -85,6 +85,7 @@ export const detail = (overrides: Partial<OpportunityDetail> = {}): OpportunityD
   text_redacted: false,
   media: [mediaItem(1), mediaItem(2), VIDEO],
   media_pending: 2,
+  take_rate_bps: 1500,
   ...overrides,
 });
 
