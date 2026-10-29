@@ -15,6 +15,7 @@ import OpportunityRoute from "../../../app/(app)/opportunities/[id]";
 import AuthLayout, { unstable_settings } from "../../../app/(auth)/_layout";
 import { METRICS, SIGNED_OUT } from "../../auth/__tests__/helpers";
 import { SessionGate } from "../../auth/SessionGate";
+import { TabsLayout } from "../../tabs/TabsLayout";
 import { detail, DISPATCH_ID } from "./helpers";
 
 type Session = ReturnType<typeof useSession>;
@@ -71,7 +72,8 @@ const routes = {
   "(auth)/_layout": { default: AuthLayout, unstable_settings },
   "(auth)/welcome": () => <Text>welcome stub</Text>,
   "(app)/_layout": { default: AppLayout, unstable_settings: appSettings },
-  "(app)/index": () => <Text>home stub</Text>,
+  "(app)/(tabs)/_layout": TabsLayout,
+  "(app)/(tabs)/index": () => <Text>home stub</Text>,
   "(app)/opportunities/[id]": OpportunityRoute,
 };
 

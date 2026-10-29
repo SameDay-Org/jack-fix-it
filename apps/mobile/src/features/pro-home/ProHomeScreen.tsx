@@ -1,15 +1,15 @@
+import { useIsFocused } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
 
 import { useSession } from "@/api";
-import { Screen } from "@/components/ui";
-import { AccountButton } from "@/features/account/AccountButton";
+import { Screen, useTabBarInset } from "@/components/ui";
 import { useOpenPhoneStepAfterSignUp } from "@/features/phone/useOpenPhoneStepAfterSignUp";
 
 import { OpportunityList } from "./OpportunityList";
 
 /**
- * The pro's home (#219): a greeting with the way to the account, then the new opportunities,
+ * The pro's home (#219), the Home tab: a greeting, then the new opportunities,
  * which scroll the header along. The wallet (#70) and the current job (#63) come later.
  *
  * Right after a sign-up it opens the phone step over itself, once, and shows only its bare page
@@ -19,11 +19,14 @@ export function ProHomeScreen() {
   const { t } = useTranslation();
   const { user } = useSession();
   const phoneStepOffered = useOpenPhoneStepAfterSignUp();
+  // Tabs stay mounted while another one shows: only the focused tab owns the status bar.
+  const focused = useIsFocused();
+  const inset = useTabBarInset();
 
   if (!user) return null;
   if (phoneStepOffered) {
     return (
-      <Screen bar="light" testID="pro-home">
+      <Screen bar="light" ownsStatusBar={focused} testID="pro-home">
         {null}
       </Screen>
     );
@@ -31,28 +34,28 @@ export function ProHomeScreen() {
 
   const firstName = user.first_name?.trim();
   return (
-    <Screen bar="light" testID="pro-home">
-      <OpportunityList
-        header={
-          <View className="gap-6 pb-4 pt-2">
-            <View className="flex-row items-center justify-between gap-3">
+    // No bottom edge: the page pads the tab bar itself.
+    <Screen bar="light" edges={[]} ownsStatusBar={focused} testID="pro-home">
+      <View className="flex-1" style={{ paddingBottom: inset }}>
+        <OpportunityList
+          header={
+            <View className="gap-6 pb-4 pt-2">
               <Text
                 accessibilityRole="header"
-                className="shrink text-title-1 text-navy-900"
+                className="text-title-1 text-navy-900"
                 testID="pro-home-greeting"
               >
                 {firstName
                   ? t("opportunities.greeting", { name: firstName })
                   : t("opportunities.greetingNoName")}
               </Text>
-              <AccountButton user={user} />
+              <Text accessibilityRole="header" className="text-headline text-navy-900">
+                {t("opportunities.title")}
+              </Text>
             </View>
-            <Text accessibilityRole="header" className="text-headline text-navy-900">
-              {t("opportunities.title")}
-            </Text>
-          </View>
-        }
-      />
+          }
+        />
+      </View>
     </Screen>
   );
 }

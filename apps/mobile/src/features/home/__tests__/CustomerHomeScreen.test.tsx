@@ -16,19 +16,32 @@ jest.mock("@/api", () => ({
   useSession: jest.fn(),
   logout: jest.fn(),
 }));
-jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
+jest.mock("expo-router", () => ({
+  router: { push: jest.fn() },
+  useIsFocused: () => true,
+  useScrollToTop: jest.fn(),
+}));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
   "react-native-safe-area-context",
   () => jest.requireActual("react-native-safe-area-context/jest/mock").default,
 );
 
-const tellJack = () => screen.getByRole("button", { name: "Tell Jack What Happened" });
 const cardNames = () =>
   screen
-    .getAllByRole("button")
+    .queryAllByRole("button")
     .filter((button) => String(button.props.testID).startsWith("home-category-"))
     .map((button) => button.props.accessibilityLabel as string);
+
+/** Every text run in the rendered tree, in tree order (the order a screen reader walks). */
+const textRuns = (node: unknown, runs: string[] = []): string[] => {
+  if (typeof node === "string") runs.push(node);
+  else if (Array.isArray(node)) node.forEach((child) => textRuns(child, runs));
+  else if (node && typeof node === "object" && "children" in node) {
+    textRuns((node as { children: unknown }).children, runs);
+  }
+  return runs;
+};
 
 describe("CustomerHomeScreen", () => {
   beforeEach(() => {
@@ -42,28 +55,46 @@ describe("CustomerHomeScreen", () => {
     await act(() => i18n.changeLanguage("en"));
   });
 
-  it("shows the headline, support line and one primary action", async () => {
+  it("home has no tell-jack button and shows the new support line", async () => {
     await renderWithQuery(<CustomerHomeScreen />);
     await screen.findByRole("button", { name: "Painting" });
 
-    expect(screen.getByRole("header", { name: "What's going on at home?" })).toBeTruthy();
-    expect(screen.getByText("Tell Jack. We'll take care of the rest.")).toBeTruthy();
-    expect(tellJack()).toBeTruthy();
-    // The kit's primary pill is the only green surface: cards and the account button are not primary.
+    expect(screen.getByText("Pick a category and Jack takes care of the rest.")).toBeTruthy();
+    expect(screen.queryByTestId("home-tell-jack")).toBeNull();
+    expect(screen.queryByRole("button", { name: /tell jack/i })).toBeNull();
+    expect(screen.queryByText(/tell jack/i)).toBeNull();
+    expect(screen.queryByLabelText(/tell jack/i)).toBeNull();
+    // No primary pill is left on home: the cards are the way in.
     const primary = screen
       .getAllByRole("button")
       .filter((button) => String(button.props.className).includes("bg-green-500"));
-    expect(primary).toEqual([tellJack()]);
+    expect(primary).toEqual([]);
+    // Reading order: headline, support line, categories title, then the cards.
+    const headers = screen.getAllByRole("header");
+    expect(headers).toHaveLength(2);
+    expect(headers[0]).toHaveTextContent("What's going on at home?");
+    expect(headers[1]).toHaveTextContent("Categories");
+    const runs = textRuns(screen.toJSON());
+    const at = (text: string) => runs.indexOf(text);
+    expect(at("What's going on at ")).toBeGreaterThan(-1); // the headline's first run
+    expect(at("What's going on at ")).toBeLessThan(
+      at("Pick a category and Jack takes care of the rest."),
+    );
+    expect(at("Pick a category and Jack takes care of the rest.")).toBeLessThan(at("Categories"));
+    expect(at("Categories")).toBeLessThan(at("House Cleaning")); // the first card
   });
 
-  it("tell jack clears the draft category and opens the request start", async () => {
-    requestDraftStore.setState({ categorySlug: "painting" });
+  it("home has no tell-jack button and shows the new support line (es)", async () => {
+    await act(() => i18n.changeLanguage("es"));
     await renderWithQuery(<CustomerHomeScreen />);
+    await screen.findByRole("button", { name: "Pintura" });
 
-    await fireEvent.press(tellJack());
-
-    expect(requestDraftStore.getState().categorySlug).toBeNull();
-    expect(router.push).toHaveBeenCalledWith("/request/new");
+    expect(screen.getByRole("header", { name: "¿Qué está pasando en casa?" })).toBeTruthy();
+    expect(screen.getByText("Elige una categoría y Jack se encarga del resto.")).toBeTruthy();
+    expect(screen.getByRole("header", { name: "Categorías" })).toBeTruthy();
+    expect(screen.queryByTestId("home-tell-jack")).toBeNull();
+    expect(screen.queryByText(/dile a jack/i)).toBeNull();
+    expect(screen.queryByLabelText(/dile a jack/i)).toBeNull();
   });
 
   it("shows card skeletons while categories load", async () => {
@@ -71,7 +102,7 @@ describe("CustomerHomeScreen", () => {
     jest.mocked(apiGet).mockReturnValue(pending.promise);
     await renderWithQuery(<CustomerHomeScreen />);
 
-    expect(screen.getByRole("header", { name: "Or pick a category" })).toBeTruthy();
+    expect(screen.getByRole("header", { name: "Categories" })).toBeTruthy();
     expect(screen.getByRole("progressbar", { name: "Loading categories" })).toBeTruthy();
     expect(
       screen.getAllByTestId(/^home-category-skeleton-\d+$/, { includeHiddenElements: true }),
@@ -110,15 +141,17 @@ describe("CustomerHomeScreen", () => {
       "Jardinería y paisajismo",
       "Moving & Assembly",
     ]);
-    expect(screen.getByRole("header", { name: "O elige una categoría" })).toBeTruthy();
+    expect(screen.getByRole("header", { name: "Categorías" })).toBeTruthy();
   });
 
-  it("pressing a card starts a request for its slug", async () => {
+  it("a category card starts a request with its slug", async () => {
+    requestDraftStore.setState({ categorySlug: "painting" }); // an earlier start is replaced
     await renderWithQuery(<CustomerHomeScreen />);
 
     await fireEvent.press(await screen.findByRole("button", { name: "Lawn & Landscaping" }));
 
     expect(requestDraftStore.getState().categorySlug).toBe("lawn-landscaping");
+    expect(router.push).toHaveBeenCalledTimes(1);
     expect(router.push).toHaveBeenCalledWith("/request/new");
   });
 
@@ -147,9 +180,7 @@ describe("CustomerHomeScreen", () => {
     expect(await screen.findByText("We couldn't load the categories.")).toBeTruthy();
     expect(cardNames()).toEqual([]);
     expect(apiGet).toHaveBeenCalledTimes(1); // no silent retries behind the message
-
-    await fireEvent.press(tellJack()); // the hero keeps working
-    expect(router.push).toHaveBeenCalledWith("/request/new");
+    expect(screen.getByRole("header", { name: "What's going on at home?" })).toBeTruthy(); // the hero stays
 
     const retry = deferred<typeof CATEGORIES>();
     jest.mocked(apiGet).mockReturnValueOnce(retry.promise);
@@ -170,25 +201,19 @@ describe("CustomerHomeScreen", () => {
     await renderWithQuery(<CustomerHomeScreen />);
 
     await waitFor(() => expect(screen.queryByTestId("home-categories")).toBeNull());
-    expect(screen.queryByText("Or pick a category")).toBeNull();
-    expect(tellJack()).toBeTruthy();
+    expect(screen.queryByText("Categories")).toBeNull();
+    expect(screen.getByRole("header", { name: "What's going on at home?" })).toBeTruthy();
+    expect(screen.getByText("Pick a category and Jack takes care of the rest.")).toBeTruthy();
   });
 
-  it("the account button opens /account", async () => {
+  it("customer home has no AccountButton: Account is a tab (#213)", async () => {
     jest.mocked(useSession).mockReturnValue(signedIn({ first_name: "Maria", last_name: "Lopez" }));
     await renderWithQuery(<CustomerHomeScreen />);
+    await screen.findByRole("button", { name: "Painting" });
 
-    const account = screen.getByRole("button", { name: "Account" });
-    expect(account.props.className).toContain("min-h-12"); // 48 dp target
-    expect(screen.getByText("ML", { includeHiddenElements: true })).toBeTruthy();
-    await fireEvent.press(account);
-
-    expect(router.push).toHaveBeenCalledWith("/account");
-  });
-
-  it("an account without a name: the email's first letter", async () => {
-    await renderWithQuery(<CustomerHomeScreen />);
-
-    expect(screen.getByText("M", { includeHiddenElements: true })).toBeTruthy();
+    expect(screen.queryByTestId("home-account")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Account" })).toBeNull();
+    expect(screen.queryByText("ML", { includeHiddenElements: true })).toBeNull();
+    expect(router.push).not.toHaveBeenCalled();
   });
 });

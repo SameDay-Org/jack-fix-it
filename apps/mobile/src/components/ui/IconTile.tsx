@@ -27,7 +27,8 @@ export const ICON_TILE: Record<IconTileSize, { side: number; icon: number; radiu
 // A faint green-500 wash: a tile that reads on a white card and on the gray-50 page, keeps the navy
 // strokes far above 3:1, and echoes the brand accent without competing with the CTA.
 const TINT_OPACITY = 0.12;
-const TINT = withOpacity("green-500", TINT_OPACITY);
+/** The tiles' wash, for a mark that must match them (History's empty state). */
+export const ICON_TILE_TINT = withOpacity("green-500", TINT_OPACITY);
 
 /** A category icon centered in a squircle tile. Decorative: the card around it names the category. */
 export function IconTile({ slug, glyph, size = "md", testID }: IconTileProps) {
@@ -43,7 +44,7 @@ export function IconTile({ slug, glyph, size = "md", testID }: IconTileProps) {
           width: tile.side,
           height: tile.side,
           borderRadius: tokens.radius[tile.radius],
-          backgroundColor: TINT,
+          backgroundColor: ICON_TILE_TINT,
         },
       ]}
     >

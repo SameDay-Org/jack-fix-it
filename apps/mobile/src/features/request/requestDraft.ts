@@ -3,7 +3,7 @@ import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 
 type RequestDraftState = {
-  /** The category the customer picked on home, or null when they started from "Tell Jack". */
+  /** The category picked on home for the request being started; null until the first start. */
   categorySlug: string | null;
 };
 
@@ -12,11 +12,11 @@ export const requestDraftStore = createStore<RequestDraftState>()(() => ({
 }));
 
 /**
- * Starts a new request: with a category picked on home, or none (the customer describes the
- * problem first). Replaces whatever an earlier start left, and opens the request's first step.
- * The choice travels in this store, never in the route.
+ * Starts a new request from the category picked on home (every request starts from one, #232).
+ * Replaces whatever an earlier start left, and opens the request's first step. The choice
+ * travels in this store, never in the route.
  */
-export function startRequest(categorySlug: string | null): void {
+export function startRequest(categorySlug: string): void {
   requestDraftStore.setState({ categorySlug });
   router.push("/request/new");
 }

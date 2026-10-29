@@ -68,15 +68,31 @@
     "phone": "Phone",
     "phoneVerified": "Verified",
     "headline": "What's going on at <accent>home</accent>?",
-    "support": "Tell Jack. We'll take care of the rest.",
-    "tellJack": "Tell Jack What Happened",
-    "categoriesTitle": "Or pick a category",
+    "support": "Pick a category and Jack takes care of the rest.",
+    "categoriesTitle": "Categories",
     "categoriesLoading": "Loading categories",
     "categoriesFailed": "We couldn't load the categories.",
     "retry": "Try again"
   },
   "account": {
     "title": "Account"
+  },
+  "tabs": {
+    "home": "Home",
+    "history": "History",
+    "account": "Account"
+  },
+  "history": {
+    "customer": {
+      "title": "Your requests",
+      "empty": "Requests you send will show up here.",
+      "cta": "Browse categories"
+    },
+    "pro": {
+      "title": "Your jobs",
+      "empty": "Jobs you're hired for will show up here.",
+      "cta": "Go to Home"
+    }
   },
   "request": {
     "title": "Tell Jack what happened"

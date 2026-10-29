@@ -9,7 +9,8 @@ import { useDraftCategorySlug } from "./requestDraft";
 
 /**
  * Where a new request starts. A placeholder until the request flow lands (#45): the title, and
- * the category picked on home, if any, by its localized name.
+ * the category picked on home by its localized name. Only a direct link to the route, with no
+ * start on home before it, arrives without a draft: then the title alone.
  */
 export function RequestStartPlaceholderScreen() {
   const { t } = useTranslation();

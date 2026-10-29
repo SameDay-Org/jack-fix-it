@@ -135,6 +135,7 @@ export const routerMock = {
   },
   useLocalSearchParams: () => useSyncExternalStore(subscribe, () => nav.params),
   unstable_useIsNavigating: useIsNavigating,
+  useIsFocused: () => useSyncExternalStore(subscribe, () => nav.focused),
   // Runs the effect on every focus and cleans it up on blur, as React Navigation does.
   useFocusEffect: (effect: () => void | (() => void)) => {
     const focused = useSyncExternalStore(subscribe, () => nav.focused);
