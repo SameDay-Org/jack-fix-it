@@ -7,7 +7,7 @@ import { Chip, ChoiceCard, Input, Stepper } from "@/components/ui";
 import { tokens } from "@/theme";
 
 import { lengthCounter } from "./counter";
-import { localized, type IntakeQuestion, type QuestionError } from "./questions";
+import { localized, offeredPicks, type IntakeQuestion, type QuestionError } from "./questions";
 import type { IntakeAnswer } from "./requestDraft";
 
 // Ranges up to this wide take a stepper; wider ones (a home's square feet) a number field.
@@ -162,7 +162,7 @@ function ChoiceControl({ question, answer, label, invalid, locale, onAnswer }: C
     );
   }
 
-  const picked: readonly string[] = Array.isArray(answer) ? answer : [];
+  const picked = offeredPicks(question, answer);
   const most = question.max_selected ?? question.options.length;
   const full = picked.length >= most;
   const toggle = (value: string) => {

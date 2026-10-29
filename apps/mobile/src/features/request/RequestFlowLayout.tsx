@@ -6,7 +6,7 @@ import { Alert } from "react-native";
 import { sheetOptions } from "@/components/ui";
 import { useMediaUpload, type MediaUpload } from "@/features/media";
 
-import type { CreatedRequest } from "./api";
+import { useSendRequest, type CreatedRequest, type SendRequest } from "./api";
 import { hasDraftInput, resetDraft, useRequestDraft } from "./requestDraft";
 import { rememberSent } from "./sent";
 
@@ -20,6 +20,13 @@ type RequestFlow = {
   close: () => void;
   /** The request went through: the flow gives way to its confirmation. */
   finish: (request: CreatedRequest) => void;
+  /**
+   * The flow's one send: held here, not by Review, so no second Review (after an Edit) can send
+   * again while the first is in flight.
+   */
+  send: SendRequest;
+  /** A send is in flight: Back, Cancel and Edit wait for its answer, and leaving is blocked. */
+  sending: boolean;
 };
 
 const RequestFlowContext = createContext<RequestFlow | null>(null);
@@ -46,6 +53,8 @@ export function RequestFlowLayout() {
   const draftInput = useRequestDraft(hasDraftInput);
   const [ending, setEnding] = useState<Ending | null>(null);
   const [discarding, setDiscarding] = useState(false);
+  const { send, sending: sendBusy } = useSendRequest();
+  const sending = sendBusy && ending === null;
   const guarded = (draftInput || media.items.length > 0) && ending === null && !discarding;
 
   const confirmDiscard = useCallback(
@@ -59,12 +68,14 @@ export function RequestFlowLayout() {
 
   // expo-router blocks every removal while the guard is on, a replayed one too: a confirmed
   // discard turns it off and replays the blocked back with `repeat`.
-  usePreventRemove(guarded, ({ repeat }) =>
+  // While a send is in flight nothing leaves: the request may already exist on the server.
+  usePreventRemove(guarded || sending, ({ repeat }) => {
+    if (sending) return;
     confirmDiscard(() => {
       setDiscarding(true);
       repeat();
-    }),
-  );
+    });
+  });
 
   // Runs after the commit that turned the guard off, so the navigation is not blocked.
   useEffect(() => {
@@ -79,6 +90,7 @@ export function RequestFlowLayout() {
     () => ({
       media,
       close: () => {
+        if (sending) return;
         const leave = () => setEnding({ kind: "left" });
         if (guarded) confirmDiscard(leave);
         else leave();
@@ -87,8 +99,10 @@ export function RequestFlowLayout() {
         rememberSent(request);
         setEnding({ kind: "sent", id: request.id });
       },
+      send,
+      sending,
     }),
-    [media, guarded, confirmDiscard],
+    [media, guarded, confirmDiscard, send, sending],
   );
 
   return (

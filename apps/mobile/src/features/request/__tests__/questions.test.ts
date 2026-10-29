@@ -28,6 +28,13 @@ describe("questionError", () => {
     expect(questionError(QUESTIONS.extras, ["trim"])).toBeNull();
   });
 
+  it("does not count a pick the category no longer offers", () => {
+    expect(questionError(QUESTIONS.extras, ["shutters"])).toEqual({ kind: "tooFew", count: 1 });
+    expect(intakeAnswersFor([QUESTIONS.extras], { extras: ["shutters", "doors"] })).toEqual({
+      extras: ["doors"],
+    });
+  });
+
   it("asks a required text for more than blanks; a switch always has an answer", () => {
     const required = { ...QUESTIONS.notes, required: true };
     expect(questionError(required, "   ")).toEqual({ kind: "required" });

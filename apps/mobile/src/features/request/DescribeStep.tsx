@@ -1,4 +1,4 @@
-import { router } from "expo-router";
+import { router, useNavigation } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AccessibilityInfo, Text, View } from "react-native";
@@ -28,6 +28,7 @@ type DescribeStepProps = { steps: readonly StepId[] };
 export function DescribeStep({ steps }: DescribeStepProps) {
   const { t } = useTranslation();
   const { media } = useRequestFlowContext();
+  const navigation = useNavigation();
   const description = useRequestDraft((draft) => draft.description);
   const refused = useRequestDraft((draft) => draft.refusal?.step === "describe");
   const [checked, setChecked] = useState(false);
@@ -68,8 +69,13 @@ export function DescribeStep({ steps }: DescribeStepProps) {
   useEffect(() => {
     settled.current = () => {
       setWaiting(false);
-      if (failed) holdForFailed();
-      else goNext();
+      // The text may have been cleared, or the media sheet opened, while the files uploaded: check
+      // again, and go on only from this step.
+      if (blank) {
+        setChecked(true);
+        AccessibilityInfo.announceForAccessibility(t("request.describe.required"));
+      } else if (failed) holdForFailed();
+      else if (navigation.isFocused()) goNext();
     };
   });
   useEffect(() => {

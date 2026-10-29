@@ -19,6 +19,18 @@ export function localized(texts: Readonly<Record<string, string>>, locale: strin
   return texts[locale] ?? texts.en ?? "";
 }
 
+type MultiChoiceQuestion = Extract<IntakeQuestion, { type: "multi_choice" }>;
+
+/**
+ * The picks that are still among the question's options. A pick the category no longer offers
+ * (its questions were refetched after the server refused the answers) is neither shown, counted
+ * nor sent.
+ */
+export function offeredPicks(question: MultiChoiceQuestion, answer: IntakeAnswer | undefined) {
+  const picked: readonly string[] = Array.isArray(answer) ? answer : [];
+  return picked.filter((value) => question.options.some((option) => option.value === value));
+}
+
 const required = (question: IntakeQuestion): QuestionError | null =>
   question.required ? { kind: "required" } : null;
 
@@ -40,7 +52,7 @@ export function questionError(
     case "single_choice":
       return question.options.some((option) => option.value === answer) ? null : required(question);
     case "multi_choice": {
-      const count = Array.isArray(answer) ? answer.length : 0;
+      const count = offeredPicks(question, answer).length;
       if (count === 0 && !question.required) return null;
       const least = Math.max(question.min_selected, 1);
       return count < least ? { kind: "tooFew", count: least } : null;
@@ -77,12 +89,13 @@ export function intakeAnswersFor(
   for (const question of questions) {
     const answer = answers[question.key];
     if (question.type === "boolean") body[question.key] = answer === true;
-    else if (typeof answer === "string") {
+    else if (question.type === "multi_choice") {
+      const picks = offeredPicks(question, answer);
+      if (picks.length > 0) body[question.key] = picks;
+    } else if (typeof answer === "string") {
       const text = question.type === "text" ? answer.trim() : answer;
       if (text !== "") body[question.key] = text;
-    } else if (Array.isArray(answer)) {
-      if (answer.length > 0) body[question.key] = [...answer];
-    } else if (answer !== undefined) body[question.key] = answer;
+    } else if (typeof answer === "number") body[question.key] = answer;
   }
   return body;
 }

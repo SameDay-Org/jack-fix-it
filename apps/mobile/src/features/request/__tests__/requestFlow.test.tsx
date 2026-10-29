@@ -241,6 +241,13 @@ describe("the request flow", () => {
     await press("Send request");
     await press("Send request");
     expect(apiPost).toHaveBeenCalledTimes(1);
+    // In flight, the request cannot change or be left: it may already exist on the server.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Back" })).toBeDisabled());
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Edit the address" })).toBeDisabled();
+    await act(async () => router.back());
+    expect(result.getPathname()).toBe("/request/review");
+    expect(Alert.alert).not.toHaveBeenCalled();
     expect(posted()).toStrictEqual([
       {
         path: "/v1/requests",
@@ -394,6 +401,19 @@ describe("the request flow", () => {
 
     await setMedia(media({ items: [photo(1)], keys: ["uploads/1.jpg"] }));
     await waitFor(() => expect(result.getPathname()).toBe("/request/where"));
+  });
+
+  it("checks the description again when the uploads settle", async () => {
+    await setMedia(media({ items: [photo(1, { status: "uploading", key: null })] }));
+    const result = await start("Handyman card");
+    await fireEvent.changeText(screen.getByTestId("describe-text"), "Loose cabinet door");
+    await press("Continue");
+
+    await fireEvent.changeText(screen.getByTestId("describe-text"), "");
+    await setMedia(media({ items: [photo(1)], keys: ["uploads/1.jpg"] }));
+
+    expect(await screen.findByText("Tell us what's going on to continue.")).toBeTruthy();
+    expect(result.getPathname()).toBe("/request/new");
   });
 
   it("holds Continue on a failed upload until it is removed", async () => {

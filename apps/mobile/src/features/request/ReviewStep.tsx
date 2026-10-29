@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { router } from "expo-router";
+import { router, usePreventRemove } from "expo-router";
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { AccessibilityInfo, Image, Text, View } from "react-native";
@@ -12,7 +12,6 @@ import type { MediaItem } from "@/features/media";
 import { tokens } from "@/theme";
 
 import { addressLine, resolveAddress, savedAddressBody, typedAddressBody } from "./address";
-import { useSendRequest } from "./api";
 import { answerText } from "./answerText";
 import { refuseStep, useRequestDraft, type RequestDraft, type StepRefusal } from "./requestDraft";
 import { useRequestFlowContext } from "./RequestFlowLayout";
@@ -34,11 +33,13 @@ export function ReviewStep({ category, steps }: ReviewStepProps) {
   const { t, i18n } = useTranslation();
   const locale = i18n.resolvedLanguage ?? "en";
   const queryClient = useQueryClient();
-  const { media, finish } = useRequestFlowContext();
+  const { media, finish, send, sending } = useRequestFlowContext();
   const draft = useRequestDraft((value) => value);
   const saved = useSavedAddresses();
-  const { send, sending } = useSendRequest();
   const [failure, setFailure] = useState<ReviewFailure | null>(null);
+  // Android's back and the iOS swipe wait for the send's answer too (the flow's guard only covers
+  // leaving the flow, not this step).
+  usePreventRemove(sending, () => {});
   const resolved = resolveAddress(draft.address, saved.data?.items);
   const address =
     resolved.kind === "saved"
@@ -62,16 +63,16 @@ export function ReviewStep({ category, steps }: ReviewStepProps) {
       onFailed: (outcome) => {
         if (outcome.kind === "signedOut") return; // the session's own screens take over
         if (outcome.kind === "retry") return fail(outcome.reason);
-        if (outcome.kind === "rejected" || !steps.includes(outcome.refusal.step)) {
-          return fail("rejected");
-        }
-        // What the server knows better: which ZIPs are served, the category's questions.
+        if (outcome.kind === "rejected") return fail("rejected");
+        // What the server knows better: which ZIPs are served, the category's questions (also
+        // when a category that asked none now does: its steps change with the refetch).
         if (outcome.refusal.reason === "zipNotServed") {
           void queryClient.invalidateQueries({ queryKey: SAVED_ADDRESSES_QUERY_KEY });
         }
         if (outcome.refusal.reason === "invalidAnswers") {
           void queryClient.invalidateQueries({ queryKey: CATEGORIES_QUERY_KEY });
         }
+        if (!steps.includes(outcome.refusal.step)) return fail("rejected");
         backTo(outcome.refusal);
       },
     });
@@ -106,6 +107,7 @@ export function ReviewStep({ category, steps }: ReviewStepProps) {
     >
       {steps.includes("questions") ? (
         <ReviewSection
+          locked={sending}
           title={categoryName(category)}
           editLabel={t("request.review.editAnswers")}
           onEdit={() => router.dismissTo(stepHref("questions", steps))}
@@ -115,6 +117,7 @@ export function ReviewStep({ category, steps }: ReviewStepProps) {
         </ReviewSection>
       ) : null}
       <ReviewSection
+        locked={sending}
         title={t("request.review.description")}
         editLabel={t("request.review.editDescription")}
         onEdit={() => router.dismissTo(stepHref("describe", steps))}
@@ -124,6 +127,7 @@ export function ReviewStep({ category, steps }: ReviewStepProps) {
         {media.items.length > 0 ? <Thumbnails items={media.items} /> : null}
       </ReviewSection>
       <ReviewSection
+        locked={sending}
         title={t("request.review.address")}
         editLabel={t("request.review.editAddress")}
         onEdit={() => router.dismissTo(stepHref("where", steps))}
@@ -143,12 +147,14 @@ type ReviewSectionProps = {
   /** "Edit address": the link's spoken name; it shows as "Edit". */
   editLabel: string;
   onEdit: () => void;
+  /** A send is in flight: the request cannot change under it. */
+  locked: boolean;
   children: ReactNode;
   testID: string;
 };
 
 /** A part of the request: its name and Edit on one line, the content under, a rule above. */
-function ReviewSection({ title, editLabel, onEdit, children, testID }: ReviewSectionProps) {
+function ReviewSection({ title, editLabel, onEdit, locked, children, testID }: ReviewSectionProps) {
   const { t } = useTranslation();
   return (
     <View className="gap-2 border-t border-navy-900/10 pt-4" testID={testID}>
@@ -163,6 +169,7 @@ function ReviewSection({ title, editLabel, onEdit, children, testID }: ReviewSec
           label={t("request.review.edit")}
           accessibilityLabel={editLabel}
           variant="ghost"
+          disabled={locked}
           onPress={onEdit}
           className="-mr-5"
           testID={`${testID}-edit`}

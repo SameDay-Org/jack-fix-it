@@ -7,7 +7,7 @@ import { sendFailureOf, type RequestCreate, type SendFailure } from "./send";
 
 export type CreatedRequest = PostResponse<"/v1/requests">;
 
-type SendCallbacks = {
+export type SendCallbacks = {
   onSent: (request: CreatedRequest) => void;
   onFailed: (failure: SendFailure) => void;
 };
@@ -16,7 +16,10 @@ type SendCallbacks = {
  * Sends the request once. A second call while one is in flight, or after one went through, is
  * ignored however fast the taps: the server would create a second request.
  */
-export function useSendRequest() {
+/** Sends the request; the callbacks say how it ended. A call while one is in flight is ignored. */
+export type SendRequest = (body: RequestCreate, callbacks: SendCallbacks) => Promise<void>;
+
+export function useSendRequest(): { send: SendRequest; sending: boolean } {
   const mutation = useMutation({
     mutationFn: (body: RequestCreate) => apiPost("/v1/requests", body, { auth: true }),
   });

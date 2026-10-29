@@ -51,7 +51,7 @@ export function StepScreen({
 }: StepScreenProps) {
   const { t } = useTranslation();
   const { top } = useSafeAreaInsets();
-  const { close } = useRequestFlowContext();
+  const { close, sending } = useRequestFlowContext();
   const titleRef = useRef<ComponentRef<typeof Text>>(null);
   const index = steps.indexOf(step);
   const first = index === 0;
@@ -76,6 +76,7 @@ export function StepScreen({
               <Button
                 label={t("common.back")}
                 variant="ghost"
+                disabled={sending}
                 onPress={() => (first ? close() : router.back())}
                 className="-ml-5"
                 testID="request-back"
@@ -84,6 +85,7 @@ export function StepScreen({
                 <Button
                   label={t("request.cancel")}
                   variant="ghost"
+                  disabled={sending}
                   onPress={() => close()}
                   className="-mr-5"
                   testID="request-cancel"
