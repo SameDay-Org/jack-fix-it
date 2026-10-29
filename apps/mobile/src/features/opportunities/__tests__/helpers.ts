@@ -115,6 +115,16 @@ const subscribe = (listener: () => void) => {
   return () => nav.listeners.delete(listener);
 };
 
+/** The screen's leave guard (`usePreventRemove`), as last rendered. */
+type RemoveEvent = { data: { action: { type: string } } };
+const guard = {
+  prevent: false,
+  callback: null as ((event: RemoveEvent) => void) | null,
+};
+
+/** The action a back gesture or a back button dispatches; `navigation.dispatch` receives it. */
+export const GO_BACK = { type: "GO_BACK" };
+
 export const navigation = {
   setParams: (params: Record<string, string>) => update({ params }),
   setFocused: (focused: boolean) => update({ focused }),
@@ -122,6 +132,17 @@ export const navigation = {
   setCanGoBack: (canGoBack: boolean) => update({ canGoBack }),
   reset: () =>
     update({ params: { id: DISPATCH_ID }, focused: true, navigating: false, canGoBack: true }),
+  /**
+   * A back gesture or the system back on the screen: true when nothing guards it (the screen
+   * would leave); otherwise the guard's callback runs, as React Navigation calls it.
+   */
+  attemptLeave: (): boolean => {
+    if (!guard.prevent) return true;
+    guard.callback?.({ data: { action: GO_BACK } });
+    return false;
+  },
+  /** `useNavigation().dispatch`, which a confirmed discard calls with the blocked action. */
+  dispatch: jest.fn(),
 };
 
 const useIsNavigating = () => useSyncExternalStore(subscribe, () => nav.navigating);
@@ -137,6 +158,20 @@ export const routerMock = {
   useLocalSearchParams: () => useSyncExternalStore(subscribe, () => nav.params),
   unstable_useIsNavigating: useIsNavigating,
   useIsFocused: () => useSyncExternalStore(subscribe, () => nav.focused),
+  useNavigation: () => ({ dispatch: navigation.dispatch }),
+  usePreventRemove: (prevent: boolean, callback: (event: RemoveEvent) => void) => {
+    useEffect(() => {
+      guard.prevent = prevent;
+      guard.callback = callback;
+    });
+    useEffect(
+      () => () => {
+        guard.prevent = false;
+        guard.callback = null;
+      },
+      [],
+    );
+  },
   // Runs the effect on every focus and cleans it up on blur, as React Navigation does.
   useFocusEffect: (effect: () => void | (() => void)) => {
     const focused = useSyncExternalStore(subscribe, () => nav.focused);

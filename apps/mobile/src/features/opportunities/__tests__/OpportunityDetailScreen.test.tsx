@@ -87,6 +87,7 @@ beforeEach(() => {
   navigation.reset();
   jest.mocked(apiGet).mockReset().mockResolvedValue(detail());
   jest.mocked(router.back).mockClear();
+  jest.mocked(router.push).mockClear();
   jest.mocked(router.replace).mockClear();
   jest.mocked(router.dismissTo).mockClear();
 });
@@ -125,6 +126,18 @@ describe("OpportunityDetailScreen", () => {
     expect(cachedList(client).map((item) => item.viewed)).toEqual([true, false]);
   });
 
+  it("offers Send a quote once loaded, which opens the quote form over it", async () => {
+    await renderWithQuery(<OpportunityDetailScreen />);
+    expect(screen.queryByTestId("opportunity-send-quote")).toBeNull();
+    await screen.findByText("JF-000124");
+
+    await fireEvent.press(screen.getByRole("button", { name: "Send a quote" }));
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/opportunities/[id]/quote",
+      params: { id: DISPATCH_ID },
+    });
+  });
+
   it("says when contact details were hidden", async () => {
     jest.mocked(apiGet).mockResolvedValue(detail({ text_redacted: true }));
     await renderWithQuery(<OpportunityDetailScreen />);
@@ -152,6 +165,7 @@ describe("OpportunityDetailScreen", () => {
 
     expect(await screen.findByText("This request is no longer available")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(screen.queryByTestId("opportunity-send-quote")).toBeNull();
     expect(cachedList(client).map((item) => item.dispatch_id)).toEqual([summary(2).dispatch_id]);
 
     await fireEvent.press(screen.getByRole("button", { name: "Go to home" }));

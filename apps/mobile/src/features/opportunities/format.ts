@@ -70,6 +70,16 @@ export function formatDay(day: string, locale: string = formatLocale()): string 
   }).format(date);
 }
 
+/** An instant's local day, "Fri, Oct 30", as `formatDay` writes a calendar day. */
+export const formatInstantDay = (at: number, locale: string = formatLocale()): string =>
+  new Intl.DateTimeFormat(locale, { weekday: "short", month: "short", day: "numeric" }).format(
+    new Date(at),
+  );
+
+/** An instant's local time of day, "9:00 AM" ("9:00" in ES). */
+export const formatTimeOfDay = (at: number, locale: string = formatLocale()): string =>
+  new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" }).format(new Date(at));
+
 /** How long ago the request was sent to the pro ("2 h ago", "just now"); past a week, the date. */
 export function sentAgo(
   t: TFunction,

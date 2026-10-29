@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, Text, View } from "react-native";
 
-import { Card, IconTile, Screen, Skeleton, TextSkeleton } from "@/components/ui";
+import { Button, Card, IconTile, Screen, Skeleton, TextSkeleton } from "@/components/ui";
 import { BackButton } from "@/features/auth/components/BackButton";
 import { markOpportunityViewed } from "@/features/pro-home/useOpportunities";
 import { useSettledError } from "@/features/quotes/useRequestQuotes";
@@ -29,7 +29,8 @@ const FACT_ROWS = 3;
 /**
  * One opportunity, read-only (`/opportunities/[id]`, where the new-request push lands): the
  * request's code and category, the facts a pro may see before payment (city and ZIP, preferred
- * date, when it was sent), the description, and the photos and videos. The quote form is part 2.
+ * date, when it was sent), the description, and the photos and videos. Its one action, "Send a
+ * quote", stays under the scrolling request and opens the quote form over it.
  */
 export function OpportunityDetailScreen() {
   const { t } = useTranslation();
@@ -91,6 +92,16 @@ export function OpportunityDetailScreen() {
           />
         )}
       </ScrollView>
+      {data !== undefined && !gone ? (
+        <View className="px-4 pb-4 pt-3">
+          <Button
+            label={t("opportunities.detail.sendQuote")}
+            size="lg"
+            onPress={() => router.push({ pathname: "/opportunities/[id]/quote", params: { id } })}
+            testID="opportunity-send-quote"
+          />
+        </View>
+      ) : null}
     </Screen>
   );
 }

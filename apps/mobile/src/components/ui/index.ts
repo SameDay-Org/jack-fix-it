@@ -30,6 +30,8 @@ export type { TabBarGeometry, TabBarItem, TabBarProps } from "./TabBar";
 export type { SkeletonProps } from "./Skeleton";
 export { TextSkeleton } from "./TextSkeleton";
 export type { TextSkeletonProps } from "./TextSkeleton";
+export { Stepper } from "./Stepper";
+export type { StepperProps } from "./Stepper";
 export { StatusBadge, StatusBadgeSkeleton } from "./StatusBadge";
 export type { StatusBadgeProps, StatusBadgeSkeletonProps, StatusTone } from "./StatusBadge";
 export { dismissToast, showToast, useToast } from "./toast";

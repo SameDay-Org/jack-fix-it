@@ -33,6 +33,27 @@ export function formatMoney(cents: number, locale: string = formatLocale()): str
   }).format(cents / CENTS_PER_DOLLAR);
 }
 
+/** Cents as US dollars with the cents always shown, "$85.00": what the pro sends and receives. */
+export function formatMoneyExact(cents: number, locale: string = formatLocale()): string {
+  return new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(cents / CENTS_PER_DOLLAR);
+}
+
+const BPS_PER_WHOLE = 10_000;
+const RATE_MAX_DIGITS = 2;
+
+/** A rate in basis points as a percentage: 1500 → "15%", 1250 → "12.5%" ("15 %" in ES). */
+export function formatRate(bps: number, locale: string = formatLocale()): string {
+  return new Intl.NumberFormat(locale, {
+    style: "percent",
+    maximumFractionDigits: RATE_MAX_DIGITS,
+  }).format(bps / BPS_PER_WHOLE);
+}
+
 const NO_BREAK_SPACE = "\u00A0";
 
 /** The text with no-break spaces, so a line never breaks inside it ("1 h 30 min", "12 jobs"). */
