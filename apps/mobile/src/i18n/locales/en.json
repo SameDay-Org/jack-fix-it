@@ -344,6 +344,14 @@
     "less": "Less",
     "moreLabel": "More, show all of what's included",
     "lessLabel": "Less, show less of what's included",
+    "approach": {
+      "title": "How I'll do it",
+      "more": "Read more",
+      "less": "Show less",
+      "moreLabel": "Read more, show all of how the pro will do the job",
+      "lessLabel": "Show less of how the pro will do the job",
+      "summary": "How I'll do it: {{approach}}"
+    },
     "accept": "Accept",
     "acceptLabel": "Accept the quote from {{pro}} for {{price}}",
     "viewProfile": "View profile",

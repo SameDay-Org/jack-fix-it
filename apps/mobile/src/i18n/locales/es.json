@@ -344,6 +344,14 @@
     "less": "Menos",
     "moreLabel": "Más, ver todo lo que incluye",
     "lessLabel": "Menos, ver menos de lo que incluye",
+    "approach": {
+      "title": "Cómo lo haré",
+      "more": "Leer más",
+      "less": "Ver menos",
+      "moreLabel": "Leer más, ver todo cómo el profesional hará el trabajo",
+      "lessLabel": "Ver menos de cómo el profesional hará el trabajo",
+      "summary": "Cómo lo haré: {{approach}}"
+    },
     "accept": "Aceptar",
     "acceptLabel": "Aceptar el presupuesto de {{pro}} por {{price}}",
     "viewProfile": "Ver perfil",

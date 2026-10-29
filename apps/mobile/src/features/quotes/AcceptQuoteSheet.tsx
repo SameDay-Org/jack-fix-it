@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { AccessibilityInfo, Text, View } from "react-native";
 
 import { Button, SheetContent, VerifiedBadge } from "@/components/ui";
+import { continuousCorners } from "@/theme";
 
 import { useAcceptQuote, type AcceptOutcome } from "./useAcceptQuote";
 import { quotesQueryOptions } from "./useRequestQuotes";
@@ -12,8 +13,8 @@ import { quoteText } from "./quoteText";
 
 /**
  * The confirmation before accepting a quote (`/requests/[id]/accept?quote=…`, a fit-to-contents
- * sheet over the list). It restates the price and the pro as they were when Accept was tapped,
- * then posts once; the answer decides the rest:
+ * sheet over the list). It restates the price, the pro and the pro's approach as they were when
+ * Accept was tapped, then posts once; the answer decides the rest:
  * - accepted: the sheet closes over the accepted card, and screen readers hear it;
  * - no longer acceptable (409, 404): the sheet closes, a toast says so, the list refetches;
  * - offline or a server error: the sheet stays with the reason, and confirming again is safe.
@@ -103,6 +104,19 @@ export function AcceptQuoteSheet() {
         <Text className="text-callout text-gray-500">{text.start}</Text>
         <Text className="text-callout text-gray-500">{text.duration}</Text>
       </View>
+      {/* In full: the customer accepts knowing the approach; a long one scrolls with the body. */}
+      {quote.approach ? (
+        <View
+          style={continuousCorners}
+          className="gap-1 rounded-md bg-gray-50 p-3"
+          testID="accept-quote-approach"
+        >
+          <Text className="text-caption text-gray-500">{t("quotes.approach.title")}</Text>
+          <Text className="text-callout text-navy-900" testID="accept-quote-approach-text">
+            {quote.approach}
+          </Text>
+        </View>
+      ) : null}
       {failed ? (
         <Text className="text-callout text-danger" testID="accept-quote-failed">
           {t("quotes.confirm.failed")}

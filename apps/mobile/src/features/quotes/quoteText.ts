@@ -36,7 +36,10 @@ export type QuoteText = {
   stats: string;
   /** "Expires in 3 h 20 min", "Expires Fri, Oct 31, 5:00 PM" or "Expired". */
   expiry: string;
-  /** The whole card in one sentence for screen readers: pro, verified, price, start, and the rest. */
+  /**
+   * The whole card in one sentence for screen readers: pro, verified, price, start, and the rest,
+   * ending with the pro's approach when there is one.
+   */
   summary: string;
 };
 
@@ -89,6 +92,7 @@ export function quoteText(
     jobs,
     years,
     state === "accepted" ? t("quotes.acceptedNote") : expiry,
+    quote.approach ? t("quotes.approach.summary", { approach: quote.approach }) : null,
   ]
     .filter((part) => part !== null)
     .join(", ");
