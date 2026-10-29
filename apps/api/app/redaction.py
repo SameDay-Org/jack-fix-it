@@ -46,6 +46,8 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import Final, Protocol
 
+from app import redaction_legacy
+
 MASK: Final = "•••"
 
 _FLAGS: Final = re.IGNORECASE
@@ -672,14 +674,51 @@ def redact_contacts(text: str) -> RedactionResult:
     new drive belts" keeps "new drive belts", "2 Amazon.com Key pads" keeps "Key pads". A phone
     that took its number leaves it as the rules in order read it ("APT" before a phone's mask)."""
     cleaned = _clean(text)
-    masked, cutting = _masks_in_order(cleaned)
-    if masked:
-        found = [span for search, rule in _PHONE_STEPS for span in _spans(search, rule, cleaned)]
-        if cutting:
-            found += _cut_spans(cleaned, _Apart.of(cutting), _Apart.of(masked))
-        masked = _joined(masked, found)
-    result, count = _mask_spans(cleaned, masked)
+    result, count = _mask_spans(cleaned, _hidden(cleaned))
     return RedactionResult(result, count > 0)
+
+
+def _hidden(text: str) -> list[tuple[int, int]]:
+    """Where redact_contacts masks `text` (cleaned): the rules in order, and the floor."""
+    masked, _ = _masks_in_order(text)
+    return masked + _floor_masks(text)
+
+
+def _floor_masks(text: str) -> list[tuple[int, int]]:
+    """Where the safety floor masks `text` (cleaned; its _clean is the same code): the rules
+    of app.redaction_legacy, the filter before #240, run as its redact_contacts runs them, each
+    on the text the ones before it masked. redact_contacts masks all of it too, so its output
+    never shows a character that filter hid (#240, until #267)."""
+    current = text
+    origin = [(index, index + 1) for index in range(len(text))]  # each character's span in text
+    masked: list[tuple[int, int]] = []
+    for pattern, replace in redaction_legacy._STEPS:
+        spans = list(_floor_spans(pattern, replace, current))
+        if spans:
+            current, origin = _masked_with_origin(current, origin, spans, masked)
+    return masked
+
+
+def _floor_spans(
+    pattern: re.Pattern[str], replace: _Replace, text: str
+) -> Iterator[tuple[int, int]]:
+    """Where the floor's _substitute masks `text` with `replace`. Only its _phones masks part
+    of a match: the windows are this module's _phones (the same code), checked against the
+    floor's replacement; on any difference the whole match is masked."""
+    search_from = 0
+    while (match := pattern.search(text, search_from)) is not None:
+        replacement = replace(match)
+        if replacement is None:
+            search_from = match.start() + 1
+            continue
+        if replacement == MASK:
+            yield match.span()
+        elif replacement != match.group(0):
+            start = match.start()
+            windows = _phones(match)
+            local = [(begin - start, end - start, MASK) for begin, end in windows]
+            yield from windows if _apply(match.group(0), local)[0] == replacement else [match.span()]
+        search_from = max(match.end(), match.start() + 1)
 
 
 def _cut_spans(text: str, cutting: "_Apart", masked: "_Apart") -> list[tuple[int, int]]:
