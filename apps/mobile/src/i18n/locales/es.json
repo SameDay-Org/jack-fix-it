@@ -87,13 +87,40 @@
     "customer": {
       "title": "Tus solicitudes",
       "empty": "Las solicitudes que envíes aparecerán aquí.",
-      "cta": "Ver categorías"
+      "cta": "Ver categorías",
+      "loading": "Cargando tus solicitudes",
+      "otherCategory": "Solicitud",
+      "today": "Hoy",
+      "yesterday": "Ayer",
+      "error": {
+        "title": "No pudimos cargar tus solicitudes",
+        "body": "Revisa tu conexión e inténtalo de nuevo.",
+        "retry": "Intentar de nuevo"
+      },
+      "more": {
+        "failed": "No pudimos cargar más solicitudes.",
+        "retry": "Intentar de nuevo"
+      },
+      "refreshFailed": "No se pudo actualizar. Revisa tu conexión e inténtalo de nuevo."
     },
     "pro": {
       "title": "Tus trabajos",
       "empty": "Los trabajos para los que te contraten aparecerán aquí.",
       "cta": "Ir a Inicio"
     }
+  },
+  "customerStatus": {
+    "requestReceived": "Solicitud recibida",
+    "reviewing": "En revisión",
+    "findingAPro": "Buscando un profesional",
+    "quoteReady": "Presupuesto listo",
+    "scheduled": "Programada",
+    "professionalOnTheWay": "Profesional en camino",
+    "inProgress": "En curso",
+    "waitingForConfirmation": "Esperando confirmación",
+    "completed": "Completada",
+    "needsAttention": "Requiere atención",
+    "cancelled": "Cancelada"
   },
   "request": {
     "progress": "Paso {{current}} de {{total}}",

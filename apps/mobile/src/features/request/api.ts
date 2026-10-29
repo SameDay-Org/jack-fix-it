@@ -1,7 +1,8 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useRef } from "react";
 
 import { apiPost, isCurrentGeneration, sessionGeneration, type PostResponse } from "@/api";
+import { invalidateMyRequests } from "@/features/history/useMyRequests";
 
 import { sendFailureOf, type RequestCreate, type SendFailure } from "./send";
 
@@ -20,6 +21,7 @@ export type SendCallbacks = {
 export type SendRequest = (body: RequestCreate, callbacks: SendCallbacks) => Promise<void>;
 
 export function useSendRequest(): { send: SendRequest; sending: boolean } {
+  const queryClient = useQueryClient();
   const mutation = useMutation({
     mutationFn: (body: RequestCreate) => apiPost("/v1/requests", body, { auth: true }),
   });
@@ -41,9 +43,12 @@ export function useSendRequest(): { send: SendRequest; sending: boolean } {
         if (isCurrentGeneration(startedIn)) onFailed(sendFailureOf(error));
         return;
       }
-      if (isCurrentGeneration(startedIn)) onSent(created);
+      if (!isCurrentGeneration(startedIn)) return;
+      // History lists the new request the next time it shows (#47).
+      void invalidateMyRequests(queryClient);
+      onSent(created);
     },
-    [mutateAsync],
+    [mutateAsync, queryClient],
   );
 
   return { send, sending: mutation.isPending || mutation.isSuccess };

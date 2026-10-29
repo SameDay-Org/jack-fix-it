@@ -29,6 +29,7 @@ import WhereRoute from "../../../app/(app)/request/(flow)/where";
 import SentRoute from "../../../app/(app)/request/sent";
 import { METRICS } from "../../auth/__tests__/helpers";
 import { panelRiseOptions } from "../../auth/panelRoute";
+import { MY_REQUESTS_QUERY_KEY } from "../../history/useMyRequests";
 import { CATEGORIES_QUERY_KEY } from "../../home/useCategories";
 import { TabsLayout } from "../../tabs/TabsLayout";
 import { formatLongDay, offeredDays } from "../dates";
@@ -368,9 +369,12 @@ describe("the request flow", () => {
   it("opens the sent request from the confirmation", async () => {
     jest.mocked(apiPost).mockResolvedValue(created() as never);
     const result = await toReview();
+    client.setQueryData(MY_REQUESTS_QUERY_KEY, { pages: [], pageParams: [] });
 
     await press("Send request");
     await waitFor(() => expect(result.getPathname()).toBe("/request/sent"));
+    // History lists the new request the next time it shows.
+    expect(client.getQueryState(MY_REQUESTS_QUERY_KEY)?.isInvalidated).toBe(true);
     await press("See my request");
 
     await waitFor(() => expect(result.getPathname()).toBe(`/requests/${created().id}`));
@@ -399,6 +403,7 @@ describe("the request flow", () => {
     const sending = deferred<ReturnType<typeof created>>();
     jest.mocked(apiPost).mockReturnValue(sending.promise as never);
     const result = await toReview();
+    client.setQueryData(MY_REQUESTS_QUERY_KEY, { pages: [], pageParams: [] });
     await press("Send request");
 
     // The sign-out lands between the client's own session check and the flow's callback.
@@ -406,6 +411,7 @@ describe("the request flow", () => {
     await act(async () => sending.resolve(created()));
 
     expect(result.getPathname()).toBe("/request/review");
+    expect(client.getQueryState(MY_REQUESTS_QUERY_KEY)?.isInvalidated).toBe(false);
     await act(async () => router.push({ pathname: "/request/sent", params: { id: created().id } }));
     await waitFor(() => expect(result.getPathname()).toBe(`/requests/${created().id}`));
     expect(screen.queryByText("JF-000124")).toBeNull();

@@ -87,13 +87,40 @@
     "customer": {
       "title": "Your requests",
       "empty": "Requests you send will show up here.",
-      "cta": "Browse categories"
+      "cta": "Browse categories",
+      "loading": "Loading your requests",
+      "otherCategory": "Request",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "error": {
+        "title": "We couldn't load your requests",
+        "body": "Check your connection and try again.",
+        "retry": "Try again"
+      },
+      "more": {
+        "failed": "We couldn't load more requests.",
+        "retry": "Try again"
+      },
+      "refreshFailed": "Couldn't refresh. Check your connection and try again."
     },
     "pro": {
       "title": "Your jobs",
       "empty": "Jobs you're hired for will show up here.",
       "cta": "Go to Home"
     }
+  },
+  "customerStatus": {
+    "requestReceived": "Request Received",
+    "reviewing": "Reviewing",
+    "findingAPro": "Finding a Pro",
+    "quoteReady": "Quote Ready",
+    "scheduled": "Scheduled",
+    "professionalOnTheWay": "Professional On The Way",
+    "inProgress": "In Progress",
+    "waitingForConfirmation": "Waiting for Confirmation",
+    "completed": "Completed",
+    "needsAttention": "Needs Attention",
+    "cancelled": "Cancelled"
   },
   "request": {
     "progress": "Step {{current}} of {{total}}",
