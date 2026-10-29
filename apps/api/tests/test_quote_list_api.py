@@ -483,6 +483,31 @@ async def test_scope_with_a_handle_glued_to_a_combining_mark_is_masked(
     assert shown == ["Same day, find me ••• for the key"] * 2
 
 
+@pytest.mark.parametrize(
+    "contact",
+    ["@mañana.fixit", "@josé_silva", "insta: bob" + chr(0x0483) + "smith"],
+    ids=["at_enye_dot", "at_accented_underscore", "platform_cyrillic_mark"],
+)
+async def test_scope_with_a_unicode_letter_handle_is_masked_whole(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: World, contact: str
+) -> None:
+    """A handle body takes any Unicode letter and a platform id its marks (#236): no tail."""
+    request_id = await make_request(db_session, world, RequestStatus.QUOTE_READY)
+    await add_quote(
+        db_session,
+        request_id,
+        await quoting_pro(db_session),
+        scope=f"Same day, find me {contact} for the key",
+        amount=1_000,
+    )
+
+    response = await db_client.get(path(request_id), headers=customer(world))
+
+    assert response.status_code == 200
+    shown = [item["scope"] for item in response.json()["items"]]
+    assert shown == ["Same day, find me ••• for the key"]
+
+
 async def test_known_email_is_the_quoting_pros_not_another_pros(
     db_client: httpx.AsyncClient, db_session: AsyncSession, world: World
 ) -> None:

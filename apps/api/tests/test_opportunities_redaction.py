@@ -336,6 +336,24 @@ ROUND4_CASES = [
         "+13055550199",
         "742 Evergreen Terrace",
     ),
+    # #236: a Unicode letter in the handle body used to end the mask ("•••ñana.fixit"), and a
+    # mark inside a platform id used to leave the mark and "smith".
+    (
+        "handle-with-unicode-letters",
+        "Repair the leaking kitchen sink, find me @mañana.fixit please.",
+        "fixit",
+        "test@example.invalid",
+        "+13055550199",
+        "742 Evergreen Terrace",
+    ),
+    (
+        "platform-id-with-cyrillic-mark",
+        "Repair the leaking kitchen sink, insta: bob" + chr(0x0483) + "smith please.",
+        "smith",
+        "test@example.invalid",
+        "+13055550199",
+        "742 Evergreen Terrace",
+    ),
 ]
 
 

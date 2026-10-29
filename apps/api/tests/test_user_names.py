@@ -401,6 +401,17 @@ def test_safe_public_name_withholds_a_handle_glued_to_a_combining_mark() -> None
     assert safe_public_name("@home.fixit", "Pérez", KnownValues()) is None
 
 
+# #236: the handle body takes any Unicode letter, and a platform id the marks glued to it, so
+# neither leaves a readable tail of the name.
+@pytest.mark.parametrize(
+    "first",
+    ["@mañana.fixit", "@josé_silva", "insta: bob" + chr(0x0483) + "smith"],
+    ids=["at_enye_dot", "at_accented_underscore", "platform_cyrillic_mark"],
+)
+def test_safe_public_name_withholds_a_unicode_letter_handle(first: str) -> None:
+    assert safe_public_name(first, "Pérez", KnownValues()) is None
+
+
 @pytest.mark.parametrize("field", ["first_name", "last_name"])
 async def test_a_handle_glued_to_a_combining_mark_is_refused_at_write_time(
     db_client: httpx.AsyncClient, db_session: AsyncSession, field: str

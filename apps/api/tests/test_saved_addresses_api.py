@@ -806,6 +806,10 @@ CONTACT_LABELS = [
     "@home" + chr(0x05B0) + "fixit",  # HEBREW POINT SHEVA
     "@home" + chr(0x093F) + "fixit",  # DEVANAGARI VOWEL SIGN I (Mc)
     "@home" + chr(0x1D167) + "fixit",  # MUSICAL SYMBOL COMBINING TREMOLO-1
+    # #236: Unicode letters in the handle body, and a mark inside a cashtag.
+    "@mañana.fixit",
+    "@josé_silva",
+    "$bob" + chr(0x0483) + "smith",
     # Round 2: a phone glued to a unit marker, which the skipped unit step used to catch.
     "APT3055550199",
     "UNIT3055550199",
@@ -841,6 +845,9 @@ CONTACT_LABELS = [
         "at_home_hebrew_mark",
         "at_home_devanagari_mark",
         "at_home_musical_mark",
+        "at_enye_dot",
+        "at_accented_underscore",
+        "cashtag_cyrillic_mark",
         "apt_phone",
         "unit_phone",
         "suite_phone",

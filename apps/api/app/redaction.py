@@ -30,8 +30,10 @@ letters for digits ("305 555 O199"), commas between phone groups, digits that mi
 numerals, a phone grouping no one uses ("30 55 55 01 99"), a bare handle with no "@", cue or
 digit ("insta jdoe"), a plain word after a weak platform ("my venmo is jdoe"), a display name
 ("find me on facebook as John Doe"), a street with no suffix ("1234 Flagler"), a reversed street
-with lowercase or function-word names, and text inside images (#173 handles media). A 10-digit
-order or serial number is masked like a phone: hiding a number is the safe side.
+with lowercase or function-word names, a combining mark inside a TLD or a mail provider's name
+("gmail.c" + U+0483 + "om": the literal lists cannot take marks), and text inside images (#173
+handles media). A 10-digit order or serial number is masked like a phone: hiding a number is
+the safe side.
 
 The patterns are data in this module; it does no I/O and keeps no state. Every pattern is
 anchored so a 2,000-character input (the description limit) is handled in milliseconds.
@@ -109,149 +111,15 @@ _ODD_SEPARATOR: Final = re.compile(
 _DASH_CODES: Final = (*range(0x2010, 0x2016), 0x207B, 0x208B, 0x2212, 0xFE58, 0xFE63, 0xFF0D)
 _DASHES: Final = re.compile("[" + "".join(map(chr, _DASH_CODES)) + "]")
 
-# --- Emails ----------------------------------------------------------------------------------
-# Top-level domains a bare "name.tld" must end with, unless a path follows: generic ones,
-# country codes customers here use, and the gTLDs local businesses pick. Words such as "so",
-# "do" or "to" are left out, since "it.So" is a missing space, not a domain.
-_TLDS: Final = (
-    "com|net|org|edu|gov|io|co|us|me|info|biz|app|dev|ly|gl|ee|be|cc|ws|page|link|site|"
-    "online|store|shop|xyz|ai|tv|gg|mx|es|br|ar|cu|ve|pr|ca|uk|de|fr|miami|travel|studio|"
-    "email|pro|club|services|solutions|tech|live|nyc|agency|llc|design|art|life|world|today|"
-    "company|group|repair|contractors|construction|builders|homes|house|realty|properties|"
-    "network|plumbing|expert|cleaning|pools|roofing"
-)
-_TLD_END: Final = rf"(?:{_TLDS})(?![a-z0-9])"
-# TLDs that are also words, so "cooling.Me and my wife" is a missing space, not a domain.
-_WORD_TLDS: Final = frozenset(
-    {"me", "us", "be", "es", "co", "pro", "art", "life", "live", "today", "world", "club",
-     "shop", "store", "site", "page", "link", "info", "design", "house", "homes", "group"}
-)  # fmt: skip
-# Mail providers whose name alone, with no TLD, is an address ("jdoe@gmail").
-_PROVIDERS: Final = (
-    r"(?:gmail|g\s?mail|hotmail|yahoo|outlook|icloud|aol|msn|proton(?:mail)?|comcast|"
-    r"bellsouth|earthlink|verizon|att\.net)"
-)
-_START: Final = r"(?<![\w.%+@-])"  # never start inside a word or a dotted chain
-# Possessive, so a long dotted chain is never re-split; Unicode letters too ("josé.pérez").
-_LOCAL: Final = r"[\w+][\w.%+-]*+"  # any valid start: "_jane", "__x", "+tag"
-_AT: Final = r"(?:\s*@\s*|\s*[(\[{<]\s*(?:at|arroba)\s*[)\]}>]\s*|\s+(?:at|arroba|en)\s+)"
-_STRONG_AT: Final = r"(?:\s*@\s*|\s*[(\[{<]\s*(?:at|arroba)\s*[)\]}>]\s*|\s+arroba\s+)"
-_SPELLED_DOT: Final = r"(?:\.|\s*[(\[{<]\s*(?:dot|punto)\s*[)\]}>]\s*|\s+(?:dot|punto)\s+)"
-_ONLY_SPELLED_DOT: Final = r"(?:\s*[(\[{<]\s*(?:dot|punto)\s*[)\]}>]\s*|\s+(?:dot|punto)\s+)"
-PLAIN_EMAIL: Final = re.compile(
-    rf"{_START}{_LOCAL}@[a-z0-9-]++(?:[.,][a-z0-9-]++)*?[.,][a-z]{{2,}}\b", _FLAGS
-)
-SPACED_EMAIL: Final = re.compile(
-    rf"{_START}{_LOCAL}\s*@\s*[a-z0-9-]++(?:\s*\.\s*[a-z0-9-]++)*?\s*\.\s*{_TLD_END}", _FLAGS
-)
-# "maria at gmail dot com", "juan dot perez at gmail dot com", "jane (at) outlook.com". With a
-# bare " at " and a plain dot, the local part may not be a common word ("it at Amazon.com").
-SPELLED_EMAIL: Final = re.compile(
-    rf"{_START}(?P<local>{_LOCAL}(?:{_ONLY_SPELLED_DOT}[a-z0-9_-]++)*)"
-    rf"(?P<at>{_AT})[a-z0-9-]++(?:{_SPELLED_DOT}[a-z0-9-]++)*?(?P<dot>{_SPELLED_DOT})"
-    rf"(?P<tld>{_TLD_END})",
-    _FLAGS,
-)
-# A provider with no TLD, or with a TLD typed loosely ("gmail com", "gmailcom", "gmail,com").
-PROVIDER_EMAIL: Final = re.compile(
-    rf"{_START}(?P<local>{_LOCAL})(?P<at>{_AT}){_PROVIDERS}"
-    rf"(?:\s*[.,]?\s*(?:dot\s+|punto\s+)?(?:com|net|es|mx)\b)?",
-    _FLAGS,
-)
-# "local@word" glued, whatever comes next: an address with its domain cut short.
-GLUED_EMAIL: Final = re.compile(rf"{_START}[^\W\d_]{_LOCAL}@[a-z][a-z0-9-]++\b", _FLAGS)
-# An email typed letter by letter: "j a n e @ g m a i l . c o m".
-SPACED_LETTERS_EMAIL: Final = re.compile(
-    r"(?<!\S)(?:[a-z0-9]\s){2,40}@\s(?:[a-z0-9]\s?){2,40}(?:\.\s?(?:[a-z]\s?){2,6})?", _FLAGS
-)
-# Words that are never the local part of a spelled-out email ("photos are at iCloud").
-_COMMON_WORDS: Final = frozenset(
-    {"it", "is", "are", "was", "were", "be", "been", "me", "us", "you", "him", "her", "them",
-     "one", "this", "that", "these", "those", "here", "there", "work", "works", "worked", "look",
-     "send", "sent", "bought", "buy", "parts", "part", "photos", "pics", "pictures", "stuff",
-     "things", "home", "house", "online", "ad", "ads", "job", "price", "prices", "order",
-     "ordered", "stay", "stays", "estoy", "esta", "está", "están", "fotos", "trabajo", "and",
-     "or", "the", "a", "an", "at", "on", "in", "to", "of", "for", "my", "your", "our", "his",
-     "their", "el", "la", "los", "las", "de", "en", "y", "o", "mi", "su", "i", "we", "they",
-     "he", "she", "available", "located", "based", "listed", "found", "seen", "saw"}
-)  # fmt: skip
-
-# --- URLs ------------------------------------------------------------------------------------
-_DOMAIN_START: Final = r"(?<![\w.@-])"
-URL: Final = re.compile(
-    rf"(?:https?://|\bwww\s*\.\s*)\S+"
-    rf"|{_DOMAIN_START}[a-z0-9][a-z0-9-]*+(?:\.[a-z0-9-]++)*?\.[a-z]{{2,}}/\S*"
-    rf"|{_DOMAIN_START}[a-z0-9][a-z0-9-]*+(?:\.[a-z0-9-]++)*?\.(?P<tld>{_TLD_END})"
-    rf"|{_DOMAIN_START}[a-z0-9][a-z0-9-]{{2,}}\s*\.\s+(?:com|net|org|co|us|io|miami)\b"
-    rf"|{_DOMAIN_START}[a-z0-9][a-z0-9-]{{2,}}\s+\.\s*(?:com|net|org|co|us|io|miami)\b"
-    rf"|{_DOMAIN_START}[a-z0-9-]{{2,}}(?:\s+(?:dot|punto)\s+[a-z0-9-]+)*\s+(?:dot|punto)\s+"
-    rf"{_TLD_END}",
-    _FLAGS,
-)
-
-# --- Handles ---------------------------------------------------------------------------------
-# Strong platforms: "my insta is jdoe" names a handle whatever the word. Weak platforms are
-# everyday words too ("Zelle as payment", "facebook last week"): their id must look like a
-# handle (a digit, "_", "." or a leading "@"/"$"), unless a cue word or ":"/"=" came first.
-_STRONG_PLATFORMS: Final = r"(?:insta(?:gram)?|ig|snap(?:chat)?|tiktok|telegram|tg|twitter|sc)"
-_WEAK_PLATFORMS: Final = (
-    r"(?:whats\s?app|wasap|guasap|wsp|wpp|wa|facebook|face|fb|venmo|cash\s?app|zelle|paypal|"
-    r"e-?mail|correo|g\s?mail|hotmail|yahoo|outlook|icloud)"
-)
-_PLATFORM_WORDS: Final = frozenset(
-    {"insta", "instagram", "ig", "snap", "snapchat", "tiktok", "telegram", "tg", "twitter", "sc",
-     "whatsapp", "wasap", "guasap", "wsp", "wpp", "wa", "facebook", "face", "fb", "venmo",
-     "cashapp", "zelle", "paypal", "email", "e-mail", "correo", "gmail", "hotmail", "yahoo",
-     "outlook", "icloud", "text", "call", "phone", "cash", "card", "check"}
-)  # fmt: skip
-_CUE: Final = r"(?:handle|account|cuenta|user(?:name)?|usuario|name|nombre|id)"
-_LINK_WORD: Final = (
-    r"(?:is|es|as|como|me\s+at|at|al|se\s+llama|is\s+called|aparezco\s+como|aparece\s+como)"
-)
-PLATFORM_HANDLE: Final = re.compile(
-    rf"\b(?:(?P<strong>{_STRONG_PLATFORMS})|(?P<weak>{_WEAK_PLATFORMS}))"
-    rf"(?:(?P<cue>\s+{_CUE}\b(?:\s+(?:is|es))?\s*[:=]?\s*)"
-    rf"|(?P<colon>\s*(?:{_LINK_WORD}\s*)?[:=@>]\s*@?\s*)"
-    rf"|(?P<dash>\s*[/-]\s*)"
-    rf"|(?P<linked>\s+{_LINK_WORD}\s+)"
-    rf"|(?P<spaced>\s+))"
-    r"(?P<id>[@$]?[^\W_][\w.-]{1,29})(?![\w])",
-    _FLAGS,
-)
-# A handle written before its platform: "j.doe.fixit (insta)". The token is possessive and its
-# shape is checked in _mask_reverse_handle, so a long dotted chain costs one pass.
-REVERSE_HANDLE: Final = re.compile(
-    rf"(?<![\w@.])(?P<id>[^\W_][\w.]*+)\s*[(\[]?\s*(?:on\s+|en\s+)?{_STRONG_PLATFORMS}\b",
-    _FLAGS,
-)
-# Words that follow "insta is" in ordinary sentences, so are not an id.
-_NOT_AN_ID: Final = frozenset(
-    {"fine", "ok", "okay", "good", "great", "better", "best", "easier", "faster", "down", "not",
-     "free", "working", "broken", "the", "a", "my", "your", "private", "public", "new", "old",
-     "bien", "mejor", "gratis", "privado", "privada", "nuevo", "nueva", "empty", "gone"}
-)  # fmt: skip
-# "@name" and "$cashtag", but not "@5pm", "@noon", "@home", "@tomorrow", a price or a currency.
-# A handle token is letters, digits and runs of ".", "_" and "-" (_HANDLE_BODY, as the
-# platforms accept it), the separators also in their compatibility forms as typed
-# (_SEPARATOR_FORMS: the low lines whose NFKC form is "_", the dot leaders and the ellipsis
-# whose NFKC form is a run of "."; the dashes are already "-" and U+2024 already "." after
-# _clean). A time, a measure or a word after "@" is exempt only when it is the whole token:
-# _BODY_END refuses whatever would continue the token, a word character (letters, digits,
-# "_"), a combining mark glued to the word (\w skips marks: "@home" + U+0335 + "fixit") or
-# a run of separators followed by a word character. So "@home", "@home.", "@home!" and
-# "@home " stay, while "@home.fixit", "@home--fixit", "@home._fixit", "@home_fixit" and
-# "@home" + U+FF3F + "fixit" are handles (#224 review, rounds 1 and 2).
-# The marks are every nonspacing (Mn) and spacing (Mc) combining mark, of any script, so a
-# Cyrillic, Hebrew or Arabic mark continues the token as a Latin one does ("@home" + U+0483
-# + "fixit", #229); the enclosing marks (Me) are dropped by _clean. _MARK_RANGES is generated
-# from the unicodedata of Python 3.12 (Unicode 15.0): a scan of every code point at import
-# costs a few hundred ms, so the tuple is committed and test_mark_set_matches_unicodedata
-# rebuilds it, failing on any difference after a Python upgrade. _HANDLE_BODY also takes the
-# marks glued to its own characters (_MARKED), so "@bob" + U+05B0 + "smith" is masked whole.
-# A spacing mark (Mc) survives _clean after a separator or the "@" too, so a run of
-# separators followed by a mark continues the token ("@home." + U+093F + "fixit") and the
-# "@" may carry marks before the body ("@" + U+093F + "bobsmith"), also in the spaced form
-# ("@ bob" + U+0483 + ".smith").
+# --- Combining marks -------------------------------------------------------------------------
+# Every nonspacing (Mn) and spacing (Mc) combining mark, of any script, so a Cyrillic, Hebrew
+# or Arabic mark continues a token as a Latin one does ("@home" + U+0483 + "fixit", #229); the
+# enclosing marks (Me) are dropped by _clean. _MARK_RANGES is generated from the unicodedata of
+# Python 3.12 (Unicode 15.0): a scan of every code point at import costs a few hundred ms, so
+# the tuple is committed and test_mark_set_matches_unicodedata rebuilds it, failing on any
+# difference after a Python upgrade. The handle, email and URL patterns take the marks glued to
+# their own characters (_MARKED after a counted character, or _MARKS inside a class), so
+# "@bob" + U+05B0 + "smith" and "jo" + U+0483 + "se@gmail.com" are masked whole (#236).
 _MARK_RANGES: Final = (
     (0x0300, 0x036F), (0x0483, 0x0487), (0x0591, 0x05BD), (0x05BF, 0x05BF), (0x05C1, 0x05C2),
     (0x05C4, 0x05C5), (0x05C7, 0x05C7), (0x0610, 0x061A), (0x064B, 0x065F), (0x0670, 0x0670),
@@ -325,13 +193,171 @@ _MARK_RANGES: Final = (
 )  # fmt: skip
 _MARKS: Final = "".join(f"{chr(low)}-{chr(high)}" for low, high in _MARK_RANGES)
 _MARKED: Final = rf"[{_MARKS}]*+"  # the marks glued to one character, taken as a run
+
+# --- Emails ----------------------------------------------------------------------------------
+# Top-level domains a bare "name.tld" must end with, unless a path follows: generic ones,
+# country codes customers here use, and the gTLDs local businesses pick. Words such as "so",
+# "do" or "to" are left out, since "it.So" is a missing space, not a domain.
+_TLDS: Final = (
+    "com|net|org|edu|gov|io|co|us|me|info|biz|app|dev|ly|gl|ee|be|cc|ws|page|link|site|"
+    "online|store|shop|xyz|ai|tv|gg|mx|es|br|ar|cu|ve|pr|ca|uk|de|fr|miami|travel|studio|"
+    "email|pro|club|services|solutions|tech|live|nyc|agency|llc|design|art|life|world|today|"
+    "company|group|repair|contractors|construction|builders|homes|house|realty|properties|"
+    "network|plumbing|expert|cleaning|pools|roofing"
+)
+_TLD_END: Final = rf"(?:{_TLDS})(?![a-z0-9])"
+# TLDs that are also words, so "cooling.Me and my wife" is a missing space, not a domain.
+_WORD_TLDS: Final = frozenset(
+    {"me", "us", "be", "es", "co", "pro", "art", "life", "live", "today", "world", "club",
+     "shop", "store", "site", "page", "link", "info", "design", "house", "homes", "group"}
+)  # fmt: skip
+# Mail providers whose name alone, with no TLD, is an address ("jdoe@gmail").
+_PROVIDERS: Final = (
+    r"(?:gmail|g\s?mail|hotmail|yahoo|outlook|icloud|aol|msn|proton(?:mail)?|comcast|"
+    r"bellsouth|earthlink|verizon|att\.net)"
+)
+# Never start inside a word, a dotted chain or a marked token: a start after a mark would scan
+# the token again from every mark ("a" + U+0483 repeated), so the lookbehind refuses it and the
+# leftmost start takes the whole token, marks included.
+_START: Final = rf"(?<![\w.%+@\-{_MARKS}])"
+# Possessive, so a long dotted chain is never re-split; Unicode letters too ("josé.pérez"), and
+# the marks glued to any of its characters ("jo" + U+0483 + "se", #236).
+_LOCAL: Final = rf"[\w+][\w.%+\-{_MARKS}]*+"  # any valid start: "_jane", "__x", "+tag"
+# A domain label character: any Unicode letter or digit ("gmäil", "ñandú"), a hyphen, or a mark
+# glued to one of them. "_" stays out ("see_gmail.com" is a known gap, see _FOLDABLE). The TLD
+# and the provider names stay literal: a mark inside them ("gmail.c" + U+0483 + "om") is a
+# known gap, since each would need the mark class after every letter.
+_LABEL: Final = rf"(?:[^\W_]|[\-{_MARKS}])"
+_AT: Final = r"(?:\s*@\s*|\s*[(\[{<]\s*(?:at|arroba)\s*[)\]}>]\s*|\s+(?:at|arroba|en)\s+)"
+_STRONG_AT: Final = r"(?:\s*@\s*|\s*[(\[{<]\s*(?:at|arroba)\s*[)\]}>]\s*|\s+arroba\s+)"
+_SPELLED_DOT: Final = r"(?:\.|\s*[(\[{<]\s*(?:dot|punto)\s*[)\]}>]\s*|\s+(?:dot|punto)\s+)"
+_ONLY_SPELLED_DOT: Final = r"(?:\s*[(\[{<]\s*(?:dot|punto)\s*[)\]}>]\s*|\s+(?:dot|punto)\s+)"
+PLAIN_EMAIL: Final = re.compile(
+    rf"{_START}{_LOCAL}@{_LABEL}++(?:[.,]{_LABEL}++)*?[.,][a-z]{{2,}}\b", _FLAGS
+)
+SPACED_EMAIL: Final = re.compile(
+    rf"{_START}{_LOCAL}\s*@\s*{_LABEL}++(?:\s*\.\s*{_LABEL}++)*?\s*\.\s*{_TLD_END}", _FLAGS
+)
+# "maria at gmail dot com", "juan dot perez at gmail dot com", "jane (at) outlook.com". With a
+# bare " at " and a plain dot, the local part may not be a common word ("it at Amazon.com").
+SPELLED_EMAIL: Final = re.compile(
+    rf"{_START}(?P<local>{_LOCAL}(?:{_ONLY_SPELLED_DOT}[\w\-{_MARKS}]++)*)"
+    rf"(?P<at>{_AT}){_LABEL}++(?:{_SPELLED_DOT}{_LABEL}++)*?(?P<dot>{_SPELLED_DOT})"
+    rf"(?P<tld>{_TLD_END})",
+    _FLAGS,
+)
+# A provider with no TLD, or with a TLD typed loosely ("gmail com", "gmailcom", "gmail,com").
+PROVIDER_EMAIL: Final = re.compile(
+    rf"{_START}(?P<local>{_LOCAL})(?P<at>{_AT}){_PROVIDERS}"
+    rf"(?:\s*[.,]?\s*(?:dot\s+|punto\s+)?(?:com|net|es|mx)\b)?",
+    _FLAGS,
+)
+# "local@word" glued, whatever comes next: an address with its domain cut short. The word ends
+# where a word character would continue it ("jose@acme_x" is the "_" gap), marks included.
+GLUED_EMAIL: Final = re.compile(rf"{_START}[^\W\d_]{_LOCAL}@[^\W\d_]{_LABEL}++(?!\w)", _FLAGS)
+# An email typed letter by letter: "j a n e @ g m a i l . c o m", in any script, each letter
+# with its marks. Before the "@" the letters are taken once, possessively, and after each one
+# the space is tried before the mark class (an atomic choice, never revisited when the "@" is
+# missing): this part runs from every word start, and the mark class is a long one.
+SPACED_LETTERS_EMAIL: Final = re.compile(
+    rf"(?<!\S)(?:[^\W_](?>\s|[{_MARKS}]++\s)){{2,40}}+@\s(?:[^\W_]{_MARKED}\s?){{2,40}}"
+    rf"(?:\.\s?(?:[^\W\d_]{_MARKED}\s?){{2,6}})?",
+    _FLAGS,
+)
+# Words that are never the local part of a spelled-out email ("photos are at iCloud").
+_COMMON_WORDS: Final = frozenset(
+    {"it", "is", "are", "was", "were", "be", "been", "me", "us", "you", "him", "her", "them",
+     "one", "this", "that", "these", "those", "here", "there", "work", "works", "worked", "look",
+     "send", "sent", "bought", "buy", "parts", "part", "photos", "pics", "pictures", "stuff",
+     "things", "home", "house", "online", "ad", "ads", "job", "price", "prices", "order",
+     "ordered", "stay", "stays", "estoy", "esta", "está", "están", "fotos", "trabajo", "and",
+     "or", "the", "a", "an", "at", "on", "in", "to", "of", "for", "my", "your", "our", "his",
+     "their", "el", "la", "los", "las", "de", "en", "y", "o", "mi", "su", "i", "we", "they",
+     "he", "she", "available", "located", "based", "listed", "found", "seen", "saw"}
+)  # fmt: skip
+
+# --- URLs ------------------------------------------------------------------------------------
+# A domain never starts inside a word or a marked token (see _START); its labels are _LABEL,
+# so "gmäil.com", "gm" + U+0483 + "ail.com" and "ñandú.com/x" are masked whole.
+_DOMAIN_START: Final = rf"(?<![\w.@\-{_MARKS}])"
+URL: Final = re.compile(
+    rf"(?:https?://|\bwww\s*\.\s*)\S+"
+    rf"|{_DOMAIN_START}[^\W_]{_LABEL}*+(?:\.{_LABEL}++)*?\.[a-z]{{2,}}/\S*"
+    rf"|{_DOMAIN_START}[^\W_]{_LABEL}*+(?:\.{_LABEL}++)*?\.(?P<tld>{_TLD_END})"
+    rf"|{_DOMAIN_START}[^\W_]{_LABEL}{{2,}}+\s*\.\s+(?:com|net|org|co|us|io|miami)\b"
+    rf"|{_DOMAIN_START}[^\W_]{_LABEL}{{2,}}+\s+\.\s*(?:com|net|org|co|us|io|miami)\b"
+    rf"|{_DOMAIN_START}{_LABEL}{{2,}}+(?:\s+(?:dot|punto)\s+{_LABEL}++)*\s+(?:dot|punto)\s+"
+    rf"{_TLD_END}",
+    _FLAGS,
+)
+
+# --- Handles ---------------------------------------------------------------------------------
+# Strong platforms: "my insta is jdoe" names a handle whatever the word. Weak platforms are
+# everyday words too ("Zelle as payment", "facebook last week"): their id must look like a
+# handle (a digit, "_", "." or a leading "@"/"$"), unless a cue word or ":"/"=" came first.
+_STRONG_PLATFORMS: Final = r"(?:insta(?:gram)?|ig|snap(?:chat)?|tiktok|telegram|tg|twitter|sc)"
+_WEAK_PLATFORMS: Final = (
+    r"(?:whats\s?app|wasap|guasap|wsp|wpp|wa|facebook|face|fb|venmo|cash\s?app|zelle|paypal|"
+    r"e-?mail|correo|g\s?mail|hotmail|yahoo|outlook|icloud)"
+)
+_PLATFORM_WORDS: Final = frozenset(
+    {"insta", "instagram", "ig", "snap", "snapchat", "tiktok", "telegram", "tg", "twitter", "sc",
+     "whatsapp", "wasap", "guasap", "wsp", "wpp", "wa", "facebook", "face", "fb", "venmo",
+     "cashapp", "zelle", "paypal", "email", "e-mail", "correo", "gmail", "hotmail", "yahoo",
+     "outlook", "icloud", "text", "call", "phone", "cash", "card", "check"}
+)  # fmt: skip
+_CUE: Final = r"(?:handle|account|cuenta|user(?:name)?|usuario|name|nombre|id)"
+_LINK_WORD: Final = (
+    r"(?:is|es|as|como|me\s+at|at|al|se\s+llama|is\s+called|aparezco\s+como|aparece\s+como)"
+)
+PLATFORM_HANDLE: Final = re.compile(
+    rf"\b(?:(?P<strong>{_STRONG_PLATFORMS})|(?P<weak>{_WEAK_PLATFORMS}))"
+    rf"(?:(?P<cue>\s+{_CUE}\b(?:\s+(?:is|es))?\s*[:=]?\s*)"
+    rf"|(?P<colon>\s*(?:{_LINK_WORD}\s*)?[:=@>]\s*@?\s*)"
+    rf"|(?P<dash>\s*[/-]\s*)"
+    rf"|(?P<linked>\s+{_LINK_WORD}\s+)"
+    rf"|(?P<spaced>\s+))"
+    rf"(?P<id>[@$]?{_MARKED}[^\W_]{_MARKED}(?:[\w.-]{_MARKED}){{1,29}})(?![\w{_MARKS}])",
+    _FLAGS,
+)
+# A handle written before its platform: "j.doe.fixit (insta)". The token is possessive and its
+# shape is checked in _mask_reverse_handle, so a long dotted chain costs one pass. It never
+# starts inside a marked token (see _START) and takes the marks glued to its characters.
+REVERSE_HANDLE: Final = re.compile(
+    rf"(?<![\w@.{_MARKS}])(?P<id>{_MARKED}[^\W_][\w.{_MARKS}]*+)"
+    rf"\s*[(\[]?\s*(?:on\s+|en\s+)?{_STRONG_PLATFORMS}\b",
+    _FLAGS,
+)
+# Words that follow "insta is" in ordinary sentences, so are not an id.
+_NOT_AN_ID: Final = frozenset(
+    {"fine", "ok", "okay", "good", "great", "better", "best", "easier", "faster", "down", "not",
+     "free", "working", "broken", "the", "a", "my", "your", "private", "public", "new", "old",
+     "bien", "mejor", "gratis", "privado", "privada", "nuevo", "nueva", "empty", "gone"}
+)  # fmt: skip
+# "@name" and "$cashtag", but not "@5pm", "@noon", "@home", "@tomorrow", a price or a currency.
+# A handle token is word characters (\w: the letters of any script, digits and "_", so
+# "@mañana.fixit", "@josé_silva" and "@мария.ivanova" are masked whole, #236) and runs of ".",
+# "_" and "-" (_HANDLE_BODY, as the platforms accept it), the separators also in their
+# compatibility forms as typed (_SEPARATOR_FORMS: the low lines whose NFKC form is "_", the
+# dot leaders and the ellipsis whose NFKC form is a run of "."; the dashes are already "-" and
+# U+2024 already "." after _clean). A time, a measure or a word after "@" is exempt only when
+# it is the whole token: _BODY_END refuses whatever would continue the token, a word character,
+# a combining mark glued to the word (\w skips marks: "@home" + U+0335 + "fixit") or a run of
+# separators followed by a word character. So "@home", "@home.", "@home!", "@home " and
+# "@mañana" stay, while "@home.fixit", "@home--fixit", "@home._fixit", "@home_fixit" and
+# "@home" + U+FF3F + "fixit" are handles (#224 review, rounds 1 and 2). _clean composes the
+# input (NFC), so "@home" + U+0301 + "fixit" is "@homéfixit": no exempt word, one token.
+# _HANDLE_BODY takes the marks glued to its own characters (_MARKED, the mark set of
+# _MARK_RANGES), so "@bob" + U+05B0 + "smith" is masked whole (#229). A spacing mark (Mc)
+# survives _clean after a separator or the "@" too, so a run of separators followed by a mark
+# continues the token ("@home." + U+093F + "fixit") and the "@" may carry marks before the
+# body ("@" + U+093F + "bobsmith"), also in the spaced form ("@ bob" + U+0483 + ".smith").
+# The platform handle, the reverse handle and the cashtag take the marks the same way (#236).
 _SEPARATOR_FORMS: Final = "".join(
     map(chr, (0xFE33, 0xFE34, 0xFE4D, 0xFE4E, 0xFE4F, 0xFF3F, 0x2025, 0x2026, 0xFE19, 0xFE30))
 )
 _SEPARATORS: Final = rf"._\-{_SEPARATOR_FORMS}"
-_HANDLE_BODY: Final = (
-    rf"[a-z0-9_]{_MARKED}(?:(?:[a-z0-9{_SEPARATORS}]{_MARKED}){{0,28}}[a-z0-9_]{_MARKED})?"
-)
+_HANDLE_BODY: Final = rf"\w{_MARKED}(?:(?:[\w{_SEPARATORS}]{_MARKED}){{0,28}}\w{_MARKED})?"
 _BODY_END: Final = rf"(?![\w{_MARKS}]|[{_SEPARATORS}]+[\w{_MARKS}])"
 AT_HANDLE: Final = re.compile(
     rf"(?<![\w.@])@{_MARKED}(?:\s(?=[\w.\-{_MARKS}]*[\d_.]))?(?!\d{{1,2}}(?:[:.]\d{{1,3}})?\s*(?:[ap]\.?m\.?)?{_BODY_END}|"
@@ -340,7 +366,17 @@ AT_HANDLE: Final = re.compile(
     rf"{_HANDLE_BODY}",
     _FLAGS,
 )
-CASHTAG: Final = re.compile(r"(?<![\w$])\$(?!(?-i:[A-Z]{3})\b)[a-z][a-z0-9_-]{1,19}\b", _FLAGS)
+# A cashtag is 2 to 20 characters, a letter first, ending on a word character; the characters
+# carry their marks, and the "$" may carry a spacing mark ("$" + U+093F + "bob").
+CASHTAG: Final = re.compile(
+    rf"(?<![\w$])\$(?!(?-i:[A-Z]{{3}})\b){_MARKED}[^\W\d_]{_MARKED}(?:[\w-]{_MARKED}){{0,18}}"
+    rf"\w{_MARKED}(?![\w{_MARKS}])",
+    _FLAGS,
+)
+# A combining mark on an ASCII letter after NFC is never an accent (every EN, ES and PT accent
+# composes): "bob" + U+0483 + "smith" is shaped like an evasion, not like a word.
+_MARKED_LATIN: Final = re.compile(rf"[a-z][{_MARKS}]", _FLAGS)
+_CASHTAG_START: Final = re.compile(rf"\$[{_MARKS}]*[^\W\d_]")  # "$jdoe", "$" + U+093F + "jdoe"
 
 # --- Phones ----------------------------------------------------------------------------------
 # Phones spelled out: ten or more digit words (EN or ES) or digits in a row.
@@ -615,9 +651,11 @@ def _handle_shaped(handle: str) -> bool:
     if handle[0] == "@":
         return True
     if handle[0] == "$":
-        return re.match(r"\$[^\W\d_]", handle) is not None  # "$jdoe", not "$150"
+        return _CASHTAG_START.match(handle) is not None  # "$jdoe", not "$150"
     has_letter = re.search(r"[^\W\d_]", handle) is not None
-    return has_letter and re.search(r"[\d_.]", handle) is not None
+    return has_letter and (
+        re.search(r"[\d_.]", handle) is not None or _MARKED_LATIN.search(handle) is not None
+    )
 
 
 def _mask_handle(match: re.Match[str]) -> str | None:

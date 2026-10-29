@@ -446,10 +446,11 @@ COMBINING_MARKS = [
 ]
 MARKS = [mark for mark, _ in COMBINING_MARKS]
 MARK_IDS = [name for _, name in COMBINING_MARKS]
-# Every exempt token shape of AT_HANDLE, in ASCII (the handle body is ASCII, so "@mañana" +
-# a mark is detected but masked up to the "ñ": a known gap of the body, not of the marks).
+# Every exempt token shape of AT_HANDLE, "mañana" included (#236: the body takes any letter, so
+# "@mañana" + a mark + "fixit" is masked whole).
 EXEMPT_WORDS = [
-    "home", "work", "casa", "noon", "night", "today", "tomorrow", "tonight", "manana", "5pm", "6ft"
+    "home", "work", "casa", "noon", "night", "today", "tomorrow", "tonight", "manana", "mañana",
+    "5pm", "6ft",
 ]  # fmt: skip
 
 
@@ -564,6 +565,138 @@ def test_spaced_handle_with_a_mark_is_masked() -> None:
     for text in ("@ bob" + chr(0x0483) + ".smith", "@ bob." + chr(0x093F) + "smith"):
         assert redact_contacts(text) == RedactionResult(MASK, True), ascii(text)
     assert redact_contacts("@ home" + chr(0x0483)) == RedactionResult("@ home" + chr(0x0483), False)
+
+
+# #236 (the Gatekeeper's N1 and N2 on #234): the handle body took ASCII letters only, so a
+# Unicode letter ended the mask ("@mañana.fixit" came back as "•••ñana.fixit", and after NFC
+# "@home" + U+0301 + "fixit" as "•••éfixit"); the platform handle, the reverse handle and the
+# cashtag split at a mark ("insta: bob" + U+0483 + "smith" left the mark and "smith").
+TITLO = chr(0x0483)  # COMBINING CYRILLIC TITLO (Mn): kept by _clean after a letter
+VOWEL_SIGN_I = chr(0x093F)  # DEVANAGARI VOWEL SIGN I (Mc): kept by _clean after any character
+CYRILLIC_NAME = "".join(map(chr, (0x043C, 0x0430, 0x0440, 0x0438, 0x044F)))  # "maria" in Cyrillic
+UNICODE_HANDLES = [
+    "@mañana.fixit",
+    "@josé_silva",
+    "@home" + chr(0x0301) + "fixit",  # NFC composes it to "@homéfixit": no exempt word in it
+    "@" + CYRILLIC_NAME + ".ivanova",
+    "@café",
+    "@home" + chr(0x0663),  # ARABIC-INDIC DIGIT THREE continues the token as "3" would
+]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize("handle", UNICODE_HANDLES, ids=[ascii(h) for h in UNICODE_HANDLES])
+def test_unicode_letter_handles_masked_whole(handle: str, form: Literal["NFC", "NFD"]) -> None:
+    """The body is \\w (any letter, digit or "_") plus separators and marks: no readable tail,
+    whether the letters come composed or decomposed."""
+    typed = unicodedata.normalize(form, handle)
+
+    assert redact_contacts(typed) == RedactionResult(MASK, True), ascii(typed)
+    assert redact_contacts(f"find me {typed} today") == RedactionResult(
+        f"find me {MASK} today", True
+    ), ascii(typed)
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize("word", ["home", "mañana", "casa", "5pm"])
+def test_exempt_words_with_unicode_letters_pass(word: str, form: Literal["NFC", "NFD"]) -> None:
+    for whole in (f"@{word}", f"@{word}.", f"@{word}!", f"I'm @{word}, ok"):
+        typed = unicodedata.normalize(form, whole)
+        expected = unicodedata.normalize("NFC", typed)  # the output is always composed
+
+        assert redact_contacts(typed) == RedactionResult(expected, False), ascii(typed)
+
+
+SIBLING_CASES = [
+    # Platform handles: the probe, then a spacing mark after the colon and after a separator,
+    # Unicode letters, and a mark inside a plain word after a weak platform.
+    ("insta: bob" + TITLO + "smith", MASK),
+    ("insta: " + VOWEL_SIGN_I + "bobsmith", MASK),
+    ("insta: bob." + VOWEL_SIGN_I + "smith", MASK),
+    ("insta: mañana", MASK),
+    ("ig josé_silva", MASK),
+    ("tiktok: " + CYRILLIC_NAME + ".ivanova", MASK),
+    ("whatsapp bob" + TITLO + "smith", MASK),
+    # Reverse handles: the match stops at the platform word, so a closing bracket stays.
+    ("bob" + TITLO + "smith (insta)", MASK + ")"),
+    ("bob" + TITLO + ".smith (insta)", MASK + ")"),
+    ("bob" + TITLO + "smith on insta", MASK),
+    ("mañana.fixit (insta)", MASK + ")"),
+    (CYRILLIC_NAME + ".ivanova on tiktok", MASK),
+    # Cashtags, in the cashtag rule and after a platform word.
+    ("$bob" + TITLO + "smith", MASK),
+    ("$" + VOWEL_SIGN_I + "bobsmith", MASK),
+    ("$mañana", MASK),
+    ("$ñandú", MASK),
+    ("venmo $" + VOWEL_SIGN_I + "bob", MASK),
+]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"), SIBLING_CASES, ids=[ascii(text) for text, _ in SIBLING_CASES]
+)
+def test_sibling_matchers_take_marks_and_letters(text: str, expected: str) -> None:
+    assert redact_contacts(text) == RedactionResult(expected, True), ascii(text)
+    assert redact_contacts(f"find me {text} today") == RedactionResult(
+        f"find me {expected} today", True
+    ), ascii(text)
+
+
+def test_a_mark_is_handle_shape_only_on_a_latin_letter() -> None:
+    """A mark on an ASCII letter after NFC is an evasion, so "bob" + U+0483 + "smith" is
+    shaped like a handle where "bobsmith" is a plain word (the known bare-handle gap); a word
+    of a script that writes with marks is not."""
+    namaste = "".join(map(chr, (0x0928, 0x092E, 0x0938, 0x094D, 0x0924, 0x0947)))
+    for plain in ("bobsmith (insta)", f"{namaste} (insta)", f"whatsapp {namaste}"):
+        assert redact_contacts(plain) == RedactionResult(plain, False), ascii(plain)
+
+
+# The audit of AC3 (#236): a mark or a non-ASCII letter inside the local part, the domain and
+# the path, against every email and URL rule. A mark inside the TLD or a provider's name
+# ("gmail.c" + U+0483 + "om", "jose at gm" + U+0483 + "ail") stays a known gap: those lists
+# are literal (module doc).
+AUDIT_CASES = [
+    # PLAIN_EMAIL: the local part, a label, the "@", a non-ASCII letter in the label.
+    "jo" + TITLO + "se@gmail.com",
+    "jose@gm" + TITLO + "ail.com",
+    "jose@" + VOWEL_SIGN_I + "gmail.com",
+    "jose@gmäil.com",
+    "josé@gmail.com",
+    # SPACED_EMAIL, SPELLED_EMAIL (EN and ES), PROVIDER_EMAIL, GLUED_EMAIL.
+    "jose @ gm" + TITLO + "ail . com",
+    "jo" + TITLO + "se at gmail dot com",
+    "jose at gm" + TITLO + "ail dot com",
+    "jose at gmäil dot com",
+    "jose arroba gm" + TITLO + "ail punto com",
+    "jo" + TITLO + "se at gmail",
+    "jose@gm" + TITLO + "ail",
+    "jose@gmäil",
+    # SPACED_LETTERS_EMAIL.
+    "j o s é @ g m a i l . c o m",
+    "j" + TITLO + " a n e @ g m a i l",
+    # URL: a label, a non-ASCII label, the path, the "www." form, a path TLD, the spaced and
+    # the spelled dot.
+    "gm" + TITLO + "ail.com",
+    "gmäil.com",
+    "ñandú.com/x",
+    "jackfixit.com/jo" + TITLO + "se",
+    "www.gm" + TITLO + "ail.com",
+    "linktr" + TITLO + ".ee/bob",
+    "jack" + TITLO + "fixit . com",
+    "jackäfixit . com",
+    "jack" + TITLO + "fixit dot com",
+    "jackäfixit dot com",
+]
+
+
+@pytest.mark.parametrize("text", AUDIT_CASES, ids=[ascii(text) for text in AUDIT_CASES])
+def test_email_url_mark_audit(text: str) -> None:
+    assert redact_contacts(text) == RedactionResult(MASK, True), ascii(text)
+    # A path, the "www." form and a spaced form take what follows them, as they always did.
+    if "/" not in text and " @ " not in text and not text.startswith("www."):
+        assert redact_contacts(f"write to {text}, thanks") == RedactionResult(
+            f"write to {MASK}, thanks", True
+        ), ascii(text)
 
 
 @pytest.mark.parametrize("prefix", ["APT", "UNIT", "SUITE", "STE", "PO BOX"])
@@ -1182,4 +1315,43 @@ def test_hostile_inputs_against_the_known_values_finish_quickly(text: str) -> No
 )
 def test_many_marks_after_exempt_word_is_fast(text: str) -> None:
     """The mark runs are possessive (_MARKED) and the body counts characters, not marks."""
+    assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25
+
+
+MARKED_LETTER = "é" + chr(0x0483)  # a non-ASCII letter with a mark: 2,500 of them is 5,000 chars
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "@" + MARKED_LETTER * 2500,
+        "insta: " + MARKED_LETTER * 2500,
+        MARKED_LETTER * 2500 + " (nope)",
+        "$" + MARKED_LETTER * 2500,
+        MARKED_LETTER * 2500 + "@",
+        "x@" + MARKED_LETTER * 2500,
+        "jose at " + MARKED_LETTER * 2500 + " dot x",
+        (MARKED_LETTER + " ") * 1667 + "@",
+        MARKED_LETTER * 2500 + ".c",
+        (MARKED_LETTER + ".") * 1667,
+        MARKED_LETTER * 2500 + " dot x",
+    ],
+    ids=[
+        "at_handle",
+        "platform_handle",
+        "reverse_handle",
+        "cashtag",
+        "email_local",
+        "email_domain",
+        "spelled_email",
+        "spaced_letters_email",
+        "url_label",
+        "url_dotted_labels",
+        "url_spelled_dot",
+    ],
+)
+def test_many_unicode_letters_with_marks_are_fast(text: str) -> None:
+    """One 5,000-character case per pattern changed in #236: the lookbehinds refuse a start
+    after a mark, so a marked token is scanned once, and the counted bodies stay possessive."""
+    assert len(text) >= 5000
     assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25
