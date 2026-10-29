@@ -20,3 +20,37 @@ CUT_CONTACTS: Final = (
     ("1250 Ocean Dr at gm" + chr(0x0483) + "ail", "Ocean"),
 )
 CUT_IDS: Final = ("reverse_handle", "street")
+
+# Fix round 5 on #240: what the recovery of cut contacts missed and develop's filter hid
+# (Vault R3-B1, Gatekeeper F-B1 and F-B2). Each with the word it showed, and its masked form.
+_MARKED_COM: Final = "acme.c" + chr(0x0483) + "om"
+FLOOR_CONTACTS: Final = (
+    # R3-B1: a URL or an email takes the contact's number or cue and showed the rest.
+    (_MARKED_COM + "/1250 Ocean Dr", "Ocean", "•••"),
+    (_MARKED_COM + "/insta jdoe1", "jdoe1", "•••"),
+    (_MARKED_COM + "/@ bob_smith", "bob_smith", "•••"),
+    (_MARKED_COM + "/apt 4B", "4B", "•••"),
+    (_MARKED_COM + "@1250 Ocean Dr", "Ocean", "•••"),
+    (_MARKED_COM + "/Calle Flagler 742", "Flagler", "•••"),
+    (_MARKED_COM + "/8800 SW 72nd", "72nd", "•••"),
+    (_MARKED_COM + "/Brickell Ave 1200", "1200", "•••"),
+    # F-B1: the street inside a match the phone's mask refused.
+    ("786 555 0142, 742 Evergreen Ter arroba gm" + chr(0x0483) + "ail punto com", "Evergreen",
+     "•••, •••"),
+    ("Unit 4B, 742 Evergreen Ter arroba gm" + chr(0x0483) + "ail punto com", "Evergreen", "•••"),
+    # F-B2: the unit the handle beside it made the unit rule refuse.
+    ("Unit 4B jdoe1 insta dot c" + chr(0x0483) + "om", "4B", "••• •••"),
+)  # fmt: skip
+FLOOR_IDS: Final = (
+    "url_street",
+    "url_platform",
+    "url_at_handle",
+    "url_unit",
+    "email_street",
+    "url_spanish_street",
+    "url_grid",
+    "url_reversed_street",
+    "phone_then_street",
+    "unit_then_street",
+    "unit_then_handle",
+)

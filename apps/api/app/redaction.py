@@ -672,15 +672,24 @@ def redact_contacts(text: str) -> RedactionResult:
     (_CUT_STEPS) joins only an email or URL mask that took its cue, the platform, the suffix or
     the number (_cut). A mask that took another of its words was another contact's: "site.com/2
     new drive belts" keeps "new drive belts", "2 Amazon.com Key pads" keeps "Key pads". A phone
-    that took its number leaves it as the rules in order read it ("APT" before a phone's mask)."""
+    that took its number leaves it as the rules in order read it ("APT" before a phone's mask).
+    Last, every character the filter before #240 masks is masked too (_floor_masks), so the
+    text never shows more than that filter showed, whatever the rules above miss (#240, until
+    #267)."""
     cleaned = _clean(text)
     result, count = _mask_spans(cleaned, _hidden(cleaned))
     return RedactionResult(result, count > 0)
 
 
 def _hidden(text: str) -> list[tuple[int, int]]:
-    """Where redact_contacts masks `text` (cleaned): the rules in order, and the floor."""
-    masked, _ = _masks_in_order(text)
+    """Where redact_contacts masks `text` (cleaned): the rules in order with the contacts they
+    cut, and the floor."""
+    masked, cutting = _masks_in_order(text)
+    if masked:
+        found = [span for search, rule in _PHONE_STEPS for span in _spans(search, rule, text)]
+        if cutting:
+            found += _cut_spans(text, _Apart.of(cutting), _Apart.of(masked))
+        masked = _joined(masked, found)
     return masked + _floor_masks(text)
 
 
@@ -703,8 +712,9 @@ def _floor_spans(
     pattern: re.Pattern[str], replace: _Replace, text: str
 ) -> Iterator[tuple[int, int]]:
     """Where the floor's _substitute masks `text` with `replace`. Only its _phones masks part
-    of a match: the windows are this module's _phones (the same code), checked against the
-    floor's replacement; on any difference the whole match is masked."""
+    of a match: the windows are this module's _phones (the same code but for the return type),
+    checked against the floor's replacement. Were they to differ, the whole match would be
+    masked; test_the_floor_reads_develops_text_in_the_same_coordinates pins that they agree."""
     search_from = 0
     while (match := pattern.search(text, search_from)) is not None:
         replacement = replace(match)
@@ -717,7 +727,9 @@ def _floor_spans(
             start = match.start()
             windows = _phones(match)
             local = [(begin - start, end - start, MASK) for begin, end in windows]
-            yield from windows if _apply(match.group(0), local)[0] == replacement else [match.span()]
+            yield from (
+                windows if _apply(match.group(0), local)[0] == replacement else [match.span()]
+            )
         search_from = max(match.end(), match.start() + 1)
 
 
@@ -1368,7 +1380,10 @@ def redact_known(text: str, known: KnownValues) -> RedactionResult:
     for pattern in _known_patterns(known):
         cleaned, count = _substitute(pattern, _mask, cleaned)
         masked += count
-    cleaned, count = _mask_spans(cleaned, _known_spans(cleaned, known.streets))
+    # Touching masks stay apart, as before #240: redact_text's floor then reads the same text
+    # as the filter before #240 did (_floor_masks).
+    spans = _known_spans(cleaned, known.streets)
+    cleaned, count = _mask_spans(cleaned, spans, touching=False)
     return RedactionResult(cleaned, masked + count > 0)
 
 
@@ -1866,12 +1881,15 @@ def _unit_spans(text: str, tokens: list[_KnownToken], unit: str) -> list[tuple[i
     return spans
 
 
-def _mask_spans(text: str, spans: list[tuple[int, int]]) -> tuple[str, int]:
-    """`text` with each span (merged when they overlap or touch) replaced by the mask."""
+def _mask_spans(
+    text: str, spans: list[tuple[int, int]], *, touching: bool = True
+) -> tuple[str, int]:
+    """`text` with each span (merged when they overlap, or touch when `touching`) replaced by
+    the mask."""
     pieces: list[str] = []
     position = count = 0
     for start, end in sorted(spans):
-        if count and start <= position:  # overlaps or touches the previous mask: extend it
+        if count and (start < position or (touching and start == position)):  # extend the mask
             if end > position:
                 position = end
             continue

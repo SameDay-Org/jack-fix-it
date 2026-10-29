@@ -12,6 +12,7 @@ from typing import Literal
 
 import pytest
 
+from app import redaction_legacy
 from app.redaction import (
     _MARK_RANGES,
     _SPELLED_EMAILS,
@@ -19,7 +20,11 @@ from app.redaction import (
     MASK,
     KnownValues,
     RedactionResult,
+    _clean,
+    _floor_masks,
+    _hidden,
     _mask,
+    _mask_spans,
     _Replace,
     _replacements,
     _Search,
@@ -28,7 +33,14 @@ from app.redaction import (
     redact_text,
 )
 from tests import redaction_c6facaa as c6facaa
-from tests.contact_overlaps import CUT_CONTACTS, CUT_IDS, OVERLAP_IDS, PHONE_EMAIL_OVERLAPS
+from tests.contact_overlaps import (
+    CUT_CONTACTS,
+    CUT_IDS,
+    FLOOR_CONTACTS,
+    FLOOR_IDS,
+    OVERLAP_IDS,
+    PHONE_EMAIL_OVERLAPS,
+)
 from tests.glue_variants import all_glue_cases
 from tests.helpers import best_seconds_without_gc
 
@@ -1064,6 +1076,7 @@ KNOWN = KnownValues(
     phones=("+13055550199",),
     streets=("742 Evergreen Terrace", "Apt 4B"),
 )
+LEGACY_KNOWN = redaction_legacy.KnownValues(KNOWN.emails, KNOWN.phones, KNOWN.streets)
 
 
 @pytest.mark.parametrize(
@@ -1676,6 +1689,17 @@ def test_many_unicode_letters_with_marks_are_fast(text: str) -> None:
     assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25
 
 
+def assert_within_the_floor_budget(text: str) -> None:
+    """0.25 s at the field cap (2,000 characters: the description, the quote scope and the
+    approach). The whole text may take what develop's filter takes on it, plus that budget: the
+    safety floor runs develop's filter (app.redaction_legacy), which is quadratic on
+    spelled-dot chains (0.3 to 0.5 s at 5,000 characters). Cesar's decision on #240 fix round
+    5; #267 removes the floor."""
+    assert best_seconds_without_gc(lambda: redact_text(text[:2000], KNOWN)) < 0.25
+    develop = best_seconds_without_gc(lambda: redaction_legacy.redact_text(text, LEGACY_KNOWN))
+    assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < develop + 0.25
+
+
 @pytest.mark.parametrize(
     "text",
     [
@@ -1713,7 +1737,7 @@ def test_round_one_rules_are_fast(text: str) -> None:
     """One 5,000-character case per rule changed in round 1 of #240: the spelled-dot chains
     are scanned once per run, and the run without marks is one more linear pass."""
     assert len(text) >= 5000
-    assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25
+    assert_within_the_floor_budget(text)
 
 
 @pytest.mark.parametrize(
@@ -1749,7 +1773,7 @@ def test_round_two_dot_word_pieces_are_fast(text: str) -> None:
     """Round 2 of #240: dot words are pieces again. A dot word read as a piece starts a chain
     of its own, and each piece is read by one chain only, even past its run."""
     assert len(text) >= 5000
-    assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25
+    assert_within_the_floor_budget(text)
 
 
 # Vault round 1 on #240: a phone an email overlaps (#257), and the reverse handle's spaces (#260)
@@ -1869,8 +1893,8 @@ def test_r4_reverse_handle_and_street_recovered(
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        ("@jdoe1@acme.c" + chr(0x0483) + "om", f"@{MASK}"),
-        ("write @jdoe1@acme.co thanks", f"write @{MASK} thanks"),
+        ("@jdoe1@acme.c" + chr(0x0483) + "om", MASK),
+        ("write @jdoe1@acme.co thanks", f"write {MASK} thanks"),
         ("a@bob@x.com", "a@bob@x.com"),
     ],
 )
@@ -1878,8 +1902,9 @@ def test_an_at_sign_that_starts_a_token_may_precede_the_local_part(
     text: str, expected: str
 ) -> None:
     """The handle written as the address: base left "@acme.co" (the URL rule never starts after
-    an "@") and, with a mark in the domain, the part after the mark. An "@" inside a word stays
-    out ("a@bob@x.com", unchanged as on base)."""
+    an "@") and, with a mark in the domain, the part after the mark. Base masks "@jdoe1" as a
+    handle, so the floor takes the "@" too. An "@" inside a word stays out ("a@bob@x.com",
+    unchanged as on base)."""
     assert redact_contacts(text) == RedactionResult(expected, expected != text)
 
 
@@ -1951,7 +1976,7 @@ def _shown_in(sentence: str, form: Literal["NFC", "NFD"], contact: str) -> set[s
     return _shown_words(redact_contacts(text).text)
 
 
-def test_adjacent_contact_pairs_never_expose_more_than_base() -> None:
+def test_adjacent_contact_pairs_never_show_what_each_contact_alone_hides() -> None:
     """Pairs of an email or a URL and a handle, a street, a phone, an email or a URL, side by
     side or sharing a word, with marked and spelled cues, in sentences, NFC or NFD. The
     reference is each contact read alone: a word of a contact the redactor hides alone never
@@ -1992,3 +2017,168 @@ def test_the_recovery_of_cut_contacts_is_fast(unit: str, length: int) -> None:
     text = (unit * (length // len(unit) + 1))[:length]
 
     assert best_seconds_without_gc(lambda: redact_contacts(text)) < 0.25
+
+
+# Fix round 5 on #240: the safety floor (Cesar's decision). redact_contacts also masks every
+# character develop's filter masks (app.redaction_legacy, until #267).
+
+# A comma after the contact: both filters read a period after a handle as part of it, and a
+# unit before an ordinary word as prose ("apt 4B tonight").
+FLOOR_SENTENCES = [
+    "{}",
+    "Call me at {}, thanks.",
+    "Escríbeme a {}, gracias.",
+    "Me liga no {}, obrigado.",
+]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize("sentence", FLOOR_SENTENCES, ids=["standalone", "en", "es", "pt"])
+@pytest.mark.parametrize(("contact", "secret", "masked"), FLOOR_CONTACTS, ids=FLOOR_IDS)
+def test_the_floor_hides_what_the_recovery_missed(
+    contact: str, secret: str, masked: str, sentence: str, form: Literal["NFC", "NFD"]
+) -> None:
+    """Vault R3-B1 (a URL or an email takes the contact's number or cue), Gatekeeper F-B1 (the
+    street inside a refused match) and F-B2 (the unit beside a recovered handle): develop's
+    filter hid them, so the floor does."""
+    text = unicodedata.normalize(form, sentence.format(contact))
+    expected = RedactionResult(sentence.format(masked), True)
+
+    assert redact_contacts(text) == expected
+    assert redact_text(text, KnownValues()) == expected
+    assert secret not in expected.text
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Email me at jane.doe+repairs@gmail.com please", f"Email me at {MASK} please"),
+        ("see site.com/2 new drive belts", f"see {MASK} new drive belts"),
+        ("We need 2 Amazon.com Key pads by Friday", f"We need 2 {MASK} Key pads by Friday"),
+        ("Call me at jose at gmail tonight.", f"Call me at {MASK} tonight."),
+        ("El baño.es muy pequeño", "El baño.es muy pequeño"),
+    ],
+)
+def test_the_floor_keeps_the_prose_both_filters_keep(text: str, expected: str) -> None:
+    """The union hides only what one of the two filters hides: words both keep stay."""
+    assert redact_contacts(text) == RedactionResult(expected, expected != text)
+    assert redaction_legacy.redact_contacts(text).text == expected
+
+
+@pytest.mark.parametrize("text", ["dot " * 2500], ids=["dot_words_x10000"])
+def test_a_dot_chain_past_the_field_cap_takes_develops_time(text: str) -> None:
+    """Develop's filter takes about 1.9 s on 10,000 characters of spelled dots; the floor runs
+    it, so the budget is its time plus 0.25 s (Cesar's decision on #240 fix round 5)."""
+    assert_within_the_floor_budget(text)
+
+
+_FLOOR_MARKS = [chr(0x0483), chr(0x093F), chr(0x0301)]
+_FLOOR_FILLERS = [chr(0x200B), chr(0x3164), chr(0x2800), chr(0xFE0F), chr(0x00AD)]
+_FLOOR_CUES = [
+    *("Call me at ", "email me: ", "find me on ", "text ", "my insta is "),
+    *("Llámame al ", "escríbeme a ", "mi correo es ", "búscame en "),
+    *("Me liga no ", "meu zap é ", "manda para "),
+]
+_FLOOR_PREFIXES = [
+    *("acme.c{m}om/", "acme.c{m}om@", "site.com/", "www.fixjose.c{m}om/", "jose@", "@"),
+    *("linktr.ee/", "x at ", "gm{m}ail ", "jdoe1 ", "Unit 4B ", "apt 4B "),
+]
+_FLOOR_CONTACTS = [
+    *(contact for contact, _, _ in FLOOR_CONTACTS),
+    *(contact for contact, _ in CUT_CONTACTS),
+    *PHONE_EMAIL_OVERLAPS,
+    *_PAIR_CONTACTS,
+    *_PAIR_EMAILS_AND_URLS,
+    *("jane.doe@gmail.com", "305-555-0199", "(305) 555 0199", "+1 954 555 0142", "@bob_smith"),
+    *("$jdoe", "insta: maria_88", "jdoe1 (insta)", "j.doe.fixit on tiktok", "apt 4B", "Unit 4B"),
+    *("PO Box 12", "8800 SW 72nd", "Calle 8 #12", "Brickell Ave 1200", "742 Evergreen Ter"),
+    *("www.fixjose.com/2", "linktr.ee/x", "maria arroba gmail punto com", "bob at yahoo dot com"),
+]
+_FLOOR_ENDINGS = ["", ".", ",", " tonight.", " mañana", " hoje.", " please", "!", ")"]
+
+
+def _floor_text(rng: random.Random) -> str:
+    """A sentence of one to three contacts: cued in EN, ES or PT, behind a URL, an email, an
+    "@", a unit or a handle that shares their first word, side by side or as adjacent pairs,
+    with marks, fillers, fullwidth letters and NFD."""
+    mark = rng.choice(_FLOOR_MARKS)
+    segments = []
+    for _ in range(rng.randint(1, 3)):
+        if rng.random() < 0.25:
+            segments.append(_contact_pair(rng)[0])
+            continue
+        segment = rng.choice(_FLOOR_CONTACTS).format(m=mark)
+        if rng.random() < 0.5:
+            segment = rng.choice(_FLOOR_PREFIXES).format(m=mark) + segment
+        if rng.random() < 0.5:
+            segment = rng.choice(_FLOOR_CUES) + segment
+        segments.append(segment)
+    joined = segments[0] + "".join(rng.choice(_PAIR_JOINS) + segment for segment in segments[1:])
+    chars = list(joined + rng.choice(_FLOOR_ENDINGS))
+    for _ in range(rng.choice([0, 0, 1, 2])):
+        chars.insert(rng.randrange(len(chars) + 1), rng.choice(_FLOOR_MARKS + _FLOOR_FILLERS))
+    if rng.random() < 0.2:
+        chars = [
+            chr(ord(char) + 0xFEE0) if char.isascii() and char.isalnum() and rng.random() < 0.3
+            else char
+            for char in chars
+        ]  # fmt: skip
+    text = "".join(chars)
+    return unicodedata.normalize("NFD", text) if rng.random() < 0.3 else text
+
+
+def _visible_runs(text: str) -> list[str]:
+    """The text between masks: a mask is a run of its dots, however many masks touch."""
+    return [run for run in re.split("•+", text) if run]
+
+
+def test_floor_never_shows_what_legacy_hides() -> None:
+    """The safety floor by construction (fix round 5 on #240): on 20,000 seeded sentences no
+    character develop's filter hides shows in the output. Each output character is placed in
+    the cleaned text through the masks (_hidden); none is inside a mask of the floor, and the
+    output is exactly the cleaned text with those masks. Without the positions: each run of
+    text the output shows is part of a run develop's output shows, and the flag holds."""
+    rng = random.Random(5240)  # noqa: S311 - reproducible test data, not secrets
+    exposed: list[tuple[str, str, str]] = []
+    for _ in range(20000):
+        text = _floor_text(rng)
+        cleaned = _clean(text)
+        hidden = _hidden(cleaned)
+        result = redact_contacts(text)
+        legacy = redaction_legacy.redact_contacts(text)
+        assert result.text == _mask_spans(cleaned, hidden)[0]
+        shown = set(range(len(cleaned))).difference(*(range(*span) for span in hidden))
+        in_floor = shown & set().union(*(range(*span) for span in _floor_masks(cleaned)))
+        legacy_runs = _visible_runs(legacy.text)
+        beyond = [run for run in _visible_runs(result.text) if not _within(run, legacy_runs)]
+        if in_floor or beyond or (legacy.redacted and not result.redacted):
+            exposed.append((text, result.text, legacy.text))
+
+    assert exposed == []
+
+
+def _within(run: str, runs: list[str]) -> bool:
+    return any(run in other for other in runs)
+
+
+def test_the_floor_reads_develops_text_in_the_same_coordinates() -> None:
+    """The span alignment: develop's filter cleans the text exactly as this one does, so the
+    floor's masks are positions in the same cleaned text; drawn there, they give develop's
+    output (masks compared as runs of dots, touching or not). The known values are masked as
+    develop masks them too, so redact_text's floor reads develop's own second pass."""
+    rng = random.Random(5241)  # noqa: S311 - reproducible test data, not secrets
+    for _ in range(5000):
+        text = _floor_text(rng)
+        cleaned = _clean(text)
+        assert redaction_legacy._clean(text) == cleaned
+        floor = _mask_spans(cleaned, _floor_masks(cleaned))[0]
+        legacy = redaction_legacy.redact_contacts(text).text
+        assert re.sub("•+", MASK, floor) == re.sub("•+", MASK, legacy), ascii(text)
+        known = KnownValues(
+            emails=(rng.choice(["jane.doe@gmail.com", "ana.r@gmail.com", "x@y.co"]),),
+            phones=(rng.choice(["+13055550199", "+17865550142", "+19545550142"]),),
+            streets=(rng.choice(["742 Evergreen Terrace", "1250 Ocean Dr"]), "Apt 4B"),
+        )
+        develop = redaction_legacy.KnownValues(known.emails, known.phones, known.streets)
+        ours, theirs = redact_known(text, known), redaction_legacy.redact_known(text, develop)
+        assert (ours.text, ours.redacted) == (theirs.text, theirs.redacted), ascii(text)
