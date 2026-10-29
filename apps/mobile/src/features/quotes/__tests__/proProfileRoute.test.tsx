@@ -203,20 +203,25 @@ describe("a link that reaches the running app", () => {
     expect(result.getSearchParams().profile).toBeUndefined();
   });
 
-  it.each([
-    ["a raw & in the quote id", `${COMPARE}/quotes/${QUOTE_ID}&profile=${OTHER_QUOTE}/pro`],
-    ["an encoded delimiter", `${COMPARE}/quotes/${QUOTE_ID}%26profile%3D../pro`],
-    ["a double encoding", `${COMPARE}/quotes/${QUOTE_ID}%2526profile%253D../pro`],
-    ["an encoded dot segment", `${COMPARE}/quotes/%2E%2E/pro`],
-    ["an extra segment", `${COMPARE}/quotes/${QUOTE_ID}/pro/${OTHER_QUOTE}`],
+  it.each<[string, string, boolean]>([
+    ["a raw & in the quote id", `${COMPARE}/quotes/${QUOTE_ID}&profile=${OTHER_QUOTE}/pro`, false],
+    ["an encoded delimiter", `${COMPARE}/quotes/${QUOTE_ID}%26profile%3D../pro`, false],
+    ["a double encoding", `${COMPARE}/quotes/${QUOTE_ID}%2526profile%253D../pro`, false],
+    ["an encoded dot segment", `${COMPARE}/quotes/%2E%2E/pro`, false],
+    ["an extra segment", `${COMPARE}/quotes/${QUOTE_ID}/pro/${OTHER_QUOTE}`, false],
     [
       "a comparison with profile segments",
       `${COMPARE}?profile=..&profile=..&profile=${OTHER_REQUEST}&profile=quotes&profile=${OTHER_QUOTE}`,
+      true,
     ],
-    ["a comparison with a repeated profile", `${COMPARE}?profile=${QUOTE_ID}&profile=${QUOTE_ID}`],
-    ["a comparison with an encoded path", `${COMPARE}?profile=..%2F..%2F${OTHER_REQUEST}`],
-    ["a comparison with an empty profile", `${COMPARE}?profile=`],
-  ])("%s opens no profile it could fetch", async (_, path) => {
+    [
+      "a comparison with a repeated profile",
+      `${COMPARE}?profile=${QUOTE_ID}&profile=${QUOTE_ID}`,
+      true,
+    ],
+    ["a comparison with an encoded path", `${COMPARE}?profile=..%2F..%2F${OTHER_REQUEST}`, true],
+    ["a comparison with an empty profile", `${COMPARE}?profile=`, true],
+  ])("%s opens no profile it could fetch", async (_, path, landsOnCompare) => {
     const url = `jackfixit:/${path}`;
     const result = await openUrl(url);
 
@@ -224,8 +229,9 @@ describe("a link that reaches the running app", () => {
     expect(landings).toEqual([url]);
     // No profile opened for a pair of real ids: what a route got was the link's own text.
     expect(profilesShown.filter(({ id, quoteId }) => isUuid(id) && isUuid(quoteId))).toEqual([]);
-    // A comparison it reached opened nothing and dropped the param.
-    if (result.getPathname() === COMPARE) {
+    // A forged comparison stays the comparison: it opened nothing and dropped the param.
+    if (landsOnCompare) {
+      expect(result.getPathname()).toBe(COMPARE);
       expect(screen.getByText(`compare stub ${REQUEST_ID}`)).toBeTruthy();
       expect(result.getSearchParams().profile).toBeUndefined();
     }
