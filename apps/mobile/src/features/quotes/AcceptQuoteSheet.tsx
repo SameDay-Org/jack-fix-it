@@ -90,7 +90,9 @@ export function AcceptQuoteSheet() {
         {/* The seal is hidden from screen readers, so the line's label says "verified" once. */}
         <Text
           className="text-headline text-navy-900"
-          accessibilityLabel={quote.pro.verified ? t("quotes.nameVerified", { name: from }) : from}
+          accessibilityLabel={
+            quote.pro.verified ? t("quotes.nameVerified", { name: from }) : undefined
+          }
           testID="accept-quote-pro"
         >
           {from}

@@ -46,7 +46,7 @@ export function VerifiedBadge({ type, testID }: VerifiedBadgeProps) {
         testID={testID}
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
-        style={{ width: GAP + size, height: size, paddingLeft: GAP }}
+        style={{ width: GAP + size, height: size, paddingStart: GAP }}
       >
         <Svg
           width={size}

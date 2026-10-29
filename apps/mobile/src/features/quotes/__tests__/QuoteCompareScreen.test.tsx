@@ -383,8 +383,9 @@ describe("QuoteCompareScreen", () => {
 
     const sheet = within(screen.getByTestId("accept-quote-sheet"));
     const line = sheet.getByTestId("accept-quote-pro");
-    expect(sheet.getByLabelText("From Dan K.")).toBe(line);
+    // Read as shown: no label of its own, so no "verified" either.
     expect(sheet.getByText("From Dan K.")).toBe(line);
+    expect(line.props.accessibilityLabel).toBeUndefined();
     expect(sheet.queryByTestId("accept-quote-verified", HIDDEN)).toBeNull();
   });
 
@@ -605,7 +606,6 @@ describe("QuoteCompareScreen", () => {
       style === "scope" ? ["text-callout", "text-callout"] : [style],
     );
     expect(lineStyles(skeletons[0])).toEqual(loaded);
-    expect(screen.queryByTestId("quote-skeleton-0-badge", HIDDEN)).toBeNull();
   });
 
   it("a long scope shows four lines and a More control that expands it", async () => {

@@ -79,7 +79,7 @@ describe("VerifiedBadge", () => {
     expect(StyleSheet.flatten(seal().props.style)).toMatchObject({
       width: side + 4,
       height: side,
-      paddingLeft: 4,
+      paddingStart: 4,
     });
     expect(verifiedBadgeSize("headline", fontScale)).toBe(side);
   });
