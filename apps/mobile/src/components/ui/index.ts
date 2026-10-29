@@ -37,6 +37,8 @@ export type { Toast, ToastTone } from "./toast";
 export { ToastHost } from "./ToastHost";
 export { useFlag } from "./useFlag";
 export { useReduceTransparency } from "./useReduceTransparency";
+export { VerifiedBadge } from "./VerifiedBadge";
+export type { VerifiedBadgeProps } from "./VerifiedBadge";
 export { WordRotator } from "./WordRotator";
 export type { WordRotatorProps } from "./WordRotator";
 export type { ReduceTransparency } from "./useReduceTransparency";

@@ -134,6 +134,14 @@ describe("theme tokens", () => {
     expect(contrast(rgbOf("success"), rgbOf("white"))).toBeGreaterThanOrEqual(AA_NON_TEXT);
   });
 
+  // The verified seal is a meaningful graphic (WCAG 1.4.11) on every surface the app has.
+  it.each(["white", "gray-50", "navy-900"] as const)(
+    "tokens: green-700 is at least 3:1 on %s",
+    (surface) => {
+      expect(contrast(rgbOf("green-700"), rgbOf(surface))).toBeGreaterThanOrEqual(AA_NON_TEXT);
+    },
+  );
+
   it.each(FORBIDDEN_PAIRS)('every "Forbidden" pair fails AA: %s on %s', (fg, bg) => {
     expect(contrast(rgbOf(fg), rgbOf(bg))).toBeLessThan(AA_TEXT);
   });
