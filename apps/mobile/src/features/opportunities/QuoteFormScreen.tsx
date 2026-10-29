@@ -166,16 +166,14 @@ function QuoteFlow({ opportunity, onSettled }: QuoteFlowProps) {
     case "review":
       return (
         <Screen bar="light" testID="quote-screen">
-          <ScrollView contentContainerClassName="flex-grow px-4 pb-6 pt-2">
-            <QuoteReviewStep
-              body={quoteBody(quote.draft)}
-              takeRateBps={opportunity.take_rate_bps}
-              sending={sending}
-              failed={step.failed}
-              onSend={sendQuote}
-              onEdit={() => setStep({ kind: "form" })}
-            />
-          </ScrollView>
+          <QuoteReviewStep
+            body={quoteBody(quote.draft)}
+            takeRateBps={opportunity.take_rate_bps}
+            sending={sending}
+            failed={step.failed}
+            onSend={sendQuote}
+            onEdit={() => setStep({ kind: "form" })}
+          />
         </Screen>
       );
     case "form":

@@ -371,7 +371,7 @@
       "goneBody": "It closed before your quote went out, so nothing was sent.",
       "quotedTitle": "You already quoted this request",
       "quotedBody": "There is one quote per pro on each request. We'll let you know if the customer accepts.",
-      "home": "Back to opportunities"
+      "home": "See opportunities"
     },
     "discard": {
       "title": "Discard this quote?",
