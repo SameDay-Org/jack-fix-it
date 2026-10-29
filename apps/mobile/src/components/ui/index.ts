@@ -25,6 +25,8 @@ export type { SheetDetents } from "./sheet";
 export { SheetContent } from "./SheetContent";
 export type { SheetContentProps } from "./SheetContent";
 export { Skeleton, useSkeletonPulse } from "./Skeleton";
+export { TabBar, tabBarGeometry, useTabBarInset } from "./TabBar";
+export type { TabBarGeometry, TabBarItem, TabBarProps } from "./TabBar";
 export type { SkeletonProps } from "./Skeleton";
 export { TextSkeleton } from "./TextSkeleton";
 export type { TextSkeletonProps } from "./TextSkeleton";

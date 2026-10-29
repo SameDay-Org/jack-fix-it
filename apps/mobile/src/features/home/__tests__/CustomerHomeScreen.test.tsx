@@ -16,7 +16,11 @@ jest.mock("@/api", () => ({
   useSession: jest.fn(),
   logout: jest.fn(),
 }));
-jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
+jest.mock("expo-router", () => ({
+  router: { push: jest.fn() },
+  useIsFocused: () => true,
+  useScrollToTop: jest.fn(),
+}));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
   "react-native-safe-area-context",
@@ -25,7 +29,7 @@ jest.mock(
 
 const cardNames = () =>
   screen
-    .getAllByRole("button")
+    .queryAllByRole("button")
     .filter((button) => String(button.props.testID).startsWith("home-category-"))
     .map((button) => button.props.accessibilityLabel as string);
 
@@ -202,21 +206,14 @@ describe("CustomerHomeScreen", () => {
     expect(screen.getByText("Pick a category and Jack takes care of the rest.")).toBeTruthy();
   });
 
-  it("the account button opens /account", async () => {
+  it("customer home has no AccountButton: Account is a tab (#213)", async () => {
     jest.mocked(useSession).mockReturnValue(signedIn({ first_name: "Maria", last_name: "Lopez" }));
     await renderWithQuery(<CustomerHomeScreen />);
+    await screen.findByRole("button", { name: "Painting" });
 
-    const account = screen.getByRole("button", { name: "Account" });
-    expect(account.props.className).toContain("min-h-12"); // 48 dp target
-    expect(screen.getByText("ML", { includeHiddenElements: true })).toBeTruthy();
-    await fireEvent.press(account);
-
-    expect(router.push).toHaveBeenCalledWith("/account");
-  });
-
-  it("an account without a name: the email's first letter", async () => {
-    await renderWithQuery(<CustomerHomeScreen />);
-
-    expect(screen.getByText("M", { includeHiddenElements: true })).toBeTruthy();
+    expect(screen.queryByTestId("home-account")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Account" })).toBeNull();
+    expect(screen.queryByText("ML", { includeHiddenElements: true })).toBeNull();
+    expect(router.push).not.toHaveBeenCalled();
   });
 });

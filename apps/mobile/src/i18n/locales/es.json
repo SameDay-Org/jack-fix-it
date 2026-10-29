@@ -77,6 +77,23 @@
   "account": {
     "title": "Cuenta"
   },
+  "tabs": {
+    "home": "Inicio",
+    "history": "Historial",
+    "account": "Cuenta"
+  },
+  "history": {
+    "customer": {
+      "title": "Tus solicitudes",
+      "empty": "Las solicitudes que envíes aparecerán aquí.",
+      "cta": "Ver categorías"
+    },
+    "pro": {
+      "title": "Tus trabajos",
+      "empty": "Los trabajos para los que te contraten aparecerán aquí.",
+      "cta": "Ir a Inicio"
+    }
+  },
   "request": {
     "title": "Dile a Jack qué pasó"
   },

@@ -77,6 +77,23 @@
   "account": {
     "title": "Account"
   },
+  "tabs": {
+    "home": "Home",
+    "history": "History",
+    "account": "Account"
+  },
+  "history": {
+    "customer": {
+      "title": "Your requests",
+      "empty": "Requests you send will show up here.",
+      "cta": "Browse categories"
+    },
+    "pro": {
+      "title": "Your jobs",
+      "empty": "Jobs you're hired for will show up here.",
+      "cta": "Go to Home"
+    }
+  },
   "request": {
     "title": "Tell Jack what happened"
   },

@@ -3,13 +3,14 @@ import { View } from "react-native";
 
 import { useSession } from "@/api";
 
-// Home is always the first screen of the group, so a flow pushed over it (the phone steps, even
-// when a sign-up lands straight on them) ends by popping back to it.
-export const unstable_settings = { anchor: "index" };
+// The tabs are always the first screen of the group, so a flow pushed over them (the phone steps,
+// even when a sign-up lands straight on them; a request opened from a deep link) ends by popping
+// back to a tab: the one it left, or Home after a cold start.
+export const unstable_settings = { anchor: "(tabs)" };
 
 /**
- * The signed-in group. Its screens exist only while a session is signed in, enforced here for all
- * of them rather than screen by screen: without one the layout renders the session shell in place
+ * The signed-in group: the tab shell (D18) and the flows pushed over it. Its screens exist only
+ * while a session is signed in, enforced here for all of them rather than screen by screen: without one the layout renders the session shell in place
  * of its stack, so from the first commit of a sign-out, of a refresh the server rejected or of an
  * expired session, no private screen, value or control is in the tree. The gate's switch to
  * `(auth)` is the next commit, before that one is drawn (see `GroupStack`); the shell is what this
