@@ -11,7 +11,12 @@ deletes the device. A send's outcome is stored before that cleanup, and a cleanu
 retried on its own, without sending. Every Redis and HTTP call has a timeout. Logs carry user
 and device ids, Expo error codes and counts only. Only an active user is sent to (#55): like
 the devices and the locale, the status is read when the message runs, so a user suspended after
-an event was queued gets nothing.
+an event was queued gets nothing. A message whose preference group the user turned off for push
+(#217, notifications.preferences) is muted the same way, at send time: its devices still to
+send become `failed`, final, so a retry or a receipt's resend never sends it, even once the
+group is back on. A mute is stored as `failed`, not as a status of its own, so a worker of an
+earlier version (a rollback, or two versions running during a deploy) still reads the state;
+only the `push_muted` log line names it.
 
 Expo has no idempotency key, so a device is never left plain pending once it may have been sent
 to: before the HTTP call its state becomes `in_flight` (if that write fails, nothing is sent and
@@ -55,6 +60,8 @@ from app.integrations.expo_push import (
 )
 from app.modules.devices.service import DeviceService, PushTarget
 from app.modules.notifications import catalog
+from app.modules.notifications.preferences import Channel, PreferenceGroup, group_of_push
+from app.modules.notifications.preferences_service import NotificationPreferenceService
 from app.modules.notifications.service import InvalidPushError, PushRequest, enqueue_push
 from app.modules.users.service import UserService
 from app.modules.users.types import UserStatus
@@ -84,7 +91,7 @@ class Status(StrEnum):
     ACCEPTED = "accepted"  # Expo took it; its ticket waits for a receipt
     DEAD = "dead"  # DeviceNotRegistered; the device is still to be deleted
     GONE = "gone"  # DeviceNotRegistered; the device was deleted
-    FAILED = "failed"  # a final error, or out of attempts
+    FAILED = "failed"  # a final error, out of attempts, or muted (#217): never sent again
     IN_FLIGHT = "in_flight"  # handed to Expo; the outcome is not stored yet
     UNKNOWN = "unknown"  # its outcome was lost after the send: final, never sent again
 
@@ -303,14 +310,15 @@ async def send_push(
     request.validate()  # what enqueue_push checked, again: the queue is not trusted
     extra = {"user_id": user_id}
     attempt = int(ctx.get("job_try", 1))
+    group = group_of_push(title_key)
     try:
         recipients = await deps.store.delivery(message_id)
-        resolved = await _targets_and_locale(deps, request.user_id)
+        resolved = await _targets_and_locale(deps, request.user_id, group)
         if resolved is None:
             # Not active (#55): nothing is sent on this run or any later one of the message.
             logger.info("push_user_not_active", extra=extra)
             return
-        targets, locale = resolved
+        targets, locale, muted = resolved
         if recipients is None:
             recipients = await deps.store.start(request, [t.device_id for t in targets])
         # In flight when an earlier run ended without storing the outcome: maybe delivered.
@@ -323,11 +331,23 @@ async def send_push(
             await deps.store.record(message_id, lost)
             logger.warning("push_outcome_unknown", extra={**extra, "count": len(lost)})
             recipients = {**recipients, **lost}
+        # The group is off for push (#217): the devices still to send never get it. Stored as
+        # failed, a status every earlier worker reads as final (no new value in the state).
+        silenced = {
+            device_id: replace(recipient, status=Status.FAILED)
+            for device_id, recipient in recipients.items()
+            if muted and recipient.status is Status.PENDING
+        }
+        if silenced:
+            await deps.store.record(message_id, silenced)
+            logger.info("push_muted", extra={**extra, "group": str(group), "count": len(silenced)})
+            recipients = {**recipients, **silenced}
     except (RedisError, OSError, SQLAlchemyError):
         raise _retry(deps, attempt, extra) from None
     due = [t for t in targets if _status(recipients, t.device_id) is Status.PENDING]
     if not due and not any(r.status is Status.DEAD for r in recipients.values()):
-        logger.info("push_already_sent" if recipients else "push_no_devices", extra=extra)
+        if not silenced:
+            logger.info("push_already_sent" if recipients else "push_no_devices", extra=extra)
         return
 
     outcome: dict[uuid.UUID, Recipient] = {}
@@ -522,18 +542,23 @@ async def _resend(deps: PushDeps, ticket_id: str, ref: TicketRef) -> bool:
 
 
 async def _targets_and_locale(
-    deps: PushDeps, user_id: uuid.UUID
-) -> tuple[list[PushTarget], str] | None:
-    """The user's devices and locale; None when the user is not active (suspended)."""
+    deps: PushDeps, user_id: uuid.UUID, group: PreferenceGroup | None
+) -> tuple[list[PushTarget], str, bool] | None:
+    """The user's devices, locale and whether they turned the message's group off for push
+    (muted; never for a group of None, the test push); None when the user is not active
+    (suspended)."""
     # The session closes before Expo is called: no connection waits on the network.
     async with deps.sessions() as session:
         user = await UserService(session).get_by_id(user_id)
         if user is None:
-            return [], catalog.DEFAULT_LOCALE
+            return [], catalog.DEFAULT_LOCALE, False
         if user.status is not UserStatus.ACTIVE:
             return None
         targets = await DeviceService(session, deps.max_devices_per_user).targets_for(user_id)
-        return targets, user.locale
+        muted = group is not None and not await NotificationPreferenceService(session).enabled(
+            user_id, group, Channel.PUSH
+        )
+        return targets, user.locale, muted
 
 
 async def _forget_devices(deps: PushDeps, device_ids: list[uuid.UUID]) -> None:

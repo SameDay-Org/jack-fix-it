@@ -718,6 +718,33 @@ export interface paths {
         patch: operations["update_saved_address_v1_addresses__address_id__patch"];
         trace?: never;
     };
+    "/v1/me/notification-preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get my notification preferences
+         * @description Every group with each of its channels: `enabled` is the caller's choice, or the default
+         *     when they never changed it. A `locked` channel is always on (account and security).
+         */
+        get: operations["get_notification_preferences_v1_me_notification_preferences_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change my notification preferences
+         * @description Applies the changes all or nothing and returns every preference, as GET does. Turning a
+         *     locked channel on is accepted and changes nothing. Pushes muted while a group was off are
+         *     not sent when it is turned back on.
+         */
+        patch: operations["update_notification_preferences_v1_me_notification_preferences_patch"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -850,6 +877,22 @@ export interface components {
             names: {
                 [key: string]: string;
             };
+        };
+        /**
+         * Channel
+         * @enum {string}
+         */
+        Channel: "push" | "email" | "sms";
+        /** ChannelPreference */
+        ChannelPreference: {
+            channel: components["schemas"]["Channel"];
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Locked
+             * @description Always on: the user cannot turn it off.
+             */
+            locked: boolean;
         };
         /**
          * CheckStatus
@@ -1056,6 +1099,12 @@ export interface components {
         ErrorResponse: {
             error: components["schemas"]["ErrorDetail"];
         };
+        /** GroupPreferences */
+        GroupPreferences: {
+            group: components["schemas"]["PreferenceGroup"];
+            /** Channels */
+            channels: components["schemas"]["ChannelPreference"][];
+        };
         /** IntegerQuestion */
         IntegerQuestion: {
             /**
@@ -1179,6 +1228,23 @@ export interface components {
              * @description At most this many; all options when absent.
              */
             max_selected?: number | null;
+        };
+        /**
+         * NotificationPreferences
+         * @description Every group, in a fixed order, with each of its channels: the user's choice, or the
+         *     default when they never changed it.
+         */
+        NotificationPreferences: {
+            /** Groups */
+            groups: components["schemas"]["GroupPreferences"][];
+        };
+        /**
+         * NotificationPreferencesPatch
+         * @description 1 to MAX_CHANGES changes, each pair once and only a channel its group has.
+         */
+        NotificationPreferencesPatch: {
+            /** Changes */
+            changes: components["schemas"]["PreferenceChange"][];
         };
         /**
          * OpportunityCategory
@@ -1393,6 +1459,18 @@ export interface components {
              */
             expires_at: string;
         };
+        /** PreferenceChange */
+        PreferenceChange: {
+            group: components["schemas"]["PreferenceGroup"];
+            channel: components["schemas"]["Channel"];
+            /** Enabled */
+            enabled: boolean;
+        };
+        /**
+         * PreferenceGroup
+         * @enum {string}
+         */
+        PreferenceGroup: "job_updates" | "quotes_and_opportunities" | "reminders" | "marketing" | "account_and_security";
         /**
          * ProDocumentStatus
          * @enum {string}
@@ -4192,6 +4270,86 @@ export interface operations {
                 headers: {
                     /** @description Seconds until the current limit window ends. */
                     "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_notification_preferences_v1_me_notification_preferences_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPreferences"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_notification_preferences_v1_me_notification_preferences_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationPreferencesPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPreferences"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description preference_locked: a change turns off a locked channel; validation_error: an unknown group or channel, a channel its group does not have, a group and channel twice, no change or more than 20. Either way nothing is stored. */
+            422: {
+                headers: {
                     [name: string]: unknown;
                 };
                 content: {

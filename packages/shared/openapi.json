@@ -2743,6 +2743,108 @@
           }
         }
       }
+    },
+    "/v1/me/notification-preferences": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Get my notification preferences",
+        "description": "Every group with each of its channels: `enabled` is the caller's choice, or the default\nwhen they never changed it. A `locked` channel is always on (account and security).",
+        "operationId": "get_notification_preferences_v1_me_notification_preferences_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPreferences"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Change my notification preferences",
+        "description": "Applies the changes all or nothing and returns every preference, as GET does. Turning a\nlocked channel on is accepted and changes nothing. Pushes muted while a group was off are\nnot sent when it is turned back on.",
+        "operationId": "update_notification_preferences_v1_me_notification_preferences_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationPreferencesPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPreferences"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "preference_locked: a change turns off a locked channel; validation_error: an unknown group or channel, a channel its group does not have, a group and channel twice, no change or more than 20. Either way nothing is stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -3033,6 +3135,38 @@
           "names"
         ],
         "title": "CategorySummary"
+      },
+      "Channel": {
+        "type": "string",
+        "enum": [
+          "push",
+          "email",
+          "sms"
+        ],
+        "title": "Channel"
+      },
+      "ChannelPreference": {
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/Channel"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "locked": {
+            "type": "boolean",
+            "title": "Locked",
+            "description": "Always on: the user cannot turn it off."
+          }
+        },
+        "type": "object",
+        "required": [
+          "channel",
+          "enabled",
+          "locked"
+        ],
+        "title": "ChannelPreference"
       },
       "CheckStatus": {
         "type": "string",
@@ -3462,6 +3596,26 @@
         ],
         "title": "ErrorResponse"
       },
+      "GroupPreferences": {
+        "properties": {
+          "group": {
+            "$ref": "#/components/schemas/PreferenceGroup"
+          },
+          "channels": {
+            "items": {
+              "$ref": "#/components/schemas/ChannelPreference"
+            },
+            "type": "array",
+            "title": "Channels"
+          }
+        },
+        "type": "object",
+        "required": [
+          "group",
+          "channels"
+        ],
+        "title": "GroupPreferences"
+      },
       "IntegerQuestion": {
         "properties": {
           "key": {
@@ -3696,6 +3850,43 @@
           "type"
         ],
         "title": "MultiChoiceQuestion"
+      },
+      "NotificationPreferences": {
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/GroupPreferences"
+            },
+            "type": "array",
+            "title": "Groups"
+          }
+        },
+        "type": "object",
+        "required": [
+          "groups"
+        ],
+        "title": "NotificationPreferences",
+        "description": "Every group, in a fixed order, with each of its channels: the user's choice, or the\ndefault when they never changed it."
+      },
+      "NotificationPreferencesPatch": {
+        "properties": {
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/PreferenceChange"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Changes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "changes"
+        ],
+        "title": "NotificationPreferencesPatch",
+        "description": "1 to MAX_CHANGES changes, each pair once and only a channel its group has."
       },
       "OpportunityCategory": {
         "properties": {
@@ -4091,6 +4282,39 @@
           "expires_at"
         ],
         "title": "PhotoOut"
+      },
+      "PreferenceChange": {
+        "properties": {
+          "group": {
+            "$ref": "#/components/schemas/PreferenceGroup"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/Channel"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "group",
+          "channel",
+          "enabled"
+        ],
+        "title": "PreferenceChange"
+      },
+      "PreferenceGroup": {
+        "type": "string",
+        "enum": [
+          "job_updates",
+          "quotes_and_opportunities",
+          "reminders",
+          "marketing",
+          "account_and_security"
+        ],
+        "title": "PreferenceGroup"
       },
       "ProDocumentStatus": {
         "type": "string",

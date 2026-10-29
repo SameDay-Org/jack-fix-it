@@ -2,16 +2,15 @@ import { Trans, useTranslation } from "react-i18next";
 import { ScrollView, Text, View } from "react-native";
 
 import { useSession } from "@/api";
-import { Button, Screen } from "@/components/ui";
+import { Screen } from "@/components/ui";
 import { AccountButton } from "@/features/account/AccountButton";
 import { useOpenPhoneStepAfterSignUp } from "@/features/phone/useOpenPhoneStepAfterSignUp";
-import { startRequest } from "@/features/request";
 
 import { CategoryCards } from "./CategoryCards";
 
 /**
- * The customer's home: a navy hero that asks what is going on and offers one action, telling
- * Jack what happened; the categories below are the secondary way in. Both start a request.
+ * The customer's home: a navy hero that asks what is going on and points at the categories
+ * below, the one way into a request (every request starts from a category, #232).
  *
  * Right after a sign-up it opens the phone step over itself, once, and shows only its bare page
  * until then (`useOpenPhoneStepAfterSignUp`).
@@ -47,12 +46,6 @@ export function CustomerHomeScreen() {
             </Text>
             <Text className="text-body text-white">{t("home.support")}</Text>
           </View>
-          <Button
-            label={t("home.tellJack")}
-            size="lg"
-            onPress={() => startRequest(null)}
-            testID="home-tell-jack"
-          />
         </View>
         <CategoryCards />
       </ScrollView>
