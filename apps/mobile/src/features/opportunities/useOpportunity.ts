@@ -5,7 +5,13 @@ import { useCallback, useMemo } from "react";
 import { AppState } from "react-native";
 
 import { apiGet, ApiError } from "@/api";
-import { evictOpportunity } from "@/features/pro-home/useOpportunities";
+import {
+  allowOpportunity,
+  denyOpportunity,
+  evictOpportunity,
+  flattenOpportunities,
+  OPPORTUNITIES_QUERY_KEY,
+} from "@/features/pro-home/useOpportunities";
 import { useExpiryClock } from "@/features/quotes/expiry";
 
 export type OpportunityDetail = ApiSchema<"OpportunityDetail">;
@@ -16,17 +22,20 @@ export const opportunityQueryKey = (dispatchId: string) => ["opportunities", dis
 /**
  * One open opportunity as the pro sees it; the server marks it viewed on the first open. A
  * failure shows at once with a retry rather than behind a skeleton, and a 404 (not open for this
- * pro any more) never improves by asking again.
+ * pro any more) never improves by asking again. A 200 lifts an earlier denial.
  */
 export const opportunityQueryOptions = (dispatchId: string) =>
   queryOptions({
     queryKey: opportunityQueryKey(dispatchId),
-    queryFn: ({ signal }) =>
-      apiGet("/v1/pros/me/opportunities/{dispatch_id}", {
+    queryFn: async ({ signal, client }) => {
+      const detail = await apiGet("/v1/pros/me/opportunities/{dispatch_id}", {
         auth: true,
         signal,
         params: { dispatch_id: dispatchId },
-      }),
+      });
+      allowOpportunity(client, dispatchId);
+      return detail;
+    },
     retry: false,
   });
 
@@ -39,11 +48,22 @@ export const isGone = (error: unknown): boolean =>
   error instanceof ApiError && error.status === 404;
 
 /**
- * The pro may not see it any more (the detail answered 404): its row leaves the list, and its
- * detail, signed media URLs included, leaves the cache. A later failure cannot show the old
- * body again; only a new answer can.
+ * The pro may not see it any more (the detail answered 404): no page shows it from now on, its
+ * row leaves the cached pages, and its detail, signed media URLs included, leaves the cache. A
+ * later failure cannot show the old body again; only a new 200 can.
+ *
+ * A page fetch in flight holds the old pages and would write the row back when it lands, so
+ * while the row is cached that fetch is cancelled first. The cancel restores the state from
+ * before it (a failed next page stays failed, with its retry), so the row goes after it. With no
+ * such row (a first load, or a request opened from a push) the fetch is left to land: the denial
+ * hides the row in any answer.
  */
-export function forgetOpportunity(client: QueryClient, dispatchId: string): void {
+export async function forgetOpportunity(client: QueryClient, dispatchId: string): Promise<void> {
+  denyOpportunity(client, dispatchId);
+  const cached = flattenOpportunities(client.getQueryData(OPPORTUNITIES_QUERY_KEY));
+  if (cached.some((item) => item.dispatch_id === dispatchId)) {
+    await client.cancelQueries({ queryKey: OPPORTUNITIES_QUERY_KEY, exact: true });
+  }
   evictOpportunity(client, dispatchId);
   client.removeQueries({ queryKey: opportunityQueryKey(dispatchId), exact: true });
 }

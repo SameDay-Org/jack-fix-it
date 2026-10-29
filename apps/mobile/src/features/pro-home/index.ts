@@ -4,6 +4,8 @@ export { OpportunityList } from "./OpportunityList";
 export type { OpportunityListProps } from "./OpportunityList";
 export { ProHomeScreen } from "./ProHomeScreen";
 export {
+  allowOpportunity,
+  denyOpportunity,
   evictOpportunity,
   flattenOpportunities,
   markOpportunityViewed,

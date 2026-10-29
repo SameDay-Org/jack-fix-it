@@ -55,7 +55,7 @@ export function OpportunityDetailScreen() {
   }, [client, data]);
   // No longer open for this pro: the list stops offering it, and its detail is forgotten.
   useEffect(() => {
-    if (denied) forgetOpportunity(client, id);
+    if (denied) void forgetOpportunity(client, id);
   }, [client, denied, id]);
 
   return (

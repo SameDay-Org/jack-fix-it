@@ -1,9 +1,12 @@
 import {
   infiniteQueryOptions,
+  skipToken,
   useInfiniteQuery,
+  useQuery,
   type InfiniteData,
   type QueryClient,
 } from "@tanstack/react-query";
+import { useCallback } from "react";
 
 import { apiGet, ApiError, type GetResponse } from "@/api";
 
@@ -62,7 +65,59 @@ export const opportunitiesQueryOptions = () =>
     retry: false,
   });
 
-export const useOpportunities = () => useInfiniteQuery(opportunitiesQueryOptions());
+/**
+ * The ids whose detail answered 404 (#219): no list answer shows them again, not even one that
+ * was on its way when the 404 came, until a 200 for that detail. Kept in the QueryClient, never
+ * fetched and never collected, so the sign-out's `clear()` takes them with the rest of the cache.
+ */
+const DENIED_KEY = ["opportunities-denied"] as const;
+type DeniedIds = readonly string[];
+const NONE_DENIED: DeniedIds = [];
+
+function updateDenied(client: QueryClient, update: (ids: DeniedIds) => DeniedIds): void {
+  // Built with its gcTime first: `setQueryData` alone would make a query that is collected.
+  client.getQueryCache().build<DeniedIds>(client, { queryKey: DENIED_KEY, gcTime: Infinity });
+  client.setQueryData<DeniedIds>(DENIED_KEY, (ids) => update(ids ?? NONE_DENIED));
+}
+
+/** Its detail answered 404: no page shows it from now on. */
+export const denyOpportunity = (client: QueryClient, dispatchId: string): void =>
+  updateDenied(client, (ids) => (ids.includes(dispatchId) ? ids : [...ids, dispatchId]));
+
+/** Its detail answered 200: it is open for this pro again. */
+export function allowOpportunity(client: QueryClient, dispatchId: string): void {
+  if (client.getQueryData<DeniedIds>(DENIED_KEY)?.includes(dispatchId)) {
+    updateDenied(client, (ids) => ids.filter((id) => id !== dispatchId));
+  }
+}
+
+const withoutDenied = <TPageParam>(
+  data: InfiniteData<OpportunityPage, TPageParam>,
+  denied: DeniedIds,
+): InfiniteData<OpportunityPage, TPageParam> =>
+  denied.length === 0
+    ? data
+    : {
+        ...data,
+        pages: data.pages.map((page) => ({
+          ...page,
+          items: page.items.filter((item) => !denied.includes(item.dispatch_id)),
+        })),
+      };
+
+export function useOpportunities() {
+  const { data: denied = NONE_DENIED } = useQuery<DeniedIds>({
+    queryKey: DENIED_KEY,
+    queryFn: skipToken,
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+  const select = useCallback(
+    (data: InfiniteData<OpportunityPage, Cursor>) => withoutDenied(data, denied),
+    [denied],
+  );
+  return useInfiniteQuery({ ...opportunitiesQueryOptions(), select });
+}
 
 /** The rows of every loaded page, in order. */
 export const flattenOpportunities = (data: OpportunityPages | undefined): OpportunitySummary[] =>
@@ -72,11 +127,16 @@ function updatePages(
   client: QueryClient,
   update: (items: OpportunitySummary[]) => OpportunitySummary[],
 ): void {
-  client.setQueryData<OpportunityPages>(OPPORTUNITIES_QUERY_KEY, (data) =>
-    data === undefined
-      ? undefined
-      : { ...data, pages: data.pages.map((page) => ({ ...page, items: update(page.items) })) },
-  );
+  const query = client
+    .getQueryCache()
+    .find<OpportunityPages>({ queryKey: OPPORTUNITIES_QUERY_KEY, exact: true });
+  const data = query?.state.data;
+  if (query === undefined || data === undefined) return;
+  // Only the rows change. `setQueryData` would also mark the query a success, and a failed next
+  // page would lose its retry.
+  query.setState({
+    data: { ...data, pages: data.pages.map((page) => ({ ...page, items: update(page.items) })) },
+  });
 }
 
 /** The pro opened it: its "New" marker goes away in the list behind the detail. */
