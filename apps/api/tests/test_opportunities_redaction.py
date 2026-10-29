@@ -26,6 +26,7 @@ from app.queue import get_job_queue
 from app.rate_limit import get_rate_limiter
 from app.redaction import MASK
 from tests.conftest import InMemoryRateLimiter
+from tests.contact_overlaps import OVERLAP_IDS, PHONE_EMAIL_OVERLAPS
 from tests.glue_variants import glue_sample
 from tests.helpers import async_best_seconds_without_gc
 from tests.test_intake_questions import labels, option
@@ -355,12 +356,24 @@ ROUND4_CASES = [
         "742 Evergreen Terrace",
     ),
 ]
+# Vault round 1 on #240 (#257): an email that takes a phone's last group used to leave
+# "786 555"; the customer's own phone is another one, so the patterns mask it.
+OVERLAP_CASES = [
+    (
+        f"phone-email-overlap-{name}",
+        f"Repair the leaking kitchen sink, call {contact} please.",
+        contact[:7],
+        "test@example.invalid",
+        "+17865550100",
+        "742 Evergreen Terrace",
+    )
+    for name, contact in zip(OVERLAP_IDS, PHONE_EMAIL_OVERLAPS, strict=True)
+]
+CASES = ROUND3_CASES + ROUND4_CASES + OVERLAP_CASES
 
 
 @pytest.mark.parametrize(
-    ("name", "text", "secret", "email", "phone", "street"),
-    ROUND3_CASES + ROUND4_CASES,
-    ids=[case[0] for case in ROUND3_CASES + ROUND4_CASES],
+    ("name", "text", "secret", "email", "phone", "street"), CASES, ids=[case[0] for case in CASES]
 )
 @pytest.mark.parametrize(
     ("source", "route"), [("description", "list"), ("description", "detail"), ("intake", "detail")]

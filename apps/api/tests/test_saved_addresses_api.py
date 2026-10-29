@@ -38,6 +38,7 @@ from tests.conftest import (
     make_app,
     make_settings,
 )
+from tests.contact_overlaps import OVERLAP_IDS, PHONE_EMAIL_OVERLAPS
 from tests.helpers import as_status_writer
 from tests.test_auth_api import register as register_account
 from tests.test_devices_api import caller, wait_until_blocking
@@ -815,6 +816,8 @@ CONTACT_LABELS = [
     "UNIT3055550199",
     "SUITE3055550199",
     "PO BOX3055550199",
+    # Vault round 1 on #240 (#257): an email that takes a phone's last group.
+    *PHONE_EMAIL_OVERLAPS,
 ]
 
 
@@ -852,6 +855,7 @@ CONTACT_LABELS = [
         "unit_phone",
         "suite_phone",
         "po_box_phone",
+        *[f"phone_email_overlap_{name}" for name in OVERLAP_IDS],
     ],
 )
 async def test_label_rejects_contacts(

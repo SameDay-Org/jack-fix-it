@@ -27,6 +27,7 @@ from app.redaction import (
     redact_text,
 )
 from tests import redaction_c6facaa as c6facaa
+from tests.contact_overlaps import OVERLAP_IDS, PHONE_EMAIL_OVERLAPS
 from tests.glue_variants import all_glue_cases
 from tests.helpers import best_seconds_without_gc
 
@@ -1748,3 +1749,57 @@ def test_round_two_dot_word_pieces_are_fast(text: str) -> None:
     of its own, and each piece is read by one chain only, even past its run."""
     assert len(text) >= 5000
     assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25
+
+
+# Vault round 1 on #240: a phone an email overlaps (#257), and the reverse handle's spaces (#260)
+
+OVERLAP_SENTENCES = [
+    "{}",
+    "Call me at {} tonight.",
+    "Llámame al {} esta noche.",
+    "Me liga no {} hoje à noite.",
+]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize("sentence", OVERLAP_SENTENCES, ids=["standalone", "en", "es", "pt"])
+@pytest.mark.parametrize("contact", PHONE_EMAIL_OVERLAPS, ids=OVERLAP_IDS)
+def test_phone_and_email_overlap_masks_the_union(
+    contact: str, sentence: str, form: Literal["NFC", "NFD"]
+) -> None:
+    """The email reads the phone's last group; the phone rule still reads all ten digits on the
+    text without masks, so the phone and the email are one mask and no group stays."""
+    text = unicodedata.normalize(form, sentence.format(contact))
+    expected = RedactionResult(sentence.format(MASK), True)
+
+    assert redact_contacts(text) == expected
+    assert redact_text(text, KnownValues()) == expected
+
+
+def test_the_union_takes_phones_only() -> None:
+    """The platform rule reads "gmail tonight." as a handle; the email's mask hides that
+    reading in order, and only phones join a mask from the text without masks."""
+    assert redact_contacts("Call me at jose at gmail tonight.") == RedactionResult(
+        f"Call me at {MASK} tonight.", True
+    )
+    assert redact_contacts("Call me at 305 555 0199 at gmail tonight.") == RedactionResult(
+        f"Call me at {MASK} tonight.", True
+    )
+
+
+@pytest.mark.parametrize("length", [2000, 5000, 10000])
+def test_reverse_handle_whitespace_is_linear(length: int) -> None:
+    """#260: the spaces before and after the optional bracket are possessive, so a long run
+    of spaces is not split between them again and again when no platform follows."""
+    text = "a" + " " * (length - 2) + "b"
+
+    assert best_seconds_without_gc(lambda: redact_contacts(text)) < 0.25
+    for handle, expected in [
+        ("j.doe.fixit (insta)", f"{MASK})"),
+        ("j.doe.fixit(insta)", f"{MASK})"),
+        ("j.doe.fixit  [ insta", MASK),
+        ("j.doe.fixit\t(\tig", MASK),
+        ("j.doe.fixit on insta", MASK),
+        ("j.doe.fixit [en tiktok]", f"{MASK}]"),
+    ]:
+        assert redact_contacts(handle) == RedactionResult(expected, True)

@@ -359,10 +359,12 @@ PLATFORM_HANDLE: Final = re.compile(
 )
 # A handle written before its platform: "j.doe.fixit (insta)". The token is possessive and its
 # shape is checked in _mask_reverse_handle, so a long dotted chain costs one pass. It never
-# starts inside a marked token (see _START) and takes the marks glued to its characters.
+# starts inside a marked token (see _START) and takes the marks glued to its characters. The
+# spaces around the bracket are possessive: two runs that could split one stretch of spaces
+# would try every split before failing ("a", 2,000 spaces, "b" took 0.6 s, #260).
 REVERSE_HANDLE: Final = re.compile(
     rf"(?<![\w@.{_MARKS}])(?P<id>{_MARKED}[^\W_][\w.{_MARKS}]*+)"
-    rf"\s*[(\[]?\s*(?:on\s+|en\s+)?{_STRONG_PLATFORMS}\b",
+    rf"\s*+(?:[(\[]\s*+)?(?:on\s+|en\s+)?{_STRONG_PLATFORMS}\b",
     _FLAGS,
 )
 # Words that follow "insta is" in ordinary sentences, so are not an id.
@@ -579,6 +581,9 @@ _MEASURE_AFTER: Final = re.compile(
 _SHORT_NUMBER: Final = re.compile(r"\d{1,4}(?:[./]\d{1,3})?")
 
 _Replace = Callable[[re.Match[str]], str | None]  # None keeps the match as it is
+# What a contact rule masks in a match: None when it holds no contact (the search tries again
+# one character later), else the spans to mask; [] when it was analyzed whole and holds none.
+_Rule = Callable[[re.Match[str]], list[tuple[int, int]] | None]
 
 
 class _Search(Protocol):
@@ -650,16 +655,79 @@ class RedactionResult:
 
 
 def redact_contacts(text: str) -> RedactionResult:
-    """`text` with every contact detail it recognizes replaced by MASK (see the module doc)."""
+    """`text` with every contact detail it recognizes replaced by MASK (see the module doc).
+    The rules run in order, each on the text the ones before it masked. A mask can cut a
+    contact a later rule would have read whole: in "call 305 555 0199 at gmail" the email
+    takes the last group and leaves six digits, no phone (#257). So the phone rules also read
+    the text without masks, and a phone they find there joins the masks it overlaps or touches.
+    Only phones: the other rules read cue words, and an email's provider is no platform for the
+    word after it ("jose at gmail tonight." would lose "tonight.")."""
     cleaned = _clean(text)
-    masked = 0
-    for search, replace in _STEPS:
-        if search in _UNMARKED_FIRST:
-            cleaned, count = _substitute_unmarked(search, replace, cleaned)
-            masked += count
-        cleaned, count = _substitute(search, replace, cleaned)
-        masked += count
-    return RedactionResult(cleaned, masked > 0)
+    masked = _masks_in_order(cleaned)
+    if masked:
+        phones = [span for search, rule in _PHONE_STEPS for span in _spans(search, rule, cleaned)]
+        masked = _joined(masked, phones)
+    result, count = _mask_spans(cleaned, masked)
+    return RedactionResult(result, count > 0)
+
+
+def _masks_in_order(text: str) -> list[tuple[int, int]]:
+    """Each rule on the text the rules before it masked (a mask is no word, so "unit 5B
+    youtu.be/abc123" reads as a unit once the URL is masked): where the masks are in `text`."""
+    current = text
+    origin = [(index, index + 1) for index in range(len(text))]  # each character's span in text
+    masked: list[tuple[int, int]] = []
+    for search, rule in _STEPS:
+        runs = [_unmarked_spans, _spans] if search in _UNMARKED_FIRST else [_spans]
+        for run in runs:
+            spans = list(run(search, rule, current))
+            if spans:
+                current, origin = _masked_with_origin(current, origin, spans, masked)
+    return masked
+
+
+def _masked_with_origin(
+    text: str,
+    origin: list[tuple[int, int]],
+    spans: list[tuple[int, int]],
+    masked: list[tuple[int, int]],
+) -> tuple[str, list[tuple[int, int]]]:
+    """`text` with `spans` (in order; touching ones may share marks) replaced by MASK, and the
+    origin of its characters; adds the span each mask hides in the cleaned text to `masked`."""
+    pieces: list[str] = []
+    new_origin: list[tuple[int, int]] = []
+    position = 0
+    for start, end in spans:
+        hidden = (origin[start][0], origin[end - 1][1])
+        masked.append(hidden)
+        start = max(start, position)
+        pieces += [text[position:start], MASK]
+        new_origin += origin[position:start] + [hidden] * len(MASK)
+        position = max(end, position)
+    pieces.append(text[position:])
+    new_origin += origin[position:]
+    return "".join(pieces), new_origin
+
+
+def _joined(masked: list[tuple[int, int]], found: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """`masked` grown by the spans in `found` that overlap or touch it, directly or through
+    another such span. A span that meets no mask is one the rules in order passed over in its
+    own context, so it stays out."""
+    spans = sorted(
+        [(start, end, True) for start, end in masked] + [(*span, False) for span in found]
+    )
+    joined: list[tuple[int, int]] = []
+    group_start, group_end, group_masked = spans[0]
+    for start, end, is_masked in spans[1:]:
+        if start <= group_end:
+            group_end, group_masked = max(group_end, end), group_masked or is_masked
+            continue
+        if group_masked:
+            joined.append((group_start, group_end))
+        group_start, group_end, group_masked = start, end, is_masked
+    if group_masked:
+        joined.append((group_start, group_end))
+    return joined
 
 
 def _clean(text: str) -> str:
@@ -712,31 +780,43 @@ def _substitute(search: _Search, replace: _Replace, text: str) -> tuple[str, int
     return _apply(text, _replacements(search, replace, text))
 
 
-def _substitute_unmarked(search: _Search, replace: _Replace, text: str) -> tuple[str, int]:
-    """The same step on `text` without its marks; each mask also covers the marks inside its
+def _unmarked_spans(search: _Search, rule: _Rule, text: str) -> Iterator[tuple[int, int]]:
+    """The same rule on `text` without its marks; each span also covers the marks inside its
     match and around it, so "gmail.c" + U+0483 + "om" is masked whole (see _UNMARKED_FIRST)."""
     kept = [index for index, char in enumerate(text) if char not in _MARK_CHARS]
     if len(kept) == len(text):
-        return text, 0
+        return
     unmarked = "".join(text[index] for index in kept)
     kept.append(len(text))
-    spans = (
-        (kept[start - 1] + 1 if start else 0, kept[end], replacement)
-        for start, end, replacement in _replacements(search, replace, unmarked)
-    )
-    return _apply(text, spans)  # two touching masks may share the marks between them
+    for start, end in _spans(search, rule, unmarked):
+        yield kept[start - 1] + 1 if start else 0, kept[end]
+
+
+def _spans(search: _Search, rule: _Rule, text: str) -> Iterator[tuple[int, int]]:
+    """Where `rule` masks `text`. A kept match only skips one character, so a contact that
+    starts inside it is still found ("fix 2 doors 1250 Ocean Dr")."""
+    search_from = 0
+    while (match := search.search(text, search_from)) is not None:
+        spans = rule(match)
+        if spans is None:
+            search_from = match.start() + 1
+            continue
+        end = match.end()
+        if isinstance(search, _RunSearch):
+            end = search.mask_end(text, match)
+            spans = [(match.start(), end)]
+        yield from spans
+        search_from = max(end, match.start() + 1)
+
+
+def _whole(replace: _Replace) -> _Rule:
+    """The rule that masks a whole match unless `replace` keeps it."""
+    return lambda match: None if replace(match) is None else [match.span()]
 
 
 def _replacements(search: _Search, replace: _Replace, text: str) -> Iterator[tuple[int, int, str]]:
-    search_from = 0
-    while (match := search.search(text, search_from)) is not None:
-        replacement = replace(match)
-        if replacement is None:
-            search_from = match.start() + 1
-            continue
-        end = search.mask_end(text, match) if isinstance(search, _RunSearch) else match.end()
-        yield match.start(), end, replacement
-        search_from = max(end, match.start() + 1)
+    for start, end in _spans(search, _whole(replace), text):
+        yield start, end, MASK
 
 
 def _apply(text: str, spans: Iterable[tuple[int, int, str]]) -> tuple[str, int]:
@@ -882,12 +962,12 @@ def _mask_reversed_street(match: re.Match[str]) -> str | None:
     return MASK
 
 
-def _phones(match: re.Match[str]) -> str | None:
-    """Masks every phone-shaped window of digit groups in one digit run. Returns the run itself
-    when it holds no phone, so the scan moves past it (it was analyzed whole)."""
+def _phones(match: re.Match[str]) -> list[tuple[int, int]]:
+    """The phone-shaped windows of digit groups in one digit run; [] when it holds none, so the
+    scan moves past the run (it was analyzed whole)."""
     run = match.group(0)
     if _glued_to_a_code(match) or _DOTTED_QUAD.fullmatch(run.strip("()[]")):
-        return run
+        return []
     # A measure after the run ("100 / 200 / 1500 sq ft"): a window that ends the run is a
     # quantity, not a phone. Earlier windows still count ("call 305-555-0199. 3 bedrooms").
     measure = _MEASURE_AFTER.match(match.string, match.end())
@@ -906,16 +986,9 @@ def _phones(match: re.Match[str]) -> str | None:
         begin = groups[start].start()
         while begin > 0 and run[begin - 1] in "([+":
             begin -= 1
-        spans.append((begin, groups[end - 1].end()))
+        spans.append((match.start() + begin, match.start() + groups[end - 1].end()))
         start = end
-    if not spans:
-        return run
-    pieces, cursor = [], 0
-    for begin, finish in spans:
-        pieces += [run[cursor:begin], MASK]
-        cursor = finish
-    pieces.append(run[cursor:])
-    return "".join(pieces)
+    return spans
 
 
 def _glued_to_a_code(match: re.Match[str]) -> bool:
@@ -1009,31 +1082,35 @@ def _is_latin_mobile(joined: str, count: int) -> bool:
 
 # Order matters: emails and URLs before the handles and domains inside them; phones before
 # platform handles, so "whatsapp 305 555 0199" loses the whole number; masks hold no letter or
-# digit, so a later pattern never matches inside an earlier mask.
+# digit, so a later pattern never matches inside an earlier mask. A contact an earlier mask
+# cuts is joined back whole (redact_contacts).
 _SPELLED_EMAILS: Final = _RunSearch(
     _LOCAL_HEAD, _LOCAL_STEP, SPELLED_EMAIL, _is_spelled_email, tail="at"
 )
 _SPELLED_URLS: Final = _RunSearch(_DOMAIN_HEAD, _DOMAIN_STEP, SPELLED_URL)
-_STEPS: Final[tuple[tuple[_Search, _Replace], ...]] = (
-    (SPACED_LETTERS_EMAIL, _mask),
-    (PLAIN_EMAIL, _mask),
-    (SPACED_EMAIL, _mask),
-    (_SPELLED_EMAILS, _mask),
-    (PROVIDER_EMAIL, _mask_provider_email),
-    (GLUED_EMAIL, _mask),
-    (_SPELLED_URLS, _mask),  # before URL: "miweb punto com.mx" is masked from "miweb"
-    (URL, _mask_url),
-    (SPELLED_PHONE, _mask),
+_PHONE_STEPS: Final[tuple[tuple[_Search, _Rule], ...]] = (
+    (SPELLED_PHONE, _whole(_mask)),
     (DIGIT_RUN, _phones),
-    (PLATFORM_HANDLE, _mask_handle),
-    (REVERSE_HANDLE, _mask_reverse_handle),
-    (AT_HANDLE, _mask),
-    (CASHTAG, _mask),
-    (STREET, _mask_street),
-    (REVERSED_STREET, _mask_reversed_street),
-    (GRID_OR_HIGHWAY, _mask),
-    (SPANISH_STREET, _mask),
-    (UNIT_OR_BOX, _mask),
+)
+_STEPS: Final[tuple[tuple[_Search, _Rule], ...]] = (
+    (SPACED_LETTERS_EMAIL, _whole(_mask)),
+    (PLAIN_EMAIL, _whole(_mask)),
+    (SPACED_EMAIL, _whole(_mask)),
+    (_SPELLED_EMAILS, _whole(_mask)),
+    (PROVIDER_EMAIL, _whole(_mask_provider_email)),
+    (GLUED_EMAIL, _whole(_mask)),
+    (_SPELLED_URLS, _whole(_mask)),
+    (URL, _whole(_mask_url)),
+    *_PHONE_STEPS,
+    (PLATFORM_HANDLE, _whole(_mask_handle)),
+    (REVERSE_HANDLE, _whole(_mask_reverse_handle)),
+    (AT_HANDLE, _whole(_mask)),
+    (CASHTAG, _whole(_mask)),
+    (STREET, _whole(_mask_street)),
+    (REVERSED_STREET, _whole(_mask_reversed_street)),
+    (GRID_OR_HIGHWAY, _whole(_mask)),
+    (SPANISH_STREET, _whole(_mask)),
+    (UNIT_OR_BOX, _whole(_mask)),
 )
 # The rules with a literal TLD or provider list run first on the text without its marks: a
 # mark glued inside "gmail" or "com" splits the literal ("gmail.c" + U+0483 + "om", "jose at
@@ -1645,11 +1722,11 @@ def _unit_spans(text: str, tokens: list[_KnownToken], unit: str) -> list[tuple[i
 
 
 def _mask_spans(text: str, spans: list[tuple[int, int]]) -> tuple[str, int]:
-    """`text` with each span (merged when they overlap) replaced by the mask."""
+    """`text` with each span (merged when they overlap or touch) replaced by the mask."""
     pieces: list[str] = []
     position = count = 0
     for start, end in sorted(spans):
-        if start < position:  # overlaps the previous mask: extend it
+        if count and start <= position:  # overlaps or touches the previous mask: extend it
             if end > position:
                 position = end
             continue
