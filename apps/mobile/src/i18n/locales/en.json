@@ -10,7 +10,8 @@
     "hide": "Hide",
     "showPassword": "Show password",
     "hidePassword": "Hide password",
-    "dismiss": "Dismiss"
+    "dismiss": "Dismiss",
+    "notSet": "Not set"
   },
   "welcome": {
     "support": "Tell Jack. We'll take care of the rest.",

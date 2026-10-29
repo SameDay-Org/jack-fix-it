@@ -2,7 +2,7 @@ import type { ParseKeys, TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
 
-import { Button, Input, Stepper } from "@/components/ui";
+import { Button, Input, ValueStepper } from "@/components/ui";
 import { BackButton } from "@/features/auth/components/BackButton";
 import { formatMoneyExact, formatRate } from "@/features/quotes/format";
 
@@ -18,6 +18,12 @@ import { DURATION_MINUTES_STEP, START_STEP_MINUTES, type QuoteDraftState } from 
 
 const MINUTES_PER_HOUR = 60;
 const DAY = 1;
+/** The share of a note's limit from which its counter shows (and is read), as the kit's sample. */
+const COUNTER_FROM = 0.9;
+
+/** "1850 / 2000" once a note nears its limit; nothing before, so typing is not read out. */
+const nearLimit = (text: string, max: number): string | undefined =>
+  text.length >= max * COUNTER_FROM ? `${text.length} / ${max}` : undefined;
 
 type QuoteFormStepProps = {
   quote: QuoteDraftState;
@@ -93,7 +99,7 @@ export function QuoteFormStep({ quote, takeRateBps, preferredDate, onReview }: Q
         error={problemText(t, "scope", problems.scope)}
         multiline
         maxLength={SCOPE_MAX_LENGTH}
-        counter
+        counter={nearLimit(draft.scope, SCOPE_MAX_LENGTH)}
         autoCapitalize="sentences"
         testID="quote-scope"
       />
@@ -104,7 +110,7 @@ export function QuoteFormStep({ quote, takeRateBps, preferredDate, onReview }: Q
         hint={t("quoteForm.approach.hint")}
         multiline
         maxLength={APPROACH_MAX_LENGTH}
-        counter
+        counter={nearLimit(draft.approach, APPROACH_MAX_LENGTH)}
         autoCapitalize="sentences"
         testID="quote-approach"
       />
@@ -113,7 +119,7 @@ export function QuoteFormStep({ quote, takeRateBps, preferredDate, onReview }: Q
         <Text accessibilityRole="header" className="text-headline text-navy-900">
           {t("quoteForm.duration.title")}
         </Text>
-        <Stepper
+        <ValueStepper
           label={t("quoteForm.duration.hours")}
           valueText={t("quoteForm.duration.hoursValue", { count: duration.hours })}
           onDecrement={() => quote.stepHours(-1)}
@@ -124,7 +130,7 @@ export function QuoteFormStep({ quote, takeRateBps, preferredDate, onReview }: Q
           invalid={durationError !== undefined}
           testID="quote-hours"
         />
-        <Stepper
+        <ValueStepper
           label={t("quoteForm.duration.minutes")}
           valueText={t("quoteForm.duration.minutesValue", { count: duration.minutes })}
           onDecrement={() => quote.stepMinutes(-1)}
@@ -147,7 +153,7 @@ export function QuoteFormStep({ quote, takeRateBps, preferredDate, onReview }: Q
             {t("quoteForm.start.preferred", { date: formatDay(preferredDate) })}
           </Text>
         ) : null}
-        <Stepper
+        <ValueStepper
           label={t("quoteForm.start.day")}
           valueText={formatInstantDay(draft.startAt)}
           onDecrement={() => quote.stepDay(-DAY)}
@@ -158,7 +164,7 @@ export function QuoteFormStep({ quote, takeRateBps, preferredDate, onReview }: Q
           invalid={startError !== undefined}
           testID="quote-day"
         />
-        <Stepper
+        <ValueStepper
           label={t("quoteForm.start.time")}
           valueText={formatTimeOfDay(draft.startAt)}
           onDecrement={() => quote.stepTime(-1)}

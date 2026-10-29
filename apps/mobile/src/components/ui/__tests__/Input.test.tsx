@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react-native";
 import { createRef } from "react";
-import { StyleSheet, Text } from "react-native";
+import { AccessibilityInfo, Platform, StyleSheet, Text } from "react-native";
 
 import { bubbleShadow } from "@/theme";
 
@@ -135,5 +135,129 @@ describe("Input", () => {
     expect(row.children.indexOf(field())).toBe(0);
     expect(row.children).toHaveLength(2);
     expect(screen.getByText("Show")).toBeTruthy();
+  });
+
+  it("multiline: a tall field whose text starts at the top", async () => {
+    await render(
+      <Input label="Email" value="" onChangeText={jest.fn()} multiline testID="email" />,
+    );
+
+    expect(field().props.multiline).toBe(true);
+    expect(field().props.textAlignVertical).toBe("top");
+    expect(field().props.className).toContain("min-h-32");
+    expect(bubble().props.className).toContain("items-start");
+  });
+
+  it("a single-line field stays centered in its bubble", async () => {
+    await render(<Input label="Email" value="" onChangeText={jest.fn()} testID="email" />);
+
+    expect(field().props.multiline).toBe(false);
+    expect(field().props.textAlignVertical).toBeUndefined();
+    expect(bubble().props.className).toContain("items-center");
+  });
+
+  it("shows the counter at the end of the message line, read politely, beside the hint", async () => {
+    await render(
+      <Input
+        label="Email"
+        value="x"
+        onChangeText={jest.fn()}
+        hint="Optional"
+        counter="1,850 / 2,000"
+        maxLength={2000}
+        testID="email"
+      />,
+    );
+
+    const counter = screen.getByTestId("email-counter");
+    expect(counter).toHaveTextContent("1,850 / 2,000");
+    expect(counter.props.accessibilityLiveRegion).toBe("polite");
+    expect(screen.getByText("Optional")).toBeTruthy();
+    expect(field().props.maxLength).toBe(2000);
+  });
+
+  describe("counter announcements", () => {
+    const MAX = 10;
+    let announce: jest.SpyInstance;
+
+    beforeEach(() => {
+      announce = jest
+        .spyOn(AccessibilityInfo, "announceForAccessibilityWithOptions")
+        .mockImplementation();
+    });
+
+    afterEach(() => {
+      announce.mockRestore();
+      jest.restoreAllMocks(); // Platform.OS
+    });
+
+    // The field as a screen drives it: the counter shows from 9 characters (90% of the limit).
+    const typed = (value: string) => (
+      <Input
+        label="Email"
+        value={value}
+        onChangeText={jest.fn()}
+        maxLength={MAX}
+        counter={value.length >= 9 ? `${value.length} / ${MAX}` : undefined}
+        testID="email"
+      />
+    );
+
+    it("iOS: at the threshold and at the limit, not per keystroke or on a same-text render", async () => {
+      jest.replaceProperty(Platform, "OS", "ios");
+      const { rerender } = await render(typed("abcdefg"));
+      await fireEvent(field(), "focus");
+
+      await rerender(typed("abcdefgh")); // 8: no counter yet
+      expect(announce).not.toHaveBeenCalled();
+
+      await rerender(typed("abcdefghi")); // 9: the counter appears
+      expect(announce).toHaveBeenCalledTimes(1);
+      expect(announce).toHaveBeenLastCalledWith("9 / 10", { queue: true });
+
+      await rerender(typed("abcdefghi")); // unchanged
+      expect(announce).toHaveBeenCalledTimes(1);
+
+      await rerender(typed("abcdefghij")); // 10: the limit
+      expect(announce).toHaveBeenCalledTimes(2);
+      expect(announce).toHaveBeenLastCalledWith("10 / 10", { queue: true });
+
+      await rerender(typed("abcdefghi")); // back under it, still showing: quiet
+      await rerender(typed("abcdefgh")); // the counter goes away: quiet
+      expect(announce).toHaveBeenCalledTimes(2);
+    });
+
+    it("iOS: a counter already showing when the field takes focus stays quiet", async () => {
+      jest.replaceProperty(Platform, "OS", "ios");
+      await render(typed("abcdefghij"));
+      await fireEvent(field(), "focus");
+
+      expect(announce).not.toHaveBeenCalled();
+    });
+
+    it("Android: the live region reads it, so nothing is announced twice", async () => {
+      jest.replaceProperty(Platform, "OS", "android");
+      const { rerender } = await render(typed("abcdefgh"));
+      await fireEvent(field(), "focus");
+      await rerender(typed("abcdefghi"));
+      await rerender(typed("abcdefghij"));
+
+      expect(announce).not.toHaveBeenCalled();
+      expect(screen.getByTestId("email-counter").props.accessibilityLiveRegion).toBe("polite");
+    });
+  });
+
+  it("calls onBlur and still drops the focus ring", async () => {
+    const onBlur = jest.fn();
+    await render(
+      <Input label="Email" value="" onChangeText={jest.fn()} onBlur={onBlur} testID="email" />,
+    );
+
+    await fireEvent(field(), "focus");
+    expect(bubble().props.className).toContain("border-green-700");
+    await fireEvent(field(), "blur");
+
+    expect(onBlur).toHaveBeenCalledTimes(1);
+    expect(bubble().props.className).toContain("border-transparent");
   });
 });

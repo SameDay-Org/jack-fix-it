@@ -1,9 +1,10 @@
-import type { ComponentRef, ReactNode, Ref } from "react";
-import { Text, TextInput, View, type TextInputProps } from "react-native";
+import { useEffect, useRef, type ComponentRef, type ReactNode, type Ref } from "react";
+import { Platform, Text, TextInput, View, type TextInputProps } from "react-native";
 
 import { bubbleShadow, continuousCorners } from "@/theme";
 
 import { cx } from "./cx";
+import { announce } from "./focus";
 import { useFlag } from "./useFlag";
 
 type PassthroughProps = Pick<
@@ -21,6 +22,7 @@ type PassthroughProps = Pick<
   | "submitBehavior"
   | "onSubmitEditing"
   | "maxLength"
+  | "onBlur"
 >;
 
 /** The native field behind an `Input`, for focus management between fields. */
@@ -37,6 +39,14 @@ export type InputProps = PassthroughProps & {
   error?: string;
   /** Danger ring only, when the message is shown elsewhere (a form-level error that names this field). */
   invalid?: boolean;
+  /** A tall field for a few sentences: the text starts at the top and wraps. */
+  multiline?: boolean;
+  /**
+   * A short note at the end of the message line, such as how many characters are left. Android
+   * reads its changes as a polite live region; iOS has none, so VoiceOver hears it when it appears
+   * and when the text reaches `maxLength`, while the field has focus.
+   */
+  counter?: string;
   disabled?: boolean;
   /**
    * Fixed text at the field's left end that is part of the value but not typed (a calling code
@@ -48,12 +58,6 @@ export type InputProps = PassthroughProps & {
    * row, so the text column is whatever width remains: nothing overlaps at any font scale.
    */
   accessory?: ReactNode;
-  /** Several lines of text, growing from a three-line box. */
-  multiline?: boolean;
-  /** Shows "120 / 2000" under the field; needs `maxLength`. */
-  counter?: boolean;
-  /** The field lost focus (the focus ring is handled here). */
-  onBlur?: () => void;
   /** The native field, so a previous field's return key can move focus here. */
   ref?: Ref<InputHandle>;
   /** Layout-only classes for the wrapper (margins, width). */
@@ -73,29 +77,27 @@ export function Input({
   hint,
   error,
   invalid = false,
+  multiline = false,
+  counter,
   disabled = false,
   prefix,
   accessory,
-  multiline = false,
-  counter = false,
-  onBlur,
   ref,
   className,
   testID,
+  onBlur,
+  maxLength,
   ...textInputProps
 }: InputProps) {
-  const [focused, focus, blur] = useFlag();
+  const [focused, focus, blurred] = useFlag();
+  const blur: NonNullable<InputProps["onBlur"]> = (event) => {
+    blurred();
+    onBlur?.(event);
+  };
   const hasError = Boolean(error);
   const message = error || hint;
   const ring = hasError || invalid ? RING.error : focused ? RING.focused : RING.rest;
-  const count =
-    counter && textInputProps.maxLength !== undefined
-      ? `${value.length} / ${textInputProps.maxLength}`
-      : null;
-  const handleBlur = () => {
-    blur();
-    onBlur?.();
-  };
+  useCounterAnnouncement(counter, maxLength !== undefined && value.length >= maxLength, focused);
 
   return (
     <View className={className}>
@@ -105,7 +107,7 @@ export function Input({
         style={[bubbleShadow, continuousCorners]}
         className={cx(
           "min-h-12 flex-row rounded-md border-2 bg-white",
-          multiline ? "items-stretch" : "items-center",
+          multiline ? "items-start" : "items-center",
           ring,
           disabled && "opacity-50",
         )}
@@ -118,6 +120,7 @@ export function Input({
         <TextInput
           {...textInputProps}
           ref={ref}
+          maxLength={maxLength}
           accessibilityLabel={label}
           accessibilityHint={message}
           accessibilityState={{ disabled }}
@@ -125,19 +128,19 @@ export function Input({
           value={value}
           onChangeText={onChangeText}
           onFocus={focus}
-          onBlur={handleBlur}
+          onBlur={blur}
           multiline={multiline}
-          textAlignVertical={multiline ? "top" : "center"}
+          textAlignVertical={multiline ? "top" : undefined}
           testID={testID}
           className={cx(
-            "flex-1 text-body text-navy-900",
-            multiline ? "min-h-28 py-3" : "min-h-12",
+            "min-h-12 flex-1 text-body text-navy-900",
+            multiline && "min-h-32 py-3",
             prefix ? "pl-2 pr-4" : "px-4",
           )}
         />
         {accessory ? <View className="pr-1">{accessory}</View> : null}
       </View>
-      {message || count ? (
+      {message || counter ? (
         <View className="mt-1 flex-row gap-3">
           <Text
             accessibilityLiveRegion={hasError ? "polite" : "none"}
@@ -145,18 +148,32 @@ export function Input({
           >
             {message}
           </Text>
-          {count ? (
+          {counter ? (
             <Text
-              accessibilityElementsHidden
-              importantForAccessibility="no"
+              accessibilityLiveRegion="polite"
               className="text-footnote text-gray-500"
               testID={testID && `${testID}-counter`}
             >
-              {count}
+              {counter}
             </Text>
           ) : null}
         </View>
       ) : null}
     </View>
   );
+}
+
+/**
+ * iOS only (Android's live region already reads the counter): announces it at the two moments that
+ * matter while typing, when it first shows and when the text reaches the limit, never per keystroke.
+ * A counter already showing when the field takes focus (a draft read back) stays quiet.
+ */
+function useCounterAnnouncement(counter: string | undefined, atLimit: boolean, focused: boolean) {
+  const previous = useRef({ shown: Boolean(counter), atLimit });
+  useEffect(() => {
+    const before = previous.current;
+    previous.current = { shown: Boolean(counter), atLimit };
+    if (Platform.OS !== "ios" || !focused || !counter) return;
+    if (!before.shown || (atLimit && !before.atLimit)) announce(counter);
+  }, [counter, atLimit, focused]);
 }

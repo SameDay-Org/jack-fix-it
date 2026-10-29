@@ -7,10 +7,12 @@ import { useFlag } from "./useFlag";
 
 export type ChoiceCardProps = {
   title: string;
-  /** One line under the title; read as the accessibility hint. */
-  description: string;
+  /** One line under the title, when the choice needs one; read as the accessibility hint. */
+  description?: string;
   selected: boolean;
   onPress: () => void;
+  /** Not a choice right now: dimmed, takes no presses; the description says why. */
+  disabled?: boolean;
   /** Layout-only classes (margins). */
   className?: string;
   testID?: string;
@@ -25,6 +27,7 @@ export function ChoiceCard({
   description,
   selected,
   onPress,
+  disabled = false,
   className,
   testID,
 }: ChoiceCardProps) {
@@ -33,10 +36,11 @@ export function ChoiceCard({
   return (
     <Pressable
       accessibilityRole="radio"
-      accessibilityState={{ checked: selected }}
+      accessibilityState={{ checked: selected, disabled }}
       accessibilityLabel={title}
       accessibilityHint={description}
       onPress={onPress}
+      disabled={disabled}
       onPressIn={pressIn}
       onPressOut={pressOut}
       testID={testID}
@@ -44,12 +48,13 @@ export function ChoiceCard({
       className={cx(
         "flex-row items-center gap-4 rounded-lg border-2 bg-white p-4",
         selected ? "border-green-700" : "border-transparent",
+        disabled && "opacity-50",
         className,
       )}
     >
       <View className="flex-1 gap-1">
         <Text className="text-headline text-navy-900">{title}</Text>
-        <Text className="text-callout text-gray-500">{description}</Text>
+        {description ? <Text className="text-callout text-gray-500">{description}</Text> : null}
       </View>
       <View
         testID={testID && `${testID}-indicator`}

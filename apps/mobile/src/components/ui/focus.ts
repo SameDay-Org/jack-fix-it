@@ -8,3 +8,12 @@ export function moveAccessibilityFocus(instance: Parameters<typeof findNodeHandl
   const tag = findNodeHandle(instance);
   if (tag != null) AccessibilityInfo.setAccessibilityFocus(tag);
 }
+
+/**
+ * Speaks a message without moving focus: a notice that appeared away from it, a counter reaching
+ * its limit. Queued on iOS so it follows what VoiceOver is saying instead of cutting it off;
+ * Android has no queue option and speaks it through TalkBack's announcement.
+ */
+export function announce(message: string): void {
+  AccessibilityInfo.announceForAccessibilityWithOptions(message, { queue: true });
+}

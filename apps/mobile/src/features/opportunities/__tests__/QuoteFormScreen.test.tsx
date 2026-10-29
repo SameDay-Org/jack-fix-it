@@ -270,10 +270,13 @@ describe("QuoteFormScreen: the form", () => {
     await renderForm();
     expect(screen.getByTestId("quote-scope").props.maxLength).toBe(2000);
     expect(screen.getByTestId("quote-approach").props.maxLength).toBe(2000);
-    await typeInto("quote-approach", "Two coats.");
-    // Shown, not read: the field's limit stops typing at the bound.
-    expect(screen.getByTestId("quote-approach-counter", HIDDEN)).toHaveTextContent("10 / 2000");
-    expect(screen.getByTestId("quote-scope-counter", HIDDEN)).toHaveTextContent("0 / 2000");
+    // No counter while far from the limit, so typing is not read out; from 90 % it shows.
+    await typeInto("quote-approach", "a".repeat(1799));
+    expect(screen.queryByTestId("quote-approach-counter", HIDDEN)).toBeNull();
+    await typeInto("quote-approach", "a".repeat(1800));
+    expect(screen.getByTestId("quote-approach-counter")).toHaveTextContent("1800 / 2000");
+    await typeInto("quote-scope", "a".repeat(2000));
+    expect(screen.getByTestId("quote-scope-counter")).toHaveTextContent("2000 / 2000");
   });
 });
 

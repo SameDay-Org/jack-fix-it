@@ -1,4 +1,5 @@
 import { VARIANT } from "@/components/ui/Button";
+import { TONE as NOTICE_TONE } from "@/components/ui/Notice";
 import { TONE } from "@/components/ui/StatusBadge";
 
 import tokens from "./tokens.json";
@@ -155,6 +156,22 @@ describe("theme tokens", () => {
       expect(label).toBeDefined();
       for (const surface of LIGHT_SURFACES) {
         expect(paintedContrast(label!, fill, surface)).toBeGreaterThanOrEqual(AA_TEXT);
+      }
+    },
+  );
+
+  // A notice's tint is translucent, so its text is measured over the tint on each page surface.
+  it.each(Object.entries(NOTICE_TONE))(
+    "notice text keeps AA over its tint on white and gray-50: %s",
+    (_tone, { surface, title, body }) => {
+      const fill = paintOf(surface, "bg");
+      expect(fill).toBeDefined();
+      for (const text of [title, body]) {
+        const paint = paintOf(text, "text");
+        expect(paint).toBeDefined();
+        for (const page of LIGHT_SURFACES) {
+          expect(paintedContrast(paint!, fill, page)).toBeGreaterThanOrEqual(AA_TEXT);
+        }
       }
     },
   );

@@ -61,4 +61,31 @@ describe("ChoiceCard", () => {
       borderCurve: "continuous",
     });
   });
+
+  it("leaves the description out when there is none", async () => {
+    await render(<ChoiceCard title="One time" selected={false} onPress={jest.fn()} />);
+
+    const oneTime = screen.getByRole("radio", { name: "One time" });
+    expect(oneTime.props.accessibilityHint).toBeUndefined();
+    expect(screen.getAllByText(/./)).toHaveLength(1); // the title alone
+  });
+
+  it("exposes disabled, dims and ignores presses", async () => {
+    const onPress = jest.fn();
+    await render(
+      <ChoiceCard
+        title="Mom's"
+        description="Not in our area yet."
+        selected={false}
+        disabled
+        onPress={onPress}
+      />,
+    );
+
+    const moms = screen.getByRole("radio", { name: "Mom's" });
+    expect(moms.props.accessibilityState).toMatchObject({ checked: false, disabled: true });
+    expect(moms.props.className).toContain("opacity-50");
+    await fireEvent.press(moms);
+    expect(onPress).not.toHaveBeenCalled();
+  });
 });
