@@ -5,11 +5,12 @@ import json
 import logging
 import uuid
 from collections import Counter
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from enum import StrEnum
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -33,11 +34,13 @@ from app.integrations.expo_push import (
 from app.modules.devices.models import Device, DevicePlatform
 from app.modules.devices.service import DeviceService
 from app.modules.notifications.models import NotificationPreference
-from app.modules.notifications.preferences import PREFERENCE_GROUPS
+from app.modules.notifications.preferences import PREFERENCE_GROUPS, Channel, PreferenceGroup
+from app.modules.notifications.preferences_service import NotificationPreferenceService
 from app.modules.notifications.push_tasks import (
     PushStateNotStoredError,
     PushStore,
     Recipient,
+    Status,
     check_push_receipts,
     send_push,
 )
@@ -744,7 +747,7 @@ async def test_send_push_muted_group_sends_nothing(
         await push(ctx, user, "quote:1", **QUOTE)
 
     assert sender.sent == []
-    assert await statuses(redis, prefix, "quote:1") == ["muted", "muted"]
+    assert await statuses(redis, prefix, "quote:1") == ["failed", "failed"]  # muted
     [record] = [r for r in caplog.records if r.message == "push_muted"]
     assert record.__dict__["user_id"] == str(user.id)
     assert record.__dict__["group"] == "quotes_and_opportunities"
@@ -780,7 +783,7 @@ async def test_receipt_resend_while_muted_sends_nothing(
     await push(ctx, user, "quote:1", **QUOTE)  # the worker runs the queued job
 
     assert sent_to(sender) == {BUSY: 1, OK: 1}  # the first send only
-    assert sorted(await statuses(redis, prefix, "quote:1")) == ["accepted", "muted"]
+    assert sorted(await statuses(redis, prefix, "quote:1")) == ["accepted", "failed"]
 
 
 async def test_send_push_default_and_enabled_send(
@@ -810,3 +813,189 @@ async def test_test_push_never_muted(
     await push(ctx, user)  # push.test.*
 
     assert sent_to(sender) == {OK: 1}
+
+
+# Round 1 (#231, B1): a worker of the previous version (a rollback, or two versions running
+# during a deploy) reads the delivery state this one stores. develop 3dcd842's reader, copied
+# here on purpose and never imported: it must not follow later changes to push_tasks.
+
+
+class PreviousStatus(StrEnum):
+    """develop 3dcd842's Status: the only values a stored state may hold."""
+
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    DEAD = "dead"
+    GONE = "gone"
+    FAILED = "failed"
+    IN_FLIGHT = "in_flight"
+    UNKNOWN = "unknown"
+
+
+# What develop 3dcd842 reads as final: never sent again, nothing left to clean up.
+PREVIOUS_FINAL = {PreviousStatus.GONE, PreviousStatus.FAILED, PreviousStatus.UNKNOWN}
+DEAD = "ExponentPushToken[dead]"
+GROUP = "quotes_and_opportunities"
+
+
+def previous_delivery(
+    fields: Mapping[bytes, bytes],
+) -> dict[uuid.UUID, tuple[PreviousStatus, int, str | None]]:
+    """develop 3dcd842's PushStore.delivery and Recipient.decode: it decodes every device of
+    the message, and one status it does not know raises ValueError."""
+
+    def text(value: bytes) -> str:
+        return value.decode()
+
+    decoded: dict[uuid.UUID, tuple[PreviousStatus, int, str | None]] = {}
+    for name, value in fields.items():
+        if text(name) == "request":
+            continue
+        status, attempts, ticket_id = text(value).split(":", 2)
+        decoded[uuid.UUID(text(name))] = (PreviousStatus(status), int(attempts), ticket_id or None)
+    return decoded
+
+
+async def device_ids(session: AsyncSession, user: User) -> dict[str, uuid.UUID]:
+    devices = await session.scalars(select(Device).where(Device.user_id == user.id))
+    return {device.expo_push_token: device.id for device in devices}
+
+
+async def mixed_quote(
+    ctx: dict[str, Any], session: AsyncSession, sender: FakeSender, queue: FakeQueue, user: User
+) -> None:
+    """quote:1 as this worker leaves it with OK accepted and BUSY muted: both were sent, BUSY's
+    receipt asked for a resend, and the group was turned off before the resend ran."""
+    await push(ctx, user, "quote:1", **QUOTE)
+    sender.receipts = {f"ticket-{BUSY}": Receipt(ok=False, error=RATE_LIMITED)}
+    await set_preference(session, user, GROUP, False)
+    await check_push_receipts(ctx)
+    await push(ctx, user, "quote:1", **QUOTE)  # the queued resend: BUSY is muted
+    queue.jobs.clear()  # that job ran
+    sender.receipts = {}
+
+
+async def test_stored_statuses_are_readable_by_previous_worker(
+    ctx: dict[str, Any],
+    db_session: AsyncSession,
+    sender: FakeSender,
+    queue: FakeQueue,
+    redis: Redis,
+    prefix: str,
+) -> None:
+    # Every status this worker can store (a mute among them) is one the previous worker knows.
+    assert {status.value for status in Status} <= {status.value for status in PreviousStatus}
+
+    user = await make_user(db_session, "en", BUSY, OK)
+    await mixed_quote(ctx, db_session, sender, queue, user)
+    fields = await cast(Awaitable[dict[bytes, bytes]], redis.hgetall(f"{prefix}:message:quote:1"))
+
+    decoded = previous_delivery(fields)  # raises on a status it does not know
+
+    ids = await device_ids(db_session, user)
+    assert decoded[ids[OK]] == (PreviousStatus.ACCEPTED, 1, f"ticket-{OK}")
+    muted, _, _ = decoded[ids[BUSY]]
+    assert muted in PREVIOUS_FINAL  # final: the previous worker never sends it again
+    assert muted is not PreviousStatus.PENDING  # not due
+
+
+async def test_receipt_sweep_with_mixed_accepted_and_muted_delivery(
+    ctx: dict[str, Any],
+    db_session: AsyncSession,
+    sender: FakeSender,
+    queue: FakeQueue,
+    redis: Redis,
+    prefix: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    user = await make_user(db_session, "en", BUSY, OK)
+    await mixed_quote(ctx, db_session, sender, queue, user)
+    other = await make_user(db_session, "en", DEAD)
+    await push(ctx, other, "test:2")  # an unrelated message
+    assert await ticket_ids(redis, prefix) == {f"ticket-{OK}", f"ticket-{DEAD}"}
+    sender.receipts = {
+        f"ticket-{OK}": Receipt(ok=False, error=RATE_LIMITED),
+        f"ticket-{DEAD}": Receipt(ok=False, error="DeviceNotRegistered"),
+    }
+
+    caplog.clear()  # mixed_quote ran a sweep already
+    with caplog.at_level(logging.INFO):
+        await check_push_receipts(ctx)
+
+    assert set(sender.asked[-1]) == {f"ticket-{OK}", f"ticket-{DEAD}"}  # one batch
+    [record] = [r for r in caplog.records if r.message == "push_receipts_checked"]
+    counts = {key: record.__dict__[key] for key in ("checked", "dead", "resent")}
+    assert counts == {"checked": 2, "dead": 1, "resent": 1}  # the sweep completed
+    assert await ticket_ids(redis, prefix) == set()  # the completed tickets are deleted
+    assert await device_tokens(db_session) == {BUSY, OK}  # the unrelated device is cleaned up
+    assert set(queue.jobs) == {"push:quote:1"}
+    await push(ctx, user, "quote:1", **QUOTE)  # the queued resend runs, still muted
+    assert sent_to(sender) == {BUSY: 1, OK: 1, DEAD: 1}  # BUSY was never sent after the mute
+    assert await statuses(redis, prefix, "quote:1") == ["failed", "failed"]
+
+
+async def test_mute_keeps_dead_token_cleanup(
+    ctx: dict[str, Any],
+    db_session: AsyncSession,
+    sender: FakeSender,
+    redis: Redis,
+    prefix: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await make_user(db_session, "en", DEAD, BUSY)
+    sender.errors = {DEAD: "DeviceNotRegistered", BUSY: RATE_LIMITED}
+    forget = DeviceService.forget
+
+    async def database_down(self: DeviceService, device_id: uuid.UUID) -> None:
+        raise SQLAlchemyError("synthetic outage")
+
+    monkeypatch.setattr(DeviceService, "forget", database_down)
+    with pytest.raises(Retry):
+        await push(ctx, user, "quote:1", **QUOTE)
+    assert sorted(await statuses(redis, prefix, "quote:1")) == ["dead", "pending"]
+
+    monkeypatch.setattr(DeviceService, "forget", forget)
+    await set_preference(db_session, user, GROUP, False)
+    await push({**ctx, "job_try": 2}, user, "quote:1", **QUOTE)  # done: no Retry
+
+    assert sent_to(sender) == {DEAD: 1, BUSY: 1}  # the first run only
+    assert await device_tokens(db_session) == {BUSY}  # the dead device is still deleted
+    assert sorted(await statuses(redis, prefix, "quote:1")) == ["failed", "gone"]
+
+
+@pytest.mark.parametrize("on_at_lookup", [True, False])
+async def test_preference_change_mid_run_is_one_decision(
+    on_at_lookup: bool,
+    ctx: dict[str, Any],
+    db_session: AsyncSession,
+    sender: FakeSender,
+    redis: Redis,
+    prefix: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await make_user(db_session, "en", BUSY, OK)
+    await set_preference(db_session, user, GROUP, on_at_lookup)
+    enabled = NotificationPreferenceService.enabled
+    lookups: list[bool] = []
+
+    async def then_flip(
+        self: NotificationPreferenceService,
+        user_id: uuid.UUID,
+        group: PreferenceGroup,
+        channel: Channel,
+    ) -> bool:
+        answer = await enabled(self, user_id, group, channel)
+        lookups.append(answer)
+        await set_preference(db_session, user, GROUP, not on_at_lookup)  # right after the read
+        return answer
+
+    monkeypatch.setattr(NotificationPreferenceService, "enabled", then_flip)
+    await push(ctx, user, "quote:1", **QUOTE)
+
+    assert lookups == [on_at_lookup]  # read once for the whole run
+    if on_at_lookup:  # every device sent
+        assert sent_to(sender) == {BUSY: 1, OK: 1}
+        assert await statuses(redis, prefix, "quote:1") == ["accepted", "accepted"]
+    else:  # every device muted
+        assert sender.sent == []
+        assert await statuses(redis, prefix, "quote:1") == ["failed", "failed"]

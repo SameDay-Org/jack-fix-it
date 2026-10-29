@@ -13,8 +13,10 @@ and device ids, Expo error codes and counts only. Only an active user is sent to
 the devices and the locale, the status is read when the message runs, so a user suspended after
 an event was queued gets nothing. A message whose preference group the user turned off for push
 (#217, notifications.preferences) is muted the same way, at send time: its devices still to
-send become `muted`, final, so a retry or a receipt's resend never sends it, even once the
-group is back on.
+send become `failed`, final, so a retry or a receipt's resend never sends it, even once the
+group is back on. A mute is stored as `failed`, not as a status of its own, so a worker of an
+earlier version (a rollback, or two versions running during a deploy) still reads the state;
+only the `push_muted` log line names it.
 
 Expo has no idempotency key, so a device is never left plain pending once it may have been sent
 to: before the HTTP call its state becomes `in_flight` (if that write fails, nothing is sent and
@@ -89,10 +91,9 @@ class Status(StrEnum):
     ACCEPTED = "accepted"  # Expo took it; its ticket waits for a receipt
     DEAD = "dead"  # DeviceNotRegistered; the device is still to be deleted
     GONE = "gone"  # DeviceNotRegistered; the device was deleted
-    FAILED = "failed"  # a final error, or out of attempts
+    FAILED = "failed"  # a final error, out of attempts, or muted (#217): never sent again
     IN_FLIGHT = "in_flight"  # handed to Expo; the outcome is not stored yet
     UNKNOWN = "unknown"  # its outcome was lost after the send: final, never sent again
-    MUTED = "muted"  # the user had turned its group off for push: final, never sent (#217)
 
 
 class PushStateNotStoredError(RuntimeError):
@@ -330,9 +331,10 @@ async def send_push(
             await deps.store.record(message_id, lost)
             logger.warning("push_outcome_unknown", extra={**extra, "count": len(lost)})
             recipients = {**recipients, **lost}
-        # The group is off for push (#217): the devices still to send never get it.
+        # The group is off for push (#217): the devices still to send never get it. Stored as
+        # failed, a status every earlier worker reads as final (no new value in the state).
         silenced = {
-            device_id: replace(recipient, status=Status.MUTED)
+            device_id: replace(recipient, status=Status.FAILED)
             for device_id, recipient in recipients.items()
             if muted and recipient.status is Status.PENDING
         }
