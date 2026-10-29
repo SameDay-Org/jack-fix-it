@@ -8,8 +8,10 @@ import { AccessibilityInfo, Alert, type AlertButton } from "react-native";
 import { ApiError, apiGet, apiPost, NetworkError } from "@/api";
 
 import { flattenOpportunities, OPPORTUNITIES_QUERY_KEY } from "../../pro-home/useOpportunities";
+import { OpportunityDetailScreen } from "../OpportunityDetailScreen";
 import { QuoteFormScreen } from "../QuoteFormScreen";
 import {
+  forgetOpportunity,
   opportunityQueryKey,
   opportunityQueryOptions,
   type OpportunityDetail,
@@ -592,5 +594,206 @@ describe("QuoteFormScreen: denied over a cached detail", () => {
     expect(screen.getByTestId("quote-sent")).toBeTruthy();
     expect(screen.queryByTestId("quote-closed-gone")).toBeNull();
     expect(router.dismissTo).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, unknown]>([
+    ["a network error", new NetworkError(false)],
+    ["a 503", new ApiError(503, "unavailable")],
+  ])(
+    "the denial survives focus and a reopening with %s; only a fresh 200 lifts it",
+    async (_, failure) => {
+      jest.mocked(apiGet).mockRejectedValue(new ApiError(404, "not_found"));
+      const client = seededClient();
+      await renderWithQuery(<QuoteFormScreen />, client);
+      await screen.findByTestId("quote-closed-gone");
+      await waitFor(() =>
+        expect(client.getQueryData(opportunityQueryKey(DISPATCH_ID))).toBeUndefined(),
+      );
+      await act(async () => navigation.setFocused(false));
+      await act(async () => navigation.setFocused(true));
+      await act(() => client.refetchQueries({ queryKey: opportunityQueryKey(DISPATCH_ID) }));
+      expect(apiGet).toHaveBeenCalledTimes(1);
+      expect(client.getQueryData(DENIED_KEY)).toEqual([DISPATCH_ID]);
+
+      jest.mocked(apiGet).mockRejectedValue(failure);
+      await screen.rerender(<QuoteFormScreen key="opened-again" />);
+      await screen.findByTestId("quote-load-error");
+      expect(screen.queryByTestId("quote-form")).toBeNull();
+      expect(client.getQueryData(opportunityQueryKey(DISPATCH_ID))).toBeUndefined();
+      expect(client.getQueryData(DENIED_KEY)).toEqual([DISPATCH_ID]);
+
+      jest.mocked(apiGet).mockResolvedValue(detail({ description: "Fresh authorized body" }));
+      await press("quote-load-error-action");
+      await screen.findByTestId("quote-form");
+      expect(client.getQueryData(DENIED_KEY)).toEqual([]);
+      expect(client.getQueryData(opportunityQueryKey(DISPATCH_ID))).toHaveProperty(
+        "description",
+        "Fresh authorized body",
+      );
+      expect(screen.getByTestId("quote-price").props.value).toBe("");
+    },
+  );
+});
+
+const DENIED_KEY = ["opportunities-denied"];
+
+/** The form over the detail it was pushed from, as the stack keeps them: one cache for both. */
+async function renderStacked(client: QueryClient = seededClient()) {
+  await renderWithQuery(
+    <>
+      <OpportunityDetailScreen />
+      <QuoteFormScreen />
+    </>,
+    client,
+  );
+  await screen.findByTestId("quote-form");
+  return client;
+}
+
+/** A read of the detail by another screen, answering `error`; later reads answer `then`. */
+async function readFails(client: QueryClient, error: unknown, then: unknown) {
+  jest.mocked(apiGet).mockRejectedValueOnce(error).mockRejectedValue(then);
+  await act(async () => {
+    await client.fetchQuery(opportunityQueryOptions(DISPATCH_ID)).catch(() => undefined);
+  });
+}
+
+/** Nothing of the denied opportunity is left: not on screen, not in the cache, not listed. */
+const leftOver = (client: QueryClient) => ({
+  formShown: screen.queryByTestId("quote-form") !== null,
+  reviewShown: screen.queryByTestId("quote-review-step") !== null,
+  detailCached: client.getQueryData(opportunityQueryKey(DISPATCH_ID)) !== undefined,
+  rowListed: listedIds(client).includes(DISPATCH_ID),
+  denied: client.getQueryData(DENIED_KEY),
+});
+const NOTHING_LEFT = {
+  formShown: false,
+  reviewShown: false,
+  detailCached: false,
+  rowListed: false,
+  denied: [DISPATCH_ID],
+};
+
+describe("QuoteFormScreen: denied while the quote is out", () => {
+  it.each<[string, unknown]>([
+    ["network", new NetworkError(false)],
+    ["503", new ApiError(503, "unavailable")],
+  ])("overwritten 404 during send then POST failure closes (%s)", async (_, failure) => {
+    const client = await renderForm();
+    await fillAndReview();
+    const post = deferredPost();
+    await press("quote-send");
+
+    // Two reads by other screens land before the form draws again: it never sees the 404.
+    jest
+      .mocked(apiGet)
+      .mockRejectedValueOnce(new ApiError(404, "not_found"))
+      .mockRejectedValue(failure);
+    await act(async () => {
+      await client.fetchQuery(opportunityQueryOptions(DISPATCH_ID)).catch(() => undefined);
+      await client.fetchQuery(opportunityQueryOptions(DISPATCH_ID)).catch(() => undefined);
+    });
+
+    // The quote waits for its answer, locked: the draft and the detail are gone at once.
+    expect(screen.getByTestId("quote-review-step")).toBeTruthy();
+    expect(screen.getByTestId("quote-edit")).toBeDisabled();
+    await waitFor(() => expect(leftOver(client)).toMatchObject({ detailCached: false }));
+    const reads = jest.mocked(apiGet).mock.calls.length;
+
+    await act(async () => post.fail(new NetworkError(false)));
+    expect(await screen.findByTestId("quote-closed-gone")).toBeTruthy();
+    expect(leftOver(client)).toEqual(NOTHING_LEFT);
+    expect(apiGet).toHaveBeenCalledTimes(reads);
+  });
+
+  it.each<[string, unknown, string]>([
+    ["network", new NetworkError(false), "quote-closed-gone"],
+    ["503", new ApiError(503, "unavailable"), "quote-closed-gone"],
+    ["404", new ApiError(404, "not_found"), "quote-closed-gone"],
+    ["409 not quotable", new ApiError(409, "not_quotable"), "quote-closed-gone"],
+    ["409 quote exists", new ApiError(409, "quote_exists"), "quote-closed-alreadyQuoted"],
+    ["422", new ApiError(422, "validation_error"), "quote-closed-gone"],
+  ])(
+    "stacked detail screen handles the 404 during send, POST fails, form closes (%s)",
+    async (_, failure, closedID) => {
+      const client = await renderStacked();
+      await fillAndReview();
+      const post = deferredPost();
+      await press("quote-send");
+      await readFails(client, new ApiError(404, "not_found"), new NetworkError(false));
+      await waitFor(() => expect(client.getQueryData(DENIED_KEY)).toEqual([DISPATCH_ID]));
+      await waitFor(() =>
+        expect(client.getQueryData(opportunityQueryKey(DISPATCH_ID))).toBeUndefined(),
+      );
+
+      await act(async () => post.fail(failure));
+      expect(await screen.findByTestId(closedID)).toBeTruthy();
+      expect(screen.queryByTestId("quote-edit")).toBeNull();
+      expect(screen.queryByTestId("quote-price")).toBeNull();
+      expect(leftOver(client)).toEqual(NOTHING_LEFT);
+      // Back goes home, not to the detail under it.
+      expect(navigation.attemptLeave()).toBe(false);
+      await waitFor(() => expect(router.dismissTo).toHaveBeenCalledWith("/"));
+    },
+  );
+
+  it("stacked detail screen handles the 404 during send, then the 201 shows the confirmation", async () => {
+    const client = await renderStacked();
+    await fillAndReview();
+    const post = deferredPost();
+    await press("quote-send");
+    await readFails(client, new ApiError(404, "not_found"), new NetworkError(false));
+    await waitFor(() =>
+      expect(client.getQueryData(opportunityQueryKey(DISPATCH_ID))).toBeUndefined(),
+    );
+
+    await act(async () => post.answer(sentQuote()));
+    expect(await screen.findByTestId("quote-sent")).toBeTruthy();
+    expect(screen.queryByTestId("quote-closed-gone")).toBeNull();
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith("Quote sent");
+    expect(leftOver(client)).toEqual(NOTHING_LEFT);
+    expect(navigation.attemptLeave()).toBe(false);
+    await waitFor(() => expect(router.dismissTo).toHaveBeenCalledWith("/"));
+  });
+
+  it("a denial recorded on another screen during the send closes the form once the POST fails", async () => {
+    const client = await renderForm();
+    await fillAndReview();
+    const post = deferredPost();
+    await press("quote-send");
+    const reads = jest.mocked(apiGet).mock.calls.length;
+
+    // The form never sees this 404: the screen that got it forgot the query, error and all.
+    await act(() => forgetOpportunity(client, DISPATCH_ID));
+    expect(screen.getByTestId("quote-review-step")).toBeTruthy();
+    expect(navigation.attemptLeave()).toBe(false);
+
+    await act(async () => post.fail(new ApiError(503, "unavailable")));
+    expect(await screen.findByTestId("quote-closed-gone")).toBeTruthy();
+    expect(leftOver(client)).toEqual(NOTHING_LEFT);
+    expect(apiGet).toHaveBeenCalledTimes(reads);
+  });
+
+  it("the draft goes with the denial: a later 200 elsewhere and a failed POST do not bring it back", async () => {
+    const client = await renderForm();
+    await fillAndReview();
+    const post = deferredPost();
+    await press("quote-send");
+    await readFails(client, new ApiError(404, "not_found"), new NetworkError(false));
+    await waitFor(() =>
+      expect(client.getQueryData(opportunityQueryKey(DISPATCH_ID))).toBeUndefined(),
+    );
+
+    // Another screen gets a 200 for it while the quote is still out.
+    jest.mocked(apiGet).mockResolvedValue(detail());
+    await act(async () => {
+      await client.fetchQuery(opportunityQueryOptions(DISPATCH_ID));
+    });
+    await act(async () => post.fail(new NetworkError(false)));
+
+    expect(await screen.findByTestId("quote-closed-gone")).toBeTruthy();
+    expect(screen.queryByTestId("quote-form")).toBeNull();
+    expect(screen.queryByTestId("quote-review-step")).toBeNull();
+    expect(screen.queryByTestId("quote-price")).toBeNull();
   });
 });

@@ -19,22 +19,33 @@ export type OpportunityMedia = ApiSchema<"OpportunityMedia">;
 
 export const opportunityQueryKey = (dispatchId: string) => ["opportunities", dispatchId] as const;
 
+/** Not open for this pro: another pro's, declined, expired or quoted (404). */
+export const isGone = (error: unknown): boolean =>
+  error instanceof ApiError && error.status === 404;
+
 /**
  * One open opportunity as the pro sees it; the server marks it viewed on the first open. A
  * failure shows at once with a retry rather than behind a skeleton, and a 404 (not open for this
- * pro any more) never improves by asking again. A 200 lifts an earlier denial.
+ * pro any more) never improves by asking again. The answer itself records a 404 as a denial and
+ * a 200 lifts it, so a screen learns of a 404 even when a later answer replaced it before the
+ * screen drew again.
  */
 export const opportunityQueryOptions = (dispatchId: string) =>
   queryOptions({
     queryKey: opportunityQueryKey(dispatchId),
     queryFn: async ({ signal, client }) => {
-      const detail = await apiGet("/v1/pros/me/opportunities/{dispatch_id}", {
-        auth: true,
-        signal,
-        params: { dispatch_id: dispatchId },
-      });
-      allowOpportunity(client, dispatchId);
-      return detail;
+      try {
+        const detail = await apiGet("/v1/pros/me/opportunities/{dispatch_id}", {
+          auth: true,
+          signal,
+          params: { dispatch_id: dispatchId },
+        });
+        allowOpportunity(client, dispatchId);
+        return detail;
+      } catch (error) {
+        if (isGone(error)) denyOpportunity(client, dispatchId);
+        throw error;
+      }
     },
     retry: false,
   });
@@ -42,10 +53,6 @@ export const opportunityQueryOptions = (dispatchId: string) =>
 /** The opportunity; with `enabled` false nothing is asked for (a screen that already saw a 404). */
 export const useOpportunity = (dispatchId: string, enabled = true) =>
   useQuery({ ...opportunityQueryOptions(dispatchId), enabled });
-
-/** Not open for this pro: another pro's, declined, expired or quoted (404). */
-export const isGone = (error: unknown): boolean =>
-  error instanceof ApiError && error.status === 404;
 
 /**
  * The pro may not see it any more (the detail answered 404): no page shows it from now on, its
