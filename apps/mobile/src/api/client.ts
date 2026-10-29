@@ -99,7 +99,13 @@ async function withSession<T>(
     const freshToken = await refreshSession();
     ensureCurrent(startedIn);
     throwIfAborted(options.signal);
-    result = await send(freshToken);
+    try {
+      result = await send(freshToken);
+    } catch (retryError) {
+      // A failed retry is held to the same session as the first answer.
+      ensureCurrent(startedIn);
+      throw retryError;
+    }
   }
   ensureCurrent(startedIn);
   return result;

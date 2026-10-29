@@ -43,7 +43,9 @@ export const opportunityQueryOptions = (dispatchId: string) =>
         allowOpportunity(client, dispatchId);
         return detail;
       } catch (error) {
-        if (isGone(error)) denyOpportunity(client, dispatchId);
+        // A cancelled read (a sign-out cleared the cache) belongs to a session that is gone: its
+        // 404 must not deny the dispatch to whoever is signed in now.
+        if (isGone(error) && !signal.aborted) denyOpportunity(client, dispatchId);
         throw error;
       }
     },
