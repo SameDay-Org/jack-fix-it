@@ -2,14 +2,67 @@ import { router } from "expo-router";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 
-type RequestDraftState = {
-  /** The category picked on home for the request being started; null until the first start. */
-  categorySlug: string | null;
+import type { StepId } from "./steps";
+
+/** An answer to one intake question, as its type says: a whole number, an option, options, yes/no or text. */
+export type IntakeAnswer = number | string | boolean | readonly string[];
+
+/** A US service address as the customer types it in the Where step. */
+export type AddressFields = {
+  line1: string;
+  line2: string;
+  city: string;
+  state: string;
+  zipCode: string;
 };
 
-export const requestDraftStore = createStore<RequestDraftState>()(() => ({
+/**
+ * Which address the request goes to: a saved one, or the one typed in the form. `null` until the
+ * customer picks, which means the default saved address (or the form when there is none).
+ */
+export type AddressChoice = { kind: "saved"; id: string } | { kind: "typed" } | null;
+
+/**
+ * Why the server sent the customer back to a step after a send. The step shows it until the
+ * customer changes something there.
+ */
+export type RefusalReason = "invalidAnswers" | "invalidMedia" | "zipNotServed";
+export type StepRefusal = { step: StepId; reason: RefusalReason };
+
+export type RequestDraft = {
+  /** The category picked on home; every request starts from one (#232). */
+  categorySlug: string | null;
+  /** Answers by question key; a key is absent until the customer answers. */
+  answers: Readonly<Record<string, IntakeAnswer>>;
+  description: string;
+  address: AddressChoice;
+  typedAddress: AddressFields;
+  refusal: StepRefusal | null;
+};
+
+export const EMPTY_ADDRESS: AddressFields = {
+  line1: "",
+  line2: "",
+  city: "",
+  state: "",
+  zipCode: "",
+};
+
+const EMPTY_DRAFT: RequestDraft = {
   categorySlug: null,
-}));
+  answers: {},
+  description: "",
+  address: null,
+  typedAddress: EMPTY_ADDRESS,
+  refusal: null,
+};
+
+/**
+ * The request being written, kept in memory for the flow's life: it survives Back between the
+ * steps and the app going to the background, and goes when the flow does (sent, discarded, or a
+ * sign-out). Media is not here: the flow's upload list holds it (see `RequestFlowLayout`).
+ */
+export const requestDraftStore = createStore<RequestDraft>()(() => EMPTY_DRAFT);
 
 /**
  * Starts a new request from the category picked on home (every request starts from one, #232).
@@ -17,9 +70,71 @@ export const requestDraftStore = createStore<RequestDraftState>()(() => ({
  * travels in this store, never in the route.
  */
 export function startRequest(categorySlug: string): void {
-  requestDraftStore.setState({ categorySlug });
+  requestDraftStore.setState({ ...EMPTY_DRAFT, categorySlug });
   router.push("/request/new");
 }
 
+/** Forgets the draft: the flow was sent, discarded or left. */
+export function resetDraft(): void {
+  requestDraftStore.setState(EMPTY_DRAFT);
+}
+
+/** A change on `step` answers the server's objection there. */
+const clearRefusalOn = (draft: RequestDraft, step: StepId): Pick<RequestDraft, "refusal"> => ({
+  refusal: draft.refusal?.step === step ? null : draft.refusal,
+});
+
+/** Sets one answer, or clears it with `undefined`. */
+export function setAnswer(key: string, answer: IntakeAnswer | undefined): void {
+  requestDraftStore.setState((draft) => {
+    const answers = { ...draft.answers };
+    if (answer === undefined) delete answers[key];
+    else answers[key] = answer;
+    return { answers, ...clearRefusalOn(draft, "questions") };
+  });
+}
+
+export function setDescription(description: string): void {
+  requestDraftStore.setState((draft) => ({ description, ...clearRefusalOn(draft, "describe") }));
+}
+
+export function chooseAddress(address: Exclude<AddressChoice, null>): void {
+  requestDraftStore.setState((draft) => ({ address, ...clearRefusalOn(draft, "where") }));
+}
+
+/** Typing in the form picks it: saved addresses arriving later never take its place. */
+export function setTypedAddress(field: keyof AddressFields, value: string): void {
+  requestDraftStore.setState((draft) => ({
+    typedAddress: { ...draft.typedAddress, [field]: value },
+    address: { kind: "typed" },
+    ...clearRefusalOn(draft, "where"),
+  }));
+}
+
+/** The server refused the request because of `step`: the flow goes back there and says why. */
+export function refuseStep(refusal: StepRefusal): void {
+  requestDraftStore.setState({ refusal });
+}
+
+/** The customer dealt with the server's objection on `step`. */
+export function clearRefusal(step: StepId): void {
+  requestDraftStore.setState((draft) => clearRefusalOn(draft, step));
+}
+
+/** Whether leaving would lose something the customer entered (the flow counts media itself). */
+export function hasDraftInput(draft: RequestDraft): boolean {
+  const typed = Object.values(draft.typedAddress).some((value) => value.trim() !== "");
+  return (
+    Object.keys(draft.answers).length > 0 ||
+    draft.description.trim() !== "" ||
+    draft.address !== null ||
+    typed
+  );
+}
+
+export function useRequestDraft<T>(select: (draft: RequestDraft) => T): T {
+  return useStore(requestDraftStore, select);
+}
+
 export const useDraftCategorySlug = (): string | null =>
-  useStore(requestDraftStore, (state) => state.categorySlug);
+  useRequestDraft((draft) => draft.categorySlug);
