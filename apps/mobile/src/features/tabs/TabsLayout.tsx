@@ -1,7 +1,9 @@
 import { Tabs, type BottomTabBarProps } from "expo-router/js-tabs";
 import { useTranslation } from "react-i18next";
+import { useDerivedValue } from "react-native-reanimated";
 
 import { TabBar, type TabBarItem } from "@/components/ui";
+import { CONTENT_FROM, usePanelHandoff, usePanelHandoffContext } from "@/features/auth";
 import { tokens } from "@/theme";
 
 import { TABS, tabFor } from "./tabs";
@@ -13,6 +15,17 @@ import { TABS, tabFor } from "./tabs";
  */
 function RouterTabBar({ state, emitter, navigateToTab }: BottomTabBarProps) {
   const { t } = useTranslation();
+  // Home's categories panel rising into a request: the bar slides away over the first half of the
+  // rise, as the panel's cards fade, and comes back as the panel lowers.
+  // Only over Home: a panel left up under another tab (a link that opened it from outside) must
+  // not take the bar with it.
+  const { progress } = usePanelHandoffContext();
+  const { phase } = usePanelHandoff();
+  const onHome = tabFor(state.routes[state.index]?.name ?? "")?.route === "index";
+  const slideOut = useDerivedValue(
+    () => (onHome ? Math.min(1, progress.value / CONTENT_FROM) : 0),
+    [onHome],
+  );
 
   const items = state.routes.flatMap((route, index): TabBarItem[] => {
     const tab = tabFor(route.name);
@@ -40,7 +53,14 @@ function RouterTabBar({ state, emitter, navigateToTab }: BottomTabBarProps) {
     ];
   });
 
-  return <TabBar items={items} testID="tab-bar" />;
+  return (
+    <TabBar
+      items={items}
+      slideOut={slideOut}
+      hidden={onHome && phase !== "idle"}
+      testID="tab-bar"
+    />
+  );
 }
 
 const renderTabBar = (props: BottomTabBarProps) => <RouterTabBar {...props} />;

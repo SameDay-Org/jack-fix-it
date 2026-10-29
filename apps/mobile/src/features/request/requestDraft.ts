@@ -1,9 +1,10 @@
-import { router } from "expo-router";
+import { router, type Href } from "expo-router";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 
 import { onSignOut } from "@/api";
 
+import { flowRisen, setFlowRisen } from "./rise";
 import type { StepId } from "./steps";
 
 /** An answer to one intake question, as its type says: a whole number, an option, options, yes/no or text. */
@@ -28,7 +29,8 @@ export type AddressChoice = { kind: "saved"; id: string } | { kind: "typed" } | 
  * Why the server sent the customer back to a step after a send. The step shows it until the
  * customer changes something there.
  */
-export type RefusalReason = "invalidAddress" | "invalidAnswers" | "invalidMedia" | "zipNotServed";
+export type RefusalReason =
+  "invalidAddress" | "invalidAnswers" | "invalidMedia" | "staleDate" | "zipNotServed";
 export type StepRefusal = { step: StepId; reason: RefusalReason };
 
 export type RequestDraft = {
@@ -39,6 +41,8 @@ export type RequestDraft = {
   description: string;
   address: AddressChoice;
   typedAddress: AddressFields;
+  /** A day as YYYY-MM-DD, or null for "I'm flexible". */
+  preferredDate: string | null;
   refusal: StepRefusal | null;
 };
 
@@ -56,6 +60,7 @@ const EMPTY_DRAFT: RequestDraft = {
   description: "",
   address: null,
   typedAddress: EMPTY_ADDRESS,
+  preferredDate: null,
   refusal: null,
 };
 
@@ -66,19 +71,40 @@ const EMPTY_DRAFT: RequestDraft = {
  */
 export const requestDraftStore = createStore<RequestDraft>()(() => EMPTY_DRAFT);
 
+const FIRST_STEP = "/request/new" satisfies Href;
+
 /**
  * Starts a new request from the category picked on home (every request starts from one, #232).
- * Replaces whatever an earlier start left, and opens the request's first step. The choice
- * travels in this store, never in the route.
+ * Replaces whatever an earlier start left, and opens the request's first step: a push, or with
+ * `rise`, Home's panel rising into it (which says whether it started). The choice travels in this
+ * store, never in the route.
  */
-export function startRequest(categorySlug: string): void {
+export function startRequest(categorySlug: string, rise?: (href: Href) => boolean): void {
+  const before = { draft: requestDraftStore.getState(), risen: flowRisen() };
   requestDraftStore.setState({ ...EMPTY_DRAFT, categorySlug });
-  router.push("/request/new");
+  setFlowRisen(rise !== undefined);
+  if (!rise) {
+    router.push(FIRST_STEP);
+    return;
+  }
+  // Not started (the panel is already rising into another start): that start keeps its draft.
+  if (rise(FIRST_STEP)) return;
+  requestDraftStore.setState(before.draft);
+  setFlowRisen(before.risen);
+}
+
+/**
+ * Forgets a start whose flow never mounted (Home's panel lowered after a push that went nowhere).
+ * A flow that did mount has forgotten it already, on its way out.
+ */
+export function forgetUnopenedRequest(): void {
+  if (flowRisen()) resetDraft();
 }
 
 /** Forgets the draft: the flow was sent, discarded or left, or the account signed out. */
 export function resetDraft(): void {
   requestDraftStore.setState(EMPTY_DRAFT);
+  setFlowRisen(false);
 }
 
 // The address and the answers are the account's: they never outlive its session, even when no
@@ -117,6 +143,10 @@ export function setTypedAddress(field: keyof AddressFields, value: string): void
   }));
 }
 
+export function setPreferredDate(preferredDate: string | null): void {
+  requestDraftStore.setState((draft) => ({ preferredDate, ...clearRefusalOn(draft, "when") }));
+}
+
 /** The server refused the request because of `step`: the flow goes back there and says why. */
 export function refuseStep(refusal: StepRefusal): void {
   // A fresh object each time: the step keys its scroll and announcement on it, so a second refusal
@@ -136,7 +166,8 @@ export function hasDraftInput(draft: RequestDraft): boolean {
     Object.keys(draft.answers).length > 0 ||
     draft.description.trim() !== "" ||
     draft.address !== null ||
-    typed
+    typed ||
+    draft.preferredDate !== null
   );
 }
 

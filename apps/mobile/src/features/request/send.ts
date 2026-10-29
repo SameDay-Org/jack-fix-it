@@ -46,12 +46,14 @@ type RequestParts = {
   mediaKeys: readonly string[];
 };
 
-/** The `RequestCreate` body: the answers by key, the media keys in order; no preferred date yet. */
+/** The `RequestCreate` body: the answers by key, the media keys in order, the date as YYYY-MM-DD
+ * (left out when flexible). */
 export function requestBody({ draft, category, address, mediaKeys }: RequestParts): RequestCreate {
   return {
     category_id: category.id,
     description: draft.description.trim(),
     address,
+    ...(draft.preferredDate ? { preferred_date: draft.preferredDate } : {}),
     intake_answers: intakeAnswersFor(category.intake_questions, draft.answers),
     media_keys: [...mediaKeys],
   };

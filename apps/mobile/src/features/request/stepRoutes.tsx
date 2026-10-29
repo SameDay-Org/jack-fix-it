@@ -5,6 +5,7 @@ import { FlowFallback } from "./FlowFallback";
 import { QuestionsStep } from "./QuestionsStep";
 import { ReviewStep } from "./ReviewStep";
 import { useRequestFlow, type RequestFlowState } from "./useRequestFlow";
+import { WhenStep } from "./WhenStep";
 import { WhereStep } from "./WhereStep";
 
 type ReadyFlow = Extract<RequestFlowState, { status: "ready" }>;
@@ -28,6 +29,7 @@ export const FirstStepRoute = withFlow(({ category, steps }) =>
 
 export const DescribeRoute = withFlow(({ steps }) => <DescribeStep steps={steps} />);
 export const WhereRoute = withFlow(({ steps }) => <WhereStep steps={steps} />);
+export const WhenRoute = withFlow(({ steps }) => <WhenStep steps={steps} />);
 export const ReviewRoute = withFlow(({ category, steps }) => (
   <ReviewStep category={category} steps={steps} />
 ));

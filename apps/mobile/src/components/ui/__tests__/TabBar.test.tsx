@@ -2,6 +2,7 @@ import { fireEvent, render, renderHook, screen } from "@testing-library/react-na
 import { BottomTabBarHeightContext } from "expo-router/js-tabs";
 import { createElement, type ReactNode } from "react";
 import { Dimensions, Platform, StyleSheet } from "react-native";
+import { makeMutable } from "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { glassFallback, tokens } from "@/theme";
@@ -152,6 +153,30 @@ describe("TabBar", () => {
       ...glassFallback.light,
       borderRadius: tokens.radius.pill,
     });
+  });
+
+  it("slides below the screen's edge as a panel rises over the tabs, out of reach meanwhile", async () => {
+    jest.replaceProperty(Platform, "OS", "android");
+    const slideOut = makeMutable(0);
+    const bar = () => screen.getByTestId("tab-bar", { includeHiddenElements: true });
+    const translateY = () =>
+      (bar().props.jestAnimatedStyle as { value: { transform: { translateY: number }[] } }).value
+        .transform[0].translateY;
+    const ui = (hidden: boolean) => (
+      <TabBar items={items} slideOut={slideOut} hidden={hidden} testID="tab-bar" />
+    );
+    const { rerender } = await render(ui(false), { wrapper });
+    expect(translateY()).toBe(0);
+    expect(bar().props.pointerEvents).toBe("auto");
+
+    slideOut.value = 1;
+    await rerender(ui(true));
+
+    // Its whole footprint and the gap its shadow spreads into.
+    expect(translateY()).toBe(tabBarGeometry(fontScale, BOTTOM_INSET, false).inset + 8);
+    expect(bar().props.pointerEvents).toBe("none");
+    expect(bar().props.accessibilityElementsHidden).toBe(true);
+    expect(screen.queryByRole("tab", { name: "Home" })).toBeNull();
   });
 });
 
