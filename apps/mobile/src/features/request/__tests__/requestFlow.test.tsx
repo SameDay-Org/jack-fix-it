@@ -636,6 +636,20 @@ describe("the request flow", () => {
     await fireEvent.press(screen.getByTestId(`when-day-${offeredDays(3)[2]}`));
     await fireEvent(screen.getByTestId("when-chosen"), "layout", layout);
     expect(scrollToEnd).toHaveBeenCalledTimes(2);
+
+    // The same day again (scrolled away from its line): the line does not lay out again, so the
+    // pick reveals it at once, and a later layout of that line is not taken for a pick.
+    await fireEvent.press(screen.getByTestId(`when-day-${offeredDays(3)[2]}`));
+    expect(scrollToEnd).toHaveBeenCalledTimes(3);
+    await fireEvent(screen.getByTestId("when-chosen"), "layout", layout);
+    expect(scrollToEnd).toHaveBeenCalledTimes(3);
+
+    // After "I'm flexible" the line is gone: picking that day again waits for its new line.
+    await fireEvent.press(screen.getByTestId("when-flexible"));
+    await fireEvent.press(screen.getByTestId(`when-day-${offeredDays(3)[2]}`));
+    expect(scrollToEnd).toHaveBeenCalledTimes(3);
+    await fireEvent(screen.getByTestId("when-chosen"), "layout", layout);
+    expect(scrollToEnd).toHaveBeenCalledTimes(4);
   });
 
   it("gives the flow the panel rise when a category card opens it, the push otherwise", async () => {

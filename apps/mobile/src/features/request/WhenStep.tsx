@@ -29,10 +29,19 @@ export function WhenStep({ steps }: { steps: readonly StepId[] }) {
   const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
   const reduceMotion = useReducedMotion();
   // A pick spells the day out at the bottom of the step, below the fold on a small phone: once it
-  // is laid out, the step scrolls to it, above Continue.
-  const reveal = useRef(false);
+  // is laid out, the step scrolls to it, above Continue. `reveal` holds the day waiting for its
+  // line's first layout, `shown` the day whose line has one.
+  const reveal = useRef<string | null>(null);
+  const shown = useRef<string | null>(null);
+  const toChosen = () => scrollRef.current?.scrollToEnd({ animated: !reduceMotion });
   const pick = (day: string) => {
-    reveal.current = true;
+    if (day === date && !stale && shown.current === day) {
+      // The same day again: its line is already laid out and will not lay out again.
+      reveal.current = null;
+      toChosen();
+    } else {
+      reveal.current = day;
+    }
     setPreferredDate(day);
   };
 
@@ -87,9 +96,10 @@ export function WhenStep({ steps }: { steps: readonly StepId[] }) {
             key={date}
             className="text-title-2 text-navy-900"
             onLayout={() => {
-              if (!reveal.current) return;
-              reveal.current = false;
-              scrollRef.current?.scrollToEnd({ animated: !reduceMotion });
+              shown.current = date;
+              if (reveal.current !== date) return;
+              reveal.current = null;
+              toChosen();
             }}
             testID="when-chosen"
           >
