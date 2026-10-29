@@ -41,8 +41,11 @@ export type QuoteText = {
 };
 
 /** The pro's name, or the neutral label when the API withholds it; never an empty string. */
+export const displayName = (t: TFunction, name: string | null): string =>
+  name?.trim() || t("quotes.proFallback");
+
 export const proName = (t: TFunction, quote: CustomerQuote): string =>
-  quote.pro.name?.trim() || t("quotes.proFallback");
+  displayName(t, quote.pro.name);
 
 function expiryText(t: TFunction, quote: CustomerQuote, now: number, locale: string): string {
   const expiry = expiryAt(quote.expires_at, now);

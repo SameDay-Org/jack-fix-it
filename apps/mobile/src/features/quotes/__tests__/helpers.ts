@@ -124,10 +124,12 @@ export const renderWithQuery = (ui: ReactElement, client: QueryClient = newQuery
   });
 
 type SheetParams = { id: string; quote: string };
+type PushedHref = { pathname: string; params: Record<string, string> };
 
 /**
- * A stand-in for the router: `push` to the accept sheet opens it (the test's harness renders it),
- * `back` closes it; the screen is focused unless a test blurs it. The router reads as idle
+ * A stand-in for the router: `push` to the accept sheet opens it (the test's harness renders it;
+ * a push anywhere else is only recorded), `back` closes it; the screen is focused unless a test
+ * blurs it. The router reads as idle
  * (`unstable_useIsNavigating` false) unless a test says a transition is under way with
  * `navigation.setNavigating(true)` and lands it with `false`, as the real router does around a
  * push or a back. Use it as the `expo-router` mock:
@@ -135,12 +137,16 @@ type SheetParams = { id: string; quote: string };
  */
 const nav = {
   sheet: null as SheetParams | null,
+  /** The screen's own params when a test sets them (a link's `profile`). */
+  params: null as Record<string, string | string[] | undefined> | null,
   focused: true,
   navigating: false,
   listeners: new Set<() => void>(),
 };
 
-function update(change: Partial<Pick<typeof nav, "sheet" | "focused" | "navigating">>): void {
+function update(
+  change: Partial<Pick<typeof nav, "sheet" | "params" | "focused" | "navigating">>,
+): void {
   Object.assign(nav, change);
   nav.listeners.forEach((listener) => listener());
 }
@@ -154,18 +160,33 @@ export const navigation = {
   useSheet: () => useSyncExternalStore(subscribe, () => nav.sheet),
   setFocused: (focused: boolean) => update({ focused }),
   setNavigating: (navigating: boolean) => update({ navigating }),
-  reset: () => update({ sheet: null, focused: true, navigating: false }),
+  setParams: (params: Record<string, string | string[]> | null) => update({ params }),
+  reset: () => update({ sheet: null, params: null, focused: true, navigating: false }),
 };
 
 const useIsNavigating = () => useSyncExternalStore(subscribe, () => nav.navigating);
 
+/** The screen's own navigation (`useNavigation`): `setParams` merges into the screen's params. */
+export const screenNavigation = {
+  setParams: jest.fn((params: Record<string, string | undefined>) =>
+    update({ params: { ...(nav.params ?? { id: REQUEST_ID }), ...params } }),
+  ),
+};
+
 export const routerMock = {
   router: {
-    push: jest.fn((href: { params: SheetParams }) => update({ sheet: href.params })),
+    push: jest.fn((href: PushedHref) => {
+      if (href.pathname === "/requests/[id]/accept") {
+        update({ sheet: href.params as SheetParams });
+      }
+    }),
     back: jest.fn(() => update({ sheet: null })),
+    canGoBack: jest.fn(() => true),
+    setParams: jest.fn(),
     dismissTo: jest.fn(),
   },
-  useLocalSearchParams: () => nav.sheet ?? { id: REQUEST_ID },
+  useLocalSearchParams: () => nav.sheet ?? nav.params ?? { id: REQUEST_ID },
+  useNavigation: () => screenNavigation,
   unstable_useIsNavigating: useIsNavigating,
   // Runs the effect on every focus and cleans it up on blur, as React Navigation does.
   useFocusEffect: (effect: () => void | (() => void)) => {
