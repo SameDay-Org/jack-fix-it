@@ -1,9 +1,8 @@
 import { useCallback, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Text, useWindowDimensions, View, type LayoutChangeEvent } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Button, Card } from "@/components/ui";
+import { Button, Card, useTabBarInset } from "@/components/ui";
 import { startRequest } from "@/features/request";
 import { continuousCorners } from "@/theme";
 
@@ -78,12 +77,12 @@ function Grid({ cells, onLayout, testID }: GridProps) {
  * whole section, panel included: the hero then fills the page instead of sitting over a blank
  * sheet.
  *
- * The light panel runs to the bottom edge and pads the home indicator itself (the screen's own
- * bottom padding would be the navy page).
+ * The light panel runs to the bottom edge and pads the tab bar itself (the screen's own bottom
+ * padding would be the navy page), so the last row of cards stays reachable above it.
  */
 export function CategoryCards() {
   const { t } = useTranslation();
-  const { bottom } = useSafeAreaInsets();
+  const bottom = useTabBarInset();
   const categories = useCategories();
   const [rowWidth, onGridLayout] = useRowWidth();
   const side = cardSide(rowWidth);

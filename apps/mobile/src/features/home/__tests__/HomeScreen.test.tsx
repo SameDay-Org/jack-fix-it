@@ -13,7 +13,11 @@ jest.mock("@/api", () => ({
   useSession: jest.fn(),
   logout: jest.fn(),
 }));
-jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
+jest.mock("expo-router", () => ({
+  router: { push: jest.fn() },
+  useIsFocused: () => true,
+  useScrollToTop: jest.fn(),
+}));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
   "react-native-safe-area-context",
