@@ -11,3 +11,12 @@ PHONE_EMAIL_OVERLAPS: Final = (
     "305 555 0199 at gmail",  # the ASCII report
 )
 OVERLAP_IDS: Final = ("marked_provider", "spacing_mark_provider", "unicode_domain", "ascii")
+
+# A reverse handle or a street whose platform or suffix an email or a URL also reads (Vault
+# round 2 on #240): the URL takes "insta" and left "jdoe1", the email takes "Dr" and left
+# "1250 Ocean". Each with the word it used to leave.
+CUT_CONTACTS: Final = (
+    ("jdoe1 insta dot c" + chr(0x0483) + "om", "jdoe1"),
+    ("1250 Ocean Dr at gm" + chr(0x0483) + "ail", "Ocean"),
+)
+CUT_IDS: Final = ("reverse_handle", "street")

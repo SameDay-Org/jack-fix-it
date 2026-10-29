@@ -39,6 +39,7 @@ The patterns are data in this module; it does no I/O and keeps no state. Every p
 anchored so a 2,000-character input (the description limit) is handled in milliseconds.
 """
 
+import bisect
 import re
 import unicodedata
 from collections.abc import Callable, Iterable, Iterator
@@ -242,8 +243,12 @@ _SPANISH_EN: Final = re.compile(r"\s+en\s+", _FLAGS)
 _SPELLED_DOT: Final = r"(?:\.|\s*[(\[{<]\s*(?:dot|punto)\s*[)\]}>]\s*|\s+(?:dot|punto)\s+)"
 _BRACKETED_DOT: Final = r"\s*[(\[{<]\s*(?:dot|punto)\s*[)\]}>]\s*"
 _ONLY_SPELLED_DOT: Final = rf"(?:{_BRACKETED_DOT}|\s+(?:dot|punto)\s+)"
+# An "@" that starts a token may stand before the local part too: "@jdoe@acme.com" is the
+# handle written as the address, and "acme.com" after an "@" is no URL (_DOMAIN_START).
+_AT_SIGN_START: Final = rf"(?<=@)(?<![\w.%+@\-{_MARKS}]@)"
 PLAIN_EMAIL: Final = re.compile(
-    rf"{_START}{_MARKED}{_LOCAL}@{_LABEL}++(?:[.,]{_LABEL}++)*?[.,][a-z]{{2,}}\b", _FLAGS
+    rf"(?:{_START}|{_AT_SIGN_START}){_MARKED}{_LOCAL}@{_LABEL}++(?:[.,]{_LABEL}++)*?[.,][a-z]{{2,}}\b",
+    _FLAGS,
 )
 SPACED_EMAIL: Final = re.compile(
     rf"{_START}{_MARKED}{_LOCAL}\s*@\s*{_LABEL}++(?:\s*\.\s*{_LABEL}++)*?\s*\.\s*{_TLD_END}",
@@ -658,32 +663,107 @@ def redact_contacts(text: str) -> RedactionResult:
     """`text` with every contact detail it recognizes replaced by MASK (see the module doc).
     The rules run in order, each on the text the ones before it masked. A mask can cut a
     contact a later rule would have read whole: in "call 305 555 0199 at gmail" the email
-    takes the last group and leaves six digits, no phone (#257). So the phone rules also read
-    the text without masks, and a phone they find there joins the masks it overlaps or touches.
-    Only phones: the other rules read cue words, and an email's provider is no platform for the
-    word after it ("jose at gmail tonight." would lose "tonight.")."""
+    takes the last group and leaves six digits, no phone (#257); the URL in "jdoe1 insta dot
+    com" takes the platform and leaves the handle, the email in "1250 Ocean Dr at gmail" takes
+    the suffix and leaves the house (#240). So these rules also read the text without masks. A
+    phone found there joins the masks it overlaps or touches. A reverse handle or an address
+    (_CUT_STEPS) joins only an email or URL mask that took its cue, the platform, the suffix or
+    the number (_cut). A mask that took another of its words was another contact's: "site.com/2
+    new drive belts" keeps "new drive belts", "2 Amazon.com Key pads" keeps "Key pads". A phone
+    that took its number leaves it as the rules in order read it ("APT" before a phone's mask)."""
     cleaned = _clean(text)
-    masked = _masks_in_order(cleaned)
+    masked, cutting = _masks_in_order(cleaned)
     if masked:
-        phones = [span for search, rule in _PHONE_STEPS for span in _spans(search, rule, cleaned)]
-        masked = _joined(masked, phones)
+        found = [span for search, rule in _PHONE_STEPS for span in _spans(search, rule, cleaned)]
+        if cutting:
+            found += _cut_spans(cleaned, _Apart.of(cutting), _Apart.of(masked))
+        masked = _joined(masked, found)
     result, count = _mask_spans(cleaned, masked)
     return RedactionResult(result, count > 0)
 
 
-def _masks_in_order(text: str) -> list[tuple[int, int]]:
+def _cut_spans(text: str, cutting: "_Apart", masked: "_Apart") -> list[tuple[int, int]]:
+    """The reverse handles and addresses in `text` that a mask in `cutting` cut (_cut)."""
+    found: list[tuple[int, int]] = []
+    for search, rule in _CUT_STEPS:
+        cue = _CUES[search]
+
+        def cut_rule(
+            match: re.Match[str], rule: _Rule = rule, cue: _Cue = cue
+        ) -> list[tuple[int, int]] | None:
+            spans = rule(match)
+            if spans is None:
+                return None
+            return [span for span in spans if _cut(span, cue(match), cutting, masked)]
+
+        found += _spans(search, cut_rule, text)
+    return found
+
+
+def _cut(span: tuple[int, int], cue: int, cutting: "_Apart", masked: "_Apart") -> bool:
+    """A mask in `cutting` starts inside `span`, after its first character, and covers the
+    first character of its cue (`cue`), or starts right at the end of `span`; and no mask stands
+    in `span` before it. The rule read the contact as it would have in order, had the email or
+    URL rule not taken the cue: a mask inside it (a platform handle in "4B instagram x_1 ig
+    way.com") broke it there too."""
+    index = bisect.bisect_right(cutting.starts, cue) - 1
+    touching = bisect.bisect_left(cutting.starts, span[1])
+    if index >= 0 and cutting.starts[index] > span[0] and cutting.spans[index][1] > cue:
+        cut_at = cutting.starts[index]
+    elif touching < len(cutting.starts) and cutting.starts[touching] == span[1]:
+        cut_at = span[1]
+    else:
+        return False
+    before = bisect.bisect_left(masked.starts, cut_at) - 1  # the last mask starting before it
+    return before < 0 or masked.spans[before][1] <= span[0]
+
+
+@dataclass(frozen=True)
+class _Apart:
+    """Spans sorted, the overlapping ones merged, and their starts (for bisection)."""
+
+    spans: list[tuple[int, int]]
+    starts: list[int]
+
+    @classmethod
+    def of(cls, spans: list[tuple[int, int]]) -> "_Apart":
+        merged: list[tuple[int, int]] = []
+        for start, end in sorted(spans):
+            if merged and start < merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+            else:
+                merged.append((start, end))
+        return cls(merged, [start for start, _ in merged])
+
+
+def _last_word(match: re.Match[str]) -> int:
+    """Where the last word of `match` starts: the platform of a reverse handle, the number or
+    the name word of a Spanish street, the grid street of the Miami grid."""
+    text, start, end = match.string, match.start(), match.end()
+    while end > start and not text[end - 1].isalnum():
+        end -= 1
+    while end > start and text[end - 1].isalnum():
+        end -= 1
+    return end
+
+
+def _masks_in_order(text: str) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
     """Each rule on the text the rules before it masked (a mask is no word, so "unit 5B
-    youtu.be/abc123" reads as a unit once the URL is masked): where the masks are in `text`."""
+    youtu.be/abc123" reads as a unit once the URL is masked): where the masks are in `text`,
+    and which of them the email and URL rules made."""
     current = text
     origin = [(index, index + 1) for index in range(len(text))]  # each character's span in text
     masked: list[tuple[int, int]] = []
-    for search, rule in _STEPS:
+    by_emails_and_urls = 0
+    for step, (search, rule) in enumerate(_STEPS):
         runs = [_unmarked_spans, _spans] if search in _UNMARKED_FIRST else [_spans]
         for run in runs:
             spans = list(run(search, rule, current))
             if spans:
                 current, origin = _masked_with_origin(current, origin, spans, masked)
-    return masked
+        if step < len(_EMAIL_AND_URL_STEPS):
+            by_emails_and_urls = len(masked)
+    return masked, masked[:by_emails_and_urls]
 
 
 def _masked_with_origin(
@@ -1092,7 +1172,33 @@ _PHONE_STEPS: Final[tuple[tuple[_Search, _Rule], ...]] = (
     (SPELLED_PHONE, _whole(_mask)),
     (DIGIT_RUN, _phones),
 )
-_STEPS: Final[tuple[tuple[_Search, _Rule], ...]] = (
+# The rules that read their cue after the contact: an email or a URL masked before them can
+# take a reverse handle's platform or an address's suffix, so they read the text without masks
+# again (redact_contacts). A handle with its platform or sigil first keeps it before the id,
+# and a mask that takes the id already hides the contact ("Email me at jane@gmail.com" keeps
+# "Email me at"); a unit keeps its word before the number the same way ("apt 4B@x.com" keeps
+# "apt").
+_ADDRESS_STEPS: Final[tuple[tuple[_Search, _Rule], ...]] = (
+    (STREET, _whole(_mask_street)),
+    (REVERSED_STREET, _whole(_mask_reversed_street)),
+    (GRID_OR_HIGHWAY, _whole(_mask)),
+    (SPANISH_STREET, _whole(_mask)),
+)
+_REVERSE_HANDLE_STEP: Final[tuple[_Search, _Rule]] = (
+    REVERSE_HANDLE,
+    _whole(_mask_reverse_handle),
+)
+_CUT_STEPS: Final[tuple[tuple[_Search, _Rule], ...]] = (_REVERSE_HANDLE_STEP, *_ADDRESS_STEPS)
+# Where the cue of each of them starts: what the email or URL mask must have taken (_cut).
+_Cue = Callable[[re.Match[str]], int]
+_CUES: Final[dict[_Search, _Cue]] = {
+    REVERSE_HANDLE: _last_word,
+    STREET: lambda match: match.start("suffix"),
+    REVERSED_STREET: lambda match: match.start("number"),
+    GRID_OR_HIGHWAY: _last_word,
+    SPANISH_STREET: _last_word,
+}
+_EMAIL_AND_URL_STEPS: Final[tuple[tuple[_Search, _Rule], ...]] = (
     (SPACED_LETTERS_EMAIL, _whole(_mask)),
     (PLAIN_EMAIL, _whole(_mask)),
     (SPACED_EMAIL, _whole(_mask)),
@@ -1101,15 +1207,15 @@ _STEPS: Final[tuple[tuple[_Search, _Rule], ...]] = (
     (GLUED_EMAIL, _whole(_mask)),
     (_SPELLED_URLS, _whole(_mask)),
     (URL, _whole(_mask_url)),
+)
+_STEPS: Final[tuple[tuple[_Search, _Rule], ...]] = (
+    *_EMAIL_AND_URL_STEPS,
     *_PHONE_STEPS,
     (PLATFORM_HANDLE, _whole(_mask_handle)),
-    (REVERSE_HANDLE, _whole(_mask_reverse_handle)),
+    _REVERSE_HANDLE_STEP,
     (AT_HANDLE, _whole(_mask)),
     (CASHTAG, _whole(_mask)),
-    (STREET, _whole(_mask_street)),
-    (REVERSED_STREET, _whole(_mask_reversed_street)),
-    (GRID_OR_HIGHWAY, _whole(_mask)),
-    (SPANISH_STREET, _whole(_mask)),
+    *_ADDRESS_STEPS,
     (UNIT_OR_BOX, _whole(_mask)),
 )
 # The rules with a literal TLD or provider list run first on the text without its marks: a

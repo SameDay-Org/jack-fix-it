@@ -29,7 +29,7 @@ from app.modules.users.types import UserRole
 from app.observability import JsonFormatter
 from app.queue import get_job_queue
 from tests.conftest import make_settings
-from tests.contact_overlaps import PHONE_EMAIL_OVERLAPS
+from tests.contact_overlaps import CUT_CONTACTS, PHONE_EMAIL_OVERLAPS
 from tests.test_opportunities_api import (
     T0,
     World,
@@ -361,6 +361,41 @@ async def test_a_phone_an_email_overlaps_is_masked_whole_in_scope_and_approach(
     masked = "Questions: call •••, llama •••, or write •••."
     assert item["scope"] == item["approach"] == masked
     assert not re.search(r"\d", item["scope"] + item["approach"])
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+async def test_a_handle_or_street_an_email_cuts_is_masked_whole_in_scope_and_approach(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    form: Literal["NFC", "NFD"],
+) -> None:
+    """Vault round 2 on #240: the URL took "insta" and the customer read "jdoe1", the email
+    took "Dr" and the customer read "1250 Ocean"."""
+    request_id = await make_request(db_session, world)
+    pro = await quoting_pro(db_session)
+    row = RequestDispatch(request_id=request_id, pro_id=pro.profile_id, sent_at=T0)
+    db_session.add(row)
+    await db_session.flush()
+    (handle, handle_secret), (street, street_secret) = CUT_CONTACTS
+    note = unicodedata.normalize(
+        form, f"Preguntas: escríbeme a {handle}, o pasa por {street} mañana."
+    )
+
+    sent = await db_client.post(
+        quote_path(row.id),
+        json=body(scope=note, approach=note),
+        headers=headers_for(pro.user_id, UserRole.PRO),
+    )
+
+    assert sent.status_code == 201, sent.text
+    listed = await db_client.get(list_path(request_id), headers=customer(world))
+    assert listed.status_code == 200, listed.text
+    [item] = listed.json()["items"]
+    masked = "Preguntas: escríbeme a •••, o pasa por ••• mañana."
+    assert item["scope"] == item["approach"] == masked
+    for secret in (handle_secret, street_secret, "1250"):
+        assert secret not in item["scope"] + item["approach"]
 
 
 async def test_customer_quote_without_approach_shows_null(

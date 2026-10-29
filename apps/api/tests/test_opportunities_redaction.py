@@ -6,6 +6,7 @@ are checked on their serialized values. The customer's own view keeps the text a
 """
 
 import logging
+import unicodedata
 import uuid
 from typing import Any
 
@@ -26,7 +27,7 @@ from app.queue import get_job_queue
 from app.rate_limit import get_rate_limiter
 from app.redaction import MASK
 from tests.conftest import InMemoryRateLimiter
-from tests.contact_overlaps import OVERLAP_IDS, PHONE_EMAIL_OVERLAPS
+from tests.contact_overlaps import CUT_CONTACTS, CUT_IDS, OVERLAP_IDS, PHONE_EMAIL_OVERLAPS
 from tests.glue_variants import glue_sample
 from tests.helpers import async_best_seconds_without_gc
 from tests.test_intake_questions import labels, option
@@ -369,7 +370,21 @@ OVERLAP_CASES = [
     )
     for name, contact in zip(OVERLAP_IDS, PHONE_EMAIL_OVERLAPS, strict=True)
 ]
-CASES = ROUND3_CASES + ROUND4_CASES + OVERLAP_CASES
+# Vault round 2 on #240: the URL took the reverse handle's platform and left "jdoe1", the
+# email took the street's suffix and left "1250 Ocean"; NFC and NFD (the accents decompose).
+CUT_CASES = [
+    (
+        f"cut-{name}-{form.lower()}",
+        unicodedata.normalize(form, f"Reparar el fregadero, escríbeme a {contact} mañana."),
+        secret,
+        "test@example.invalid",
+        "+17865550100",
+        "742 Evergreen Terrace",
+    )
+    for name, (contact, secret) in zip(CUT_IDS, CUT_CONTACTS, strict=True)
+    for form in ("NFC", "NFD")
+]
+CASES = ROUND3_CASES + ROUND4_CASES + OVERLAP_CASES + CUT_CASES
 
 
 @pytest.mark.parametrize(

@@ -5,6 +5,7 @@ come back unchanged (and not flagged). The module docstring lists the known gaps
 """
 
 import random
+import re
 import sys
 import unicodedata
 from typing import Literal
@@ -27,7 +28,7 @@ from app.redaction import (
     redact_text,
 )
 from tests import redaction_c6facaa as c6facaa
-from tests.contact_overlaps import OVERLAP_IDS, PHONE_EMAIL_OVERLAPS
+from tests.contact_overlaps import CUT_CONTACTS, CUT_IDS, OVERLAP_IDS, PHONE_EMAIL_OVERLAPS
 from tests.glue_variants import all_glue_cases
 from tests.helpers import best_seconds_without_gc
 
@@ -1776,15 +1777,29 @@ def test_phone_and_email_overlap_masks_the_union(
     assert redact_text(text, KnownValues()) == expected
 
 
-def test_the_union_takes_phones_only() -> None:
-    """The platform rule reads "gmail tonight." as a handle; the email's mask hides that
-    reading in order, and only phones join a mask from the text without masks."""
-    assert redact_contacts("Call me at jose at gmail tonight.") == RedactionResult(
-        f"Call me at {MASK} tonight.", True
-    )
-    assert redact_contacts("Call me at 305 555 0199 at gmail tonight.") == RedactionResult(
-        f"Call me at {MASK} tonight.", True
-    )
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Call me at jose at gmail tonight.", f"Call me at {MASK} tonight."),
+        ("Call me at 305 555 0199 at gmail tonight.", f"Call me at {MASK} tonight."),
+        ("Email me at jane.doe+repairs@gmail.com please", f"Email me at {MASK} please"),
+        ("see site.com/2 new drive belts", f"see {MASK} new drive belts"),
+        ("APT 3055550199", f"APT {MASK}"),
+        ("We need 2 Amazon.com Key pads by Friday", f"We need 2 {MASK} Key pads by Friday"),
+        ("Unit 4B ig.com please Bay windows", f"{MASK} {MASK} please Bay windows"),
+        ("apt 4B@x.com on the left", f"apt {MASK} on the left"),
+    ],
+)
+def test_a_mask_joins_only_the_contacts_it_cut(text: str, expected: str) -> None:
+    """The platform rule reads "gmail tonight." as a handle and "Email me at jane..." as one:
+    its platform comes first, so the email's mask hides its id and it never joins a mask. A
+    street or a unit a mask starts before took its number from another contact (a URL's path,
+    a phone): the rules in order read what is left, so "new drive belts" and "APT" stay. A URL
+    that took a street's name word, not its suffix ("Amazon.com Key"), or a handle's word, not
+    its platform ("ig.com please Bay", where the unit's mask also broke the street), is another
+    contact too. A unit's word comes before its number, like a platform before its id: an email
+    that takes the number leaves "apt"."""
+    assert redact_contacts(text) == RedactionResult(expected, True)
 
 
 @pytest.mark.parametrize("length", [2000, 5000, 10000])
@@ -1803,3 +1818,177 @@ def test_reverse_handle_whitespace_is_linear(length: int) -> None:
         ("j.doe.fixit [en tiktok]", f"{MASK}]"),
     ]:
         assert redact_contacts(handle) == RedactionResult(expected, True)
+
+
+# Vault round 2 on #240: a reverse handle or an address an email or a URL cuts
+
+R4_CUT_CONTACTS = [
+    *(contact for contact, _ in CUT_CONTACTS),
+    "jdoe1 insta dot com",  # the same cut in ASCII, on base too
+    "1250 Ocean Dr at gmail",
+    "j.doe.fixit (tiktok.c" + chr(0x093F) + "om",
+    "maria_88 on instagram punto c" + chr(0x093F) + "om",
+    "742 Evergreen Ter arroba gm" + chr(0x0483) + "ail punto com",
+    "88 Coral Way (at) acme (dot) c" + chr(0x0483) + "om",
+    "1250 Ocean St.c" + chr(0x0483) + "om",
+    "Brickell Ave 1200@gm" + chr(0x0483) + "ail.com",  # the reversed street
+    "8800 SW 72nd at gm" + chr(0x0483) + "ail",  # the Miami grid
+    "Calle Flagler 742 at gm" + chr(0x0483) + "ail",  # the Spanish street
+]
+R4_CUT_IDS = [
+    *CUT_IDS,
+    "ascii_reverse_handle",
+    "ascii_street",
+    "bracketed_platform",
+    "on_platform",
+    "spelled_email",
+    "bracketed_email",
+    "url_after_suffix",
+    "reversed_street",
+    "grid",
+    "spanish_street",
+]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize("sentence", OVERLAP_SENTENCES, ids=["standalone", "en", "es", "pt"])
+@pytest.mark.parametrize("contact", R4_CUT_CONTACTS, ids=R4_CUT_IDS)
+def test_r4_reverse_handle_and_street_recovered(
+    contact: str, sentence: str, form: Literal["NFC", "NFD"]
+) -> None:
+    """The email or URL rule runs first and takes the platform ("insta dot com") or the suffix
+    ("Dr at gmail"); the handle and the address rules read the text without masks again, so the
+    handle and the house join the mask that cut them."""
+    text = unicodedata.normalize(form, sentence.format(contact))
+    expected = RedactionResult(sentence.format(MASK), True)
+
+    assert redact_contacts(text) == expected
+    assert redact_text(text, KnownValues()) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("@jdoe1@acme.c" + chr(0x0483) + "om", f"@{MASK}"),
+        ("write @jdoe1@acme.co thanks", f"write @{MASK} thanks"),
+        ("a@bob@x.com", "a@bob@x.com"),
+    ],
+)
+def test_an_at_sign_that_starts_a_token_may_precede_the_local_part(
+    text: str, expected: str
+) -> None:
+    """The handle written as the address: base left "@acme.co" (the URL rule never starts after
+    an "@") and, with a mark in the domain, the part after the mark. An "@" inside a word stays
+    out ("a@bob@x.com", unchanged as on base)."""
+    assert redact_contacts(text) == RedactionResult(expected, expected != text)
+
+
+_PAIR_MARKS = ["", chr(0x0483), chr(0x093F)]
+_PAIR_PLATFORMS = ["insta", "ig", "tiktok", "facebook"]
+# What the email or the URL reads after the shared word: "insta" + " dot c" + mark + "om".
+_PAIR_TAILS = [
+    " at gm{m}ail",
+    " at gmail dot c{m}om",
+    "@gm{m}ail.com",
+    " arroba gm{m}ail punto com",
+    " (at) acme (dot) c{m}om",
+    " en hotm{m}ail",
+    " dot c{m}om",
+    ".c{m}om",
+    " punto c{m}om",
+    ".com/jose",
+]
+_PAIR_CONTACTS = [
+    "jdoe1 (insta)",
+    "insta: maria_88",
+    "@j.doe.fixit",
+    "1250 Ocean Dr",
+    "Brickell Ave 1200",
+    "786 555 0142",
+]
+_PAIR_EMAILS_AND_URLS = [
+    "jose at gm{m}ail",
+    "ana.r@gm{m}ail.com",
+    "fixjose punto c{m}om",
+    "www.fixjose.c{m}om",
+]
+_PAIR_JOINS = [" ", ", ", " or ", " y ", " / ", "; ", "\n", " ("]
+# Cue words: no part of the contact itself, and on base they show beside a mask too.
+_PAIR_CUES = frozenset({"at", "dot", "on", "en", "arroba", "punto", "www", "com", *_PAIR_PLATFORMS})
+
+
+def _contact_pair(rng: random.Random) -> tuple[str, list[str]]:
+    """Two contacts side by side, one of them an email or a URL, or sharing a word: the handle's
+    platform, the street's suffix or the phone's last group starts an email or a URL ("jdoe1
+    insta dot com")."""
+    mark = rng.choice(_PAIR_MARKS)
+    if rng.random() < 0.5:
+        kind = rng.choice(["handle", "street", "phone"])
+        if kind == "handle":
+            body = rng.choice(["jdoe1 ", "j.doe.fixit (", "maria_88 on ", "bob2smith ["])
+            word = rng.choice(_PAIR_PLATFORMS)
+        elif kind == "street":
+            body = rng.choice(["1250 Ocean ", "742 Evergreen ", "4100 NW 7th ", "8800 SW "])
+            word = rng.choice(["Dr", "Ter", "St", "Ave", "Way", "72nd"])
+        else:
+            body, word = rng.choice(["786 555 ", "(305) 555-", "+1 954 555 "]), "0142"
+        tail = word + rng.choice(_PAIR_TAILS).format(m=mark)
+        return body + tail, [body + word, tail]
+    pair = [
+        rng.choice(_PAIR_EMAILS_AND_URLS).format(m=mark),
+        rng.choice(_PAIR_CONTACTS + _PAIR_EMAILS_AND_URLS).format(m=mark),
+    ]
+    rng.shuffle(pair)
+    return pair[0] + rng.choice(_PAIR_JOINS) + pair[1], pair
+
+
+def _shown_words(text: str) -> set[str]:
+    return set(re.findall(r"[^\W_]+", unicodedata.normalize("NFC", text)))
+
+
+def _shown_in(sentence: str, form: Literal["NFC", "NFD"], contact: str) -> set[str]:
+    text = unicodedata.normalize(form, sentence.format(contact))
+    return _shown_words(redact_contacts(text).text)
+
+
+def test_adjacent_contact_pairs_never_expose_more_than_base() -> None:
+    """Pairs of an email or a URL and a handle, a street, a phone, an email or a URL, side by
+    side or sharing a word, with marked and spelled cues, in sentences, NFC or NFD. The
+    reference is each contact read alone: a word of a contact the redactor hides alone never
+    shows in the pair. That is where base and the ordered pass failed (an email or a URL that
+    took a cue left the rest of the contact). The same pairs against base itself (develop's
+    redactor) are in the PR: none shows more than base. Two addresses side by side ("1250 Ocean
+    Dr y Brickell Ave 1200") read as one street and leave "1200", as on base: no email or URL
+    takes part, so they stay out of this test."""
+    rng = random.Random(4240)  # noqa: S311 - reproducible test data, not secrets
+    exposed: list[tuple[str, set[str]]] = []
+    for _ in range(3000):
+        pair, contacts = _contact_pair(rng)
+        sentence = rng.choice(OVERLAP_SENTENCES)
+        form: Literal["NFC", "NFD"] = rng.choice(["NFC", "NFD"])
+        in_pair = _shown_in(sentence, form, pair)
+        for contact in contacts:
+            hidden_alone = _shown_words(contact) - _PAIR_CUES - _shown_in(sentence, form, contact)
+            if hidden_alone & in_pair:
+                exposed.append((pair, hidden_alone & in_pair))
+
+    assert exposed == []
+
+
+@pytest.mark.parametrize("length", [5000, 10000])
+@pytest.mark.parametrize(
+    "unit",
+    [
+        "jdoe1 insta dot c" + chr(0x0483) + "om 1250 Ocean Dr at gm" + chr(0x0483) + "ail ",
+        "12 Main St jose@gmail.com ",
+        "jdoe1 (insta) acme.com ",
+        "Calle 8 #12 apt 4B 8800 SW 72nd at gmail ",
+    ],
+    ids=["cut_pairs", "streets_and_emails", "handles_and_urls", "addresses_and_emails"],
+)
+def test_the_recovery_of_cut_contacts_is_fast(unit: str, length: int) -> None:
+    """Dense contacts an email or a URL cuts: the handle and address rules read the text once
+    more, and each span finds the next email or URL mask by bisection."""
+    text = (unit * (length // len(unit) + 1))[:length]
+
+    assert best_seconds_without_gc(lambda: redact_contacts(text)) < 0.25
