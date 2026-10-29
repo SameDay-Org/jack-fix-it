@@ -150,6 +150,7 @@ async def test_an_invalid_take_rate_503_and_nothing_written(
     db_client: httpx.AsyncClient,
     db_session: AsyncSession,
     world: World,
+    queue: RecordingQueue,
     caplog: pytest.LogCaptureFixture,
     stored: object,
 ) -> None:
@@ -165,6 +166,7 @@ async def test_an_invalid_take_rate_503_and_nothing_written(
     assert await quotes_of(db_session, request_id) == []
     assert (await dispatch_row(db_session, dispatch_id)).status is DispatchStatus.SENT
     assert await status_of(db_session, request_id) is RequestStatus.FINDING_PRO
+    assert queue.jobs == {}  # no new quote push
     [invalid] = [r for r in caplog.records if r.message == "setting_invalid"]
     [refused] = [r for r in caplog.records if r.message == "quote_not_configured"]
     assert invalid.__dict__["key"] == refused.__dict__["key"] == TAKE_RATE

@@ -55,7 +55,8 @@ class QuoteCreate(BaseModel):
     @field_validator("approach", mode="before")
     @classmethod
     def _blank_is_no_note(cls, value: object) -> object:
-        # The same strip as the constraint (str.strip), so only a blank note becomes null.
+        # Blank by str.strip, which also drops a few control characters the constraint's
+        # strip keeps: a note of only those becomes null too, never a 1-character note.
         if isinstance(value, str) and not value.strip():
             return None
         return value
