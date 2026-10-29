@@ -14,9 +14,10 @@ export type VerifiedBadgeProps = {
 
 /** The space between the name's last letter and the seal. */
 const GAP = 4;
-// An inline view sits on the line's baseline on both platforms. Dropping the seal by 15% of its
-// size centers it on the capitals (cap height is about 0.7 em in Roboto and SF Pro).
-const CAP_CENTER_DROP = 0.15;
+// An inline view sits on the line's baseline on both platforms. Dropping the seal by 18% of its
+// size centers it on the capitals (cap height is about 0.7 em in Roboto and SF Pro): measured on
+// Android at 17 and 28 dp, within half a pixel of their center.
+const CAP_CENTER_DROP = 0.18;
 // U+2060 WORD JOINER, invisible: no line break between the name and the seal, so a wrapping name
 // takes its last word along and the seal never starts a line on its own.
 const WORD_JOINER = "\u2060";
