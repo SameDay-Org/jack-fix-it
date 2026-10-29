@@ -30,10 +30,10 @@ letters for digits ("305 555 O199"), commas between phone groups, digits that mi
 numerals, a phone grouping no one uses ("30 55 55 01 99"), a bare handle with no "@", cue or
 digit ("insta jdoe"), a plain word after a weak platform ("my venmo is jdoe"), a display name
 ("find me on facebook as John Doe"), a street with no suffix ("1234 Flagler"), a reversed street
-with lowercase or function-word names, a mark or a non-ASCII letter inside a TLD or a mail
-provider's name ("gmail.c" + U+0483 + "om", "gmail.cöm": those lists are literal), and text
-inside images (#173 handles media). A 10-digit order or serial number is masked like a phone:
-hiding a number is the safe side.
+with lowercase or function-word names, a non-ASCII letter inside a TLD or a mail provider's
+name ("gmail.cöm": those lists are literal; a mark glued inside one is handled, see
+_UNMARKED_FIRST), and text inside images (#173 handles media). A 10-digit order or serial
+number is masked like a phone: hiding a number is the safe side.
 
 The patterns are data in this module; it does no I/O and keeps no state. Every pattern is
 anchored so a 2,000-character input (the description limit) is handled in milliseconds.
@@ -41,9 +41,9 @@ anchored so a 2,000-character input (the description limit) is handled in millis
 
 import re
 import unicodedata
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Protocol
 
 MASK: Final = "•••"
 
@@ -193,6 +193,9 @@ _MARK_RANGES: Final = (
 )  # fmt: skip
 _MARKS: Final = "".join(f"{chr(low)}-{chr(high)}" for low, high in _MARK_RANGES)
 _MARKED: Final = rf"[{_MARKS}]*+"  # the marks glued to one character, taken as a run
+_MARK_CHARS: Final = frozenset(
+    chr(code) for low, high in _MARK_RANGES for code in range(low, high + 1)
+)
 
 # --- Emails ----------------------------------------------------------------------------------
 # Top-level domains a bare "name.tld" must end with, unless a path follows: generic ones,
@@ -227,11 +230,15 @@ _START: Final = rf"(?<![\w.%+@\-{_MARKS}])"
 _LOCAL: Final = rf"[\w+][\w.%+\-{_MARKS}]*+"  # any valid start: "_jane", "__x", "+tag"
 # A domain label character: any Unicode letter or digit ("gmäil", "ñandú"), a hyphen, or a mark
 # glued to one of them. "_" stays out ("see_gmail.com" is a known gap, see _FOLDABLE). The TLD
-# and the provider names stay literal: a mark inside them ("gmail.c" + U+0483 + "om") is a
-# known gap, since each would need the mark class after every letter.
+# and the provider names stay literal (the mark class after every letter would make the
+# patterns hundreds of kilobytes); a mark inside them ("gmail.c" + U+0483 + "om") is found by
+# running these rules on the text without its marks first (_UNMARKED_FIRST, #240).
 _LABEL: Final = rf"(?:[^\W_]|[\-{_MARKS}])"
+_LABEL_CHAR: Final = re.compile(_LABEL)
 _AT: Final = r"(?:\s*@\s*|\s*[(\[{<]\s*(?:at|arroba)\s*[)\]}>]\s*|\s+(?:at|arroba|en)\s+)"
 _STRONG_AT: Final = r"(?:\s*@\s*|\s*[(\[{<]\s*(?:at|arroba)\s*[)\]}>]\s*|\s+arroba\s+)"
+_WEAK_AT: Final = re.compile(r"\s+(?:at|en)\s+", _FLAGS)  # everyday words too
+_SPANISH_EN: Final = re.compile(r"\s+en\s+", _FLAGS)
 _SPELLED_DOT: Final = r"(?:\.|\s*[(\[{<]\s*(?:dot|punto)\s*[)\]}>]\s*|\s+(?:dot|punto)\s+)"
 _ONLY_SPELLED_DOT: Final = r"(?:\s*[(\[{<]\s*(?:dot|punto)\s*[)\]}>]\s*|\s+(?:dot|punto)\s+)"
 PLAIN_EMAIL: Final = re.compile(
@@ -243,11 +250,23 @@ SPACED_EMAIL: Final = re.compile(
 )
 # "maria at gmail dot com", "juan dot perez at gmail dot com", "jane (at) outlook.com". With a
 # bare " at " and a plain dot, the local part may not be a common word ("it at Amazon.com").
-# The spelled dots of the local part are bounded: an open repeat backtracks one piece at a time
-# from every word start, quadratic on "a dot " repeated (the domain chain is lazy and runs only
-# after the "at", so it stays open).
+# The local part is a chain of pieces joined by spelled dots, of any length ("a dot b dot c dot
+# d dot e dot f at gmail dot com" is masked whole, #240). Tried from every word start, the
+# chain would be scanned again from each of its pieces (quadratic on "a dot " repeated), so the
+# rule runs through _RunSearch: once per chain (_LOCAL_RUN), from its first piece. A piece is
+# never the dot word itself, so "a dot dot b at gmail dot com" starts at the first "dot", as a
+# search from every word start would. An at word may be a piece ("bob punto at (at) gmail.com"
+# is one address); a dot word right before it is the one start inside a run that can differ
+# ("jose dot at acme (dot) com" is "dot" at "acme"), so it is tried too (_LOCAL_INNER). The
+# domain chain is lazy and runs only after the "at".
+_LOCAL_PIECE: Final = rf"(?!(?:dot|punto)(?![\w.%+\-{_MARKS}])){_MARKED}{_LOCAL}"
+_LOCAL_CHAIN: Final = rf"{_LOCAL}(?:{_ONLY_SPELLED_DOT}{_LOCAL_PIECE})*+"
+_LOCAL_RUN: Final = re.compile(rf"{_START}{_MARKED}{_LOCAL_CHAIN}", _FLAGS)
+_LOCAL_INNER: Final = re.compile(
+    rf"(?<=\s)(?:dot|punto)(?=\s+(?:at|arroba|en)(?![\w.%+\-{_MARKS}]))", _FLAGS
+)
 SPELLED_EMAIL: Final = re.compile(
-    rf"{_START}{_MARKED}(?P<local>{_LOCAL}(?:{_ONLY_SPELLED_DOT}[\w\-{_MARKS}]++){{0,4}})"
+    rf"{_START}{_MARKED}(?P<local>{_LOCAL_CHAIN})"
     rf"(?P<at>{_AT}){_LABEL}++(?:{_SPELLED_DOT}{_LABEL}++)*?(?P<dot>{_SPELLED_DOT})"
     rf"(?P<tld>{_TLD_END})",
     _FLAGS,
@@ -288,16 +307,24 @@ _COMMON_WORDS: Final = frozenset(
 # A domain never starts inside a word or a marked token (see _START), and may begin with a
 # spacing mark; its labels are _LABEL, so "gmäil.com", "gm" + U+0483 + "ail.com" and
 # "ñandú.com/x" are masked whole. An accented word glued to a word TLD by a missing space
-# ("El baño.es muy pequeño") is left alone by _missing_space. The spelled dots are bounded, as
-# in SPELLED_EMAIL.
+# ("El baño.es muy pequeño") is left alone by _accented_word.
 _DOMAIN_START: Final = rf"(?<![\w.@\-{_MARKS}])"
 URL: Final = re.compile(
     rf"(?:https?://|\bwww\s*\.\s*)\S+"
     rf"|{_DOMAIN_START}{_MARKED}[^\W_]{_LABEL}*+(?:\.{_LABEL}++)*?\.[a-z]{{2,}}/\S*"
     rf"|{_DOMAIN_START}{_MARKED}[^\W_]{_LABEL}*+(?:\.{_LABEL}++)*?\.(?P<tld>{_TLD_END})"
     rf"|{_DOMAIN_START}{_MARKED}[^\W_]{_LABEL}{{2,}}+\s*\.\s+(?:com|net|org|co|us|io|miami)\b"
-    rf"|{_DOMAIN_START}{_MARKED}[^\W_]{_LABEL}{{2,}}+\s+\.\s*(?:com|net|org|co|us|io|miami)\b"
-    rf"|{_DOMAIN_START}{_LABEL}{{2,}}+(?:\s+(?:dot|punto)\s+{_LABEL}++){{0,4}}\s+(?:dot|punto)\s+"
+    rf"|{_DOMAIN_START}{_MARKED}[^\W_]{_LABEL}{{2,}}+\s+\.\s*(?:com|net|org|co|us|io|miami)\b",
+    _FLAGS,
+)
+# "jackfixit dot com", "aa dot bb dot cc dot dd dot ee dot ff dot com": a chain of any length,
+# run once per chain (_DOMAIN_RUN) as SPELLED_EMAIL is; its pieces are never the dot word.
+_DOMAIN_PIECE: Final = rf"(?!(?:dot|punto)(?![^\W_]|[\-{_MARKS}])){_LABEL}++"
+_DOMAIN_RUN: Final = re.compile(
+    rf"{_DOMAIN_START}{_LABEL}{{2,}}+(?:\s+(?:dot|punto)\s+{_DOMAIN_PIECE})*+", _FLAGS
+)
+SPELLED_URL: Final = re.compile(
+    rf"{_DOMAIN_START}{_LABEL}{{2,}}+(?:\s+(?:dot|punto)\s+{_DOMAIN_PIECE})*\s+(?:dot|punto)\s+"
     rf"{_TLD_END}",
     _FLAGS,
 )
@@ -378,15 +405,24 @@ AT_HANDLE: Final = re.compile(
     _FLAGS,
 )
 # A cashtag is 2 to 20 characters, a letter first, ending on a word character; the characters
-# carry their marks, and the "$" may carry a spacing mark ("$" + U+093F + "bob").
+# carry their marks, and the "$" may carry a spacing mark ("$" + U+093F + "bob"). Three capitals
+# are a currency only as the whole token: a mark or a word character continues it ("$BOB" +
+# U+0483 + "smith" is a cashtag, "$USD" and "$USD-denominated" are currencies, #240).
 CASHTAG: Final = re.compile(
-    rf"(?<![\w$])\$(?!(?-i:[A-Z]{{3}})\b){_MARKED}[^\W\d_]{_MARKED}(?:[\w-]{_MARKED}){{0,18}}"
-    rf"\w{_MARKED}(?![\w{_MARKS}])",
+    rf"(?<![\w$])\$(?!(?-i:[A-Z]{{3}})(?![\w{_MARKS}]))"
+    rf"{_MARKED}[^\W\d_]{_MARKED}(?:[\w-]{_MARKED}){{0,18}}\w{_MARKED}(?![\w{_MARKS}])",
     _FLAGS,
 )
-# A combining mark on an ASCII letter after NFC is never an accent (every EN, ES and PT accent
-# composes): "bob" + U+0483 + "smith" is shaped like an evasion, not like a word.
-_MARKED_LATIN: Final = re.compile(rf"[a-z][{_MARKS}]", _FLAGS)
+# A combining mark on a Latin letter after NFC is never an accent (every EN, ES and PT accent
+# composes): "bob" + U+0483 + "smith" and "josé" + U+0483 + "smith" are shaped like an evasion,
+# not like a word (#240). Scripts that write with marks (Devanagari, Arabic, Hebrew) are not
+# Latin, so their words stay plain words. The Latin letters: ASCII, Latin-1, Extended-A and B,
+# and Extended Additional (Vietnamese).
+_LATIN_LETTERS: Final = "a-z" + "".join(
+    f"{chr(low)}-{chr(high)}"
+    for low, high in ((0x00C0, 0x00D6), (0x00D8, 0x00F6), (0x00F8, 0x024F), (0x1E00, 0x1EFF))
+)
+_MARKED_LATIN: Final = re.compile(rf"[{_LATIN_LETTERS}][{_MARKS}]", _FLAGS)
 _CASHTAG_START: Final = re.compile(rf"\$[{_MARKS}]*[^\W\d_]")  # "$jdoe", "$" + U+093F + "jdoe"
 
 # --- Phones ----------------------------------------------------------------------------------
@@ -546,6 +582,37 @@ _SHORT_NUMBER: Final = re.compile(r"\d{1,4}(?:[./]\d{1,3})?")
 _Replace = Callable[[re.Match[str]], str | None]  # None keeps the match as it is
 
 
+class _Search(Protocol):
+    def search(self, string: str, pos: int = 0) -> re.Match[str] | None: ...
+
+
+@dataclass(frozen=True)
+class _RunSearch:
+    """`pattern` tried once per run of `run` (its leading spelled-dot chain), from the run's
+    first piece. A start at a later piece would scan the same chain to the same end and reach
+    the same verdict, so skipping those starts keeps the search linear (#240). The starts that
+    can differ (`inner`, inside the run) are tried after it; each match there is short. `accept`
+    refuses a match here rather than in the replace step, which would try again one character
+    later."""
+
+    run: re.Pattern[str]
+    pattern: re.Pattern[str]
+    accept: Callable[[re.Match[str]], bool] | None = None
+    inner: re.Pattern[str] | None = None
+
+    def search(self, string: str, pos: int = 0) -> re.Match[str] | None:
+        while (run := self.run.search(string, pos)) is not None:
+            starts = [run.start()]
+            if self.inner is not None:
+                starts += [inner.start() for inner in self.inner.finditer(string, *run.span())]
+            for start in starts:
+                match = self.pattern.match(string, start)
+                if match is not None and (self.accept is None or self.accept(match)):
+                    return match
+            pos = run.end()
+        return None
+
+
 @dataclass(frozen=True)
 class RedactionResult:
     text: str
@@ -556,8 +623,11 @@ def redact_contacts(text: str) -> RedactionResult:
     """`text` with every contact detail it recognizes replaced by MASK (see the module doc)."""
     cleaned = _clean(text)
     masked = 0
-    for pattern, replace in _STEPS:
-        cleaned, count = _substitute(pattern, replace, cleaned)
+    for search, replace in _STEPS:
+        if search in _UNMARKED_FIRST:
+            cleaned, count = _substitute_unmarked(search, replace, cleaned)
+            masked += count
+        cleaned, count = _substitute(search, replace, cleaned)
         masked += count
     return RedactionResult(cleaned, masked > 0)
 
@@ -606,20 +676,45 @@ def _fold_confusables(match: re.Match[str]) -> str:
     return "".join(_CONFUSABLES.get(char, char) for char in word)
 
 
-def _substitute(pattern: re.Pattern[str], replace: _Replace, text: str) -> tuple[str, int]:
+def _substitute(search: _Search, replace: _Replace, text: str) -> tuple[str, int]:
     """Like pattern.sub, but a kept match only skips one character, so a contact that starts
     inside it is still found ("fix 2 doors 1250 Ocean Dr")."""
-    pieces: list[str] = []
-    position, count = 0, 0
+    return _apply(text, _replacements(search, replace, text))
+
+
+def _substitute_unmarked(search: _Search, replace: _Replace, text: str) -> tuple[str, int]:
+    """The same step on `text` without its marks; each mask also covers the marks inside its
+    match and around it, so "gmail.c" + U+0483 + "om" is masked whole (see _UNMARKED_FIRST)."""
+    kept = [index for index, char in enumerate(text) if char not in _MARK_CHARS]
+    if len(kept) == len(text):
+        return text, 0
+    unmarked = "".join(text[index] for index in kept)
+    kept.append(len(text))
+    spans = (
+        (kept[start - 1] + 1 if start else 0, kept[end], replacement)
+        for start, end, replacement in _replacements(search, replace, unmarked)
+    )
+    return _apply(text, spans)  # two touching masks may share the marks between them
+
+
+def _replacements(search: _Search, replace: _Replace, text: str) -> Iterator[tuple[int, int, str]]:
     search_from = 0
-    while (match := pattern.search(text, search_from)) is not None:
+    while (match := search.search(text, search_from)) is not None:
         replacement = replace(match)
         if replacement is None:
             search_from = match.start() + 1
             continue
-        pieces += [text[position : match.start()], replacement]
+        yield match.start(), match.end(), replacement
+        search_from = max(match.end(), match.start() + 1)
+
+
+def _apply(text: str, spans: Iterable[tuple[int, int, str]]) -> tuple[str, int]:
+    pieces: list[str] = []
+    position, count = 0, 0
+    for start, end, replacement in spans:
+        pieces += [text[position:start], replacement]
         count += replacement.count(MASK)
-        position = search_from = max(match.end(), match.start() + 1)
+        position = end
     pieces.append(text[position:])
     return "".join(pieces), count
 
@@ -629,37 +724,50 @@ def _mask(match: re.Match[str]) -> str | None:
 
 
 def _missing_space(match: re.Match[str], tld: str) -> bool:
-    """ "cooling.Me and my wife": a word TLD, capitalized, right after a lowercase letter. Or
-    "El baño.es muy pequeño": a word TLD after a label with a non-ASCII letter, which is Spanish
-    or Portuguese typing, not a domain (an accented domain with a path or "www." is still one)."""
-    if tld.lower() not in _WORD_TLDS:
-        return False
+    """ "cooling.Me and my wife": a word TLD, capitalized, right after a lowercase letter."""
     start = match.start("tld")
     before = match.string[start - 2] if start >= 2 else ""
-    if tld[0].isupper() and not tld.isupper() and before.islower():
-        return True
-    label = match.string[match.start() : start - 1].rsplit(".", 1)[-1]
-    return any(char.isalpha() and not char.isascii() for char in label)
+    return tld.lower() in _WORD_TLDS and tld[0].isupper() and not tld.isupper() and before.islower()
+
+
+def _accented_word(text: str, dot: int, tld: str) -> bool:
+    """ "El baño.es muy pequeño": a word TLD after a label with a non-ASCII letter, which is
+    Spanish or Portuguese typing with a missing space, not a domain. Only the label glued to
+    the dot at `dot` counts (an accented domain with a path or "www." is still one)."""
+    if tld.lower() not in _WORD_TLDS:
+        return False
+    start = dot
+    while start > 0 and _LABEL_CHAR.fullmatch(text[start - 1]) is not None:
+        start -= 1
+    return any(char.isalpha() and not char.isascii() for char in text[start:dot])
 
 
 def _mask_url(match: re.Match[str]) -> str | None:
     tld = match.group("tld")
-    if tld is not None and _missing_space(match, tld):
+    if tld is not None and (
+        _missing_space(match, tld) or _accented_word(match.string, match.start("tld") - 1, tld)
+    ):
         return None
     return MASK
 
 
-def _mask_spelled_email(match: re.Match[str]) -> str | None:
-    weak_at = re.fullmatch(r"\s+(?:at|en)\s+", match.group("at"), _FLAGS) is not None
+def _is_spelled_email(match: re.Match[str]) -> bool:
+    at = match.group("at")
+    weak_at = _WEAK_AT.fullmatch(at) is not None
     if weak_at and match.group("local").lower() in _COMMON_WORDS:
-        return None  # "it at Amazon.com", "work at BestPools.com"
-    if match.group("dot") == "." and _missing_space(match, match.group("tld")):
-        return None  # "is at home.Me and my wife"
-    return MASK
+        return False  # "it at Amazon.com", "work at BestPools.com"
+    if match.group("dot") != "." or not weak_at:
+        return True  # "@", "(at)" and "arroba" make an address whatever its labels (#240)
+    if _missing_space(match, match.group("tld")):
+        return False  # "is at home.Me and my wife"
+    # "Vivo en baño.es muy...": "en" is a word first. After "at" the address is masked whatever
+    # its labels ("josé at acme.es", #240).
+    spanish_en = _SPANISH_EN.fullmatch(at) is not None
+    return not (spanish_en and _accented_word(match.string, match.start("dot"), match.group("tld")))
 
 
 def _mask_provider_email(match: re.Match[str]) -> str | None:
-    weak_at = re.fullmatch(r"\s+(?:at|en)\s+", match.group("at"), _FLAGS) is not None
+    weak_at = _WEAK_AT.fullmatch(match.group("at")) is not None
     if weak_at and match.group("local").lower() in _COMMON_WORDS:
         return None  # "photos are at iCloud", "I work at Yahoo"
     return MASK
@@ -871,13 +979,16 @@ def _is_latin_mobile(joined: str, count: int) -> bool:
 # Order matters: emails and URLs before the handles and domains inside them; phones before
 # platform handles, so "whatsapp 305 555 0199" loses the whole number; masks hold no letter or
 # digit, so a later pattern never matches inside an earlier mask.
-_STEPS: Final[tuple[tuple[re.Pattern[str], _Replace], ...]] = (
+_SPELLED_EMAILS: Final = _RunSearch(_LOCAL_RUN, SPELLED_EMAIL, _is_spelled_email, _LOCAL_INNER)
+_SPELLED_URLS: Final = _RunSearch(_DOMAIN_RUN, SPELLED_URL)
+_STEPS: Final[tuple[tuple[_Search, _Replace], ...]] = (
     (SPACED_LETTERS_EMAIL, _mask),
     (PLAIN_EMAIL, _mask),
     (SPACED_EMAIL, _mask),
-    (SPELLED_EMAIL, _mask_spelled_email),
+    (_SPELLED_EMAILS, _mask),
     (PROVIDER_EMAIL, _mask_provider_email),
     (GLUED_EMAIL, _mask),
+    (_SPELLED_URLS, _mask),  # before URL: "miweb punto com.mx" is masked from "miweb"
     (URL, _mask_url),
     (SPELLED_PHONE, _mask),
     (DIGIT_RUN, _phones),
@@ -890,6 +1001,14 @@ _STEPS: Final[tuple[tuple[re.Pattern[str], _Replace], ...]] = (
     (GRID_OR_HIGHWAY, _mask),
     (SPANISH_STREET, _mask),
     (UNIT_OR_BOX, _mask),
+)
+# The rules with a literal TLD or provider list run first on the text without its marks: a
+# mark glued inside "gmail" or "com" splits the literal ("gmail.c" + U+0483 + "om", "jose at
+# gm" + U+0483 + "ail", #240), and the mark class after every letter of the lists would make
+# the patterns hundreds of kilobytes. The run on the text as it is follows and keeps what only
+# the marks make a contact. Only a text with a mark pays for the extra run.
+_UNMARKED_FIRST: Final[frozenset[_Search]] = frozenset(
+    {PLAIN_EMAIL, SPACED_EMAIL, _SPELLED_EMAILS, PROVIDER_EMAIL, URL, _SPELLED_URLS}
 )
 
 

@@ -652,9 +652,8 @@ def test_a_mark_is_handle_shape_only_on_a_latin_letter() -> None:
 
 
 # The audit of AC3 (#236): a mark or a non-ASCII letter inside the local part, the domain and
-# the path, against every email and URL rule. A mark inside the TLD or a provider's name
-# ("gmail.c" + U+0483 + "om", "jose at gm" + U+0483 + "ail") stays a known gap: those lists
-# are literal (module doc).
+# the path, against every email and URL rule. A mark inside the TLD or a provider's name is
+# test_b4_mark_inside_a_tld_or_provider_masks_whole_span (#240).
 AUDIT_CASES = [
     # PLAIN_EMAIL: the local part, a label, the "@", a non-ASCII letter in the label.
     "jo" + TITLO + "se@gmail.com",
@@ -723,6 +722,201 @@ def test_an_accented_word_glued_to_a_word_tld_is_a_missing_space(
         assert redact_contacts(typed) == RedactionResult(text, False), ascii(typed)
     for domain in ("ñandú.com", "baño.es/x", "www.baño.es", "gmäil.com"):
         assert redact_contacts(f"see {domain}") == RedactionResult(f"see {MASK}", True), domain
+
+
+# #240 review, round 1 (the Gatekeeper's B1 to B5): each probe is masked whole with
+# redacted=True, in NFC and NFD, standalone and inside a sentence; the protected text next to
+# it stays as typed.
+def _assert_masked_whole(text: str, form: Literal["NFC", "NFD"]) -> None:
+    typed = unicodedata.normalize(form, text)
+
+    assert redact_contacts(typed) == RedactionResult(MASK, True), ascii(typed)
+    assert redact_contacts(f"write to {typed} thanks") == RedactionResult(
+        f"write to {MASK} thanks", True
+    ), ascii(typed)
+
+
+def _assert_unchanged(text: str, form: Literal["NFC", "NFD"]) -> None:
+    typed = unicodedata.normalize(form, text)
+
+    assert redact_contacts(typed) == RedactionResult(text, False), ascii(typed)
+
+
+B1_EMAILS = [
+    "josé (at) acme.es",
+    "josé arroba acme.es",
+    "josé at acme.es",
+    "josé@acme.es",
+    "jose (at) acme.Es",
+    "jose arroba acme.Me",
+    "jose (at) mañana.es",
+    "jose arroba mañana.es",
+    "jose at baño.es",
+    "josé (at) mañana.es",
+]
+B1_PROSE = ["El baño.es muy pequeño", "la cocina está.me gusta", "Vivo en baño.es muy bien"]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize("text", B1_EMAILS + B1_PROSE, ids=ascii)
+def test_b1_explicit_email_cue_masks_whole_address(text: str, form: Literal["NFC", "NFD"]) -> None:
+    """The missing-space exception reads only the label glued to the dot, and only without an
+    explicit cue: "@", "(at)", "arroba" and "at" make an address whatever its letters."""
+    if text in B1_PROSE:
+        _assert_unchanged(text, form)
+    else:
+        _assert_masked_whole(text, form)
+
+
+B2_CASHTAGS = [
+    "$BOB" + TITLO + "smith",
+    "$BOB" + TITLO,
+    "$BO" + TITLO + "Bsmith",
+    "$BOB" + VOWEL_SIGN_I + "smith",
+    "$" + VOWEL_SIGN_I + "USD",
+]
+B2_CURRENCIES = [
+    "$USD",
+    "pay in $USD.",
+    "$USD-50 deposit",
+    "$USD-denominated invoice",
+    "$EUR, $GBP",
+]
+
+
+@pytest.mark.parametrize("text", B2_CASHTAGS + B2_CURRENCIES, ids=ascii)
+def test_b2_currency_exemption_needs_the_whole_token(text: str) -> None:
+    """Three capitals are a currency only when nothing continues them: a mark or a word
+    character makes a cashtag of the whole token."""
+    if text in B2_CURRENCIES:
+        _assert_unchanged(text, "NFC")
+    else:
+        _assert_masked_whole(text, "NFC")
+
+
+# The reverse handle stops at the platform word, so a closing bracket stays.
+B3_HANDLES = [
+    ("josé" + TITLO + "smith (insta)", MASK + ")"),
+    ("josé" + TITLO + "smith on insta", MASK),
+    ("ação" + TITLO + "silva (insta)", MASK + ")"),
+    ("insta josé" + TITLO + "smith", MASK),
+    ("ñandú" + VOWEL_SIGN_I + "fixit on tiktok", MASK),
+]
+HEBREW_SHALOM = "".join(map(chr, (0x05E9, 0x05B8, 0x05DC, 0x05D5, 0x05B9, 0x05DD)))
+ARABIC_MARHABA = "".join(map(chr, (0x0645, 0x064E, 0x0631, 0x0652, 0x062D, 0x064E, 0x0628, 0x0627)))
+DEVANAGARI_NAMASTE = "".join(map(chr, (0x0928, 0x092E, 0x0938, 0x094D, 0x0924, 0x0947)))
+B3_WORDS = [
+    "josé (insta)",
+    "ação (insta)",
+    "insta mañana",
+    f"{HEBREW_SHALOM} (insta)",
+    f"{ARABIC_MARHABA} (insta)",
+    f"insta {HEBREW_SHALOM}",
+    f"whatsapp {DEVANAGARI_NAMASTE}",
+]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    B3_HANDLES + [(word, word) for word in B3_WORDS],
+    ids=[ascii(text) for text, _ in B3_HANDLES] + [ascii(word) for word in B3_WORDS],
+)
+def test_b3_mark_on_any_latin_letter_is_handle_shape(
+    text: str, expected: str, form: Literal["NFC", "NFD"]
+) -> None:
+    """A mark that survives NFC on a Latin letter, accented or not, is an evasion; the words of
+    scripts that write with marks are not Latin and stay plain words."""
+    typed = unicodedata.normalize(form, text)
+
+    assert redact_contacts(typed) == RedactionResult(expected, expected != text), ascii(typed)
+
+
+B4_SPANS = [
+    "gmail.c" + TITLO + "om",
+    "jose at gm" + TITLO + "ail",
+    "jose@gmail.c" + TITLO + "om",
+    "jose@gmail.com" + TITLO,
+    "jose@gm" + TITLO + "ail.c" + TITLO + "om",
+    "jose@acme.i" + TITLO + "o",
+    "jose @ gmail . c" + TITLO + "om",
+    "jose at gmail dot c" + TITLO + "om",
+    "jose arroba gmail punto c" + TITLO + "om",
+    "jose (at) hotm" + TITLO + "ail.com",
+    "jose en hotm" + TITLO + "ail",
+    "jose at gmail c" + TITLO + "om",
+    "jose at y" + TITLO + "ahoo",
+    "josé at gm" + TITLO + "ail",
+    "gm" + TITLO + "ail.c" + TITLO + "om",
+    "gmail.c" + VOWEL_SIGN_I + "om",
+    "linktr.e" + TITLO + "e/bob",
+    "jackfixit . c" + TITLO + "om",
+    "jackfixit dot c" + TITLO + "om",
+]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize("text", B4_SPANS, ids=ascii)
+def test_b4_mark_inside_a_tld_or_provider_masks_whole_span(
+    text: str, form: Literal["NFC", "NFD"]
+) -> None:
+    """The rules with a literal TLD or provider list also run on the text without its marks,
+    and the mask covers the marks."""
+    _assert_masked_whole(text, form)
+
+
+def _spelled_chain(separator: str, pieces: int) -> str:
+    return separator.join("abcdefghijk"[:pieces])
+
+
+B5_CHAINS = [
+    *(f"{_spelled_chain(' dot ', n + 1)} at gmail dot com" for n in range(5, 11)),
+    *(f"{_spelled_chain(' dot ', n + 1)} at acme dot com" for n in range(5, 11)),
+    f"{_spelled_chain(' punto ', 7)} arroba gmail punto com",
+    f"{_spelled_chain(' (dot) ', 7)} (at) gmail (dot) com",
+    f"{_spelled_chain(' dot ', 6)} at gmail.com",
+    "josé dot b dot c dot d dot e dot f at gmail dot com",
+    *(" dot ".join(["jack", *("fixit" for _ in range(n - 1)), "com"]) for n in range(5, 11)),
+]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize("text", B5_CHAINS, ids=ascii)
+def test_b5_long_spelled_chain_masked_whole(text: str, form: Literal["NFC", "NFD"]) -> None:
+    """A spelled-dot chain of 5 to 10 separators, before the "at" or in a domain, is masked
+    from its first piece; the chain is scanned once per run, not bounded."""
+    _assert_masked_whole(text, form)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "jose dot at acme (dot) com",
+        "jose punto arroba acme (punto) com",
+        "jo dot en acme (punto) es",
+    ],
+)
+def test_a_dot_word_before_the_at_cue_starts_the_address(text: str) -> None:
+    """An at word is never a piece of the spelled local part, so the search tries the "dot"
+    before it as a local part, as a search from every word start does (base parity)."""
+    first = text.split()[0]
+    assert redact_contacts(text) == RedactionResult(f"{first} {MASK}", True)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Mi web es plomeriajose punto com.mx", f"Mi web es {MASK}.mx"),
+        ("jackfixit dot co.uk", f"{MASK}.uk"),
+        ("see miweb dot co.uk/contact", f"see {MASK}.uk/contact"),
+    ],
+)
+def test_a_spelled_domain_before_a_country_code_keeps_its_name_masked(
+    text: str, expected: str
+) -> None:
+    """The spelled-dot domain rule runs before the URL rule, so "com.mx" never takes the mask
+    from the name before it (as on base, where both were one alternation)."""
+    assert redact_contacts(text) == RedactionResult(expected, True)
 
 
 @pytest.mark.parametrize("prefix", ["APT", "UNIT", "SUITE", "STE", "PO BOX"])
@@ -1388,6 +1582,46 @@ MARKED_LETTER = "é" + chr(0x0483)  # a non-ASCII letter with a mark: 2,500 of t
 def test_many_unicode_letters_with_marks_are_fast(text: str) -> None:
     """One 5,000-character case per pattern changed in #236: the lookbehinds refuse a start
     after a mark, so a marked token is scanned once, the counted bodies stay possessive, and
-    the spelled-dot chains are bounded."""
+    the spelled-dot chains are scanned once per run."""
+    assert len(text) >= 5000
+    assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "a dot " * 833 + "zz",
+        "a dot " * 832 + "a at home.Me",
+        "a  dot  " * 625,
+        ("a" + TITLO + " dot ") * 715,
+        "aa dot " * 714 + "zz",
+        "dot " * 1250,
+        "a dot at " * 556,
+        ("gmail.c" + TITLO + "om ") * 500,
+        ("jose at gm" + TITLO + "ail ") * 334,
+        ("a" + TITLO + " at ") * 1000,
+        ("$BOB" + TITLO) * 1000,
+        MARKED_LETTER * 2499 + " (insta)",
+        "x en " + "ñ" * 4992 + ".es",
+    ],
+    ids=[
+        "local_chain",
+        "local_chain_refused",
+        "local_chain_double_spaces",
+        "local_chain_marked",
+        "domain_chain",
+        "dot_words",
+        "dot_word_before_at",
+        "unmarked_url",
+        "unmarked_provider",
+        "unmarked_spelled_email",
+        "cashtag_marked_currency",
+        "latin_mark_shape",
+        "accented_label",
+    ],
+)
+def test_round_one_rules_are_fast(text: str) -> None:
+    """One 5,000-character case per rule changed in round 1 of #240: the spelled-dot chains
+    are scanned once per run, and the run without marks is one more linear pass."""
     assert len(text) >= 5000
     assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25
