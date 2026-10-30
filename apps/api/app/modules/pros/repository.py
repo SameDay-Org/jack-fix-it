@@ -124,6 +124,13 @@ class ProProfileRepository:
             statement = statement.with_for_update().execution_options(populate_existing=True)
         return await self._session.scalar(statement)
 
+    async def get_by_id(self, pro_id: uuid.UUID, *, lock: bool = False) -> ProProfile | None:
+        """`lock`: FOR UPDATE until the transaction ends."""
+        statement = select(ProProfile).where(ProProfile.id == pro_id)
+        if lock:
+            statement = statement.with_for_update().execution_options(populate_existing=True)
+        return await self._session.scalar(statement)
+
     async def set_stripe_account_id(self, pro_id: uuid.UUID, account_id: str) -> None:
         await self._session.execute(
             update(ProProfile)
@@ -136,6 +143,13 @@ class ProProfileRepository:
             update(ProProfile)
             .where(ProProfile.id == pro_id)
             .values(stripe_account_requested_at=func.now(), updated_at=func.now())
+        )
+
+    async def clear_stripe_account_requested(self, pro_id: uuid.UUID) -> None:
+        await self._session.execute(
+            update(ProProfile)
+            .where(ProProfile.id == pro_id)
+            .values(stripe_account_requested_at=None, updated_at=func.now())
         )
 
     async def set_payouts_enabled(self, pro_id: uuid.UUID, enabled: bool) -> bool:

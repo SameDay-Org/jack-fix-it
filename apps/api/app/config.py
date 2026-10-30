@@ -51,6 +51,9 @@ _STRIPE_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
 _STRIPE_SETTINGS: tuple[str, ...] = ("stripe_secret_key", "public_api_url")
 # Stripe stays in test mode until launch (ADR 0005): a live key works in production only.
 _STRIPE_LIVE_KEY_PREFIXES = ("sk_live_", "rk_live_")
+# Stripe keeps an idempotency key at least this long (its documented 24 hours): Stripe's fact,
+# not a setting.
+STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS = 86_400
 # Upper bound on passwords (NIST 800-63B allows a cap); also bounds the Argon2 input.
 PASSWORD_MAX_LENGTH = 128
 
@@ -276,10 +279,12 @@ class Settings(BaseSettings):
     stripe_timeout_seconds: float = Field(default=10.0, gt=0)
     stripe_max_network_retries: int = Field(default=0, ge=0)
     # A profile with no stored account whose first create was attempted at least this many
-    # seconds ago looks its account up in Stripe before another create: Stripe may forget an
+    # seconds ago looks its account up in Stripe instead of creating again: Stripe may forget an
     # idempotency key once it is 24 hours old, so the value stays below that. The lookup lists
     # the platform's accounts, 100 per page, at most this many pages.
-    stripe_account_reconcile_after_seconds: int = Field(default=72_000, gt=0, lt=86_400)
+    stripe_account_reconcile_after_seconds: int = Field(
+        default=72_000, gt=0, lt=STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS
+    )
     stripe_account_list_max_pages: int = Field(default=10, gt=0)
     # The API's public base URL, such as https://api.example.com: Stripe sends the pro's browser
     # back to its onboarding pages there. Required with Stripe in staging and production (https).

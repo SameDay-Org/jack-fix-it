@@ -72,8 +72,9 @@ _RESPONSES: dict[int | str, dict[str, Any]] = {
     responses={
         **_RESPONSES,
         status.HTTP_409_CONFLICT: _error(
-            "payouts_needs_review: Stripe holds more than one payout account for the pro, or "
-            "could not be searched to the end; nothing was created. Support resolves it."
+            "payouts_needs_review: an earlier account create is unresolved: Stripe shows no "
+            "payout account for the pro, more than one, or could not be searched to the end; "
+            "nothing was created. Support resolves it."
         ),
         status.HTTP_429_TOO_MANY_REQUESTS: {
             **_error("rate_limited: too many onboarding links; retry later."),

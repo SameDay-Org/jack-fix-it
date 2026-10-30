@@ -18,9 +18,15 @@ class PaymentsProviderError(AppError):
 
 
 class PayoutsNeedsReviewError(AppError):
-    """Stripe holds more than one account for the pro, or the lookup could not tell: support
-    resolves it in the Stripe dashboard before another account is created."""
+    """An account create is unresolved: the lookup after it found no account, more than one,
+    or could not tell. Support resolves it (scripts/resolve_payout_account.py) before another
+    account is created."""
 
     status_code = 409
     code = "payouts_needs_review"
     message = "Your payout account needs a review by our support team."
+
+
+class PayoutsRecoveryRefusedError(Exception):
+    """A staff recovery of a payout account was refused. The message is for the operator and
+    never holds an account id or an email."""

@@ -135,10 +135,21 @@ class ProService:
         profile = await self._profiles.get_by_user_id(user_id, lock=lock)
         return None if profile is None else _payout_account(profile)
 
+    async def lock_payout_account_by_profile(self, pro_id: uuid.UUID) -> PayoutAccount | None:
+        """The profile's payout account, its row FOR UPDATE until the caller's transaction
+        ends; None when no profile has this id (staff recovery, #39)."""
+        profile = await self._profiles.get_by_id(pro_id, lock=True)
+        return None if profile is None else _payout_account(profile)
+
     async def mark_stripe_account_requested(self, pro_id: uuid.UUID) -> None:
         """Stamps the profile's account-create attempt now; the caller holds the row lock and
         commits before the create call."""
         await self._profiles.set_stripe_account_requested_now(pro_id)
+
+    async def clear_stripe_account_requested(self, pro_id: uuid.UUID) -> None:
+        """Forgets the profile's account-create attempt, so the next onboarding link creates
+        again; the caller holds the row lock and commits."""
+        await self._profiles.clear_stripe_account_requested(pro_id)
 
     async def set_stripe_account(self, pro_id: uuid.UUID, account_id: str) -> None:
         """Stores the profile's Express account id; the caller holds the row lock and commits."""

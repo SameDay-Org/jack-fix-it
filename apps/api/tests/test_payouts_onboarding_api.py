@@ -27,7 +27,7 @@ from app.integrations.stripe_connect import (
     get_stripe_connect,
 )
 from app.modules.auth.permissions import PUBLIC_ROUTES
-from app.modules.payouts.errors import PaymentsUnavailableError
+from app.modules.payouts.errors import PaymentsUnavailableError, PayoutsNeedsReviewError
 from app.modules.payouts.service import PayoutsConfig, PayoutsService
 from app.modules.pros.models import ProProfile
 from app.modules.pros.repository import ProProfileRepository
@@ -139,6 +139,15 @@ class FakeStripe:
         self.looked_up.append(profile_id)
         matches = tuple(account for account, of in self.profiles.items() if of == profile_id)
         return ProfileAccounts(matches, complete=self.list_complete)
+
+    async def account_profile_id(self, account_id: str) -> str | None:
+        """An account missing from `profiles` is one Stripe does not know (a 404); an empty
+        profile id is an account without that metadata."""
+        if "retrieve" in self.errors:
+            raise self.errors["retrieve"]
+        if account_id not in self.profiles:
+            raise StripeRejectedError(code="resource_missing")
+        return self.profiles[account_id] or None
 
 
 @dataclass
@@ -550,8 +559,9 @@ async def _refused_lookup(
 ) -> tuple[Caller, list[dict[str, object]]]:
     """A pro whose create was attempted longer ago than RECONCILE_AFTER, with no stored account,
     and `matches` remote accounts naming the profile: the call answers 409, creates nothing and
-    stores nothing. Returns the pro and the JSON log lines."""
-    ana = await pro(db_session, requested_at=datetime.now(UTC) - RECONCILE_AFTER - timedelta(1))
+    stores nothing, the attempt's time unchanged. Returns the pro and the JSON log lines."""
+    attempted = datetime.now(UTC) - RECONCILE_AFTER - timedelta(1)
+    ana = await pro(db_session, requested_at=attempted)
     profile = await profile_of(db_session, ana)
     assert profile is not None
     profile_id = str(profile.id)  # read before the call, whose commit expires the row
@@ -565,13 +575,30 @@ async def _refused_lookup(
     assert stripe.looked_up == [profile_id]
     assert stripe.created == []
     assert stripe.links == []
-    assert (await profile_of(db_session, ana)).stripe_account_id is None  # type: ignore[union-attr]
+    after = await profile_of(db_session, ana)
+    assert after is not None
+    assert (after.stripe_account_id, after.stripe_account_requested_at) == (None, attempted)
     formatter = JsonFormatter()
     lines = [formatter.format(record) for record in caplog.records]
     for line in lines:
         for private in (*remote, await email_of(db_session, ana)):
             assert private not in line, line
     return ana, [json.loads(line) for line in lines]
+
+
+async def test_no_matching_account_refuses_with_needs_review(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    stripe: FakeStripe,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A complete listing with no account naming the profile does not prove the old create can
+    never land (#279 Vault round 2): no new create, the attempt stays unresolved for staff."""
+    _, logs = await _refused_lookup(db_client, db_session, stripe, caplog, matches=0)
+
+    [ambiguous] = [log for log in logs if log["message"] == "payouts_account_ambiguous"]
+    assert ambiguous["level"] == "ERROR"
+    assert (ambiguous["count"], ambiguous["listing_complete"]) == (0, True)
 
 
 async def test_two_matching_accounts_refuse_with_needs_review(
@@ -818,6 +845,7 @@ async def test_retry_within_window_replays_with_the_same_key(new_pro: NewPro) ->
     with pytest.raises(PaymentsUnavailableError):
         await _link(new_pro, stripe)
     await _age_attempt(new_pro, RECONCILE_AFTER - timedelta(minutes=5))
+    attempted = (await _profile(new_pro)).stripe_account_requested_at
 
     await _link(new_pro, stripe)
 
@@ -825,7 +853,11 @@ async def test_retry_within_window_replays_with_the_same_key(new_pro: NewPro) ->
     assert len(stripe.created) == 2
     assert stripe.created[1] == stripe.created[0]
     assert stripe.looked_up == []
-    assert (await _profile(new_pro)).stripe_account_id == account_id
+    profile = await _profile(new_pro)
+    assert (profile.stripe_account_id, profile.stripe_account_requested_at) == (
+        account_id,
+        attempted,
+    )
 
 
 async def test_retry_after_key_pruned_adopts_the_existing_account(new_pro: NewPro) -> None:
@@ -856,28 +888,108 @@ async def test_retry_after_key_pruned_adopts_the_existing_account(new_pro: NewPr
         assert await ProService(session).hireable_cards([profile.id]) == {}
 
 
-async def test_retry_after_key_pruned_creates_when_nothing_landed(new_pro: NewPro) -> None:
-    """The first create failed before Stripe made anything; the retry comes after
-    RECONCILE_AFTER: the lookup finds nothing, the attempt is stamped again, and one account is
-    created."""
+async def test_zero_matches_after_window_refuses_and_keeps_the_stamp(new_pro: NewPro) -> None:
+    """The first create failed with nothing visible in Stripe; the retries come after
+    RECONCILE_AFTER: each lookup finds nothing, and each answers 409 without a create, the
+    attempt's time as it was. Round 2 stamped it again and created; that is gone (#279)."""
     stripe = IdempotentStripe(errors={"create": StripeUnavailableError()})
     with pytest.raises(PaymentsUnavailableError):
         await _link(new_pro, stripe)
-    assert stripe.states == {}
     await _age_attempt(new_pro, RECONCILE_AFTER + timedelta(minutes=5))
     aged = (await _profile(new_pro)).stripe_account_requested_at
     stripe.errors.clear()
 
+    for _ in range(2):
+        with pytest.raises(PayoutsNeedsReviewError):
+            await _link(new_pro, stripe)
+
+    profile = await _profile(new_pro)
+    assert stripe.states == {}
+    assert stripe.created == []
+    assert stripe.looked_up == [str(profile.id)] * 2
+    assert (profile.stripe_account_id, profile.stripe_account_requested_at) == (None, aged)
+
+
+@dataclass
+class CachedFailureStripe(FakeStripe):
+    """The Vault's model of an unresolved create (#279 round 2): Stripe answers the key with a
+    cached 500 and shows no account, then makes the account while recovering from the incident
+    (`recover`), without changing the cached answer. Once `pruned`, the key is forgotten and a
+    create makes a new account. `recover_after_listing`: the recovery lands right after the
+    next listing, between it and whatever the caller does next."""
+
+    pruned: bool = False
+    recover_after_listing: bool = False
+
+    async def create_express_account(
+        self, *, email: str, profile_id: str, idempotency_key: str
+    ) -> CreatedAccount:
+        if not self.pruned:
+            self.created.append(
+                {"email": email, "profile_id": profile_id, "idempotency_key": idempotency_key}
+            )
+            raise StripeUnavailableError(code="api_error")
+        return await super().create_express_account(
+            email=email, profile_id=profile_id, idempotency_key=idempotency_key
+        )
+
+    def recover(self) -> None:
+        original = self.created[0]
+        self.states["acct_recovered"] = NOT_SUBMITTED
+        self.profiles["acct_recovered"] = original["profile_id"]
+
+    async def find_accounts_by_profile(self, profile_id: str) -> ProfileAccounts:
+        found = await super().find_accounts_by_profile(profile_id)
+        if self.recover_after_listing:
+            self.recover_after_listing = False
+            self.recover()
+        return found
+
+
+@pytest.mark.parametrize("recovery", ["after_cached_failure_replay", "after_empty_listing"])
+async def test_unresolved_create_never_makes_a_second_account(
+    new_pro: NewPro, recovery: str
+) -> None:
+    """The Vault's two probes (#279 round 2), each of which left two accounts on round 2:
+
+    - after_cached_failure_replay: past RECONCILE_AFTER the lookup is empty, then Stripe's
+      incident recovery makes the account, then Stripe prunes the key;
+    - after_empty_listing: past RECONCILE_AFTER, the key pruned, the recovery lands between the
+      empty listing and the create that used to follow it.
+
+    The empty lookup answers 409 with no create and the attempt's time unchanged; the next call
+    finds the recovered account and adopts it: one remote account, never two."""
+    stripe = CachedFailureStripe()
+    with pytest.raises(PaymentsUnavailableError):
+        await _link(new_pro, stripe)
+    await _age_attempt(new_pro, RECONCILE_AFTER + timedelta(hours=1))
+    attempted = (await _profile(new_pro)).stripe_account_requested_at
+    if recovery == "after_empty_listing":
+        stripe.pruned = True
+        stripe.recover_after_listing = True
+
+    with pytest.raises(PayoutsNeedsReviewError):
+        await _link(new_pro, stripe)
+
+    unresolved = await _profile(new_pro)
+    assert (unresolved.stripe_account_id, unresolved.stripe_account_requested_at) == (
+        None,
+        attempted,
+    )
+    assert len(stripe.created) == 1
+    if recovery == "after_cached_failure_replay":
+        stripe.recover()
+        stripe.pruned = True
+
     await _link(new_pro, stripe)
 
     profile = await _profile(new_pro)
-    [account_id] = stripe.states
+    assert list(stripe.states) == ["acct_recovered"]
     assert len(stripe.created) == 1
-    assert stripe.looked_up == [str(profile.id)]
-    assert profile.stripe_account_id == account_id
-    assert aged is not None
-    assert profile.stripe_account_requested_at is not None
-    assert profile.stripe_account_requested_at > aged
+    assert stripe.looked_up == [str(profile.id)] * 2
+    assert profile.stripe_account_id == "acct_recovered"
+    assert profile.stripe_account_requested_at == attempted
+    assert profile.payouts_enabled is False
 
 
 class HeldRead(FakeStripe):

@@ -3683,7 +3683,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description payouts_needs_review: Stripe holds more than one payout account for the pro, or could not be searched to the end; nothing was created. Support resolves it. */
+            /** @description payouts_needs_review: an earlier account create is unresolved: Stripe shows no payout account for the pro, more than one, or could not be searched to the end; nothing was created. Support resolves it. */
             409: {
                 headers: {
                     [name: string]: unknown;

@@ -93,6 +93,10 @@ class StripeConnect(Protocol):
         """The platform's accounts created for the profile (metadata pro_profile_id)."""
         ...
 
+    async def account_profile_id(self, account_id: str) -> str | None:
+        """The profile the account's metadata names (pro_profile_id), None when it names none."""
+        ...
+
 
 class StripeExpressConnect:
     def __init__(
@@ -197,6 +201,16 @@ class StripeExpressConnect:
                 break
             params = {"limit": ACCOUNT_LIST_PAGE_SIZE, "starting_after": page.data[-1].id}
         return ProfileAccounts(tuple(found), complete=False)
+
+    async def account_profile_id(self, account_id: str) -> str | None:
+        try:
+            account = await self._client.v1.accounts.retrieve_async(account_id)
+        except stripe.StripeError as error:
+            _raise_typed(error)
+        if account.metadata is None:
+            return None
+        profile_id = account.metadata.to_dict().get("pro_profile_id")
+        return profile_id if isinstance(profile_id, str) else None
 
 
 def _raise_typed(error: stripe.StripeError) -> NoReturn:

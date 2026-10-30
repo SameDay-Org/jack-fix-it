@@ -292,6 +292,36 @@ async def test_find_accounts_by_profile_errors_are_typed() -> None:
         await wrapper.find_accounts_by_profile(PROFILE)
 
 
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [({"pro_profile_id": PROFILE, "other": "x"}, PROFILE), ({"other": "x"}, None), (None, None)],
+)
+async def test_account_profile_id_reads_the_metadata(
+    metadata: dict[str, str] | None, expected: str | None
+) -> None:
+    """Staff recovery (#279): the profile an account's metadata names, read from the account."""
+    wrapper, http = connect((200, {"id": ACCOUNT, "object": "account", "metadata": metadata}))
+
+    assert await wrapper.account_profile_id(ACCOUNT) == expected
+    [(method, url, _, _)] = http.sent
+    assert (method, url) == ("get", f"https://api.stripe.com/v1/accounts/{ACCOUNT}")
+
+
+@pytest.mark.parametrize(
+    ("answer", "kind"),
+    [
+        ((404, error_body("resource_missing")), StripeRejectedError),
+        (NETWORK_ERROR, StripeUnavailableError),
+    ],
+)
+async def test_account_profile_id_errors_are_typed(answer: Answer, kind: type[Exception]) -> None:
+    wrapper, _ = connect(answer)
+
+    with pytest.raises(kind) as raised:
+        await wrapper.account_profile_id(ACCOUNT)
+    assert ACCOUNT not in str(raised.value)
+
+
 def test_get_stripe_connect_needs_the_key() -> None:
     without = make_app(make_settings(stripe_secret_key=None))
     with_key = make_app(make_settings(stripe_secret_key=FAKE_KEY))
