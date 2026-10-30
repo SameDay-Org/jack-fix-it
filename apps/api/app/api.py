@@ -17,6 +17,7 @@ from app.modules.requests.router import router as requests_router
 from app.modules.service_areas.router import router as service_areas_router
 from app.modules.uploads.router import router as uploads_router
 from app.modules.waitlist.router import router as waitlist_router
+from app.modules.webhooks.router import router as webhooks_router
 
 # Documents the real 422 body (the error contract) instead of FastAPI's default schema.
 v1_router = APIRouter(
@@ -35,5 +36,6 @@ v1_router.include_router(quotes_router)
 v1_router.include_router(customer_quotes_router)
 v1_router.include_router(devices_router)
 v1_router.include_router(waitlist_router)
+v1_router.include_router(webhooks_router)
 v1_router.include_router(addresses_router)
 v1_router.include_router(notification_preferences_router)
