@@ -100,3 +100,14 @@ class OpportunityDetail(_Out):
         "form's live 'you'll receive' preview only: the quote's response carries the "
         "amounts that count.",
     )
+    quote_max_amount_cents: int | None = Field(
+        examples=[250000],
+        description="The highest price a quote may state, in cents, or null when the platform "
+        "sets no cap: the quote form checks it before sending. Submitting enforces the same "
+        "value.",
+    )
+    quote_max_duration_minutes: int | None = Field(
+        examples=[480],
+        description="The longest estimated duration a quote may state, in minutes, or null when "
+        "the platform sets no cap. Submitting enforces the same value.",
+    )
