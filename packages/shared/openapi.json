@@ -2399,6 +2399,107 @@
         ]
       }
     },
+    "/v1/webhooks/stripe": {
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Receive a Stripe event",
+        "description": "Stripe's only entry point. No access token: the Stripe-Signature HMAC over the raw body\nis the credential. Each event is stored once by its id and handled by the worker; a\nduplicate delivery answers 200 too. Any non-2xx makes Stripe deliver the event again.",
+        "operationId": "receive_stripe_event_v1_webhooks_stripe_post",
+        "parameters": [
+          {
+            "name": "Stripe-Signature",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Stripe-Signature"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookReceived"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_signature: Stripe-Signature is missing, does not match the body or is too old; invalid_payload: the signed body is not a Stripe event.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "payload_too_large: the body is too large.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error: the event could not be stored or queued; Stripe delivers it again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not_configured: the signing secret is not set; Stripe delivers it again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "description": "The event exactly as Stripe sent it; the signature covers these bytes.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/addresses": {
       "get": {
         "tags": [
@@ -6118,6 +6219,19 @@
           "web"
         ],
         "title": "WaitlistSource"
+      },
+      "WebhookReceived": {
+        "properties": {
+          "received": {
+            "type": "boolean",
+            "const": true,
+            "title": "Received",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "WebhookReceived",
+        "description": "Stripe reads only the status code; the body says the event is safely stored."
       },
       "ZipOut": {
         "properties": {

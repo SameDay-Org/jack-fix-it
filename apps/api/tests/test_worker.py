@@ -72,6 +72,7 @@ def test_registration_keeps_names_tries_and_timeouts() -> None:
             get_settings().media_sanitize_max_tries + SANITIZE_SPARE_TRIES,
             get_settings().media_sanitize_job_timeout_seconds,
         ),
+        "process_stripe_event": (get_settings().stripe_webhook_max_attempts, None),
     }
 
 
