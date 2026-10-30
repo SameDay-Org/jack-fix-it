@@ -4089,6 +4089,17 @@
             ],
             "title": "Preferred Date"
           },
+          "preferred_period": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreferredPeriod"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set whenever preferred_date is; null without one."
+          },
           "sent_at": {
             "type": "string",
             "format": "date-time",
@@ -4144,6 +4155,7 @@
           "intake_answers",
           "location",
           "preferred_date",
+          "preferred_period",
           "sent_at",
           "viewed_at",
           "text_redacted",
@@ -4286,6 +4298,17 @@
             ],
             "title": "Preferred Date"
           },
+          "preferred_period": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreferredPeriod"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set whenever preferred_date is; null without one."
+          },
           "sent_at": {
             "type": "string",
             "format": "date-time",
@@ -4311,6 +4334,7 @@
           "description_excerpt",
           "location",
           "preferred_date",
+          "preferred_period",
           "sent_at",
           "viewed",
           "text_redacted"
@@ -4448,6 +4472,17 @@
           "account_and_security"
         ],
         "title": "PreferenceGroup"
+      },
+      "PreferredPeriod": {
+        "type": "string",
+        "enum": [
+          "morning",
+          "afternoon",
+          "evening",
+          "flexible"
+        ],
+        "title": "PreferredPeriod",
+        "description": "When in the preferred day the customer would like the visit (#237). Pros propose the\nexact start in their quote; the period only refines a preferred date."
       },
       "ProDocumentStatus": {
         "type": "string",
@@ -5089,6 +5124,17 @@
             "title": "Preferred Date",
             "description": "Today or later, as a UTC date."
           },
+          "preferred_period": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreferredPeriod"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When in the preferred date. Defaults to flexible with a date; without one, only flexible (or nothing) is accepted, and none is stored."
+          },
           "intake_answers": {
             "additionalProperties": {
               "$ref": "#/components/schemas/JsonValue"
@@ -5183,6 +5229,17 @@
             ],
             "title": "Preferred Date"
           },
+          "preferred_period": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreferredPeriod"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set whenever preferred_date is; null without one."
+          },
           "intake_answers": {
             "additionalProperties": {
               "$ref": "#/components/schemas/JsonValue"
@@ -5213,6 +5270,7 @@
           "description",
           "address",
           "preferred_date",
+          "preferred_period",
           "intake_answers",
           "media",
           "created_at"

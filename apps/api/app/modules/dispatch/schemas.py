@@ -12,7 +12,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-from app.modules.requests.service import RequestMediaKind
+from app.modules.requests.service import PreferredPeriod, RequestMediaKind
 
 
 class _Out(BaseModel):
@@ -46,6 +46,9 @@ class OpportunitySummary(_Out):
     description_excerpt: str = Field(description="The start of the customer's description.")
     location: OpportunityLocation
     preferred_date: date | None
+    preferred_period: PreferredPeriod | None = Field(
+        description="Set whenever preferred_date is; null without one."
+    )
     sent_at: datetime
     viewed: bool = Field(description="True once the pro has opened it.")
     text_redacted: bool = Field(
@@ -76,6 +79,9 @@ class OpportunityDetail(_Out):
     intake_answers: dict[str, JsonValue]
     location: OpportunityLocation
     preferred_date: date | None
+    preferred_period: PreferredPeriod | None = Field(
+        description="Set whenever preferred_date is; null without one."
+    )
     sent_at: datetime
     viewed_at: datetime | None = Field(description="When the pro first opened it.")
     text_redacted: bool = Field(

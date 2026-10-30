@@ -26,7 +26,12 @@ from app.modules.categories.intake import dump_questions
 from app.modules.categories.models import Category
 from app.modules.categories.service import load_seed_data
 from app.modules.requests.customer_status import REQUEST_CUSTOMER_STATUS
-from app.modules.requests.models import RequestMedia, RequestStatus, ServiceRequest
+from app.modules.requests.models import (
+    PreferredPeriod,
+    RequestMedia,
+    RequestStatus,
+    ServiceRequest,
+)
 from app.modules.service_areas.models import ServiceArea
 from app.modules.uploads.schemas import UploadPurpose
 from app.modules.uploads.service import owned_upload, upload_content_type
@@ -256,6 +261,7 @@ async def test_customer_creates_request_with_address_media_and_gets_public_code(
         "description",
         "address",
         "preferred_date",
+        "preferred_period",
         "intake_answers",
         "media",
         "created_at",
@@ -378,6 +384,106 @@ async def test_preferred_date_in_past_rejected(
     assert past.status_code == 422
     assert past.json() == VALIDATION_ERROR
     assert same_day.status_code == 201
+
+
+# Preferred period (#237)
+
+
+async def stored_period(session: AsyncSession, request_id: str) -> PreferredPeriod | None:
+    statement = select(ServiceRequest.preferred_period).where(
+        ServiceRequest.id == uuid.UUID(request_id)
+    )
+    return (await session.execute(statement)).scalar_one()
+
+
+async def test_create_with_date_defaults_period_to_flexible(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    ana = await make_caller(db_session)
+    tomorrow = (datetime.now(UTC).date() + timedelta(days=1)).isoformat()
+
+    response = await create(db_client, ana, preferred_date=tomorrow)
+
+    assert response.status_code == 201
+    out = response.json()
+    assert out["preferred_date"] == tomorrow
+    assert out["preferred_period"] == "flexible"
+    assert await stored_period(db_session, out["id"]) is PreferredPeriod.FLEXIBLE
+
+
+@pytest.mark.parametrize("period", list(PreferredPeriod))
+async def test_create_with_date_and_period_stores_it(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    period: PreferredPeriod,
+) -> None:
+    ana = await make_caller(db_session)
+    tomorrow = (datetime.now(UTC).date() + timedelta(days=1)).isoformat()
+
+    response = await create(db_client, ana, preferred_date=tomorrow, preferred_period=period.value)
+
+    assert response.status_code == 201
+    request_id = response.json()["id"]
+    assert response.json()["preferred_period"] == period.value
+    assert await stored_period(db_session, request_id) is period
+    # The customer's detail returns it too.
+    detail = await db_client.get(f"/v1/requests/{request_id}", headers=ana.headers)
+    assert detail.status_code == 200
+    assert (detail.json()["preferred_date"], detail.json()["preferred_period"]) == (
+        tomorrow,
+        period.value,
+    )
+
+
+@pytest.mark.parametrize("period", [None, "flexible"], ids=["absent", "flexible"])
+async def test_create_without_date_period_absent_or_flexible_is_null(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    period: str | None,
+) -> None:
+    ana = await make_caller(db_session)
+    overrides = {} if period is None else {"preferred_period": period}
+
+    response = await create(db_client, ana, **overrides)
+
+    assert response.status_code == 201
+    out = response.json()
+    assert (out["preferred_date"], out["preferred_period"]) == (None, None)
+    assert await stored_period(db_session, out["id"]) is None
+    detail = await db_client.get(f"/v1/requests/{out['id']}", headers=ana.headers)
+    assert detail.json()["preferred_period"] is None
+
+
+@pytest.mark.parametrize("period", ["morning", "afternoon", "evening"])
+async def test_create_without_date_specific_period_is_refused(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage, period: str
+) -> None:
+    ana = await make_caller(db_session)
+
+    response = await create(db_client, ana, preferred_period=period)
+    explicit_null = await create(db_client, ana, preferred_date=None, preferred_period=period)
+
+    # The same error a past date gets (InvalidRequestError).
+    assert response.status_code == explicit_null.status_code == 422
+    assert response.json() == explicit_null.json() == VALIDATION_ERROR
+    assert await count_rows(db_session, ServiceRequest, ServiceRequest.customer_id, ana.id) == 0
+    assert await count_rows(db_session, Address, Address.user_id, ana.id) == 0
+
+
+@pytest.mark.parametrize("period", ["night", "Morning", "", 1, ["morning"]])
+async def test_unknown_period_is_422(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage, period: object
+) -> None:
+    ana = await make_caller(db_session)
+    tomorrow = (datetime.now(UTC).date() + timedelta(days=1)).isoformat()
+
+    response = await create(db_client, ana, preferred_date=tomorrow, preferred_period=period)
+
+    assert response.status_code == 422
+    assert response.json() == VALIDATION_ERROR
+    assert await count_rows(db_session, ServiceRequest, ServiceRequest.customer_id, ana.id) == 0
 
 
 async def test_intake_answers_size_limit(
