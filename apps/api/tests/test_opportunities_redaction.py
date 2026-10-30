@@ -6,6 +6,7 @@ are checked on their serialized values. The customer's own view keeps the text a
 """
 
 import logging
+import re
 import unicodedata
 import uuid
 from typing import Any, Literal
@@ -65,6 +66,14 @@ STREET = ADDRESS["line1"]
 CONTACT_TEXT = f"{EMAIL}; call {PHONE}; repair the sink at {STREET}, Apt 4."
 # Every form a canary could take in the JSON.
 CANARIES = (EMAIL, "privacy-canary", "example.invalid", PHONE, "5555550199", STREET)
+# What the server issues (ids, the public code, timestamps) is random, sequential or read from
+# the clock, so a short numeric canary such as "1200" can turn up inside it by chance (#283).
+# Leak checks read the response without those values; no canary is shaped like one.
+SERVER_VALUES = re.compile(
+    r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"
+    r"|JF-\d{6,}"
+    r"|\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)?"
+)
 
 QUESTIONS: list[dict[str, Any]] = [
     {"key": "notes", "type": "text", "required": False, "max_length": 500,
@@ -131,10 +140,15 @@ async def dispatched(
     return customer, pro, request_id, await dispatch(session, request_id, pro), category_id
 
 
+def pro_text(response: httpx.Response) -> str:
+    """The response as a leak check reads it: the server-issued values blanked."""
+    return SERVER_VALUES.sub("<server>", response.text)
+
+
 def assert_no_canary(response: httpx.Response) -> None:
     assert response.status_code == 200, response.text
     for canary in CANARIES:
-        assert canary not in response.text, canary
+        assert canary not in pro_text(response), canary
 
 
 async def test_description_contacts_masked_in_the_list_excerpt(
@@ -451,7 +465,7 @@ async def test_ordinary_contacts_never_reach_a_pro(
     )
 
     assert response.status_code == 200, response.text
-    assert secret not in response.text, f"{name} leaked through {source}/{route}"
+    assert secret not in pro_text(response), f"{name} leaked through {source}/{route}"
     body = response.json()
     flagged = body["items"][0]["text_redacted"] if route == "list" else body["text_redacted"]
     assert flagged is True
@@ -648,7 +662,7 @@ async def test_pros_see_the_service_areas_city_never_the_typed_one(
     assert detail.json()["location"] == expected
     for response in (listing, detail):
         for canary in CANARIES:
-            assert canary not in response.text, canary
+            assert canary not in pro_text(response), canary
     # The customer's own view keeps what they typed.
     own = await db_client.get(f"/v1/requests/{request_id}", headers=customer.headers)
     assert own.json()["address"]["city"] == typed
@@ -675,9 +689,9 @@ async def test_a_zip_without_an_active_area_shows_no_city(
     assert listing.json()["items"][0]["location"] == expected
     assert detail.json()["location"] == expected
     for response in (listing, detail):
-        assert "Orlando" not in response.text
+        assert "Orlando" not in pro_text(response)
         for canary in CANARIES:
-            assert canary not in response.text, canary
+            assert canary not in pro_text(response), canary
     missing = [r for r in caplog.records if r.getMessage() == "opportunity_city_missing"]
     assert missing
     assert {r.__dict__["service_request_id"] for r in missing} == {str(request_id)}
@@ -693,7 +707,7 @@ async def test_a_zip_plus_four_is_shown_as_its_five_digits(
     _, detail = await pro_reads(db_client, pro, dispatch_id)
 
     assert detail.json()["location"] == {"zip_code": ADDRESS["zip_code"], "city": "Orlando"}
-    assert "1234" not in detail.text
+    assert "1234" not in pro_text(detail)
 
 
 # Every customer-controlled field holds a canary. Free text pros are meant to read (the
@@ -761,6 +775,6 @@ async def test_no_customer_controlled_field_reaches_a_pro(
 
     for response in (listing, detail):
         for canary in PROVENANCE_CANARIES:
-            assert canary.lower() not in response.text.lower(), canary
+            assert canary.lower() not in pro_text(response).lower(), canary
     assert detail.json()["location"] == {"zip_code": ADDRESS["zip_code"], "city": "Orlando"}
     assert detail.json()["text_redacted"] is True

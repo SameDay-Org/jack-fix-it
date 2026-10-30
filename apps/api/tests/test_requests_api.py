@@ -36,6 +36,7 @@ from app.observability import JsonFormatter
 from app.queue import get_job_queue
 from app.rate_limit import get_rate_limiter
 from tests.conftest import TEST_JWT_SECRET, InMemoryRateLimiter, make_settings
+from tests.helpers import letter_tag
 from tests.test_intake_questions import FIXTURE_QUESTIONS, labels
 
 GLOSSARY = Path(__file__).resolve().parents[3] / "docs" / "glossary.md"
@@ -181,7 +182,7 @@ async def make_category(
     questions: list[dict[str, Any]] | None = None,
 ) -> uuid.UUID:
     category = Category(
-        slug=f"test-{uuid.uuid4().hex[:8]}",
+        slug=f"test-{letter_tag()}",
         names={"en": "Test", "es": "Prueba"},
         active=active,
         intake_questions=questions or [],

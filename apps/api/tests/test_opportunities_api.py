@@ -33,7 +33,7 @@ from app.modules.users.models import User
 from app.modules.users.types import UserRole
 from app.observability import JsonFormatter
 from tests.conftest import make_settings
-from tests.helpers import as_status_writer
+from tests.helpers import as_status_writer, letter_tag
 from tests.test_requests_api import Caller, FakeStorage, make_caller
 
 EXCERPT = 12
@@ -97,9 +97,7 @@ async def build_world(db_session: AsyncSession) -> World:
     agent = User(
         email=f"agent-{uuid.uuid4().hex[:8]}@x.com", password_hash="x", role=UserRole.AGENT
     )
-    category = Category(
-        slug=f"test-{uuid.uuid4().hex[:8]}", names={"en": "Plumbing", "es": "Plomería"}
-    )
+    category = Category(slug=f"test-{letter_tag()}", names={"en": "Plumbing", "es": "Plomería"})
     db_session.add_all([customer, agent, category])
     await db_session.flush()
     address = Address(

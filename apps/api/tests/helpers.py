@@ -2,6 +2,7 @@
 
 import gc
 import time
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from typing import Final
@@ -15,11 +16,19 @@ _SET_STATUS_WRITER: Final = text("SELECT set_config('app.status_writer', :value,
 # app.status_writer_fixtures is 'on', which conftest sets on the test database alone.
 FIXTURES_TOKEN: Final = "fixtures"
 _IN_FAILED_TRANSACTION: Final = "25P02"
+# Hex digits as letters: a fixture slug stays unique with no digit in it that a leak check
+# could read as part of the number it looks for (#283).
+_DIGITS_AS_LETTERS: Final = str.maketrans("0123456789", "ghijklmnop")
 
 
 # Timed runs per measurement: a busy test machine can stall one run; backtracking would make
 # every run slow (#196).
 TIMED_RUNS: Final = 3
+
+
+def letter_tag(length: int = 8) -> str:
+    """A random tag of lowercase letters, for unique fixture slugs (#283)."""
+    return uuid.uuid4().hex[:length].translate(_DIGITS_AS_LETTERS)
 
 
 @contextmanager
