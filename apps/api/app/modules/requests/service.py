@@ -56,8 +56,11 @@ from app.modules.requests.models import (
     ServiceRequest,
 )
 from app.modules.requests.models import (
-    # Part of this service's interface (SafeMedia.kind): other modules take it from here, never
-    # from requests.models (ADR 0003).
+    # Part of this service's interface (SafeMedia.kind, RequestForPro.preferred_period): other
+    # modules take them from here, never from requests.models (ADR 0003).
+    PreferredPeriod as PreferredPeriod,
+)
+from app.modules.requests.models import (
     RequestMediaKind as RequestMediaKind,
 )
 from app.modules.requests.repository import ServiceRequestRepository
@@ -124,6 +127,7 @@ class ServiceRequestService:
     async def create(self, user: UserAccount, data: RequestCreate) -> RequestOut:
         if data.preferred_date is not None and data.preferred_date < datetime.now(UTC).date():
             raise InvalidRequestError
+        preferred_period = _stored_period(data.preferred_date, data.preferred_period)
         if _intake_size(data.intake_answers) > self._config.intake_max_bytes:
             raise InvalidRequestError
         if not await self._service_areas.is_served(data.address.zip_code):
@@ -142,6 +146,7 @@ class ServiceRequestService:
                     description=data.description,
                     intake_answers=intake_answers,
                     preferred_date=data.preferred_date,
+                    preferred_period=preferred_period,
                     language=user.locale,
                     origin=RequestOrigin.APP,
                     utm=data.utm.model_dump(exclude_none=True) if data.utm else None,
@@ -293,6 +298,7 @@ class ServiceRequestService:
             description=request.description,
             address=address,
             preferred_date=request.preferred_date,
+            preferred_period=request.preferred_period,
             intake_answers=request.intake_answers,
             media=media,
             created_at=request.created_at,
@@ -315,6 +321,16 @@ def _decode_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
         return decoded.astimezone(UTC), uuid.UUID(request_id)
     except (binascii.Error, UnicodeDecodeError, ValueError, OverflowError):
         raise InvalidRequestError from None
+
+
+def _stored_period(day: date | None, period: PreferredPeriod | None) -> PreferredPeriod | None:
+    """The period to store (#237): flexible by default with a date; without one the customer
+    is flexible, stored as None, and a specific period has nothing to refine."""
+    if day is not None:
+        return period or PreferredPeriod.FLEXIBLE
+    if period not in (None, PreferredPeriod.FLEXIBLE):
+        raise InvalidRequestError
+    return None
 
 
 def _intake_size(answers: dict[str, JsonValue]) -> int:
@@ -382,6 +398,7 @@ class RequestForPro:
     description: str  # redacted
     intake_answers: dict[str, JsonValue]  # every string redacted
     preferred_date: date | None
+    preferred_period: PreferredPeriod | None
     area: AddressArea
     description_redacted: bool  # something was masked in the description
     answers_redacted: bool  # something was masked in the answers
@@ -462,6 +479,7 @@ class ProRequestReader:
                 description=description.text,
                 intake_answers=answers,
                 preferred_date=row.preferred_date,
+                preferred_period=row.preferred_period,
                 area=self._area(row.id, zip_codes[row.address_id], cities),
                 description_redacted=description.redacted,
                 answers_redacted=answers_redacted,

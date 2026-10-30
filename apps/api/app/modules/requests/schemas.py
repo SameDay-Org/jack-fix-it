@@ -5,7 +5,7 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints
 
 from app.modules.addresses.schemas import NO_NUL, AddressIn, AddressOut
-from app.modules.requests.models import RequestMediaKind, RequestStatus
+from app.modules.requests.models import PreferredPeriod, RequestMediaKind, RequestStatus
 
 UtmValue = Annotated[str, StringConstraints(max_length=100, pattern=NO_NUL)]
 
@@ -34,6 +34,13 @@ class RequestCreate(BaseModel):
     category_id: uuid.UUID | None = None
     address: AddressIn
     preferred_date: date | None = Field(default=None, description="Today or later, as a UTC date.")
+    preferred_period: PreferredPeriod | None = Field(
+        default=None,
+        description=(
+            "When in the preferred date. Defaults to flexible with a date; without one, only "
+            "flexible (or nothing) is accepted, and none is stored."
+        ),
+    )
     intake_answers: dict[str, JsonValue] = Field(
         default_factory=dict,
         description=(
@@ -67,6 +74,9 @@ class RequestOut(BaseModel):
     description: str
     address: AddressOut
     preferred_date: date | None
+    preferred_period: PreferredPeriod | None = Field(
+        description="Set whenever preferred_date is; null without one."
+    )
     intake_answers: dict[str, JsonValue]
     media: list[MediaOut]
     created_at: datetime

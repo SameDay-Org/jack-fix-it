@@ -105,6 +105,7 @@ export const created = (patch: Partial<CreatedRequest> = {}): CreatedRequest => 
   description: "Peeling paint in the kitchen",
   address: { line1: "12 Main St", line2: null, city: "Newark", state: "NJ", zip_code: "07102" },
   preferred_date: null,
+  preferred_period: null,
   intake_answers: {},
   media: [],
   created_at: "2026-10-29T12:00:00Z",
