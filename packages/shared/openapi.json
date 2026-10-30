@@ -4031,6 +4031,36 @@
             "examples": [
               1500
             ]
+          },
+          "quote_max_amount_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote Max Amount Cents",
+            "description": "The highest price a quote may state, in cents, or null when the platform sets no cap: the quote form checks it before sending. Submitting enforces the same value.",
+            "examples": [
+              250000
+            ]
+          },
+          "quote_max_duration_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote Max Duration Minutes",
+            "description": "The longest estimated duration a quote may state, in minutes, or null when the platform sets no cap. Submitting enforces the same value.",
+            "examples": [
+              480
+            ]
           }
         },
         "additionalProperties": false,
@@ -4048,7 +4078,9 @@
           "text_redacted",
           "media",
           "media_pending",
-          "take_rate_bps"
+          "take_rate_bps",
+          "quote_max_amount_cents",
+          "quote_max_duration_minutes"
         ],
         "title": "OpportunityDetail"
       },
