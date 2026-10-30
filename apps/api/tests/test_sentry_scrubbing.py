@@ -124,6 +124,23 @@ def test_before_send_strips_query_from_any_referer_form(
     assert result["request"]["headers"] == {header_name: expected, "user-agent": "probe/1.0?beta"}
 
 
+@pytest.mark.parametrize(
+    "header_name", ["Stripe-Signature", "stripe-signature", "STRIPE-SIGNATURE"]
+)
+def test_before_send_drops_credential_headers(header_name: str) -> None:
+    # A Stripe-Signature HMAC authenticates a webhook body (#40): Sentry's own filter misses it.
+    event: Any = {
+        "request": {
+            "url": "http://testserver/v1/webhooks/stripe",
+            "headers": {header_name: "t=1761000000,v1=abc123", "content-type": "application/json"},
+        },
+    }
+
+    result = before_send(event, {})
+
+    assert result["request"]["headers"] == {"content-type": "application/json"}
+
+
 def test_before_send_strips_url_transaction_query() -> None:
     url_based = before_send({"transaction": f"/v1/unknown?{QUERY}"}, {})
     function_based = before_send({"transaction": "app.main.handler"}, {})

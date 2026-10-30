@@ -13,11 +13,13 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 import httpx
 import pytest
+import sentry_sdk
 from fastapi import FastAPI
 from redis.exceptions import RedisError
 from sqlalchemy import URL, delete, select, text, update
@@ -30,7 +32,10 @@ from app.modules.webhooks.handlers import StripeEvent
 from app.modules.webhooks.models import WebhookEvent, WebhookEventStatus
 from app.modules.webhooks.repository import WebhookEventRepository
 from app.queue import JobQueue, get_job_queue
-from tests.conftest import LOCK_WAIT_DEADLINE_SECONDS, backend_pid, make_settings
+from tests.conftest import LOCK_WAIT_DEADLINE_SECONDS, backend_pid, make_app, make_settings
+from tests.test_sentry_scrubbing import TEST_DSN, MemoryTransport, _payloads, sentry_transport
+
+__all__ = ["sentry_transport"]  # a fixture, used by name
 
 # Fixture value, not a real secret.
 SECRET = "whsec_test_fixture_value_not_real"
@@ -132,6 +137,12 @@ def settings() -> Settings:
 
 @pytest.fixture
 async def webhook(app: FastAPI, test_database_url: URL) -> AsyncIterator[Webhook]:
+    async with _serving(app, test_database_url) as webhook:
+        yield webhook
+
+
+@asynccontextmanager
+async def _serving(app: FastAPI, test_database_url: URL) -> AsyncIterator[Webhook]:
     engine = create_async_engine(test_database_url)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     app.state.session_factory = sessions
@@ -618,3 +629,41 @@ async def test_webhook_logs_carry_no_payload_or_signature(
         rendered = json.dumps(vars(record), default=str)
         for value in forbidden:
             assert value not in rendered, record.getMessage()
+
+
+async def test_enqueue_failure_reaches_sentry_without_the_signature(
+    sentry_transport: MemoryTransport, settings: Settings, test_database_url: URL
+) -> None:
+    # stripe_webhook_enqueue_failed is an error log, so Sentry sends it with the request headers.
+    app = make_app(settings.model_copy(update={"sentry_dsn": TEST_DSN}))
+    sentinel = f"SENTINEL-{uuid.uuid4().hex}"
+    async with _serving(app, test_database_url) as webhook:
+        webhook.queue.failure = RedisError("queue unavailable")
+        event_id = webhook.new_id()
+        body = event_body(event_id, marker=sentinel)
+        signature = sign(body)
+        timestamp, digest = signature.split(",")
+
+        response = await webhook.post(body, signature)
+    sentry_sdk.flush()
+
+    assert response.status_code == 500
+    payloads = _payloads(sentry_transport)
+    events = [json.loads(p) for p in payloads]
+    [failed] = [
+        e for e in events if e.get("logentry", {}).get("message") == "stripe_webhook_enqueue_failed"
+    ]
+    assert failed["extra"]["stripe_event_id"] == event_id
+    # The headers still go, so the check below would see the signature if it went too.
+    headers = failed["request"]["headers"]
+    assert headers["content-type"] == "application/json"
+    assert all("signature" not in name.lower() for e in events for name in _headers(e))
+    wire = "\n".join(payloads)
+    for leak in (signature, timestamp, digest.removeprefix("v1="), sentinel, SECRET):
+        assert leak not in wire
+
+
+def _headers(event: dict[str, object]) -> dict[str, object]:
+    request = event.get("request")
+    headers = request.get("headers") if isinstance(request, dict) else None
+    return headers if isinstance(headers, dict) else {}
