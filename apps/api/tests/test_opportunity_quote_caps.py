@@ -132,6 +132,7 @@ async def test_quote_at_the_shown_cap_is_accepted_and_above_is_refused(
     over_amount = await dispatch(db_session, await make_request(db_session, world), world.me)
     over_duration = await dispatch(db_session, await make_request(db_session, world), world.me)
     detail = await db_client.get(f"{BASE}/{at_caps}", headers=world.me.caller.headers)
+    assert detail.status_code == 200, detail.text
     max_amount = detail.json()["quote_max_amount_cents"]
     max_duration = detail.json()["quote_max_duration_minutes"]
 
