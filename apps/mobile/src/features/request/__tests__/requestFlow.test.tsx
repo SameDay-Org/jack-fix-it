@@ -10,6 +10,7 @@ import {
   BackHandler,
   Platform,
   Pressable,
+  ScrollView,
   Text,
   type AlertButton,
 } from "react-native";
@@ -612,6 +613,43 @@ describe("the request flow", () => {
     expect(screen.getByTestId("review-when")).toHaveTextContent(
       new RegExp(formatLongDay(day, "en")),
     );
+  });
+
+  it("scrolls the picked day's line into view above Continue, after a pick only", async () => {
+    const scrollToEnd = ScrollView.prototype.scrollToEnd as jest.Mock;
+    const layout = { nativeEvent: { layout: { x: 0, y: 0, width: 288, height: 28 } } };
+    const result = await toReview();
+    await press("Edit the day");
+    await waitFor(() => expect(result.getPathname()).toBe("/request/when"));
+    scrollToEnd.mockClear();
+
+    await fireEvent.press(screen.getByTestId(`when-day-${offeredDays(3)[1]}`));
+    await fireEvent(screen.getByTestId("when-chosen"), "layout", layout);
+    expect(scrollToEnd).toHaveBeenCalledTimes(1);
+    expect(scrollToEnd).toHaveBeenCalledWith({ animated: true });
+
+    // The same line laid out again without a pick (a font change) leaves the scroll alone.
+    await fireEvent(screen.getByTestId("when-chosen"), "layout", layout);
+    expect(scrollToEnd).toHaveBeenCalledTimes(1);
+
+    // Each new pick reveals its own line.
+    await fireEvent.press(screen.getByTestId(`when-day-${offeredDays(3)[2]}`));
+    await fireEvent(screen.getByTestId("when-chosen"), "layout", layout);
+    expect(scrollToEnd).toHaveBeenCalledTimes(2);
+
+    // The same day again (scrolled away from its line): the line does not lay out again, so the
+    // pick reveals it at once, and a later layout of that line is not taken for a pick.
+    await fireEvent.press(screen.getByTestId(`when-day-${offeredDays(3)[2]}`));
+    expect(scrollToEnd).toHaveBeenCalledTimes(3);
+    await fireEvent(screen.getByTestId("when-chosen"), "layout", layout);
+    expect(scrollToEnd).toHaveBeenCalledTimes(3);
+
+    // After "I'm flexible" the line is gone: picking that day again waits for its new line.
+    await fireEvent.press(screen.getByTestId("when-flexible"));
+    await fireEvent.press(screen.getByTestId(`when-day-${offeredDays(3)[2]}`));
+    expect(scrollToEnd).toHaveBeenCalledTimes(3);
+    await fireEvent(screen.getByTestId("when-chosen"), "layout", layout);
+    expect(scrollToEnd).toHaveBeenCalledTimes(4);
   });
 
   it("gives the flow the panel rise when a category card opens it, the push otherwise", async () => {

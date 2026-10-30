@@ -39,6 +39,7 @@ export const summary = (
   description_excerpt: EXCERPT,
   location: { zip_code: "33301", city: "Fort Lauderdale" },
   preferred_date: "2026-10-30",
+  preferred_period: null,
   sent_at: hoursFromNow(-2),
   viewed: false,
   text_redacted: false,
@@ -80,12 +81,15 @@ export const detail = (overrides: Partial<OpportunityDetail> = {}): OpportunityD
   intake_answers: {},
   location: { zip_code: "33301", city: "Fort Lauderdale" },
   preferred_date: "2026-10-30",
+  preferred_period: null,
   sent_at: hoursFromNow(-2),
   viewed_at: null,
   text_redacted: false,
   media: [mediaItem(1), mediaItem(2), VIDEO],
   media_pending: 2,
   take_rate_bps: 1500,
+  quote_max_amount_cents: null,
+  quote_max_duration_minutes: null,
   ...overrides,
 });
 

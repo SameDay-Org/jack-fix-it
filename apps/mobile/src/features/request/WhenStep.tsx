@@ -2,6 +2,7 @@ import { router } from "expo-router";
 import { useRef, type ComponentRef } from "react";
 import { useTranslation } from "react-i18next";
 import { AccessibilityInfo, Pressable, ScrollView, Text, View } from "react-native";
+import { useReducedMotion } from "react-native-reanimated";
 
 import { Button, ChoiceCard, Notice, useFlag } from "@/components/ui";
 import { cx } from "@/components/ui/cx";
@@ -25,6 +26,24 @@ export function WhenStep({ steps }: { steps: readonly StepId[] }) {
   const date = useRequestDraft((draft) => draft.preferredDate);
   const refused = useRequestDraft((draft) => draft.refusal?.reason === "staleDate");
   const stale = date !== null && isPastDay(date);
+  const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
+  const reduceMotion = useReducedMotion();
+  // A pick spells the day out at the bottom of the step, below the fold on a small phone: once it
+  // is laid out, the step scrolls to it, above Continue. `reveal` holds the day waiting for its
+  // line's first layout, `shown` the day whose line has one.
+  const reveal = useRef<string | null>(null);
+  const shown = useRef<string | null>(null);
+  const toChosen = () => scrollRef.current?.scrollToEnd({ animated: !reduceMotion });
+  const pick = (day: string) => {
+    if (day === date && !stale && shown.current === day) {
+      // The same day again: its line is already laid out and will not lay out again.
+      reveal.current = null;
+      toChosen();
+    } else {
+      reveal.current = day;
+    }
+    setPreferredDate(day);
+  };
 
   const onContinue = () => {
     if (stale) {
@@ -50,6 +69,7 @@ export function WhenStep({ steps }: { steps: readonly StepId[] }) {
         />
       }
       refusal={refused ? t("request.when.staleTitle") : undefined}
+      scrollRef={scrollRef}
       testID="request-when"
     >
       {refused || stale ? (
@@ -69,9 +89,20 @@ export function WhenStep({ steps }: { steps: readonly StepId[] }) {
       />
       <View className="gap-3">
         <Text className="text-headline text-navy-900">{t("request.when.pickDay")}</Text>
-        <DayStrip selected={stale ? null : date} locale={locale} />
+        <DayStrip selected={stale ? null : date} locale={locale} onPick={pick} />
         {date !== null && !stale ? (
-          <Text className="text-title-2 text-navy-900" testID="when-chosen">
+          <Text
+            // A new line for each day, so each pick lays it out again.
+            key={date}
+            className="text-title-2 text-navy-900"
+            onLayout={() => {
+              shown.current = date;
+              if (reveal.current !== date) return;
+              reveal.current = null;
+              toChosen();
+            }}
+            testID="when-chosen"
+          >
             {formatLongDay(date, locale)}
           </Text>
         ) : null}
@@ -80,10 +111,10 @@ export function WhenStep({ steps }: { steps: readonly StepId[] }) {
   );
 }
 
-type DayStripProps = { selected: string | null; locale: string };
+type DayStripProps = { selected: string | null; locale: string; onPick: (day: string) => void };
 
 /** The offered days as a row of bubbles that scrolls sideways, the chosen one filled navy. */
-function DayStrip({ selected, locale }: DayStripProps) {
+function DayStrip({ selected, locale, onPick }: DayStripProps) {
   const { t } = useTranslation();
   // Every render: the step stays mounted under Review, and a send refused after midnight comes
   // back to a strip that must start at the new first day (it is a few dozen strings).
@@ -116,6 +147,7 @@ function DayStrip({ selected, locale }: DayStripProps) {
           locale={locale}
           relative={relative(day)}
           selected={day === selected}
+          onPress={() => onPick(day)}
           onLayout={(x) => {
             // Back on the step with a day chosen: it is in view, once.
             if (day !== selected || scrolled.current) return;
@@ -134,10 +166,11 @@ type DayBubbleProps = {
   /** "Today" or "Tomorrow" on the phone's calendar, in place of the weekday. */
   relative: string | null;
   selected: boolean;
+  onPress: () => void;
   onLayout: (x: number) => void;
 };
 
-function DayBubble({ day, locale, relative, selected, onLayout }: DayBubbleProps) {
+function DayBubble({ day, locale, relative, selected, onPress, onLayout }: DayBubbleProps) {
   const [pressed, pressIn, pressOut] = useFlag();
   const parts = dayParts(day, locale);
   const long = formatLongDay(day, locale);
@@ -147,7 +180,7 @@ function DayBubble({ day, locale, relative, selected, onLayout }: DayBubbleProps
       accessibilityRole="radio"
       accessibilityState={{ checked: selected }}
       accessibilityLabel={relative ? `${relative}, ${long}` : long}
-      onPress={() => setPreferredDate(day)}
+      onPress={onPress}
       onPressIn={pressIn}
       onPressOut={pressOut}
       onLayout={({ nativeEvent }) => onLayout(nativeEvent.layout.x)}

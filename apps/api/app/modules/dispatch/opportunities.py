@@ -6,8 +6,8 @@ same 404, as does a pro without a profile. The request comes through the request
 pro-safe reader (ADR 0003), so no customer, contact, street, coordinates, utm or BDC field
 ever reaches this module; the free text comes with contact details masked (app.redaction).
 Opening one marks the dispatch viewed, once. The detail carries the platform's take rate
-(#246) for the quote form's preview; a malformed rate is a 503 not_configured, before the
-dispatch is marked viewed.
+(#246) for the quote form's preview and the quote caps (#258) the form checks before sending;
+a malformed rate or cap is a 503 not_configured, before the dispatch is marked viewed.
 
 The detail shows the request's photos and videos as their privacy-safe copies only (#173):
 the reader hands this module no original key (file_key), and sign_safe_media, the one place a
@@ -102,6 +102,7 @@ class OpportunityService:
                 description_excerpt=view.description[: self._config.excerpt_chars],
                 location=_location(view),
                 preferred_date=view.preferred_date,
+                preferred_period=view.preferred_period,
                 sent_at=row.sent_at,
                 viewed=row.status is DispatchStatus.VIEWED,
                 text_redacted=view.description_redacted,
@@ -130,8 +131,11 @@ class OpportunityService:
         )
         if dispatch is None or view is None or pro_id is None:
             raise NotFoundError
-        # Before any write: a malformed rate (503, logged by the settings service) marks nothing.
+        # Before any write: a malformed rate or cap (503, logged by the settings service) marks
+        # nothing.
         take_rate_bps = await self._settings.platform_take_rate_bps()
+        quote_max_amount_cents = await self._settings.quote_max_amount_cents()
+        quote_max_duration_minutes = await self._settings.quote_max_duration_minutes()
         first_view = await self._dispatches.mark_viewed(dispatch.id, datetime.now(UTC))
         viewed_at = await self._dispatches.viewed_at(dispatch.id)
         await self._session.commit()
@@ -157,6 +161,7 @@ class OpportunityService:
             intake_answers=view.intake_answers,
             location=_location(view),
             preferred_date=view.preferred_date,
+            preferred_period=view.preferred_period,
             sent_at=dispatch.sent_at,
             viewed_at=viewed_at,
             text_redacted=view.text_redacted,
@@ -167,6 +172,8 @@ class OpportunityService:
             ],
             media_pending=media.pending,
             take_rate_bps=take_rate_bps,
+            quote_max_amount_cents=quote_max_amount_cents,
+            quote_max_duration_minutes=quote_max_duration_minutes,
         )
 
     async def _category_summaries(

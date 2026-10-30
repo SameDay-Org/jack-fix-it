@@ -132,6 +132,9 @@ _ASCII_LETTERS: Final = frozenset(string.ascii_letters)
 _SCHEME_CHARS: Final = _ASCII_LETTERS | frozenset(string.digits + "+.-")
 # Besides whitespace and the start of the text, a URL in free text may follow one of these.
 _URL_START_AFTER: Final = frozenset("\"'([<{=:,;")
+# Request headers holding credentials that send_default_pii=False does not filter. Lower case;
+# matched whatever the header's casing.
+_CREDENTIAL_HEADERS: Final = frozenset({"stripe-signature"})
 
 
 def _without_query(url: str) -> str:
@@ -211,7 +214,7 @@ def _without_database_text(event: Event, hint: Hint) -> None:
 
 def before_send(event: Event, hint: Hint) -> Event:
     """Sentry hook: drops the query string from the request URL, its Referer and the transaction,
-    and a database error's text.
+    credential headers (Stripe-Signature) and a database error's text.
 
     Keeps the path and every other field. Fields of an unexpected shape are left as they are.
     """
@@ -225,6 +228,9 @@ def before_send(event: Event, hint: Hint) -> Event:
         headers = request.get("headers")
         if isinstance(headers, dict):
             for name, value in list(headers.items()):
+                if isinstance(name, str) and name.lower() in _CREDENTIAL_HEADERS:
+                    del headers[name]
+                    continue
                 if not isinstance(value, str):
                     continue
                 # Referer is a URI reference by definition and may be relative ("login?…",

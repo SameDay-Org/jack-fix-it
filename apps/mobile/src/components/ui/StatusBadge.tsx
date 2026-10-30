@@ -27,15 +27,23 @@ export const TONE: Record<StatusTone, { container: string; text: string }> = {
   brand: { container: "bg-green-500", text: "text-navy-900" },
 };
 
-// The pill and its label; StatusBadgeSkeleton below shares both so a loading row never jumps.
-const SHAPE = "self-start rounded-pill px-3 py-1";
+// The pill and its label; StatusBadgeSkeleton below shares both so a loading row never jumps. The
+// end padding is 2 dp short: the label's trailing thin space (`withRoom`) makes up the rest.
+const SHAPE = "self-start rounded-pill py-1 pl-3 pr-2.5";
 const LABEL = "text-caption";
+/**
+ * Android lays a label out again when it draws it, and that pass can need a sub-pixel more than the
+ * width the label was measured at: "Request Received" broke after its first word, under the pill's
+ * height. A trailing thin space widens the measured box by about 2 dp, and a line's end spaces
+ * take no width when Android breaks lines, so the label always draws on the line it measured on.
+ */
+const withRoom = (label: string) => `${label}\u2009`;
 
 export function StatusBadge({ label, tone, className, testID }: StatusBadgeProps) {
   return (
     <View testID={testID} className={cx(SHAPE, TONE[tone].container, className)}>
       <Text accessibilityRole="text" className={cx(LABEL, TONE[tone].text)}>
-        {label}
+        {withRoom(label)}
       </Text>
     </View>
   );
@@ -62,7 +70,7 @@ export function StatusBadgeSkeleton({ label, testID }: StatusBadgeSkeletonProps)
           importantForAccessibility="no-hide-descendants"
           className={cx(LABEL, "opacity-0")}
         >
-          {label}
+          {withRoom(label)}
         </Text>
       </View>
     </Animated.View>

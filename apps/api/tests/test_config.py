@@ -377,6 +377,43 @@ def test_resend_api_key_is_masked() -> None:
     assert "re_test_key_not_real" not in repr(settings)
 
 
+def test_stripe_webhook_settings_defaults() -> None:
+    settings = make_settings()
+
+    # Not required anywhere: without the secret the webhook answers 503 (#40).
+    assert settings.stripe_webhook_secret is None
+    assert settings.stripe_webhook_tolerance_seconds == 300
+    assert settings.stripe_webhook_max_body_bytes == 524_288
+    assert settings.stripe_webhook_max_attempts == 5
+    assert settings.stripe_webhook_retry_backoff_seconds == 10
+
+
+def test_empty_stripe_webhook_secret_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "")
+
+    assert make_settings().stripe_webhook_secret is None
+
+
+def test_stripe_webhook_secret_is_masked() -> None:
+    settings = make_settings(stripe_webhook_secret="whsec_test_not_real")
+
+    assert "whsec_test_not_real" not in repr(settings)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "stripe_webhook_tolerance_seconds",
+        "stripe_webhook_max_body_bytes",
+        "stripe_webhook_max_attempts",
+        "stripe_webhook_retry_backoff_seconds",
+    ],
+)
+def test_stripe_webhook_settings_must_be_positive(name: str) -> None:
+    with pytest.raises(ValidationError):
+        make_settings(**{name: 0})
+
+
 def test_password_reset_settings_defaults() -> None:
     settings = make_settings()
 

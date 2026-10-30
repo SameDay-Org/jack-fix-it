@@ -2571,6 +2571,107 @@
         ]
       }
     },
+    "/v1/webhooks/stripe": {
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Receive a Stripe event",
+        "description": "Stripe's only entry point. No access token: the Stripe-Signature HMAC over the raw body\nis the credential. Each event is stored once by its id and handled by the worker; a\nduplicate delivery answers 200 too. Any non-2xx makes Stripe deliver the event again.",
+        "operationId": "receive_stripe_event_v1_webhooks_stripe_post",
+        "parameters": [
+          {
+            "name": "Stripe-Signature",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Stripe-Signature"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookReceived"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_signature: Stripe-Signature is missing, does not match the body or is too old; invalid_payload: the signed body is not a Stripe event.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "payload_too_large: the body is too large.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error: the event could not be stored or queued; Stripe delivers it again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not_configured: the signing secret is not set; Stripe delivers it again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "description": "The event exactly as Stripe sent it; the signature covers these bytes.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/addresses": {
       "get": {
         "tags": [
@@ -4180,6 +4281,17 @@
             ],
             "title": "Preferred Date"
           },
+          "preferred_period": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreferredPeriod"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set whenever preferred_date is; null without one."
+          },
           "sent_at": {
             "type": "string",
             "format": "date-time",
@@ -4223,6 +4335,36 @@
             "examples": [
               1500
             ]
+          },
+          "quote_max_amount_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote Max Amount Cents",
+            "description": "The highest price a quote may state, in cents, or null when the platform sets no cap: the quote form checks it before sending. Submitting enforces the same value.",
+            "examples": [
+              250000
+            ]
+          },
+          "quote_max_duration_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote Max Duration Minutes",
+            "description": "The longest estimated duration a quote may state, in minutes, or null when the platform sets no cap. Submitting enforces the same value.",
+            "examples": [
+              480
+            ]
           }
         },
         "additionalProperties": false,
@@ -4235,12 +4377,15 @@
           "intake_answers",
           "location",
           "preferred_date",
+          "preferred_period",
           "sent_at",
           "viewed_at",
           "text_redacted",
           "media",
           "media_pending",
-          "take_rate_bps"
+          "take_rate_bps",
+          "quote_max_amount_cents",
+          "quote_max_duration_minutes"
         ],
         "title": "OpportunityDetail"
       },
@@ -4377,6 +4522,17 @@
             ],
             "title": "Preferred Date"
           },
+          "preferred_period": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreferredPeriod"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set whenever preferred_date is; null without one."
+          },
           "sent_at": {
             "type": "string",
             "format": "date-time",
@@ -4402,6 +4558,7 @@
           "description_excerpt",
           "location",
           "preferred_date",
+          "preferred_period",
           "sent_at",
           "viewed",
           "text_redacted"
@@ -4567,6 +4724,17 @@
           "account_and_security"
         ],
         "title": "PreferenceGroup"
+      },
+      "PreferredPeriod": {
+        "type": "string",
+        "enum": [
+          "morning",
+          "afternoon",
+          "evening",
+          "flexible"
+        ],
+        "title": "PreferredPeriod",
+        "description": "When in the preferred day the customer would like the visit (#237). Pros propose the\nexact start in their quote; the period only refines a preferred date."
       },
       "ProDocumentStatus": {
         "type": "string",
@@ -5208,6 +5376,17 @@
             "title": "Preferred Date",
             "description": "Today or later, as a UTC date."
           },
+          "preferred_period": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreferredPeriod"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When in the preferred date. Defaults to flexible with a date; without one, only flexible (or nothing) is accepted, and none is stored."
+          },
           "intake_answers": {
             "additionalProperties": {
               "$ref": "#/components/schemas/JsonValue"
@@ -5302,6 +5481,17 @@
             ],
             "title": "Preferred Date"
           },
+          "preferred_period": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreferredPeriod"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set whenever preferred_date is; null without one."
+          },
           "intake_answers": {
             "additionalProperties": {
               "$ref": "#/components/schemas/JsonValue"
@@ -5332,6 +5522,7 @@
           "description",
           "address",
           "preferred_date",
+          "preferred_period",
           "intake_answers",
           "media",
           "created_at"
@@ -6306,6 +6497,19 @@
           "web"
         ],
         "title": "WaitlistSource"
+      },
+      "WebhookReceived": {
+        "properties": {
+          "received": {
+            "type": "boolean",
+            "const": true,
+            "title": "Received",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "WebhookReceived",
+        "description": "Stripe reads only the status code; the body says the event is safely stored."
       },
       "ZipOut": {
         "properties": {

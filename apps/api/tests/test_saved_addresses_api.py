@@ -38,6 +38,7 @@ from tests.conftest import (
     make_app,
     make_settings,
 )
+from tests.contact_overlaps import OVERLAP_IDS, PHONE_EMAIL_OVERLAPS
 from tests.helpers import as_status_writer
 from tests.test_auth_api import register as register_account
 from tests.test_devices_api import caller, wait_until_blocking
@@ -806,11 +807,17 @@ CONTACT_LABELS = [
     "@home" + chr(0x05B0) + "fixit",  # HEBREW POINT SHEVA
     "@home" + chr(0x093F) + "fixit",  # DEVANAGARI VOWEL SIGN I (Mc)
     "@home" + chr(0x1D167) + "fixit",  # MUSICAL SYMBOL COMBINING TREMOLO-1
+    # #236: Unicode letters in the handle body, and a mark inside a cashtag.
+    "@mañana.fixit",
+    "@josé_silva",
+    "$bob" + chr(0x0483) + "smith",
     # Round 2: a phone glued to a unit marker, which the skipped unit step used to catch.
     "APT3055550199",
     "UNIT3055550199",
     "SUITE3055550199",
     "PO BOX3055550199",
+    # Vault round 1 on #240 (#257): an email that takes a phone's last group.
+    *PHONE_EMAIL_OVERLAPS,
 ]
 
 
@@ -841,10 +848,14 @@ CONTACT_LABELS = [
         "at_home_hebrew_mark",
         "at_home_devanagari_mark",
         "at_home_musical_mark",
+        "at_enye_dot",
+        "at_accented_underscore",
+        "cashtag_cyrillic_mark",
         "apt_phone",
         "unit_phone",
         "suite_phone",
         "po_box_phone",
+        *[f"phone_email_overlap_{name}" for name in OVERLAP_IDS],
     ],
 )
 async def test_label_rejects_contacts(

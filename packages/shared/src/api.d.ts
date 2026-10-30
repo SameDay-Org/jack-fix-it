@@ -713,6 +713,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/webhooks/stripe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive a Stripe event
+         * @description Stripe's only entry point. No access token: the Stripe-Signature HMAC over the raw body
+         *     is the credential. Each event is stored once by its id and handled by the worker; a
+         *     duplicate delivery answers 200 too. Any non-2xx makes Stripe deliver the event again.
+         */
+        post: operations["receive_stripe_event_v1_webhooks_stripe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/addresses": {
         parameters: {
             query?: never;
@@ -1351,6 +1373,8 @@ export interface components {
             location: components["schemas"]["OpportunityLocation"];
             /** Preferred Date */
             preferred_date: string | null;
+            /** @description Set whenever preferred_date is; null without one. */
+            preferred_period: components["schemas"]["PreferredPeriod"] | null;
             /**
              * Sent At
              * Format: date-time
@@ -1382,6 +1406,18 @@ export interface components {
              * @example 1500
              */
             take_rate_bps: number;
+            /**
+             * Quote Max Amount Cents
+             * @description The highest price a quote may state, in cents, or null when the platform sets no cap: the quote form checks it before sending. Submitting enforces the same value.
+             * @example 250000
+             */
+            quote_max_amount_cents: number | null;
+            /**
+             * Quote Max Duration Minutes
+             * @description The longest estimated duration a quote may state, in minutes, or null when the platform sets no cap. Submitting enforces the same value.
+             * @example 480
+             */
+            quote_max_duration_minutes: number | null;
         };
         /**
          * OpportunityLocation
@@ -1454,6 +1490,8 @@ export interface components {
             location: components["schemas"]["OpportunityLocation"];
             /** Preferred Date */
             preferred_date: string | null;
+            /** @description Set whenever preferred_date is; null without one. */
+            preferred_period: components["schemas"]["PreferredPeriod"] | null;
             /**
              * Sent At
              * Format: date-time
@@ -1554,6 +1592,13 @@ export interface components {
          * @enum {string}
          */
         PreferenceGroup: "job_updates" | "quotes_and_opportunities" | "reminders" | "marketing" | "account_and_security";
+        /**
+         * PreferredPeriod
+         * @description When in the preferred day the customer would like the visit (#237). Pros propose the
+         *     exact start in their quote; the period only refines a preferred date.
+         * @enum {string}
+         */
+        PreferredPeriod: "morning" | "afternoon" | "evening" | "flexible";
         /**
          * ProDocumentStatus
          * @enum {string}
@@ -1862,6 +1907,8 @@ export interface components {
              * @description Today or later, as a UTC date.
              */
             preferred_date?: string | null;
+            /** @description When in the preferred date. Defaults to flexible with a date; without one, only flexible (or nothing) is accepted, and none is stored. */
+            preferred_period?: components["schemas"]["PreferredPeriod"] | null;
             /**
              * Intake Answers
              * @description Answers to the category's intake_questions (GET /v1/categories), by question key: an integer, an option value, a list of distinct option values, a boolean or a text, as each question's type says. Empty without a category. A size limit applies; NUL characters and non-finite numbers are refused. Text is stored trimmed.
@@ -1906,6 +1953,8 @@ export interface components {
             address: components["schemas"]["AddressOut"];
             /** Preferred Date */
             preferred_date: string | null;
+            /** @description Set whenever preferred_date is; null without one. */
+            preferred_period: components["schemas"]["PreferredPeriod"] | null;
             /** Intake Answers */
             intake_answers: {
                 [key: string]: components["schemas"]["JsonValue"];
@@ -2324,6 +2373,18 @@ export interface components {
          * @enum {string}
          */
         WaitlistSource: "app" | "web";
+        /**
+         * WebhookReceived
+         * @description Stripe reads only the status code; the body says the event is safely stored.
+         */
+        WebhookReceived: {
+            /**
+             * Received
+             * @default true
+             * @constant
+             */
+            received: true;
+        };
         /** ZipOut */
         ZipOut: {
             /**
@@ -4260,6 +4321,78 @@ export interface operations {
                 headers: {
                     /** @description Seconds until the current limit window ends. */
                     "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    receive_stripe_event_v1_webhooks_stripe_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Stripe-Signature"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The event exactly as Stripe sent it; the signature covers these bytes. */
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookReceived"];
+                };
+            };
+            /** @description invalid_signature: Stripe-Signature is missing, does not match the body or is too old; invalid_payload: the signed body is not a Stripe event. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description payload_too_large: the body is too large. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description internal_error: the event could not be stored or queued; Stripe delivers it again. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_configured: the signing secret is not set; Stripe delivers it again. */
+            503: {
+                headers: {
                     [name: string]: unknown;
                 };
                 content: {

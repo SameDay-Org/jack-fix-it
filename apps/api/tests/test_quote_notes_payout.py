@@ -2,8 +2,10 @@
 take rate (Cesar, 2026-10-29: 15%, the platform absorbs Stripe's card fee)."""
 
 import logging
+import re
+import unicodedata
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 import pytest
@@ -27,6 +29,12 @@ from app.modules.users.types import UserRole
 from app.observability import JsonFormatter
 from app.queue import get_job_queue
 from tests.conftest import make_settings
+from tests.contact_overlaps import (
+    CUT_CONTACTS,
+    FLOOR_CONTACTS,
+    FLOOR_IDS,
+    PHONE_EMAIL_OVERLAPS,
+)
 from tests.test_opportunities_api import (
     T0,
     World,
@@ -323,6 +331,111 @@ async def test_approach_masked_for_customer_raw_for_pro(
 
     assert accepted.status_code == 200, accepted.text
     assert accepted.json()["approach"] == masked
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+async def test_a_phone_an_email_overlaps_is_masked_whole_in_scope_and_approach(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    form: Literal["NFC", "NFD"],
+) -> None:
+    """Vault round 1 on #240: the email took the phone's last group and the customer read
+    "786 555". The pro's own phone is 305 555 0199, so the ASCII case (#257) would be masked
+    by the known values; the three Vault inputs reach the patterns."""
+    request_id = await make_request(db_session, world)
+    pro = await quoting_pro(db_session)
+    row = RequestDispatch(request_id=request_id, pro_id=pro.profile_id, sent_at=T0)
+    db_session.add(row)
+    await db_session.flush()
+    marked, spacing_mark, unicode_domain = PHONE_EMAIL_OVERLAPS[:3]
+    note = unicodedata.normalize(
+        form, f"Questions: call {marked}, llama {spacing_mark}, or write {unicode_domain}."
+    )
+
+    sent = await db_client.post(
+        quote_path(row.id),
+        json=body(scope=note, approach=note),
+        headers=headers_for(pro.user_id, UserRole.PRO),
+    )
+
+    assert sent.status_code == 201, sent.text
+    listed = await db_client.get(list_path(request_id), headers=customer(world))
+    assert listed.status_code == 200, listed.text
+    [item] = listed.json()["items"]
+    masked = "Questions: call •••, llama •••, or write •••."
+    assert item["scope"] == item["approach"] == masked
+    assert not re.search(r"\d", item["scope"] + item["approach"])
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+async def test_a_handle_or_street_an_email_cuts_is_masked_whole_in_scope_and_approach(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    form: Literal["NFC", "NFD"],
+) -> None:
+    """Vault round 2 on #240: the URL took "insta" and the customer read "jdoe1", the email
+    took "Dr" and the customer read "1250 Ocean"."""
+    request_id = await make_request(db_session, world)
+    pro = await quoting_pro(db_session)
+    row = RequestDispatch(request_id=request_id, pro_id=pro.profile_id, sent_at=T0)
+    db_session.add(row)
+    await db_session.flush()
+    (handle, handle_secret), (street, street_secret) = CUT_CONTACTS
+    note = unicodedata.normalize(
+        form, f"Preguntas: escríbeme a {handle}, o pasa por {street} mañana."
+    )
+
+    sent = await db_client.post(
+        quote_path(row.id),
+        json=body(scope=note, approach=note),
+        headers=headers_for(pro.user_id, UserRole.PRO),
+    )
+
+    assert sent.status_code == 201, sent.text
+    listed = await db_client.get(list_path(request_id), headers=customer(world))
+    assert listed.status_code == 200, listed.text
+    [item] = listed.json()["items"]
+    masked = "Preguntas: escríbeme a •••, o pasa por ••• mañana."
+    assert item["scope"] == item["approach"] == masked
+    for secret in (handle_secret, street_secret, "1250"):
+        assert secret not in item["scope"] + item["approach"]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize(("contact", "secret", "masked"), FLOOR_CONTACTS, ids=FLOOR_IDS)
+async def test_what_develop_hid_stays_hidden_in_scope_and_approach(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    contact: str,
+    secret: str,
+    masked: str,
+    form: Literal["NFC", "NFD"],
+) -> None:
+    """Fix round 5 on #240 (the safety floor): a URL or an email took the contact's number or
+    cue (Vault R3-B1), a refused match left a street (F-B1), a recovered handle left its unit
+    (F-B2). Develop's filter hid each one, so the customer never reads it."""
+    request_id = await make_request(db_session, world)
+    pro = await quoting_pro(db_session)
+    row = RequestDispatch(request_id=request_id, pro_id=pro.profile_id, sent_at=T0)
+    db_session.add(row)
+    await db_session.flush()
+    note = unicodedata.normalize(form, f"Preguntas: escríbeme a {contact}, gracias.")
+
+    sent = await db_client.post(
+        quote_path(row.id),
+        json=body(scope=note, approach=note),
+        headers=headers_for(pro.user_id, UserRole.PRO),
+    )
+
+    assert sent.status_code == 201, sent.text
+    listed = await db_client.get(list_path(request_id), headers=customer(world))
+    assert listed.status_code == 200, listed.text
+    [item] = listed.json()["items"]
+    assert item["scope"] == item["approach"] == f"Preguntas: escríbeme a {masked}, gracias."
+    assert secret not in item["scope"] + item["approach"]
 
 
 async def test_customer_quote_without_approach_shows_null(

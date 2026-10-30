@@ -15,6 +15,7 @@ from app.modules.users.models import User
 from app.modules.users.names import PersonName, public_name, safe_public_name
 from app.observability import JsonFormatter
 from app.redaction import KnownValues, redact_contacts
+from tests.contact_overlaps import OVERLAP_IDS, PHONE_EMAIL_OVERLAPS
 from tests.test_auth_api import EMAIL, VALIDATION_ERROR, get_user, register
 from tests.test_create_staff_user import PASSWORD as STAFF_PASSWORD
 from tests.test_create_staff_user import STORED_EMAIL as STAFF_EMAIL
@@ -142,6 +143,14 @@ def test_safe_public_name_withholds_a_contact_pattern(first: str) -> None:
     """Withheld whole, never partly masked; with or without the account's own contacts."""
     assert safe_public_name(first, "Perez", OWN) is None
     assert safe_public_name(first, "Perez", KnownValues()) is None
+
+
+@pytest.mark.parametrize("contact", PHONE_EMAIL_OVERLAPS, ids=OVERLAP_IDS)
+def test_a_phone_an_email_overlaps_is_no_name(contact: str) -> None:
+    """Vault round 1 on #240 (#257): refused at write time, withheld from a stored name."""
+    with pytest.raises(ValidationError):
+        NAME.validate_python(contact)
+    assert safe_public_name(contact, "Perez", KnownValues()) is None
 
 
 def test_safe_public_name_withholds_the_accounts_own_email_and_phone() -> None:
@@ -399,6 +408,17 @@ MARKED_HANDLE = "@home" + chr(0x0483) + "fixit"
 def test_safe_public_name_withholds_a_handle_glued_to_a_combining_mark() -> None:
     assert safe_public_name(MARKED_HANDLE, "Pérez", KnownValues()) is None
     assert safe_public_name("@home.fixit", "Pérez", KnownValues()) is None
+
+
+# #236: the handle body takes any Unicode letter, and a platform id the marks glued to it, so
+# neither leaves a readable tail of the name.
+@pytest.mark.parametrize(
+    "first",
+    ["@mañana.fixit", "@josé_silva", "insta: bob" + chr(0x0483) + "smith"],
+    ids=["at_enye_dot", "at_accented_underscore", "platform_cyrillic_mark"],
+)
+def test_safe_public_name_withholds_a_unicode_letter_handle(first: str) -> None:
+    assert safe_public_name(first, "Pérez", KnownValues()) is None
 
 
 @pytest.mark.parametrize("field", ["first_name", "last_name"])

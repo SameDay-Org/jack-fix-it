@@ -251,6 +251,15 @@ class Settings(BaseSettings):
     # are safe (each request is locked), so the timeout only bounds a stuck run.
     quote_expiry_sweep_minutes: int = Field(default=5, ge=1, le=60)
     quote_expiry_timeout_seconds: int = Field(default=240, gt=0)
+    # Stripe webhooks (D7.3, #40): the endpoint's signing secret (whsec_...). Optional: without
+    # it POST /v1/webhooks/stripe answers 503 and Stripe retries. How old a signature may be
+    # (Stripe's default tolerance), the largest body read, and the worker's handling: the runs
+    # of one event before it is failed, and the delay before a retry, times the attempt number.
+    stripe_webhook_secret: SecretStr | None = None
+    stripe_webhook_tolerance_seconds: int = Field(default=300, gt=0)
+    stripe_webhook_max_body_bytes: int = Field(default=524_288, gt=0)
+    stripe_webhook_max_attempts: int = Field(default=5, gt=0)
+    stripe_webhook_retry_backoff_seconds: int = Field(default=10, gt=0)
     # Waitlist (D8.4, #46): joins per client IP and per contact (email or phone, hashed), per
     # AUTH_RATE_LIMIT_WINDOW_SECONDS.
     waitlist_join_limit: int = Field(default=5, gt=0)
@@ -323,6 +332,7 @@ class Settings(BaseSettings):
         "refresh_rotation_secret",
         "resend_api_key",
         "email_from",
+        "stripe_webhook_secret",
         "expo_access_token",
         "google_maps_api_key",
         "stripe_secret_key",

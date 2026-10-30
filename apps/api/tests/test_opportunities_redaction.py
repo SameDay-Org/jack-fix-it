@@ -6,8 +6,9 @@ are checked on their serialized values. The customer's own view keeps the text a
 """
 
 import logging
+import unicodedata
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 import pytest
@@ -26,10 +27,26 @@ from app.queue import get_job_queue
 from app.rate_limit import get_rate_limiter
 from app.redaction import MASK
 from tests.conftest import InMemoryRateLimiter
+from tests.contact_overlaps import (
+    CUT_CONTACTS,
+    CUT_IDS,
+    FLOOR_CONTACTS,
+    FLOOR_IDS,
+    OVERLAP_IDS,
+    PHONE_EMAIL_OVERLAPS,
+)
 from tests.glue_variants import glue_sample
 from tests.helpers import async_best_seconds_without_gc
 from tests.test_intake_questions import labels, option
 from tests.test_opportunities_api import BASE, Pro, dispatch, make_pro
+from tests.test_redaction import (
+    B1_EMAILS,
+    B2_CASHTAGS,
+    B3_HANDLES,
+    B4_SPANS,
+    B5_CHAINS,
+    R2_B1_PIECES,
+)
 from tests.test_requests_api import (
     ADDRESS,
     NOW,
@@ -336,13 +353,72 @@ ROUND4_CASES = [
         "+13055550199",
         "742 Evergreen Terrace",
     ),
+    # #236: a Unicode letter in the handle body used to end the mask ("•••ñana.fixit"), and a
+    # mark inside a platform id used to leave the mark and "smith".
+    (
+        "handle-with-unicode-letters",
+        "Repair the leaking kitchen sink, find me @mañana.fixit please.",
+        "fixit",
+        "test@example.invalid",
+        "+13055550199",
+        "742 Evergreen Terrace",
+    ),
+    (
+        "platform-id-with-cyrillic-mark",
+        "Repair the leaking kitchen sink, insta: bob" + chr(0x0483) + "smith please.",
+        "smith",
+        "test@example.invalid",
+        "+13055550199",
+        "742 Evergreen Terrace",
+    ),
 ]
+# Vault round 1 on #240 (#257): an email that takes a phone's last group used to leave
+# "786 555"; the customer's own phone is another one, so the patterns mask it.
+OVERLAP_CASES = [
+    (
+        f"phone-email-overlap-{name}",
+        f"Repair the leaking kitchen sink, call {contact} please.",
+        contact[:7],
+        "test@example.invalid",
+        "+17865550100",
+        "742 Evergreen Terrace",
+    )
+    for name, contact in zip(OVERLAP_IDS, PHONE_EMAIL_OVERLAPS, strict=True)
+]
+# Vault round 2 on #240: the URL took the reverse handle's platform and left "jdoe1", the
+# email took the street's suffix and left "1250 Ocean"; NFC and NFD (the accents decompose).
+CUT_CASES = [
+    (
+        f"cut-{name}-{form.lower()}",
+        unicodedata.normalize(form, f"Reparar el fregadero, escríbeme a {contact} mañana."),
+        secret,
+        "test@example.invalid",
+        "+17865550100",
+        "742 Evergreen Terrace",
+    )
+    for name, (contact, secret) in zip(CUT_IDS, CUT_CONTACTS, strict=True)
+    for form in ("NFC", "NFD")
+]
+# Fix round 5 on #240 (the safety floor): a URL or an email took the contact's number or cue
+# (Vault R3-B1), a refused match left a street (F-B1), a recovered handle left its unit (F-B2).
+# Develop's filter hid each one; the account's own values are unrelated.
+FLOOR_CASES = [
+    (
+        f"floor-{name}-{form.lower()}",
+        unicodedata.normalize(form, f"Reparar el fregadero, escríbeme a {contact}, gracias."),
+        secret,
+        "test@example.invalid",
+        "+17865550100",
+        "100 Harbor Point Blvd",
+    )
+    for name, (contact, secret, _) in zip(FLOOR_IDS, FLOOR_CONTACTS, strict=True)
+    for form in ("NFC", "NFD")
+]
+CASES = ROUND3_CASES + ROUND4_CASES + OVERLAP_CASES + CUT_CASES + FLOOR_CASES
 
 
 @pytest.mark.parametrize(
-    ("name", "text", "secret", "email", "phone", "street"),
-    ROUND3_CASES + ROUND4_CASES,
-    ids=[case[0] for case in ROUND3_CASES + ROUND4_CASES],
+    ("name", "text", "secret", "email", "phone", "street"), CASES, ids=[case[0] for case in CASES]
 )
 @pytest.mark.parametrize(
     ("source", "route"), [("description", "list"), ("description", "detail"), ("intake", "detail")]
@@ -379,6 +455,46 @@ async def test_ordinary_contacts_never_reach_a_pro(
     body = response.json()
     flagged = body["items"][0]["text_redacted"] if route == "list" else body["text_redacted"]
     assert flagged is True
+
+
+# The tables of the earlier review rounds on #240, one description each: B1-B5 (round 1) and
+# the dot and punto pieces (round 2). Each line masked as the redactor's own tests expect.
+REVIEW_TABLES = {
+    "b1-explicit-cue": [(text, MASK) for text in B1_EMAILS],
+    "b2-cashtag": [(text, MASK) for text in B2_CASHTAGS],
+    "b3-marked-latin": B3_HANDLES,
+    "b4-marked-tld": [(text, MASK) for text in B4_SPANS],
+    "b5-long-chain": [(text, MASK) for text in B5_CHAINS],
+    "r2-b1-dot-pieces": [(text, MASK) for text in R2_B1_PIECES],
+}
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize("table", list(REVIEW_TABLES))
+async def test_the_review_tables_reach_a_pro_masked(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    table: str,
+    form: Literal["NFC", "NFD"],
+) -> None:
+    entries = REVIEW_TABLES[table]
+    description = "\n".join(f"Write to {text}" for text, _ in entries)
+    _, pro, _, dispatch_id, _ = await dispatched(
+        db_client,
+        db_session,
+        description=unicodedata.normalize(form, description),
+        email="test@example.invalid",
+        phone="+17865550100",
+        street="100 Harbor Point Blvd",
+    )
+
+    detail = await db_client.get(f"{BASE}/{dispatch_id}", headers=pro.caller.headers)
+
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["description"] == "\n".join(f"Write to {masked}" for _, masked in entries)
+    assert body["text_redacted"] is True
 
 
 @pytest.mark.parametrize(
