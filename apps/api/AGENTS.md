@@ -102,5 +102,6 @@ uv run alembic upgrade head
 uv run python -m scripts.seed_categories          # inserts missing launch categories (seed_data.json); never updates a row
 uv run python -m scripts.seed_service_areas       # inserts missing served ZIPs (service_areas/seed_data.json: South Florida, Broward active, #9); never updates a row
 uv run python -m scripts.create_staff_user        # creates an admin or agent (asks; password via getpass), or --promote an account; --help
+uv run python -m scripts.resolve_payout_account   # staff settle a 409 payouts_needs_review: --pro <profile id> --adopt <acct_...> or --allow-new (asks; --yes); --help
 uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest
 ```

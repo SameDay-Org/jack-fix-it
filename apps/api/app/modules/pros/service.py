@@ -74,6 +74,27 @@ class ProPublicDetails:
     categories: list[CategorySummary]  # active ones only, by slug
 
 
+@dataclass(frozen=True)
+class PayoutAccount:
+    """A pro's payout side (#39): the profile, its Stripe Express account (None until the first
+    onboarding link), when that account's create was attempted (None before the first attempt)
+    and whether payouts are enabled, as last read from Stripe."""
+
+    profile_id: uuid.UUID
+    stripe_account_id: str | None
+    stripe_account_requested_at: datetime | None
+    payouts_enabled: bool
+
+
+def _payout_account(profile: ProProfile) -> PayoutAccount:
+    return PayoutAccount(
+        profile_id=profile.id,
+        stripe_account_id=profile.stripe_account_id,
+        stripe_account_requested_at=profile.stripe_account_requested_at,
+        payouts_enabled=profile.payouts_enabled,
+    )
+
+
 class ProService:
     def __init__(self, session: AsyncSession) -> None:
         self._profiles = ProProfileRepository(session)
@@ -95,6 +116,49 @@ class ProService:
     async def get_profile_id_for_user(self, user_id: uuid.UUID) -> uuid.UUID | None:
         """The pro_profiles.id of a user, or None when the user has no pro profile."""
         return await self._profiles.get_id_by_user_id(user_id)
+
+    async def lock_payout_account(self, user_id: uuid.UUID) -> tuple[bool, PayoutAccount]:
+        """(created, account): the user's payout account (#39), its profile row locked FOR
+        UPDATE until the transaction ends and inserted first when missing, empty and pending,
+        as GET /pros/me does. The caller commits."""
+        created = await self._profiles.insert_if_missing(user_id)
+        profile = await self._profiles.get_by_user_id(user_id, lock=True)
+        if profile is None:  # pragma: no cover - the row was just ensured in this transaction
+            raise RuntimeError("pro profile missing after insert")
+        return created, _payout_account(profile)
+
+    async def payout_account(
+        self, user_id: uuid.UUID, *, lock: bool = False
+    ) -> PayoutAccount | None:
+        """The user's payout account (#39), or None when they have no profile yet. `lock`: its
+        profile row FOR UPDATE until the caller's transaction ends."""
+        profile = await self._profiles.get_by_user_id(user_id, lock=lock)
+        return None if profile is None else _payout_account(profile)
+
+    async def lock_payout_account_by_profile(self, pro_id: uuid.UUID) -> PayoutAccount | None:
+        """The profile's payout account, its row FOR UPDATE until the caller's transaction
+        ends; None when no profile has this id (staff recovery, #39)."""
+        profile = await self._profiles.get_by_id(pro_id, lock=True)
+        return None if profile is None else _payout_account(profile)
+
+    async def mark_stripe_account_requested(self, pro_id: uuid.UUID) -> None:
+        """Stamps the profile's account-create attempt now; the caller holds the row lock and
+        commits before the create call."""
+        await self._profiles.set_stripe_account_requested_now(pro_id)
+
+    async def clear_stripe_account_requested(self, pro_id: uuid.UUID) -> None:
+        """Forgets the profile's account-create attempt, so the next onboarding link creates
+        again; the caller holds the row lock and commits."""
+        await self._profiles.clear_stripe_account_requested(pro_id)
+
+    async def set_stripe_account(self, pro_id: uuid.UUID, account_id: str) -> None:
+        """Stores the profile's Express account id; the caller holds the row lock and commits."""
+        await self._profiles.set_stripe_account_id(pro_id, account_id)
+
+    async def set_payouts_enabled(self, pro_id: uuid.UUID, enabled: bool) -> bool:
+        """Stores what Stripe says of the account's payouts; True when the value changed (only
+        then is the row written). The caller commits."""
+        return await self._profiles.set_payouts_enabled(pro_id, enabled)
 
     async def hireable_cards(self, pro_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, ProCard]:
         """The public card of each pro among `pro_ids` who can still be hired, by profile id:

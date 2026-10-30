@@ -79,6 +79,8 @@ environment as **shared variables** referenced from both services, so the two ne
 | `S3_REGION`                   | `auto` (the default) for Cloudflare R2                                   | no              | D6.2 (#35) |
 | `STRIPE_WEBHOOK_SECRET`       | optional until the Stripe endpoint exists; unset, the webhook gives 503  | yes             | D7.3 (#40) |
 | `GOOGLE_MAPS_API_KEY`         | optional until #14; without it `POST /v1/geo/reverse` answers 503        | yes             | #215       |
+| `STRIPE_SECRET_KEY`           | required; `sk_test_` until launch: a live key works in production only   | yes             | D7.1 (#39) |
+| `PUBLIC_API_URL`              | required; https, e.g. `https://${{api.RAILWAY_PUBLIC_DOMAIN}}`           | no              | D7.1 (#39) |
 
 "Required" means the API refuses to start in staging and production without it (the settings
 validators in `apps/api/app/config.py`). Every other setting has a working default; the
@@ -112,6 +114,8 @@ never logs `worker_started`. Use the same values as api.
 | `S3_BUCKET`                 | same as api                                                | no              | D6.2 (#35)  |
 | `S3_ACCESS_KEY_ID`          | same as api                                                | yes             | D6.2 (#35)  |
 | `S3_SECRET_ACCESS_KEY`      | same as api                                                | yes             | D6.2 (#35)  |
+| `STRIPE_SECRET_KEY`         | same as api                                                | yes             | D7.1 (#39)  |
+| `PUBLIC_API_URL`            | same as api                                                | no              | D7.1 (#39)  |
 | `EXPO_ACCESS_TOKEN`         | optional; set it only if Expo enhanced push security is on | yes             | D10.3 (#54) |
 
 `apps/api/tests/test_railway_doc.py` fails when a setting that staging or production requires

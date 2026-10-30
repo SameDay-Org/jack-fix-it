@@ -480,6 +480,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/pros/me/payouts/onboarding-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get a payout onboarding link
+         * @description A single-use link to Stripe's hosted onboarding, where the pro enters the details
+         *     Stripe needs to pay them out. The first call creates the pro's payout account (one per pro,
+         *     ever); later calls reuse it. Stripe sends the browser back to the app when the pro is done
+         *     or the link has expired; then read GET /v1/pros/me/payouts.
+         */
+        post: operations["create_onboarding_link_v1_pros_me_payouts_onboarding_link_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pros/me/payouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My payout status
+         * @description Where the pro's payout onboarding stands, read from Stripe on each call. Only a pro with
+         *     payouts enabled receives requests.
+         */
+        get: operations["get_payouts_status_v1_pros_me_payouts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pros/me/opportunities": {
         parameters: {
             query?: never;
@@ -1276,6 +1320,19 @@ export interface components {
             /** Changes */
             changes: components["schemas"]["PreferenceChange"][];
         };
+        /** OnboardingLinkOut */
+        OnboardingLinkOut: {
+            /**
+             * Url
+             * @description Single-use Stripe-hosted onboarding page; open it in a browser.
+             */
+            url: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
         /**
          * OpportunityCategory
          * @description The request's category, as this module shows it: its own strict model, not the shared
@@ -1477,6 +1534,18 @@ export interface components {
              */
             new_password: string;
         };
+        /** PayoutsOut */
+        PayoutsOut: {
+            /** @description not_started: no payout account yet; incomplete: Stripe still needs information; in_review: everything is submitted and Stripe is checking it; enabled: payouts are on. */
+            status: components["schemas"]["PayoutsStatus"];
+            /** Payouts Enabled */
+            payouts_enabled: boolean;
+        };
+        /**
+         * PayoutsStatus
+         * @enum {string}
+         */
+        PayoutsStatus: "not_started" | "incomplete" | "in_review" | "enabled";
         /** PhoneSendRequest */
         PhoneSendRequest: {
             /**
@@ -3569,6 +3638,156 @@ export interface operations {
             };
             /** @description invalid_media: file_key is not the caller's own pro_document upload, or is already a document; validation_error: an unknown type, an expiry date in the past, or a field the review sets (status, rejection_reason, reviewed_by...). */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_onboarding_link_v1_pros_me_payouts_onboarding_link_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingLinkOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have a payout account. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description payouts_needs_review: an earlier account create is unresolved: Stripe shows no payout account for the pro, more than one, or could not be searched to the end; nothing was created. Support resolves it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many onboarding links; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description payments_error: Stripe refused the call, e.g. for an account deleted on its side. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description payments_unavailable: payments are not configured, or Stripe is not reachable; nothing changed, retry later. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_payouts_status_v1_pros_me_payouts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PayoutsOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have a payout account. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description payments_error: Stripe refused the call, e.g. for an account deleted on its side. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description payments_unavailable: payments are not configured, or Stripe is not reachable; nothing changed, retry later. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
