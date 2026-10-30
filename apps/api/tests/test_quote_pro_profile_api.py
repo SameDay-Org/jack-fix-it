@@ -29,6 +29,7 @@ from app.modules.service_areas.models import ServiceArea
 from app.modules.users.types import UserRole
 from app.observability import JsonFormatter
 from app.queue import get_job_queue
+from tests.helpers import letter_tag
 from tests.test_opportunities_api import EMAIL, NOT_FOUND, PHONE, World, build_world, make_request
 from tests.test_quote_list_api import (
     FORBIDDEN,
@@ -86,7 +87,7 @@ async def edit_profile(session: AsyncSession, pro: QuotingPro, **fields: object)
 async def make_category(session: AsyncSession, slug: str, *, active: bool = True) -> uuid.UUID:
     """`slug` leads the stored slug, so it sets the order; the suffix keeps it unique."""
     category = Category(
-        slug=f"{slug}-{uuid.uuid4().hex[:8]}",
+        slug=f"{slug}-{letter_tag()}",
         names={"en": f"{slug} en", "es": f"{slug} es"},
         active=active,
     )
