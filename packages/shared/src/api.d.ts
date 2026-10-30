@@ -1347,6 +1347,18 @@ export interface components {
              * @example 1500
              */
             take_rate_bps: number;
+            /**
+             * Quote Max Amount Cents
+             * @description The highest price a quote may state, in cents, or null when the platform sets no cap: the quote form checks it before sending. Submitting enforces the same value.
+             * @example 250000
+             */
+            quote_max_amount_cents: number | null;
+            /**
+             * Quote Max Duration Minutes
+             * @description The longest estimated duration a quote may state, in minutes, or null when the platform sets no cap. Submitting enforces the same value.
+             * @example 480
+             */
+            quote_max_duration_minutes: number | null;
         };
         /**
          * OpportunityLocation

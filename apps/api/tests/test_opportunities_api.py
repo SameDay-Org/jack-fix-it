@@ -374,6 +374,8 @@ async def test_response_never_contains_customer_contact_or_street(
         "media",
         "media_pending",
         "take_rate_bps",
+        "quote_max_amount_cents",
+        "quote_max_duration_minutes",
     }
 
 
@@ -420,6 +422,8 @@ DETAIL = {
     ],
     "media_pending": 0,
     "take_rate_bps": 1500,
+    "quote_max_amount_cents": None,
+    "quote_max_duration_minutes": None,
 }
 
 
