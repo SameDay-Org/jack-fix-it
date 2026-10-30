@@ -17,6 +17,7 @@ from fastapi import FastAPI
 
 from app.integrations.stripe_connect import (
     AccountState,
+    ProfileAccounts,
     StripeExpressConnect,
     StripeRejectedError,
     StripeUnavailableError,
@@ -80,10 +81,16 @@ class RecordingHTTPClient(stripe.HTTPClient):
         pass
 
 
-def connect(*answers: Answer) -> tuple[StripeExpressConnect, RecordingHTTPClient]:
+def connect(
+    *answers: Answer, max_pages: int = 3
+) -> tuple[StripeExpressConnect, RecordingHTTPClient]:
     http = RecordingHTTPClient(*answers)
     wrapper = StripeExpressConnect(
-        secret_key=FAKE_KEY, timeout_seconds=5.0, max_network_retries=0, http_client=http
+        secret_key=FAKE_KEY,
+        timeout_seconds=5.0,
+        max_network_retries=0,
+        account_list_max_pages=max_pages,
+        http_client=http,
     )
     return wrapper, http
 
@@ -223,6 +230,66 @@ async def test_errors_on_create_and_link_are_typed() -> None:
 
     assert (on_create.value.code, on_link.value.code) == ("email_invalid", "resource_missing")
     assert EMAIL not in str(on_create.value)
+
+
+def accounts_page(*metadata: dict[str, str] | None, has_more: bool) -> tuple[int, dict[str, Any]]:
+    """One page of GET /v1/accounts: an account per entry, with that metadata."""
+    data = [
+        {"id": f"acct_page{uuid.uuid4().hex[:10]}", "object": "account", "metadata": entry}
+        for entry in metadata
+    ]
+    return 200, {"object": "list", "url": "/v1/accounts", "data": data, "has_more": has_more}
+
+
+def list_queries(http: RecordingHTTPClient) -> list[dict[str, list[str]]]:
+    assert all(
+        (method, urlsplit(url).path) == ("get", "/v1/accounts") for method, url, *_ in http.sent
+    )
+    return [parse_qs(urlsplit(url).query) for _, url, _, _ in http.sent]
+
+
+async def test_find_accounts_by_profile_reads_every_page_and_filters_metadata() -> None:
+    mine = {"pro_profile_id": PROFILE}
+    first = accounts_page(None, {}, {"pro_profile_id": str(uuid.uuid4())}, has_more=True)
+    second = accounts_page({"other": "x"}, mine, has_more=False)
+    wrapper, http = connect(first, second)
+
+    found = await wrapper.find_accounts_by_profile(PROFILE)
+
+    assert found == ProfileAccounts((second[1]["data"][1]["id"],), complete=True)
+    assert list_queries(http) == [
+        {"limit": ["100"]},
+        {"limit": ["100"], "starting_after": [first[1]["data"][-1]["id"]]},
+    ]
+
+
+async def test_find_accounts_by_profile_stops_at_the_page_bound() -> None:
+    mine = {"pro_profile_id": PROFILE}
+    wrapper, http = connect(
+        accounts_page(mine, has_more=True), accounts_page({}, has_more=True), max_pages=2
+    )
+
+    found = await wrapper.find_accounts_by_profile(PROFILE)
+
+    assert (len(found.account_ids), found.complete) == (1, False)
+    assert len(http.sent) == 2
+
+
+async def test_find_accounts_by_profile_stops_at_a_second_match() -> None:
+    mine = {"pro_profile_id": PROFILE}
+    wrapper, http = connect(accounts_page(mine, has_more=True), accounts_page(mine, has_more=True))
+
+    found = await wrapper.find_accounts_by_profile(PROFILE)
+
+    assert (len(found.account_ids), found.complete) == (2, False)
+    assert len(http.sent) == 2
+
+
+async def test_find_accounts_by_profile_errors_are_typed() -> None:
+    wrapper, _ = connect(accounts_page({}, has_more=True), NETWORK_ERROR)
+
+    with pytest.raises(StripeUnavailableError):
+        await wrapper.find_accounts_by_profile(PROFILE)
 
 
 def test_get_stripe_connect_needs_the_key() -> None:

@@ -3,8 +3,12 @@
 One Stripe Connect Express account per pro, created with the first onboarding link and stored
 on the profile; later links reuse it. The profile row stays locked (FOR UPDATE) from the check
 to the stored id, and the create call carries a key derived from the profile id, committed
-before the call, so neither two concurrent first calls nor a retry after a lost response make a
-second account. The status reads the account from Stripe, the row locked over the read, and
+before the call with the time of the attempt, so neither two concurrent first calls nor a retry
+after a lost response make a second account: within STRIPE_ACCOUNT_RECONCILE_AFTER_SECONDS of
+the attempt, Stripe answers the same key with the same account; later, when Stripe may have
+forgotten the key, the retry looks the account up by its metadata first and adopts it. Two
+matches, or a lookup that could not finish, create nothing: 409 for support to resolve in the
+Stripe dashboard. The status reads the account from Stripe, the row locked over the read, and
 keeps pro_profiles.payouts_enabled current: dispatch and quote acceptance read that column
 (context doc section 5).
 
@@ -17,6 +21,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Final
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,7 +33,11 @@ from app.integrations.stripe_connect import (
     StripeRejectedError,
     StripeUnavailableError,
 )
-from app.modules.payouts.errors import PaymentsProviderError, PaymentsUnavailableError
+from app.modules.payouts.errors import (
+    PaymentsProviderError,
+    PaymentsUnavailableError,
+    PayoutsNeedsReviewError,
+)
 from app.modules.payouts.schemas import OnboardingLinkOut, PayoutsOut, PayoutsStatus
 from app.modules.pros.service import ProService
 from app.modules.users.types import UserAccount
@@ -58,10 +67,17 @@ def payouts_status(state: AccountState) -> PayoutsStatus:
 @dataclass(frozen=True)
 class PayoutsConfig:
     public_api_url: str | None
+    # How old a profile's unanswered account create must be before a retry looks it up first.
+    account_reconcile_after: timedelta
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "PayoutsConfig":
-        return cls(public_api_url=settings.public_api_url)
+        return cls(
+            public_api_url=settings.public_api_url,
+            account_reconcile_after=timedelta(
+                seconds=settings.stripe_account_reconcile_after_seconds
+            ),
+        )
 
 
 class PayoutsService:
@@ -85,39 +101,85 @@ class PayoutsService:
         if base_url is None:
             logger.warning("payouts_public_api_url_missing")
             raise PaymentsUnavailableError
-        created, account = await self._pros.lock_payout_account(user.id)
-        if created:
-            # The profile id names the account in Stripe (metadata, idempotency key): a new
-            # profile is committed first, so a rollback after a lost create answer keeps it and
-            # the retry sends the same key. Then the row is locked again.
-            await self._session.commit()
-            logger.info("pro_profile_created", extra={"user_id": str(user.id)})
-            _, account = await self._pros.lock_payout_account(user.id)
-        pro_id = account.profile_id
-        account_id = account.stripe_account_id
-        if account_id is None:
-            async with self._stripe_call(pro_id, "create_account"):
-                new = await stripe.create_express_account(
-                    email=user.email,
-                    profile_id=str(pro_id),
-                    idempotency_key=account_idempotency_key(pro_id),
-                )
-            account_id = new.account_id
-            await self._pros.set_stripe_account(pro_id, account_id)
-            await self._session.commit()
-            logger.info(
-                "payouts_account_created",
-                extra={"pro_id": str(pro_id), "stripe_request_id": new.request_id},
-            )
-        else:
-            # Ends the transaction: the row lock is not held over the link call.
-            await self._session.commit()
+        pro_id, account_id = await self._account(stripe, user)
         async with self._stripe_call(pro_id, "create_link"):
             link = await stripe.create_onboarding_link(
                 account_id, return_url=base_url + RETURN_PATH, refresh_url=base_url + REFRESH_PATH
             )
         logger.info("payouts_onboarding_link_created", extra={"pro_id": str(pro_id)})
         return OnboardingLinkOut(url=link.url, expires_at=link.expires_at)
+
+    async def _account(self, stripe: StripeConnect, user: UserAccount) -> tuple[uuid.UUID, str]:
+        """(profile id, Express account id): the stored account, else one adopted from Stripe or
+        created, with the profile when missing. Ends the transaction: the row lock is not held
+        over the link call."""
+        created, account = await self._pros.lock_payout_account(user.id)
+        pro_id = account.profile_id
+        if account.stripe_account_id is not None:
+            await self._session.commit()
+            return pro_id, account.stripe_account_id
+        attempted = account.stripe_account_requested_at
+        if attempted is not None and datetime.now(UTC) - attempted >= (
+            self._config.account_reconcile_after
+        ):
+            adopted = await self._adopt_lost_account(stripe, pro_id)
+            if adopted is not None:
+                return pro_id, adopted
+            attempted = None  # nothing landed: this create is a first attempt again
+        if attempted is None:
+            # The profile id names the account in Stripe (metadata, idempotency key), and the
+            # attempt's time says when Stripe may forget that key: both are committed first (a
+            # new profile too), so a rollback after a lost create answer keeps them. Then the
+            # row is locked again; a call that stored the account meanwhile is the one kept.
+            await self._pros.mark_stripe_account_requested(pro_id)
+            await self._session.commit()
+            if created:
+                logger.info("pro_profile_created", extra={"user_id": str(user.id)})
+            _, account = await self._pros.lock_payout_account(user.id)
+            if account.stripe_account_id is not None:
+                await self._session.commit()
+                return pro_id, account.stripe_account_id
+        async with self._stripe_call(pro_id, "create_account"):
+            new = await stripe.create_express_account(
+                email=user.email,
+                profile_id=str(pro_id),
+                idempotency_key=account_idempotency_key(pro_id),
+            )
+        await self._pros.set_stripe_account(pro_id, new.account_id)
+        await self._session.commit()
+        logger.info(
+            "payouts_account_created",
+            extra={"pro_id": str(pro_id), "stripe_request_id": new.request_id},
+        )
+        return pro_id, new.account_id
+
+    async def _adopt_lost_account(self, stripe: StripeConnect, pro_id: uuid.UUID) -> str | None:
+        """An earlier create's answer was lost long enough ago that Stripe may have forgotten
+        its key: the account it made, if any, is found by its metadata, the row still locked.
+        One match is stored and committed; None when nothing landed. Several matches, or a
+        listing stopped at its page bound, create nothing: support keeps one of the accounts in
+        the Stripe dashboard and deletes the others, and the pro's next call adopts it."""
+        async with self._stripe_call(pro_id, "find_accounts"):
+            found = await stripe.find_accounts_by_profile(str(pro_id))
+        if found.complete and len(found.account_ids) == 1:
+            [account_id] = found.account_ids
+            await self._pros.set_stripe_account(pro_id, account_id)
+            await self._session.commit()
+            logger.warning("payouts_account_adopted", extra={"pro_id": str(pro_id)})
+            return account_id
+        if found.complete and not found.account_ids:
+            logger.info("payouts_account_lookup_empty", extra={"pro_id": str(pro_id)})
+            return None
+        await self._session.rollback()
+        logger.error(
+            "payouts_account_ambiguous",
+            extra={
+                "pro_id": str(pro_id),
+                "count": len(found.account_ids),
+                "listing_complete": found.complete,
+            },
+        )
+        raise PayoutsNeedsReviewError
 
     async def status(self, user: UserAccount) -> PayoutsOut:
         """Where the caller's onboarding stands, read from Stripe; a changed payouts_enabled is

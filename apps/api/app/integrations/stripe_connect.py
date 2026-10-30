@@ -5,9 +5,10 @@ account asks for the `transfers` capability only. Calls go through the official 
 client on httpx (timeout and retries from settings): no synchronous call blocks the event loop.
 
 What leaves this module is typed and minimal: an account's state as three booleans, a link's URL
-and expiry. Stripe's errors become `StripeUnavailableError` (network, timeout, 409, 429, 5xx) or
-`StripeRejectedError` (any other 4xx), each carrying only Stripe's request id and error code:
-an SDK error's text can name the account id, so it is never chained or logged. The `stripe`
+and expiry, the ids of the accounts a profile's metadata names. Stripe's errors become
+`StripeUnavailableError` (network, timeout, 409, 429, 5xx) or `StripeRejectedError` (any other
+4xx), each carrying only Stripe's request id and error code: an SDK error's text can name the
+account id, so it is never chained or logged. The `stripe`
 logger, which names every request URL (account ids included) at INFO and request bodies (the
 email) at DEBUG, runs at WARNING (app/observability.py).
 """
@@ -18,10 +19,13 @@ from typing import NoReturn, Protocol
 
 import stripe
 from starlette.requests import Request
+from stripe.params import AccountListParams
 
 from app.config import Settings
 
 EXPRESS_COUNTRY = "US"
+# The most accounts one list page returns (Stripe's maximum).
+ACCOUNT_LIST_PAGE_SIZE = 100
 
 
 class StripeCallError(Exception):
@@ -61,6 +65,15 @@ class AccountState:
     requirements_due: bool
 
 
+@dataclass(frozen=True)
+class ProfileAccounts:
+    """The connected accounts whose metadata names a profile. `complete`: the listing reached
+    its end; False when it stopped at the page bound, or at a second match."""
+
+    account_ids: tuple[str, ...]
+    complete: bool
+
+
 class StripeConnect(Protocol):
     async def create_express_account(
         self, *, email: str, profile_id: str, idempotency_key: str
@@ -76,6 +89,10 @@ class StripeConnect(Protocol):
 
     async def retrieve_account(self, account_id: str) -> AccountState: ...
 
+    async def find_accounts_by_profile(self, profile_id: str) -> ProfileAccounts:
+        """The platform's accounts created for the profile (metadata pro_profile_id)."""
+        ...
+
 
 class StripeExpressConnect:
     def __init__(
@@ -84,8 +101,10 @@ class StripeExpressConnect:
         secret_key: str,
         timeout_seconds: float,
         max_network_retries: int,
+        account_list_max_pages: int,
         http_client: stripe.HTTPClient | None = None,
     ) -> None:
+        self._account_list_max_pages = account_list_max_pages
         self._client = stripe.StripeClient(
             secret_key,
             # The async-only httpx client: a synchronous call raises instead of blocking.
@@ -101,6 +120,7 @@ class StripeExpressConnect:
             secret_key=settings.stripe_secret_key.get_secret_value(),
             timeout_seconds=settings.stripe_timeout_seconds,
             max_network_retries=settings.stripe_max_network_retries,
+            account_list_max_pages=settings.stripe_account_list_max_pages,
         )
 
     async def create_express_account(
@@ -151,6 +171,32 @@ class StripeExpressConnect:
             payouts_enabled=bool(account.payouts_enabled),
             requirements_due=bool(requirements and requirements.currently_due),
         )
+
+    async def find_accounts_by_profile(self, profile_id: str) -> ProfileAccounts:
+        """v1 has no search by metadata: lists the platform's accounts page by page, at most
+        STRIPE_ACCOUNT_LIST_MAX_PAGES pages, and keeps those whose metadata names the profile.
+        Stops at a second match, which is answer enough."""
+        found: list[str] = []
+        params: AccountListParams = {"limit": ACCOUNT_LIST_PAGE_SIZE}
+        for _ in range(self._account_list_max_pages):
+            try:
+                page = await self._client.v1.accounts.list_async(params=params)
+            except stripe.StripeError as error:
+                _raise_typed(error)
+            found += [
+                account.id
+                for account in page.data
+                if account.metadata is not None
+                and account.metadata.to_dict().get("pro_profile_id") == profile_id
+            ]
+            if len(found) > 1:
+                return ProfileAccounts(tuple(found), complete=False)
+            if not page.has_more:
+                return ProfileAccounts(tuple(found), complete=True)
+            if not page.data:  # more, but no cursor to reach it
+                break
+            params = {"limit": ACCOUNT_LIST_PAGE_SIZE, "starting_after": page.data[-1].id}
+        return ProfileAccounts(tuple(found), complete=False)
 
 
 def _raise_typed(error: stripe.StripeError) -> NoReturn:

@@ -6,6 +6,7 @@ import random
 import re
 import uuid
 from collections.abc import Callable, Iterator
+from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -509,14 +510,21 @@ async def test_captured_event_has_no_stripe_account_id(sentry_transport: MemoryT
         secret_key="sk_test_fixture-not-a-real-key",
         timeout_seconds=1.0,
         max_network_retries=0,
+        account_list_max_pages=1,
         http_client=http,
     )
     pros = AsyncMock(spec=ProService)
     pros.payout_account.return_value = PayoutAccount(
-        profile_id=uuid.uuid4(), stripe_account_id=account_id, payouts_enabled=False
+        profile_id=uuid.uuid4(),
+        stripe_account_id=account_id,
+        stripe_account_requested_at=None,
+        payouts_enabled=False,
     )
     service = PayoutsService(
-        AsyncMock(spec=AsyncSession), pros, wrapper, PayoutsConfig(public_api_url=None)
+        AsyncMock(spec=AsyncSession),
+        pros,
+        wrapper,
+        PayoutsConfig(public_api_url=None, account_reconcile_after=timedelta(hours=1)),
     )
     user = UserAccount(
         id=uuid.uuid4(),

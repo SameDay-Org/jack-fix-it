@@ -275,6 +275,12 @@ class Settings(BaseSettings):
     stripe_secret_key: SecretStr | None = None
     stripe_timeout_seconds: float = Field(default=10.0, gt=0)
     stripe_max_network_retries: int = Field(default=0, ge=0)
+    # A profile with no stored account whose first create was attempted at least this many
+    # seconds ago looks its account up in Stripe before another create: Stripe may forget an
+    # idempotency key once it is 24 hours old, so the value stays below that. The lookup lists
+    # the platform's accounts, 100 per page, at most this many pages.
+    stripe_account_reconcile_after_seconds: int = Field(default=72_000, gt=0, lt=86_400)
+    stripe_account_list_max_pages: int = Field(default=10, gt=0)
     # The API's public base URL, such as https://api.example.com: Stripe sends the pro's browser
     # back to its onboarding pages there. Required with Stripe in staging and production (https).
     public_api_url: str | None = None

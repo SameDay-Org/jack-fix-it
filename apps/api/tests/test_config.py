@@ -488,3 +488,15 @@ def test_public_api_url_must_be_absolute_http(url: str) -> None:
 def test_payouts_app_url_takes_no_query(url: str) -> None:
     with pytest.raises(ValidationError, match="PAYOUTS_ONBOARDING_APP_URL"):
         make_settings(payouts_onboarding_app_url=url)
+
+
+def test_stripe_account_reconcile_settings() -> None:
+    settings = make_settings()
+    assert settings.stripe_account_reconcile_after_seconds == 72_000
+    assert settings.stripe_account_list_max_pages == 10
+    # Stripe may forget an idempotency key once it is 24 hours old: the lookup must come first.
+    for value in (0, 86_400):
+        with pytest.raises(ValidationError):
+            make_settings(stripe_account_reconcile_after_seconds=value)
+    with pytest.raises(ValidationError):
+        make_settings(stripe_account_list_max_pages=0)

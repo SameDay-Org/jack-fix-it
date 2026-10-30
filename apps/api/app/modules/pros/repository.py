@@ -131,6 +131,13 @@ class ProProfileRepository:
             .values(stripe_account_id=account_id, updated_at=func.now())
         )
 
+    async def set_stripe_account_requested_now(self, pro_id: uuid.UUID) -> None:
+        await self._session.execute(
+            update(ProProfile)
+            .where(ProProfile.id == pro_id)
+            .values(stripe_account_requested_at=func.now(), updated_at=func.now())
+        )
+
     async def set_payouts_enabled(self, pro_id: uuid.UUID, enabled: bool) -> bool:
         """True when the stored value changed; a profile that already matches is not written."""
         result = await self._session.execute(

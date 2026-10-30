@@ -3683,6 +3683,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description payouts_needs_review: Stripe holds more than one payout account for the pro, or could not be searched to the end; nothing was created. Support resolves it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description The request is invalid. */
             422: {
                 headers: {

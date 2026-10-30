@@ -20,6 +20,7 @@ from app.integrations.stripe_connect import (
     AccountState,
     CreatedAccount,
     OnboardingLink,
+    ProfileAccounts,
     StripeConnect,
     StripeRejectedError,
     StripeUnavailableError,
@@ -45,6 +46,8 @@ LIMIT = 3
 WINDOW = 600
 NOW = 1_000.0
 LINK_TTL = timedelta(minutes=5)
+RECONCILE_AFTER = timedelta(hours=5)
+CONFIG = PayoutsConfig(public_api_url=PUBLIC_API_URL, account_reconcile_after=RECONCILE_AFTER)
 RETURN_URL = f"{PUBLIC_API_URL}/v1/payouts/onboarding/return"
 REFRESH_URL = f"{PUBLIC_API_URL}/v1/payouts/onboarding/refresh"
 LINK = "/v1/pros/me/payouts/onboarding-link"
@@ -69,6 +72,12 @@ INVALID_TOKEN = {
     }
 }
 RATE_LIMITED = {"error": {"code": "rate_limited", "message": "Too many requests. Try again later."}}
+NEEDS_REVIEW = {
+    "error": {
+        "code": "payouts_needs_review",
+        "message": "Your payout account needs a review by our support team.",
+    }
+}
 
 NOT_SUBMITTED = AccountState(details_submitted=False, payouts_enabled=False, requirements_due=True)
 DUE = AccountState(details_submitted=True, payouts_enabled=False, requirements_due=True)
@@ -79,7 +88,8 @@ ENABLED = AccountState(details_submitted=True, payouts_enabled=True, requirement
 @dataclass
 class FakeStripe:
     """Records every call; `errors` makes one operation fail; `on_create` runs inside the create
-    call, before it answers."""
+    call, before it answers. `profiles` is each remote account's metadata profile id, which the
+    lookup reads; `list_complete` False is a listing stopped at its page bound."""
 
     states: dict[str, AccountState] = field(default_factory=dict)
     created: list[dict[str, str]] = field(default_factory=list)
@@ -87,6 +97,9 @@ class FakeStripe:
     retrieved: list[str] = field(default_factory=list)
     errors: dict[str, Exception] = field(default_factory=dict)
     on_create: Callable[[], Awaitable[None]] | None = None
+    profiles: dict[str, str] = field(default_factory=dict)
+    looked_up: list[str] = field(default_factory=list)
+    list_complete: bool = True
 
     async def create_express_account(
         self, *, email: str, profile_id: str, idempotency_key: str
@@ -100,6 +113,7 @@ class FakeStripe:
             await self.on_create()
         account_id = f"acct_fake{len(self.created)}{uuid.uuid4().hex[:6]}"
         self.states[account_id] = NOT_SUBMITTED
+        self.profiles[account_id] = profile_id
         return CreatedAccount(account_id=account_id, request_id="req_fake_create")
 
     async def create_onboarding_link(
@@ -119,6 +133,13 @@ class FakeStripe:
         self.retrieved.append(account_id)
         return self.states[account_id]
 
+    async def find_accounts_by_profile(self, profile_id: str) -> ProfileAccounts:
+        if "find" in self.errors:
+            raise self.errors["find"]
+        self.looked_up.append(profile_id)
+        matches = tuple(account for account, of in self.profiles.items() if of == profile_id)
+        return ProfileAccounts(matches, complete=self.list_complete)
+
 
 @dataclass
 class IdempotentStripe(FakeStripe):
@@ -131,6 +152,8 @@ class IdempotentStripe(FakeStripe):
     async def create_express_account(
         self, *, email: str, profile_id: str, idempotency_key: str
     ) -> CreatedAccount:
+        if "create" in self.errors:
+            raise self.errors["create"]
         self.created.append(
             {"email": email, "profile_id": profile_id, "idempotency_key": idempotency_key}
         )
@@ -139,6 +162,7 @@ class IdempotentStripe(FakeStripe):
             account_id = f"acct_fake{len(self.accounts_by_key)}{uuid.uuid4().hex[:6]}"
             self.accounts_by_key[idempotency_key] = account_id
             self.states[account_id] = NOT_SUBMITTED
+            self.profiles[account_id] = profile_id
         if self.lost_answers:
             self.lost_answers -= 1
             raise StripeUnavailableError
@@ -160,6 +184,7 @@ def settings() -> Settings:
         payouts_onboarding_app_url=APP_URL,
         payouts_onboarding_link_limit=LIMIT,
         payouts_onboarding_link_window_seconds=WINDOW,
+        stripe_account_reconcile_after_seconds=int(RECONCILE_AFTER.total_seconds()),
     )
 
 
@@ -179,12 +204,20 @@ def limiter(app: FastAPI) -> InMemoryRateLimiter:
     return limiter
 
 
-async def pro(session: AsyncSession, *, account_id: str | None = None) -> Caller:
+async def pro(
+    session: AsyncSession, *, account_id: str | None = None, requested_at: datetime | None = None
+) -> Caller:
     """A committed pro (an error path rolls the request's transaction back), with a profile
-    holding `account_id` when one is given."""
+    holding `account_id` and `requested_at` when either is given."""
     caller = await make_caller(session)
-    if account_id is not None:
-        session.add(ProProfile(user_id=caller.id, stripe_account_id=account_id))
+    if account_id is not None or requested_at is not None:
+        session.add(
+            ProProfile(
+                user_id=caller.id,
+                stripe_account_id=account_id,
+                stripe_account_requested_at=requested_at,
+            )
+        )
     await session.commit()
     return caller
 
@@ -216,6 +249,8 @@ async def test_onboarding_link_creates_account_once(
     assert profile is not None
     [account_id] = list(stripe.states)
     assert profile.stripe_account_id == account_id
+    assert profile.stripe_account_requested_at is not None
+    assert stripe.looked_up == []
     assert stripe.created == [
         {
             "email": await email_of(db_session, ana),
@@ -505,6 +540,84 @@ async def test_stripe_unavailable_and_errors(
             assert secret not in line, line
 
 
+async def _refused_lookup(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    stripe: FakeStripe,
+    caplog: pytest.LogCaptureFixture,
+    *,
+    matches: int,
+) -> tuple[Caller, list[dict[str, object]]]:
+    """A pro whose create was attempted longer ago than RECONCILE_AFTER, with no stored account,
+    and `matches` remote accounts naming the profile: the call answers 409, creates nothing and
+    stores nothing. Returns the pro and the JSON log lines."""
+    ana = await pro(db_session, requested_at=datetime.now(UTC) - RECONCILE_AFTER - timedelta(1))
+    profile = await profile_of(db_session, ana)
+    assert profile is not None
+    profile_id = str(profile.id)  # read before the call, whose commit expires the row
+    remote = [f"acct_dup{index}{uuid.uuid4().hex[:8]}" for index in range(matches)]
+    stripe.profiles = dict.fromkeys(remote, profile_id)
+
+    with caplog.at_level(logging.DEBUG):
+        response = await db_client.post(LINK, headers=ana.headers)
+
+    assert (response.status_code, response.json()) == (409, NEEDS_REVIEW)
+    assert stripe.looked_up == [profile_id]
+    assert stripe.created == []
+    assert stripe.links == []
+    assert (await profile_of(db_session, ana)).stripe_account_id is None  # type: ignore[union-attr]
+    formatter = JsonFormatter()
+    lines = [formatter.format(record) for record in caplog.records]
+    for line in lines:
+        for private in (*remote, await email_of(db_session, ana)):
+            assert private not in line, line
+    return ana, [json.loads(line) for line in lines]
+
+
+async def test_two_matching_accounts_refuse_with_needs_review(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    stripe: FakeStripe,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Two remote accounts name the profile: neither is adopted and no third is created; an
+    ERROR log carries the pro id and the count, never an account id or the email."""
+    _, logs = await _refused_lookup(db_client, db_session, stripe, caplog, matches=2)
+
+    [ambiguous] = [log for log in logs if log["message"] == "payouts_account_ambiguous"]
+    assert ambiguous["level"] == "ERROR"
+    assert (ambiguous["count"], ambiguous["listing_complete"]) == (2, True)
+
+
+async def test_listing_bound_reached_refuses_with_needs_review(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    stripe: FakeStripe,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The listing stopped at its page bound with one match so far: another may follow, so the
+    match is not adopted and nothing is created."""
+    stripe.list_complete = False
+
+    _, logs = await _refused_lookup(db_client, db_session, stripe, caplog, matches=1)
+
+    [ambiguous] = [log for log in logs if log["message"] == "payouts_account_ambiguous"]
+    assert (ambiguous["count"], ambiguous["listing_complete"]) == (1, False)
+
+
+async def test_lookup_failure_is_503_and_creates_nothing(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, stripe: FakeStripe
+) -> None:
+    ana = await pro(db_session, requested_at=datetime.now(UTC) - RECONCILE_AFTER - timedelta(1))
+    stripe.errors = {"find": StripeUnavailableError(request_id="req_fake_503")}
+
+    response = await db_client.post(LINK, headers=ana.headers)
+
+    assert (response.status_code, response.json()) == (503, UNAVAILABLE)
+    assert stripe.created == []
+    assert (await profile_of(db_session, ana)).stripe_account_id is None  # type: ignore[union-attr]
+
+
 async def test_onboarding_rate_limited(
     db_client: httpx.AsyncClient, db_session: AsyncSession, stripe: FakeStripe
 ) -> None:
@@ -611,7 +724,6 @@ async def test_onboarding_link_concurrent_first_calls_create_one_account(
     deadline."""
     sessions = committed_pro.sessions
     stripe = FakeStripe()
-    config = PayoutsConfig(public_api_url=PUBLIC_API_URL)
     async with sessions() as one, sessions() as two:
         pids = [await _backend_pid(one), await _backend_pid(two)]
 
@@ -621,7 +733,7 @@ async def test_onboarding_link_concurrent_first_calls_create_one_account(
         stripe.on_create = hold_until_the_other_waits
         results = await asyncio.gather(
             *(
-                PayoutsService(session, ProService(session), stripe, config).onboarding_link(
+                PayoutsService(session, ProService(session), stripe, CONFIG).onboarding_link(
                     committed_pro.user
                 )
                 for session in (one, two)
@@ -648,14 +760,13 @@ async def test_onboarding_link_retry_after_lost_create_answer_reuses_the_account
     and metadata, and Stripe answers with the same account. With the profile rolled back, the
     retry made a new profile id, a new key and a second account."""
     stripe = IdempotentStripe(lost_answers=1)
-    config = PayoutsConfig(public_api_url=PUBLIC_API_URL)
     async with new_pro.sessions() as session:
         with pytest.raises(PaymentsUnavailableError):
-            await PayoutsService(session, ProService(session), stripe, config).onboarding_link(
+            await PayoutsService(session, ProService(session), stripe, CONFIG).onboarding_link(
                 new_pro.user
             )
     async with new_pro.sessions() as session:
-        await PayoutsService(session, ProService(session), stripe, config).onboarding_link(
+        await PayoutsService(session, ProService(session), stripe, CONFIG).onboarding_link(
             new_pro.user
         )
         profile = await session.scalar(
@@ -669,6 +780,104 @@ async def test_onboarding_link_retry_after_lost_create_answer_reuses_the_account
     assert stripe.created[0]["profile_id"] == str(profile.id)
     assert profile.stripe_account_id == account_id
     assert stripe.links == [(account_id, RETURN_URL, REFRESH_URL)]
+
+
+async def _link(new_pro: NewPro, stripe: FakeStripe) -> None:
+    """One onboarding-link call in a fresh session, as a later request would be."""
+    async with new_pro.sessions() as session:
+        await PayoutsService(session, ProService(session), stripe, CONFIG).onboarding_link(
+            new_pro.user
+        )
+
+
+async def _profile(new_pro: NewPro) -> ProProfile:
+    async with new_pro.sessions() as session:
+        profile = await session.scalar(
+            select(ProProfile).where(ProProfile.user_id == new_pro.user.id)
+        )
+    assert profile is not None
+    return profile
+
+
+async def _age_attempt(new_pro: NewPro, by: timedelta) -> None:
+    """Moves the profile's create attempt `by` into the past, as time passing would."""
+    async with new_pro.sessions() as session:
+        await session.execute(
+            update(ProProfile)
+            .where(ProProfile.user_id == new_pro.user.id)
+            .values(stripe_account_requested_at=ProProfile.stripe_account_requested_at - by)
+        )
+        await session.commit()
+
+
+async def test_retry_within_window_replays_with_the_same_key(new_pro: NewPro) -> None:
+    """Stripe made the account, its answer was lost, and the retry comes just inside
+    RECONCILE_AFTER: Stripe still holds the key, so the retry sends it again, with no lookup,
+    and gets the same account back."""
+    stripe = IdempotentStripe(lost_answers=1)
+    with pytest.raises(PaymentsUnavailableError):
+        await _link(new_pro, stripe)
+    await _age_attempt(new_pro, RECONCILE_AFTER - timedelta(minutes=5))
+
+    await _link(new_pro, stripe)
+
+    [account_id] = stripe.accounts_by_key.values()
+    assert len(stripe.created) == 2
+    assert stripe.created[1] == stripe.created[0]
+    assert stripe.looked_up == []
+    assert (await _profile(new_pro)).stripe_account_id == account_id
+
+
+async def test_retry_after_key_pruned_adopts_the_existing_account(new_pro: NewPro) -> None:
+    """The Vault's reproduction (#279): Stripe made account A, its answer was lost, and the pro
+    comes back after Stripe forgot the key (it may, once the key is 24 hours old). A create now
+    would make account B; instead the retry finds A by its metadata and stores it, with no
+    second create. Until then, and after, the profile is not hireable."""
+    stripe = IdempotentStripe(lost_answers=1)
+    with pytest.raises(PaymentsUnavailableError):
+        await _link(new_pro, stripe)
+    [account_a] = stripe.states
+    lost = await _profile(new_pro)
+    assert lost.stripe_account_id is None
+    assert lost.stripe_account_requested_at is not None
+    stripe.accounts_by_key.clear()  # Stripe pruned the key; account A stays
+    await _age_attempt(new_pro, RECONCILE_AFTER + timedelta(minutes=5))
+
+    await _link(new_pro, stripe)
+
+    profile = await _profile(new_pro)
+    assert list(stripe.states) == [account_a]
+    assert len(stripe.created) == 1
+    assert stripe.looked_up == [str(profile.id)]
+    assert profile.stripe_account_id == account_a
+    assert stripe.links == [(account_a, RETURN_URL, REFRESH_URL)]
+    assert profile.payouts_enabled is False
+    async with new_pro.sessions() as session:
+        assert await ProService(session).hireable_cards([profile.id]) == {}
+
+
+async def test_retry_after_key_pruned_creates_when_nothing_landed(new_pro: NewPro) -> None:
+    """The first create failed before Stripe made anything; the retry comes after
+    RECONCILE_AFTER: the lookup finds nothing, the attempt is stamped again, and one account is
+    created."""
+    stripe = IdempotentStripe(errors={"create": StripeUnavailableError()})
+    with pytest.raises(PaymentsUnavailableError):
+        await _link(new_pro, stripe)
+    assert stripe.states == {}
+    await _age_attempt(new_pro, RECONCILE_AFTER + timedelta(minutes=5))
+    aged = (await _profile(new_pro)).stripe_account_requested_at
+    stripe.errors.clear()
+
+    await _link(new_pro, stripe)
+
+    profile = await _profile(new_pro)
+    [account_id] = stripe.states
+    assert len(stripe.created) == 1
+    assert stripe.looked_up == [str(profile.id)]
+    assert profile.stripe_account_id == account_id
+    assert aged is not None
+    assert profile.stripe_account_requested_at is not None
+    assert profile.stripe_account_requested_at > aged
 
 
 class HeldRead(FakeStripe):
@@ -704,12 +913,11 @@ async def test_payouts_status_overlapping_reads_store_the_last_answer(
             .values(stripe_account_id=account_id)
         )
         await session.commit()
-    config = PayoutsConfig(public_api_url=PUBLIC_API_URL)
     held = HeldRead(states={account_id: DUE})
     finished: list[str] = []
 
     async def status(name: str, session: AsyncSession, stripe: FakeStripe) -> bool:
-        service = PayoutsService(session, ProService(session), stripe, config)
+        service = PayoutsService(session, ProService(session), stripe, CONFIG)
         response = await service.status(committed_pro.user)
         finished.append(name)
         return response.payouts_enabled

@@ -47,6 +47,9 @@ class ProProfile(IdTimestampsMixin, Base):
         index=True,
     )
     stripe_account_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    # When the account's create was attempted (#39), committed before the call: a create whose
+    # answer was lost long ago is looked up in Stripe before another one.
+    stripe_account_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     payouts_enabled: Mapped[bool] = mapped_column(server_default=false())
     # A rating, not money; NULL until the first review.
     rating_avg: Mapped[Decimal | None] = mapped_column(Numeric(3, 2))
