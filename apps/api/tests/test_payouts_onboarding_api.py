@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 from fastapi import FastAPI, Request
-from sqlalchemy import URL, delete, select, text
+from sqlalchemy import URL, delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import Settings
@@ -26,6 +26,7 @@ from app.integrations.stripe_connect import (
     get_stripe_connect,
 )
 from app.modules.auth.permissions import PUBLIC_ROUTES
+from app.modules.payouts.errors import PaymentsUnavailableError
 from app.modules.payouts.service import PayoutsConfig, PayoutsService
 from app.modules.pros.models import ProProfile
 from app.modules.pros.repository import ProProfileRepository
@@ -117,6 +118,31 @@ class FakeStripe:
             raise self.errors["retrieve"]
         self.retrieved.append(account_id)
         return self.states[account_id]
+
+
+@dataclass
+class IdempotentStripe(FakeStripe):
+    """Answers a repeated idempotency key with the account its first call made, as Stripe does.
+    The first `lost_answers` creates make the account, then fail as a timeout would."""
+
+    accounts_by_key: dict[str, str] = field(default_factory=dict)
+    lost_answers: int = 0
+
+    async def create_express_account(
+        self, *, email: str, profile_id: str, idempotency_key: str
+    ) -> CreatedAccount:
+        self.created.append(
+            {"email": email, "profile_id": profile_id, "idempotency_key": idempotency_key}
+        )
+        account_id = self.accounts_by_key.get(idempotency_key)
+        if account_id is None:
+            account_id = f"acct_fake{len(self.accounts_by_key)}{uuid.uuid4().hex[:6]}"
+            self.accounts_by_key[idempotency_key] = account_id
+            self.states[account_id] = NOT_SUBMITTED
+        if self.lost_answers:
+            self.lost_answers -= 1
+            raise StripeUnavailableError
+        return CreatedAccount(account_id=account_id, request_id="req_fake_create")
 
 
 def _fake_stripe(request: Request) -> StripeConnect:
@@ -295,8 +321,10 @@ async def test_payouts_status_persists_payouts_enabled(
     set_payouts_enabled = ProProfileRepository.set_payouts_enabled
 
     async def recording(self: ProProfileRepository, pro_id: uuid.UUID, enabled: bool) -> bool:
-        writes.append(enabled)
-        return await set_payouts_enabled(self, pro_id, enabled)
+        changed = await set_payouts_enabled(self, pro_id, enabled)
+        if changed:  # the row was written
+            writes.append(enabled)
+        return changed
 
     monkeypatch.setattr(ProProfileRepository, "set_payouts_enabled", recording)
 
@@ -424,11 +452,14 @@ async def test_stripe_unavailable_and_errors(
         return await db_client.request(method, path, headers=caller.headers)
 
     with caplog.at_level(logging.DEBUG):
-        # Timeout or 5xx on the create: nothing stored, not even the new profile.
+        # Timeout or 5xx on the create: no account id stored. The new profile was committed
+        # before the call, so a retry sends the same key.
         stripe.errors = {"create": unavailable}
         response = await call(ana, "POST", LINK)
         assert (response.status_code, response.json()) == (503, UNAVAILABLE)
-        assert await profile_of(db_session, ana) is None
+        profile = await profile_of(db_session, ana)
+        assert profile is not None
+        assert profile.stripe_account_id is None
 
         # On the link: the account id stays as it was.
         stripe.errors = {"link": unavailable}
@@ -522,8 +553,16 @@ def test_return_pages_are_public_and_unlisted(app: FastAPI) -> None:
     assert not [path for path in paths if path.startswith("/v1/payouts/")]
 
 
-# Two first calls at once: real commits on two connections. The test creates its own rows and
-# deletes them afterwards.
+# Calls that overlap or retry: real commits on their own connections. The tests create their
+# own rows and delete them afterwards.
+
+
+@dataclass(frozen=True)
+class NewPro:
+    """A committed pro user, without a profile yet."""
+
+    sessions: async_sessionmaker[AsyncSession]
+    user: UserAccount
 
 
 @dataclass(frozen=True)
@@ -534,27 +573,33 @@ class CommittedPro:
 
 
 @pytest.fixture
-async def committed_pro(test_database_url: URL) -> AsyncIterator[CommittedPro]:
+async def new_pro(test_database_url: URL) -> AsyncIterator[NewPro]:
     engine = create_async_engine(test_database_url)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     async with sessions() as session:
         user = User(email=f"pro-{uuid.uuid4().hex[:8]}@x.com", password_hash="x", role=UserRole.PRO)
         session.add(user)
-        await session.flush()
-        profile = ProProfile(user_id=user.id)
-        session.add(profile)
         await session.commit()
         account = UserAccount(
             id=user.id, email=user.email, role=user.role, locale=user.locale, status=user.status
         )
     try:
-        yield CommittedPro(sessions, account, profile.id)
+        yield NewPro(sessions, account)
     finally:
         async with sessions() as session:
-            await session.execute(delete(ProProfile).where(ProProfile.id == profile.id))
+            await session.execute(delete(ProProfile).where(ProProfile.user_id == user.id))
             await session.execute(delete(User).where(User.id == user.id))
             await session.commit()
         await engine.dispose()
+
+
+@pytest.fixture
+async def committed_pro(new_pro: NewPro) -> CommittedPro:
+    async with new_pro.sessions() as session:
+        profile = ProProfile(user_id=new_pro.user.id)
+        session.add(profile)
+        await session.commit()
+    return CommittedPro(new_pro.sessions, new_pro.user, profile.id)
 
 
 async def test_onboarding_link_concurrent_first_calls_create_one_account(
@@ -595,6 +640,103 @@ async def test_onboarding_link_concurrent_first_calls_create_one_account(
     assert stored == account_id
 
 
+async def test_onboarding_link_retry_after_lost_create_answer_reuses_the_account(
+    new_pro: NewPro,
+) -> None:
+    """A pro without a profile: Stripe makes the account, but its answer is lost. The new
+    profile was committed before the call, so the retry, in a fresh session, sends the same key
+    and metadata, and Stripe answers with the same account. With the profile rolled back, the
+    retry made a new profile id, a new key and a second account."""
+    stripe = IdempotentStripe(lost_answers=1)
+    config = PayoutsConfig(public_api_url=PUBLIC_API_URL)
+    async with new_pro.sessions() as session:
+        with pytest.raises(PaymentsUnavailableError):
+            await PayoutsService(session, ProService(session), stripe, config).onboarding_link(
+                new_pro.user
+            )
+    async with new_pro.sessions() as session:
+        await PayoutsService(session, ProService(session), stripe, config).onboarding_link(
+            new_pro.user
+        )
+        profile = await session.scalar(
+            select(ProProfile).where(ProProfile.user_id == new_pro.user.id)
+        )
+
+    assert len(stripe.created) == 2
+    assert stripe.created[1] == stripe.created[0]
+    [account_id] = stripe.accounts_by_key.values()
+    assert profile is not None
+    assert stripe.created[0]["profile_id"] == str(profile.id)
+    assert profile.stripe_account_id == account_id
+    assert stripe.links == [(account_id, RETURN_URL, REFRESH_URL)]
+
+
+class HeldRead(FakeStripe):
+    """Enters its account read, then answers once `release` is set."""
+
+    def __init__(self, states: dict[str, AccountState]) -> None:
+        super().__init__(states=states)
+        self.reading = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def retrieve_account(self, account_id: str) -> AccountState:
+        self.reading.set()
+        await self.release.wait()
+        return await super().retrieve_account(account_id)
+
+
+async def test_payouts_status_overlapping_reads_store_the_last_answer(
+    committed_pro: CommittedPro,
+) -> None:
+    """Two status calls for one pro overlap: the first is inside its Stripe read (payouts not
+    enabled) when the second starts (enabled). The first read answers once the second call has
+    finished or waits on the first. Whichever call finishes last, its answer is the stored one,
+    and each call answers what Stripe told it. Gated on the value read before the call, the
+    second stored true and the first answered false over it, leaving true stored. The second
+    call must also have waited on the first's row lock: without it, an older Stripe answer
+    could be stored over a newer one."""
+    sessions = committed_pro.sessions
+    account_id = f"acct_overlap{uuid.uuid4().hex[:8]}"
+    async with sessions() as session:
+        await session.execute(
+            update(ProProfile)
+            .where(ProProfile.id == committed_pro.profile_id)
+            .values(stripe_account_id=account_id)
+        )
+        await session.commit()
+    config = PayoutsConfig(public_api_url=PUBLIC_API_URL)
+    held = HeldRead(states={account_id: DUE})
+    finished: list[str] = []
+
+    async def status(name: str, session: AsyncSession, stripe: FakeStripe) -> bool:
+        service = PayoutsService(session, ProService(session), stripe, config)
+        response = await service.status(committed_pro.user)
+        finished.append(name)
+        return response.payouts_enabled
+
+    async with sessions() as one, sessions() as two:
+        pids = [await _backend_pid(one), await _backend_pid(two)]
+        first = asyncio.create_task(status("first", one, held))
+        async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+            await held.reading.wait()
+        second = asyncio.create_task(
+            status("second", two, FakeStripe(states={account_id: ENABLED}))
+        )
+        await _wait_until_one_blocks(sessions, pids, unless=second)
+        second_waited = not second.done()
+        held.release.set()
+        answers = dict(zip(("first", "second"), await asyncio.gather(first, second), strict=True))
+    async with sessions() as session:
+        stored = await session.scalar(
+            select(ProProfile.payouts_enabled).where(ProProfile.id == committed_pro.profile_id)
+        )
+
+    assert answers == {"first": False, "second": True}
+    assert len(finished) == 2
+    assert stored is answers[finished[-1]]
+    assert second_waited
+
+
 async def _backend_pid(session: AsyncSession) -> int:
     pid = await session.scalar(text("SELECT pg_backend_pid()"))
     assert isinstance(pid, int)
@@ -602,9 +744,13 @@ async def _backend_pid(session: AsyncSession) -> int:
 
 
 async def _wait_until_one_blocks(
-    sessions: async_sessionmaker[AsyncSession], pids: list[int]
+    sessions: async_sessionmaker[AsyncSession],
+    pids: list[int],
+    *,
+    unless: asyncio.Task[bool] | None = None,
 ) -> None:
-    """Returns once Postgres reports either backend waiting on a lock the other holds."""
+    """Returns once Postgres reports either backend waiting on a lock the other holds, or once
+    the `unless` task is done."""
     first, second = pids
     query = text(
         "SELECT CAST(:second AS integer) = ANY(pg_blocking_pids(:first)) "
@@ -613,7 +759,9 @@ async def _wait_until_one_blocks(
     async with sessions() as monitor:
         try:
             async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
-                while not await monitor.scalar(query, {"first": first, "second": second}):
+                while not (unless is not None and unless.done()) and not await monitor.scalar(
+                    query, {"first": first, "second": second}
+                ):
                     pass
         except TimeoutError:
             pytest.fail(f"neither call waited on the other within {LOCK_WAIT_DEADLINE_SECONDS} s")

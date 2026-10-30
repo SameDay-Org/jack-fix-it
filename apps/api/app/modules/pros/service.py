@@ -124,9 +124,12 @@ class ProService:
             raise RuntimeError("pro profile missing after insert")
         return created, _payout_account(profile)
 
-    async def payout_account(self, user_id: uuid.UUID) -> PayoutAccount | None:
-        """The user's payout account (#39), or None when they have no profile yet."""
-        profile = await self._profiles.get_by_user_id(user_id)
+    async def payout_account(
+        self, user_id: uuid.UUID, *, lock: bool = False
+    ) -> PayoutAccount | None:
+        """The user's payout account (#39), or None when they have no profile yet. `lock`: its
+        profile row FOR UPDATE until the caller's transaction ends."""
+        profile = await self._profiles.get_by_user_id(user_id, lock=lock)
         return None if profile is None else _payout_account(profile)
 
     async def set_stripe_account(self, pro_id: uuid.UUID, account_id: str) -> None:

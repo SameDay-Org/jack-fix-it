@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import string
 import sys
 import traceback
@@ -135,6 +136,14 @@ _URL_START_AFTER: Final = frozenset("\"'([<{=:,;")
 # Request headers holding credentials that send_default_pii=False does not filter. Lower case;
 # matched whatever the header's casing.
 _CREDENTIAL_HEADERS: Final = frozenset({"stripe-signature"})
+# A Stripe connected account's id (a pro's, #39): Sentry's httpx integration records every
+# outgoing URL, and Stripe's are /v1/accounts/acct_..., so the id gives way wherever a URL may be.
+_STRIPE_ACCOUNT_ID: Final = re.compile(r"\bacct_\w+", re.ASCII)
+_STRIPE_ACCOUNT_REDACTED: Final = "acct_[Filtered]"
+
+
+def _without_stripe_accounts(text: str) -> str:
+    return _STRIPE_ACCOUNT_ID.sub(_STRIPE_ACCOUNT_REDACTED, text)
 
 
 def _without_query(url: str) -> str:
@@ -214,7 +223,8 @@ def _without_database_text(event: Event, hint: Hint) -> None:
 
 def before_send(event: Event, hint: Hint) -> Event:
     """Sentry hook: drops the query string from the request URL, its Referer and the transaction,
-    credential headers (Stripe-Signature) and a database error's text.
+    credential headers (Stripe-Signature), Stripe account ids from the request URL and a
+    database error's text.
 
     Keeps the path and every other field. Fields of an unexpected shape are left as they are.
     """
@@ -224,7 +234,7 @@ def before_send(event: Event, hint: Hint) -> Event:
         request.pop("query_string", None)
         url = request.get("url")
         if isinstance(url, str):
-            request["url"] = _without_query(url)
+            request["url"] = _without_stripe_accounts(_without_query(url))
         headers = request.get("headers")
         if isinstance(headers, dict):
             for name, value in list(headers.items()):
@@ -245,7 +255,8 @@ def before_send(event: Event, hint: Hint) -> Event:
 
 
 def before_breadcrumb(crumb: Breadcrumb, hint: BreadcrumbHint) -> Breadcrumb:
-    """Sentry hook: drops the query string from HTTP and navigation breadcrumbs.
+    """Sentry hook: drops the query string from HTTP and navigation breadcrumbs, and Stripe
+    account ids (an outgoing Stripe call's URL).
 
     Also from URLs in a breadcrumb's message and in the text values of its data, e.g. a
     library's log line, or its `extra`, naming a request URL. The SQL breadcrumbs the
@@ -266,13 +277,13 @@ def before_breadcrumb(crumb: Breadcrumb, hint: BreadcrumbHint) -> Breadcrumb:
         return crumb
     message = crumb.get("message")
     if isinstance(message, str):
-        crumb["message"] = _without_url_queries(message)
+        crumb["message"] = _without_stripe_accounts(_without_url_queries(message))
     data = crumb.get("data")
     if isinstance(data, dict):
         data.pop("http.query", None)
         for name, value in list(data.items()):
             if isinstance(value, str):
-                data[name] = _without_url_queries(value)
+                data[name] = _without_stripe_accounts(_without_url_queries(value))
         url = data.get("url")
         if crumb.get("type") in ("http", "navigation") and isinstance(url, str):
             data["url"] = _without_query(url)

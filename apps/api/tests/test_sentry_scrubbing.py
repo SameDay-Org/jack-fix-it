@@ -4,17 +4,27 @@ import json
 import logging
 import random
 import re
+import uuid
 from collections.abc import Callable, Iterator
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 import sentry_sdk
+import stripe
 from sentry_sdk.envelope import Envelope
 from sentry_sdk.transport import Transport
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import observability
+from app.integrations.stripe_connect import StripeExpressConnect
 from app.main import create_app
+from app.modules.payouts.errors import PaymentsProviderError
+from app.modules.payouts.service import PayoutsConfig, PayoutsService
+from app.modules.pros.service import PayoutAccount, ProService
+from app.modules.users.types import UserAccount, UserRole, UserStatus
 from app.observability import JsonFormatter, before_breadcrumb, before_send, init_sentry
 from tests.conftest import make_settings
 from tests.helpers import seconds_without_gc
@@ -471,3 +481,87 @@ def test_sentry_disabled_without_dsn_still_holds(monkeypatch: pytest.MonkeyPatch
     assert options["include_local_variables"] is False
     assert options["before_send"] is observability.before_send
     assert options["before_breadcrumb"] is observability.before_breadcrumb
+
+
+async def test_captured_event_has_no_stripe_account_id(sentry_transport: MemoryTransport) -> None:
+    """A status read through the real Stripe wrapper and the SDK's httpx client, answered 404 by
+    a mock transport: Sentry's httpx integration records the request URL
+    (/v1/accounts/acct_...) as a breadcrumb, and the service's error log sends an event that
+    carries it. The account id stays out of what Sentry receives; the path stays (#39)."""
+    account_id = "acct_sentry_fixture0123"
+    init_sentry(make_settings(sentry_dsn=TEST_DSN))
+    mock = httpx.MockTransport(
+        lambda request: httpx.Response(
+            404,
+            json={
+                "error": {
+                    "type": "invalid_request_error",
+                    "code": "resource_missing",
+                    "message": f"No such account: '{account_id}'",
+                }
+            },
+        )
+    )
+    client = httpx.AsyncClient(transport=mock)
+    # The SDK's own test hook: its httpx client sends through `client`, on the mock transport.
+    http = stripe.HTTPXClient(timeout=1.0, _lib=SimpleNamespace(AsyncClient=lambda **_: client))
+    wrapper = StripeExpressConnect(
+        secret_key="sk_test_fixture-not-a-real-key",
+        timeout_seconds=1.0,
+        max_network_retries=0,
+        http_client=http,
+    )
+    pros = AsyncMock(spec=ProService)
+    pros.payout_account.return_value = PayoutAccount(
+        profile_id=uuid.uuid4(), stripe_account_id=account_id, payouts_enabled=False
+    )
+    service = PayoutsService(
+        AsyncMock(spec=AsyncSession), pros, wrapper, PayoutsConfig(public_api_url=None)
+    )
+    user = UserAccount(
+        id=uuid.uuid4(),
+        email="pro-fixture@example.invalid",
+        role=UserRole.PRO,
+        locale="en",
+        status=UserStatus.ACTIVE,
+    )
+
+    with pytest.raises(PaymentsProviderError):
+        await service.status(user)
+    await client.aclose()
+    sentry_sdk.flush()
+
+    payloads = _payloads(sentry_transport)
+    events = [json.loads(p) for p in payloads if "payouts_stripe_rejected" in p]
+    assert events, "no event was captured"
+    assert account_id not in "\n".join(payloads)
+    for event in events:
+        crumbs = event["breadcrumbs"]["values"]
+        # Earlier tests' breadcrumbs share the scope: only Stripe's are this call's.
+        stripe_urls = [
+            c["data"]["url"]
+            for c in crumbs
+            if c.get("type") == "http" and "api.stripe.com" in c["data"]["url"]
+        ]
+        assert stripe_urls == ["https://api.stripe.com/v1/accounts/acct_[Filtered]"]
+
+
+def test_before_breadcrumb_and_before_send_redact_stripe_account_ids() -> None:
+    crumb: Any = {
+        "type": "http",
+        "message": "GET /v1/accounts/acct_1Abc failed",
+        "data": {"url": "https://api.stripe.com/v1/accounts/acct_1Abc/login_links?x=1"},
+    }
+    assert before_breadcrumb(crumb, {}) == {
+        "type": "http",
+        "message": "GET /v1/accounts/acct_[Filtered] failed",
+        "data": {"url": "https://api.stripe.com/v1/accounts/acct_[Filtered]/login_links"},
+    }
+    event: Any = {"request": {"url": "https://api.example.invalid/v1/x/acct_1Abc?y=2"}}
+    assert (
+        before_send(event, {})["request"]["url"]
+        == "https://api.example.invalid/v1/x/acct_[Filtered]"
+    )
+    # Only a whole id: a word that merely contains the prefix stays.
+    plain: Any = {"type": "default", "message": "my_acct_total"}
+    assert before_breadcrumb(plain, {})["message"] == "my_acct_total"
