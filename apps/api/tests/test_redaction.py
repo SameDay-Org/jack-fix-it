@@ -5,20 +5,41 @@ come back unchanged (and not flagged). The module docstring lists the known gaps
 """
 
 import random
+import re
 import sys
 import unicodedata
 from typing import Literal
 
 import pytest
 
+from app import redaction_legacy
 from app.redaction import (
     _MARK_RANGES,
+    _SPELLED_EMAILS,
+    _SPELLED_URLS,
     MASK,
     KnownValues,
     RedactionResult,
+    _clean,
+    _floor_masks,
+    _hidden,
+    _mask,
+    _mask_spans,
+    _Replace,
+    _replacements,
+    _Search,
     redact_contacts,
     redact_known,
     redact_text,
+)
+from tests import redaction_c6facaa as c6facaa
+from tests.contact_overlaps import (
+    CUT_CONTACTS,
+    CUT_IDS,
+    FLOOR_CONTACTS,
+    FLOOR_IDS,
+    OVERLAP_IDS,
+    PHONE_EMAIL_OVERLAPS,
 )
 from tests.glue_variants import all_glue_cases
 from tests.helpers import best_seconds_without_gc
@@ -446,10 +467,11 @@ COMBINING_MARKS = [
 ]
 MARKS = [mark for mark, _ in COMBINING_MARKS]
 MARK_IDS = [name for _, name in COMBINING_MARKS]
-# Every exempt token shape of AT_HANDLE, in ASCII (the handle body is ASCII, so "@mañana" +
-# a mark is detected but masked up to the "ñ": a known gap of the body, not of the marks).
+# Every exempt token shape of AT_HANDLE, "mañana" included (#236: the body takes any letter, so
+# "@mañana" + a mark + "fixit" is masked whole).
 EXEMPT_WORDS = [
-    "home", "work", "casa", "noon", "night", "today", "tomorrow", "tonight", "manana", "5pm", "6ft"
+    "home", "work", "casa", "noon", "night", "today", "tomorrow", "tonight", "manana", "mañana",
+    "5pm", "6ft",
 ]  # fmt: skip
 
 
@@ -566,6 +588,438 @@ def test_spaced_handle_with_a_mark_is_masked() -> None:
     assert redact_contacts("@ home" + chr(0x0483)) == RedactionResult("@ home" + chr(0x0483), False)
 
 
+# #236 (the Gatekeeper's N1 and N2 on #234): the handle body took ASCII letters only, so a
+# Unicode letter ended the mask ("@mañana.fixit" came back as "•••ñana.fixit", and after NFC
+# "@home" + U+0301 + "fixit" as "•••éfixit"); the platform handle, the reverse handle and the
+# cashtag split at a mark ("insta: bob" + U+0483 + "smith" left the mark and "smith").
+TITLO = chr(0x0483)  # COMBINING CYRILLIC TITLO (Mn): kept by _clean after a letter
+VOWEL_SIGN_I = chr(0x093F)  # DEVANAGARI VOWEL SIGN I (Mc): kept by _clean after any character
+CYRILLIC_NAME = "".join(map(chr, (0x043C, 0x0430, 0x0440, 0x0438, 0x044F)))  # "maria" in Cyrillic
+UNICODE_HANDLES = [
+    "@mañana.fixit",
+    "@josé_silva",
+    "@home" + chr(0x0301) + "fixit",  # NFC composes it to "@homéfixit": no exempt word in it
+    "@" + CYRILLIC_NAME + ".ivanova",
+    "@café",
+    "@home" + chr(0x0663),  # ARABIC-INDIC DIGIT THREE continues the token as "3" would
+]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize("handle", UNICODE_HANDLES, ids=[ascii(h) for h in UNICODE_HANDLES])
+def test_unicode_letter_handles_masked_whole(handle: str, form: Literal["NFC", "NFD"]) -> None:
+    """The body is \\w (any letter, digit or "_") plus separators and marks: no readable tail,
+    whether the letters come composed or decomposed."""
+    typed = unicodedata.normalize(form, handle)
+
+    assert redact_contacts(typed) == RedactionResult(MASK, True), ascii(typed)
+    assert redact_contacts(f"find me {typed} today") == RedactionResult(
+        f"find me {MASK} today", True
+    ), ascii(typed)
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize("word", ["home", "mañana", "casa", "5pm"])
+def test_exempt_words_with_unicode_letters_pass(word: str, form: Literal["NFC", "NFD"]) -> None:
+    for whole in (f"@{word}", f"@{word}.", f"@{word}!", f"I'm @{word}, ok"):
+        typed = unicodedata.normalize(form, whole)
+        expected = unicodedata.normalize("NFC", typed)  # the output is always composed
+
+        assert redact_contacts(typed) == RedactionResult(expected, False), ascii(typed)
+
+
+SIBLING_CASES = [
+    # Platform handles: the probe, then a spacing mark after the colon and after a separator,
+    # Unicode letters, and a mark inside a plain word after a weak platform.
+    ("insta: bob" + TITLO + "smith", MASK),
+    ("insta: " + VOWEL_SIGN_I + "bobsmith", MASK),
+    ("insta: bob." + VOWEL_SIGN_I + "smith", MASK),
+    ("insta: mañana", MASK),
+    ("ig josé_silva", MASK),
+    ("tiktok: " + CYRILLIC_NAME + ".ivanova", MASK),
+    ("whatsapp bob" + TITLO + "smith", MASK),
+    # Reverse handles: the match stops at the platform word, so a closing bracket stays.
+    ("bob" + TITLO + "smith (insta)", MASK + ")"),
+    ("bob" + TITLO + ".smith (insta)", MASK + ")"),
+    ("bob" + TITLO + "smith on insta", MASK),
+    ("mañana.fixit (insta)", MASK + ")"),
+    (CYRILLIC_NAME + ".ivanova on tiktok", MASK),
+    # Cashtags, in the cashtag rule and after a platform word.
+    ("$bob" + TITLO + "smith", MASK),
+    ("$" + VOWEL_SIGN_I + "bobsmith", MASK),
+    ("$mañana", MASK),
+    ("$ñandú", MASK),
+    ("venmo $" + VOWEL_SIGN_I + "bob", MASK),
+]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"), SIBLING_CASES, ids=[ascii(text) for text, _ in SIBLING_CASES]
+)
+def test_sibling_matchers_take_marks_and_letters(text: str, expected: str) -> None:
+    assert redact_contacts(text) == RedactionResult(expected, True), ascii(text)
+    assert redact_contacts(f"find me {text} today") == RedactionResult(
+        f"find me {expected} today", True
+    ), ascii(text)
+
+
+def test_a_mark_is_handle_shape_only_on_a_latin_letter() -> None:
+    """A mark on an ASCII letter after NFC is an evasion, so "bob" + U+0483 + "smith" is
+    shaped like a handle where "bobsmith" is a plain word (the known bare-handle gap); a word
+    of a script that writes with marks is not."""
+    namaste = "".join(map(chr, (0x0928, 0x092E, 0x0938, 0x094D, 0x0924, 0x0947)))
+    for plain in ("bobsmith (insta)", f"{namaste} (insta)", f"whatsapp {namaste}"):
+        assert redact_contacts(plain) == RedactionResult(plain, False), ascii(plain)
+
+
+# The audit of AC3 (#236): a mark or a non-ASCII letter inside the local part, the domain and
+# the path, against every email and URL rule. A mark inside the TLD or a provider's name is
+# test_b4_mark_inside_a_tld_or_provider_masks_whole_span (#240).
+AUDIT_CASES = [
+    # PLAIN_EMAIL: the local part, a label, the "@", a non-ASCII letter in the label.
+    "jo" + TITLO + "se@gmail.com",
+    "jose@gm" + TITLO + "ail.com",
+    "jose@" + VOWEL_SIGN_I + "gmail.com",
+    "jose@gmäil.com",
+    "josé@gmail.com",
+    # SPACED_EMAIL, SPELLED_EMAIL (EN and ES), PROVIDER_EMAIL, GLUED_EMAIL.
+    "jose @ gm" + TITLO + "ail . com",
+    "jo" + TITLO + "se at gmail dot com",
+    "jose at gm" + TITLO + "ail dot com",
+    "jose at gmäil dot com",
+    "jose arroba gm" + TITLO + "ail punto com",
+    "jo" + TITLO + "se at gmail",
+    "jose@gm" + TITLO + "ail",
+    "jose@gmäil",
+    # SPACED_LETTERS_EMAIL.
+    "j o s é @ g m a i l . c o m",
+    "j" + TITLO + " a n e @ g m a i l",
+    # A spacing mark before the token (review of #236: the lookbehinds refuse a start after a
+    # mark, so the mark itself must be a legal start) in every email rule and the URL rules.
+    VOWEL_SIGN_I + "jose@gmail.com",
+    VOWEL_SIGN_I + "jose @ gmail . com",
+    VOWEL_SIGN_I + "jose at gmail dot com",
+    VOWEL_SIGN_I + "jose at gmail",
+    VOWEL_SIGN_I + "jose@acme",
+    VOWEL_SIGN_I + "jackfixit.com",
+    VOWEL_SIGN_I + "jackfixit.com/x",
+    VOWEL_SIGN_I + "jackfixit . com",
+    VOWEL_SIGN_I + "jackfixit dot com",
+    # URL: a label, a non-ASCII label, the path, the "www." form, a path TLD, the spaced and
+    # the spelled dot.
+    "gm" + TITLO + "ail.com",
+    "gmäil.com",
+    "ñandú.com/x",
+    "jackfixit.com/jo" + TITLO + "se",
+    "www.gm" + TITLO + "ail.com",
+    "linktr" + TITLO + ".ee/bob",
+    "jack" + TITLO + "fixit . com",
+    "jackäfixit . com",
+    "jack" + TITLO + "fixit dot com",
+    "jackäfixit dot com",
+]
+
+
+@pytest.mark.parametrize("text", AUDIT_CASES, ids=[ascii(text) for text in AUDIT_CASES])
+def test_email_url_mark_audit(text: str) -> None:
+    assert redact_contacts(text) == RedactionResult(MASK, True), ascii(text)
+    # A path, the "www." form and a spaced form take what follows them, as they always did.
+    if "/" not in text and " @ " not in text and not text.startswith("www."):
+        assert redact_contacts(f"write to {text}, thanks") == RedactionResult(
+            f"write to {MASK}, thanks", True
+        ), ascii(text)
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+def test_an_accented_word_glued_to_a_word_tld_is_a_missing_space(
+    form: Literal["NFC", "NFD"],
+) -> None:
+    """Review of #236: with Unicode letters in the labels, "baño.es" matched the domain rule.
+    A word TLD after a label with a non-ASCII letter is Spanish or Portuguese typing; a domain
+    with such a letter still needs a path, "www." or a non-word TLD."""
+    for text in ("El baño.es muy pequeño", "la cocina está.me gusta", "não.me diga isso"):
+        typed = unicodedata.normalize(form, text)
+
+        assert redact_contacts(typed) == RedactionResult(text, False), ascii(typed)
+    for domain in ("ñandú.com", "baño.es/x", "www.baño.es", "gmäil.com"):
+        assert redact_contacts(f"see {domain}") == RedactionResult(f"see {MASK}", True), domain
+
+
+# #240 review, round 1 (the Gatekeeper's B1 to B5): each probe is masked whole with
+# redacted=True, in NFC and NFD, standalone and inside a sentence; the protected text next to
+# it stays as typed.
+def _assert_masked_whole(text: str, form: Literal["NFC", "NFD"]) -> None:
+    typed = unicodedata.normalize(form, text)
+
+    assert redact_contacts(typed) == RedactionResult(MASK, True), ascii(typed)
+    assert redact_contacts(f"write to {typed} thanks") == RedactionResult(
+        f"write to {MASK} thanks", True
+    ), ascii(typed)
+
+
+def _assert_unchanged(text: str, form: Literal["NFC", "NFD"]) -> None:
+    typed = unicodedata.normalize(form, text)
+
+    assert redact_contacts(typed) == RedactionResult(text, False), ascii(typed)
+
+
+B1_EMAILS = [
+    "josé (at) acme.es",
+    "josé arroba acme.es",
+    "josé at acme.es",
+    "josé@acme.es",
+    "jose (at) acme.Es",
+    "jose arroba acme.Me",
+    "jose (at) mañana.es",
+    "jose arroba mañana.es",
+    "jose at baño.es",
+    "josé (at) mañana.es",
+]
+B1_PROSE = ["El baño.es muy pequeño", "la cocina está.me gusta", "Vivo en baño.es muy bien"]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize("text", B1_EMAILS + B1_PROSE, ids=ascii)
+def test_b1_explicit_email_cue_masks_whole_address(text: str, form: Literal["NFC", "NFD"]) -> None:
+    """The missing-space exception reads only the label glued to the dot, and only without an
+    explicit cue: "@", "(at)", "arroba" and "at" make an address whatever its letters."""
+    if text in B1_PROSE:
+        _assert_unchanged(text, form)
+    else:
+        _assert_masked_whole(text, form)
+
+
+B2_CASHTAGS = [
+    "$BOB" + TITLO + "smith",
+    "$BOB" + TITLO,
+    "$BO" + TITLO + "Bsmith",
+    "$BOB" + VOWEL_SIGN_I + "smith",
+    "$" + VOWEL_SIGN_I + "USD",
+]
+B2_CURRENCIES = [
+    "$USD",
+    "pay in $USD.",
+    "$USD-50 deposit",
+    "$USD-denominated invoice",
+    "$EUR, $GBP",
+]
+
+
+@pytest.mark.parametrize("text", B2_CASHTAGS + B2_CURRENCIES, ids=ascii)
+def test_b2_currency_exemption_needs_the_whole_token(text: str) -> None:
+    """Three capitals are a currency only when nothing continues them: a mark or a word
+    character makes a cashtag of the whole token."""
+    if text in B2_CURRENCIES:
+        _assert_unchanged(text, "NFC")
+    else:
+        _assert_masked_whole(text, "NFC")
+
+
+# The reverse handle stops at the platform word, so a closing bracket stays.
+B3_HANDLES = [
+    ("josé" + TITLO + "smith (insta)", MASK + ")"),
+    ("josé" + TITLO + "smith on insta", MASK),
+    ("ação" + TITLO + "silva (insta)", MASK + ")"),
+    ("insta josé" + TITLO + "smith", MASK),
+    ("ñandú" + VOWEL_SIGN_I + "fixit on tiktok", MASK),
+]
+HEBREW_SHALOM = "".join(map(chr, (0x05E9, 0x05B8, 0x05DC, 0x05D5, 0x05B9, 0x05DD)))
+ARABIC_MARHABA = "".join(map(chr, (0x0645, 0x064E, 0x0631, 0x0652, 0x062D, 0x064E, 0x0628, 0x0627)))
+DEVANAGARI_NAMASTE = "".join(map(chr, (0x0928, 0x092E, 0x0938, 0x094D, 0x0924, 0x0947)))
+B3_WORDS = [
+    "josé (insta)",
+    "ação (insta)",
+    "insta mañana",
+    f"{HEBREW_SHALOM} (insta)",
+    f"{ARABIC_MARHABA} (insta)",
+    f"insta {HEBREW_SHALOM}",
+    f"whatsapp {DEVANAGARI_NAMASTE}",
+]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    B3_HANDLES + [(word, word) for word in B3_WORDS],
+    ids=[ascii(text) for text, _ in B3_HANDLES] + [ascii(word) for word in B3_WORDS],
+)
+def test_b3_mark_on_any_latin_letter_is_handle_shape(
+    text: str, expected: str, form: Literal["NFC", "NFD"]
+) -> None:
+    """A mark that survives NFC on a Latin letter, accented or not, is an evasion; the words of
+    scripts that write with marks are not Latin and stay plain words."""
+    typed = unicodedata.normalize(form, text)
+
+    assert redact_contacts(typed) == RedactionResult(expected, expected != text), ascii(typed)
+
+
+B4_SPANS = [
+    "gmail.c" + TITLO + "om",
+    "jose at gm" + TITLO + "ail",
+    "jose@gmail.c" + TITLO + "om",
+    "jose@gmail.com" + TITLO,
+    "jose@gm" + TITLO + "ail.c" + TITLO + "om",
+    "jose@acme.i" + TITLO + "o",
+    "jose @ gmail . c" + TITLO + "om",
+    "jose at gmail dot c" + TITLO + "om",
+    "jose arroba gmail punto c" + TITLO + "om",
+    "jose (at) hotm" + TITLO + "ail.com",
+    "jose en hotm" + TITLO + "ail",
+    "jose at gmail c" + TITLO + "om",
+    "jose at y" + TITLO + "ahoo",
+    "josé at gm" + TITLO + "ail",
+    "gm" + TITLO + "ail.c" + TITLO + "om",
+    "gmail.c" + VOWEL_SIGN_I + "om",
+    "linktr.e" + TITLO + "e/bob",
+    "jackfixit . c" + TITLO + "om",
+    "jackfixit dot c" + TITLO + "om",
+]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize("text", B4_SPANS, ids=ascii)
+def test_b4_mark_inside_a_tld_or_provider_masks_whole_span(
+    text: str, form: Literal["NFC", "NFD"]
+) -> None:
+    """The rules with a literal TLD or provider list also run on the text without its marks,
+    and the mask covers the marks."""
+    _assert_masked_whole(text, form)
+
+
+def _spelled_chain(separator: str, pieces: int) -> str:
+    return separator.join("abcdefghijk"[:pieces])
+
+
+B5_CHAINS = [
+    *(f"{_spelled_chain(' dot ', n + 1)} at gmail dot com" for n in range(5, 11)),
+    *(f"{_spelled_chain(' dot ', n + 1)} at acme dot com" for n in range(5, 11)),
+    f"{_spelled_chain(' punto ', 7)} arroba gmail punto com",
+    f"{_spelled_chain(' (dot) ', 7)} (at) gmail (dot) com",
+    f"{_spelled_chain(' dot ', 6)} at gmail.com",
+    "josé dot b dot c dot d dot e dot f at gmail dot com",
+    *(" dot ".join(["jack", *("fixit" for _ in range(n - 1)), "com"]) for n in range(5, 11)),
+]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize("text", B5_CHAINS, ids=ascii)
+def test_b5_long_spelled_chain_masked_whole(text: str, form: Literal["NFC", "NFD"]) -> None:
+    """A spelled-dot chain of 5 to 10 separators, before the "at" or in a domain, is masked
+    from its first piece; the chain is scanned once per run, not bounded."""
+    _assert_masked_whole(text, form)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "jose dot at acme (dot) com",
+        "jose punto arroba acme (punto) com",
+        "jo dot en acme (punto) es",
+    ],
+)
+def test_a_dot_word_before_the_at_cue_starts_the_address(text: str) -> None:
+    """A spaced dot word starts a chain of its own (the words around it are its separators),
+    so the search tries the "dot" before the at cue as a local part, as a search from every
+    word start does (base parity)."""
+    first = text.split()[0]
+    assert redact_contacts(text) == RedactionResult(f"{first} {MASK}", True)
+
+
+R2_B1_PIECES = [
+    "jose dot dot at acme dot com",
+    "josé dot punto at acme.com",
+    "bob punto punto arroba acme punto com",
+    "jose (dot) dot (at) acme (dot) com",
+    "miweb dot dot dot com",
+    "miweb punto punto punto com",
+]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize("text", R2_B1_PIECES, ids=ascii)
+def test_r2_b1_literal_separator_words_as_pieces(text: str, form: Literal["NFC", "NFD"]) -> None:
+    """A dot word is a piece of the chain as well as its separator, so the chain is masked from
+    its first piece, as on base (round 2 of #240)."""
+    _assert_masked_whole(text, form)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["x (at) pérez.me@b.c (dot) es", "josé arroba baño.es arroba acme punto com"],
+)
+def test_an_address_starting_inside_a_masked_domain_joins_the_mask(text: str) -> None:
+    """An explicit cue masks "x (at) pérez.me" whatever its labels (#240); the address that
+    starts inside that domain and runs past it joins the mask instead of being cut in two."""
+    assert redact_contacts(f"write to {text} thanks") == RedactionResult(
+        f"write to {MASK} thanks", True
+    )
+
+
+_FUZZ_WORDS = [
+    *("jose", "josé", "bob", "acme", "gmail", "miweb", "a", "q", "x1", "jo-se", "_x", "b-"),
+    *("it", "home", "pérez", "ñandú", "-b", "b.c", "+tag", "x%y", "e" + TITLO, TITLO + "a"),
+    *("dot", "dot", "dot", "DOT", "Dot", "punto", "punto", "Punto", "at", "AT", "en"),
+    *("arroba", "com", "com", "es", "me", "Me", "co", "mx", "net", "io"),
+]
+_FUZZ_JOINS = [
+    *(" dot ", " dot ", " dot ", " DOT ", "  dot  ", "\tdot\t", " punto ", " punto "),
+    *(" (dot) ", " [punto] ", " <dot> ", " {punto} ", " (dot)", "(dot) ", ".", ",", " "),
+    *(" at ", " AT ", " arroba ", " (at) ", " [at] ", "@", " @ ", " en "),
+]
+
+
+def _fuzz_chain(rng: random.Random) -> str:
+    words = [rng.choice(_FUZZ_WORDS) for _ in range(rng.randint(1, 11))]
+    text = words[0] + "".join(rng.choice(_FUZZ_JOINS) + word for word in words[1:])
+    if rng.random() < 0.3:
+        text = f"write to {text} thanks"
+    return unicodedata.normalize("NFD", text) if rng.random() < 0.3 else text
+
+
+def _masked(search: _Search, replace: _Replace, text: str) -> set[int]:
+    spans = _replacements(search, replace, text)
+    return {index for start, end, _ in spans for index in range(start, end)}
+
+
+def test_spelled_chain_parity_with_c6facaa() -> None:
+    """Random chains of names, dot words, "(dot)", ".", at cues and TLDs through the spelled
+    email and URL rules and through c6facaa's patterns, from before round 1 of #240: the rules
+    mask every character the old grammar masked, and more where it was bounded."""
+    rng = random.Random(240)  # noqa: S311 - reproducible test data, not secrets
+    rules = [
+        (_SPELLED_EMAILS, c6facaa.SPELLED_EMAIL, c6facaa.mask_spelled_email),
+        (_SPELLED_URLS, c6facaa.SPELLED_URL, c6facaa.mask_spelled_url),
+    ]
+    narrower: list[str] = []
+    masked_by_old = 0
+    for _ in range(3000):
+        text = _fuzz_chain(rng)
+        for search, old, old_replace in rules:
+            old_masked = _masked(old, old_replace, text)
+            masked_by_old += bool(old_masked)
+            if not old_masked <= _masked(search, _mask, text):
+                narrower.append(text)
+
+    assert narrower == []
+    assert masked_by_old >= 500  # the chains do reach the rules
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Mi web es plomeriajose punto com.mx", f"Mi web es {MASK}.mx"),
+        ("jackfixit dot co.uk", f"{MASK}.uk"),
+        ("see miweb dot co.uk/contact", f"see {MASK}.uk/contact"),
+    ],
+)
+def test_a_spelled_domain_before_a_country_code_keeps_its_name_masked(
+    text: str, expected: str
+) -> None:
+    """The spelled-dot domain rule runs before the URL rule, so "com.mx" never takes the mask
+    from the name before it (as on base, where both were one alternation)."""
+    assert redact_contacts(text) == RedactionResult(expected, True)
+
+
 @pytest.mark.parametrize("prefix", ["APT", "UNIT", "SUITE", "STE", "PO BOX"])
 def test_a_phone_glued_to_a_unit_marker_is_masked(prefix: str) -> None:
     # Standalone, as a label is: inside a sentence the unit step leaves "unit 2 is not cooling"
@@ -622,6 +1076,7 @@ KNOWN = KnownValues(
     phones=("+13055550199",),
     streets=("742 Evergreen Terrace", "Apt 4B"),
 )
+LEGACY_KNOWN = redaction_legacy.KnownValues(KNOWN.emails, KNOWN.phones, KNOWN.streets)
 
 
 @pytest.mark.parametrize(
@@ -1183,3 +1638,547 @@ def test_hostile_inputs_against_the_known_values_finish_quickly(text: str) -> No
 def test_many_marks_after_exempt_word_is_fast(text: str) -> None:
     """The mark runs are possessive (_MARKED) and the body counts characters, not marks."""
     assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25
+
+
+MARKED_LETTER = "é" + chr(0x0483)  # a non-ASCII letter with a mark: 2,500 of them is 5,000 chars
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "@" + MARKED_LETTER * 2500,
+        "insta: " + MARKED_LETTER * 2500,
+        MARKED_LETTER * 2500 + " (nope)",
+        "$" + MARKED_LETTER * 2500,
+        MARKED_LETTER * 2500 + "@",
+        "x@" + MARKED_LETTER * 2500,
+        "jose at " + MARKED_LETTER * 2500 + " dot x",
+        (MARKED_LETTER + " ") * 1667 + "@",
+        MARKED_LETTER * 2500 + ".c",
+        (MARKED_LETTER + ".") * 1667,
+        MARKED_LETTER * 2500 + " dot x",
+        # Review of #236: a spacing mark at every word start, and the spelled-dot chains.
+        (chr(0x093F) + "a") * 2500,
+        (" " + chr(0x093F)) * 2500,
+        "aé dot " * 714 + "zz",
+        "a punto " * 625,
+    ],
+    ids=[
+        "at_handle",
+        "platform_handle",
+        "reverse_handle",
+        "cashtag",
+        "email_local",
+        "email_domain",
+        "spelled_email",
+        "spaced_letters_email",
+        "url_label",
+        "url_dotted_labels",
+        "url_spelled_dot",
+        "mark_led_tokens",
+        "mark_after_every_space",
+        "accented_dot_chain",
+        "punto_chain",
+    ],
+)
+def test_many_unicode_letters_with_marks_are_fast(text: str) -> None:
+    """One 5,000-character case per pattern changed in #236: the lookbehinds refuse a start
+    after a mark, so a marked token is scanned once, the counted bodies stay possessive, and
+    the spelled-dot chains are scanned once per run."""
+    assert len(text) >= 5000
+    assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25
+
+
+def assert_within_the_floor_budget(text: str) -> None:
+    """0.25 s at the field cap (2,000 characters: the description, the quote scope and the
+    approach). The whole text may take what develop's filter takes on it, plus that budget: the
+    safety floor runs develop's filter (app.redaction_legacy), which is quadratic on
+    spelled-dot chains (0.3 to 0.5 s at 5,000 characters). Cesar's decision on #240 fix round
+    5; #267 removes the floor."""
+    assert best_seconds_without_gc(lambda: redact_text(text[:2000], KNOWN)) < 0.25
+    develop = best_seconds_without_gc(lambda: redaction_legacy.redact_text(text, LEGACY_KNOWN))
+    assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < develop + 0.25
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "a dot " * 833 + "zz",
+        "a dot " * 832 + "a at home.Me",
+        "a  dot  " * 625,
+        ("a" + TITLO + " dot ") * 715,
+        "aa dot " * 714 + "zz",
+        "dot " * 1250,
+        "a dot at " * 556,
+        ("gmail.c" + TITLO + "om ") * 500,
+        ("jose at gm" + TITLO + "ail ") * 334,
+        ("a" + TITLO + " at ") * 1000,
+        ("$BOB" + TITLO) * 1000,
+        MARKED_LETTER * 2499 + " (insta)",
+        "x en " + "ñ" * 4992 + ".es",
+    ],
+    ids=[
+        "local_chain",
+        "local_chain_refused",
+        "local_chain_double_spaces",
+        "local_chain_marked",
+        "domain_chain",
+        "dot_words",
+        "dot_word_before_at",
+        "unmarked_url",
+        "unmarked_provider",
+        "unmarked_spelled_email",
+        "cashtag_marked_currency",
+        "latin_mark_shape",
+        "accented_label",
+    ],
+)
+def test_round_one_rules_are_fast(text: str) -> None:
+    """One 5,000-character case per rule changed in round 1 of #240: the spelled-dot chains
+    are scanned once per run, and the run without marks is one more linear pass."""
+    assert len(text) >= 5000
+    assert_within_the_floor_budget(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "jose " + "dot " * 1250 + "at x",
+        "dot dot at " * 455,
+        "punto punto arroba " * 264,
+        "a dot dot " * 500 + "at x",
+        "dot " * 625 + "at " + "dot " * 625,
+        "a (dot) dot " * 455 + "(at) x",
+        "x dot dot dot " * 358 + "at gmail",
+        "a dot dot dot b dot dot dot " * 179 + "at x",
+        "miweb " + "dot " * 1250,
+        "punto " * 834 + "x",
+        "x" + " arroba ñ punto me" * 300,
+    ],
+    ids=[
+        "dot_run_then_at",
+        "dot_dot_at",
+        "punto_punto_arroba",
+        "piece_dot_dot_at",
+        "dot_run_on_both_sides",
+        "bracketed_and_spaced",
+        "chains_past_their_run",
+        "swapped_chains",
+        "domain_dot_run",
+        "domain_punto_run",
+        "overlapping_addresses",
+    ],
+)
+def test_round_two_dot_word_pieces_are_fast(text: str) -> None:
+    """Round 2 of #240: dot words are pieces again. A dot word read as a piece starts a chain
+    of its own, and each piece is read by one chain only, even past its run."""
+    assert len(text) >= 5000
+    assert_within_the_floor_budget(text)
+
+
+# Vault round 1 on #240: a phone an email overlaps (#257), and the reverse handle's spaces (#260)
+
+OVERLAP_SENTENCES = [
+    "{}",
+    "Call me at {} tonight.",
+    "Llámame al {} esta noche.",
+    "Me liga no {} hoje à noite.",
+]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize("sentence", OVERLAP_SENTENCES, ids=["standalone", "en", "es", "pt"])
+@pytest.mark.parametrize("contact", PHONE_EMAIL_OVERLAPS, ids=OVERLAP_IDS)
+def test_phone_and_email_overlap_masks_the_union(
+    contact: str, sentence: str, form: Literal["NFC", "NFD"]
+) -> None:
+    """The email reads the phone's last group; the phone rule still reads all ten digits on the
+    text without masks, so the phone and the email are one mask and no group stays."""
+    text = unicodedata.normalize(form, sentence.format(contact))
+    expected = RedactionResult(sentence.format(MASK), True)
+
+    assert redact_contacts(text) == expected
+    assert redact_text(text, KnownValues()) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Call me at jose at gmail tonight.", f"Call me at {MASK} tonight."),
+        ("Call me at 305 555 0199 at gmail tonight.", f"Call me at {MASK} tonight."),
+        ("Email me at jane.doe+repairs@gmail.com please", f"Email me at {MASK} please"),
+        ("see site.com/2 new drive belts", f"see {MASK} new drive belts"),
+        ("APT 3055550199", f"APT {MASK}"),
+        ("We need 2 Amazon.com Key pads by Friday", f"We need 2 {MASK} Key pads by Friday"),
+        ("Unit 4B ig.com please Bay windows", f"{MASK} {MASK} please Bay windows"),
+        ("apt 4B@x.com on the left", f"apt {MASK} on the left"),
+    ],
+)
+def test_a_mask_joins_only_the_contacts_it_cut(text: str, expected: str) -> None:
+    """The platform rule reads "gmail tonight." as a handle and "Email me at jane..." as one:
+    its platform comes first, so the email's mask hides its id and it never joins a mask. A
+    street or a unit a mask starts before took its number from another contact (a URL's path,
+    a phone): the rules in order read what is left, so "new drive belts" and "APT" stay. A URL
+    that took a street's name word, not its suffix ("Amazon.com Key"), or a handle's word, not
+    its platform ("ig.com please Bay", where the unit's mask also broke the street), is another
+    contact too. A unit's word comes before its number, like a platform before its id: an email
+    that takes the number leaves "apt"."""
+    assert redact_contacts(text) == RedactionResult(expected, True)
+
+
+@pytest.mark.parametrize("length", [2000, 5000, 10000])
+def test_reverse_handle_whitespace_is_linear(length: int) -> None:
+    """#260: the spaces before and after the optional bracket are possessive, so a long run
+    of spaces is not split between them again and again when no platform follows."""
+    text = "a" + " " * (length - 2) + "b"
+
+    assert best_seconds_without_gc(lambda: redact_contacts(text)) < 0.25
+    for handle, expected in [
+        ("j.doe.fixit (insta)", f"{MASK})"),
+        ("j.doe.fixit(insta)", f"{MASK})"),
+        ("j.doe.fixit  [ insta", MASK),
+        ("j.doe.fixit\t(\tig", MASK),
+        ("j.doe.fixit on insta", MASK),
+        ("j.doe.fixit [en tiktok]", f"{MASK}]"),
+    ]:
+        assert redact_contacts(handle) == RedactionResult(expected, True)
+
+
+# Vault round 2 on #240: a reverse handle or an address an email or a URL cuts
+
+R4_CUT_CONTACTS = [
+    *(contact for contact, _ in CUT_CONTACTS),
+    "jdoe1 insta dot com",  # the same cut in ASCII, on base too
+    "1250 Ocean Dr at gmail",
+    "j.doe.fixit (tiktok.c" + chr(0x093F) + "om",
+    "maria_88 on instagram punto c" + chr(0x093F) + "om",
+    "742 Evergreen Ter arroba gm" + chr(0x0483) + "ail punto com",
+    "88 Coral Way (at) acme (dot) c" + chr(0x0483) + "om",
+    "1250 Ocean St.c" + chr(0x0483) + "om",
+    "Brickell Ave 1200@gm" + chr(0x0483) + "ail.com",  # the reversed street
+    "8800 SW 72nd at gm" + chr(0x0483) + "ail",  # the Miami grid
+    "Calle Flagler 742 at gm" + chr(0x0483) + "ail",  # the Spanish street
+]
+R4_CUT_IDS = [
+    *CUT_IDS,
+    "ascii_reverse_handle",
+    "ascii_street",
+    "bracketed_platform",
+    "on_platform",
+    "spelled_email",
+    "bracketed_email",
+    "url_after_suffix",
+    "reversed_street",
+    "grid",
+    "spanish_street",
+]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize("sentence", OVERLAP_SENTENCES, ids=["standalone", "en", "es", "pt"])
+@pytest.mark.parametrize("contact", R4_CUT_CONTACTS, ids=R4_CUT_IDS)
+def test_r4_reverse_handle_and_street_recovered(
+    contact: str, sentence: str, form: Literal["NFC", "NFD"]
+) -> None:
+    """The email or URL rule runs first and takes the platform ("insta dot com") or the suffix
+    ("Dr at gmail"); the handle and the address rules read the text without masks again, so the
+    handle and the house join the mask that cut them."""
+    text = unicodedata.normalize(form, sentence.format(contact))
+    expected = RedactionResult(sentence.format(MASK), True)
+
+    assert redact_contacts(text) == expected
+    assert redact_text(text, KnownValues()) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("@jdoe1@acme.c" + chr(0x0483) + "om", MASK),
+        ("write @jdoe1@acme.co thanks", f"write {MASK} thanks"),
+        ("a@bob@x.com", "a@bob@x.com"),
+    ],
+)
+def test_an_at_sign_that_starts_a_token_may_precede_the_local_part(
+    text: str, expected: str
+) -> None:
+    """The handle written as the address: base left "@acme.co" (the URL rule never starts after
+    an "@") and, with a mark in the domain, the part after the mark. Base masks "@jdoe1" as a
+    handle, so the floor takes the "@" too. An "@" inside a word stays out ("a@bob@x.com",
+    unchanged as on base)."""
+    assert redact_contacts(text) == RedactionResult(expected, expected != text)
+
+
+_PAIR_MARKS = ["", chr(0x0483), chr(0x093F)]
+_PAIR_PLATFORMS = ["insta", "ig", "tiktok", "facebook"]
+# What the email or the URL reads after the shared word: "insta" + " dot c" + mark + "om".
+_PAIR_TAILS = [
+    " at gm{m}ail",
+    " at gmail dot c{m}om",
+    "@gm{m}ail.com",
+    " arroba gm{m}ail punto com",
+    " (at) acme (dot) c{m}om",
+    " en hotm{m}ail",
+    " dot c{m}om",
+    ".c{m}om",
+    " punto c{m}om",
+    ".com/jose",
+]
+_PAIR_CONTACTS = [
+    "jdoe1 (insta)",
+    "insta: maria_88",
+    "@j.doe.fixit",
+    "1250 Ocean Dr",
+    "Brickell Ave 1200",
+    "786 555 0142",
+]
+_PAIR_EMAILS_AND_URLS = [
+    "jose at gm{m}ail",
+    "ana.r@gm{m}ail.com",
+    "fixjose punto c{m}om",
+    "www.fixjose.c{m}om",
+]
+_PAIR_JOINS = [" ", ", ", " or ", " y ", " / ", "; ", "\n", " ("]
+# Cue words: no part of the contact itself, and on base they show beside a mask too.
+_PAIR_CUES = frozenset({"at", "dot", "on", "en", "arroba", "punto", "www", "com", *_PAIR_PLATFORMS})
+
+
+def _contact_pair(rng: random.Random) -> tuple[str, list[str]]:
+    """Two contacts side by side, one of them an email or a URL, or sharing a word: the handle's
+    platform, the street's suffix or the phone's last group starts an email or a URL ("jdoe1
+    insta dot com")."""
+    mark = rng.choice(_PAIR_MARKS)
+    if rng.random() < 0.5:
+        kind = rng.choice(["handle", "street", "phone"])
+        if kind == "handle":
+            body = rng.choice(["jdoe1 ", "j.doe.fixit (", "maria_88 on ", "bob2smith ["])
+            word = rng.choice(_PAIR_PLATFORMS)
+        elif kind == "street":
+            body = rng.choice(["1250 Ocean ", "742 Evergreen ", "4100 NW 7th ", "8800 SW "])
+            word = rng.choice(["Dr", "Ter", "St", "Ave", "Way", "72nd"])
+        else:
+            body, word = rng.choice(["786 555 ", "(305) 555-", "+1 954 555 "]), "0142"
+        tail = word + rng.choice(_PAIR_TAILS).format(m=mark)
+        return body + tail, [body + word, tail]
+    pair = [
+        rng.choice(_PAIR_EMAILS_AND_URLS).format(m=mark),
+        rng.choice(_PAIR_CONTACTS + _PAIR_EMAILS_AND_URLS).format(m=mark),
+    ]
+    rng.shuffle(pair)
+    return pair[0] + rng.choice(_PAIR_JOINS) + pair[1], pair
+
+
+def _shown_words(text: str) -> set[str]:
+    return set(re.findall(r"[^\W_]+", unicodedata.normalize("NFC", text)))
+
+
+def _shown_in(sentence: str, form: Literal["NFC", "NFD"], contact: str) -> set[str]:
+    text = unicodedata.normalize(form, sentence.format(contact))
+    return _shown_words(redact_contacts(text).text)
+
+
+def test_adjacent_contact_pairs_never_show_what_each_contact_alone_hides() -> None:
+    """Pairs of an email or a URL and a handle, a street, a phone, an email or a URL, side by
+    side or sharing a word, with marked and spelled cues, in sentences, NFC or NFD. The
+    reference is each contact read alone: a word of a contact the redactor hides alone never
+    shows in the pair. That is where base and the ordered pass failed (an email or a URL that
+    took a cue left the rest of the contact). The same pairs against base itself (develop's
+    redactor) are in the PR: none shows more than base. Two addresses side by side ("1250 Ocean
+    Dr y Brickell Ave 1200") read as one street and leave "1200", as on base: no email or URL
+    takes part, so they stay out of this test."""
+    rng = random.Random(4240)  # noqa: S311 - reproducible test data, not secrets
+    exposed: list[tuple[str, set[str]]] = []
+    for _ in range(3000):
+        pair, contacts = _contact_pair(rng)
+        sentence = rng.choice(OVERLAP_SENTENCES)
+        form: Literal["NFC", "NFD"] = rng.choice(["NFC", "NFD"])
+        in_pair = _shown_in(sentence, form, pair)
+        for contact in contacts:
+            hidden_alone = _shown_words(contact) - _PAIR_CUES - _shown_in(sentence, form, contact)
+            if hidden_alone & in_pair:
+                exposed.append((pair, hidden_alone & in_pair))
+
+    assert exposed == []
+
+
+@pytest.mark.parametrize("length", [5000, 10000])
+@pytest.mark.parametrize(
+    "unit",
+    [
+        "jdoe1 insta dot c" + chr(0x0483) + "om 1250 Ocean Dr at gm" + chr(0x0483) + "ail ",
+        "12 Main St jose@gmail.com ",
+        "jdoe1 (insta) acme.com ",
+        "Calle 8 #12 apt 4B 8800 SW 72nd at gmail ",
+    ],
+    ids=["cut_pairs", "streets_and_emails", "handles_and_urls", "addresses_and_emails"],
+)
+def test_the_recovery_of_cut_contacts_is_fast(unit: str, length: int) -> None:
+    """Dense contacts an email or a URL cuts: the handle and address rules read the text once
+    more, and each span finds the next email or URL mask by bisection."""
+    text = (unit * (length // len(unit) + 1))[:length]
+
+    assert best_seconds_without_gc(lambda: redact_contacts(text)) < 0.25
+
+
+# Fix round 5 on #240: the safety floor (Cesar's decision). redact_contacts also masks every
+# character develop's filter masks (app.redaction_legacy, until #267).
+
+# A comma after the contact: both filters read a period after a handle as part of it, and a
+# unit before an ordinary word as prose ("apt 4B tonight").
+FLOOR_SENTENCES = [
+    "{}",
+    "Call me at {}, thanks.",
+    "Escríbeme a {}, gracias.",
+    "Me liga no {}, obrigado.",
+]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+@pytest.mark.parametrize("sentence", FLOOR_SENTENCES, ids=["standalone", "en", "es", "pt"])
+@pytest.mark.parametrize(("contact", "secret", "masked"), FLOOR_CONTACTS, ids=FLOOR_IDS)
+def test_the_floor_hides_what_the_recovery_missed(
+    contact: str, secret: str, masked: str, sentence: str, form: Literal["NFC", "NFD"]
+) -> None:
+    """Vault R3-B1 (a URL or an email takes the contact's number or cue), Gatekeeper F-B1 (the
+    street inside a refused match) and F-B2 (the unit beside a recovered handle): develop's
+    filter hid them, so the floor does."""
+    text = unicodedata.normalize(form, sentence.format(contact))
+    expected = RedactionResult(sentence.format(masked), True)
+
+    assert redact_contacts(text) == expected
+    assert redact_text(text, KnownValues()) == expected
+    assert secret not in expected.text
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Email me at jane.doe+repairs@gmail.com please", f"Email me at {MASK} please"),
+        ("see site.com/2 new drive belts", f"see {MASK} new drive belts"),
+        ("We need 2 Amazon.com Key pads by Friday", f"We need 2 {MASK} Key pads by Friday"),
+        ("Call me at jose at gmail tonight.", f"Call me at {MASK} tonight."),
+        ("El baño.es muy pequeño", "El baño.es muy pequeño"),
+    ],
+)
+def test_the_floor_keeps_the_prose_both_filters_keep(text: str, expected: str) -> None:
+    """The union hides only what one of the two filters hides: words both keep stay."""
+    assert redact_contacts(text) == RedactionResult(expected, expected != text)
+    assert redaction_legacy.redact_contacts(text).text == expected
+
+
+@pytest.mark.parametrize("text", ["dot " * 2500], ids=["dot_words_x10000"])
+def test_a_dot_chain_past_the_field_cap_takes_develops_time(text: str) -> None:
+    """Develop's filter takes about 1.9 s on 10,000 characters of spelled dots; the floor runs
+    it, so the budget is its time plus 0.25 s (Cesar's decision on #240 fix round 5)."""
+    assert_within_the_floor_budget(text)
+
+
+_FLOOR_MARKS = [chr(0x0483), chr(0x093F), chr(0x0301)]
+_FLOOR_FILLERS = [chr(0x200B), chr(0x3164), chr(0x2800), chr(0xFE0F), chr(0x00AD)]
+_FLOOR_CUES = [
+    *("Call me at ", "email me: ", "find me on ", "text ", "my insta is "),
+    *("Llámame al ", "escríbeme a ", "mi correo es ", "búscame en "),
+    *("Me liga no ", "meu zap é ", "manda para "),
+]
+_FLOOR_PREFIXES = [
+    *("acme.c{m}om/", "acme.c{m}om@", "site.com/", "www.fixjose.c{m}om/", "jose@", "@"),
+    *("linktr.ee/", "x at ", "gm{m}ail ", "jdoe1 ", "Unit 4B ", "apt 4B "),
+]
+_FLOOR_CONTACTS = [
+    *(contact for contact, _, _ in FLOOR_CONTACTS),
+    *(contact for contact, _ in CUT_CONTACTS),
+    *PHONE_EMAIL_OVERLAPS,
+    *_PAIR_CONTACTS,
+    *_PAIR_EMAILS_AND_URLS,
+    *("jane.doe@gmail.com", "305-555-0199", "(305) 555 0199", "+1 954 555 0142", "@bob_smith"),
+    *("$jdoe", "insta: maria_88", "jdoe1 (insta)", "j.doe.fixit on tiktok", "apt 4B", "Unit 4B"),
+    *("PO Box 12", "8800 SW 72nd", "Calle 8 #12", "Brickell Ave 1200", "742 Evergreen Ter"),
+    *("www.fixjose.com/2", "linktr.ee/x", "maria arroba gmail punto com", "bob at yahoo dot com"),
+]
+_FLOOR_ENDINGS = ["", ".", ",", " tonight.", " mañana", " hoje.", " please", "!", ")"]
+
+
+def _floor_text(rng: random.Random) -> str:
+    """A sentence of one to three contacts: cued in EN, ES or PT, behind a URL, an email, an
+    "@", a unit or a handle that shares their first word, side by side or as adjacent pairs,
+    with marks, fillers, fullwidth letters and NFD."""
+    mark = rng.choice(_FLOOR_MARKS)
+    segments = []
+    for _ in range(rng.randint(1, 3)):
+        if rng.random() < 0.25:
+            segments.append(_contact_pair(rng)[0])
+            continue
+        segment = rng.choice(_FLOOR_CONTACTS).format(m=mark)
+        if rng.random() < 0.5:
+            segment = rng.choice(_FLOOR_PREFIXES).format(m=mark) + segment
+        if rng.random() < 0.5:
+            segment = rng.choice(_FLOOR_CUES) + segment
+        segments.append(segment)
+    joined = segments[0] + "".join(rng.choice(_PAIR_JOINS) + segment for segment in segments[1:])
+    chars = list(joined + rng.choice(_FLOOR_ENDINGS))
+    for _ in range(rng.choice([0, 0, 1, 2])):
+        chars.insert(rng.randrange(len(chars) + 1), rng.choice(_FLOOR_MARKS + _FLOOR_FILLERS))
+    if rng.random() < 0.2:
+        chars = [
+            chr(ord(char) + 0xFEE0) if char.isascii() and char.isalnum() and rng.random() < 0.3
+            else char
+            for char in chars
+        ]  # fmt: skip
+    text = "".join(chars)
+    return unicodedata.normalize("NFD", text) if rng.random() < 0.3 else text
+
+
+def _visible_runs(text: str) -> list[str]:
+    """The text between masks: a mask is a run of its dots, however many masks touch."""
+    return [run for run in re.split("•+", text) if run]
+
+
+def test_floor_never_shows_what_legacy_hides() -> None:
+    """The safety floor by construction (fix round 5 on #240): on 20,000 seeded sentences no
+    character develop's filter hides shows in the output. Each output character is placed in
+    the cleaned text through the masks (_hidden); none is inside a mask of the floor, and the
+    output is exactly the cleaned text with those masks. Without the positions: each run of
+    text the output shows is part of a run develop's output shows, and the flag holds."""
+    rng = random.Random(5240)  # noqa: S311 - reproducible test data, not secrets
+    exposed: list[tuple[str, str, str]] = []
+    for _ in range(20000):
+        text = _floor_text(rng)
+        cleaned = _clean(text)
+        hidden = _hidden(cleaned)
+        result = redact_contacts(text)
+        legacy = redaction_legacy.redact_contacts(text)
+        assert result.text == _mask_spans(cleaned, hidden)[0]
+        shown = set(range(len(cleaned))).difference(*(range(*span) for span in hidden))
+        in_floor = shown & set().union(*(range(*span) for span in _floor_masks(cleaned)))
+        legacy_runs = _visible_runs(legacy.text)
+        beyond = [run for run in _visible_runs(result.text) if not _within(run, legacy_runs)]
+        if in_floor or beyond or (legacy.redacted and not result.redacted):
+            exposed.append((text, result.text, legacy.text))
+
+    assert exposed == []
+
+
+def _within(run: str, runs: list[str]) -> bool:
+    return any(run in other for other in runs)
+
+
+def test_the_floor_reads_develops_text_in_the_same_coordinates() -> None:
+    """The span alignment: develop's filter cleans the text exactly as this one does, so the
+    floor's masks are positions in the same cleaned text; drawn there, they give develop's
+    output (masks compared as runs of dots, touching or not). The known values are masked as
+    develop masks them too, so redact_text's floor reads develop's own second pass."""
+    rng = random.Random(5241)  # noqa: S311 - reproducible test data, not secrets
+    for _ in range(5000):
+        text = _floor_text(rng)
+        cleaned = _clean(text)
+        assert redaction_legacy._clean(text) == cleaned
+        floor = _mask_spans(cleaned, _floor_masks(cleaned))[0]
+        legacy = redaction_legacy.redact_contacts(text).text
+        assert re.sub("•+", MASK, floor) == re.sub("•+", MASK, legacy), ascii(text)
+        known = KnownValues(
+            emails=(rng.choice(["jane.doe@gmail.com", "ana.r@gmail.com", "x@y.co"]),),
+            phones=(rng.choice(["+13055550199", "+17865550142", "+19545550142"]),),
+            streets=(rng.choice(["742 Evergreen Terrace", "1250 Ocean Dr"]), "Apt 4B"),
+        )
+        develop = redaction_legacy.KnownValues(known.emails, known.phones, known.streets)
+        ours, theirs = redact_known(text, known), redaction_legacy.redact_known(text, develop)
+        assert (ours.text, ours.redacted) == (theirs.text, theirs.redacted), ascii(text)

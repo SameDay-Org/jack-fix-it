@@ -30,18 +30,23 @@ letters for digits ("305 555 O199"), commas between phone groups, digits that mi
 numerals, a phone grouping no one uses ("30 55 55 01 99"), a bare handle with no "@", cue or
 digit ("insta jdoe"), a plain word after a weak platform ("my venmo is jdoe"), a display name
 ("find me on facebook as John Doe"), a street with no suffix ("1234 Flagler"), a reversed street
-with lowercase or function-word names, and text inside images (#173 handles media). A 10-digit
-order or serial number is masked like a phone: hiding a number is the safe side.
+with lowercase or function-word names, a non-ASCII letter inside a TLD or a mail provider's
+name ("gmail.cöm": those lists are literal; a mark glued inside one is handled, see
+_UNMARKED_FIRST), and text inside images (#173 handles media). A 10-digit order or serial
+number is masked like a phone: hiding a number is the safe side.
 
 The patterns are data in this module; it does no I/O and keeps no state. Every pattern is
 anchored so a 2,000-character input (the description limit) is handled in milliseconds.
 """
 
+import bisect
 import re
 import unicodedata
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Protocol
+
+from app import redaction_legacy
 
 MASK: Final = "•••"
 
@@ -109,149 +114,15 @@ _ODD_SEPARATOR: Final = re.compile(
 _DASH_CODES: Final = (*range(0x2010, 0x2016), 0x207B, 0x208B, 0x2212, 0xFE58, 0xFE63, 0xFF0D)
 _DASHES: Final = re.compile("[" + "".join(map(chr, _DASH_CODES)) + "]")
 
-# --- Emails ----------------------------------------------------------------------------------
-# Top-level domains a bare "name.tld" must end with, unless a path follows: generic ones,
-# country codes customers here use, and the gTLDs local businesses pick. Words such as "so",
-# "do" or "to" are left out, since "it.So" is a missing space, not a domain.
-_TLDS: Final = (
-    "com|net|org|edu|gov|io|co|us|me|info|biz|app|dev|ly|gl|ee|be|cc|ws|page|link|site|"
-    "online|store|shop|xyz|ai|tv|gg|mx|es|br|ar|cu|ve|pr|ca|uk|de|fr|miami|travel|studio|"
-    "email|pro|club|services|solutions|tech|live|nyc|agency|llc|design|art|life|world|today|"
-    "company|group|repair|contractors|construction|builders|homes|house|realty|properties|"
-    "network|plumbing|expert|cleaning|pools|roofing"
-)
-_TLD_END: Final = rf"(?:{_TLDS})(?![a-z0-9])"
-# TLDs that are also words, so "cooling.Me and my wife" is a missing space, not a domain.
-_WORD_TLDS: Final = frozenset(
-    {"me", "us", "be", "es", "co", "pro", "art", "life", "live", "today", "world", "club",
-     "shop", "store", "site", "page", "link", "info", "design", "house", "homes", "group"}
-)  # fmt: skip
-# Mail providers whose name alone, with no TLD, is an address ("jdoe@gmail").
-_PROVIDERS: Final = (
-    r"(?:gmail|g\s?mail|hotmail|yahoo|outlook|icloud|aol|msn|proton(?:mail)?|comcast|"
-    r"bellsouth|earthlink|verizon|att\.net)"
-)
-_START: Final = r"(?<![\w.%+@-])"  # never start inside a word or a dotted chain
-# Possessive, so a long dotted chain is never re-split; Unicode letters too ("josé.pérez").
-_LOCAL: Final = r"[\w+][\w.%+-]*+"  # any valid start: "_jane", "__x", "+tag"
-_AT: Final = r"(?:\s*@\s*|\s*[(\[{<]\s*(?:at|arroba)\s*[)\]}>]\s*|\s+(?:at|arroba|en)\s+)"
-_STRONG_AT: Final = r"(?:\s*@\s*|\s*[(\[{<]\s*(?:at|arroba)\s*[)\]}>]\s*|\s+arroba\s+)"
-_SPELLED_DOT: Final = r"(?:\.|\s*[(\[{<]\s*(?:dot|punto)\s*[)\]}>]\s*|\s+(?:dot|punto)\s+)"
-_ONLY_SPELLED_DOT: Final = r"(?:\s*[(\[{<]\s*(?:dot|punto)\s*[)\]}>]\s*|\s+(?:dot|punto)\s+)"
-PLAIN_EMAIL: Final = re.compile(
-    rf"{_START}{_LOCAL}@[a-z0-9-]++(?:[.,][a-z0-9-]++)*?[.,][a-z]{{2,}}\b", _FLAGS
-)
-SPACED_EMAIL: Final = re.compile(
-    rf"{_START}{_LOCAL}\s*@\s*[a-z0-9-]++(?:\s*\.\s*[a-z0-9-]++)*?\s*\.\s*{_TLD_END}", _FLAGS
-)
-# "maria at gmail dot com", "juan dot perez at gmail dot com", "jane (at) outlook.com". With a
-# bare " at " and a plain dot, the local part may not be a common word ("it at Amazon.com").
-SPELLED_EMAIL: Final = re.compile(
-    rf"{_START}(?P<local>{_LOCAL}(?:{_ONLY_SPELLED_DOT}[a-z0-9_-]++)*)"
-    rf"(?P<at>{_AT})[a-z0-9-]++(?:{_SPELLED_DOT}[a-z0-9-]++)*?(?P<dot>{_SPELLED_DOT})"
-    rf"(?P<tld>{_TLD_END})",
-    _FLAGS,
-)
-# A provider with no TLD, or with a TLD typed loosely ("gmail com", "gmailcom", "gmail,com").
-PROVIDER_EMAIL: Final = re.compile(
-    rf"{_START}(?P<local>{_LOCAL})(?P<at>{_AT}){_PROVIDERS}"
-    rf"(?:\s*[.,]?\s*(?:dot\s+|punto\s+)?(?:com|net|es|mx)\b)?",
-    _FLAGS,
-)
-# "local@word" glued, whatever comes next: an address with its domain cut short.
-GLUED_EMAIL: Final = re.compile(rf"{_START}[^\W\d_]{_LOCAL}@[a-z][a-z0-9-]++\b", _FLAGS)
-# An email typed letter by letter: "j a n e @ g m a i l . c o m".
-SPACED_LETTERS_EMAIL: Final = re.compile(
-    r"(?<!\S)(?:[a-z0-9]\s){2,40}@\s(?:[a-z0-9]\s?){2,40}(?:\.\s?(?:[a-z]\s?){2,6})?", _FLAGS
-)
-# Words that are never the local part of a spelled-out email ("photos are at iCloud").
-_COMMON_WORDS: Final = frozenset(
-    {"it", "is", "are", "was", "were", "be", "been", "me", "us", "you", "him", "her", "them",
-     "one", "this", "that", "these", "those", "here", "there", "work", "works", "worked", "look",
-     "send", "sent", "bought", "buy", "parts", "part", "photos", "pics", "pictures", "stuff",
-     "things", "home", "house", "online", "ad", "ads", "job", "price", "prices", "order",
-     "ordered", "stay", "stays", "estoy", "esta", "está", "están", "fotos", "trabajo", "and",
-     "or", "the", "a", "an", "at", "on", "in", "to", "of", "for", "my", "your", "our", "his",
-     "their", "el", "la", "los", "las", "de", "en", "y", "o", "mi", "su", "i", "we", "they",
-     "he", "she", "available", "located", "based", "listed", "found", "seen", "saw"}
-)  # fmt: skip
-
-# --- URLs ------------------------------------------------------------------------------------
-_DOMAIN_START: Final = r"(?<![\w.@-])"
-URL: Final = re.compile(
-    rf"(?:https?://|\bwww\s*\.\s*)\S+"
-    rf"|{_DOMAIN_START}[a-z0-9][a-z0-9-]*+(?:\.[a-z0-9-]++)*?\.[a-z]{{2,}}/\S*"
-    rf"|{_DOMAIN_START}[a-z0-9][a-z0-9-]*+(?:\.[a-z0-9-]++)*?\.(?P<tld>{_TLD_END})"
-    rf"|{_DOMAIN_START}[a-z0-9][a-z0-9-]{{2,}}\s*\.\s+(?:com|net|org|co|us|io|miami)\b"
-    rf"|{_DOMAIN_START}[a-z0-9][a-z0-9-]{{2,}}\s+\.\s*(?:com|net|org|co|us|io|miami)\b"
-    rf"|{_DOMAIN_START}[a-z0-9-]{{2,}}(?:\s+(?:dot|punto)\s+[a-z0-9-]+)*\s+(?:dot|punto)\s+"
-    rf"{_TLD_END}",
-    _FLAGS,
-)
-
-# --- Handles ---------------------------------------------------------------------------------
-# Strong platforms: "my insta is jdoe" names a handle whatever the word. Weak platforms are
-# everyday words too ("Zelle as payment", "facebook last week"): their id must look like a
-# handle (a digit, "_", "." or a leading "@"/"$"), unless a cue word or ":"/"=" came first.
-_STRONG_PLATFORMS: Final = r"(?:insta(?:gram)?|ig|snap(?:chat)?|tiktok|telegram|tg|twitter|sc)"
-_WEAK_PLATFORMS: Final = (
-    r"(?:whats\s?app|wasap|guasap|wsp|wpp|wa|facebook|face|fb|venmo|cash\s?app|zelle|paypal|"
-    r"e-?mail|correo|g\s?mail|hotmail|yahoo|outlook|icloud)"
-)
-_PLATFORM_WORDS: Final = frozenset(
-    {"insta", "instagram", "ig", "snap", "snapchat", "tiktok", "telegram", "tg", "twitter", "sc",
-     "whatsapp", "wasap", "guasap", "wsp", "wpp", "wa", "facebook", "face", "fb", "venmo",
-     "cashapp", "zelle", "paypal", "email", "e-mail", "correo", "gmail", "hotmail", "yahoo",
-     "outlook", "icloud", "text", "call", "phone", "cash", "card", "check"}
-)  # fmt: skip
-_CUE: Final = r"(?:handle|account|cuenta|user(?:name)?|usuario|name|nombre|id)"
-_LINK_WORD: Final = (
-    r"(?:is|es|as|como|me\s+at|at|al|se\s+llama|is\s+called|aparezco\s+como|aparece\s+como)"
-)
-PLATFORM_HANDLE: Final = re.compile(
-    rf"\b(?:(?P<strong>{_STRONG_PLATFORMS})|(?P<weak>{_WEAK_PLATFORMS}))"
-    rf"(?:(?P<cue>\s+{_CUE}\b(?:\s+(?:is|es))?\s*[:=]?\s*)"
-    rf"|(?P<colon>\s*(?:{_LINK_WORD}\s*)?[:=@>]\s*@?\s*)"
-    rf"|(?P<dash>\s*[/-]\s*)"
-    rf"|(?P<linked>\s+{_LINK_WORD}\s+)"
-    rf"|(?P<spaced>\s+))"
-    r"(?P<id>[@$]?[^\W_][\w.-]{1,29})(?![\w])",
-    _FLAGS,
-)
-# A handle written before its platform: "j.doe.fixit (insta)". The token is possessive and its
-# shape is checked in _mask_reverse_handle, so a long dotted chain costs one pass.
-REVERSE_HANDLE: Final = re.compile(
-    rf"(?<![\w@.])(?P<id>[^\W_][\w.]*+)\s*[(\[]?\s*(?:on\s+|en\s+)?{_STRONG_PLATFORMS}\b",
-    _FLAGS,
-)
-# Words that follow "insta is" in ordinary sentences, so are not an id.
-_NOT_AN_ID: Final = frozenset(
-    {"fine", "ok", "okay", "good", "great", "better", "best", "easier", "faster", "down", "not",
-     "free", "working", "broken", "the", "a", "my", "your", "private", "public", "new", "old",
-     "bien", "mejor", "gratis", "privado", "privada", "nuevo", "nueva", "empty", "gone"}
-)  # fmt: skip
-# "@name" and "$cashtag", but not "@5pm", "@noon", "@home", "@tomorrow", a price or a currency.
-# A handle token is letters, digits and runs of ".", "_" and "-" (_HANDLE_BODY, as the
-# platforms accept it), the separators also in their compatibility forms as typed
-# (_SEPARATOR_FORMS: the low lines whose NFKC form is "_", the dot leaders and the ellipsis
-# whose NFKC form is a run of "."; the dashes are already "-" and U+2024 already "." after
-# _clean). A time, a measure or a word after "@" is exempt only when it is the whole token:
-# _BODY_END refuses whatever would continue the token, a word character (letters, digits,
-# "_"), a combining mark glued to the word (\w skips marks: "@home" + U+0335 + "fixit") or
-# a run of separators followed by a word character. So "@home", "@home.", "@home!" and
-# "@home " stay, while "@home.fixit", "@home--fixit", "@home._fixit", "@home_fixit" and
-# "@home" + U+FF3F + "fixit" are handles (#224 review, rounds 1 and 2).
-# The marks are every nonspacing (Mn) and spacing (Mc) combining mark, of any script, so a
-# Cyrillic, Hebrew or Arabic mark continues the token as a Latin one does ("@home" + U+0483
-# + "fixit", #229); the enclosing marks (Me) are dropped by _clean. _MARK_RANGES is generated
-# from the unicodedata of Python 3.12 (Unicode 15.0): a scan of every code point at import
-# costs a few hundred ms, so the tuple is committed and test_mark_set_matches_unicodedata
-# rebuilds it, failing on any difference after a Python upgrade. _HANDLE_BODY also takes the
-# marks glued to its own characters (_MARKED), so "@bob" + U+05B0 + "smith" is masked whole.
-# A spacing mark (Mc) survives _clean after a separator or the "@" too, so a run of
-# separators followed by a mark continues the token ("@home." + U+093F + "fixit") and the
-# "@" may carry marks before the body ("@" + U+093F + "bobsmith"), also in the spaced form
-# ("@ bob" + U+0483 + ".smith").
+# --- Combining marks -------------------------------------------------------------------------
+# Every nonspacing (Mn) and spacing (Mc) combining mark, of any script, so a Cyrillic, Hebrew
+# or Arabic mark continues a token as a Latin one does ("@home" + U+0483 + "fixit", #229); the
+# enclosing marks (Me) are dropped by _clean. _MARK_RANGES is generated from the unicodedata of
+# Python 3.12 (Unicode 15.0): a scan of every code point at import costs a few hundred ms, so
+# the tuple is committed and test_mark_set_matches_unicodedata rebuilds it, failing on any
+# difference after a Python upgrade. The handle, email and URL patterns take the marks glued to
+# their own characters (_MARKED after a counted character, or _MARKS inside a class), so
+# "@bob" + U+05B0 + "smith" and "jo" + U+0483 + "se@gmail.com" are masked whole (#236).
 _MARK_RANGES: Final = (
     (0x0300, 0x036F), (0x0483, 0x0487), (0x0591, 0x05BD), (0x05BF, 0x05BF), (0x05C1, 0x05C2),
     (0x05C4, 0x05C5), (0x05C7, 0x05C7), (0x0610, 0x061A), (0x064B, 0x065F), (0x0670, 0x0670),
@@ -325,13 +196,214 @@ _MARK_RANGES: Final = (
 )  # fmt: skip
 _MARKS: Final = "".join(f"{chr(low)}-{chr(high)}" for low, high in _MARK_RANGES)
 _MARKED: Final = rf"[{_MARKS}]*+"  # the marks glued to one character, taken as a run
+_MARK_CHARS: Final = frozenset(
+    chr(code) for low, high in _MARK_RANGES for code in range(low, high + 1)
+)
+
+# --- Emails ----------------------------------------------------------------------------------
+# Top-level domains a bare "name.tld" must end with, unless a path follows: generic ones,
+# country codes customers here use, and the gTLDs local businesses pick. Words such as "so",
+# "do" or "to" are left out, since "it.So" is a missing space, not a domain.
+_TLDS: Final = (
+    "com|net|org|edu|gov|io|co|us|me|info|biz|app|dev|ly|gl|ee|be|cc|ws|page|link|site|"
+    "online|store|shop|xyz|ai|tv|gg|mx|es|br|ar|cu|ve|pr|ca|uk|de|fr|miami|travel|studio|"
+    "email|pro|club|services|solutions|tech|live|nyc|agency|llc|design|art|life|world|today|"
+    "company|group|repair|contractors|construction|builders|homes|house|realty|properties|"
+    "network|plumbing|expert|cleaning|pools|roofing"
+)
+_TLD_END: Final = rf"(?:{_TLDS})(?![a-z0-9])"
+# TLDs that are also words, so "cooling.Me and my wife" is a missing space, not a domain.
+_WORD_TLDS: Final = frozenset(
+    {"me", "us", "be", "es", "co", "pro", "art", "life", "live", "today", "world", "club",
+     "shop", "store", "site", "page", "link", "info", "design", "house", "homes", "group"}
+)  # fmt: skip
+# Mail providers whose name alone, with no TLD, is an address ("jdoe@gmail").
+_PROVIDERS: Final = (
+    r"(?:gmail|g\s?mail|hotmail|yahoo|outlook|icloud|aol|msn|proton(?:mail)?|comcast|"
+    r"bellsouth|earthlink|verizon|att\.net)"
+)
+# Never start inside a word, a dotted chain or a marked token: a start after a mark would scan
+# the token again from every mark ("a" + U+0483 repeated), so the lookbehind refuses it and the
+# leftmost start takes the whole token, marks included. A token may begin with a spacing mark
+# (_clean keeps an Mc anywhere: U+093F + "jose@gmail.com"), so every pattern takes _MARKED
+# right after the lookbehind, where that mark is the one legal start.
+_START: Final = rf"(?<![\w.%+@\-{_MARKS}])"
+# Possessive, so a long dotted chain is never re-split; Unicode letters too ("josé.pérez"), and
+# the marks glued to any of its characters ("jo" + U+0483 + "se", #236).
+_LOCAL: Final = rf"[\w+][\w.%+\-{_MARKS}]*+"  # any valid start: "_jane", "__x", "+tag"
+# A domain label character: any Unicode letter or digit ("gmäil", "ñandú"), a hyphen, or a mark
+# glued to one of them. "_" stays out ("see_gmail.com" is a known gap, see _FOLDABLE). The TLD
+# and the provider names stay literal (the mark class after every letter would make the
+# patterns hundreds of kilobytes); a mark inside them ("gmail.c" + U+0483 + "om") is found by
+# running these rules on the text without its marks first (_UNMARKED_FIRST, #240).
+_LABEL: Final = rf"(?:[^\W_]|[\-{_MARKS}])"
+_LABEL_CHAR: Final = re.compile(_LABEL)
+_AT: Final = r"(?:\s*@\s*|\s*[(\[{<]\s*(?:at|arroba)\s*[)\]}>]\s*|\s+(?:at|arroba|en)\s+)"
+_STRONG_AT: Final = r"(?:\s*@\s*|\s*[(\[{<]\s*(?:at|arroba)\s*[)\]}>]\s*|\s+arroba\s+)"
+_WEAK_AT: Final = re.compile(r"\s+(?:at|en)\s+", _FLAGS)  # everyday words too
+_SPANISH_EN: Final = re.compile(r"\s+en\s+", _FLAGS)
+_SPELLED_DOT: Final = r"(?:\.|\s*[(\[{<]\s*(?:dot|punto)\s*[)\]}>]\s*|\s+(?:dot|punto)\s+)"
+_BRACKETED_DOT: Final = r"\s*[(\[{<]\s*(?:dot|punto)\s*[)\]}>]\s*"
+_ONLY_SPELLED_DOT: Final = rf"(?:{_BRACKETED_DOT}|\s+(?:dot|punto)\s+)"
+# An "@" that starts a token may stand before the local part too: "@jdoe@acme.com" is the
+# handle written as the address, and "acme.com" after an "@" is no URL (_DOMAIN_START).
+_AT_SIGN_START: Final = rf"(?<=@)(?<![\w.%+@\-{_MARKS}]@)"
+PLAIN_EMAIL: Final = re.compile(
+    rf"(?:{_START}|{_AT_SIGN_START}){_MARKED}{_LOCAL}@{_LABEL}++(?:[.,]{_LABEL}++)*?[.,][a-z]{{2,}}\b",
+    _FLAGS,
+)
+SPACED_EMAIL: Final = re.compile(
+    rf"{_START}{_MARKED}{_LOCAL}\s*@\s*{_LABEL}++(?:\s*\.\s*{_LABEL}++)*?\s*\.\s*{_TLD_END}",
+    _FLAGS,
+)
+# "maria at gmail dot com", "juan dot perez at gmail dot com", "jane (at) outlook.com". With a
+# bare " at " and a plain dot, the local part may not be a common word ("it at Amazon.com").
+# The local part is a chain of pieces joined by spelled dots, of any length ("a dot b dot c dot
+# d dot e dot f at gmail dot com" is masked whole, #240). A dot word or an at word may be a
+# piece too ("jose dot dot at acme dot com", "bob punto at (at) gmail.com"). Tried from every
+# word start, the chain would be scanned again from each of its pieces (quadratic on "a dot "
+# repeated), so the rule runs through _RunSearch, which walks each run once (_LOCAL_HEAD, then
+# _LOCAL_STEP) and tries only the starts that can end differently. The domain chain is lazy
+# and runs only after the "at". A piece may begin with "-" or a mark ("jose dot -b at x.com").
+_LOCAL_PIECE: Final = rf"[\w+\-{_MARKS}][\w.%+\-{_MARKS}]*+"
+_LOCAL_CHAIN: Final = rf"{_LOCAL}(?:{_ONLY_SPELLED_DOT}{_LOCAL_PIECE})*+"
+_LOCAL_HEAD: Final = re.compile(rf"{_START}{_MARKED}{_LOCAL}", _FLAGS)
+_LOCAL_STEP: Final = re.compile(
+    rf"(?:\s+(?P<word>dot|punto)\s+|{_BRACKETED_DOT})(?P<piece>{_LOCAL_PIECE})", _FLAGS
+)
+SPELLED_EMAIL: Final = re.compile(
+    rf"{_START}{_MARKED}(?P<local>{_LOCAL_CHAIN})"
+    rf"(?P<at>{_AT}){_LABEL}++(?:{_SPELLED_DOT}{_LABEL}++)*?(?P<dot>{_SPELLED_DOT})"
+    rf"(?P<tld>{_TLD_END})",
+    _FLAGS,
+)
+# A provider with no TLD, or with a TLD typed loosely ("gmail com", "gmailcom", "gmail,com").
+PROVIDER_EMAIL: Final = re.compile(
+    rf"{_START}{_MARKED}(?P<local>{_LOCAL})(?P<at>{_AT}){_PROVIDERS}"
+    rf"(?:\s*[.,]?\s*(?:dot\s+|punto\s+)?(?:com|net|es|mx)\b)?",
+    _FLAGS,
+)
+# "local@word" glued, whatever comes next: an address with its domain cut short. The word ends
+# where a word character would continue it ("jose@acme_x" is the "_" gap), marks included.
+GLUED_EMAIL: Final = re.compile(
+    rf"{_START}{_MARKED}[^\W\d_]{_LOCAL}@[^\W\d_]{_LABEL}++(?!\w)", _FLAGS
+)
+# An email typed letter by letter: "j a n e @ g m a i l . c o m", in any script, each letter
+# with its marks. Before the "@" the letters are taken once, possessively, and after each one
+# the space is tried before the mark class (an atomic choice, never revisited when the "@" is
+# missing): this part runs from every word start, and the mark class is a long one.
+SPACED_LETTERS_EMAIL: Final = re.compile(
+    rf"(?<!\S)(?:[^\W_](?>\s|[{_MARKS}]++\s)){{2,40}}+@\s(?:[^\W_]{_MARKED}\s?){{2,40}}"
+    rf"(?:\.\s?(?:[^\W\d_]{_MARKED}\s?){{2,6}})?",
+    _FLAGS,
+)
+# Words that are never the local part of a spelled-out email ("photos are at iCloud").
+_COMMON_WORDS: Final = frozenset(
+    {"it", "is", "are", "was", "were", "be", "been", "me", "us", "you", "him", "her", "them",
+     "one", "this", "that", "these", "those", "here", "there", "work", "works", "worked", "look",
+     "send", "sent", "bought", "buy", "parts", "part", "photos", "pics", "pictures", "stuff",
+     "things", "home", "house", "online", "ad", "ads", "job", "price", "prices", "order",
+     "ordered", "stay", "stays", "estoy", "esta", "está", "están", "fotos", "trabajo", "and",
+     "or", "the", "a", "an", "at", "on", "in", "to", "of", "for", "my", "your", "our", "his",
+     "their", "el", "la", "los", "las", "de", "en", "y", "o", "mi", "su", "i", "we", "they",
+     "he", "she", "available", "located", "based", "listed", "found", "seen", "saw"}
+)  # fmt: skip
+
+# --- URLs ------------------------------------------------------------------------------------
+# A domain never starts inside a word or a marked token (see _START), and may begin with a
+# spacing mark; its labels are _LABEL, so "gmäil.com", "gm" + U+0483 + "ail.com" and
+# "ñandú.com/x" are masked whole. An accented word glued to a word TLD by a missing space
+# ("El baño.es muy pequeño") is left alone by _accented_word.
+_DOMAIN_START: Final = rf"(?<![\w.@\-{_MARKS}])"
+URL: Final = re.compile(
+    rf"(?:https?://|\bwww\s*\.\s*)\S+"
+    rf"|{_DOMAIN_START}{_MARKED}[^\W_]{_LABEL}*+(?:\.{_LABEL}++)*?\.[a-z]{{2,}}/\S*"
+    rf"|{_DOMAIN_START}{_MARKED}[^\W_]{_LABEL}*+(?:\.{_LABEL}++)*?\.(?P<tld>{_TLD_END})"
+    rf"|{_DOMAIN_START}{_MARKED}[^\W_]{_LABEL}{{2,}}+\s*\.\s+(?:com|net|org|co|us|io|miami)\b"
+    rf"|{_DOMAIN_START}{_MARKED}[^\W_]{_LABEL}{{2,}}+\s+\.\s*(?:com|net|org|co|us|io|miami)\b",
+    _FLAGS,
+)
+# "jackfixit dot com", "aa dot bb dot cc dot dd dot ee dot ff dot com": a chain of any length,
+# walked once per run (_DOMAIN_HEAD, then _DOMAIN_STEP) as SPELLED_EMAIL is. A piece may be
+# the dot word ("miweb dot dot dot com").
+_DOMAIN_PIECE: Final = rf"{_LABEL}++"
+_DOMAIN_HEAD: Final = re.compile(rf"{_DOMAIN_START}{_LABEL}{{2,}}+", _FLAGS)
+_DOMAIN_STEP: Final = re.compile(rf"\s+(?P<word>dot|punto)\s+(?P<piece>{_DOMAIN_PIECE})", _FLAGS)
+SPELLED_URL: Final = re.compile(
+    rf"{_DOMAIN_START}{_LABEL}{{2,}}+(?:\s+(?:dot|punto)\s+{_DOMAIN_PIECE})*\s+(?:dot|punto)\s+"
+    rf"{_TLD_END}",
+    _FLAGS,
+)
+
+# --- Handles ---------------------------------------------------------------------------------
+# Strong platforms: "my insta is jdoe" names a handle whatever the word. Weak platforms are
+# everyday words too ("Zelle as payment", "facebook last week"): their id must look like a
+# handle (a digit, "_", "." or a leading "@"/"$"), unless a cue word or ":"/"=" came first.
+_STRONG_PLATFORMS: Final = r"(?:insta(?:gram)?|ig|snap(?:chat)?|tiktok|telegram|tg|twitter|sc)"
+_WEAK_PLATFORMS: Final = (
+    r"(?:whats\s?app|wasap|guasap|wsp|wpp|wa|facebook|face|fb|venmo|cash\s?app|zelle|paypal|"
+    r"e-?mail|correo|g\s?mail|hotmail|yahoo|outlook|icloud)"
+)
+_PLATFORM_WORDS: Final = frozenset(
+    {"insta", "instagram", "ig", "snap", "snapchat", "tiktok", "telegram", "tg", "twitter", "sc",
+     "whatsapp", "wasap", "guasap", "wsp", "wpp", "wa", "facebook", "face", "fb", "venmo",
+     "cashapp", "zelle", "paypal", "email", "e-mail", "correo", "gmail", "hotmail", "yahoo",
+     "outlook", "icloud", "text", "call", "phone", "cash", "card", "check"}
+)  # fmt: skip
+_CUE: Final = r"(?:handle|account|cuenta|user(?:name)?|usuario|name|nombre|id)"
+_LINK_WORD: Final = (
+    r"(?:is|es|as|como|me\s+at|at|al|se\s+llama|is\s+called|aparezco\s+como|aparece\s+como)"
+)
+PLATFORM_HANDLE: Final = re.compile(
+    rf"\b(?:(?P<strong>{_STRONG_PLATFORMS})|(?P<weak>{_WEAK_PLATFORMS}))"
+    rf"(?:(?P<cue>\s+{_CUE}\b(?:\s+(?:is|es))?\s*[:=]?\s*)"
+    rf"|(?P<colon>\s*(?:{_LINK_WORD}\s*)?[:=@>]\s*@?\s*)"
+    rf"|(?P<dash>\s*[/-]\s*)"
+    rf"|(?P<linked>\s+{_LINK_WORD}\s+)"
+    rf"|(?P<spaced>\s+))"
+    rf"(?P<id>[@$]?{_MARKED}[^\W_]{_MARKED}(?:[\w.-]{_MARKED}){{1,29}})(?![\w{_MARKS}])",
+    _FLAGS,
+)
+# A handle written before its platform: "j.doe.fixit (insta)". The token is possessive and its
+# shape is checked in _mask_reverse_handle, so a long dotted chain costs one pass. It never
+# starts inside a marked token (see _START) and takes the marks glued to its characters. The
+# spaces around the bracket are possessive: two runs that could split one stretch of spaces
+# would try every split before failing ("a", 2,000 spaces, "b" took 0.6 s, #260).
+REVERSE_HANDLE: Final = re.compile(
+    rf"(?<![\w@.{_MARKS}])(?P<id>{_MARKED}[^\W_][\w.{_MARKS}]*+)"
+    rf"\s*+(?:[(\[]\s*+)?(?:on\s+|en\s+)?{_STRONG_PLATFORMS}\b",
+    _FLAGS,
+)
+# Words that follow "insta is" in ordinary sentences, so are not an id.
+_NOT_AN_ID: Final = frozenset(
+    {"fine", "ok", "okay", "good", "great", "better", "best", "easier", "faster", "down", "not",
+     "free", "working", "broken", "the", "a", "my", "your", "private", "public", "new", "old",
+     "bien", "mejor", "gratis", "privado", "privada", "nuevo", "nueva", "empty", "gone"}
+)  # fmt: skip
+# "@name" and "$cashtag", but not "@5pm", "@noon", "@home", "@tomorrow", a price or a currency.
+# A handle token is word characters (\w: the letters of any script, digits and "_", so
+# "@mañana.fixit", "@josé_silva" and "@мария.ivanova" are masked whole, #236) and runs of ".",
+# "_" and "-" (_HANDLE_BODY, as the platforms accept it), the separators also in their
+# compatibility forms as typed (_SEPARATOR_FORMS: the low lines whose NFKC form is "_", the
+# dot leaders and the ellipsis whose NFKC form is a run of "."; the dashes are already "-" and
+# U+2024 already "." after _clean). A time, a measure or a word after "@" is exempt only when
+# it is the whole token: _BODY_END refuses whatever would continue the token, a word character,
+# a combining mark glued to the word (\w skips marks: "@home" + U+0335 + "fixit") or a run of
+# separators followed by a word character. So "@home", "@home.", "@home!", "@home " and
+# "@mañana" stay, while "@home.fixit", "@home--fixit", "@home._fixit", "@home_fixit" and
+# "@home" + U+FF3F + "fixit" are handles (#224 review, rounds 1 and 2). _clean composes the
+# input (NFC), so "@home" + U+0301 + "fixit" is "@homéfixit": no exempt word, one token.
+# _HANDLE_BODY takes the marks glued to its own characters (_MARKED, the mark set of
+# _MARK_RANGES), so "@bob" + U+05B0 + "smith" is masked whole (#229). A spacing mark (Mc)
+# survives _clean after a separator or the "@" too, so a run of separators followed by a mark
+# continues the token ("@home." + U+093F + "fixit") and the "@" may carry marks before the
+# body ("@" + U+093F + "bobsmith"), also in the spaced form ("@ bob" + U+0483 + ".smith").
+# The platform handle, the reverse handle and the cashtag take the marks the same way (#236).
 _SEPARATOR_FORMS: Final = "".join(
     map(chr, (0xFE33, 0xFE34, 0xFE4D, 0xFE4E, 0xFE4F, 0xFF3F, 0x2025, 0x2026, 0xFE19, 0xFE30))
 )
 _SEPARATORS: Final = rf"._\-{_SEPARATOR_FORMS}"
-_HANDLE_BODY: Final = (
-    rf"[a-z0-9_]{_MARKED}(?:(?:[a-z0-9{_SEPARATORS}]{_MARKED}){{0,28}}[a-z0-9_]{_MARKED})?"
-)
+_HANDLE_BODY: Final = rf"\w{_MARKED}(?:(?:[\w{_SEPARATORS}]{_MARKED}){{0,28}}\w{_MARKED})?"
 _BODY_END: Final = rf"(?![\w{_MARKS}]|[{_SEPARATORS}]+[\w{_MARKS}])"
 AT_HANDLE: Final = re.compile(
     rf"(?<![\w.@])@{_MARKED}(?:\s(?=[\w.\-{_MARKS}]*[\d_.]))?(?!\d{{1,2}}(?:[:.]\d{{1,3}})?\s*(?:[ap]\.?m\.?)?{_BODY_END}|"
@@ -340,7 +412,26 @@ AT_HANDLE: Final = re.compile(
     rf"{_HANDLE_BODY}",
     _FLAGS,
 )
-CASHTAG: Final = re.compile(r"(?<![\w$])\$(?!(?-i:[A-Z]{3})\b)[a-z][a-z0-9_-]{1,19}\b", _FLAGS)
+# A cashtag is 2 to 20 characters, a letter first, ending on a word character; the characters
+# carry their marks, and the "$" may carry a spacing mark ("$" + U+093F + "bob"). Three capitals
+# are a currency only as the whole token: a mark or a word character continues it ("$BOB" +
+# U+0483 + "smith" is a cashtag, "$USD" and "$USD-denominated" are currencies, #240).
+CASHTAG: Final = re.compile(
+    rf"(?<![\w$])\$(?!(?-i:[A-Z]{{3}})(?![\w{_MARKS}]))"
+    rf"{_MARKED}[^\W\d_]{_MARKED}(?:[\w-]{_MARKED}){{0,18}}\w{_MARKED}(?![\w{_MARKS}])",
+    _FLAGS,
+)
+# A combining mark on a Latin letter after NFC is never an accent (every EN, ES and PT accent
+# composes): "bob" + U+0483 + "smith" and "josé" + U+0483 + "smith" are shaped like an evasion,
+# not like a word (#240). Scripts that write with marks (Devanagari, Arabic, Hebrew) are not
+# Latin, so their words stay plain words. The Latin letters: ASCII, Latin-1, Extended-A and B,
+# and Extended Additional (Vietnamese).
+_LATIN_LETTERS: Final = "a-z" + "".join(
+    f"{chr(low)}-{chr(high)}"
+    for low, high in ((0x00C0, 0x00D6), (0x00D8, 0x00F6), (0x00F8, 0x024F), (0x1E00, 0x1EFF))
+)
+_MARKED_LATIN: Final = re.compile(rf"[{_LATIN_LETTERS}][{_MARKS}]", _FLAGS)
+_CASHTAG_START: Final = re.compile(rf"\$[{_MARKS}]*[^\W\d_]")  # "$jdoe", "$" + U+093F + "jdoe"
 
 # --- Phones ----------------------------------------------------------------------------------
 # Phones spelled out: ten or more digit words (EN or ES) or digits in a row.
@@ -497,6 +588,71 @@ _MEASURE_AFTER: Final = re.compile(
 _SHORT_NUMBER: Final = re.compile(r"\d{1,4}(?:[./]\d{1,3})?")
 
 _Replace = Callable[[re.Match[str]], str | None]  # None keeps the match as it is
+# What a contact rule masks in a match: None when it holds no contact (the search tries again
+# one character later), else the spans to mask; [] when it was analyzed whole and holds none.
+_Rule = Callable[[re.Match[str]], list[tuple[int, int]] | None]
+
+
+class _Search(Protocol):
+    def search(self, string: str, pos: int = 0) -> re.Match[str] | None: ...
+
+
+@dataclass(frozen=True)
+class _RunSearch:
+    """`pattern` tried on each run of spelled-dot pieces (`head`, then `step` while it
+    matches) from only the starts that can end differently, so the search stays linear (#240).
+    A piece another chain already read ends that chain's way and reaches its verdict, so only
+    a chain's first piece is tried. A spaced dot word read as a piece swaps the roles: the
+    pieces around it become its separators ("jose dot at acme dot com" is "dot" at "acme",
+    "miweb dot dot dot com" ends in "dot dot com"), so it starts a chain of its own, unless one
+    read it already ("dot dot dot"). That chain may run past its run's end; the pieces it read
+    are remembered, so each one is read once. `accept` refuses a match here rather than in the
+    replace step, which would try again one character later."""
+
+    head: re.Pattern[str]  # the run's first piece
+    step: re.Pattern[str]  # a spelled dot and the next piece: groups "word" (spaced) and "piece"
+    pattern: re.Pattern[str]
+    accept: Callable[[re.Match[str]], bool] | None = None
+    tail: str | None = None  # the group after which an overlapping match may start
+
+    def search(self, string: str, pos: int = 0) -> re.Match[str] | None:
+        read: set[int] = set()  # where the pieces of the chains tried so far start
+        while (head := self.head.search(string, pos)) is not None:
+            pieces, words, pos = self._chain(string, head)
+            for start in [head.start(), *words]:
+                first = head if start == head.start() else self.head.match(string, start)
+                if start in read or first is None:
+                    continue
+                read.update(pieces if first is head else self._chain(string, first)[0])
+                match = self.pattern.match(string, start)
+                if match is not None and (self.accept is None or self.accept(match)):
+                    return match
+        return None
+
+    def _chain(self, string: str, first: re.Match[str]) -> tuple[list[int], list[int], int]:
+        """The chain that `first` begins: where its pieces and its spaced dot words start, and
+        where it ends."""
+        pieces, words, end = [first.start()], [], first.end()
+        while (step := self.step.match(string, end)) is not None:
+            pieces.append(step.start("piece"))
+            if step.group("word") is not None:
+                words.append(step.start("word"))
+            end = step.end()
+        return pieces, words, end
+
+    def mask_end(self, string: str, match: re.Match[str]) -> int:
+        """Where the mask of `match` ends. An accepted match that starts after its `tail` group
+        and before its end runs past it (the domain of "x (at) pérez.me@b.c (dot) es" is the
+        local part of the next address); it joins the mask, so accepting a match never hides
+        one that a search refusing it would have found (#240)."""
+        end = match.end()
+        while (
+            self.tail is not None
+            and (more := self.search(string, match.end(self.tail))) is not None
+            and more.start() < end
+        ):
+            match, end = more, more.end()
+        return end
 
 
 @dataclass(frozen=True)
@@ -506,13 +662,203 @@ class RedactionResult:
 
 
 def redact_contacts(text: str) -> RedactionResult:
-    """`text` with every contact detail it recognizes replaced by MASK (see the module doc)."""
+    """`text` with every contact detail it recognizes replaced by MASK (see the module doc).
+    The rules run in order, each on the text the ones before it masked. A mask can cut a
+    contact a later rule would have read whole: in "call 305 555 0199 at gmail" the email
+    takes the last group and leaves six digits, no phone (#257); the URL in "jdoe1 insta dot
+    com" takes the platform and leaves the handle, the email in "1250 Ocean Dr at gmail" takes
+    the suffix and leaves the house (#240). So these rules also read the text without masks. A
+    phone found there joins the masks it overlaps or touches. A reverse handle or an address
+    (_CUT_STEPS) joins only an email or URL mask that took its cue, the platform, the suffix or
+    the number (_cut). A mask that took another of its words was another contact's: "site.com/2
+    new drive belts" keeps "new drive belts", "2 Amazon.com Key pads" keeps "Key pads". A phone
+    that took its number leaves it as the rules in order read it ("APT" before a phone's mask).
+    Last, every character the filter before #240 masks is masked too (_floor_masks), so the
+    text never shows more than that filter showed, whatever the rules above miss (#240, until
+    #267)."""
     cleaned = _clean(text)
-    masked = 0
-    for pattern, replace in _STEPS:
-        cleaned, count = _substitute(pattern, replace, cleaned)
-        masked += count
-    return RedactionResult(cleaned, masked > 0)
+    result, count = _mask_spans(cleaned, _hidden(cleaned))
+    return RedactionResult(result, count > 0)
+
+
+def _hidden(text: str) -> list[tuple[int, int]]:
+    """Where redact_contacts masks `text` (cleaned): the rules in order with the contacts they
+    cut, and the floor."""
+    masked, cutting = _masks_in_order(text)
+    if masked:
+        found = [span for search, rule in _PHONE_STEPS for span in _spans(search, rule, text)]
+        if cutting:
+            found += _cut_spans(text, _Apart.of(cutting), _Apart.of(masked))
+        masked = _joined(masked, found)
+    return masked + _floor_masks(text)
+
+
+def _floor_masks(text: str) -> list[tuple[int, int]]:
+    """Where the safety floor masks `text` (cleaned; its _clean is the same code): the rules
+    of app.redaction_legacy, the filter before #240, run as its redact_contacts runs them, each
+    on the text the ones before it masked. redact_contacts masks all of it too, so its output
+    never shows a character that filter hid (#240, until #267)."""
+    current = text
+    origin = [(index, index + 1) for index in range(len(text))]  # each character's span in text
+    masked: list[tuple[int, int]] = []
+    for pattern, replace in redaction_legacy._STEPS:
+        spans = list(_floor_spans(pattern, replace, current))
+        if spans:
+            current, origin = _masked_with_origin(current, origin, spans, masked)
+    return masked
+
+
+def _floor_spans(
+    pattern: re.Pattern[str], replace: _Replace, text: str
+) -> Iterator[tuple[int, int]]:
+    """Where the floor's _substitute masks `text` with `replace`. Only its _phones masks part
+    of a match: the windows are this module's _phones (the same code but for the return type),
+    checked against the floor's replacement. Were they to differ, the whole match would be
+    masked; test_the_floor_reads_develops_text_in_the_same_coordinates pins that they agree."""
+    search_from = 0
+    while (match := pattern.search(text, search_from)) is not None:
+        replacement = replace(match)
+        if replacement is None:
+            search_from = match.start() + 1
+            continue
+        if replacement == MASK:
+            yield match.span()
+        elif replacement != match.group(0):
+            start = match.start()
+            windows = _phones(match)
+            local = [(begin - start, end - start, MASK) for begin, end in windows]
+            yield from (
+                windows if _apply(match.group(0), local)[0] == replacement else [match.span()]
+            )
+        search_from = max(match.end(), match.start() + 1)
+
+
+def _cut_spans(text: str, cutting: "_Apart", masked: "_Apart") -> list[tuple[int, int]]:
+    """The reverse handles and addresses in `text` that a mask in `cutting` cut (_cut)."""
+    found: list[tuple[int, int]] = []
+    for search, rule in _CUT_STEPS:
+        cue = _CUES[search]
+
+        def cut_rule(
+            match: re.Match[str], rule: _Rule = rule, cue: _Cue = cue
+        ) -> list[tuple[int, int]] | None:
+            spans = rule(match)
+            if spans is None:
+                return None
+            return [span for span in spans if _cut(span, cue(match), cutting, masked)]
+
+        found += _spans(search, cut_rule, text)
+    return found
+
+
+def _cut(span: tuple[int, int], cue: int, cutting: "_Apart", masked: "_Apart") -> bool:
+    """A mask in `cutting` starts inside `span`, after its first character, and covers the
+    first character of its cue (`cue`), or starts right at the end of `span`; and no mask stands
+    in `span` before it. The rule read the contact as it would have in order, had the email or
+    URL rule not taken the cue: a mask inside it (a platform handle in "4B instagram x_1 ig
+    way.com") broke it there too."""
+    index = bisect.bisect_right(cutting.starts, cue) - 1
+    touching = bisect.bisect_left(cutting.starts, span[1])
+    if index >= 0 and cutting.starts[index] > span[0] and cutting.spans[index][1] > cue:
+        cut_at = cutting.starts[index]
+    elif touching < len(cutting.starts) and cutting.starts[touching] == span[1]:
+        cut_at = span[1]
+    else:
+        return False
+    before = bisect.bisect_left(masked.starts, cut_at) - 1  # the last mask starting before it
+    return before < 0 or masked.spans[before][1] <= span[0]
+
+
+@dataclass(frozen=True)
+class _Apart:
+    """Spans sorted, the overlapping ones merged, and their starts (for bisection)."""
+
+    spans: list[tuple[int, int]]
+    starts: list[int]
+
+    @classmethod
+    def of(cls, spans: list[tuple[int, int]]) -> "_Apart":
+        merged: list[tuple[int, int]] = []
+        for start, end in sorted(spans):
+            if merged and start < merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+            else:
+                merged.append((start, end))
+        return cls(merged, [start for start, _ in merged])
+
+
+def _last_word(match: re.Match[str]) -> int:
+    """Where the last word of `match` starts: the platform of a reverse handle, the number or
+    the name word of a Spanish street, the grid street of the Miami grid."""
+    text, start, end = match.string, match.start(), match.end()
+    while end > start and not text[end - 1].isalnum():
+        end -= 1
+    while end > start and text[end - 1].isalnum():
+        end -= 1
+    return end
+
+
+def _masks_in_order(text: str) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+    """Each rule on the text the rules before it masked (a mask is no word, so "unit 5B
+    youtu.be/abc123" reads as a unit once the URL is masked): where the masks are in `text`,
+    and which of them the email and URL rules made."""
+    current = text
+    origin = [(index, index + 1) for index in range(len(text))]  # each character's span in text
+    masked: list[tuple[int, int]] = []
+    by_emails_and_urls = 0
+    for step, (search, rule) in enumerate(_STEPS):
+        runs = [_unmarked_spans, _spans] if search in _UNMARKED_FIRST else [_spans]
+        for run in runs:
+            spans = list(run(search, rule, current))
+            if spans:
+                current, origin = _masked_with_origin(current, origin, spans, masked)
+        if step < len(_EMAIL_AND_URL_STEPS):
+            by_emails_and_urls = len(masked)
+    return masked, masked[:by_emails_and_urls]
+
+
+def _masked_with_origin(
+    text: str,
+    origin: list[tuple[int, int]],
+    spans: list[tuple[int, int]],
+    masked: list[tuple[int, int]],
+) -> tuple[str, list[tuple[int, int]]]:
+    """`text` with `spans` (in order; touching ones may share marks) replaced by MASK, and the
+    origin of its characters; adds the span each mask hides in the cleaned text to `masked`."""
+    pieces: list[str] = []
+    new_origin: list[tuple[int, int]] = []
+    position = 0
+    for start, end in spans:
+        hidden = (origin[start][0], origin[end - 1][1])
+        masked.append(hidden)
+        start = max(start, position)
+        pieces += [text[position:start], MASK]
+        new_origin += origin[position:start] + [hidden] * len(MASK)
+        position = max(end, position)
+    pieces.append(text[position:])
+    new_origin += origin[position:]
+    return "".join(pieces), new_origin
+
+
+def _joined(masked: list[tuple[int, int]], found: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """`masked` grown by the spans in `found` that overlap or touch it, directly or through
+    another such span. A span that meets no mask is one the rules in order passed over in its
+    own context, so it stays out."""
+    spans = sorted(
+        [(start, end, True) for start, end in masked] + [(*span, False) for span in found]
+    )
+    joined: list[tuple[int, int]] = []
+    group_start, group_end, group_masked = spans[0]
+    for start, end, is_masked in spans[1:]:
+        if start <= group_end:
+            group_end, group_masked = max(group_end, end), group_masked or is_masked
+            continue
+        if group_masked:
+            joined.append((group_start, group_end))
+        group_start, group_end, group_masked = start, end, is_masked
+    if group_masked:
+        joined.append((group_start, group_end))
+    return joined
 
 
 def _clean(text: str) -> str:
@@ -559,20 +905,58 @@ def _fold_confusables(match: re.Match[str]) -> str:
     return "".join(_CONFUSABLES.get(char, char) for char in word)
 
 
-def _substitute(pattern: re.Pattern[str], replace: _Replace, text: str) -> tuple[str, int]:
+def _substitute(search: _Search, replace: _Replace, text: str) -> tuple[str, int]:
     """Like pattern.sub, but a kept match only skips one character, so a contact that starts
     inside it is still found ("fix 2 doors 1250 Ocean Dr")."""
-    pieces: list[str] = []
-    position, count = 0, 0
+    return _apply(text, _replacements(search, replace, text))
+
+
+def _unmarked_spans(search: _Search, rule: _Rule, text: str) -> Iterator[tuple[int, int]]:
+    """The same rule on `text` without its marks; each span also covers the marks inside its
+    match and around it, so "gmail.c" + U+0483 + "om" is masked whole (see _UNMARKED_FIRST)."""
+    kept = [index for index, char in enumerate(text) if char not in _MARK_CHARS]
+    if len(kept) == len(text):
+        return
+    unmarked = "".join(text[index] for index in kept)
+    kept.append(len(text))
+    for start, end in _spans(search, rule, unmarked):
+        yield kept[start - 1] + 1 if start else 0, kept[end]
+
+
+def _spans(search: _Search, rule: _Rule, text: str) -> Iterator[tuple[int, int]]:
+    """Where `rule` masks `text`. A kept match only skips one character, so a contact that
+    starts inside it is still found ("fix 2 doors 1250 Ocean Dr")."""
     search_from = 0
-    while (match := pattern.search(text, search_from)) is not None:
-        replacement = replace(match)
-        if replacement is None:
+    while (match := search.search(text, search_from)) is not None:
+        spans = rule(match)
+        if spans is None:
             search_from = match.start() + 1
             continue
-        pieces += [text[position : match.start()], replacement]
+        end = match.end()
+        if isinstance(search, _RunSearch):
+            end = search.mask_end(text, match)
+            spans = [(match.start(), end)]
+        yield from spans
+        search_from = max(end, match.start() + 1)
+
+
+def _whole(replace: _Replace) -> _Rule:
+    """The rule that masks a whole match unless `replace` keeps it."""
+    return lambda match: None if replace(match) is None else [match.span()]
+
+
+def _replacements(search: _Search, replace: _Replace, text: str) -> Iterator[tuple[int, int, str]]:
+    for start, end in _spans(search, _whole(replace), text):
+        yield start, end, MASK
+
+
+def _apply(text: str, spans: Iterable[tuple[int, int, str]]) -> tuple[str, int]:
+    pieces: list[str] = []
+    position, count = 0, 0
+    for start, end, replacement in spans:
+        pieces += [text[position:start], replacement]
         count += replacement.count(MASK)
-        position = search_from = max(match.end(), match.start() + 1)
+        position = end
     pieces.append(text[position:])
     return "".join(pieces), count
 
@@ -588,24 +972,44 @@ def _missing_space(match: re.Match[str], tld: str) -> bool:
     return tld.lower() in _WORD_TLDS and tld[0].isupper() and not tld.isupper() and before.islower()
 
 
+def _accented_word(text: str, dot: int, tld: str) -> bool:
+    """ "El baño.es muy pequeño": a word TLD after a label with a non-ASCII letter, which is
+    Spanish or Portuguese typing with a missing space, not a domain. Only the label glued to
+    the dot at `dot` counts (an accented domain with a path or "www." is still one)."""
+    if tld.lower() not in _WORD_TLDS:
+        return False
+    start = dot
+    while start > 0 and _LABEL_CHAR.fullmatch(text[start - 1]) is not None:
+        start -= 1
+    return any(char.isalpha() and not char.isascii() for char in text[start:dot])
+
+
 def _mask_url(match: re.Match[str]) -> str | None:
     tld = match.group("tld")
-    if tld is not None and _missing_space(match, tld):
+    if tld is not None and (
+        _missing_space(match, tld) or _accented_word(match.string, match.start("tld") - 1, tld)
+    ):
         return None
     return MASK
 
 
-def _mask_spelled_email(match: re.Match[str]) -> str | None:
-    weak_at = re.fullmatch(r"\s+(?:at|en)\s+", match.group("at"), _FLAGS) is not None
+def _is_spelled_email(match: re.Match[str]) -> bool:
+    at = match.group("at")
+    weak_at = _WEAK_AT.fullmatch(at) is not None
     if weak_at and match.group("local").lower() in _COMMON_WORDS:
-        return None  # "it at Amazon.com", "work at BestPools.com"
-    if match.group("dot") == "." and _missing_space(match, match.group("tld")):
-        return None  # "is at home.Me and my wife"
-    return MASK
+        return False  # "it at Amazon.com", "work at BestPools.com"
+    if match.group("dot") != "." or not weak_at:
+        return True  # "@", "(at)" and "arroba" make an address whatever its labels (#240)
+    if _missing_space(match, match.group("tld")):
+        return False  # "is at home.Me and my wife"
+    # "Vivo en baño.es muy...": "en" is a word first. After "at" the address is masked whatever
+    # its labels ("josé at acme.es", #240).
+    spanish_en = _SPANISH_EN.fullmatch(at) is not None
+    return not (spanish_en and _accented_word(match.string, match.start("dot"), match.group("tld")))
 
 
 def _mask_provider_email(match: re.Match[str]) -> str | None:
-    weak_at = re.fullmatch(r"\s+(?:at|en)\s+", match.group("at"), _FLAGS) is not None
+    weak_at = _WEAK_AT.fullmatch(match.group("at")) is not None
     if weak_at and match.group("local").lower() in _COMMON_WORDS:
         return None  # "photos are at iCloud", "I work at Yahoo"
     return MASK
@@ -615,9 +1019,11 @@ def _handle_shaped(handle: str) -> bool:
     if handle[0] == "@":
         return True
     if handle[0] == "$":
-        return re.match(r"\$[^\W\d_]", handle) is not None  # "$jdoe", not "$150"
+        return _CASHTAG_START.match(handle) is not None  # "$jdoe", not "$150"
     has_letter = re.search(r"[^\W\d_]", handle) is not None
-    return has_letter and re.search(r"[\d_.]", handle) is not None
+    return has_letter and (
+        re.search(r"[\d_.]", handle) is not None or _MARKED_LATIN.search(handle) is not None
+    )
 
 
 def _mask_handle(match: re.Match[str]) -> str | None:
@@ -687,12 +1093,12 @@ def _mask_reversed_street(match: re.Match[str]) -> str | None:
     return MASK
 
 
-def _phones(match: re.Match[str]) -> str | None:
-    """Masks every phone-shaped window of digit groups in one digit run. Returns the run itself
-    when it holds no phone, so the scan moves past it (it was analyzed whole)."""
+def _phones(match: re.Match[str]) -> list[tuple[int, int]]:
+    """The phone-shaped windows of digit groups in one digit run; [] when it holds none, so the
+    scan moves past the run (it was analyzed whole)."""
     run = match.group(0)
     if _glued_to_a_code(match) or _DOTTED_QUAD.fullmatch(run.strip("()[]")):
-        return run
+        return []
     # A measure after the run ("100 / 200 / 1500 sq ft"): a window that ends the run is a
     # quantity, not a phone. Earlier windows still count ("call 305-555-0199. 3 bedrooms").
     measure = _MEASURE_AFTER.match(match.string, match.end())
@@ -711,16 +1117,9 @@ def _phones(match: re.Match[str]) -> str | None:
         begin = groups[start].start()
         while begin > 0 and run[begin - 1] in "([+":
             begin -= 1
-        spans.append((begin, groups[end - 1].end()))
+        spans.append((match.start() + begin, match.start() + groups[end - 1].end()))
         start = end
-    if not spans:
-        return run
-    pieces, cursor = [], 0
-    for begin, finish in spans:
-        pieces += [run[cursor:begin], MASK]
-        cursor = finish
-    pieces.append(run[cursor:])
-    return "".join(pieces)
+    return spans
 
 
 def _glued_to_a_code(match: re.Match[str]) -> bool:
@@ -814,26 +1213,69 @@ def _is_latin_mobile(joined: str, count: int) -> bool:
 
 # Order matters: emails and URLs before the handles and domains inside them; phones before
 # platform handles, so "whatsapp 305 555 0199" loses the whole number; masks hold no letter or
-# digit, so a later pattern never matches inside an earlier mask.
-_STEPS: Final[tuple[tuple[re.Pattern[str], _Replace], ...]] = (
-    (SPACED_LETTERS_EMAIL, _mask),
-    (PLAIN_EMAIL, _mask),
-    (SPACED_EMAIL, _mask),
-    (SPELLED_EMAIL, _mask_spelled_email),
-    (PROVIDER_EMAIL, _mask_provider_email),
-    (GLUED_EMAIL, _mask),
-    (URL, _mask_url),
-    (SPELLED_PHONE, _mask),
+# digit, so a later pattern never matches inside an earlier mask. A contact an earlier mask
+# cuts is joined back whole (redact_contacts).
+_SPELLED_EMAILS: Final = _RunSearch(
+    _LOCAL_HEAD, _LOCAL_STEP, SPELLED_EMAIL, _is_spelled_email, tail="at"
+)
+_SPELLED_URLS: Final = _RunSearch(_DOMAIN_HEAD, _DOMAIN_STEP, SPELLED_URL)
+_PHONE_STEPS: Final[tuple[tuple[_Search, _Rule], ...]] = (
+    (SPELLED_PHONE, _whole(_mask)),
     (DIGIT_RUN, _phones),
-    (PLATFORM_HANDLE, _mask_handle),
-    (REVERSE_HANDLE, _mask_reverse_handle),
-    (AT_HANDLE, _mask),
-    (CASHTAG, _mask),
-    (STREET, _mask_street),
-    (REVERSED_STREET, _mask_reversed_street),
-    (GRID_OR_HIGHWAY, _mask),
-    (SPANISH_STREET, _mask),
-    (UNIT_OR_BOX, _mask),
+)
+# The rules that read their cue after the contact: an email or a URL masked before them can
+# take a reverse handle's platform or an address's suffix, so they read the text without masks
+# again (redact_contacts). A handle with its platform or sigil first keeps it before the id,
+# and a mask that takes the id already hides the contact ("Email me at jane@gmail.com" keeps
+# "Email me at"); a unit keeps its word before the number the same way ("apt 4B@x.com" keeps
+# "apt").
+_ADDRESS_STEPS: Final[tuple[tuple[_Search, _Rule], ...]] = (
+    (STREET, _whole(_mask_street)),
+    (REVERSED_STREET, _whole(_mask_reversed_street)),
+    (GRID_OR_HIGHWAY, _whole(_mask)),
+    (SPANISH_STREET, _whole(_mask)),
+)
+_REVERSE_HANDLE_STEP: Final[tuple[_Search, _Rule]] = (
+    REVERSE_HANDLE,
+    _whole(_mask_reverse_handle),
+)
+_CUT_STEPS: Final[tuple[tuple[_Search, _Rule], ...]] = (_REVERSE_HANDLE_STEP, *_ADDRESS_STEPS)
+# Where the cue of each of them starts: what the email or URL mask must have taken (_cut).
+_Cue = Callable[[re.Match[str]], int]
+_CUES: Final[dict[_Search, _Cue]] = {
+    REVERSE_HANDLE: _last_word,
+    STREET: lambda match: match.start("suffix"),
+    REVERSED_STREET: lambda match: match.start("number"),
+    GRID_OR_HIGHWAY: _last_word,
+    SPANISH_STREET: _last_word,
+}
+_EMAIL_AND_URL_STEPS: Final[tuple[tuple[_Search, _Rule], ...]] = (
+    (SPACED_LETTERS_EMAIL, _whole(_mask)),
+    (PLAIN_EMAIL, _whole(_mask)),
+    (SPACED_EMAIL, _whole(_mask)),
+    (_SPELLED_EMAILS, _whole(_mask)),
+    (PROVIDER_EMAIL, _whole(_mask_provider_email)),
+    (GLUED_EMAIL, _whole(_mask)),
+    (_SPELLED_URLS, _whole(_mask)),
+    (URL, _whole(_mask_url)),
+)
+_STEPS: Final[tuple[tuple[_Search, _Rule], ...]] = (
+    *_EMAIL_AND_URL_STEPS,
+    *_PHONE_STEPS,
+    (PLATFORM_HANDLE, _whole(_mask_handle)),
+    _REVERSE_HANDLE_STEP,
+    (AT_HANDLE, _whole(_mask)),
+    (CASHTAG, _whole(_mask)),
+    *_ADDRESS_STEPS,
+    (UNIT_OR_BOX, _whole(_mask)),
+)
+# The rules with a literal TLD or provider list run first on the text without its marks: a
+# mark glued inside "gmail" or "com" splits the literal ("gmail.c" + U+0483 + "om", "jose at
+# gm" + U+0483 + "ail", #240), and the mark class after every letter of the lists would make
+# the patterns hundreds of kilobytes. The run on the text as it is follows and keeps what only
+# the marks make a contact. Only a text with a mark pays for the extra run.
+_UNMARKED_FIRST: Final[frozenset[_Search]] = frozenset(
+    {PLAIN_EMAIL, SPACED_EMAIL, _SPELLED_EMAILS, PROVIDER_EMAIL, URL, _SPELLED_URLS}
 )
 
 
@@ -938,7 +1380,10 @@ def redact_known(text: str, known: KnownValues) -> RedactionResult:
     for pattern in _known_patterns(known):
         cleaned, count = _substitute(pattern, _mask, cleaned)
         masked += count
-    cleaned, count = _mask_spans(cleaned, _known_spans(cleaned, known.streets))
+    # Touching masks stay apart, as before #240: redact_text's floor then reads the same text
+    # as the filter before #240 did (_floor_masks).
+    spans = _known_spans(cleaned, known.streets)
+    cleaned, count = _mask_spans(cleaned, spans, touching=False)
     return RedactionResult(cleaned, masked + count > 0)
 
 
@@ -1436,12 +1881,15 @@ def _unit_spans(text: str, tokens: list[_KnownToken], unit: str) -> list[tuple[i
     return spans
 
 
-def _mask_spans(text: str, spans: list[tuple[int, int]]) -> tuple[str, int]:
-    """`text` with each span (merged when they overlap) replaced by the mask."""
+def _mask_spans(
+    text: str, spans: list[tuple[int, int]], *, touching: bool = True
+) -> tuple[str, int]:
+    """`text` with each span (merged when they overlap, or touch when `touching`) replaced by
+    the mask."""
     pieces: list[str] = []
     position = count = 0
     for start, end in sorted(spans):
-        if start < position:  # overlaps the previous mask: extend it
+        if count and (start < position or (touching and start == position)):  # extend the mask
             if end > position:
                 position = end
             continue
