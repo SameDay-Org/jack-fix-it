@@ -77,6 +77,7 @@ environment as **shared variables** referenced from both services, so the two ne
 | `S3_ACCESS_KEY_ID`            | required                                                                 | yes             | D6.2 (#35) |
 | `S3_SECRET_ACCESS_KEY`        | required                                                                 | yes             | D6.2 (#35) |
 | `S3_REGION`                   | `auto` (the default) for Cloudflare R2                                   | no              | D6.2 (#35) |
+| `STRIPE_WEBHOOK_SECRET`       | optional until the Stripe endpoint exists; unset, the webhook gives 503  | yes             | D7.3 (#40) |
 | `GOOGLE_MAPS_API_KEY`         | optional until #14; without it `POST /v1/geo/reverse` answers 503        | yes             | #215       |
 
 "Required" means the API refuses to start in staging and production without it (the settings
