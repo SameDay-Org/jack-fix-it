@@ -166,7 +166,7 @@ def _without_server_values(value: Any, path: tuple[str, ...] = ()) -> Any:
 
 def pro_text(response: httpx.Response) -> str:
     """The response as a leak check reads it: the server-issued fields blanked, everything
-    else serialized as Starlette serves it."""
+    else serialized compactly with non-ASCII kept, as the API serves JSON."""
     return json.dumps(
         _without_server_values(response.json()),
         ensure_ascii=False,
@@ -239,14 +239,19 @@ def placed(node: Any, path: tuple[str, ...], value: Any) -> Any:
     return {**fields, head: placed(fields.get(head), rest, value)}
 
 
-def served(path: tuple[str, ...], value: Any) -> httpx.Response:
-    """The page or the detail, as Starlette serializes it, with `value` at `path`."""
-    body = SERVED_PAGE if path[0] in ("items", "next_cursor") else SERVED_DETAIL
+def as_served(body: Any) -> httpx.Response:
+    """`body` serialized compactly with non-ASCII kept, as the API serves JSON."""
     return httpx.Response(
         200,
-        content=JSONResponse(placed(body, path, value)).body,
+        content=bytes(JSONResponse(body).body),
         headers={"content-type": "application/json"},
     )
+
+
+def served(path: tuple[str, ...], value: Any) -> httpx.Response:
+    """The page or the detail, as served, with `value` at `path`."""
+    body = SERVED_PAGE if path[0] in ("items", "next_cursor") else SERVED_DETAIL
+    return as_served(placed(body, path, value))
 
 
 @pytest.mark.parametrize("number", [LEAKED, "1200"])
@@ -272,6 +277,7 @@ CUSTOMER_TEXTS = [
 UNNAMED_PATHS = [
     ("items", "*", "description_excerpt"),
     ("items", "*", "location", "zip_code"),
+    ("items", "*", "location", "city"),
     ("items", "*", "unexpected"),
     ("description",),
     ("intake_answers", "notes"),
@@ -298,9 +304,8 @@ def test_the_same_text_anywhere_else_is_read_as_served(
 
 
 def test_the_oracle_serializes_like_the_server() -> None:
-    body = {"description": "Fuga de agua en el baño", "intake_answers": {"n": [1, True, None]}}
-    response = httpx.Response(
-        200, content=JSONResponse(body).body, headers={"content-type": "application/json"}
+    response = as_served(
+        {"description": "Fuga de agua en el baño", "intake_answers": {"n": [1, True, None]}}
     )
 
     assert pro_text(response) == response.text
