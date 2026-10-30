@@ -1316,6 +1316,8 @@ export interface components {
             location: components["schemas"]["OpportunityLocation"];
             /** Preferred Date */
             preferred_date: string | null;
+            /** @description Set whenever preferred_date is; null without one. */
+            preferred_period: components["schemas"]["PreferredPeriod"] | null;
             /**
              * Sent At
              * Format: date-time
@@ -1431,6 +1433,8 @@ export interface components {
             location: components["schemas"]["OpportunityLocation"];
             /** Preferred Date */
             preferred_date: string | null;
+            /** @description Set whenever preferred_date is; null without one. */
+            preferred_period: components["schemas"]["PreferredPeriod"] | null;
             /**
              * Sent At
              * Format: date-time
@@ -1519,6 +1523,13 @@ export interface components {
          * @enum {string}
          */
         PreferenceGroup: "job_updates" | "quotes_and_opportunities" | "reminders" | "marketing" | "account_and_security";
+        /**
+         * PreferredPeriod
+         * @description When in the preferred day the customer would like the visit (#237). Pros propose the
+         *     exact start in their quote; the period only refines a preferred date.
+         * @enum {string}
+         */
+        PreferredPeriod: "morning" | "afternoon" | "evening" | "flexible";
         /**
          * ProDocumentStatus
          * @enum {string}
@@ -1827,6 +1838,8 @@ export interface components {
              * @description Today or later, as a UTC date.
              */
             preferred_date?: string | null;
+            /** @description When in the preferred date. Defaults to flexible with a date; without one, only flexible (or nothing) is accepted, and none is stored. */
+            preferred_period?: components["schemas"]["PreferredPeriod"] | null;
             /**
              * Intake Answers
              * @description Answers to the category's intake_questions (GET /v1/categories), by question key: an integer, an option value, a list of distinct option values, a boolean or a text, as each question's type says. Empty without a category. A size limit applies; NUL characters and non-finite numbers are refused. Text is stored trimmed.
@@ -1871,6 +1884,8 @@ export interface components {
             address: components["schemas"]["AddressOut"];
             /** Preferred Date */
             preferred_date: string | null;
+            /** @description Set whenever preferred_date is; null without one. */
+            preferred_period: components["schemas"]["PreferredPeriod"] | null;
             /** Intake Answers */
             intake_answers: {
                 [key: string]: components["schemas"]["JsonValue"];

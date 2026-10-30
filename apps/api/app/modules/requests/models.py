@@ -4,7 +4,7 @@ from enum import StrEnum
 from typing import Final
 
 from pydantic import JsonValue
-from sqlalchemy import DateTime, ForeignKey, String, Text, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,8 +37,25 @@ class RequestOrigin(StrEnum):
     PHONE = "phone"
 
 
+class PreferredPeriod(StrEnum):
+    """When in the preferred day the customer would like the visit (#237). Pros propose the
+    exact start in their quote; the period only refines a preferred date."""
+
+    MORNING = "morning"
+    AFTERNOON = "afternoon"
+    EVENING = "evening"
+    FLEXIBLE = "flexible"
+
+
 class ServiceRequest(IdTimestampsMixin, Base):
     __tablename__ = "service_requests"
+    __table_args__ = (
+        # Without a date the customer is flexible, stored as NULL: a period refines a date.
+        CheckConstraint(
+            "preferred_period IS NULL OR preferred_date IS NOT NULL",
+            name="preferred_period_needs_date",
+        ),
+    )
 
     # Shown to customers and the BDC (e.g. JF-000124); the id stays internal.
     public_code: Mapped[str] = mapped_column(
@@ -56,6 +73,10 @@ class ServiceRequest(IdTimestampsMixin, Base):
     urgency: Mapped[str | None] = mapped_column(String(32))
     preferred_contact: Mapped[str | None] = mapped_column(String(32))
     preferred_date: Mapped[date | None]
+    # Set whenever preferred_date is (flexible by default); NULL without a date.
+    preferred_period: Mapped[PreferredPeriod | None] = mapped_column(
+        str_enum(PreferredPeriod, "preferred_period")
+    )
     language: Mapped[str] = mapped_column(String(8), server_default="en")
     status: Mapped[RequestStatus] = mapped_column(
         str_enum(RequestStatus, "request_status"),

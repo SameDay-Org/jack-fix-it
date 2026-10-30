@@ -132,6 +132,10 @@ matches pros by hand when needed and follows each job to the end.
 category, location and date. It is also the BDC queue item. Identified to people by its public
 code, e.g. `JF-000124`.
 
+**Preferred period**: when in the request's preferred date the customer would like the visit:
+`morning`, `afternoon`, `evening` or `flexible` (the default). Without a date the customer is
+flexible and no period is stored. Pros propose the exact start in their quote.
+
 **Dispatch**: sending a request to up to N eligible pros of its category and ZIP.
 
 **Quote** (orçamento): a pro's fixed price for a request, with what is included, duration and

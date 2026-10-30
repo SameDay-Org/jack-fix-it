@@ -22,6 +22,7 @@ from app.modules.dispatch.models import DispatchStatus, RequestDispatch
 from app.modules.dispatch.schemas import OpportunityDetail, OpportunityPage, OpportunitySummary
 from app.modules.pros.models import ProProfile
 from app.modules.requests.models import (
+    PreferredPeriod,
     RequestMedia,
     RequestMediaKind,
     RequestOrigin,
@@ -125,6 +126,7 @@ async def make_request(
     world: World,
     status: RequestStatus = RequestStatus.FINDING_PRO,
     description: str = DESCRIPTION,
+    preferred_period: PreferredPeriod | None = None,
 ) -> uuid.UUID:
     # Every field a pro must never see is filled, so a leak would show.
     request = ServiceRequest(
@@ -134,6 +136,7 @@ async def make_request(
         description=description,
         intake_answers={"rooms": 2},
         preferred_date=date(2026, 11, 3),
+        preferred_period=preferred_period,
         origin=RequestOrigin.APP,
         status=status,
         utm={"campaign": UTM},
@@ -219,10 +222,31 @@ async def test_lists_only_callers_active_dispatches(
         "description_excerpt",
         "location",
         "preferred_date",
+        "preferred_period",
         "sent_at",
         "viewed",
         "text_redacted",
     }
+
+
+@pytest.mark.parametrize("period", [*PreferredPeriod, None], ids=str)
+async def test_opportunity_summary_and_detail_show_the_period(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    storage: FakeStorage,
+    period: PreferredPeriod | None,
+) -> None:
+    """None: a request stored before #237, whose date kept a NULL period."""
+    request_id = await make_request(db_session, world, preferred_period=period)
+    dispatch_id = await dispatch(db_session, request_id, world.me)
+
+    [summary] = (await listed(db_client, world.me)).json()["items"]
+    detail = (await db_client.get(f"{BASE}/{dispatch_id}", headers=world.me.caller.headers)).json()
+
+    expected = (date(2026, 11, 3).isoformat(), period.value if period else None)
+    assert (summary["preferred_date"], summary["preferred_period"]) == expected
+    assert (detail["preferred_date"], detail["preferred_period"]) == expected
 
 
 async def test_detail_marks_viewed_once_and_sets_viewed_at(
@@ -366,6 +390,7 @@ async def test_response_never_contains_customer_contact_or_street(
         "intake_answers",
         "location",
         "preferred_date",
+        "preferred_period",
         "sent_at",
         "viewed_at",
         "text_redacted",
@@ -395,6 +420,7 @@ SUMMARY = {
     "description_excerpt": "Water leaks",
     "location": LOCATION,
     "preferred_date": None,
+    "preferred_period": None,
     "sent_at": T0.isoformat(),
     "viewed": False,
     "text_redacted": False,
@@ -407,6 +433,7 @@ DETAIL = {
     "intake_answers": {},
     "location": LOCATION,
     "preferred_date": None,
+    "preferred_period": None,
     "sent_at": T0.isoformat(),
     "viewed_at": None,
     "text_redacted": False,
