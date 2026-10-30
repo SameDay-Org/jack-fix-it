@@ -95,7 +95,9 @@ function Pro({ open = false }: { open?: boolean }) {
 
 /**
  * The Vault's sequence up to the race: page 1 is [A, B], page 2 fails, its retry is pending when
- * A's detail answers 404. Returns the pending page and the rendered tree.
+ * A's detail answers 404. Returns the pending page and the rendered tree once the screen shows
+ * the denial: the cache changes before the list re-renders (TanStack notifies on a later timer),
+ * so the retry stays held until the cards and the footer are observed.
  */
 async function denyDuringPendingRetry(client: QueryClient) {
   const retried = deferred<OpportunityPage>();
@@ -117,6 +119,9 @@ async function denyDuringPendingRetry(client: QueryClient) {
   await view.rerender(<Pro open />);
   expect(await screen.findByText(GONE)).toBeTruthy();
   await waitFor(() => expect(cachedIds(client)).toEqual([B.dispatch_id]));
+  // The skeleton showed until now: the failed-page notice is back only once the cancel renders.
+  expect(await screen.findByText(MORE_FAILED)).toBeTruthy();
+  await waitFor(() => expect(cardIds()).toEqual([B.dispatch_id]));
   return { retried, view };
 }
 
