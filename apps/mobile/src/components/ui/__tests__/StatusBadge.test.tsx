@@ -33,6 +33,18 @@ describe("StatusBadge", () => {
     expect(screen.getByText("Pending").props.className).not.toMatch(/warning/);
   });
 
+  it("ends the label and its skeleton copy with a thin space, the room Android needs to draw it", async () => {
+    // Android can draw a label a sub-pixel wider than it measured it, and broke "Request Received"
+    // after its first word; line ends take no width when it breaks lines, so the space is room.
+    await render(<StatusBadge label="Request Received" tone="info" testID="badge" />);
+    expect(screen.getByText("Request Received").props.children).toBe("Request Received\u2009");
+
+    await render(<StatusBadgeSkeleton label="Request Received" testID="badge-skeleton" />);
+    expect(
+      screen.getByText("Request Received", { includeHiddenElements: true }).props.children,
+    ).toBe("Request Received\u2009");
+  });
+
   it("the skeleton is the same pill around an invisible copy of the label", async () => {
     await render(<StatusBadgeSkeleton label="Scheduled" testID="badge-skeleton" />);
 

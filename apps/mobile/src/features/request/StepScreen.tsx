@@ -110,7 +110,11 @@ export function StepScreen({
           style={risen ? entrance.contentStyle : undefined}
           onLayout={risen ? entrance.enter : undefined}
         >
-          <View className="gap-3 px-4 pt-2">
+          {/* The header and the action bar are opaque and drawn over the scroll view: Android draws
+              its content past its frame, and a scrolled step showed through under the progress.
+              The header's bottom padding keeps the content's cut edge off the progress; the
+              content's top padding is that much shorter, so the step at rest does not move. */}
+          <View className="z-10 gap-3 bg-gray-50 px-4 pb-2 pt-2">
             <View className="flex-row items-center justify-between">
               <Button
                 label={t("common.back")}
@@ -140,7 +144,7 @@ export function StepScreen({
           </View>
           <ScrollView
             ref={scroll}
-            contentContainerClassName="gap-6 px-4 pb-6 pt-6"
+            contentContainerClassName="gap-6 px-4 pb-6 pt-4"
             keyboardShouldPersistTaps="handled"
             testID={`${testID}-scroll`}
           >
@@ -157,7 +161,7 @@ export function StepScreen({
             </View>
             {children}
           </ScrollView>
-          <View className="px-4 pb-4 pt-2">{action}</View>
+          <View className="z-10 bg-gray-50 px-4 pb-4 pt-2">{action}</View>
         </Animated.View>
       </KeyboardAvoidingView>
     </Screen>

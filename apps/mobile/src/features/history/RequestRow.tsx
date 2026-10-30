@@ -55,12 +55,13 @@ const styles = StyleSheet.create({
 });
 
 /**
- * The placeholder's sample rows, in the app's language: the general-repairs category of the seed,
- * whose name is among the catalog's longest in Spanish, and a code with the longest day word.
+ * The placeholder's sample rows, in the app's language: a one-line category name of the seed, so
+ * the name keeps one line for most rows at any font scale (the longest Spanish names wrap at a
+ * large one and grow their row when it loads), and a code with the longest day word.
  */
 const SAMPLE_CATEGORY: Record<ReturnType<typeof deviceLocale>, string> = {
   en: "Handyman",
-  es: "Reparaciones generales",
+  es: "Pintura",
 };
 const SAMPLE_CODE = "JF-000124";
 
