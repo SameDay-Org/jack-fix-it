@@ -402,13 +402,15 @@ async def test_create_with_date_defaults_period_to_flexible(
     ana = await make_caller(db_session)
     tomorrow = (datetime.now(UTC).date() + timedelta(days=1)).isoformat()
 
-    response = await create(db_client, ana, preferred_date=tomorrow)
+    absent = await create(db_client, ana, preferred_date=tomorrow)
+    explicit_null = await create(db_client, ana, preferred_date=tomorrow, preferred_period=None)
 
-    assert response.status_code == 201
-    out = response.json()
-    assert out["preferred_date"] == tomorrow
-    assert out["preferred_period"] == "flexible"
-    assert await stored_period(db_session, out["id"]) is PreferredPeriod.FLEXIBLE
+    for response in (absent, explicit_null):
+        assert response.status_code == 201
+        out = response.json()
+        assert out["preferred_date"] == tomorrow
+        assert out["preferred_period"] == "flexible"
+        assert await stored_period(db_session, out["id"]) is PreferredPeriod.FLEXIBLE
 
 
 @pytest.mark.parametrize("period", list(PreferredPeriod))
@@ -436,15 +438,23 @@ async def test_create_with_date_and_period_stores_it(
     )
 
 
-@pytest.mark.parametrize("period", [None, "flexible"], ids=["absent", "flexible"])
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {},
+        {"preferred_period": "flexible"},
+        {"preferred_date": None, "preferred_period": None},
+        {"preferred_date": None, "preferred_period": "flexible"},
+    ],
+    ids=["absent", "flexible", "explicit-nulls", "null-date-flexible"],
+)
 async def test_create_without_date_period_absent_or_flexible_is_null(
     db_client: httpx.AsyncClient,
     db_session: AsyncSession,
     storage: FakeStorage,
-    period: str | None,
+    overrides: dict[str, str | None],
 ) -> None:
     ana = await make_caller(db_session)
-    overrides = {} if period is None else {"preferred_period": period}
 
     response = await create(db_client, ana, **overrides)
 
