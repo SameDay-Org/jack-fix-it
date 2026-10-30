@@ -5,6 +5,7 @@ the canary email and phone, at the canary street, then dispatched; the pro's fee
 are checked on their serialized values. The customer's own view keeps the text as written.
 """
 
+import json
 import logging
 import unicodedata
 import uuid
@@ -13,12 +14,14 @@ from typing import Any, Literal
 import httpx
 import pytest
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.storage import get_storage
 from app.modules.categories.intake import INTAKE_QUESTIONS
 from app.modules.categories.models import Category
+from app.modules.dispatch.schemas import OpportunityDetail, OpportunityPage
 from app.modules.jobs.service import SYSTEM
 from app.modules.requests.state_machine import RequestStateMachine, RequestStatus
 from app.modules.service_areas.models import ServiceArea
@@ -65,6 +68,26 @@ STREET = ADDRESS["line1"]
 CONTACT_TEXT = f"{EMAIL}; call {PHONE}; repair the sink at {STREET}, Apt 4."
 # Every form a canary could take in the JSON.
 CANARIES = (EMAIL, "privacy-canary", "example.invalid", PHONE, "5555550199", STREET)
+# What the server issues (ids, the public code, timestamps, signed URLs, the cursor) is random,
+# sequential or read from the clock, so a short numeric canary such as "1200" can turn up
+# inside it by chance (#283). Leak checks blank these fields of OpportunityPage and
+# OpportunityDetail by path, from the root ("*" is any list item); every other value, the
+# customer's text and any field not named here, is read as served (#286).
+SERVER_PATHS: frozenset[tuple[str, ...]] = frozenset({
+    ("items", "*", "dispatch_id"),
+    ("items", "*", "public_code"),
+    ("items", "*", "category", "id"),
+    ("items", "*", "sent_at"),
+    ("next_cursor",),
+    ("dispatch_id",),
+    ("public_code",),
+    ("category", "id"),
+    ("sent_at",),
+    ("viewed_at",),
+    ("media", "*", "url"),
+    ("media", "*", "expires_at"),
+})  # fmt: skip
+SERVER_VALUE = "<server>"
 
 QUESTIONS: list[dict[str, Any]] = [
     {"key": "notes", "type": "text", "required": False, "max_length": 500,
@@ -131,10 +154,161 @@ async def dispatched(
     return customer, pro, request_id, await dispatch(session, request_id, pro), category_id
 
 
+def _without_server_values(value: Any, path: tuple[str, ...] = ()) -> Any:
+    if path in SERVER_PATHS:
+        return SERVER_VALUE
+    if isinstance(value, dict):
+        return {key: _without_server_values(item, (*path, key)) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_without_server_values(item, (*path, "*")) for item in value]
+    return value
+
+
+def pro_text(response: httpx.Response) -> str:
+    """The response as a leak check reads it: the server-issued fields blanked, everything
+    else serialized compactly with non-ASCII kept, as the API serves JSON."""
+    return json.dumps(
+        _without_server_values(response.json()),
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    )
+
+
 def assert_no_canary(response: httpx.Response) -> None:
     assert response.status_code == 200, response.text
     for canary in CANARIES:
-        assert canary not in response.text, canary
+        assert canary not in pro_text(response), canary
+
+
+# The oracle's own controls (#286): a canary-shaped number inside a server-issued field is not a
+# leak; the same text where the customer writes, or in a field SERVER_PATHS does not name, is.
+# The bodies pass the response schemas, so every path they hold is one the API serves.
+SENT_AT = "2026-10-30T04:00:00Z"
+CATEGORY = {"id": str(uuid.UUID(int=2)), "slug": "plumbing", "names": {"en": "Plumbing"}}
+LOCATION = {"zip_code": ADDRESS["zip_code"], "city": "Orlando"}
+SERVED_PAGE = OpportunityPage.model_validate({
+    "items": [{
+        "dispatch_id": str(uuid.UUID(int=1)), "public_code": "JF-000001", "category": CATEGORY,
+        "description_excerpt": "Repair the leaking kitchen sink.", "location": LOCATION,
+        "preferred_date": None, "preferred_period": None, "sent_at": SENT_AT, "viewed": False,
+        "text_redacted": False,
+    }],
+    "next_cursor": "opaque-cursor",
+}).model_dump(mode="json")  # fmt: skip
+SERVED_DETAIL = OpportunityDetail.model_validate({
+    "dispatch_id": str(uuid.UUID(int=1)), "public_code": "JF-000001", "category": CATEGORY,
+    "description": "Repair the leaking kitchen sink.",
+    "intake_answers": {"notes": "Under the sink", "rooms": 2}, "location": LOCATION,
+    "preferred_date": None, "preferred_period": None, "sent_at": SENT_AT, "viewed_at": SENT_AT,
+    "text_redacted": False,
+    "media": [{
+        "kind": "photo", "content_type": "image/jpeg",
+        "url": "https://storage.test/get/m/copy?sig=fake", "expires_at": SENT_AT,
+    }],
+    "media_pending": 0, "take_rate_bps": 0, "quote_max_amount_cents": None,
+    "quote_max_duration_minutes": None,
+}).model_dump(mode="json")  # fmt: skip
+LEAKED = "5555550199"
+
+
+def server_shaped(number: str) -> dict[str, str]:
+    """`number` inside each server-issued value, by field name."""
+    stamp = f"2026-10-30T04:00:00.{number}Z"
+    return {
+        "dispatch_id": f"a0000000-0000-4000-8000-{number:0>12}",
+        "id": f"b0000000-0000-4000-8000-{number:0>12}",
+        "public_code": f"JF-{number:0>6}",
+        "sent_at": stamp,
+        "viewed_at": stamp,
+        "expires_at": stamp,
+        "url": f"https://storage.test/get/m/{number}?sig=fake",
+        "next_cursor": number,
+    }
+
+
+def placed(node: Any, path: tuple[str, ...], value: Any) -> Any:
+    """A copy of `node` holding `value` at `path` ("*" is the first list item), made as needed."""
+    if not path:
+        return value
+    head, rest = path[0], path[1:]
+    if head == "*":
+        items = list(node) if isinstance(node, list) and node else [{}]
+        return [placed(items[0], rest, value), *items[1:]]
+    fields = dict(node) if isinstance(node, dict) else {}
+    return {**fields, head: placed(fields.get(head), rest, value)}
+
+
+def as_served(body: Any) -> httpx.Response:
+    """`body` serialized compactly with non-ASCII kept, as the API serves JSON."""
+    return httpx.Response(
+        200,
+        content=bytes(JSONResponse(body).body),
+        headers={"content-type": "application/json"},
+    )
+
+
+def served(path: tuple[str, ...], value: Any) -> httpx.Response:
+    """The page or the detail, as served, with `value` at `path`."""
+    body = SERVED_PAGE if path[0] in ("items", "next_cursor") else SERVED_DETAIL
+    return as_served(placed(body, path, value))
+
+
+@pytest.mark.parametrize("number", [LEAKED, "1200"])
+@pytest.mark.parametrize("path", sorted(SERVER_PATHS), ids="/".join)
+def test_a_number_inside_a_server_issued_field_is_not_a_leak(
+    path: tuple[str, ...], number: str
+) -> None:
+    response = served(path, server_shaped(number)[path[-1]])
+
+    assert number in response.text
+    assert number not in pro_text(response)
+    assert_no_canary(response)
+
+
+CUSTOMER_TEXTS = [
+    ("Call JF-5555550199 about the sink", LEAKED),
+    *(
+        (text, number)
+        for number in (LEAKED, "1200")
+        for text in dict.fromkeys(server_shaped(number).values())
+    ),
+]
+UNNAMED_PATHS = [
+    ("items", "*", "description_excerpt"),
+    ("items", "*", "location", "zip_code"),
+    ("items", "*", "location", "city"),
+    ("items", "*", "unexpected"),
+    ("description",),
+    ("intake_answers", "notes"),
+    ("intake_answers", "rooms", "*", "notes"),
+    ("intake_answers", "dispatch_id"),
+    ("intake_answers", "sent_at"),
+    ("location", "zip_code"),
+    ("media", "*", "content_type"),
+    ("unexpected",),
+]
+
+
+@pytest.mark.parametrize(("text", "number"), CUSTOMER_TEXTS)
+@pytest.mark.parametrize("path", UNNAMED_PATHS, ids="/".join)
+def test_the_same_text_anywhere_else_is_read_as_served(
+    path: tuple[str, ...], text: str, number: str
+) -> None:
+    response = served(path, text)
+
+    assert number in pro_text(response)
+    if number == LEAKED:
+        with pytest.raises(AssertionError):
+            assert_no_canary(response)
+
+
+def test_the_oracle_serializes_like_the_server() -> None:
+    response = as_served(
+        {"description": "Fuga de agua en el baño", "intake_answers": {"n": [1, True, None]}}
+    )
+
+    assert pro_text(response) == response.text
 
 
 async def test_description_contacts_masked_in_the_list_excerpt(
@@ -451,7 +625,7 @@ async def test_ordinary_contacts_never_reach_a_pro(
     )
 
     assert response.status_code == 200, response.text
-    assert secret not in response.text, f"{name} leaked through {source}/{route}"
+    assert secret not in pro_text(response), f"{name} leaked through {source}/{route}"
     body = response.json()
     flagged = body["items"][0]["text_redacted"] if route == "list" else body["text_redacted"]
     assert flagged is True
@@ -648,7 +822,7 @@ async def test_pros_see_the_service_areas_city_never_the_typed_one(
     assert detail.json()["location"] == expected
     for response in (listing, detail):
         for canary in CANARIES:
-            assert canary not in response.text, canary
+            assert canary not in pro_text(response), canary
     # The customer's own view keeps what they typed.
     own = await db_client.get(f"/v1/requests/{request_id}", headers=customer.headers)
     assert own.json()["address"]["city"] == typed
@@ -675,9 +849,9 @@ async def test_a_zip_without_an_active_area_shows_no_city(
     assert listing.json()["items"][0]["location"] == expected
     assert detail.json()["location"] == expected
     for response in (listing, detail):
-        assert "Orlando" not in response.text
+        assert "Orlando" not in pro_text(response)
         for canary in CANARIES:
-            assert canary not in response.text, canary
+            assert canary not in pro_text(response), canary
     missing = [r for r in caplog.records if r.getMessage() == "opportunity_city_missing"]
     assert missing
     assert {r.__dict__["service_request_id"] for r in missing} == {str(request_id)}
@@ -693,7 +867,7 @@ async def test_a_zip_plus_four_is_shown_as_its_five_digits(
     _, detail = await pro_reads(db_client, pro, dispatch_id)
 
     assert detail.json()["location"] == {"zip_code": ADDRESS["zip_code"], "city": "Orlando"}
-    assert "1234" not in detail.text
+    assert "1234" not in pro_text(detail)
 
 
 # Every customer-controlled field holds a canary. Free text pros are meant to read (the
@@ -761,6 +935,6 @@ async def test_no_customer_controlled_field_reaches_a_pro(
 
     for response in (listing, detail):
         for canary in PROVENANCE_CANARIES:
-            assert canary.lower() not in response.text.lower(), canary
+            assert canary.lower() not in pro_text(response).lower(), canary
     assert detail.json()["location"] == {"zip_code": ADDRESS["zip_code"], "city": "Orlando"}
     assert detail.json()["text_redacted"] is True
