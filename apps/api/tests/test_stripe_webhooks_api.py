@@ -93,11 +93,12 @@ class Webhook:
     async def post(
         self, body: bytes, signature: str | None = None, *, sign_it: bool = True
     ) -> httpx.Response:
-        headers = {"Content-Type": "application/json"}
+        headers = {b"Content-Type": b"application/json"}
         if signature is None and sign_it:
             signature = sign(body)
         if signature is not None:
-            headers["Stripe-Signature"] = signature
+            # Bytes: httpx wants ASCII in a str header, and a client may send any byte.
+            headers[b"Stripe-Signature"] = signature.encode("latin-1")
         return await self.client.post("/v1/webhooks/stripe", content=body, headers=headers)
 
     async def rows(self, event_id: str) -> list[WebhookEvent]:
@@ -343,6 +344,11 @@ def _no_v1_signature(body: bytes) -> tuple[bytes, str | None]:
     return body, sign(body).replace("v1=", "v0=")
 
 
+def _non_ascii_signature(body: bytes) -> tuple[bytes, str | None]:
+    # Sent as latin-1 bytes; Starlette decodes header values as latin-1.
+    return body, sign(body) + ",v1=" + chr(0xE9)
+
+
 @pytest.mark.parametrize(
     "tamper",
     [
@@ -352,6 +358,7 @@ def _no_v1_signature(body: bytes) -> tuple[bytes, str | None]:
         _expired_timestamp,
         _malformed_header,
         _no_v1_signature,
+        _non_ascii_signature,
     ],
 )
 async def test_invalid_signature_returns_400(

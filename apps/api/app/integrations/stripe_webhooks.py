@@ -21,8 +21,8 @@ MAX_FIELD_LENGTH: Final = 255
 
 
 class InvalidSignatureError(Exception):
-    """No header, a malformed one, no `v1` signature matching the body, a timestamp older than
-    the tolerance, or a body that is not UTF-8 (Stripe signs text)."""
+    """No header, a malformed or non-ASCII one, no `v1` signature matching the body, a timestamp
+    older than the tolerance, or a body that is not UTF-8 (Stripe signs text)."""
 
 
 class InvalidPayloadError(Exception):
@@ -48,6 +48,9 @@ def verify_event(
     if tolerance <= 0:
         # The SDK skips the timestamp check on a falsy tolerance: a replay would never expire.
         raise ValueError("tolerance must be positive")
+    if signature is not None and not signature.isascii():
+        # The SDK's compare_digest raises TypeError on a non-ASCII string.
+        raise InvalidSignatureError
     try:
         stripe.WebhookSignature.verify_header(payload, signature, secret, tolerance)
     except (stripe.SignatureVerificationError, UnicodeDecodeError):
