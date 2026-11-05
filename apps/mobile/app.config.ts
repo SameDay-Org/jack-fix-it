@@ -26,10 +26,12 @@ const PERMISSION_PROMPTS = {
   en: {
     NSCameraUsageDescription: en.permissions.camera,
     NSPhotoLibraryUsageDescription: en.permissions.photos,
+    NSMotionUsageDescription: en.permissions.motion,
   },
   es: {
     NSCameraUsageDescription: es.permissions.camera,
     NSPhotoLibraryUsageDescription: es.permissions.photos,
+    NSMotionUsageDescription: es.permissions.motion,
   },
 };
 
@@ -78,6 +80,22 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           microphonePermission: false,
         },
       ],
+      // The ID card (#250, added in #251; each needs a new dev build). The in-screen selfie
+      // preview: the same camera string as the picker, photos only (no microphone string on iOS,
+      // no RECORD_AUDIO on Android) and no barcode scanner, which keeps ML Kit out of the build.
+      [
+        "expo-camera",
+        {
+          cameraPermission: en.permissions.camera,
+          microphonePermission: false,
+          recordAudioAndroid: false,
+          barcodeScannerEnabled: false,
+        },
+      ],
+      // The gyroscope behind the card's tilt and sheen; iOS wants the motion string in Info.plist.
+      ["expo-sensors", { motionPermission: en.permissions.motion }],
+      // The share sheet for the card's PNG. Without options the app receives no shares.
+      "expo-sharing",
     ],
     locales: {
       en: { ios: PERMISSION_PROMPTS.en },
