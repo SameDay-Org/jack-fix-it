@@ -297,6 +297,9 @@ class Settings(BaseSettings):
     stripe_payment_intent_reconcile_after_seconds: int = Field(
         default=72_000, gt=0, lt=STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS
     )
+    # Job execution (D12.2, #63): wrong arrival codes a pro may enter at check-in before the
+    # code locks and the BDC is alerted (Cesar, 2026-10-29: 5).
+    arrival_code_max_attempts: int = Field(default=5, gt=0)
     # The API's public base URL, such as https://api.example.com: Stripe sends the pro's browser
     # back to its onboarding pages there. Required with Stripe in staging and production (https).
     public_api_url: str | None = None

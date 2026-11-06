@@ -25,7 +25,7 @@ from app.modules.users.errors import (
     PublicCodeExhaustedError,
 )
 from app.modules.users.models import User
-from app.modules.users.names import safe_public_name
+from app.modules.users.names import safe_first_name, safe_public_name
 from app.modules.users.repository import UserRepository
 from app.modules.users.types import (
     KEEP,
@@ -89,6 +89,17 @@ class UserService:
                 first, last, KnownValues(emails=(email,), phones=(phone,) if phone else ())
             )
             for user_id, first, last, email, phone in await self._users.names(user_ids)
+        }
+
+    async def first_names(self, user_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str | None]:
+        """Each user's first name alone, read in one query: what the pro of a paid job sees of
+        the customer (#63). None when it is missing or shows a contact detail, the user's own
+        email and phone included (names.safe_first_name). Never the last name or a contact."""
+        return {
+            user_id: safe_first_name(
+                first, KnownValues(emails=(email,), phones=(phone,) if phone else ())
+            )
+            for user_id, first, _, email, phone in await self._users.names(user_ids)
         }
 
     async def get_by_id(self, user_id: uuid.UUID) -> UserAccount | None:

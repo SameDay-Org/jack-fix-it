@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 
 from sqlalchemy import and_, case, exists, or_, select, update
@@ -10,6 +11,15 @@ from app.modules.quotes.models import Quote, QuoteStatus
 class QuoteRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def proposed_starts(
+        self, quote_ids: Collection[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, datetime]]:
+        """(id, proposed_start_at) only."""
+        if not quote_ids:
+            return []
+        statement = select(Quote.id, Quote.proposed_start_at).where(Quote.id.in_(quote_ids))
+        return [(row[0], row[1]) for row in (await self._session.execute(statement)).all()]
 
     async def exists_for(self, request_id: uuid.UUID, pro_id: uuid.UUID) -> bool:
         statement = select(exists().where(Quote.request_id == request_id, Quote.pro_id == pro_id))

@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.errors import NotFoundError
 from app.integrations.storage import Storage
-from app.modules.addresses.schemas import AddressArea
+from app.modules.addresses.schemas import AddressArea, AddressOut
 from app.modules.addresses.service import AddressService
 from app.modules.auth.permissions import ensure_owner
 from app.modules.categories.intake import InvalidAnswersError, validate_answers
@@ -409,6 +409,16 @@ class RequestForPro:
 
 
 @dataclass(frozen=True)
+class RequestForJob:
+    """A request as the pro of its paid job sees it (#63): the opportunity's view (RequestForPro:
+    the free text still redacted, no customer or contact) plus the whole address, which they need
+    to get there. No coordinates."""
+
+    view: RequestForPro
+    address: AddressOut
+
+
+@dataclass(frozen=True)
 class SafeMedia:
     """A photo or video's privacy-safe copy (#173), as a pro may be shown it. It has no
     original key (file_key), so nothing built on it can sign the customer's file. The key is
@@ -436,7 +446,8 @@ def media_keys_among(keys: Collection[str]) -> Select[str]:
 
 
 class ProRequestReader:
-    """Read-only access for the pro opportunities (#49), through this module (ADR 0003)."""
+    """Read-only access for the pro opportunities (#49) and the pro's jobs (#63), through this
+    module (ADR 0003)."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._requests = ServiceRequestRepository(session)
@@ -457,6 +468,21 @@ class ProRequestReader:
         rows = [
             r for r in await self._requests.get_many(request_ids) if r.status in OPEN_FOR_QUOTES
         ]
+        return await self._views(rows)
+
+    async def job_views(self, request_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, RequestForJob]:
+        """The requests among `request_ids`, whatever their status, as the pro of their paid job
+        sees them (#63): the opportunity's view and the full address. Call it for the caller's
+        own jobs only: it does not check that."""
+        rows = await self._requests.get_many(request_ids)
+        views = await self._views(rows)
+        addresses = await self._addresses.full_many([r.address_id for r in rows])
+        return {
+            row.id: RequestForJob(view=views[row.id], address=addresses[row.address_id])
+            for row in rows
+        }
+
+    async def _views(self, rows: list[ServiceRequest]) -> dict[uuid.UUID, RequestForPro]:
         zip_codes = await self._addresses.zip_codes([r.address_id for r in rows])
         cities = await self._service_areas.canonical_cities(zip_codes.values())
         # What each customer's own details are, read once per page, for the known-value pass.

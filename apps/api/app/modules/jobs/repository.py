@@ -1,9 +1,11 @@
 import uuid
+from collections.abc import Collection
+from datetime import datetime
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.jobs.models import Job, JobEvent
+from app.modules.jobs.models import Job, JobEvent, JobStatus
 
 
 class JobRepository:
@@ -24,6 +26,42 @@ class JobRepository:
             .execution_options(populate_existing=True)
         )
         return (await self._session.scalars(statement)).one_or_none()
+
+    async def get_of_request(self, request_id: uuid.UUID) -> Job | None:
+        """The request's job (one per request), unlocked: for reads."""
+        return (
+            await self._session.scalars(select(Job).where(Job.request_id == request_id))
+        ).one_or_none()
+
+    async def get(self, job_id: uuid.UUID) -> Job | None:
+        """The job, unlocked: for reads."""
+        return await self._session.get(Job, job_id)
+
+    async def page_for_pro(
+        self,
+        pro_id: uuid.UUID,
+        statuses: Collection[JobStatus] | None,
+        limit: int,
+        before: tuple[datetime, uuid.UUID] | None,
+    ) -> list[Job]:
+        """The pro's jobs, newest first (created_at, then id), optionally in `statuses` only,
+        after the cursor `before`."""
+        statement = select(Job).where(Job.pro_id == pro_id)
+        if statuses is not None:
+            statement = statement.where(Job.status.in_(statuses))
+        if before is not None:
+            statement = statement.where(tuple_(Job.created_at, Job.id) < tuple_(*before))
+        statement = statement.order_by(Job.created_at.desc(), Job.id.desc()).limit(limit)
+        return list((await self._session.scalars(statement)).all())
+
+    async def events_of(self, job_id: uuid.UUID) -> list[JobEvent]:
+        """The job's history, oldest first."""
+        statement = (
+            select(JobEvent)
+            .where(JobEvent.job_id == job_id)
+            .order_by(JobEvent.created_at, JobEvent.id)
+        )
+        return list((await self._session.scalars(statement)).all())
 
     async def exists_for_request(self, request_id: uuid.UUID) -> bool:
         statement = select(exists().where(Job.request_id == request_id))

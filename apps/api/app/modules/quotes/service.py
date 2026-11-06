@@ -66,7 +66,7 @@ service, never the repository).
 
 import logging
 import uuid
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -418,10 +418,14 @@ class LockedQuote:
 
 class QuoteReader:
     """A request's quote for other modules (ADR 0003): the payment (#58) reads the accepted
-    one, locked."""
+    one, locked; a job (#63) reads its quote's proposed start, its scheduled start."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._quotes = QuoteRepository(session)
+
+    async def proposed_starts(self, quote_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, datetime]:
+        """Each quote's proposed start, in one query: nothing else of the quote."""
+        return dict(await self._quotes.proposed_starts(quote_ids))
 
     async def lock_of_request(
         self, quote_id: uuid.UUID, request_id: uuid.UUID
