@@ -34,6 +34,9 @@ export const requestCameraPermissionsAsync = jest.fn(
 
 export const Camera = { getCameraPermissionsAsync, requestCameraPermissionsAsync };
 
+/** With a message here, every active preview fails to mount with it instead of reporting ready. */
+export const cameraMock = { mountError: null as string | null };
+
 type PermissionHook = [
   PermissionResponse | null,
   () => Promise<PermissionResponse>,
@@ -78,13 +81,16 @@ export function CameraView({
   mode,
   mute,
   onCameraReady,
+  onMountError,
   style,
   testID,
   accessibilityLabel,
 }: CameraViewProps) {
   useEffect(() => {
-    if (active) onCameraReady?.();
-  }, [active, onCameraReady]);
+    if (!active) return;
+    if (cameraMock.mountError) onMountError?.({ message: cameraMock.mountError });
+    else onCameraReady?.();
+  }, [active, onCameraReady, onMountError]);
 
   return (
     <HostCamera

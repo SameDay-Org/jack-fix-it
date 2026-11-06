@@ -1,6 +1,6 @@
 // Dev-only smoke screen content for the ID card libraries (#251), unreachable outside __DEV__: the
 // sample strings are literal on purpose. One section per library, each proving it loads and runs.
-import { CameraView, PermissionStatus, useCameraPermissions } from "expo-camera";
+import { CameraView, PermissionStatus, useCameraPermissions, type CameraType } from "expo-camera";
 import { useIsFocused } from "expo-router";
 import { useState, type ReactNode, type RefObject } from "react";
 import { Image, Linking, StyleSheet, Text, View } from "react-native";
@@ -42,8 +42,17 @@ function Section({ title, badge, children }: { title: string; badge: Badge; chil
 
 function CameraSection() {
   const [permission, requestPermission] = useCameraPermissions();
+  const [facing, setFacing] = useState<CameraType>("front");
   const [ready, setReady] = useState(false);
+  const [mountError, setMountError] = useState<string | null>(null);
   const focused = useIsFocused();
+
+  // An emulator may have one lens only: the other one proves the preview there.
+  const flip = () => {
+    setFacing((current) => (current === "front" ? "back" : "front"));
+    setReady(false);
+    setMountError(null);
+  };
 
   if (!permission) {
     return (
@@ -53,27 +62,40 @@ function CameraSection() {
     );
   }
   if (permission.granted) {
+    const badge: Badge = mountError
+      ? { label: "Failed", tone: "danger" }
+      : ready
+        ? { label: "Ready", tone: "success" }
+        : { label: "Starting", tone: "info" };
     return (
-      <Section
-        title="Camera"
-        badge={ready ? { label: "Ready", tone: "success" } : { label: "Starting", tone: "info" }}
-      >
+      <Section title="Camera" badge={badge}>
         <View
           className="overflow-hidden rounded-lg bg-navy-900"
           style={[{ aspectRatio: PREVIEW_ASPECT }, continuousCorners]}
         >
           <CameraView
-            facing="front"
+            facing={facing}
             active={focused}
             onCameraReady={() => setReady(true)}
+            onMountError={(event) => setMountError(event.message)}
             style={StyleSheet.absoluteFill}
-            accessibilityLabel="Front camera preview"
+            accessibilityLabel={`${facing === "front" ? "Front" : "Back"} camera preview`}
             testID="camera-preview"
           />
         </View>
+        {mountError ? (
+          <Notice tone="danger" title="Camera could not start" body={mountError} />
+        ) : null}
         <Text className="text-footnote text-gray-500">
-          The front camera inside the screen: the selfie step&apos;s preview.
+          {facing === "front"
+            ? "The front camera inside the screen: the selfie step's preview."
+            : "The back camera, for a device without a front one."}
         </Text>
+        <Button
+          label={facing === "front" ? "Use the back camera" : "Use the front camera"}
+          variant="ghost"
+          onPress={flip}
+        />
       </Section>
     );
   }
@@ -113,8 +135,8 @@ function CameraSection() {
 function SampleCard() {
   return (
     <View className="flex-1 justify-between rounded-lg bg-navy-900 p-4" style={continuousCorners}>
-      <View className="flex-row items-center justify-between gap-2">
-        <Text className="text-headline text-white">Jack Fix It</Text>
+      <View className="flex-row items-center gap-2">
+        <Text className="flex-1 text-headline text-white">Jack Fix It</Text>
         <View className="h-2 w-10 rounded-pill bg-green-500" />
       </View>
       <View className="gap-1">

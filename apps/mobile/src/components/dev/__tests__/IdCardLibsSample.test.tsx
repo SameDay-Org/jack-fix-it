@@ -25,7 +25,7 @@ jest.mock("react-native-reanimated", () => {
   return { __esModule: true, ...actual, useReducedMotion: jest.fn(() => false) };
 });
 
-const { CAMERA_PERMISSION, getCameraPermissionsAsync, requestCameraPermissionsAsync } =
+const { CAMERA_PERMISSION, cameraMock, getCameraPermissionsAsync, requestCameraPermissionsAsync } =
   jest.requireMock<typeof CameraMock>("expo-camera");
 const { Gyroscope } = jest.requireMock<typeof SensorsMock>("expo-sensors");
 const { MOCK_CAPTURE_URI } = jest.requireMock<typeof ViewShotMock>("react-native-view-shot");
@@ -36,6 +36,7 @@ beforeEach(() => {
   jest.mocked(useReducedMotion).mockReturnValue(false);
   getCameraPermissionsAsync.mockClear().mockResolvedValue(CAMERA_PERMISSION.undetermined);
   requestCameraPermissionsAsync.mockClear().mockResolvedValue(CAMERA_PERMISSION.granted);
+  cameraMock.mountError = null;
   jest.mocked(captureRef).mockClear();
   jest.mocked(shareAsync).mockClear();
   jest.mocked(impactAsync).mockClear();
@@ -59,6 +60,25 @@ describe("camera", () => {
     expect(preview.props.facing).toBe("front");
     expect(preview.props.active).toBe(true);
     expect(await screen.findByText("Ready")).toBeTruthy();
+  });
+
+  it("a lens that cannot start says why and offers the other one", async () => {
+    getCameraPermissionsAsync.mockResolvedValue(CAMERA_PERMISSION.granted);
+    cameraMock.mountError = "No front camera";
+    await render(<IdCardLibsSample />);
+
+    expect(await screen.findByText("Camera could not start")).toBeTruthy();
+    expect(screen.getByText("No front camera")).toBeTruthy();
+    expect(screen.getByText("Failed")).toBeTruthy();
+
+    cameraMock.mountError = null;
+    await act(async () =>
+      fireEvent.press(screen.getByRole("button", { name: "Use the back camera" })),
+    );
+
+    expect(screen.getByTestId("camera-preview").props.facing).toBe("back");
+    expect(await screen.findByText("Ready")).toBeTruthy();
+    expect(screen.queryByText("Camera could not start")).toBeNull();
   });
 
   it("a refusal the system will not ask again about leads to Settings", async () => {
