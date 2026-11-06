@@ -553,7 +553,13 @@ async def test_all_writes_roll_back_together(
     pro = await db_session.get(User, world.me.caller.id)
     assert pro is not None
     actor = UserAccount(
-        id=pro.id, email=pro.email, role=pro.role, locale=pro.locale, status=pro.status
+        id=pro.id,
+        email=pro.email,
+        role=pro.role,
+        locale=pro.locale,
+        status=pro.status,
+        public_code=pro.public_code,
+        created_at=pro.created_at,
     )
 
     async def fail(*args: object, **kwargs: object) -> RequestStatus:

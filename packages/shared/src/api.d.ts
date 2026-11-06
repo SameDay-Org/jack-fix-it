@@ -141,7 +141,8 @@ export interface paths {
         };
         /**
          * Current user
-         * @description The caller's own account.
+         * @description The caller's own account, with the ID card fields (#250): the public code, the home
+         *     city and state, the ID photo as a signed URL and the member-since date.
          */
         get: operations["me_v1_auth_me_get"];
         put?: never;
@@ -151,8 +152,11 @@ export interface paths {
         head?: never;
         /**
          * Update the current user
-         * @description Sets the caller's own first and last name (#165). Both are required together while
-         *     they are not stored; afterwards either may change alone.
+         * @description Sets the caller's own first and last name (#165), home city and state and ID photo
+         *     (#250). Both names are required together while they are not stored; afterwards either may
+         *     change alone. The city and the state are set together, or both cleared with null. The
+         *     photo is the caller's own profile_photo upload key; for a pro without a public profile
+         *     photo it becomes that photo too. Nothing changes when any field is refused.
          */
         patch: operations["update_me_v1_auth_me_patch"];
         trace?: never;
@@ -1234,7 +1238,9 @@ export interface components {
         };
         /**
          * MeUpdateRequest
-         * @description PATCH /v1/auth/me: the caller's own names. Omit a field to keep it; null is refused.
+         * @description PATCH /v1/auth/me: the caller's own names (#165) and ID card fields (#250). Omit a field
+         *     to keep it. A name is never null. home_city and home_state travel together: both set, or
+         *     both null to clear them. photo_key null clears the ID photo.
          */
         MeUpdateRequest: {
             /**
@@ -1247,6 +1253,21 @@ export interface components {
              * @description 1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. No contact details (an email, phone number, website or handle, even spelled out). Both or neither.
              */
             last_name?: string | null;
+            /**
+             * Home City
+             * @description With home_state: both set, or both null to clear.
+             */
+            home_city?: string | null;
+            /**
+             * Home State
+             * @description A US state or DC code, upper case (FL); with home_city.
+             */
+            home_state?: string | null;
+            /**
+             * Photo Key
+             * @description Key of the caller's own profile_photo upload (POST /v1/uploads); null clears.
+             */
+            photo_key?: string | null;
         };
         /** MediaOut */
         MediaOut: {
@@ -1567,7 +1588,10 @@ export interface components {
              */
             code: string;
         };
-        /** PhotoOut */
+        /**
+         * PhotoOut
+         * @description An image the caller may see: a pro's profile photo (#36), a user's ID photo (#250).
+         */
         PhotoOut: {
             /**
              * Url
@@ -2286,7 +2310,8 @@ export interface components {
         };
         /**
          * UserOut
-         * @description The user as the API shows it. Never carries the password hash.
+         * @description The user as the API shows it. Never carries the password hash; the ID photo comes as
+         *     a signed URL (#250).
          */
         UserOut: {
             /**
@@ -2317,6 +2342,29 @@ export interface components {
              * @description Null for accounts created before names.
              */
             last_name: string | null;
+            /**
+             * Public Code
+             * @description The ID card's code: 8 Crockford base32 characters (0-9, A-Z without I, L, O, U), fixed at sign-up. Shown grouped as XXXX-XXXX.
+             */
+            public_code: string;
+            /**
+             * Home City
+             * @description With home_state; null until set.
+             */
+            home_city: string | null;
+            /**
+             * Home State
+             * @description A US state or DC code, e.g. FL; null until set.
+             */
+            home_state: string | null;
+            /** @description The ID photo, a presigned GET; null until set. */
+            photo: components["schemas"]["PhotoOut"] | null;
+            /**
+             * Member Since
+             * Format: date
+             * @description The day (UTC) the account was created.
+             */
+            member_since: string;
         };
         /**
          * UserRole
@@ -2732,7 +2780,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description validation_error: an invalid or null name, another field, an empty body, or one name while the other is not stored yet. */
+            /** @description validation_error: an invalid or null name, an unknown field, an empty body, one name while the other is not stored yet, or home_city without home_state (or the other way round). invalid_media: photo_key is not the caller's own profile_photo upload. */
             422: {
                 headers: {
                     [name: string]: unknown;

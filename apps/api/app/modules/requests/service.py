@@ -73,8 +73,8 @@ from app.modules.requests.schemas import (
 )
 from app.modules.service_areas.schemas import zip5
 from app.modules.service_areas.service import ServiceAreaService
+from app.modules.uploads.keys import owned_upload
 from app.modules.uploads.schemas import UploadPurpose
-from app.modules.uploads.service import owned_upload
 from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount
 from app.queue import JobQueue

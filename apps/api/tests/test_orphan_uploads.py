@@ -203,6 +203,11 @@ async def attach_photo(session: AsyncSession, world: World, key: str) -> None:
     await session.flush()
 
 
+async def attach_id_photo(session: AsyncSession, world: World, key: str) -> None:
+    world.customer.photo_key = key
+    await session.flush()
+
+
 @dataclass(frozen=True)
 class Column:
     purpose: UploadPurpose
@@ -215,6 +220,7 @@ COLUMNS = [
     Column(UploadPurpose.REQUEST_MEDIA, lambda w: w.customer.id, attach_media),
     Column(UploadPurpose.PRO_DOCUMENT, lambda w: w.pro.id, attach_document),
     Column(UploadPurpose.PROFILE_PHOTO, lambda w: w.pro.id, attach_photo),
+    Column(UploadPurpose.PROFILE_PHOTO, lambda w: w.customer.id, attach_id_photo),
 ]
 
 
@@ -251,13 +257,13 @@ async def test_delete_mode_removes_only_old_unreferenced_keys(
         storage.objects |= {old_orphan: OLD, young_orphan: YOUNG, old_kept: OLD, young_kept: YOUNG}
         expected_left |= {young_orphan, old_kept, young_kept}
         await column.attach(db_session, world, old_kept)
-        if column.purpose is not UploadPurpose.PROFILE_PHOTO:  # a profile holds one photo
+        if column.purpose is not UploadPurpose.PROFILE_PHOTO:  # a row holds one photo
             await column.attach(db_session, world, young_kept)
 
     result = await sweeper(sessions_of(db_session), storage).sweep()
 
     assert set(storage.objects) == expected_left
-    assert result == counts(scanned=12, too_young=6, referenced=3, orphaned=3, deleted=3)
+    assert result == counts(scanned=16, too_young=8, referenced=4, orphaned=4, deleted=4)
 
 
 async def test_an_object_exactly_at_the_minimum_age_is_too_young(
@@ -298,10 +304,11 @@ async def test_skipped_purposes_are_never_deleted(db_session: AsyncSession, worl
 
 
 @pytest.mark.parametrize("owner", ["customer", "agent", "admin", "unknown"])
-async def test_profile_photos_of_anyone_but_a_pro_are_never_deleted(
+async def test_unreferenced_profile_photos_of_any_owner_are_orphans(
     db_session: AsyncSession, world: World, owner: str
 ) -> None:
-    # Only pro profiles hold a photo: nothing tells a customer's photo is unused.
+    # Every user may hold an ID photo (#250), so an unused one is an orphan whoever
+    # uploaded it; before #250 only a pro's could be told unused.
     if owner == "customer":
         owner_id = world.customer.id
     elif owner == "unknown":
@@ -318,8 +325,22 @@ async def test_profile_photos_of_anyone_but_a_pro_are_never_deleted(
 
     result = await sweeper(sessions_of(db_session), storage).sweep()
 
-    assert set(storage.objects) == {photo}
-    assert result == counts(scanned=2, skipped_purpose=1, orphaned=1, deleted=1)
+    assert storage.objects == {}
+    assert result == counts(scanned=2, orphaned=2, deleted=2)
+
+
+async def test_customer_photo_survives_the_orphan_sweep(
+    db_session: AsyncSession, world: World
+) -> None:
+    # A photo only users.photo_key references (#250): a customer has no pro profile.
+    id_photo, unused = (upload_key(world.customer.id, UploadPurpose.PROFILE_PHOTO) for _ in "ab")
+    await attach_id_photo(db_session, world, id_photo)
+    storage = ListingStorage({id_photo: OLD, unused: OLD})
+
+    result = await sweeper(sessions_of(db_session), storage).sweep()
+
+    assert set(storage.objects) == {id_photo}
+    assert result == counts(scanned=2, referenced=1, orphaned=1, deleted=1)
 
 
 async def test_a_suspended_pros_unused_photo_is_still_an_orphan(
@@ -634,13 +655,13 @@ async def test_logs_carry_no_keys_or_user_ids(
     [summary] = [r for r in caplog.records if r.message == "orphan_uploads_swept"]
     logged = {name: summary.__dict__[name] for name in SweepCounts.__dataclass_fields__}
     assert logged == {
-        "scanned": 12,
-        "too_young": 3,
-        "referenced": 3,
-        "orphaned": 3,
-        "deleted": 2,
+        "scanned": 15,
+        "too_young": 4,
+        "referenced": 4,
+        "orphaned": 5,
+        "deleted": 4,
         "unparsed": 1,
-        "skipped_purpose": 2,
+        "skipped_purpose": 1,
         "failed": 1,
     }
     assert (summary.__dict__["mode"], summary.__dict__["completed"]) == ("delete", True)
@@ -673,8 +694,8 @@ async def test_one_reference_query_per_page(
     selects = [s for s in statements if s.lstrip().upper().startswith("SELECT")]
     unions = [s for s in selects if s.count("UNION ALL") == len(ReferencingColumn) - 1]
     assert len(unions) == 3  # one per page, across every referencing column
-    # A profile photo's owner role is read with its page, in one more query.
-    assert len(selects) == 3 * (2 if profile_photos else 1)
+    # No purpose excludes an owner role any more (#250), so no owner query either.
+    assert len(selects) == 3
 
 
 async def test_pagination(db_session: AsyncSession, world: World) -> None:

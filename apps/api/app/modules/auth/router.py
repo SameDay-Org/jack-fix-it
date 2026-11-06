@@ -152,9 +152,10 @@ async def logout(
         ),
     },
 )
-async def me(user: CurrentUser) -> UserOut:
-    """The caller's own account."""
-    return UserOut.model_validate(user)
+async def me(user: CurrentUser, auth: Annotated[AuthService, Depends(get_auth_service)]) -> UserOut:
+    """The caller's own account, with the ID card fields (#250): the public code, the home
+    city and state, the ID photo as a signed URL and the member-since date."""
+    return auth.present(user)
 
 
 @router.patch(
@@ -166,8 +167,10 @@ async def me(user: CurrentUser) -> UserOut:
             "invalid_token: missing, invalid or expired access token."
         ),
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
-            "validation_error: an invalid or null name, another field, an empty body, or one "
-            "name while the other is not stored yet."
+            "validation_error: an invalid or null name, an unknown field, an empty body, one "
+            "name while the other is not stored yet, or home_city without home_state (or the "
+            "other way round). invalid_media: photo_key is not the caller's own profile_photo "
+            "upload."
         ),
     },
 )
@@ -176,8 +179,11 @@ async def update_me(
     user: CurrentUser,
     auth: Annotated[AuthService, Depends(get_auth_service)],
 ) -> UserOut:
-    """Sets the caller's own first and last name (#165). Both are required together while
-    they are not stored; afterwards either may change alone."""
+    """Sets the caller's own first and last name (#165), home city and state and ID photo
+    (#250). Both names are required together while they are not stored; afterwards either may
+    change alone. The city and the state are set together, or both cleared with null. The
+    photo is the caller's own profile_photo upload key; for a pro without a public profile
+    photo it becomes that photo too. Nothing changes when any field is refused."""
     return await auth.update_me(user, data)
 
 
@@ -239,9 +245,10 @@ async def verify_phone(
     data: PhoneVerifyRequest,
     user: CurrentUser,
     phones: Annotated[PhoneVerificationService, Depends(get_phone_service)],
+    auth: Annotated[AuthService, Depends(get_auth_service)],
 ) -> UserOut:
     """Checks the code and stores the number as the user's verified phone (idempotent)."""
-    return UserOut.model_validate(await phones.verify_code(user, data.phone, data.code))
+    return auth.present(await phones.verify_code(user, data.phone, data.code))
 
 
 @router.post(

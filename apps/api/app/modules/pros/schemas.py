@@ -8,13 +8,9 @@ from app.modules.addresses.schemas import NO_NUL
 from app.modules.categories.schemas import CategorySummary
 from app.modules.pros.models import ProDocumentStatus, ProDocumentType, ProVerificationStatus
 from app.modules.service_areas.schemas import ServiceAreaOut
+from app.modules.uploads.schemas import PhotoOut
 
 MAX_YEARS_OF_EXPERIENCE = 80  # the pro_profiles CHECK
-
-
-class PhotoOut(BaseModel):
-    url: str = Field(description="Presigned GET URL.")
-    expires_at: datetime
 
 
 class ProProfileOut(BaseModel):
