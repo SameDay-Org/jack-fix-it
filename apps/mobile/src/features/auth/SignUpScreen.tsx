@@ -462,22 +462,26 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
           keyboardDismissMode="on-drag"
           testID="sign-up-scroll"
         >
-          {/* The row keeps its height on step 1, which has no way back: nothing below moves. */}
-          <Animated.View
-            style={[{ opacity: showBack ? 1 : 0 }, finishMoment.stepsStyle]}
-            {...hiddenProps(!showBack)}
-          >
-            {index === 0 ? (
-              <BackButton />
-            ) : (
-              <Button
-                label={t("common.back")}
-                variant="ghost"
-                onPress={stepBack}
-                className="-ml-5 self-start"
-                testID="back-button"
-              />
-            )}
+          {/* The row keeps its height on step 2, which has no way back: nothing below moves. Two
+              views: the animated fade would override the row's own opacity. */}
+          <Animated.View style={finishMoment.stepsStyle}>
+            <View
+              style={{ opacity: showBack ? 1 : 0 }}
+              {...hiddenProps(!showBack)}
+              testID="sign-up-back-row"
+            >
+              {index === 0 ? (
+                <BackButton />
+              ) : (
+                <Button
+                  label={t("common.back")}
+                  variant="ghost"
+                  onPress={stepBack}
+                  className="-ml-5 self-start"
+                  testID="back-button"
+                />
+              )}
+            </View>
           </Animated.View>
           <Animated.View style={finishMoment.stepsStyle} {...hiddenProps(!onSteps)}>
             <FlowProgress
@@ -536,7 +540,7 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
               />
             </Animated.View>
           )}
-          <View className="flex-1" />
+          <Animated.View className="flex-1" style={finishMoment.spacerStyle} />
           <Animated.View
             style={finishMoment.actionStyle}
             onLayout={finishMoment.onActionLayout}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { LayoutChangeEvent } from "react-native";
+import type { LayoutChangeEvent, ViewStyle } from "react-native";
 import {
   Easing,
   ReduceMotion,
@@ -26,6 +26,8 @@ const LAYOUT_WAIT_MS = 120;
 /** Room kept between the card and the action under it. */
 const ACTION_GAP = 24;
 
+type ViewAnimatedStyle = ReturnType<typeof useAnimatedStyle<ViewStyle>>;
+
 export type FinishMoment = {
   stage: FinishStage;
   /** The last step is done: the steps fade, then the card moves to the middle. */
@@ -35,13 +37,18 @@ export type FinishMoment = {
   onHeadlineLayout: (event: LayoutChangeEvent) => void;
   onActionLayout: (event: LayoutChangeEvent) => void;
   /** The back row, the progress and the step: they fade out as the flow finishes. */
-  stepsStyle: ReturnType<typeof useAnimatedStyle>;
+  stepsStyle: ViewAnimatedStyle;
   /** The card: it moves to the middle (or, under Reduce Motion, fades out and back in there). */
-  cardStyle: ReturnType<typeof useAnimatedStyle>;
+  cardStyle: ViewAnimatedStyle;
   /** "Account created!": it fades in above the card once the card is in place. */
-  headlineStyle: ReturnType<typeof useAnimatedStyle>;
+  headlineStyle: ViewAnimatedStyle;
   /** The action: it fades out with the steps and back in as the way into the app. */
-  actionStyle: ReturnType<typeof useAnimatedStyle>;
+  actionStyle: ViewAnimatedStyle;
+  /**
+   * The room above the action: never less than the headline and the card need (large text on a
+   * small phone), so the action stays under the card and the page scrolls to it.
+   */
+  spacerStyle: ViewAnimatedStyle;
 };
 
 /**
@@ -114,6 +121,11 @@ export function useFinishMoment(startFinished: boolean, onArrived: () => void): 
   }, [stage]);
 
   const stepsStyle = useAnimatedStyle(() => ({ opacity: 1 - exit.value }));
+  // The card's own place stays where it is (cardY does not depend on this): the action goes at
+  // least the headline's height (less what sits above the card) below it.
+  const spacerStyle = useAnimatedStyle(() => ({
+    minHeight: Math.max(0, headlineHeight.value - cardY.value - ACTION_GAP),
+  }));
   const actionStyle = useAnimatedStyle(() => ({
     opacity: exit.value < 1 ? 1 - exit.value : reveal.value,
   }));
@@ -148,5 +160,6 @@ export function useFinishMoment(startFinished: boolean, onArrived: () => void): 
     cardStyle,
     headlineStyle,
     actionStyle,
+    spacerStyle,
   };
 }

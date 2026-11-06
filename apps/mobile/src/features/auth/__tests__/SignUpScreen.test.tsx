@@ -330,6 +330,10 @@ describe("SignUpScreen: the name step", () => {
     await reachName();
 
     expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+    // Out of sight too, not only out of reach (the steps' fade wraps it, never overrides it).
+    expect(screen.getByTestId("sign-up-back-row", { includeHiddenElements: true })).toHaveStyle({
+      opacity: 0,
+    });
     expect(mockGuard.on).toBe(true);
     await act(async () => mockGuard.onBlocked());
     expect(screen.getByText("Tell us your name!")).toBeTruthy();
