@@ -562,5 +562,17 @@
       "body": "Check your connection and try again.",
       "retry": "Try again"
     }
+  },
+  "idCard": {
+    "hello": "Hello, I'm:",
+    "pro": "PRO",
+    "a11y": {
+      "card": "ID card",
+      "unnamed": "name not set yet",
+      "back": "Back of the ID card, code {{code}}",
+      "backBlank": "Back of the ID card, no code yet",
+      "flip": "Flip the card",
+      "hint": "Turns the card over."
+    }
   }
 }
