@@ -194,7 +194,7 @@ describe("IdCardShareRender", () => {
       await act(async () => jest.advanceTimersByTime(1));
       await failed;
 
-      // The give-up leaves no waiter behind: the photo's end later captures nothing by itself.
+      // A late end after the give-up captures nothing by itself, and the next capture goes on.
       await endPhotoLoad();
       expect(viewShot.captureRef).not.toHaveBeenCalled();
       await expect(ref.current?.capture()).resolves.toMatchObject({ width: 960 });
