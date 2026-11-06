@@ -3,9 +3,10 @@ import { File, Paths, UploadType } from "expo-file-system";
 
 import { apiPost } from "./client";
 import { apiConfig } from "./config";
-import { ApiError, UploadFailedError, UploadRejectedError } from "./errors";
+import { ApiError, SessionExpiredError, UploadFailedError, UploadRejectedError } from "./errors";
 import { abortError, throwIfAborted } from "./http";
 import { createNativeUploadTask } from "./nativeUploadTask";
+import { isCurrentGeneration, sessionGeneration } from "./session";
 
 export type UploadPurpose = ApiSchema<"UploadPurpose">;
 type UploadTicket = ApiSchema<"UploadResponse">;
@@ -24,6 +25,12 @@ export type UploadMediaOptions = {
   onProgress?: (fraction: number) => void;
   /** Cancels whichever step is running: the URL request or the PUT. */
   signal?: AbortSignal;
+  /**
+   * The session generation a longer operation started in (see `RequestOptions.generation`). The
+   * whole upload belongs to it, or to the generation current when the upload starts: after a
+   * sign-out or another sign-in no URL is requested and no PUT is sent, and no key is returned.
+   */
+  generation?: number;
 };
 
 type Stop = "abort" | "timeout";
@@ -69,24 +76,34 @@ export async function uploadMedia({
   file,
   onProgress,
   signal,
+  generation = sessionGeneration(),
 }: UploadMediaOptions): Promise<{ key: string }> {
   if (!LOCAL_FILE.test(file.uri)) throw new Error("uploadMedia reads files on this device only");
+  // Every step of the upload, the second URL and the second PUT too, is the starting session's.
+  const ensureCurrent = () => {
+    if (!isCurrentGeneration(generation)) throw new SessionExpiredError("superseded");
+  };
+  ensureCurrent();
   throwIfAborted(signal);
   // The URL is signed for the size of the file the PUT sends, taken from its metadata.
   const size = localFileSize(file.uri);
   if (size === null) throw new Error("The file could not be read");
-  const requestTicket = () => createUpload(purpose, file.contentType, size, signal);
+  const requestTicket = () => createUpload(purpose, file.contentType, size, signal, generation);
 
   let ticket = await requestTicket();
   try {
+    ensureCurrent();
     await putToStorage(ticket, file.uri, size, onProgress, signal);
   } catch (error) {
     if (!(error instanceof UploadFailedError) || error.reason !== "network") throw error;
+    ensureCurrent();
     throwIfAborted(signal);
     if (hasExpired(ticket)) ticket = await requestTicket();
+    ensureCurrent();
     await putToStorage(ticket, file.uri, size, onProgress, signal);
   }
   // A stop never yields a key: not one from the last progress callback, nor one during cleanup.
+  ensureCurrent();
   throwIfAborted(signal);
   return { key: ticket.key };
 }
@@ -96,12 +113,13 @@ async function createUpload(
   contentType: string,
   sizeBytes: number,
   signal: AbortSignal | undefined,
+  generation: number,
 ): Promise<UploadTicket> {
   try {
     return await apiPost(
       "/v1/uploads",
       { purpose, content_type: contentType, size_bytes: sizeBytes },
-      { auth: true, signal },
+      { auth: true, signal, generation },
     );
   } catch (error) {
     if (error instanceof ApiError && REJECTED_STATUSES.has(error.status)) {
