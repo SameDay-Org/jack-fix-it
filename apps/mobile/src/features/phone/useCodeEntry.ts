@@ -37,6 +37,11 @@ export type CodeEntryOptions = {
    * until `startOver`.
    */
   codeSent?: boolean;
+  /**
+   * The session generation the code was sent in (`usePhoneEntry`'s `onSent`): the check and every
+   * resend are pinned to it, so after another sign-in nothing is sent with that account's token.
+   */
+  generation?: number;
 };
 
 const INVALID_CODE = "invalid_code";
@@ -56,7 +61,7 @@ const INVALID_CODE = "invalid_code";
 export function useCodeEntry(
   digits: string,
   onVerified: () => void,
-  { codeSent = true }: CodeEntryOptions = {},
+  { codeSent = true, generation }: CodeEntryOptions = {},
 ): CodeEntry {
   const { t } = useTranslation();
   const { countryCode, resendSeconds } = phoneConfig;
@@ -87,7 +92,7 @@ export function useCodeEntry(
     inFlight.current = true;
     setVerifying(true);
     try {
-      const user = await verifyCode(phone, candidate, signal);
+      const user = await verifyCode(phone, candidate, signal, generation);
       if (signal.aborted) return; // the user left: this flow is over
       setSessionUser(user);
       onVerified();
@@ -122,7 +127,7 @@ export function useCodeEntry(
     setError(null);
     let restored = false;
     try {
-      await sendCode(phone, signal);
+      await sendCode(phone, signal, generation);
       if (signal.aborted) return;
       countdown.restart();
       showToast({ message: t("phone.codeResent"), tone: "neutral" });

@@ -5,11 +5,19 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { AccessibilityInfo } from "react-native";
 
-import { ApiError, apiPost, endOnboarding, type SessionUser } from "@/api";
+import { ApiError, apiPost, endOnboarding, sessionGeneration, type SessionUser } from "@/api";
 import { moveAccessibilityFocus } from "@/components/ui";
 
-import { deferred, user } from "../../../api/__tests__/helpers";
-import { sessionStore } from "../../../api/session";
+import {
+  authResponse,
+  callsTo,
+  deferred,
+  installFetchMock,
+  jsonResponse,
+  user,
+} from "../../../api/__tests__/helpers";
+import { apiPost as sentPost } from "../../../api/client";
+import { login, sessionStore } from "../../../api/session";
 import { phoneConfig } from "../../phone/config";
 import { phoneFlowStore } from "../../phone/phoneFlow";
 import { SignUpScreen } from "../SignUpScreen";
@@ -395,5 +403,29 @@ describe("SignUpScreen: a late answer", () => {
 
     expect(sessionStore.getState().user?.phone_verified).toBe(false);
     expect(phoneFlowStore.getState().pendingNumber).toBeNull();
+  });
+
+  it("a code typed after another sign-in is not checked with that account's token (#292 Vault B1)", async () => {
+    onFlow();
+    answer({ [SEND]: [accepted] });
+    await sendCode();
+    expect(calls(SEND)[0]?.[2]).toMatchObject({ generation: sessionGeneration() });
+    // The real client from here, so the pinned check is refused where it would be sent.
+    jest.mocked(apiPost).mockImplementation(sentPost);
+    const fetch = installFetchMock();
+    const second = { ...user, id: "22222222-2222-4222-8222-222222222222" };
+    fetch.mockImplementation(async (url) =>
+      url.endsWith("/v1/auth/login")
+        ? jsonResponse(200, { ...authResponse(2), user: second })
+        : jsonResponse(200, { ...second, phone_verified: true }),
+    );
+    await act(() => login({ email: "b@example.invalid", password: "synthetic test password" }));
+
+    await act(async () => fireEvent.changeText(codeField(), CODE));
+
+    expect(callsTo(fetch, VERIFY)).toHaveLength(0);
+    expect(screen.queryByText("Account created! Here's your ID:")).toBeNull();
+    expect(endOnboarding).not.toHaveBeenCalled();
+    expect(sessionStore.getState().user).toMatchObject({ id: second.id, phone_verified: false });
   });
 });

@@ -32,15 +32,22 @@ export type PhoneStep = {
 export function usePhoneStep(onCodeSent: () => void, onVerified: () => void): PhoneStep {
   const [pane, setPane] = useState<PhonePane>("number");
   const sentTo = usePendingNumber();
+  // The session the code went out in: its check and resends are pinned to it (#292 Vault B1), so
+  // a code sent for one account is never checked with another's token.
+  const [sentIn, setSentIn] = useState<number | undefined>(undefined);
   // Nothing ticks until a code is sent: the resend wait starts with it.
-  const code = useCodeEntry(sentTo ?? "", onVerified, { codeSent: false });
+  const code = useCodeEntry(sentTo ?? "", onVerified, { codeSent: false, generation: sentIn });
   const { startOver } = code;
   const number = usePhoneEntry(
-    useCallback(() => {
-      startOver();
-      setPane("code");
-      onCodeSent();
-    }, [onCodeSent, startOver]),
+    useCallback(
+      (generation: number) => {
+        setSentIn(generation);
+        startOver();
+        setPane("code");
+        onCodeSent();
+      },
+      [onCodeSent, startOver],
+    ),
   );
 
   // The digits a code went to end with the flow, as they do with the code screen.
