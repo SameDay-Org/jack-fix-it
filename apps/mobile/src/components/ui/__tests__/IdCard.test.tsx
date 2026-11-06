@@ -407,4 +407,34 @@ describe("IdCard", () => {
     expect(face("card-front")).toBe(front);
     expect(face("card-back")).toBe(back);
   });
+
+  // Gatekeeper round 1 (B2). Jest lays no text out, so the scaled proof is the emulator strip at
+  // font scale 1.3 and 2.0 (#291 evidence); this pins the structure that makes it hold at any scale.
+  it("holds two lines of the name's own scaled type, so a name that wraps never moves the place", async () => {
+    const props = { variant: "customer" as const, width: 288, city: "Miami", state: "FL" };
+    const view = await renderCard({ ...props, name: "Mar", testID: "card" });
+
+    await view.rerender(
+      card({ ...props, name: "María Fernanda Pérez de la Cruz", testID: "card" }),
+    );
+
+    const room = screen.getByTestId("card-name-room", { includeHiddenElements: true });
+    const name = screen.getByTestId("card-name");
+    const roomStyle = StyleSheet.flatten(room.props.style);
+    const nameStyle = StyleSheet.flatten(name.props.style);
+    // The room: two lines whatever the name says, sized by the font scale like the name itself.
+    expect(room.props.children).toBe("M\nM");
+    expect(room.props.numberOfLines).toBe(2);
+    expect(room.props.allowFontScaling).toBe(true);
+    expect(name.props.allowFontScaling).toBe(true);
+    expect(roomStyle.fontSize).toBe(nameStyle.fontSize);
+    expect(roomStyle.lineHeight).toBe(nameStyle.lineHeight);
+    expect(roomStyle.minHeight).toBeUndefined();
+    // Hidden from sight and from assistive technology.
+    expect(roomStyle.opacity).toBe(0);
+    expect(room.props.importantForAccessibility).toBe("no-hide-descendants");
+    // The name lies over its room, out of the flow, capped at the room's two lines.
+    expect(nameStyle).toMatchObject({ position: "absolute", top: 0, left: 0, right: 0 });
+    expect(name.props.numberOfLines).toBe(2);
+  });
 });

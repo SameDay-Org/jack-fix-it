@@ -19,10 +19,21 @@ const viewShot =
   );
 
 const PHOTO = "data:image/png;base64,iVBORw0KGgo=";
-const MARIA = { variant: "customer" as const, name: "María Pérez", city: "Miami", state: "FL" };
+const OTHER_PHOTO = "file:///cache/selfie-2.jpg";
+const PHOTO_TIMEOUT_MS = 15_000;
+const MARIA = {
+  variant: "customer" as const,
+  name: "María Pérez",
+  city: "Miami",
+  state: "FL",
+  photoTimeoutMs: PHOTO_TIMEOUT_MS,
+};
 const LABEL = "ID card, María Pérez, Miami, FL";
 
 const card = () => screen.getByRole("image", { name: LABEL, includeHiddenElements: true });
+const photo = () => screen.getByTestId("share-card-photo", { includeHiddenElements: true });
+/** Ends the current photo's load: RN's Image calls onLoadEnd on success and on failure alike. */
+const endPhotoLoad = () => fireEvent(photo(), "loadEnd");
 
 beforeEach(() => {
   jest.spyOn(PixelRatio, "get").mockReturnValue(1);
@@ -128,5 +139,67 @@ describe("IdCardShareRender", () => {
 
     await failed;
     expect(viewShot.captureRef).not.toHaveBeenCalled();
+  });
+
+  // Gatekeeper round 1 (B1): readiness belongs to one load of the photo, never to its URI.
+  it("waits for a photo put back after a removal, not for the load before it", async () => {
+    const ref = createRef<IdCardShareHandle>();
+    const view = await render(
+      <IdCardShareRender ref={ref} {...MARIA} photoUri={PHOTO} testID="share" />,
+    );
+    await endPhotoLoad();
+    await view.rerender(<IdCardShareRender ref={ref} {...MARIA} testID="share" />);
+    await view.rerender(<IdCardShareRender ref={ref} {...MARIA} photoUri={PHOTO} testID="share" />);
+
+    const capture = ref.current?.capture();
+    await act(async () => undefined);
+    expect(viewShot.captureRef).not.toHaveBeenCalled();
+
+    await endPhotoLoad();
+    await expect(capture).resolves.toMatchObject({ width: 960 });
+    expect(viewShot.captureRef).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for a replacement photo: a late end from the one before does not count", async () => {
+    const ref = createRef<IdCardShareHandle>();
+    const view = await render(
+      <IdCardShareRender ref={ref} {...MARIA} photoUri={PHOTO} testID="share" />,
+    );
+    await endPhotoLoad();
+    const staleEnd = photo().props.onLoadEnd as () => void;
+    await view.rerender(
+      <IdCardShareRender ref={ref} {...MARIA} photoUri={OTHER_PHOTO} testID="share" />,
+    );
+    expect(photo().props.source).toEqual({ uri: OTHER_PHOTO });
+
+    const capture = ref.current?.capture();
+    await act(async () => staleEnd());
+    expect(viewShot.captureRef).not.toHaveBeenCalled();
+
+    // The new photo fails to load: the capture goes on with the silhouette, never the old photo.
+    await endPhotoLoad();
+    await expect(capture).resolves.toMatchObject({ width: 960 });
+    expect(viewShot.captureRef).toHaveBeenCalledTimes(1);
+    expect(photo().props.source).toEqual({ uri: OTHER_PHOTO });
+  });
+
+  it("gives up on a photo that never ends its load, after the timeout it is given", async () => {
+    const ref = createRef<IdCardShareHandle>();
+    await render(<IdCardShareRender ref={ref} {...MARIA} photoUri={PHOTO} testID="share" />);
+    jest.useFakeTimers();
+    try {
+      const failed = expect(ref.current?.capture()).rejects.toThrow("did not load in time");
+      await act(async () => jest.advanceTimersByTime(PHOTO_TIMEOUT_MS - 1));
+      expect(viewShot.captureRef).not.toHaveBeenCalled();
+      await act(async () => jest.advanceTimersByTime(1));
+      await failed;
+
+      // A late end after the give-up captures nothing by itself, and the next capture goes on.
+      await endPhotoLoad();
+      expect(viewShot.captureRef).not.toHaveBeenCalled();
+      await expect(ref.current?.capture()).resolves.toMatchObject({ width: 960 });
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

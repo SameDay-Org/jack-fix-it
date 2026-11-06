@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useImperativeHandle, useRef, type Ref } from "react";
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type Ref,
+} from "react";
 import { Image, PixelRatio, View } from "react-native";
 import ViewShot, { type CaptureOptions, type ViewShotRef } from "react-native-view-shot";
 
@@ -22,6 +30,12 @@ export type IdCardShareRenderProps = Pick<
   "variant" | "name" | "city" | "state" | "photoUri" | "publicCode"
 > & {
   ref?: Ref<IdCardShareHandle>;
+  /**
+   * How long a capture waits for the photo to load (or fail) before it gives up, in milliseconds.
+   * Pass the API's request timeout (`apiConfig.timeoutMs`): a remote photo comes over the same
+   * network.
+   */
+  photoTimeoutMs: number;
   testID?: string;
 };
 
@@ -34,8 +48,11 @@ const OFFSCREEN_GAP = 64;
 
 const CAPTURE: CaptureOptions = { format: "png", quality: 1, result: "tmpfile" };
 const NOT_MOUNTED = "IdCardShareRender is not mounted";
+const PHOTO_TIMED_OUT = "IdCardShareRender: the photo did not load in time";
 
 type Waiter = { resolve: () => void; reject: (error: Error) => void };
+/** One photo load: a new URI, or the same one put back after a removal, is a new load. */
+type PhotoLoad = { uri: string | undefined; id: number };
 
 /**
  * The width to lay the card out at, in dp, so that the native capture comes out at
@@ -60,22 +77,35 @@ export function IdCardShareRender({
   state,
   photoUri,
   publicCode,
+  photoTimeoutMs,
   testID,
 }: IdCardShareRenderProps) {
   const width = idCardShareLayoutWidth(PixelRatio.get());
   const shot = useRef<ViewShotRef>(null);
-  // The URI whose load finished (or failed), and the captures waiting for the current one.
-  const loadedUri = useRef<string | undefined>(undefined);
+  // Readiness belongs to one load, never to a URI: a photo that changes, or is taken away and put
+  // back, starts a new load (the card remounts its Image per URI), and only that load's own end
+  // (success or failure) makes the card ready. A late end from an earlier load is ignored.
+  const [load, setLoad] = useState<PhotoLoad>({ uri: photoUri, id: 0 });
+  if (load.uri !== photoUri) setLoad({ uri: photoUri, id: load.id + 1 });
+  const activeLoad = useRef(load.id);
+  const readyLoad = useRef<number | undefined>(undefined);
   const waiting = useRef<Waiter[]>([]);
 
-  const onPhotoLoadEnd = useCallback(() => {
-    loadedUri.current = photoUri;
-    for (const waiter of waiting.current.splice(0)) waiter.resolve();
-  }, [photoUri]);
+  const loadId = load.id;
+  // Before the commit hands the card this load's callback, so no event can reach it early.
+  useLayoutEffect(() => {
+    activeLoad.current = loadId;
+  }, [loadId]);
 
-  // A capture waits for the photo it was asked with. Without a photo there is nothing to wait for,
-  // so a photo taken away mid-wait lets the capture go on; an unmount fails it instead of leaving
-  // the caller hanging.
+  const onPhotoLoadEnd = useCallback(() => {
+    if (activeLoad.current !== loadId) return;
+    readyLoad.current = loadId;
+    for (const waiter of waiting.current.splice(0)) waiter.resolve();
+  }, [loadId]);
+
+  // A capture waits for the current photo's load, however often it changes meanwhile. Without a
+  // photo there is nothing to wait for, so a photo taken away mid-wait lets the capture go on; an
+  // unmount fails it instead of leaving the caller hanging, and so does a photo that never ends.
   useEffect(() => {
     if (photoUri) return;
     for (const waiter of waiting.current.splice(0)) waiter.resolve();
@@ -91,8 +121,25 @@ export function IdCardShareRender({
     ref,
     () => ({
       capture: async () => {
-        if (photoUri && loadedUri.current !== photoUri) {
-          await new Promise<void>((resolve, reject) => waiting.current.push({ resolve, reject }));
+        if (photoUri && readyLoad.current !== activeLoad.current) {
+          await new Promise<void>((resolve, reject) => {
+            const waiter: Waiter = {
+              resolve: () => {
+                clearTimeout(timer);
+                resolve();
+              },
+              reject: (error) => {
+                clearTimeout(timer);
+                reject(error);
+              },
+            };
+            const timer = setTimeout(() => {
+              const at = waiting.current.indexOf(waiter);
+              if (at >= 0) waiting.current.splice(at, 1);
+              reject(new Error(PHOTO_TIMED_OUT));
+            }, photoTimeoutMs);
+            waiting.current.push(waiter);
+          });
         }
         const target = shot.current;
         if (!target) throw new Error(NOT_MOUNTED);
@@ -101,7 +148,7 @@ export function IdCardShareRender({
         return { uri, width: size.width, height: size.height };
       },
     }),
-    [photoUri],
+    [photoUri, photoTimeoutMs],
   );
 
   return (
