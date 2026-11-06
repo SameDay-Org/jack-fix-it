@@ -182,9 +182,11 @@ describe("IdCard", () => {
     expect(onFlip).toHaveBeenLastCalledWith("front");
   });
 
-  it("flips on a tap", async () => {
+  it("flips on a tap, and only on a tap: a scroll flick that starts on it is not one", async () => {
     await renderCard({ variant: "customer", width: 320, ...ALEX, testID: "card" });
     await settle();
+    // The hook registers the native name of the limit.
+    expect(getByGestureTestId("card-tap").config).toMatchObject({ maxDist: 8 });
 
     await act(async () => {
       fireGestureHandler(getByGestureTestId("card-tap"), [

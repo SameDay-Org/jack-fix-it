@@ -638,6 +638,9 @@ export function IdCard({
   const tap = useTapGesture({
     enabled: live,
     testID: testID ? `${testID}-tap` : undefined,
+    // A tap has no distance limit by default (only 500 ms): a quick scroll flick that starts on
+    // the card would turn it over. Past the pan's activation distance it is a drag, not a tap.
+    maxDistance: PAN_ACTIVATE_DP,
     onActivate: () => {
       "worklet";
       runOnJS(flip)(1);
