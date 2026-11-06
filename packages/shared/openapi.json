@@ -2537,7 +2537,7 @@
           "jobs"
         ],
         "summary": "Follow the job of one of my service requests",
-        "description": "The job once paid: its status, the scheduled start, the pro's public card, the ETA once\nthe pro is on the way, the arrival code to give the pro (only while they are on the way and\nhave not checked in), the history and what the customer paid.",
+        "description": "The job once paid: its status, the scheduled start, the pro's public card, the ETA once\nthe pro is on the way, the arrival code to give the pro (only while they are on the way and\nhave not checked in), the history, the pro's before and after photos (their privacy-safe\ncopies) and what the customer paid.",
         "operationId": "get_request_job_v1_requests__request_id__job_get",
         "security": [
           {
@@ -3082,6 +3082,194 @@
           },
           "409": {
             "description": "check_in_required: no check-in yet; invalid_transition: the job is past on the way.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pros/me/jobs/{job_id}/photos": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Add before or after photos of the work",
+        "description": "Attaches photos the pro uploaded (POST /v1/uploads, purpose job_photo), in the order\ngiven. The customer sees each once its privacy-safe copy is made.",
+        "operationId": "add_job_photos_v1_pros_me_jobs__job_id__photos_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobPhotosIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProJob"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_photo: a key that is not one of the caller's own job_photo uploads (nothing is stored); validation_error: a bad kind or no keys.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros have jobs to work on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job of the caller with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "job_photo_not_allowed: before photos need the job on the way or working, after photos working; duplicate_photo: a key given twice or already attached; job_photo_limit: more photos of the kind than a job holds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pros/me/jobs/{job_id}/complete": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Mark the job done",
+        "description": "Working -> completed (Job's done), with at least one after photo. The customer then has\na window to confirm. Again once completed: the job unchanged.",
+        "operationId": "complete_job_v1_pros_me_jobs__job_id__complete_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProJob"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros have jobs to work on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job of the caller with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "after_photos_required: no after photo yet; invalid_transition: the job is not working.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4342,6 +4530,9 @@
             "title": "Timeline",
             "description": "The job's history, oldest first."
           },
+          "photos": {
+            "$ref": "#/components/schemas/CustomerJobPhotos"
+          },
           "amount_cents": {
             "type": "integer",
             "title": "Amount Cents",
@@ -4368,12 +4559,45 @@
           "eta_at",
           "arrival_code",
           "timeline",
+          "photos",
           "amount_cents",
           "tax_cents",
           "customer_total_cents"
         ],
         "title": "CustomerJob",
         "description": "The customer's job on their request, once paid."
+      },
+      "CustomerJobPhotos": {
+        "properties": {
+          "before": {
+            "items": {
+              "$ref": "#/components/schemas/JobPhotoOut"
+            },
+            "type": "array",
+            "title": "Before"
+          },
+          "after": {
+            "items": {
+              "$ref": "#/components/schemas/JobPhotoOut"
+            },
+            "type": "array",
+            "title": "After"
+          },
+          "pending": {
+            "type": "integer",
+            "title": "Pending",
+            "description": "Photos not listed yet: their privacy-safe copy is still being made."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "before",
+          "after",
+          "pending"
+        ],
+        "title": "CustomerJobPhotos",
+        "description": "The pro's photos of the job, oldest first: only their privacy-safe copies (no location or\ncamera details)."
       },
       "CustomerQuote": {
         "properties": {
@@ -4880,6 +5104,76 @@
           "names"
         ],
         "title": "JobCategory"
+      },
+      "JobPhotoKind": {
+        "type": "string",
+        "enum": [
+          "before",
+          "after"
+        ],
+        "title": "JobPhotoKind"
+      },
+      "JobPhotoOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type",
+            "examples": [
+              "image/jpeg"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "A signed GET URL, valid until expires_at."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "content_type",
+          "url",
+          "expires_at"
+        ],
+        "title": "JobPhotoOut",
+        "description": "One photo of the job, signed for a short while."
+      },
+      "JobPhotosIn": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/JobPhotoKind",
+            "description": "before: while on the way or working; after: while working."
+          },
+          "upload_keys": {
+            "items": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Upload Keys",
+            "description": "Keys of the caller's own job_photo uploads (POST /v1/uploads), in the order to show them."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "upload_keys"
+        ],
+        "title": "JobPhotosIn"
       },
       "JobStatus": {
         "type": "string",
@@ -5942,6 +6236,22 @@
             "title": "Started At",
             "description": "When the work started (Working)."
           },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At",
+            "description": "When the pro marked the job done: the customer's confirmation window opens."
+          },
+          "photos": {
+            "$ref": "#/components/schemas/ProJobPhotos"
+          },
           "pro_payout_cents": {
             "type": "integer",
             "title": "Pro Payout Cents",
@@ -5962,6 +6272,8 @@
           "checked_in_at",
           "arrival_code_locked",
           "started_at",
+          "completed_at",
+          "photos",
           "pro_payout_cents"
         ],
         "title": "ProJob",
@@ -5996,6 +6308,32 @@
           "next_cursor"
         ],
         "title": "ProJobPage"
+      },
+      "ProJobPhotos": {
+        "properties": {
+          "before": {
+            "items": {
+              "$ref": "#/components/schemas/JobPhotoOut"
+            },
+            "type": "array",
+            "title": "Before"
+          },
+          "after": {
+            "items": {
+              "$ref": "#/components/schemas/JobPhotoOut"
+            },
+            "type": "array",
+            "title": "After"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "before",
+          "after"
+        ],
+        "title": "ProJobPhotos",
+        "description": "The pro's own photos of the job, oldest first: each as its privacy-safe copy once it is\nmade, else the pro's original."
       },
       "ProProfileOut": {
         "properties": {

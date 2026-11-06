@@ -704,7 +704,8 @@ export interface paths {
          * Follow the job of one of my service requests
          * @description The job once paid: its status, the scheduled start, the pro's public card, the ETA once
          *     the pro is on the way, the arrival code to give the pro (only while they are on the way and
-         *     have not checked in), the history and what the customer paid.
+         *     have not checked in), the history, the pro's before and after photos (their privacy-safe
+         *     copies) and what the customer paid.
          */
         get: operations["get_request_job_v1_requests__request_id__job_get"];
         put?: never;
@@ -813,6 +814,48 @@ export interface paths {
          * @description On the way -> working, after the check-in.
          */
         post: operations["start_job_v1_pros_me_jobs__job_id__start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pros/me/jobs/{job_id}/photos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add before or after photos of the work
+         * @description Attaches photos the pro uploaded (POST /v1/uploads, purpose job_photo), in the order
+         *     given. The customer sees each once its privacy-safe copy is made.
+         */
+        post: operations["add_job_photos_v1_pros_me_jobs__job_id__photos_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pros/me/jobs/{job_id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark the job done
+         * @description Working -> completed (Job's done), with at least one after photo. The customer then has
+         *     a window to confirm. Again once completed: the job unchanged.
+         */
+        post: operations["complete_job_v1_pros_me_jobs__job_id__complete_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1215,6 +1258,7 @@ export interface components {
              * @description The job's history, oldest first.
              */
             timeline: components["schemas"]["JobTimelineEntry"][];
+            photos: components["schemas"]["CustomerJobPhotos"];
             /**
              * Amount Cents
              * @description The price paid for the service.
@@ -1227,6 +1271,22 @@ export interface components {
              * @description What the customer paid: amount plus tax.
              */
             customer_total_cents: number;
+        };
+        /**
+         * CustomerJobPhotos
+         * @description The pro's photos of the job, oldest first: only their privacy-safe copies (no location or
+         *     camera details).
+         */
+        CustomerJobPhotos: {
+            /** Before */
+            before: components["schemas"]["JobPhotoOut"][];
+            /** After */
+            after: components["schemas"]["JobPhotoOut"][];
+            /**
+             * Pending
+             * @description Photos not listed yet: their privacy-safe copy is still being made.
+             */
+            pending: number;
         };
         /**
          * CustomerQuote
@@ -1472,6 +1532,47 @@ export interface components {
             names: {
                 [key: string]: string;
             };
+        };
+        /**
+         * JobPhotoKind
+         * @enum {string}
+         */
+        JobPhotoKind: "before" | "after";
+        /**
+         * JobPhotoOut
+         * @description One photo of the job, signed for a short while.
+         */
+        JobPhotoOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Content Type
+             * @example image/jpeg
+             */
+            content_type: string;
+            /**
+             * Url
+             * @description A signed GET URL, valid until expires_at.
+             */
+            url: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
+        /** JobPhotosIn */
+        JobPhotosIn: {
+            /** @description before: while on the way or working; after: while working. */
+            kind: components["schemas"]["JobPhotoKind"];
+            /**
+             * Upload Keys
+             * @description Keys of the caller's own job_photo uploads (POST /v1/uploads), in the order to show them.
+             */
+            upload_keys: string[];
         };
         /**
          * JobStatus
@@ -2031,6 +2132,12 @@ export interface components {
              */
             started_at: string | null;
             /**
+             * Completed At
+             * @description When the pro marked the job done: the customer's confirmation window opens.
+             */
+            completed_at: string | null;
+            photos: components["schemas"]["ProJobPhotos"];
+            /**
              * Pro Payout Cents
              * @description What the pro receives for the job.
              */
@@ -2045,6 +2152,17 @@ export interface components {
              * @description Pass as `cursor` for the next page.
              */
             next_cursor: string | null;
+        };
+        /**
+         * ProJobPhotos
+         * @description The pro's own photos of the job, oldest first: each as its privacy-safe copy once it is
+         *     made, else the pro's original.
+         */
+        ProJobPhotos: {
+            /** Before */
+            before: components["schemas"]["JobPhotoOut"][];
+            /** After */
+            after: components["schemas"]["JobPhotoOut"][];
         };
         /** ProProfileOut */
         ProProfileOut: {
@@ -5108,6 +5226,144 @@ export interface operations {
                 };
             };
             /** @description check_in_required: no check-in yet; invalid_transition: the job is past on the way. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    add_job_photos_v1_pros_me_jobs__job_id__photos_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JobPhotosIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProJob"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have jobs to work on. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job of the caller with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description job_photo_not_allowed: before photos need the job on the way or working, after photos working; duplicate_photo: a key given twice or already attached; job_photo_limit: more photos of the kind than a job holds. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description invalid_photo: a key that is not one of the caller's own job_photo uploads (nothing is stored); validation_error: a bad kind or no keys. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    complete_job_v1_pros_me_jobs__job_id__complete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProJob"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have jobs to work on. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job of the caller with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description after_photos_required: no after photo yet; invalid_transition: the job is not working. */
             409: {
                 headers: {
                     [name: string]: unknown;
