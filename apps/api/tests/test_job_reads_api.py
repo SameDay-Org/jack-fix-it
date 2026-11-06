@@ -357,14 +357,16 @@ async def test_pro_address_masks_a_contact_typed_into_it(
 async def test_pro_address_masks_the_customers_own_contacts_in_any_form(
     db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
 ) -> None:
-    """The known values run first: the customer's account email spelled out and their phone
-    with other punctuation are masked too."""
-    local, domain = CUSTOMER_EMAIL.split("@")
-    spelled = f"{local} at {domain.replace('.', ' dot ')}"
+    """The known values run first: the local part of the customer's account email and their
+    phone in an odd grouping, which the patterns alone leave as they are
+    (test_redaction.py::test_address_contacts_known_values_first)."""
+    handle = CUSTOMER_EMAIL.split("@")[0]
     digits = CUSTOMER_PHONE.removeprefix("+1")
-    spaced = f"{digits[:3]}  {digits[3:6]} / {digits[6:]}"
+    regrouped = f"{digits[:4]} {digits[4:7]} {digits[7:]}"
     world, job = await _job_at(
-        db_session, world, {**ADDRESS, "line2": f"{LINE2} {spelled}", "city": f"Orlando {spaced}"}
+        db_session,
+        world,
+        {**ADDRESS, "line2": f"{LINE2} {handle}", "city": f"Orlando {regrouped}"},
     )
 
     responses = await _pro_responses(db_client, world, job)
@@ -373,8 +375,9 @@ async def test_pro_address_masks_the_customers_own_contacts_in_any_form(
         address = _address_of(name, response)
         assert address["line2"] == f"{LINE2} {MASK}", name
         assert address["city"] == f"Orlando {MASK}", name
+        assert handle not in response.text
+        assert regrouped not in response.text
         no_leaks(response.text)
-        assert spelled not in response.text
 
 
 @pytest.mark.parametrize(
