@@ -797,6 +797,8 @@ describe("uploadMedia", () => {
           signedOut ??= logout();
         },
       }).catch((error: unknown) => error);
+      // A PUT that did start would send the whole file and be kept.
+      network = "completes";
       await flush();
       await runNativeQueue();
 
