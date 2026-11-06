@@ -91,15 +91,25 @@ class AuthService:
         # not needed to sign in.
         self._storage = storage
 
-    def present(self, account: UserAccount) -> UserOut:
-        """The account as the API shows it: the ID photo as a signed URL (#250)."""
-        photo = None
-        if account.photo_key is not None:
-            ttl = self._config.photo_url_ttl_seconds
-            photo = PhotoOut(
-                url=self._storage().presign_get(account.photo_key, ttl),
-                expires_at=datetime.now(UTC) + timedelta(seconds=ttl),
-            )
+    def prepare_photo(self, account: UserAccount) -> PhotoOut | None:
+        """The ID photo as a signed URL, or None for an account without one (#250).
+
+        The one step of showing an account that can fail: it resolves the storage and signs,
+        and a missing or broken storage configuration raises. A path that commits calls it
+        before anything becomes durable and presents with the prepared value, so a failure
+        never follows a committed rotation, update or verification (#290).
+        """
+        if account.photo_key is None:
+            return None
+        ttl = self._config.photo_url_ttl_seconds
+        return PhotoOut(
+            url=self._storage().presign_get(account.photo_key, ttl),
+            expires_at=datetime.now(UTC) + timedelta(seconds=ttl),
+        )
+
+    @staticmethod
+    def present(account: UserAccount, photo: PhotoOut | None) -> UserOut:
+        """The account as the API shows it, with its photo from prepare_photo. Never raises."""
         return UserOut.from_account(account, photo=photo)
 
     async def register(self, data: RegisterRequest) -> AuthResponse:
@@ -132,9 +142,11 @@ class AuthService:
         )
         if user.role is UserRole.PRO and account.photo_key is not None and "photo_key" in sent:
             await ProService(self._session).adopt_photo_if_missing(user.id, account.photo_key)
+        # Signed before the commit: a storage failure leaves the update uncommitted (#290).
+        photo = self.prepare_photo(account)
         await self._session.commit()
         logger.info("user_updated", extra={"user_id": str(user.id), "fields": sorted(sent)})
-        return self.present(account)
+        return self.present(account, photo)
 
     async def login(self, data: LoginRequest) -> AuthResponse:
         credentials = await self._users.get_credentials_by_email(data.email)
@@ -262,7 +274,11 @@ class AuthService:
     async def _issue_tokens(
         self, user: UserAccount, refresh_token: str, now: datetime
     ) -> AuthResponse:
-        """Creates the access token, commits the refresh token rows and builds the response."""
+        """Prepares the photo, creates the access token, commits the refresh token rows and
+        builds the response. The photo comes first: it is the step that can fail, and a
+        failure must leave the rotation uncommitted, with the presented token unspent (#290).
+        """
+        photo = self.prepare_photo(user)
         access_token = security.create_access_token(
             user_id=user.id,
             role=user.role,
@@ -272,7 +288,7 @@ class AuthService:
         )
         await self._session.commit()
         return AuthResponse(
-            user=self.present(user),
+            user=self.present(user, photo),
             access_token=access_token,
             refresh_token=refresh_token,
             expires_in=self._config.access_token_ttl_seconds,

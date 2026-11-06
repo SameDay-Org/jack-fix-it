@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.integrations.sms_verify import get_phone_verifier
 from app.integrations.storage import PresignedUpload
 from app.modules.pros.models import ProProfile
 from app.modules.users import public_codes
@@ -24,6 +25,8 @@ from app.modules.users.types import UserRole
 from app.observability import JsonFormatter
 from tests.conftest import make_settings
 from tests.test_auth_api import PASSWORD, VALIDATION_ERROR, register
+from tests.test_phone_verify_api import CODE as SMS_CODE
+from tests.test_phone_verify_api import PHONE, FakeVerifier
 
 PHOTO_TTL = 123
 CODE = re.compile(public_codes.PATTERN)
@@ -441,25 +444,42 @@ async def test_me_returns_signed_photo_and_member_since(
     }
 
 
-async def test_login_and_phone_verify_show_the_card_fields(
-    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+async def test_login_phone_verify_and_refresh_show_the_card_fields(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage, app: FastAPI
 ) -> None:
-    # Every UserOut comes from the same presenter: the sign-in response carries the photo too.
-    response = await register(db_client, email="login@example.com")
+    # Every UserOut comes from the same presenter: the sign-in, the phone verification and
+    # the refresh carry the photo too.
+    registered = (await register(db_client, email="login@example.com")).json()
     ana = Caller(
-        id=uuid.UUID(response.json()["user"]["id"]),
-        headers={"Authorization": f"Bearer {response.json()['access_token']}"},
+        id=uuid.UUID(registered["user"]["id"]),
+        headers={"Authorization": f"Bearer {registered['access_token']}"},
     )
     key = ana.upload_key()
     assert (await patch_me(db_client, ana, {"photo_key": key})).status_code == 200
+    verifier = FakeVerifier()
+    app.dependency_overrides[get_phone_verifier] = lambda: verifier
 
     login = await db_client.post(
         "/v1/auth/login", json={"email": "login@example.com", "password": PASSWORD}
     )
+    verified = await db_client.post(
+        "/v1/auth/phone/verify", json={"phone": PHONE, "code": SMS_CODE}, headers=ana.headers
+    )
+    refreshed = await db_client.post(
+        "/v1/auth/refresh", json={"refresh_token": registered["refresh_token"]}
+    )
 
     assert login.status_code == 200, login.text
-    assert login.json()["user"]["photo"]["url"].endswith(f"{key}?sig=fake")
-    assert login.json()["user"]["public_code"] == response.json()["user"]["public_code"]
+    assert verified.status_code == 200, verified.text
+    assert refreshed.status_code == 200, refreshed.text
+    assert verified.json()["phone_verified"] is True
+    assert verifier.checked == [(PHONE, SMS_CODE)]
+    for user in (login.json()["user"], verified.json(), refreshed.json()["user"]):
+        assert user["photo"]["url"].endswith(f"{key}?sig=fake")
+        assert user["public_code"] == registered["user"]["public_code"]
+        assert user["member_since"] == registered["user"]["member_since"]
+    # One signature per response that showed the photo: the PATCH and the three above.
+    assert storage.gets == [(key, PHOTO_TTL)] * 4
 
 
 # Access and logs
