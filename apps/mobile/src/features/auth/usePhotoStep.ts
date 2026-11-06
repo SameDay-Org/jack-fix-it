@@ -132,6 +132,15 @@ export function usePhotoStep(onSaved: () => void): PhotoStep {
         : permission.canAskAgain
           ? "ask"
           : "blocked";
+  // Camera access went away while the step is on screen (the setting was turned off): the
+  // preview is gone, and the one mounted once access is back is a new one. Adjusted during the
+  // render that sees the change, so no frame shows the old preview's state.
+  const cameraOff = mode === "checking" || mode === "ask" || mode === "blocked";
+  const [wasCameraOff, setWasCameraOff] = useState(cameraOff);
+  if (cameraOff !== wasCameraOff) {
+    setWasCameraOff(cameraOff);
+    if (cameraOff) setPreview((current) => ({ id: current.id + 1, state: "starting" }));
+  }
 
   const fail = useCallback((message: string) => {
     setFailure(message);
@@ -217,7 +226,7 @@ export function usePhotoStep(onSaved: () => void): PhotoStep {
     onCameraStop();
     setSaveFailed(false);
     setFailure(null);
-  }, []);
+  }, [onCameraStop]);
 
   const save = useCallback(async () => {
     if (saving.current) return;

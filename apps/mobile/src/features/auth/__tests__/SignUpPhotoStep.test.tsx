@@ -325,6 +325,25 @@ describe("SignUpScreen: the selfie step, a refused camera", () => {
     expect(screen.queryByText("Camera access is off")).toBeNull();
   });
 
+  it("access turned off and on again on the step: Take photo waits for the new preview", async () => {
+    getCameraPermissionsAsync.mockResolvedValue(CAMERA_PERMISSION.granted);
+    onFlow();
+    await renderStep();
+    await waitFor(() => expect(button("Take photo")).toBeEnabled());
+
+    getCameraPermissionsAsync.mockResolvedValue(CAMERA_PERMISSION.blocked);
+    await act(async () => onAppState()("active"));
+    expect(await screen.findByText("Camera access is off")).toBeTruthy();
+
+    cameraMock.holdReady = true;
+    getCameraPermissionsAsync.mockResolvedValue(CAMERA_PERMISSION.granted);
+    await act(async () => onAppState()("active"));
+    await waitFor(() => expect(cameraMock.pendingReady).toHaveLength(1));
+    expect(button("Take photo")).toBeDisabled();
+    await act(async () => cameraMock.pendingReady[0]?.());
+    expect(button("Take photo")).toBeEnabled();
+  });
+
   it("refused in the system dialog: the library takes over, and a cancelled pick changes nothing", async () => {
     getCameraPermissionsAsync.mockResolvedValue(CAMERA_PERMISSION.undetermined);
     requestCameraPermissionsAsync.mockResolvedValue(CAMERA_PERMISSION.blocked);
