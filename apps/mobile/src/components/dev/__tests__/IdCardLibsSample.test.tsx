@@ -11,6 +11,7 @@ import type * as CameraMock from "../../../../__mocks__/expo-camera";
 import type * as SensorsMock from "../../../../__mocks__/expo-sensors";
 import type * as ViewShotMock from "../../../../__mocks__/react-native-view-shot";
 import { IdCardLibsSample } from "../IdCardLibsSample";
+import "@/i18n";
 
 // Root __mocks__ apply on their own, but a module reached through a plain import lives in Jest's
 // module registry while `jest.requireMock` fills the mock registry: an explicit jest.mock makes

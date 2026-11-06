@@ -3,7 +3,7 @@
 // preview is a plain host view that carries the camera props and reports ready once active.
 import type { CameraViewProps } from "expo-camera";
 import { PermissionStatus, type PermissionResponse } from "expo-modules-core";
-import { useCallback, useEffect, useState, type ComponentType } from "react";
+import { useCallback, useEffect, useEffectEvent, useState, type ComponentType } from "react";
 import { View, type ViewProps } from "react-native";
 
 export { PermissionStatus };
@@ -86,11 +86,15 @@ export function CameraView({
   testID,
   accessibilityLabel,
 }: CameraViewProps) {
-  useEffect(() => {
-    if (!active) return;
+  // Reports once per mount and again when the lens or `active` changes, as the native view does;
+  // a parent re-render alone (new callback identities) reports nothing.
+  const report = useEffectEvent(() => {
     if (cameraMock.mountError) onMountError?.({ message: cameraMock.mountError });
     else onCameraReady?.();
-  }, [active, onCameraReady, onMountError]);
+  });
+  useEffect(() => {
+    if (active) report();
+  }, [active, facing]);
 
   return (
     <HostCamera
