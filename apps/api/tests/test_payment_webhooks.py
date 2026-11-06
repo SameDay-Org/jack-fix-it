@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from starlette.requests import Request
 
 from app.config import Settings
+from app.integrations.stripe_payments import get_stripe_payments
 from app.modules.addresses.models import Address
 from app.modules.categories.models import Category
 from app.modules.jobs.models import Job, JobEvent, JobStatus
@@ -42,6 +43,7 @@ from app.observability import JsonFormatter
 from app.queue import JobQueue, get_job_queue
 from tests.conftest import make_settings
 from tests.helpers import as_status_writer
+from tests.test_payments_api import PUBLISHABLE_KEY, FakeStripePayments, _fake_stripe
 from tests.test_quote_list_api import headers_for
 from tests.test_stripe_webhooks_api import sign
 
@@ -219,7 +221,11 @@ class State:
 
 @pytest.fixture
 def settings() -> Settings:
-    return make_settings(stripe_webhook_secret=SECRET, stripe_webhook_max_attempts=MAX_ATTEMPTS)
+    return make_settings(
+        stripe_webhook_secret=SECRET,
+        stripe_webhook_max_attempts=MAX_ATTEMPTS,
+        stripe_publishable_key=PUBLISHABLE_KEY,
+    )
 
 
 @pytest.fixture
@@ -663,6 +669,61 @@ async def test_after_cancel_another_quote_can_be_accepted(market: Market) -> Non
     state = await market.state()
     assert state.request is RequestStatus.ACCEPTED
     assert state.quotes == [QuoteStatus.PENDING, QuoteStatus.ACCEPTED, QuoteStatus.PENDING]
+
+
+async def test_the_same_quote_accepted_again_after_a_cancel_gets_a_fresh_payment(
+    app: FastAPI, market: Market
+) -> None:
+    """#58 round 1 B4 end to end: the cancel reopens quote A, the customer accepts it again and
+    pays: a new payment row with its own PaymentIntent (the canceled one stays), and that
+    intent's success creates the job from the new payment."""
+    app.state.fake_stripe_payments = FakeStripePayments()
+    app.dependency_overrides[get_stripe_payments] = _fake_stripe
+    stripe: FakeStripePayments = app.state.fake_stripe_payments
+    customer = headers_for(market.customer_id, UserRole.CUSTOMER)
+    base = f"/v1/requests/{market.request_id}/quotes/{market.accepted_quote}"
+    try:
+        assert await market.deliver(CANCELED) == "processed"
+        accepted = await market.client.post(f"{base}/accept", headers=customer)
+        assert accepted.status_code == 200, accepted.text
+        paid = await market.client.post(f"{base}/payment", headers=customer)
+        assert paid.status_code == 200, paid.text
+    finally:
+        app.dependency_overrides.pop(get_stripe_payments, None)
+
+    async with market.sessions() as session:
+        rows = {
+            row.id: row
+            for row in await session.scalars(
+                select(Payment).where(Payment.quote_id == market.accepted_quote)
+            )
+        }
+    assert len(rows) == 2
+    [new_id] = set(rows) - {market.payment_id}
+    old, new = rows[market.payment_id], rows[new_id]
+    assert (old.status, old.stripe_payment_intent_id) == (PaymentStatus.CANCELED, market.intent_id)
+    [new_intent] = stripe.intents
+    assert (new.status, new.stripe_payment_intent_id) == (
+        PaymentStatus.REQUIRES_PAYMENT,
+        new_intent,
+    )
+    assert stripe.intent_calls[0]["idempotency_key"] == f"payment_intent:{new_id}"
+    assert paid.json()["payment_intent_client_secret"] == stripe.intents[new_intent].client_secret
+
+    assert await market.deliver(SUCCEEDED, intent_id=new_intent) == "processed"
+
+    state = await market.state()
+    assert state.request is RequestStatus.ACCEPTED
+    [job] = state.jobs
+    assert job.quote_id == market.accepted_quote
+    async with market.sessions() as session:
+        statuses = {
+            row.id: row.status
+            for row in await session.execute(
+                select(Payment.id, Payment.status).where(Payment.quote_id == market.accepted_quote)
+            )
+        }
+    assert statuses == {market.payment_id: PaymentStatus.CANCELED, new_id: PaymentStatus.SUCCEEDED}
 
 
 async def test_payment_webhook_logs_carry_ids_only(
