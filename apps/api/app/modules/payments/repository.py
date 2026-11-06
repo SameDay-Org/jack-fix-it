@@ -23,6 +23,30 @@ class PaymentRepository:
         )
         return (await self._session.scalars(statement)).one_or_none()
 
+    async def find_by_intent(self, intent_id: str) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID] | None:
+        """The ids of the payment, its request and its quote for a PaymentIntent id, read
+        without a lock (the caller locks the request, the quote, then the payment); None for an
+        unknown intent."""
+        statement = select(Payment.id, Payment.request_id, Payment.quote_id).where(
+            Payment.stripe_payment_intent_id == intent_id
+        )
+        row = (await self._session.execute(statement)).one_or_none()
+        return None if row is None else (row.id, row.request_id, row.quote_id)
+
+    async def move_status(
+        self, payment_id: uuid.UUID, from_status: PaymentStatus, to: PaymentStatus
+    ) -> bool:
+        """from_status -> to; a conditional UPDATE, so it happens once. The caller holds the
+        row's lock and checks the edge against PAYMENT_TRANSITIONS. False when the row was no
+        longer in from_status."""
+        statement = (
+            update(Payment)
+            .where(Payment.id == payment_id, Payment.status == from_status)
+            .values(status=to)
+            .returning(Payment.id)
+        )
+        return (await self._session.scalar(statement)) is not None
+
     async def get_for_update(self, payment_id: uuid.UUID) -> Payment | None:
         """The payment, locked until the transaction ends, read as last committed."""
         statement = (
