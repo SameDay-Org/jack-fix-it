@@ -1,4 +1,5 @@
-"""Privacy-safe copies of a request's photos and videos (#173), made by the worker.
+"""Privacy-safe copies of a request's photos and videos (#173), made by the worker; a job's
+photos (#298) use the same copier through their own MediaRows (app/modules/jobs/photos.py).
 
 POST /v1/requests queues sanitize_request_media after its commit. For each media row still
 pending, the job downloads the original to a temporary file, makes the safe copy
@@ -42,7 +43,7 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Final, Literal
+from typing import Final, Literal, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -229,20 +230,80 @@ class _Workdir:
         shutil.rmtree(self.path, ignore_errors=True)
 
 
+class MediaRows(Protocol):
+    """The rows a copier makes safe copies for, grouped by a parent: a request's media (#173)
+    or a job's photos (#298). Each call runs in the copier's own short transaction."""
+
+    # The log field naming the parent. Never "request_id": that is the HTTP correlation id.
+    parent_field: str
+
+    async def pending(
+        self, session: AsyncSession, parent_id: uuid.UUID
+    ) -> list[tuple[uuid.UUID, str]]:
+        """The parent's rows still pending, oldest first: (row id, original key)."""
+        ...
+
+    async def mark_ready(
+        self, session: AsyncSession, row_id: uuid.UUID, safe_key: str, content_type: str
+    ) -> bool:
+        """Records the copy on the row, locked, if it is still pending; False when another run
+        already settled it (its copy is kept)."""
+        ...
+
+    async def fail_pending(
+        self, session: AsyncSession, row_ids: Sequence[uuid.UUID]
+    ) -> list[uuid.UUID]:
+        """Marks those of the rows still pending failed; the ids it changed."""
+        ...
+
+
+class RequestMediaRows:
+    """A request's photos and videos (#173)."""
+
+    parent_field = "service_request_id"
+
+    async def pending(
+        self, session: AsyncSession, parent_id: uuid.UUID
+    ) -> list[tuple[uuid.UUID, str]]:
+        rows = await ServiceRequestRepository(session).pending_media(parent_id)
+        return [(media.id, media.file_key) for media in rows]
+
+    async def mark_ready(
+        self, session: AsyncSession, row_id: uuid.UUID, safe_key: str, content_type: str
+    ) -> bool:
+        media = await ServiceRequestRepository(session).media_for_update(row_id)
+        if media is None or media.safe_status != MediaSafeStatus.PENDING:
+            return False
+        media.safe_key = safe_key
+        media.safe_content_type = content_type
+        media.safe_status = MediaSafeStatus.READY
+        return True
+
+    async def fail_pending(
+        self, session: AsyncSession, row_ids: Sequence[uuid.UUID]
+    ) -> list[uuid.UUID]:
+        return await ServiceRequestRepository(session).fail_pending_media(row_ids)
+
+
+REQUEST_MEDIA_ROWS: Final = RequestMediaRows()
+
+
 class MediaCopier:
     def __init__(
         self,
         sessions: Callable[[], AbstractAsyncContextManager[AsyncSession]],
         storage: Storage,
         config: MediaCopyConfig,
+        rows: MediaRows = REQUEST_MEDIA_ROWS,
     ) -> None:
         self._sessions = sessions
         self._storage = storage
         self._config = config
+        self._rows = rows
 
-    async def copy_request_media(
+    async def copy_pending(
         self,
-        request_id: uuid.UUID,
+        parent_id: uuid.UUID,
         attempt: int,
         *,
         final: bool = False,
@@ -258,7 +319,7 @@ class MediaCopier:
         run = _Try(self._config, clock)
         try:
             pending = await run.step(
-                partial(self._pending, request_id), self._config.overhead_seconds, TimeoutError
+                partial(self._pending, parent_id), self._config.overhead_seconds, TimeoutError
             )
         except _OutOfTimeError:
             raise TimeoutError from None
@@ -270,7 +331,7 @@ class MediaCopier:
                 unsettled.append(media_id)
                 continue
             try:
-                result = await self._copy_guarded(run, media_id, request_id, file_key, attempt)
+                result = await self._copy_guarded(run, media_id, parent_id, file_key, attempt)
             except _OutOfTimeError:
                 unsettled.append(media_id)
                 continue
@@ -283,7 +344,7 @@ class MediaCopier:
                 **dict.fromkeys(unsettled, SanitizeFailure.TIMEOUT),
                 **dict.fromkeys(stuck, SanitizeFailure.INTERNAL),
             }
-            settled["failed"] += await self._fail_unsettled(run, request_id, reasons)
+            settled["failed"] += await self._fail_unsettled(run, parent_id, reasons)
             unsettled = []
         return MediaCopyOutcome(
             ready=settled["ready"],
@@ -292,18 +353,15 @@ class MediaCopier:
             deferred=len(unsettled),
         )
 
-    async def _pending(self, request_id: uuid.UUID) -> list[tuple[uuid.UUID, str]]:
+    async def _pending(self, parent_id: uuid.UUID) -> list[tuple[uuid.UUID, str]]:
         async with self._sessions() as session:
-            return [
-                (media.id, media.file_key)
-                for media in await ServiceRequestRepository(session).pending_media(request_id)
-            ]
+            return await self._rows.pending(session, parent_id)
 
     async def _copy_guarded(
         self,
         run: _Try,
         media_id: uuid.UUID,
-        request_id: uuid.UUID,
+        parent_id: uuid.UUID,
         file_key: str,
         attempt: int,
     ) -> _RowResult:
@@ -311,14 +369,14 @@ class MediaCopier:
         row never stops the others. Errors are logged by class only: their text can name the
         key or a path. The try's deadline is not the row's error: it stops the loop."""
         try:
-            return await self._copy_one(run, media_id, request_id, file_key, attempt)
+            return await self._copy_one(run, media_id, parent_id, file_key, attempt)
         except _OutOfTimeError:
             raise
         except Exception as error:  # noqa: BLE001 - see the docstring
             error_class = type(error).__name__
         try:
             return await self._transient(
-                run, media_id, request_id, SanitizeFailure.INTERNAL, attempt, error_class
+                run, media_id, parent_id, SanitizeFailure.INTERNAL, attempt, error_class
             )
         except _OutOfTimeError:
             raise
@@ -328,7 +386,7 @@ class MediaCopier:
                 "media_sanitize_retry",
                 extra={
                     "media_id": str(media_id),
-                    "service_request_id": str(request_id),
+                    self._rows.parent_field: str(parent_id),
                     "reason": SanitizeFailure.INTERNAL.value,
                     "attempt": attempt,
                     "error_class": type(error).__name__,
@@ -340,18 +398,18 @@ class MediaCopier:
         self,
         run: _Try,
         media_id: uuid.UUID,
-        request_id: uuid.UUID,
+        parent_id: uuid.UUID,
         file_key: str,
         attempt: int,
     ) -> _RowResult:
         try:
             safe_key, content_type = await self._copy(run, media_id, file_key)
         except SanitizeError as error:
-            await self._fail(run, media_id, request_id, error.reason, error.exit_code)
+            await self._fail(run, media_id, parent_id, error.reason, error.exit_code)
             return "failed"
         except _TRANSIENT as error:
             return await self._transient(
-                run, media_id, request_id, _transient_reason(error), attempt
+                run, media_id, parent_id, _transient_reason(error), attempt
             )
         marked = await run.step(
             partial(self._mark_ready, media_id, safe_key, content_type),
@@ -362,7 +420,7 @@ class MediaCopier:
             return "skipped"
         logger.info(
             "media_sanitized",
-            extra={"media_id": str(media_id), "service_request_id": str(request_id)},
+            extra={"media_id": str(media_id), self._rows.parent_field: str(parent_id)},
         )
         return "ready"
 
@@ -370,18 +428,18 @@ class MediaCopier:
         self,
         run: _Try,
         media_id: uuid.UUID,
-        request_id: uuid.UUID,
+        parent_id: uuid.UUID,
         reason: SanitizeFailure,
         attempt: int,
         error_class: str | None = None,
     ) -> _RowResult:
         """A failure that may pass: retried, until the last try fails the row."""
         if attempt >= self._config.max_tries:
-            await self._fail(run, media_id, request_id, reason, None)
+            await self._fail(run, media_id, parent_id, reason, None)
             return "failed"
         extra: dict[str, object] = {
             "media_id": str(media_id),
-            "service_request_id": str(request_id),
+            self._rows.parent_field: str(parent_id),
             "reason": reason.value,
             "attempt": attempt,
         }
@@ -422,21 +480,16 @@ class MediaCopier:
     async def _mark_ready(self, media_id: uuid.UUID, safe_key: str, content_type: str) -> bool:
         """False when another run already settled the row: its copy is kept, this one is not."""
         async with self._sessions() as session:
-            media = await ServiceRequestRepository(session).media_for_update(media_id)
-            if media is None or media.safe_status != MediaSafeStatus.PENDING:
-                await session.commit()  # nothing changed: ends the transaction and its lock
-                return False
-            media.safe_key = safe_key
-            media.safe_content_type = content_type
-            media.safe_status = MediaSafeStatus.READY
+            marked = await self._rows.mark_ready(session, media_id, safe_key, content_type)
+            # Either way it ends the transaction and its lock.
             await session.commit()
-        return True
+        return marked
 
     async def _fail(
         self,
         run: _Try,
         media_id: uuid.UUID,
-        request_id: uuid.UUID,
+        parent_id: uuid.UUID,
         reason: SanitizeFailure,
         exit_code: int | None,
     ) -> None:
@@ -447,7 +500,7 @@ class MediaCopier:
             return  # another run had already settled it
         extra: dict[str, object] = {
             "media_id": str(media_id),
-            "service_request_id": str(request_id),
+            self._rows.parent_field: str(parent_id),
             "reason": reason.value,
         }
         if exit_code is not None:
@@ -455,7 +508,7 @@ class MediaCopier:
         logger.error("media_sanitize_failed", extra=extra)
 
     async def _fail_unsettled(
-        self, run: _Try, request_id: uuid.UUID, reasons: dict[uuid.UUID, SanitizeFailure]
+        self, run: _Try, parent_id: uuid.UUID, reasons: dict[uuid.UUID, SanitizeFailure]
     ) -> int:
         """A final try's settlement: the rows it could not settle fail in one write, within
         MEDIA_SANITIZE_OVERHEAD_SECONDS and what is left before ARQ's timeout (the settle
@@ -467,7 +520,7 @@ class MediaCopier:
                 "media_sanitize_failed",
                 extra={
                     "media_id": str(media_id),
-                    "service_request_id": str(request_id),
+                    self._rows.parent_field: str(parent_id),
                     "reason": reasons[media_id].value,
                 },
             )
@@ -477,7 +530,7 @@ class MediaCopier:
         """Marks those of the rows still pending failed; the ids it changed (another run may
         have settled the rest)."""
         async with self._sessions() as session:
-            failed = await ServiceRequestRepository(session).fail_pending_media(media_ids)
+            failed = await self._rows.fail_pending(session, media_ids)
             await session.commit()
         return failed
 

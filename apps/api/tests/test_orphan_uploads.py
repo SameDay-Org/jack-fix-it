@@ -31,9 +31,11 @@ from app.integrations.storage import (
 from app.modules.addresses.models import Address
 from app.modules.categories.models import Category
 from app.modules.categories.service import CategoryService
+from app.modules.jobs.models import Job, JobPhoto, JobPhotoKind
 from app.modules.pros.models import ProDocument, ProDocumentType, ProProfile
 from app.modules.pros.schemas import ProProfileUpdate
 from app.modules.pros.service import ProProfileConfig, ProProfileService
+from app.modules.quotes.models import Quote, QuoteStatus
 from app.modules.requests.models import (
     RequestMedia,
     RequestMediaKind,
@@ -41,6 +43,7 @@ from app.modules.requests.models import (
     ServiceRequest,
 )
 from app.modules.service_areas.service import ServiceAreaService
+from app.modules.uploads import orphans
 from app.modules.uploads.orphans import (
     KEY_STATEMENTS,
     REFERENCED_BY,
@@ -58,6 +61,7 @@ from app.modules.users.service import UserService
 from app.modules.users.types import UserRole, UserStatus
 from app.observability import configure_logging
 from tests.conftest import make_settings
+from tests.helpers import as_status_writer
 from tests.test_media_logging import leaks
 from tests.test_schema_requests_jobs import add
 
@@ -66,7 +70,7 @@ MIN_AGE = timedelta(hours=24)
 OLD = NOW - MIN_AGE - timedelta(minutes=1)
 YOUNG = NOW - MIN_AGE + timedelta(minutes=1)
 # Upload key columns that are not uploads: the opaque safe copies (#173), never swept.
-NOT_UPLOAD_KEYS = {"request_media.safe_key"}
+NOT_UPLOAD_KEYS = {"request_media.safe_key", "job_photos.safe_key"}
 
 
 @dataclass
@@ -160,6 +164,7 @@ class World:
     pro: User
     profile: ProProfile
     request: ServiceRequest
+    job: Job
 
 
 @pytest.fixture
@@ -182,7 +187,30 @@ async def world(db_session: AsyncSession) -> World:
         origin=RequestOrigin.APP,
     )
     await add(db_session, request)
-    return World(customer, pro, profile, request)
+    quote = Quote(
+        request_id=request.id,
+        pro_id=profile.id,
+        amount_cents=10_000,
+        scope="Fix it",
+        duration_minutes=60,
+        proposed_start_at=datetime(2030, 1, 1, tzinfo=UTC),
+        expires_at=datetime(2030, 1, 1, tzinfo=UTC),
+        status=QuoteStatus.ACCEPTED,
+    )
+    await add(db_session, quote)
+    job = Job(
+        request_id=request.id,
+        quote_id=quote.id,
+        customer_id=customer.id,
+        pro_id=profile.id,
+        customer_price_cents=10_000,
+        pro_payout_cents=8_500,
+        platform_fee_cents=1_500,
+        tax_cents=0,
+    )
+    async with as_status_writer(db_session):  # the database guard (#163)
+        await add(db_session, job)
+    return World(customer, pro, profile, request, job)
 
 
 async def attach_media(session: AsyncSession, world: World, key: str) -> None:
@@ -208,6 +236,15 @@ async def attach_id_photo(session: AsyncSession, world: World, key: str) -> None
     await session.flush()
 
 
+async def attach_job_photo(session: AsyncSession, world: World, key: str) -> None:
+    await add(
+        session,
+        JobPhoto(
+            job_id=world.job.id, kind=JobPhotoKind.AFTER, file_key=key, uploaded_by=world.pro.id
+        ),
+    )
+
+
 @dataclass(frozen=True)
 class Column:
     purpose: UploadPurpose
@@ -221,6 +258,7 @@ COLUMNS = [
     Column(UploadPurpose.PRO_DOCUMENT, lambda w: w.pro.id, attach_document),
     Column(UploadPurpose.PROFILE_PHOTO, lambda w: w.pro.id, attach_photo),
     Column(UploadPurpose.PROFILE_PHOTO, lambda w: w.customer.id, attach_id_photo),
+    Column(UploadPurpose.JOB_PHOTO, lambda w: w.pro.id, attach_job_photo),
 ]
 
 
@@ -263,7 +301,7 @@ async def test_delete_mode_removes_only_old_unreferenced_keys(
     result = await sweeper(sessions_of(db_session), storage).sweep()
 
     assert set(storage.objects) == expected_left
-    assert result == counts(scanned=16, too_young=8, referenced=4, orphaned=4, deleted=4)
+    assert result == counts(scanned=20, too_young=10, referenced=5, orphaned=5, deleted=5)
 
 
 async def test_an_object_exactly_at_the_minimum_age_is_too_young(
@@ -292,7 +330,25 @@ async def test_young_objects_a_storage_lists_as_old_are_kept(
     assert result == counts(scanned=2, too_young=1, orphaned=1, deleted=1)
 
 
-async def test_skipped_purposes_are_never_deleted(db_session: AsyncSession, world: World) -> None:
+async def test_job_photos_referenced_are_kept_unreferenced_deleted(
+    db_session: AsyncSession, world: World
+) -> None:
+    # Job photos (#298) moved from SKIPPED to REFERENCED_BY.
+    kept, orphan = (upload_key(world.pro.id, UploadPurpose.JOB_PHOTO) for _ in "ab")
+    await attach_job_photo(db_session, world, kept)
+    storage = ListingStorage({kept: OLD, orphan: OLD})
+
+    result = await sweeper(sessions_of(db_session), storage).sweep()
+
+    assert set(storage.objects) == {kept}
+    assert result == counts(scanned=2, referenced=1, orphaned=1, deleted=1)
+
+
+async def test_skipped_purposes_are_never_deleted(
+    db_session: AsyncSession, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # None is skipped today; a purpose that is must never lose a file.
+    monkeypatch.setattr(orphans, "SKIPPED", frozenset({UploadPurpose.JOB_PHOTO}))
     job_photos = {upload_key(world.pro.id, UploadPurpose.JOB_PHOTO) for _ in range(3)}
     storage = ListingStorage(dict.fromkeys(job_photos, OLD))
 
@@ -655,13 +711,13 @@ async def test_logs_carry_no_keys_or_user_ids(
     [summary] = [r for r in caplog.records if r.message == "orphan_uploads_swept"]
     logged = {name: summary.__dict__[name] for name in SweepCounts.__dataclass_fields__}
     assert logged == {
-        "scanned": 15,
-        "too_young": 4,
-        "referenced": 4,
-        "orphaned": 5,
-        "deleted": 4,
+        "scanned": 18,
+        "too_young": 5,
+        "referenced": 5,
+        "orphaned": 7,
+        "deleted": 6,
         "unparsed": 1,
-        "skipped_purpose": 1,
+        "skipped_purpose": 0,
         "failed": 1,
     }
     assert (summary.__dict__["mode"], summary.__dict__["completed"]) == ("delete", True)
