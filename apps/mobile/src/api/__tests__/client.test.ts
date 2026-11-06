@@ -1,9 +1,11 @@
 import { apiGet, apiPost } from "../client";
-import { ApiError, NetworkError } from "../errors";
-import { sessionStore } from "../session";
+import { ApiError, NetworkError, SessionExpiredError } from "../errors";
+import { login, sessionGeneration, sessionStore } from "../session";
 import {
   API_ORIGIN,
+  authResponse,
   callHeader,
+  callsTo,
   errorResponse,
   installFetchMock,
   jsonResponse,
@@ -316,5 +318,49 @@ describe("path parameters", () => {
       expect(fetchMock.mock.calls[0][0]).toBe(`${API_ORIGIN}/v1/requests/r-1/quotes/q-1/accept`);
       expect(callHeader(fetchMock.mock.calls[0], "Authorization")).toBe("Bearer access-1");
     });
+  });
+});
+
+describe("a call pinned to a session generation (#292 Vault B1)", () => {
+  const second = { ...user, id: "22222222-2222-4222-8222-222222222222" };
+
+  beforeEach(() => {
+    sessionStore.setState({
+      status: "signedIn",
+      user,
+      accessToken: "access-1",
+      accessTokenExpiresAt: Date.now() + 900_000,
+      cleanupPending: false,
+    });
+    fetchMock.mockImplementation(async (url) =>
+      url.endsWith("/v1/auth/login")
+        ? jsonResponse(200, { ...authResponse(2), user: second })
+        : jsonResponse(200, { items: [] }),
+    );
+  });
+
+  it("is sent with its own session's token while that session is current", async () => {
+    await apiGet("/v1/addresses", { auth: true, generation: sessionGeneration() });
+
+    expect(callHeader(callsTo(fetchMock, "/v1/addresses")[0], "Authorization")).toBe(
+      "Bearer access-1",
+    );
+  });
+
+  it("sends nothing once another sign-in replaced its session, where an unpinned call would", async () => {
+    const pinned = sessionGeneration();
+    await login({ email: second.email, password: "synthetic test password" });
+
+    const refused = await apiGet("/v1/addresses", { auth: true, generation: pinned }).catch(
+      (error: unknown) => error,
+    );
+    expect(refused).toBeInstanceOf(SessionExpiredError);
+    expect(refused).toMatchObject({ reason: "superseded" });
+    expect(callsTo(fetchMock, "/v1/addresses")).toHaveLength(0);
+
+    await apiGet("/v1/addresses", { auth: true });
+    expect(callHeader(callsTo(fetchMock, "/v1/addresses")[0], "Authorization")).toBe(
+      "Bearer access-2",
+    );
   });
 });

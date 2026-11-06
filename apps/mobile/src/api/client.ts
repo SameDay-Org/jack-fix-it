@@ -23,6 +23,13 @@ export type RequestOptions = {
   signal?: AbortSignal;
   /** Query-string values, e.g. `{ limit: 20, cursor }` on a paged list; `undefined` ones are left out. */
   query?: QueryParams;
+  /**
+   * Pins the call to the session generation a longer operation started in (`sessionGeneration()`
+   * taken when it started). After a sign-out or another sign-in nothing is sent: the call rejects
+   * with `SessionExpiredError("superseded")`, so a later step of the operation never carries the
+   * next session's token. Without it the call belongs to the generation current when it starts.
+   */
+  generation?: number;
 };
 
 /**
@@ -106,8 +113,9 @@ async function withSession<T>(
   options: RequestOptions,
   send: (accessToken?: string) => Promise<T>,
 ): Promise<T> {
+  if (options.generation !== undefined) ensureCurrent(options.generation);
   if (!options.auth) return send();
-  const startedIn = sessionGeneration();
+  const startedIn = options.generation ?? sessionGeneration();
   const accessToken = await getAccessToken();
   ensureCurrent(startedIn);
   throwIfAborted(options.signal);

@@ -16,6 +16,7 @@ import {
   apiPatch,
   endOnboarding,
   NetworkError,
+  sessionGeneration,
   UploadFailedError,
   UploadRejectedError,
   uploadMedia,
@@ -24,8 +25,16 @@ import {
 import { prepareMedia } from "@/features/media/compress";
 
 import type * as CameraMock from "../../../../__mocks__/expo-camera";
-import { deferred, user } from "../../../api/__tests__/helpers";
-import { sessionStore } from "../../../api/session";
+import {
+  authResponse,
+  callsTo,
+  deferred,
+  installFetchMock,
+  jsonResponse,
+  user,
+} from "../../../api/__tests__/helpers";
+import { apiPatch as sentPatch } from "../../../api/client";
+import { login, sessionStore } from "../../../api/session";
 import { phoneFlowStore } from "../../phone/phoneFlow";
 import { SignUpScreen } from "../SignUpScreen";
 import { renderInSafeArea, SIGNED_OUT } from "./helpers";
@@ -361,7 +370,11 @@ describe("SignUpScreen: the selfie step, saving the photo", () => {
 
     expect(prepareMedia).toHaveBeenCalledWith({ uri: SHOT, kind: "image" });
     expect(uploadMedia).toHaveBeenCalledWith(
-      expect.objectContaining({ purpose: "profile_photo", file: prepared(SHOT) }),
+      expect.objectContaining({
+        purpose: "profile_photo",
+        file: prepared(SHOT),
+        generation: sessionGeneration(),
+      }),
     );
     const ring = await screen.findByLabelText("Uploading your photo");
     expect(ring.props.accessibilityValue).toEqual(expect.objectContaining({ now: 40 }));
@@ -378,10 +391,33 @@ describe("SignUpScreen: the selfie step, saving the photo", () => {
     expect(apiPatch).toHaveBeenCalledWith(
       "/v1/auth/me",
       { photo_key: "profile_photo/ana.jpg" },
-      { auth: true },
+      { auth: true, generation: sessionGeneration() },
     );
     expect(sessionStore.getState().user?.photo?.url).toBe(SAVED);
     expect(endOnboarding).not.toHaveBeenCalled();
+  });
+
+  it("another sign-in during the upload: no PATCH as the next account, no failure, the flow goes on (#292 Vault B1)", async () => {
+    onFlow();
+    await renderStep();
+    await takePhoto();
+    const upload = deferred<{ key: string }>();
+    jest.mocked(uploadMedia).mockImplementation(() => upload.promise);
+    // The real client, so the pinned PATCH is refused where it would be sent.
+    jest.mocked(apiPatch).mockImplementation(sentPatch);
+    const fetch = installFetchMock();
+    const second = { ...user, id: "22222222-2222-4222-8222-222222222222" };
+    fetch.mockImplementation(async () => jsonResponse(200, { ...authResponse(2), user: second }));
+
+    await press("Use photo");
+    expect(uploadMedia).toHaveBeenCalledTimes(1);
+    await act(() => login({ email: "b@example.invalid", password: "synthetic test password" }));
+    await act(async () => upload.resolve({ key: "profile_photo/ana.jpg" }));
+
+    expect(callsTo(fetch, "/v1/auth/me")).toHaveLength(0);
+    expect(endOnboarding).not.toHaveBeenCalled();
+    expect(screen.queryByText("We couldn't save your photo. Try again.")).toBeNull();
+    expect(sessionStore.getState().user?.id).toBe(second.id);
   });
 
   it("a failed upload keeps the photo; Try again uploads the same compressed file", async () => {

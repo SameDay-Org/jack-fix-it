@@ -15,7 +15,7 @@ import {
 import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { endOnboarding, register, useSession } from "@/api";
+import { endOnboarding, isCurrentGeneration, register, sessionGeneration, useSession } from "@/api";
 import {
   Button,
   CodeInput,
@@ -98,6 +98,11 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
   const [direction, setDirection] = useState<1 | -1>(1);
   // "Let's go" was pressed: the flow is over and the app opens.
   const [done, setDone] = useState(false);
+  // The session generation the last step was saved in (or the one resumed with every step
+  // answered): "Let's go" ends the flow for that session only.
+  const [finishedIn, setFinishedIn] = useState<number | null>(() =>
+    firstStep === null ? sessionGeneration() : null,
+  );
   // A step is sliding in: its action and Back wait for it, so a second tap meant for the step that
   // left never submits or validates the one arriving.
   const [moving, setMoving] = useState(false);
@@ -129,6 +134,7 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
         // The keyboard goes down and the page back to its top: the card takes the middle of it.
         Keyboard.dismiss();
         scrollRef.current?.scrollTo({ y: 0 });
+        setFinishedIn(sessionGeneration());
         finish();
         return;
       }
@@ -175,7 +181,13 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
 
   // Past the account step the session belongs to the flow; a session that ends meanwhile (expired,
   // refused) sends the person back to Welcome, signed out.
-  const ending = done ? "done" : index >= 1 && status === "signedOut" ? "sessionLost" : null;
+  // A flow finished by a session that is gone since is not finished for this one.
+  const ending =
+    done && finishedIn !== null && isCurrentGeneration(finishedIn)
+      ? "done"
+      : index >= 1 && status === "signedOut"
+        ? "sessionLost"
+        : null;
 
   // The code goes back to its number, kept as typed.
   const changeNumber = () => {

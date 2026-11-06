@@ -4,7 +4,14 @@ import * as ImagePicker from "expo-image-picker";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ApiError, uploadMedia, UploadRejectedError, useSession } from "@/api";
+import {
+  ApiError,
+  isCurrentGeneration,
+  sessionGeneration,
+  uploadMedia,
+  UploadRejectedError,
+  useSession,
+} from "@/api";
 import { announce } from "@/components/ui/focus";
 import { useUpdateMe } from "@/features/account/api";
 import { prepareMedia, type PreparedMedia } from "@/features/media/compress";
@@ -56,7 +63,8 @@ export type PhotoStep = {
 };
 
 /** One photo's way to the account: the compressed file, then its upload key, kept for a retry. */
-type Upload = { source: string; prepared?: PreparedMedia; key?: string };
+// `generation`: the session the photo was uploaded for; its key is never reused for another.
+type Upload = { source: string; generation: number; prepared?: PreparedMedia; key?: string };
 
 type CameraState = "starting" | "ready" | "failed";
 
@@ -194,11 +202,17 @@ export function usePhotoStep(onSaved: () => void): PhotoStep {
     }
     const controller = new AbortController();
     saving.current = controller;
+    // The whole save (the upload's URL and PUT, the PATCH, the step done) belongs to the session
+    // this tap started in: after a sign-out or another sign-in nothing more is sent (Vault B1).
+    const generation = sessionGeneration();
     setSubmitting(true);
     setSaveFailed(false);
     setFailure(null);
     try {
-      const current: Upload = upload.current?.source === shot ? upload.current : { source: shot };
+      const current: Upload =
+        upload.current?.source === shot && upload.current.generation === generation
+          ? upload.current
+          : { source: shot, generation };
       upload.current = current;
       if (!current.key) {
         setProgress(0);
@@ -207,6 +221,7 @@ export function usePhotoStep(onSaved: () => void): PhotoStep {
           purpose: "profile_photo",
           file: current.prepared,
           signal: controller.signal,
+          generation,
           onProgress: (fraction) => {
             if (!controller.signal.aborted) setProgress(fraction);
           },
@@ -214,10 +229,11 @@ export function usePhotoStep(onSaved: () => void): PhotoStep {
         current.key = key;
       }
       setProgress(1);
-      await updateMe({ photo_key: current.key });
-      if (!controller.signal.aborted) onSaved();
+      await updateMe({ body: { photo_key: current.key }, generation });
+      if (!controller.signal.aborted && isCurrentGeneration(generation)) onSaved();
     } catch (error) {
       if (controller.signal.aborted) return; // the screen left: nothing to show
+      if (!isCurrentGeneration(generation)) return; // another session's now: not its news
       if (isRefusal(error)) {
         // The same file would be refused again: set it aside and open the camera for another.
         upload.current = null;

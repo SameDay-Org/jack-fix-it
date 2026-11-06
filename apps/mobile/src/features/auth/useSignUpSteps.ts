@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ApiError, NetworkError, useSession } from "@/api";
+import { ApiError, isCurrentGeneration, NetworkError, sessionGeneration, useSession } from "@/api";
 import { announce } from "@/components/ui/focus";
 import { useUpdateMe } from "@/features/account/api";
 import { useSaveAddress } from "@/features/addresses";
@@ -57,14 +57,26 @@ export function failureKey<Key extends string>(
 const isRefusal = (error: unknown): boolean => error instanceof ApiError && error.status === 422;
 
 /**
+ * Saves a step's fields. Every request it makes passes `generation` (`RequestOptions`), so the
+ * whole save belongs to the session the step's action started in.
+ */
+type StepSave<Fields> = (fields: Fields, generation: number) => Promise<void>;
+
+/**
  * The state every step form shares: one save at a time (a ref, so two taps in the same turn
  * cannot both start one), its failure announced, and the fields' errors once checked.
+ *
+ * The save is bound to the session generation its action started in. Once a sign-out or another
+ * sign-in replaces that session the save stops where it is: no later request is sent (each one is
+ * pinned to the generation), no failure is shown and the step is not marked done (`onSaved` is not
+ * called), so the step stays unfinished for the account that started it.
  */
 function useStepForm<Fields extends object, Errors extends object>(
   initial: Fields,
   validate: (fields: Fields) => Errors,
   messageOf: (errors: Errors) => string | undefined,
-  save: (fields: Fields) => Promise<void>,
+  save: StepSave<Fields>,
+  onSaved: () => void,
   invalidKey: FailureKey,
   saveKey: FailureKey,
 ): StepForm<Fields, Errors> {
@@ -93,9 +105,13 @@ function useStepForm<Fields extends object, Errors extends object>(
     }
     inFlight.current = true;
     setSubmitting(true);
+    const generation = sessionGeneration();
     try {
-      await save(fields);
+      await save(fields, generation);
+      if (isCurrentGeneration(generation)) onSaved();
     } catch (error) {
+      // The session that started the save is gone: what it failed with is not this screen's news.
+      if (!isCurrentGeneration(generation)) return;
       const message = t(isRefusal(error) ? invalidKey : failureKey(error, saveKey));
       setRefused(isRefusal(error));
       setFailure(message);
@@ -104,7 +120,7 @@ function useStepForm<Fields extends object, Errors extends object>(
       inFlight.current = false;
       setSubmitting(false);
     }
-  }, [fields, invalidKey, messageOf, save, saveKey, t, validate]);
+  }, [fields, invalidKey, messageOf, onSaved, save, saveKey, t, validate]);
 
   return {
     fields,
@@ -126,15 +142,14 @@ export function useNameStep(onSaved: () => void): StepForm<NameFields, NameError
   const { user } = useSession();
   const { mutateAsync: updateMe } = useUpdateMe();
   const save = useCallback(
-    async (fields: NameFields) => {
+    async (fields: NameFields, generation: number) => {
       const first_name = tidyName(fields.first);
       const last_name = tidyName(fields.last);
       if (user?.first_name !== first_name || user.last_name !== last_name) {
-        await updateMe({ first_name, last_name });
+        await updateMe({ body: { first_name, last_name }, generation });
       }
-      onSaved();
     },
-    [onSaved, updateMe, user],
+    [updateMe, user],
   );
   const messageOf = useCallback(
     (errors: NameErrors) => {
@@ -148,6 +163,7 @@ export function useNameStep(onSaved: () => void): StepForm<NameFields, NameError
     nameErrors,
     messageOf,
     save,
+    onSaved,
     "signUp.errors.nameInvalid",
     "signUp.errors.nameSave",
   );
@@ -174,10 +190,13 @@ export function useHomeStep(
   const { mutateAsync: updateMe } = useUpdateMe();
   const { mutateAsync: saveAddress } = useSaveAddress();
   const save = useCallback(
-    async (fields: AddressFields) => {
+    async (fields: AddressFields, generation: number) => {
       if (role === "customer") {
         try {
-          await saveAddress(savedAddressInput(fields, t("signUp.home.label"), true));
+          await saveAddress({
+            body: savedAddressInput(fields, t("signUp.home.label"), true),
+            generation,
+          });
         } catch (error) {
           // A full book (only an account that already kept addresses): the card still goes on;
           // the book is the customer's to edit later.
@@ -185,12 +204,11 @@ export function useHomeStep(
         }
       }
       await updateMe({
-        home_city: fields.city.trim(),
-        home_state: fields.state.trim().toUpperCase(),
+        body: { home_city: fields.city.trim(), home_state: fields.state.trim().toUpperCase() },
+        generation,
       });
-      onSaved();
     },
-    [onSaved, role, saveAddress, t, updateMe],
+    [role, saveAddress, t, updateMe],
   );
   const validate = useCallback((fields: AddressFields) => homeErrors(fields, role), [role]);
   const messageOf = useCallback(
@@ -208,6 +226,7 @@ export function useHomeStep(
     validate,
     messageOf,
     save,
+    onSaved,
     "signUp.errors.homeInvalid",
     "signUp.errors.homeSave",
   );
