@@ -26,7 +26,11 @@ const card = () => screen.getByRole("image", { name: LABEL, includeHiddenElement
 
 beforeEach(() => {
   jest.spyOn(PixelRatio, "get").mockReturnValue(1);
-  jest.spyOn(Image, "getSize").mockResolvedValue({ width: 960, height: 606 });
+  // getSize is overloaded (promise and callback forms), so the spy needs the promise form spelled out.
+  jest
+    .spyOn(Image, "getSize")
+    .mockImplementation((() =>
+      Promise.resolve({ width: 960, height: 606 })) as typeof Image.getSize);
   viewShot.captureRef.mockClear();
 });
 
