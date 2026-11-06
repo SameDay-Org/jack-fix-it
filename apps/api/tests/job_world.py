@@ -128,7 +128,7 @@ async def build_world(session: AsyncSession) -> JobWorld:
 
 
 async def make_accepted_request(
-    session: AsyncSession, world: JobWorld, pro: Pro
+    session: AsyncSession, world: JobWorld, pro: Pro, start: datetime = START
 ) -> tuple[ServiceRequest, Quote]:
     """The customer's request, accepted, with the pro's accepted quote: no job yet."""
     request = ServiceRequest(
@@ -148,8 +148,8 @@ async def make_accepted_request(
         amount_cents=PRICE,
         scope="Replace the cartridge",
         duration_minutes=60,
-        proposed_start_at=START,
-        expires_at=START,
+        proposed_start_at=start,
+        expires_at=start,
         status=QuoteStatus.ACCEPTED,
     )
     session.add(quote)
@@ -164,11 +164,13 @@ async def make_job(
     *,
     pro: Pro | None = None,
     created_at: datetime | None = None,
+    start: datetime = START,
     **fields: object,
 ) -> Job:
-    """A paid job in `status`: its request (accepted), accepted quote and `created` event."""
+    """A paid job in `status`: its request (accepted), accepted quote (proposing `start`) and
+    `created` event."""
     pro = pro or world.pro
-    request, quote = await make_accepted_request(session, world, pro)
+    request, quote = await make_accepted_request(session, world, pro, start)
     job = Job(
         request_id=request.id,
         quote_id=quote.id,

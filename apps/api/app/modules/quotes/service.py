@@ -72,6 +72,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Final
 
+from sqlalchemy import Subquery
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -426,6 +427,12 @@ class QuoteReader:
     async def proposed_starts(self, quote_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, datetime]:
         """Each quote's proposed start, in one query: nothing else of the quote."""
         return dict(await self._quotes.proposed_starts(quote_ids))
+
+    @staticmethod
+    def starts() -> Subquery:
+        """Each quote's id (`quote_id`) and proposed start (`start_at`), as a subquery: the
+        pro's jobs are ordered and paged by their scheduled start (#63)."""
+        return QuoteRepository.starts()
 
     async def lock_of_request(
         self, quote_id: uuid.UUID, request_id: uuid.UUID
