@@ -1,8 +1,8 @@
 import type { ApiSchema } from "@jack/shared";
 import { File } from "expo-file-system";
 
-import { UploadFailedError, UploadRejectedError } from "../errors";
-import { sessionStore } from "../session";
+import { SessionExpiredError, UploadFailedError, UploadRejectedError } from "../errors";
+import { logout, sessionGeneration, sessionStore } from "../session";
 import { localFileSize, uploadMedia, type UploadMediaOptions } from "../upload";
 import {
   callBody,
@@ -702,6 +702,53 @@ describe("uploadMedia", () => {
 
     retried.respond(200);
     await expect(upload).resolves.toEqual({ key: ticket(2).key });
+  });
+
+  describe("#292 Vault B1: the whole upload belongs to the session it started in", () => {
+    /** Signs the session out mid-upload; only the URL requests take a ticket. */
+    function routeLogout() {
+      fetchMock.mockImplementation(async (url) => {
+        if (!url.endsWith("/v1/uploads")) return jsonResponse(204);
+        const next = tickets.shift();
+        if (!next) throw new Error("no more tickets");
+        return jsonResponse(201, next);
+      });
+    }
+
+    it("a generation already replaced asks for no URL", async () => {
+      routeLogout();
+      const pinned = sessionGeneration();
+      await logout();
+
+      const refused = await start({ generation: pinned }).catch((error: unknown) => error);
+      expect(refused).toBeInstanceOf(SessionExpiredError);
+      expect(callsTo(fetchMock, "/v1/uploads")).toHaveLength(0);
+      expect(requests).toHaveLength(0);
+    });
+
+    it("a failed PUT after the session changed asks for no fresh URL and sends no second PUT", async () => {
+      routeLogout();
+      tickets = [ticket(1, -1), ticket(2)];
+      const upload = start().catch((error: unknown) => error);
+      const first = await reachRequest();
+      await logout();
+
+      first.fail();
+      await reachRequest();
+      expect(await upload).toMatchObject({ name: "SessionExpiredError", reason: "superseded" });
+      expect(callsTo(fetchMock, "/v1/uploads")).toHaveLength(1);
+      expect(requests).toHaveLength(1);
+    });
+
+    it("a PUT that completes after the session changed yields no key", async () => {
+      routeLogout();
+      const upload = start().catch((error: unknown) => error);
+      const first = await reachRequest();
+      await logout();
+
+      first.respond(200);
+      expect(await upload).toMatchObject({ name: "SessionExpiredError", reason: "superseded" });
+    });
   });
 
   it("aborting while the URL is requested sends no PUT", async () => {

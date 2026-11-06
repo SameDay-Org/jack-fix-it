@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { endOnboarding, register, useSession } from "@/api";
+import { endOnboarding, isCurrentGeneration, register, sessionGeneration, useSession } from "@/api";
 import {
   Button,
   FlowProgress,
@@ -92,7 +92,8 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
   const { status, user } = useSession();
   const [step, setStep] = useState<SignUpStep>(firstStep);
   const [direction, setDirection] = useState<1 | -1>(1);
-  const [finished, setFinished] = useState(false);
+  // The session generation the last step was saved in: the flow ends for that session only.
+  const [finishedIn, setFinishedIn] = useState<number | null>(null);
   // A step is sliding in: its action and Back wait for it, so a second tap meant for the step that
   // left never submits or validates the one arriving.
   const [moving, setMoving] = useState(false);
@@ -106,7 +107,7 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
     const next = SIGN_UP_STEPS[SIGN_UP_STEPS.indexOf(done) + 1];
     if (next === undefined) {
-      setFinished(true);
+      setFinishedIn(sessionGeneration());
       return;
     }
     setDirection(1);
@@ -133,11 +134,8 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
 
   // Past the account step the session belongs to the flow; a session that ends meanwhile (expired,
   // refused) sends the person back to Welcome, signed out.
-  const ending = finished
-    ? "finished"
-    : index >= 1 && status === "signedOut"
-      ? "sessionLost"
-      : null;
+  const ending =
+    finishedIn !== null ? "finished" : index >= 1 && status === "signedOut" ? "sessionLost" : null;
 
   const stepBack = () => {
     if (busy || moving || index < 2) return;
@@ -154,9 +152,11 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
   // After the commit that turned the guard off, so neither the gate's switch to the app nor the
   // way back to Welcome is blocked.
   useEffect(() => {
-    if (ending === "finished") endFlow();
+    // A step's save calls this only while its session is current; another sign-in before this
+    // effect runs is not ended here (the gate routes that account).
+    if (ending === "finished" && finishedIn !== null && isCurrentGeneration(finishedIn)) endFlow();
     if (ending === "sessionLost") router.dismissTo("/(auth)/welcome");
-  }, [ending]);
+  }, [ending, finishedIn]);
 
   // Focus follows the step: a screen reader's to its heading, everyone else's to its first field.
   const onSettled = useCallback((settled: SignUpStep) => {

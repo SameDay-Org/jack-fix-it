@@ -13,6 +13,7 @@ import {
   endOnboarding,
   NetworkError,
   register,
+  sessionGeneration,
   type SessionUser,
 } from "@/api";
 
@@ -292,7 +293,7 @@ describe("SignUpScreen: the name step", () => {
     expect(apiPatch).toHaveBeenCalledWith(
       "/v1/auth/me",
       { first_name: "Ana", last_name: "de la Cruz" },
-      { auth: true },
+      { auth: true, generation: sessionGeneration() },
     );
     expect(await arrive("Where do you live?")).toBeTruthy();
     expect(sessionStore.getState().user?.first_name).toBe("Ana");
@@ -380,12 +381,12 @@ describe("SignUpScreen: the home step", () => {
         label: "Home",
         is_default: true,
       },
-      { auth: true },
+      { auth: true, generation: sessionGeneration() },
     );
     expect(apiPatch).toHaveBeenCalledWith(
       "/v1/auth/me",
       { home_city: "Miami", home_state: "FL" },
-      { auth: true },
+      { auth: true, generation: sessionGeneration() },
     );
     expect(jest.mocked(apiPost).mock.invocationCallOrder[0]).toBeLessThan(
       jest.mocked(apiPatch).mock.invocationCallOrder[0],
@@ -416,12 +417,12 @@ describe("SignUpScreen: the home step", () => {
         zip_code: "33101",
         is_default: true,
       },
-      { auth: true, params: { address_id: "home-1" } },
+      { auth: true, generation: sessionGeneration(), params: { address_id: "home-1" } },
     );
     expect(apiPatch).toHaveBeenCalledWith(
       "/v1/auth/me",
       { home_city: "Miami", home_state: "FL" },
-      { auth: true },
+      { auth: true, generation: sessionGeneration() },
     );
   });
 
@@ -440,7 +441,7 @@ describe("SignUpScreen: the home step", () => {
     expect(apiPatch).toHaveBeenCalledWith(
       "/v1/auth/me",
       { home_city: "Orlando", home_state: "FL" },
-      { auth: true },
+      { auth: true, generation: sessionGeneration() },
     );
   });
 
