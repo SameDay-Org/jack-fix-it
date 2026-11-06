@@ -60,7 +60,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // Lets iOS use the Spanish InfoPlist strings below in an app whose base language is English.
       infoPlist: { CFBundleAllowMixedLocalizations: true },
     },
-    android: { package: appId },
+    android: {
+      package: appId,
+      // expo-sensors declares the step counter's permission; the ID card only reads the gyroscope.
+      blockedPermissions: ["android.permission.ACTIVITY_RECOGNITION"],
+    },
     plugins: [
       "expo-router",
       "expo-secure-store",
