@@ -310,8 +310,9 @@
     "itemRemove": "Remove {{name}}"
   },
   "permissions": {
-    "camera": "Jack uses the camera to take photos of what needs fixing.",
-    "photos": "Jack uses the photos you choose to show what needs fixing."
+    "camera": "Jack uses the camera to take your profile photo and photos of what needs fixing.",
+    "photos": "Jack uses the photos you choose to show what needs fixing.",
+    "motion": "Jack uses your phone's motion to tilt your ID card as you move it."
   },
   "quotes": {
     "title": "Your quotes",

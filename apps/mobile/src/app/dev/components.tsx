@@ -203,6 +203,14 @@ function Gallery() {
           />
         </Section>
 
+        <Section title="ID card libraries">
+          <Button
+            label="Open the libraries smoke screen"
+            variant="secondary"
+            onPress={() => router.push("/dev/id-card-libs")}
+          />
+        </Section>
+
         <Section title="Glass">
           <GlassSurface tone="light" shape="xl" className="gap-1 p-4">
             <Text className="text-headline text-navy-900">Light tone, xl</Text>
