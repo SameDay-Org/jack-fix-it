@@ -29,7 +29,6 @@ profile id and the action. Prints the profile id only: never the account id or a
 """
 
 import argparse
-import asyncio
 import re
 import sys
 import uuid
@@ -59,8 +58,10 @@ from app.observability import configure_logging
 from scripts.staff_operator import (
     NOT_AN_ADMIN,
     add_operator_arguments,
+    confirm_off_loop,
     operator_of,
     report_failure,
+    run_to_exit,
 )
 
 _ACCOUNT_ID: Final = re.compile(r"acct_[A-Za-z0-9]+")
@@ -171,7 +172,7 @@ async def run(
                 )
             # Off the event loop: the row is not locked while the operator reads, and the
             # apply below checks everything again.
-            if not (args.yes or await asyncio.to_thread(_confirmed, io)):
+            if not (args.yes or await confirm_off_loop(lambda: _confirmed(io))):
                 raise PayoutsRecoveryRefusedError("Not confirmed; nothing changed.")
             await resolve(apply=True)
         done = "now has the given account" if adopt is not None else "can create a new account"
@@ -221,7 +222,7 @@ async def _main(argv: Sequence[str]) -> int:
 
 
 def main() -> None:
-    sys.exit(asyncio.run(_main(sys.argv[1:])))
+    sys.exit(run_to_exit(lambda: _main(sys.argv[1:]), entity="pro profile"))
 
 
 if __name__ == "__main__":
