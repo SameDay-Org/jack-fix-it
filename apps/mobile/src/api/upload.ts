@@ -176,8 +176,9 @@ async function nativeQueueBarrier(): Promise<void> {
  * Nothing is sent for an upload already cancelled, out of time or no longer the session's: the
  * native queue is emptied first (`nativeQueueBarrier`), then the signal, the deadline and
  * `ensureCurrent` (the upload's session generation, which a sign-out or another sign-in may have
- * replaced while the barrier waited) are checked and the task starts in the same JavaScript tick. A stop after that (the caller's abort or the deadline) cancels the
- * native task at once, wherever its start is. The native start clears its cancelled flag, so a
+ * replaced while the barrier waited) are checked and the task starts in the same JavaScript tick.
+ * A stop after that (the caller's abort or the deadline) cancels the native task at once,
+ * wherever its start is. The native start clears its cancelled flag, so a
  * cancel that reached it while the start still waited is lost; the start's acknowledgement (a
  * barrier behind it) therefore cancels again whenever a stop is recorded.
  *
