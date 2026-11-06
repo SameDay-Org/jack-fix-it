@@ -18,6 +18,11 @@ id. Run by someone with database access and the Stripe key; there is no HTTP end
   STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS) has passed since the attempt (a
   younger attempt is refused: Stripe may still answer its key with an account).
 
+--operator <admin email> is required: an active admin account, else refused before anything
+else. Each applied action writes one audit_log row (operator, action, before and after, the
+optional --reason) in the same transaction as the change (scripts/staff_operator.py,
+app.modules.audit); a refusal or an unconfirmed run writes nothing.
+
 Checks first, prints what it will do, then asks to confirm (--yes skips that,
 non-interactive). Goes through PayoutsService, which logs payouts_account_resolved with the
 profile id and the action. Prints the profile id only: never the account id or an email.
@@ -38,6 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_settings
 from app.db import create_engine, create_session_factory
 from app.integrations.stripe_connect import StripeConnect, StripeExpressConnect
+from app.modules.audit.types import OperatorNotAdminError
 from app.modules.payouts.errors import (
     PaymentsProviderError,
     PaymentsUnavailableError,
@@ -50,6 +56,7 @@ from app.modules.payouts.service import (
 )
 from app.modules.pros.service import ProService
 from app.observability import configure_logging
+from scripts.staff_operator import NOT_AN_ADMIN, add_operator_arguments, operator_of
 
 _ACCOUNT_ID: Final = re.compile(r"acct_[A-Za-z0-9]+")
 
@@ -106,6 +113,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         f"in its metadata, and at least {STRIPE_KEY_RETENTION_HOURS} hours after the attempt "
         "(younger is refused).",
     )
+    add_operator_arguments(parser)
     parser.add_argument("--yes", action="store_true", help="Non-interactive: skip the prompt.")
     return parser.parse_args(argv)
 
@@ -126,15 +134,20 @@ async def run(
             # Not repeated: the operator may have pasted something else.
             raise PayoutsRecoveryRefusedError("--adopt takes a Stripe account id (acct_...).")
         async with sessions() as session:
+            # Before anything else: an unknown or non-admin operator changes nothing.
+            try:
+                operator = await operator_of(session, args)
+            finally:
+                await session.rollback()
             payouts = PayoutsService(
                 session, ProService(session), stripe, PayoutsConfig.from_settings(settings)
             )
 
             async def resolve(*, apply: bool) -> None:
                 if adopt is not None:
-                    await payouts.adopt_account(pro_id, adopt, apply=apply)
+                    await payouts.adopt_account(pro_id, adopt, operator, apply=apply)
                 else:
-                    await payouts.allow_new_account(pro_id, apply=apply)
+                    await payouts.allow_new_account(pro_id, operator, apply=apply)
 
             await resolve(apply=False)
             if adopt is not None:
@@ -160,6 +173,9 @@ async def run(
         return 0
     except PayoutsRecoveryRefusedError as refusal:
         print(f"Error: {refusal}", file=io.out)
+    except OperatorNotAdminError:
+        # Before any change, or (demoted or suspended during the prompt) rolled back with it.
+        print(f"Error: {NOT_AN_ADMIN}", file=io.out)
     except PaymentsUnavailableError:
         print(
             "Error: Stripe is not configured (STRIPE_SECRET_KEY) or not reachable right now; "

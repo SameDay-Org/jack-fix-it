@@ -1,4 +1,4 @@
-"""payments
+"""payments and audit_log
 
 Revision ID: a7c3e9d14f62
 Revises: b3e5a9c17d42
@@ -10,6 +10,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "a7c3e9d14f62"
@@ -112,9 +113,68 @@ def upgrade() -> None:
     )
     op.create_index(op.f("ix_payments_request_id"), "payments", ["request_id"], unique=False)
     op.create_index(op.f("ix_payments_status"), "payments", ["status"], unique=False)
+    # Staff actions on money (#58, Vault round 1 B2; app.audit): who, what, on which row,
+    # before and after (ids, statuses, Stripe ids, timestamps; no PII), why. Append-only.
+    op.create_table(
+        "audit_log",
+        sa.Column("id", sa.Uuid(), server_default=sa.text("gen_random_uuid()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column("actor_user_id", sa.Uuid(), nullable=False),
+        sa.Column("action", sa.String(length=64), nullable=False),
+        sa.Column("entity_type", sa.String(length=32), nullable=False),
+        sa.Column("entity_id", sa.Uuid(), nullable=False),
+        sa.Column("before", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("after", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("reason", sa.Text(), nullable=True),
+        sa.ForeignKeyConstraint(
+            ["actor_user_id"], ["users.id"], name=op.f("fk_audit_log_actor_user_id_users")
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_audit_log")),
+    )
+    op.create_index(
+        op.f("ix_audit_log_actor_user_id"), "audit_log", ["actor_user_id"], unique=False
+    )
+    op.create_index("ix_audit_log_entity", "audit_log", ["entity_type", "entity_id"], unique=False)
+    # Append-only: a row, once written, is never changed or removed (SQLSTATE 42501), and the
+    # table is never emptied.
+    op.execute(
+        """
+        CREATE FUNCTION audit_log_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            RAISE EXCEPTION 'audit_log is append-only' USING ERRCODE = '42501';
+        END;
+        $$
+        """
+    )
+    op.execute(
+        "CREATE TRIGGER audit_log_append_only BEFORE UPDATE OR DELETE ON audit_log "
+        "FOR EACH ROW EXECUTE FUNCTION audit_log_append_only()"
+    )
+    op.execute(
+        "CREATE TRIGGER audit_log_no_truncate BEFORE TRUNCATE ON audit_log "
+        "FOR EACH STATEMENT EXECUTE FUNCTION audit_log_append_only()"
+    )
 
 
 def downgrade() -> None:
+    # Destructive: the audit records of staff actions on payments and payout accounts are lost.
+    op.execute("DROP TRIGGER audit_log_no_truncate ON audit_log")
+    op.execute("DROP TRIGGER audit_log_append_only ON audit_log")
+    op.execute("DROP FUNCTION audit_log_append_only()")
+    op.drop_index("ix_audit_log_entity", table_name="audit_log")
+    op.drop_index(op.f("ix_audit_log_actor_user_id"), table_name="audit_log")
+    op.drop_table("audit_log")
     # Destructive: the payments (their frozen amounts and PaymentIntent ids) and the users'
     # Stripe Customer ids are lost; after a later upgrade, the next payment of each customer
     # creates a new Customer in Stripe, and a PaymentIntent created before has no row.

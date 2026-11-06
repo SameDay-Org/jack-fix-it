@@ -59,6 +59,16 @@ rules apply.
     the parameters or the driver's message, which can hold SQL literals.
   - **SQLAdmin (#41) cannot change a status by design.** A status change is a state-machine
     action with its own endpoint.
+- **audit_log (#58).** Every staff action on money writes one row through `AuditService.record`
+  (`app/modules/audit`): today the two recovery scripts (`scripts/resolve_payment_intent.py`,
+  `scripts/resolve_payout_account.py`), which take a required `--operator` (an active admin's
+  email, resolved before anything else; anyone else is refused and nothing changes) and an
+  optional `--reason`. The row names the actor's user id, the action, the entity and its
+  before/after, and is flushed in the same transaction as the change, so a failed audit write
+  rolls the change back; `record` checks again that the operator is still an active admin; a
+  refusal or a dry run writes nothing. Append-only: a trigger refuses UPDATE, DELETE and
+  TRUNCATE (SQLSTATE 42501). before/after hold ids, statuses, Stripe object ids and
+  timestamps only, never PII or secrets; a new staff money action adds an `AuditAction`.
 
 ## Worker
 
@@ -102,7 +112,7 @@ uv run alembic upgrade head
 uv run python -m scripts.seed_categories          # inserts missing launch categories (seed_data.json); never updates a row
 uv run python -m scripts.seed_service_areas       # inserts missing served ZIPs (service_areas/seed_data.json: South Florida, Broward active, #9); never updates a row
 uv run python -m scripts.create_staff_user        # creates an admin or agent (asks; password via getpass), or --promote an account; --help
-uv run python -m scripts.resolve_payout_account   # staff settle a 409 payouts_needs_review: --pro <profile id> --adopt <acct_...> or --allow-new (asks; --yes); --help
-uv run python -m scripts.resolve_payment_intent   # staff settle a 409 payment_needs_review: --payment <payment id> --adopt <pi_...> or --allow-new (asks; --yes); --help
+uv run python -m scripts.resolve_payout_account   # staff settle a 409 payouts_needs_review: --pro <profile id> --adopt <acct_...> or --allow-new, --operator <admin email> [--reason ...] (asks; --yes); --help
+uv run python -m scripts.resolve_payment_intent   # staff settle a 409 payment_needs_review: --payment <payment id> --adopt <pi_...> or --allow-new, --operator <admin email> [--reason ...] (asks; --yes); --help
 uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest
 ```

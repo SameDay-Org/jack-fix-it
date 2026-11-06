@@ -52,6 +52,16 @@ _STRIPE_SETTINGS: tuple[str, ...] = ("stripe_secret_key", "public_api_url")
 # Stripe stays in test mode until launch (ADR 0005): a live key works in production only.
 _STRIPE_LIVE_KEY_PREFIXES = ("sk_live_", "rk_live_")
 _STRIPE_LIVE_PUBLISHABLE_KEY_PREFIXES = ("pk_live_",)
+# A Stripe publishable key, test or live: it is returned to customers (the Payment Sheet), so a
+# secret (sk_) or restricted (rk_) key, or anything else, must never pass as one (#58).
+_STRIPE_PUBLISHABLE_KEY = re.compile(r"pk_(test|live)_[A-Za-z0-9]+")
+
+
+def is_publishable_key(value: str) -> bool:
+    """Whether `value` has the shape of a Stripe publishable key (pk_test_ or pk_live_)."""
+    return _STRIPE_PUBLISHABLE_KEY.fullmatch(value) is not None
+
+
 # Stripe keeps an idempotency key at least this long (its documented 24 hours): Stripe's fact,
 # not a setting.
 STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS = 86_400
@@ -278,8 +288,10 @@ class Settings(BaseSettings):
     # the same idempotency key); 0 fails at once, and the app's retry is safe.
     stripe_secret_key: SecretStr | None = None
     # The key the app's Payment Sheet initializes Stripe with (D11.1, #58): not a secret,
-    # but one per environment, and pk_test_ until launch like the secret key. Optional, so a
-    # deploy never fails for it: without it, the payment endpoint answers 503 not_configured.
+    # but one per environment, and pk_test_ until launch like the secret key. Only a pk_ key is
+    # accepted: the value is returned to customers, so a secret or restricted key fails at load.
+    # Optional, so a deploy never fails for it: without it, the payment endpoint answers 503
+    # not_configured.
     stripe_publishable_key: str | None = None
     stripe_timeout_seconds: float = Field(default=10.0, gt=0)
     stripe_max_network_retries: int = Field(default=0, ge=0)
@@ -368,6 +380,17 @@ class Settings(BaseSettings):
     @classmethod
     def _empty_is_none(cls, value: object) -> object:
         return None if value == "" else value
+
+    @field_validator("stripe_publishable_key")
+    @classmethod
+    def _check_publishable_key(cls, value: str | None) -> str | None:
+        # The message never repeats the value: it could be a secret key pasted here.
+        if value is not None and not is_publishable_key(value):
+            raise ValueError(
+                "STRIPE_PUBLISHABLE_KEY must be a Stripe publishable key (pk_test_... or "
+                "pk_live_...); a secret (sk_) or restricted (rk_) key is refused"
+            )
+        return value
 
     @field_validator("public_api_url")
     @classmethod

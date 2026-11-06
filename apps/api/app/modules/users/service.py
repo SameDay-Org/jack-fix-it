@@ -106,6 +106,11 @@ class UserService:
         user = await self._users.get_by_id(user_id)
         return _to_account(user) if user else None
 
+    async def get_by_email(self, email: str) -> UserAccount | None:
+        """Exact match: emails are stored lowercase, so pass a normalized email."""
+        user = await self._users.get_by_email(email)
+        return _to_account(user) if user else None
+
     async def get_credentials_by_email(
         self, email: str, *, lock: bool = False
     ) -> UserCredentials | None:
