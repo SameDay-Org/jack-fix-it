@@ -199,8 +199,7 @@ async def add_job_photos(
     responses={
         **_PRO_JOB_ERRORS,
         status.HTTP_409_CONFLICT: _error(
-            "after_photos_required: no after photo yet; invalid_transition: the job is not "
-            "working."
+            "after_photos_required: no after photo yet; invalid_transition: the job is not working."
         ),
     },
 )

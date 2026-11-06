@@ -35,11 +35,13 @@ Job photos and Job's done (part 2, #298), also on the job's row lock:
   invalid_photo, nothing stored). Before photos while on the way or working, after photos while
   working (else 409 job_photo_not_allowed). A key given twice, or one a job photo already holds:
   409 duplicate_photo. More than JOB_PHOTO_MAX_PER_KIND of a kind on the job: 409
-  job_photo_limit. They keep the order given. After the commit their privacy-safe copies are
-  queued (photos.py); a failed enqueue never fails the call (the photos stay pending).
-- Job's done: in_progress -> completed with at least one after photo (else 409
-  after_photos_required); the state machine sets completed_at, which opens the customer's
-  confirmation window (#66, #67). Again once completed: 200, unchanged, no second event.
+  job_photo_limit (checked before the keys are looked up). They keep the order given. After
+  the commit their privacy-safe copies are queued, one run per batch (photos.py); a failed
+  enqueue never fails the call (the photos stay pending).
+- Job's done: in_progress -> completed with at least one after photo whose safe copy did not
+  fail (else 409 after_photos_required); one still being made counts. The state machine sets
+  completed_at, which opens the customer's confirmation window (#66, #67). Again once
+  completed: 200, unchanged, no second event.
 - Both views list the photos by kind, oldest first, signed for DOWNLOAD_URL_TTL_SECONDS: the
   customer only their safe copies (photos.py says why).
 
@@ -310,10 +312,11 @@ class JobExecutionService:
             raise JobPhotoNotAllowedError
         if any(owned_upload(key, user.id, UploadPurpose.JOB_PHOTO) is None for key in keys):
             raise InvalidJobPhotoError
-        if len(set(keys)) != len(keys) or await self._photos.held_keys(keys):
-            raise DuplicateJobPhotoError
+        # The cap before any query on the keys: a huge body never reaches the database.
         if await self._photos.count(job.id, kind) + len(keys) > self._config.photo_max_per_kind:
             raise JobPhotoLimitError
+        if len(set(keys)) != len(keys) or await self._photos.held_keys(keys):
+            raise DuplicateJobPhotoError
         # One transaction shares now(): a microsecond apart, they keep the order given.
         now = datetime.now(UTC)
         photos = [
@@ -337,7 +340,7 @@ class JobExecutionService:
         logger.info("job_photos_added", extra={**ids, "kind": kind.value, "count": len(photos)})
         try:
             await enqueue_photo_sanitize(
-                queue, job.id, photos[0].id, self._config.enqueue_timeout_seconds
+                queue, job.id, [photo.id for photo in photos], self._config.enqueue_timeout_seconds
             )
         except (RedisError, OSError):  # TimeoutError is an OSError
             logger.error("job_photo_sanitize_enqueue_failed", extra=ids)
@@ -350,7 +353,7 @@ class JobExecutionService:
             return await self.pro_job(user, job.id)
         if (
             job.status is JobStatus.IN_PROGRESS
-            and await self._photos.count(job.id, JobPhotoKind.AFTER) == 0
+            and await self._photos.count(job.id, JobPhotoKind.AFTER, usable_only=True) == 0
         ):
             raise AfterPhotosRequiredError
         # 409 for anything but working; the state machine sets completed_at.

@@ -99,8 +99,14 @@ class JobPhotoRepository:
         )
         return list((await self._session.scalars(statement)).all())
 
-    async def count(self, job_id: uuid.UUID, kind: JobPhotoKind) -> int:
+    async def count(
+        self, job_id: uuid.UUID, kind: JobPhotoKind, *, usable_only: bool = False
+    ) -> int:
+        """The job's photos of the kind; `usable_only` leaves out those whose safe copy failed
+        (never shown to the customer)."""
         statement = select(func.count()).where(JobPhoto.job_id == job_id, JobPhoto.kind == kind)
+        if usable_only:
+            statement = statement.where(JobPhoto.safe_status != MediaSafeStatus.FAILED)
         return int(await self._session.scalar(statement) or 0)
 
     async def held_keys(self, keys: Collection[str]) -> set[str]:
@@ -113,11 +119,15 @@ class JobPhotoRepository:
         self._session.add_all(photos)
         await self._session.flush()
 
-    async def pending(self, job_id: uuid.UUID) -> list[JobPhoto]:
-        """The job's photos still without a safe copy, oldest first."""
+    async def pending(self, job_id: uuid.UUID, photo_ids: Collection[uuid.UUID]) -> list[JobPhoto]:
+        """Those of the job's photos `photo_ids` still without a safe copy, oldest first."""
         statement = (
             select(JobPhoto)
-            .where(JobPhoto.job_id == job_id, JobPhoto.safe_status == MediaSafeStatus.PENDING)
+            .where(
+                JobPhoto.job_id == job_id,
+                JobPhoto.id.in_(photo_ids),
+                JobPhoto.safe_status == MediaSafeStatus.PENDING,
+            )
             .order_by(JobPhoto.created_at, JobPhoto.id)
         )
         return list((await self._session.scalars(statement)).all())

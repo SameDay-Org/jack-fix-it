@@ -49,6 +49,8 @@ CONFIG = JobExecutionConfig(
 
 def no_storage() -> Storage:
     raise AssertionError("these jobs have no photo to sign")
+
+
 UUID = re.compile(
     r"[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}"
 )

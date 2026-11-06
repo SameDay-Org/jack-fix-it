@@ -329,7 +329,9 @@ async def test_the_cap_is_per_kind(
     db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
 ) -> None:
     job = await make_job(db_session, world, JobStatus.IN_PROGRESS)
-    keys = lambda count: [key_of(world.pro.id) for _ in range(count)]  # noqa: E731
+
+    def keys(count: int) -> list[str]:
+        return [key_of(world.pro.id) for _ in range(count)]
 
     assert (await add(db_client, job, world.pro.headers, "before", keys(2))).status_code == 201
     over = await add(db_client, job, world.pro.headers, "before", keys(2))
@@ -342,6 +344,27 @@ async def test_the_cap_is_per_kind(
     assert (last.status_code, after.status_code) == (201, 201)
     kinds = [photo.kind for photo in await stored(db_session, job)]
     assert (kinds.count(JobPhotoKind.BEFORE), kinds.count(JobPhotoKind.AFTER)) == (CAP, CAP)
+
+
+async def test_the_cap_is_checked_before_the_keys_are_looked_up(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A body far over the cap never reaches the database with its keys (an IN list that
+    # large would fail as a 500).
+    job = await make_job(db_session, world, JobStatus.IN_PROGRESS)
+
+    async def never(self: JobPhotoRepository, keys: object) -> set[str]:
+        raise AssertionError("the keys were looked up")
+
+    monkeypatch.setattr(JobPhotoRepository, "held_keys", never)
+    keys = [key_of(world.pro.id) for _ in range(CAP + 1)]
+
+    response = await add(db_client, job, world.pro.headers, "after", keys)
+
+    assert (response.status_code, response.json()) == (409, LIMIT)
 
 
 @pytest.mark.parametrize(
@@ -386,10 +409,15 @@ async def test_photos_keep_the_order_given_and_queue_their_safe_copies(
     assert [photo.file_key for photo in rows[: CAP - 1]] == keys
     listed = [photo["id"] for photo in second.json()["photos"]["after"]]
     assert listed == [str(photo.id) for photo in rows]
-    # One run per batch, named after its first photo: a running copy never hides a new batch.
+    # One run per batch, named after its first photo and given only its photos: a running
+    # copy never hides a new batch, and never fails one it was not given.
+    first_ids = [str(photo.id) for photo in rows[: CAP - 1]]
     assert queue.jobs == {
-        f"sanitize-job-photos:{rows[0].id}": ("sanitize_job_photos", (str(job.id),)),
-        f"sanitize-job-photos:{rows[CAP - 1].id}": ("sanitize_job_photos", (str(job.id),)),
+        f"sanitize-job-photos:{rows[0].id}": ("sanitize_job_photos", (str(job.id), first_ids)),
+        f"sanitize-job-photos:{rows[CAP - 1].id}": (
+            "sanitize_job_photos",
+            (str(job.id), [str(rows[CAP - 1].id)]),
+        ),
     }
     # The pro sees their originals until the safe copies are made.
     assert [key for key, _ in storage.gets[-CAP:]] == [photo.file_key for photo in rows]
@@ -430,6 +458,20 @@ async def test_complete_requires_an_after_photo(
     row = await job_row(db_session, job.id)
     assert (row.status, row.completed_at) == (JobStatus.IN_PROGRESS, None)
     assert len(await events(db_session, job.id)) == before
+
+
+async def test_an_after_photo_whose_copy_failed_does_not_count(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    # Never shown to the customer (e.g. a key with no file behind it): not proof of the work.
+    job = await make_job(db_session, world, JobStatus.IN_PROGRESS)
+    await photo_row(db_session, world, job, JobPhotoKind.AFTER, MediaSafeStatus.FAILED)
+    await photo_row(db_session, world, job, JobPhotoKind.BEFORE, MediaSafeStatus.READY, safe_key())
+
+    response = await db_client.post(f"{BASE}/{job.id}/complete", headers=world.pro.headers)
+
+    assert (response.status_code, response.json()) == (409, AFTER_REQUIRED)
+    assert (await job_row(db_session, job.id)).status is JobStatus.IN_PROGRESS
 
 
 async def test_complete_sets_completed_at_once(

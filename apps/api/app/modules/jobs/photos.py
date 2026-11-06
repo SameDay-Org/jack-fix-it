@@ -37,14 +37,18 @@ SANITIZE_PHOTOS_TASK: Final = "sanitize_job_photos"
 
 
 class JobPhotoRows:
-    """A job's photos, for the safe-copy copier (requests.media_copies.MediaRows)."""
+    """One batch of a job's photos, for the safe-copy copier (requests.media_copies.MediaRows).
+    A run copies its own batch only: its tries and deadline never fail another batch's rows."""
 
     parent_field = "job_id"
+
+    def __init__(self, photo_ids: Collection[uuid.UUID]) -> None:
+        self._photo_ids = frozenset(photo_ids)
 
     async def pending(
         self, session: AsyncSession, parent_id: uuid.UUID
     ) -> list[tuple[uuid.UUID, str]]:
-        rows = await JobPhotoRepository(session).pending(parent_id)
+        rows = await JobPhotoRepository(session).pending(parent_id, self._photo_ids)
         return [(photo.id, photo.file_key) for photo in rows]
 
     async def mark_ready(
@@ -64,20 +68,18 @@ class JobPhotoRows:
         return await JobPhotoRepository(session).fail_pending(row_ids)
 
 
-JOB_PHOTO_ROWS: Final = JobPhotoRows()
-
-
 async def enqueue_photo_sanitize(
-    queue: JobQueue, job_id: uuid.UUID, batch_id: uuid.UUID, timeout_seconds: float
+    queue: JobQueue, job_id: uuid.UUID, photo_ids: Sequence[uuid.UUID], timeout_seconds: float
 ) -> bool:
-    """Queues sanitize_job_photos for the job (after the commit). One run per batch of photos,
-    named after its first photo: a run already going for an earlier batch never hides a new
-    one, and two runs on the same rows write the same safe key once (the copier's rule)."""
+    """Queues sanitize_job_photos for one batch of the job's photos (after the commit), named
+    after its first photo: a run already going for an earlier batch never hides a new one, and
+    copies only its own photos."""
     return await enqueue(
         queue,
         SANITIZE_PHOTOS_TASK,
         str(job_id),
-        job_id=f"sanitize-job-photos:{batch_id}",
+        [str(photo_id) for photo_id in photo_ids],
+        job_id=f"sanitize-job-photos:{photo_ids[0]}",
         timeout_seconds=timeout_seconds,
     )
 
