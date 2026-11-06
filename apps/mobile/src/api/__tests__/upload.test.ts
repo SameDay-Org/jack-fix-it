@@ -749,6 +749,62 @@ describe("uploadMedia", () => {
       first.respond(200);
       expect(await upload).toMatchObject({ name: "SessionExpiredError", reason: "superseded" });
     });
+
+    // #292 Gatekeeper round 2, B2: the generation is checked again after the native queue barrier,
+    // in the tick that would start the task.
+    it.each(["first", "retry"] as const)(
+      "a sign-out while the %s PUT waits at the native queue barrier starts no PUT",
+      async (which) => {
+        jest.useFakeTimers();
+        try {
+          routeLogout();
+          tickets = [ticket(1, -1), ticket(2)];
+          const upload = start({ generation: sessionGeneration() }).catch(
+            (error: unknown) => error,
+          );
+          await untilNativeCall();
+          expect(nativeQueue).toHaveLength(1);
+          expect(requests).toHaveLength(0);
+          if (which === "retry") {
+            await runNativeQueue();
+            expect(requests).toHaveLength(1);
+            requests[0].fail();
+            await untilNativeCall();
+            expect(nativeQueue).toHaveLength(1);
+          }
+          const startedBefore = requests.length;
+          const startsBefore = nativeLog.filter((call) => call === "start").length;
+          await logout();
+          // A PUT that did start would send the whole file and be kept.
+          network = "completes";
+          await runNativeQueue();
+
+          expect(await upload).toMatchObject({ name: "SessionExpiredError", reason: "superseded" });
+          expect(requests.slice(startedBefore)).toEqual([]);
+          expect(nativeLog.filter((call) => call === "start")).toHaveLength(startsBefore);
+          expect(callsTo(fetchMock, "/v1/uploads")).toHaveLength(which === "first" ? 1 : 2);
+        } finally {
+          jest.useRealTimers();
+        }
+      },
+    );
+
+    it("a sign-out from inside the first progress callback starts no PUT", async () => {
+      routeLogout();
+      let signedOut: Promise<void> | null = null;
+      const upload = start({
+        onProgress: () => {
+          signedOut ??= logout();
+        },
+      }).catch((error: unknown) => error);
+      await flush();
+      await runNativeQueue();
+
+      expect(await upload).toMatchObject({ name: "SessionExpiredError", reason: "superseded" });
+      await signedOut;
+      expect(requests).toEqual([]);
+      expect(nativeLog).not.toContain("start");
+    });
   });
 
   it("aborting while the URL is requested sends no PUT", async () => {

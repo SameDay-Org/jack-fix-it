@@ -93,14 +93,14 @@ export async function uploadMedia({
   let ticket = await requestTicket();
   try {
     ensureCurrent();
-    await putToStorage(ticket, file.uri, size, onProgress, signal);
+    await putToStorage(ticket, file.uri, size, onProgress, signal, ensureCurrent);
   } catch (error) {
     if (!(error instanceof UploadFailedError) || error.reason !== "network") throw error;
     ensureCurrent();
     throwIfAborted(signal);
     if (hasExpired(ticket)) ticket = await requestTicket();
     ensureCurrent();
-    await putToStorage(ticket, file.uri, size, onProgress, signal);
+    await putToStorage(ticket, file.uri, size, onProgress, signal, ensureCurrent);
   }
   // A stop never yields a key: not one from the last progress callback, nor one during cleanup.
   ensureCurrent();
@@ -173,9 +173,10 @@ async function nativeQueueBarrier(): Promise<void> {
  * platforms, reports the bytes really sent, and its cancel stops the request. Resolves on a 2xx;
  * rejects with `UploadFailedError` or, when the caller cancels, with the signal's abort.
  *
- * Nothing is sent for an upload already cancelled or out of time: the native queue is emptied
- * first (`nativeQueueBarrier`), then the signal and the deadline are checked and the task starts
- * in the same JavaScript tick. A stop after that (the caller's abort or the deadline) cancels the
+ * Nothing is sent for an upload already cancelled, out of time or no longer the session's: the
+ * native queue is emptied first (`nativeQueueBarrier`), then the signal, the deadline and
+ * `ensureCurrent` (the upload's session generation, which a sign-out or another sign-in may have
+ * replaced while the barrier waited) are checked and the task starts in the same JavaScript tick. A stop after that (the caller's abort or the deadline) cancels the
  * native task at once, wherever its start is. The native start clears its cancelled flag, so a
  * cancel that reached it while the start still waited is lost; the start's acknowledgement (a
  * barrier behind it) therefore cancels again whenever a stop is recorded.
@@ -196,6 +197,7 @@ async function putToStorage(
   size: number,
   onProgress: ((fraction: number) => void) | undefined,
   signal: AbortSignal | undefined,
+  ensureCurrent: () => void,
 ): Promise<void> {
   const url = storageUrl(ticket);
   const task = createNativeUploadTask();
@@ -224,10 +226,12 @@ async function putToStorage(
   try {
     await nativeQueueBarrier();
     throwIfStopped();
+    ensureCurrent();
     onProgress?.(0);
-    // The last check before anything is sent (the callback is the caller's code, which may stop
-    // the upload); the listener covers every moment after it.
+    // The last checks before anything is sent (the callback is the caller's code, which may stop
+    // the upload or end the session); the listener covers every stop after it.
     throwIfStopped();
+    ensureCurrent();
     const sending = task.start(url, new File(uri), {
       httpMethod: "PUT",
       uploadType: UploadType.BINARY_CONTENT,
