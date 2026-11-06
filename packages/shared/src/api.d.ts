@@ -725,7 +725,7 @@ export interface paths {
         };
         /**
          * List my jobs
-         * @description The caller's jobs, newest first.
+         * @description The caller's jobs, newest scheduled start first.
          */
         get: operations["list_my_jobs_v1_pros_me_jobs_get"];
         put?: never;

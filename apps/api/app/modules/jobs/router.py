@@ -91,7 +91,7 @@ async def list_my_jobs(
     limit: Annotated[int | None, Query(gt=0, description="Page size; capped.")] = None,
     cursor: Annotated[str | None, Query(max_length=200)] = None,
 ) -> ProJobPage:
-    """The caller's jobs, newest first."""
+    """The caller's jobs, newest scheduled start first."""
     return await jobs.pro_jobs(user, active=active, limit=limit, cursor=cursor)
 
 

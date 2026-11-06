@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Collection
 from datetime import datetime
 
-from sqlalchemy import and_, case, exists, or_, select, update
+from sqlalchemy import Subquery, and_, case, exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.quotes.models import Quote, QuoteStatus
@@ -11,6 +11,14 @@ from app.modules.quotes.models import Quote, QuoteStatus
 class QuoteRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    @staticmethod
+    def starts() -> Subquery:
+        """Every quote's id (`quote_id`) and proposed start (`start_at`), as a subquery for
+        another module's query."""
+        return select(
+            Quote.id.label("quote_id"), Quote.proposed_start_at.label("start_at")
+        ).subquery()
 
     async def proposed_starts(
         self, quote_ids: Collection[uuid.UUID]

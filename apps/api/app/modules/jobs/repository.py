@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Collection
 from datetime import datetime
 
-from sqlalchemy import Select, exists, func, select, tuple_, update
+from sqlalchemy import Select, Subquery, exists, func, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.jobs.models import Job, JobEvent, JobPhoto, JobPhotoKind, JobStatus
@@ -42,18 +42,25 @@ class JobRepository:
         self,
         pro_id: uuid.UUID,
         statuses: Collection[JobStatus] | None,
+        starts: Subquery,
         limit: int,
         before: tuple[datetime, uuid.UUID] | None,
-    ) -> list[Job]:
-        """The pro's jobs, newest first (created_at, then id), optionally in `statuses` only,
-        after the cursor `before`."""
-        statement = select(Job).where(Job.pro_id == pro_id)
+    ) -> list[tuple[Job, datetime]]:
+        """The pro's jobs with their scheduled start, newest scheduled first (the start in
+        `starts`, the quotes module's quote_id/start_at subquery, then the job id), optionally
+        in `statuses` only, after the cursor `before` (a start and a job id)."""
+        start = starts.c.start_at
+        statement = (
+            select(Job, start)
+            .join(starts, starts.c.quote_id == Job.quote_id)
+            .where(Job.pro_id == pro_id)
+        )
         if statuses is not None:
             statement = statement.where(Job.status.in_(statuses))
         if before is not None:
-            statement = statement.where(tuple_(Job.created_at, Job.id) < tuple_(*before))
-        statement = statement.order_by(Job.created_at.desc(), Job.id.desc()).limit(limit)
-        return list((await self._session.scalars(statement)).all())
+            statement = statement.where(tuple_(start, Job.id) < tuple_(*before))
+        statement = statement.order_by(start.desc(), Job.id.desc()).limit(limit)
+        return [(job, at) for job, at in (await self._session.execute(statement)).all()]
 
     async def events_of(self, job_id: uuid.UUID) -> list[JobEvent]:
         """The job's history, oldest first."""

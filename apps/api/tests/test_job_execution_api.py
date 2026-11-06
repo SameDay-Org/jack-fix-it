@@ -72,9 +72,24 @@ async def customer_view(client: httpx.AsyncClient, world: JobWorld, job: Job) ->
 # On my way
 
 
+def _leaves(value: object) -> list[object]:
+    """Every scalar in a JSON body."""
+    if isinstance(value, dict):
+        return [leaf for item in value.values() for leaf in _leaves(item)]
+    if isinstance(value, list):
+        return [leaf for item in value for leaf in _leaves(item)]
+    return [value]
+
+
 async def test_on_the_way_sets_eta_and_issues_a_code(
-    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Pinned to the scheduled year (START is in 2030), so a substring check of the whole body
+    # would fail although no field holds the code; the CSPRNG has its own test below.
+    monkeypatch.setattr("app.modules.jobs.execution.secrets.randbelow", lambda _: 2030)
     job = await make_job(db_session, world, arrival_code_attempts=3)
     before = datetime.now(UTC)
 
@@ -85,10 +100,7 @@ async def test_on_the_way_sets_eta_and_issues_a_code(
     assert row.status is JobStatus.ON_THE_WAY
     assert row.eta_at is not None
     assert before + timedelta(minutes=30) <= row.eta_at <= datetime.now(UTC) + timedelta(minutes=30)
-    assert row.arrival_code is not None
-    assert len(row.arrival_code) == 4
-    assert row.arrival_code.isascii()
-    assert row.arrival_code.isdigit()
+    assert row.arrival_code == "2030"
     assert row.arrival_code_attempts == 0
     assert row.arrival_code_locked_at is None
     [moved] = [e for e in await events(db_session, job.id) if e.type == "status_changed"]
@@ -103,7 +115,9 @@ async def test_on_the_way_sets_eta_and_issues_a_code(
     assert body["status"] == "on_the_way"
     assert datetime.fromisoformat(body["eta_at"]) == row.eta_at
     assert "arrival_code" not in body
-    assert row.arrival_code not in response.text
+    # No field holds the code; the scheduled start (2030-...) is not a code field.
+    assert row.arrival_code not in [str(leaf) for leaf in _leaves(body)]
+    assert body["scheduled_start_at"].startswith("2030-")
     view = await customer_view(db_client, world, job)
     assert view["arrival_code"] == row.arrival_code
     assert view["customer_status"] == "customerStatus.professionalOnTheWay"

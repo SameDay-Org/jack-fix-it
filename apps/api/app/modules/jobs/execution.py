@@ -9,9 +9,10 @@ Reads:
 - The pro reads their own jobs (another pro's, or a pro without a profile: 404). They see the
   request as the opportunity showed it (category, the description with contacts masked) plus the
   whole address, which they need to get there, and the customer's first name only. Never the
-  arrival code or a contact. The address is withheld again once the job is cancelled or
-  refunded. The list is newest job first, with an `active` filter (scheduled, on the way,
-  working).
+  arrival code or a contact: contacts typed into the address are masked too, the address
+  kept. The address is withheld again once the job is cancelled or refunded. The list is newest
+  scheduled start first (the accepted quote's proposed start, then the job id), with an
+  `active` filter (scheduled, on the way, working).
 
 Actions, each on the job's row lock (JobRepository.get_for_update), in one transaction the
 service commits; every status change goes through JobStateMachine, which writes the job event:
@@ -205,17 +206,20 @@ class JobExecutionService:
     async def pro_jobs(
         self, user: UserAccount, *, active: bool, limit: int | None, cursor: str | None
     ) -> ProJobPage:
-        """Newest job first. `limit` above the maximum is capped, not refused."""
+        """Newest scheduled start first (the accepted quote's proposed start, then the job id,
+        which the cursor carries too). `limit` above the maximum is capped, not refused."""
         size = min(limit or self._config.list_default_limit, self._config.list_max_limit)
         before = _decode_cursor(cursor) if cursor else None
         pro_id = await self._pros.get_profile_id_for_user(user.id)
         if pro_id is None:  # no profile: no job was ever theirs
             return ProJobPage(items=[], next_cursor=None)
-        rows = await self._jobs.page_for_pro(pro_id, ACTIVE if active else None, size + 1, before)
+        rows = await self._jobs.page_for_pro(
+            pro_id, ACTIVE if active else None, QuoteReader.starts(), size + 1, before
+        )
         page, more = rows[:size], len(rows) > size
         return ProJobPage(
-            items=await self._pro_views(page),
-            next_cursor=_encode_cursor(page[-1]) if more and page else None,
+            items=await self._pro_views([job for job, _ in page]),
+            next_cursor=_encode_cursor(*page[-1]) if more and page else None,
         )
 
     async def pro_job(self, user: UserAccount, job_id: uuid.UUID) -> ProJob:
@@ -435,16 +439,16 @@ def _coordinate(value: float) -> Decimal:
     return Decimal(repr(value)).quantize(_COORDINATE, rounding=ROUND_HALF_EVEN)
 
 
-def _encode_cursor(job: Job) -> str:
-    raw = f"{job.created_at.isoformat()}|{job.id}".encode()
+def _encode_cursor(job: Job, scheduled_start: datetime) -> str:
+    raw = f"{scheduled_start.isoformat()}|{job.id}".encode()
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
 def _decode_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
     try:
         raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)).decode()
-        created_at, job_id = raw.split("|")
-        decoded = datetime.fromisoformat(created_at)
+        scheduled_start, job_id = raw.split("|")
+        decoded = datetime.fromisoformat(scheduled_start)
         if decoded.tzinfo is None:
             raise ValueError("naive timestamp")
         return decoded.astimezone(UTC), uuid.UUID(job_id)
