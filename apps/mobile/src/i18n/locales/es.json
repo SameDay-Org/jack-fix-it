@@ -53,13 +53,33 @@
       "supportPro": "Tu tarjeta solo muestra la ciudad y el estado.",
       "label": "Casa"
     },
+    "photo": {
+      "title": "¡Veamos esa cara!",
+      "support": "Tu foto va en tu tarjeta. Mira a la cámara con buena luz.",
+      "take": "Tomar foto",
+      "use": "Usar foto",
+      "retry": "Reintentar",
+      "retake": "Repetir",
+      "allow": "Activar la cámara",
+      "openSettings": "Abrir Configuración",
+      "library": "Elegir de la galería",
+      "preview": "Vista de la cámara",
+      "yours": "Tu foto",
+      "uploading": "Subiendo tu foto",
+      "blockedTitle": "El acceso a la cámara está desactivado",
+      "blockedBody": "Actívalo para Jack en Configuración, o elige una foto de este teléfono.",
+      "unavailableTitle": "No se pudo iniciar la cámara",
+      "unavailableBody": "Elige una foto de este teléfono."
+    },
     "next": "Continuar",
-    "finish": "Listo",
     "errors": {
       "nameInvalid": "Usa letras, espacios, guiones, apóstrofos o puntos.",
       "nameSave": "No pudimos guardar tu nombre. Inténtalo de nuevo.",
       "homeInvalid": "No pudimos usar esta dirección. Revisa los campos e inténtalo de nuevo.",
-      "homeSave": "No pudimos guardar dónde vives. Inténtalo de nuevo."
+      "homeSave": "No pudimos guardar dónde vives. Inténtalo de nuevo.",
+      "photoSave": "No pudimos guardar tu foto. Inténtalo de nuevo.",
+      "photoRejected": "No pudimos usar esta foto. Toma otra.",
+      "photoPick": "No pudimos obtener la foto. Inténtalo de nuevo."
     }
   },
   "login": {

@@ -183,7 +183,7 @@ describe("SignUpScreen: the account step", () => {
     await renderFlow();
     expect(screen.getByText("Let's start with your email")).toBeTruthy();
     expect(screen.getByText("As a pro")).toBeTruthy();
-    expect(screen.getByLabelText("Step 1 of 3")).toBeTruthy();
+    expect(screen.getByLabelText("Step 1 of 4")).toBeTruthy();
     expect(card()).toBe("pro|||"); // blank while the account is made
 
     await createAccount("  Maria@Example.com ");
@@ -193,7 +193,7 @@ describe("SignUpScreen: the account step", () => {
       { onboarding: true },
     );
     expect(await arrive("Tell us your name!")).toBeTruthy();
-    expect(screen.getByLabelText("Step 2 of 3")).toBeTruthy();
+    expect(screen.getByLabelText("Step 2 of 4")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
     // The phone step waits for the end of the flow.
     expect(phoneFlowStore.getState().offeredAfterSignUp).toBe(false);
@@ -360,16 +360,17 @@ describe("SignUpScreen: the home step", () => {
     await fireEvent.changeText(field("ZIP code"), "33101");
   }
 
-  it("a customer's address is saved as Home, then the card's city and state; the flow ends", async () => {
+  it("a customer's address is saved as Home, then the card's city and state; the selfie is next", async () => {
     await reachHome("customer");
     jest.mocked(apiPost).mockResolvedValue({} as never);
-    expect(screen.getByLabelText("Step 3 of 3")).toBeTruthy();
+    expect(screen.getByLabelText("Step 3 of 4")).toBeTruthy();
 
     await typeAddress();
     expect(card()).toBe("customer|Ana Cruz|Miami|FL");
-    await fireEvent.press(button("Done"));
+    await fireEvent.press(button("Continue"));
 
-    await waitFor(() => expect(endOnboarding).toHaveBeenCalledTimes(1));
+    expect(await arrive("Let's see that face!")).toBeTruthy();
+    expect(screen.getByLabelText("Step 4 of 4")).toBeTruthy();
     expect(apiPost).toHaveBeenCalledWith(
       "/v1/addresses",
       {
@@ -390,9 +391,9 @@ describe("SignUpScreen: the home step", () => {
     expect(jest.mocked(apiPost).mock.invocationCallOrder[0]).toBeLessThan(
       jest.mocked(apiPatch).mock.invocationCallOrder[0],
     );
-    // Home offers the phone step once the app opens, as after any sign-up (until #295).
-    expect(phoneFlowStore.getState().offeredAfterSignUp).toBe(true);
-    expect(mockGuard.on).toBe(false);
+    // The flow goes on: nothing ends and nothing leaves.
+    expect(endOnboarding).not.toHaveBeenCalled();
+    expect(mockGuard.on).toBe(true);
   });
 
   it("a Home saved by an earlier try (409) is updated with what was typed, then the card", async () => {
@@ -403,9 +404,9 @@ describe("SignUpScreen: the home step", () => {
     } as never);
 
     await typeAddress();
-    await fireEvent.press(button("Done"));
+    await fireEvent.press(button("Continue"));
 
-    await waitFor(() => expect(endOnboarding).toHaveBeenCalled());
+    await arrive("Let's see that face!");
     expect(apiPatch).toHaveBeenCalledWith(
       "/v1/addresses/{address_id}",
       {
@@ -433,9 +434,9 @@ describe("SignUpScreen: the home step", () => {
 
     await fireEvent.changeText(field("City"), "Orlando");
     await fireEvent.changeText(field("State"), "fl");
-    await fireEvent.press(button("Done"));
+    await fireEvent.press(button("Continue"));
 
-    await waitFor(() => expect(endOnboarding).toHaveBeenCalled());
+    await arrive("Let's see that face!");
     expect(apiPost).not.toHaveBeenCalled();
     expect(apiPatch).toHaveBeenCalledWith(
       "/v1/auth/me",
@@ -449,7 +450,7 @@ describe("SignUpScreen: the home step", () => {
 
     await fireEvent.changeText(field("City"), "Toronto");
     await fireEvent.changeText(field("State"), "ON");
-    await fireEvent.press(button("Done"));
+    await fireEvent.press(button("Continue"));
 
     expect(screen.getByText("Use the two-letter code, like FL.")).toBeTruthy();
     expect(apiPatch).not.toHaveBeenCalled();
@@ -461,7 +462,7 @@ describe("SignUpScreen: the home step", () => {
     jest.mocked(apiPost).mockRejectedValue(new ApiError(422, "validation_error"));
 
     await typeAddress();
-    await fireEvent.press(button("Done"));
+    await fireEvent.press(button("Continue"));
 
     expect(
       await screen.findByText("We couldn't use this address. Check the fields and try again."),
@@ -480,7 +481,7 @@ describe("SignUpScreen: the home step", () => {
 
     // A double tap: the second press meets the home step while it slides in, and is ignored.
     await fireEvent.press(button("Continue"));
-    await fireEvent.press(button("Done"));
+    await fireEvent.press(button("Continue"));
     await arrive("Where do you live?");
     expect(apiPatch).not.toHaveBeenCalled(); // the names did not change
     expect(screen.queryByText("Fill in this field.")).toBeNull();
@@ -502,7 +503,7 @@ describe("SignUpScreen: resume", () => {
     await renderFlow();
 
     expect(screen.getByText("Where do you live?")).toBeTruthy();
-    expect(screen.getByLabelText("Step 3 of 3")).toBeTruthy();
+    expect(screen.getByLabelText("Step 3 of 4")).toBeTruthy();
     expect(card()).toBe("pro|Ana Cruz||");
     expect(screen.queryByLabelText("Street address")).toBeNull();
   });
@@ -517,7 +518,14 @@ describe("SignUpScreen: resume", () => {
   });
 
   it("an account with every step answered ends the flow at once", async () => {
-    onFlow({ ...user, first_name: "Ana", last_name: "Cruz", home_city: "Miami", home_state: "FL" });
+    onFlow({
+      ...user,
+      first_name: "Ana",
+      last_name: "Cruz",
+      home_city: "Miami",
+      home_state: "FL",
+      photo: { url: "https://storage.example/photo.jpg", expires_at: "2026-11-06T12:00:00Z" },
+    });
 
     await renderFlow();
 

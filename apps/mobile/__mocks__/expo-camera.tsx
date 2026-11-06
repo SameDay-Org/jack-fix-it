@@ -1,9 +1,18 @@
 // Manual Jest mock, applied to every suite (root __mocks__): the permission hook answers from the
 // two jest.fn below (undetermined, then granted on request, unless a test says otherwise) and the
-// preview is a plain host view that carries the camera props and reports ready once active.
-import type { CameraViewProps } from "expo-camera";
+// preview is a plain host view that carries the camera props and reports ready once active; its
+// ref takes pictures through `takePictureAsync` below.
+import type { CameraCapturedPicture, CameraPictureOptions, CameraViewProps } from "expo-camera";
 import { PermissionStatus, type PermissionResponse } from "expo-modules-core";
-import { useCallback, useEffect, useEffectEvent, useState, type ComponentType } from "react";
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useImperativeHandle,
+  useState,
+  type ComponentType,
+  type Ref,
+} from "react";
 import { View, type ViewProps } from "react-native";
 
 export { PermissionStatus };
@@ -33,6 +42,19 @@ export const requestCameraPermissionsAsync = jest.fn(
 );
 
 export const Camera = { getCameraPermissionsAsync, requestCameraPermissionsAsync };
+
+/** What a preview's `takePictureAsync` answers: a photo in the app's cache, unless a test says otherwise. */
+export const takePictureAsync = jest.fn(
+  async (_options?: CameraPictureOptions): Promise<CameraCapturedPicture> => ({
+    uri: "file:///data/cache/Camera/selfie.jpg",
+    width: 3000,
+    height: 4000,
+    format: "jpg",
+  }),
+);
+
+/** The part of the native view's instance a screen calls through its ref. */
+export type CameraHandle = { takePictureAsync: typeof takePictureAsync };
 
 /** With a message here, every active preview fails to mount with it instead of reporting ready. */
 export const cameraMock = { mountError: null as string | null };
@@ -76,6 +98,7 @@ type HostCameraProps = ViewProps & Pick<CameraViewProps, "active" | "facing" | "
 const HostCamera = View as ComponentType<HostCameraProps>;
 
 export function CameraView({
+  ref,
   active = true,
   facing = "back",
   mode,
@@ -85,7 +108,8 @@ export function CameraView({
   style,
   testID,
   accessibilityLabel,
-}: CameraViewProps) {
+}: CameraViewProps & { ref?: Ref<CameraHandle> }) {
+  useImperativeHandle(ref, () => ({ takePictureAsync }), []);
   // Reports once per mount and again when the lens or `active` changes, as the native view does;
   // a parent re-render alone (new callback identities) reports nothing.
   const report = useEffectEvent(() => {

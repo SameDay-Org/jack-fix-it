@@ -10,10 +10,10 @@ import {
 import { isSignUpRole, type SignUpRole } from "./roles";
 
 /**
- * The sign-up flow's steps, in order (#250 §1): the account, the name, where the person lives.
- * The selfie (#294) and the phone (#295) plug in here, each with a `done` test on the account.
+ * The sign-up flow's steps, in order (#250 §1): the account, the name, where the person lives, the
+ * selfie (#294). The phone (#295) plugs in here, with a `done` test on the account.
  */
-export const SIGN_UP_STEPS = ["account", "name", "home"] as const;
+export const SIGN_UP_STEPS = ["account", "name", "home", "photo"] as const;
 
 export type SignUpStep = (typeof SIGN_UP_STEPS)[number];
 
@@ -21,6 +21,7 @@ export type SignUpStep = (typeof SIGN_UP_STEPS)[number];
 const DONE: Record<Exclude<SignUpStep, "account">, (user: SessionUser) => boolean> = {
   name: (user) => Boolean(user.first_name?.trim() && user.last_name?.trim()),
   home: (user) => Boolean(user.home_city && user.home_state),
+  photo: (user) => user.photo !== null,
 };
 
 /** The first step the account has not answered; `null` when every one is answered. */
