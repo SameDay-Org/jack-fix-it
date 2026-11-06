@@ -300,7 +300,7 @@
     "codeLabel": "Verification code",
     "verify": "Verify",
     "resend": "Resend code",
-    "resendIn": "Resend code in {{seconds}} s",
+    "resendIn": "Resend in {{seconds}} s",
     "codeResent": "We sent a new code.",
     "changeNumber": "Change number",
     "verified": "Phone verified",

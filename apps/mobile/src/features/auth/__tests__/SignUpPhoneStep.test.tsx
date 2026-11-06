@@ -316,7 +316,7 @@ describe("SignUpScreen: the phone step", () => {
     const { resendSeconds } = phoneConfig;
     const resend = () => screen.getByTestId("sign-up-resend");
 
-    expect(resend()).toHaveTextContent(`Resend code in ${resendSeconds} s`);
+    expect(resend()).toHaveTextContent(`Resend in ${resendSeconds} s`);
     expect(resend().props.accessibilityState).toMatchObject({ disabled: true });
 
     await act(async () => jest.advanceTimersByTime(resendSeconds * 1000));
@@ -326,7 +326,7 @@ describe("SignUpScreen: the phone step", () => {
 
     expect(calls(SEND)).toHaveLength(2);
     expect(calls(SEND)[1][1]).toEqual({ phone: E164 });
-    await waitFor(() => expect(resend()).toHaveTextContent(`Resend code in ${resendSeconds} s`));
+    await waitFor(() => expect(resend()).toHaveTextContent(`Resend in ${resendSeconds} s`));
   });
 
   it("Change number and Back return to the number, kept as typed; a new code starts over", async () => {
@@ -347,7 +347,7 @@ describe("SignUpScreen: the phone step", () => {
     await arrive("Enter the code we sent");
     expect(codeField().props.value).toBe("");
     expect(screen.getByTestId("sign-up-resend")).toHaveTextContent(
-      `Resend code in ${phoneConfig.resendSeconds} s`,
+      `Resend in ${phoneConfig.resendSeconds} s`,
     );
 
     // A system Back on the code pane goes to the number too, never a step further.

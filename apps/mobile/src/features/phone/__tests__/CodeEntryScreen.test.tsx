@@ -173,12 +173,12 @@ describe("CodeEntryScreen", () => {
     const { resendSeconds } = phoneConfig;
 
     expect(resendButton().props.accessibilityState).toMatchObject({ disabled: true });
-    expect(resendButton()).toHaveTextContent(`Resend code in ${resendSeconds} s`);
+    expect(resendButton()).toHaveTextContent(`Resend in ${resendSeconds} s`);
     await fireEvent.press(resendButton());
     expect(fetchMock).not.toHaveBeenCalled();
 
     await act(async () => jest.advanceTimersByTime((resendSeconds - 1) * 1000));
-    expect(resendButton()).toHaveTextContent("Resend code in 1 s");
+    expect(resendButton()).toHaveTextContent("Resend in 1 s");
     expect(resendButton().props.accessibilityState).toMatchObject({ disabled: true });
 
     await act(async () => jest.advanceTimersByTime(1000));
@@ -190,7 +190,7 @@ describe("CodeEntryScreen", () => {
     expect(callPath(fetchMock.mock.calls[0])).toBe(SEND);
     expect(callBody(fetchMock.mock.calls[0])).toEqual({ phone: E164 });
     await waitFor(() =>
-      expect(resendButton()).toHaveTextContent(`Resend code in ${resendSeconds} s`),
+      expect(resendButton()).toHaveTextContent(`Resend in ${resendSeconds} s`),
     );
     expect(showToast).toHaveBeenCalledWith({ message: "We sent a new code.", tone: "neutral" });
   });

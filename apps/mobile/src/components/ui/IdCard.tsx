@@ -580,6 +580,10 @@ export function IdCard({
   const place = placeOf(city, state);
 
   const [face, setFace] = useState<IdCardFace>("front");
+  // The faces' height once laid out. react-native-svg resolves the shade's and the sheen's
+  // percentages at the size they first drew at: a card that grows after (large text, a phone
+  // line typed in) draws them again at its new height.
+  const [faceHeight, setFaceHeight] = useState(0);
   /** The face shown, readable at once from a gesture's JS callback (state would lag a render). */
   const shown = useSharedValue<IdCardFace>("front");
 
@@ -795,11 +799,14 @@ export function IdCard({
             frontStyle,
           ]}
         >
-          {/* Grows with its content (not `flex: 1`, which holds it at the card's height): large
-              text that needs more room takes the shade and sheen down with it. */}
-          <View style={[{ flexGrow: 1 }, ...clipStyle(unit)]}>
-            <Shade palette={palette} gradientId={gradientId} />
+          {/* Grows with its content (not `flex: 1`, which holds it at the card's height). */}
+          <View
+            style={[{ flexGrow: 1 }, ...clipStyle(unit)]}
+            onLayout={({ nativeEvent }) => setFaceHeight(Math.round(nativeEvent.layout.height))}
+          >
+            <Shade key={`shade-${faceHeight}`} palette={palette} gradientId={gradientId} />
             <Sheen
+              key={`sheen-${faceHeight}`}
               palette={palette}
               gradientId={`${gradientId}-f`}
               style={frontSheenStyle}
@@ -826,8 +833,13 @@ export function IdCard({
           ]}
         >
           <View style={[{ flex: 1 }, ...clipStyle(unit)]}>
-            <Shade palette={palette} gradientId={`${gradientId}-b`} />
-            <Sheen palette={palette} gradientId={`${gradientId}-b`} style={backSheenStyle} />
+            <Shade key={`shade-${faceHeight}`} palette={palette} gradientId={`${gradientId}-b`} />
+            <Sheen
+              key={`sheen-${faceHeight}`}
+              palette={palette}
+              gradientId={`${gradientId}-b`}
+              style={backSheenStyle}
+            />
             <Back palette={palette} unit={unit} publicCode={publicCode} scaleFonts />
           </View>
         </Animated.View>
