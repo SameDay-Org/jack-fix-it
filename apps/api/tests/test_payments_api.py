@@ -8,6 +8,7 @@ import uuid
 from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -24,6 +25,8 @@ from app.db import get_session
 from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailableError
 from app.integrations.stripe_payments import (
     CreatedCustomer,
+    FoundPaymentIntents,
+    PaymentIntentFacts,
     PaymentIntentState,
     StripePayments,
     StripePaymentsClient,
@@ -31,6 +34,7 @@ from app.integrations.stripe_payments import (
 )
 from app.modules.payments.models import Payment, PaymentStatus
 from app.modules.payments.schemas import PaymentSheetOut
+from app.modules.payments.service import PaymentsConfig
 from app.modules.pros.models import ProProfile, ProVerificationStatus
 from app.modules.quotes.models import QuoteStatus
 from app.modules.requests.models import RequestStatus
@@ -62,6 +66,9 @@ PUBLISHABLE_KEY = "pk_test_fixture-payments-58"
 SECRET_KEY = "sk_test_fixture-not-a-real-key"
 TAKE_RATE = "platform_take_rate_bps"
 TAKE_RATE_BPS = 1500
+# Not the default either: the window comes from settings.
+RECONCILE_AFTER = timedelta(hours=5)
+CONFIG = PaymentsConfig(publishable_key=PUBLISHABLE_KEY, intent_reconcile_after=RECONCILE_AFTER)
 SHEET_KEYS = {
     "payment_intent_client_secret",
     "customer_id",
@@ -111,7 +118,10 @@ class FakeStripePayments:
     object back (customers and PaymentIntents alike). `errors` makes one operation fail;
     `on_create_customer` and `on_create_intent` run inside those creates, before they answer;
     `lost_answers` makes that many creates make their PaymentIntent and then fail as a timeout
-    would; `intent_status` is what Stripe reports for every PaymentIntent."""
+    would; `intent_status` is what Stripe reports for every PaymentIntent. `facts` is what Stripe
+    shows of each intent (amount, currency, customer, metadata payment_id), which the search by
+    payment id reads: clearing `intents_by_key` is Stripe forgetting the keys, the intents kept.
+    `search_complete` False: the search has another page."""
 
     customers: dict[str, str] = field(default_factory=dict)  # idempotency key -> customer id
     customer_calls: list[dict[str, str]] = field(default_factory=list)
@@ -125,6 +135,19 @@ class FakeStripePayments:
     on_create_intent: Callable[[], Awaitable[None]] | None = None
     lost_answers: int = 0
     intent_status: str = "requires_payment_method"
+    facts: dict[str, PaymentIntentFacts] = field(default_factory=dict)  # by PaymentIntent id
+    searches: list[uuid.UUID] = field(default_factory=list)
+    search_complete: bool = True
+
+    def add_intent(self, facts: PaymentIntentFacts) -> None:
+        """An intent Stripe holds that no create of this run answered with."""
+        self.facts[facts.payment_intent_id] = facts
+        self.intents[facts.payment_intent_id] = PaymentIntentState(
+            payment_intent_id=facts.payment_intent_id,
+            client_secret=f"{facts.payment_intent_id}_secret_{uuid.uuid4().hex[:8]}",
+            status=self.intent_status,
+            request_id="req_fake_intent",
+        )
 
     async def create_customer(self, *, user_id: str, idempotency_key: str) -> CreatedCustomer:
         if "create_customer" in self.errors:
@@ -172,6 +195,13 @@ class FakeStripePayments:
                 status=self.intent_status,
                 request_id="req_fake_intent",
             )
+            self.facts[intent_id] = PaymentIntentFacts(
+                payment_intent_id=intent_id,
+                amount_cents=amount_cents,
+                currency=currency,
+                customer_id=customer_id,
+                payment_id=dict(metadata).get("payment_id"),
+            )
         if self.lost_answers:
             self.lost_answers -= 1
             raise StripeUnavailableError(request_id="req_fake_lost")
@@ -188,6 +218,21 @@ class FakeStripePayments:
             status=self.intent_status,
             request_id="req_fake_retrieve",
         )
+
+    async def search_payment_intents(self, payment_id: uuid.UUID) -> FoundPaymentIntents:
+        if "search_payment_intents" in self.errors:
+            raise self.errors["search_payment_intents"]
+        self.searches.append(payment_id)
+        found = tuple(f for f in self.facts.values() if f.payment_id == str(payment_id))
+        return FoundPaymentIntents(intents=found, complete=self.search_complete)
+
+    async def payment_intent_facts(self, payment_intent_id: str) -> PaymentIntentFacts:
+        if "payment_intent_facts" in self.errors:
+            raise self.errors["payment_intent_facts"]
+        facts = self.facts.get(payment_intent_id)
+        if facts is None:
+            raise StripeRejectedError(request_id="req_fake_missing", code="resource_missing")
+        return facts
 
     async def create_ephemeral_key(self, customer_id: str) -> str:
         if "create_ephemeral_key" in self.errors:
@@ -206,7 +251,11 @@ def _fake_stripe(request: Request) -> StripePayments:
 def settings() -> Settings:
     # The secret key is passed as None so a STRIPE_SECRET_KEY in the shell never reaches the
     # app: without the fake, the real dependency finds no Stripe.
-    return make_settings(stripe_secret_key=None, stripe_publishable_key=PUBLISHABLE_KEY)
+    return make_settings(
+        stripe_secret_key=None,
+        stripe_publishable_key=PUBLISHABLE_KEY,
+        stripe_payment_intent_reconcile_after_seconds=int(RECONCILE_AFTER.total_seconds()),
+    )
 
 
 @pytest.fixture
@@ -663,17 +712,16 @@ async def test_payment_intent_is_created_from_the_row_for_the_sheet(
     )
 
 
-@pytest.mark.parametrize("status", [PaymentStatus.SUCCEEDED, PaymentStatus.CANCELED])
 async def test_succeeded_payment_is_not_reopened(
     db_client: httpx.AsyncClient,
     db_session: AsyncSession,
     world: World,
     stripe_fake: FakeStripePayments,
-    status: PaymentStatus,
 ) -> None:
-    """Once the webhook (#61) closed the payment, no sheet is issued: the job exists or is
-    being created, or the PaymentIntent is closed. Nothing is written or asked of Stripe. The
-    closed payment is checked before the pro: a pro unhireable since changes nothing."""
+    """Once the webhook (#61) recorded the payment's success, no sheet is issued: the job
+    exists or is being created. Nothing is written or asked of Stripe. The succeeded payment is
+    checked before the pro: a pro unhireable since changes nothing."""
+    status = PaymentStatus.SUCCEEDED
     request_id, quote_id, pro = await accepted_request(db_session, world)
     assert (await pay(db_client, world, request_id, quote_id)).status_code == 200
     [payment] = await payments_of(db_session, quote_id)

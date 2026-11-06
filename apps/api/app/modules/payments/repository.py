@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.payments.models import Payment, PaymentStatus
@@ -10,13 +10,14 @@ class PaymentRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def get_by_quote_for_update(self, quote_id: uuid.UUID) -> Payment | None:
-        """The quote's payment, locked until the transaction ends; None before the first
-        payment call. Take the request's lock first. populate_existing: a waiter gets the row
-        as the transaction that held the lock left it."""
+    async def get_live_by_quote_for_update(self, quote_id: uuid.UUID) -> Payment | None:
+        """The quote's live payment (any status but canceled; at most one, a partial unique
+        index), locked until the transaction ends; None before the first payment call of this
+        acceptance. Take the request's lock first. populate_existing: a waiter gets the row as
+        the transaction that held the lock left it."""
         statement = (
             select(Payment)
-            .where(Payment.quote_id == quote_id)
+            .where(Payment.quote_id == quote_id, Payment.status != PaymentStatus.CANCELED)
             .with_for_update()
             .execution_options(populate_existing=True)
         )
@@ -61,6 +62,22 @@ class PaymentRepository:
         self._session.add(payment)
         await self._session.flush()
         return payment
+
+    async def mark_payment_intent_requested(self, payment_id: uuid.UUID) -> None:
+        """Stamps the first create attempt now; the caller holds the row's lock and commits
+        before the create call."""
+        await self._session.execute(
+            update(Payment)
+            .where(Payment.id == payment_id)
+            .values(payment_intent_requested_at=func.now())
+        )
+
+    async def clear_payment_intent_requested(self, payment_id: uuid.UUID) -> None:
+        """Forgets the unresolved create (staff recovery), so the next call creates again; the
+        caller holds the row's lock and commits."""
+        await self._session.execute(
+            update(Payment).where(Payment.id == payment_id).values(payment_intent_requested_at=None)
+        )
 
     async def set_payment_intent_if_missing(self, payment_id: uuid.UUID, intent_id: str) -> bool:
         """Stores the PaymentIntent's id unless the row holds one already; False then. The

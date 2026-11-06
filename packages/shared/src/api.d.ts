@@ -4370,7 +4370,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description payment_not_available: the request is not accepted or this quote is not its accepted one, or the payment already succeeded (the job exists or is being created) or its PaymentIntent is closed; pro_not_hireable: the quote's pro can no longer be hired (not approved, or payouts disabled). Nothing was created. */
+            /** @description payment_not_available: the request is not accepted or this quote is not its accepted one, or the payment already succeeded (the job exists or is being created) or its PaymentIntent is closed; pro_not_hireable: the quote's pro can no longer be hired (not approved, or payouts disabled). Nothing was created. payment_needs_review: an earlier PaymentIntent create never answered and Stripe may have forgotten it; support resolves the payment before another is created. */
             409: {
                 headers: {
                     [name: string]: unknown;

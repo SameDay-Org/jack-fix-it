@@ -291,6 +291,12 @@ class Settings(BaseSettings):
         default=72_000, gt=0, lt=STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS
     )
     stripe_account_list_max_pages: int = Field(default=10, gt=0)
+    # The same bound for a payment (D11.1, #58): with no stored PaymentIntent and a create
+    # attempted at least this many seconds ago, the retry searches Stripe for the intent instead
+    # of creating again. Below Stripe's 24-hour key retention, like the account's.
+    stripe_payment_intent_reconcile_after_seconds: int = Field(
+        default=72_000, gt=0, lt=STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS
+    )
     # The API's public base URL, such as https://api.example.com: Stripe sends the pro's browser
     # back to its onboarding pages there. Required with Stripe in staging and production (https).
     public_api_url: str | None = None

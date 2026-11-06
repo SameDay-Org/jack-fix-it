@@ -3,7 +3,9 @@ reads back, and how Stripe's failures come out. A recording HTTP client stands i
 network; nothing here reaches Stripe."""
 
 import logging
+import uuid
 from typing import Any
+from urllib.parse import parse_qs
 
 import pytest
 import stripe
@@ -12,6 +14,8 @@ from starlette.requests import Request
 from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailableError
 from app.integrations.stripe_payments import (
     PAYMENT_INTENT_CLOSED_STATUSES,
+    PAYMENT_INTENT_SEARCH_LIMIT,
+    PaymentIntentFacts,
     PaymentIntentState,
     StripePaymentsClient,
     get_stripe_payments,
@@ -154,6 +158,77 @@ async def test_retrieve_payment_intent_reads_the_status() -> None:
     [(method, url, _, form)] = http.sent
     assert (method, url) == ("get", f"https://api.stripe.com/v1/payment_intents/{INTENT}")
     assert form == {}
+
+
+def search_body(*intents: dict[str, Any], has_more: bool = False) -> dict[str, Any]:
+    return {
+        "object": "search_result",
+        "url": "/v1/payment_intents/search",
+        "data": list(intents),
+        "has_more": has_more,
+        "next_page": "page_fixture" if has_more else None,
+    }
+
+
+async def test_search_payment_intents_queries_the_payment_id_and_reads_the_facts() -> None:
+    other = intent_body(id="pi_fixture_other", amount=1, customer=None, metadata={})
+    wrapper, http = client((200, search_body(intent_body(), other)))
+
+    found = await wrapper.search_payment_intents(uuid.UUID(PAYMENT_ID))
+
+    assert found.complete
+    assert found.intents == (
+        PaymentIntentFacts(INTENT, 10_000, "usd", CUSTOMER, PAYMENT_ID),
+        PaymentIntentFacts("pi_fixture_other", 1, "usd", None, None),
+    )
+    [(method, url, headers, form)] = http.sent
+    path, _, query = url.partition("?")
+    assert (method, path) == ("get", "https://api.stripe.com/v1/payment_intents/search")
+    assert parse_qs(query) == {
+        "query": [f"metadata['payment_id']:'{PAYMENT_ID}'"],
+        "limit": [str(PAYMENT_INTENT_SEARCH_LIMIT)],
+    }
+    assert "Idempotency-Key" not in headers
+    assert form == {}
+
+
+async def test_search_with_another_page_is_incomplete() -> None:
+    wrapper, _ = client((200, search_body(intent_body(), has_more=True)))
+
+    found = await wrapper.search_payment_intents(uuid.UUID(PAYMENT_ID))
+
+    assert not found.complete
+    assert len(found.intents) == 1
+
+
+async def test_payment_intent_facts_reads_an_expanded_customer_too() -> None:
+    expanded = intent_body(customer={"id": CUSTOMER, "object": "customer"}, client_secret=None)
+    wrapper, http = client((200, expanded))
+
+    facts = await wrapper.payment_intent_facts(INTENT)
+
+    assert facts == PaymentIntentFacts(INTENT, 10_000, "usd", CUSTOMER, PAYMENT_ID)
+    [(method, url, _, _)] = http.sent
+    assert (method, url) == ("get", f"https://api.stripe.com/v1/payment_intents/{INTENT}")
+
+
+@pytest.mark.parametrize(
+    ("answer", "kind"),
+    [
+        (NETWORK_ERROR, StripeUnavailableError),
+        ((429, error_body("rate_limit", "Too many requests")), StripeUnavailableError),
+        ((400, error_body("search_unavailable", f"bad {PAYMENT_ID}")), StripeRejectedError),
+    ],
+)
+async def test_search_and_facts_errors_are_typed(answer: Answer, kind: type[Exception]) -> None:
+    wrapper, _ = client(answer, answer)
+
+    with pytest.raises(kind) as searching:
+        await wrapper.search_payment_intents(uuid.UUID(PAYMENT_ID))
+    with pytest.raises(kind) as reading:
+        await wrapper.payment_intent_facts(INTENT)
+
+    assert str(searching.value) == str(reading.value) == kind.__name__
 
 
 async def test_payment_intent_without_client_secret_is_rejected() -> None:

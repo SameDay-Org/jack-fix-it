@@ -37,11 +37,24 @@ Stripe page it comes from, as read on 2026-11-06. Anything not confirmed there i
   `source_transaction`": a payout of the platform's available balance can leave nothing for
   an untied transfer.
 - All of the above: [Separate charges and transfers, "Transfer availability"](https://docs.stripe.com/connect/separate-charges-and-transfers#transfer-availability).
+- Associating a transfer with its charge is bookkeeping, not segregation of the customer's
+  money: the charge still lands in the platform's one balance, which refunds, disputes, fees
+  and other transfers also draw on. Stripe documents protected allocation of funds as a
+  separate feature, funds segregation, in private preview; the MVP does not use it.
+  [Separate charges and transfers](https://docs.stripe.com/connect/separate-charges-and-transfers?platform=web&integration=custom&ui=elements&api-integration=paymentintents)
+  (introduction, the funds segregation note).
 - What this means here: the transfer after confirmation (#68) carries `source_transaction` =
   the charge of the job's PaymentIntent (stored by #61) and the PaymentIntent's
-  `transfer_group` (`request:<request id>`, set in #58), so it never fails on the platform's
-  available balance and never draws on another customer's money. The pro's own payout then
-  waits for that charge's settlement, which the 48 h confirmation window usually covers.
+  `transfer_group` (`request:<request id>`, set in #58). Stripe's exception above covers only a
+  charge that has **not settled yet** when the transfer is created; after confirmation the
+  charge has usually settled, and then the transfer is limited by the platform's available
+  balance like any other, so it **can** fail for insufficient balance (after refunds,
+  disputes or a payout of that balance, for example). #68 must handle that failure (no
+  automatic retry by Stripe). The pro's own payout waits for the charge's settlement in either
+  case.
+- **Unverified** for #68, to confirm against Stripe before it ships: whether the platform's
+  automatic payouts should be off or delayed so the available balance covers pending
+  transfers, and how a transfer that failed for balance is retried.
 
 ## Payout schedule basics
 
@@ -74,13 +87,17 @@ Stripe page it comes from, as read on 2026-11-06. Anything not confirmed there i
   to reconcile any amount owed back to it by reducing subsequent transfer amounts or by
   reversing transfers."
   [Separate charges and transfers, "Issue refunds"](https://docs.stripe.com/connect/separate-charges-and-transfers#issue-refunds)
-- A refund after the transfer therefore needs a transfer reversal first, entirely or partially
-  (`amount`): it "adds the specified (or entire) amount back to the platform's available
-  balance, reducing the connected account's available balance accordingly", and is only
-  possible "if the connected account's available balance is greater than the reversal amount
-  or has connected reserves enabled". Reversals are for refunds or disputes related to the
-  charge, or to correct a transfer.
-  [Separate charges and transfers, "Reverse transfers"](https://docs.stripe.com/connect/separate-charges-and-transfers#reverse-transfers)
+- So funding a refund and recovering the money from the pro are separate operations. The
+  refund is funded from the platform's balance whether or not the transfer was reversed.
+  Recovery is the platform's to arrange, by a smaller later transfer or by a transfer reversal
+  (entire or partial, `amount`), which moves the amount from the connected account back to the
+  platform's available balance.
+  [Refunds through a Connect platform](https://docs.stripe.com/refunds#refunds-through-a-connect-platform),
+  [Separate charges and transfers, "Issue refunds" and "Reverse transfers"](https://docs.stripe.com/connect/separate-charges-and-transfers#reverse-transfers)
+- A reversal can fail: it needs the connected account's available balance to cover it (or
+  connected reserves), so a pro who already paid out their balance may leave nothing to
+  reverse, while the platform can still fund the refund and carries the loss until it is
+  recovered.
 - Disputes (chargebacks) are debited from the platform's balance like refunds. A negative
   balance is offset by later payments; Stripe can also debit the platform's bank account for
   it (supported in the US).
@@ -91,7 +108,10 @@ Stripe page it comes from, as read on 2026-11-06. Anything not confirmed there i
 - The customer pays the quote's amount plus tax (0 in the MVP); the platform's 15% absorbs
   Stripe's fee (Cesar, 2026-10-29). A refund returns the customer's money; Stripe's fee stays
   paid by the platform.
-- Before the transfer (#68), a refund (#69) draws on the platform's balance alone. After it,
-  reverse the transfer first; the pro's Express balance must still hold the amount.
+- Before the transfer (#68), a refund (#69) draws on the platform's balance alone and nothing
+  is owed back by the pro. After it, the refund is still funded by the platform; recovering
+  the pro's share (a reversal, or a deduction from a later transfer) is a separate step that
+  can fail. **Unconfirmed**: any sequencing between refund and recovery (for example reversing
+  before refunding) is a policy for #69 / #74 to decide with Cesar (#3), not a Stripe rule.
 - Amounts stay integer cents computed in the backend and frozen per payment and job (root
   `AGENTS.md`, "Money").

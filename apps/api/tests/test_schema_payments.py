@@ -31,7 +31,7 @@ PAYMENT_CONSTRAINTS = {
     "ck_payments_split_adds_up",
     "ck_payments_take_rate_bps_range",
     "ck_payments_payment_status",
-    "uq_payments_quote_id",
+    "uq_payments_quote_id_live",
     "uq_payments_stripe_payment_intent_id",
 }
 
@@ -135,13 +135,40 @@ async def test_amounts_are_held_to_their_sums(
     )
 
 
-async def test_one_payment_per_quote(db_session: AsyncSession, world: World) -> None:
+@pytest.mark.parametrize(
+    "live", [s for s in PaymentStatus if s is not PaymentStatus.CANCELED], ids=str
+)
+async def test_one_live_payment_per_quote(
+    db_session: AsyncSession, world: World, live: PaymentStatus
+) -> None:
+    """Two live payments for one quote are impossible whatever the service does (#58 B4):
+    the partial unique index refuses a second one beside any status but canceled."""
     request_id, quote_id = await accepted_quote(db_session, world)
-    db_session.add(payment(request_id, quote_id, world.customer_id))
+    db_session.add(payment(request_id, quote_id, world.customer_id, status=live))
     await db_session.flush()
 
     await assert_rejected(
-        db_session, payment(request_id, quote_id, world.customer_id), "uq_payments_quote_id"
+        db_session, payment(request_id, quote_id, world.customer_id), "uq_payments_quote_id_live"
+    )
+
+
+async def test_canceled_payments_stay_beside_the_live_one(
+    db_session: AsyncSession, world: World
+) -> None:
+    """A quote accepted again after cancels keeps every canceled payment and one live one."""
+    request_id, quote_id = await accepted_quote(db_session, world)
+    canceled = PaymentStatus.CANCELED
+    db_session.add_all(
+        [
+            payment(request_id, quote_id, world.customer_id, status=canceled),
+            payment(request_id, quote_id, world.customer_id, status=canceled),
+            payment(request_id, quote_id, world.customer_id),
+        ]
+    )
+    await db_session.flush()
+
+    await assert_rejected(
+        db_session, payment(request_id, quote_id, world.customer_id), "uq_payments_quote_id_live"
     )
 
 
@@ -187,6 +214,7 @@ def payment_constraint_names(connection: Connection) -> set[str]:
     inspector = inspect(connection)
     names = {str(c["name"]) for c in inspector.get_check_constraints("payments")}
     names |= {str(c["name"]) for c in inspector.get_unique_constraints("payments")}
+    names |= {str(i["name"]) for i in inspector.get_indexes("payments") if i["unique"]}
     return names
 
 
