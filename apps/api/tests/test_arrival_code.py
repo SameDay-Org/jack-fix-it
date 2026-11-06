@@ -19,7 +19,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.errors import AppError
 from app.modules.addresses.models import Address
-from app.modules.jobs import execution
 from app.modules.jobs.errors import ArrivalCodeInvalidError, ArrivalCodeLockedError
 from app.modules.jobs.execution import JobExecutionConfig, JobExecutionService
 from app.modules.jobs.models import Job, JobEvent, JobStatus
@@ -175,7 +174,7 @@ async def test_the_code_is_compared_in_constant_time(
         calls.append((a, b))
         return real(a, b)
 
-    monkeypatch.setattr(execution.hmac, "compare_digest", compare_digest)
+    monkeypatch.setattr("app.modules.jobs.execution.hmac.compare_digest", compare_digest)
     service = JobExecutionService(db_session, CONFIG)
 
     with pytest.raises(ArrivalCodeInvalidError):
@@ -218,7 +217,7 @@ async def test_arrival_code_never_logged_or_in_sentry(
     init_sentry(make_settings(sentry_dsn=TEST_DSN))
     sentry_sdk.get_isolation_scope().clear_breadcrumbs()
     # A known code, so the scan below can look for it; the wrong ones are scanned too.
-    monkeypatch.setattr(execution.secrets, "randbelow", lambda _: 7391)
+    monkeypatch.setattr("app.modules.jobs.execution.secrets.randbelow", lambda _: 7391)
     issued, wrong = "7391", "5286"
     world = await build_world(db_session)
     job = await make_job(db_session, world)

@@ -119,7 +119,7 @@ async def test_the_code_comes_from_the_csprng_with_leading_zeros(
         draws.append(bound)
         return 7
 
-    monkeypatch.setattr(execution.secrets, "randbelow", randbelow)
+    monkeypatch.setattr("app.modules.jobs.execution.secrets.randbelow", randbelow)
 
     assert execution.new_arrival_code() == "0007"
     assert draws == [10_000]

@@ -64,10 +64,11 @@ async def test_the_checks_refuse_bad_values(
     world = await build_world(db_session)
     job = await make_job(db_session, world, JobStatus.ON_THE_WAY)
 
+    for name, value in fields.items():
+        setattr(job, name, value)
+
     with pytest.raises(IntegrityError):
         async with db_session.begin_nested():
-            for name, value in fields.items():
-                setattr(job, name, value)
             await db_session.flush()
 
 
