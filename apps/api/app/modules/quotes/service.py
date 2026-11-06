@@ -441,6 +441,32 @@ class QuoteReader:
         )
 
 
+class QuoteSettlement:
+    """What a payment's outcome (#61) does to a request's quotes, under the request's lock (the
+    caller takes it first, through RequestStateMachine.lock). The caller owns the transaction:
+    every method flushes and never commits."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._quotes = QuoteRepository(session)
+
+    async def reject_others(
+        self, request_id: uuid.UUID, kept_quote_id: uuid.UUID
+    ) -> tuple[uuid.UUID, ...]:
+        """The payment succeeded: the request's other pending quotes are rejected (#189). The
+        ids it rejected, in id order."""
+        return tuple(await self._quotes.reject_pending_except(request_id, kept_quote_id))
+
+    async def unaccept(self, quote_id: uuid.UUID, now: datetime) -> QuoteStatus | None:
+        """The payment was canceled: the accepted quote goes back to pending while it is before
+        its expires_at, else to expired. The new status; None when it was not accepted."""
+        return await self._quotes.unaccept(quote_id, now)
+
+    async def has_live(self, request_id: uuid.UUID) -> bool:
+        """Whether the request still has a pending or an accepted quote, due or not: with none,
+        nothing (the #51 sweep included) moves a quote_ready request on."""
+        return await self._quotes.has_live(request_id)
+
+
 @dataclass(frozen=True)
 class RequestExpiry:
     """What expiring one request's due quotes did."""
