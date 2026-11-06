@@ -68,9 +68,14 @@ jest.mock(
 );
 // The card has its own tests (#291): here it shows what the flow hands it.
 jest.mock("../../../components/ui/IdCard", () => ({
-  IdCard: ({ name, phone }: Record<string, string | undefined>) => {
+  IdCard: ({ name, phone, photoUri }: Record<string, string | undefined>) => {
     const { Text } = jest.requireActual<typeof import("react-native")>("react-native");
-    return <Text testID="card">{`${name ?? ""}|${phone ?? ""}`}</Text>;
+    return (
+      <>
+        <Text testID="card">{`${name ?? ""}|${phone ?? ""}`}</Text>
+        <Text testID="card-photo">{photoUri ?? ""}</Text>
+      </>
+    );
   },
 }));
 
@@ -90,7 +95,15 @@ const photographed: SessionUser = {
   home_state: "FL",
   photo: { url: "https://storage.example/photo.jpg", expires_at: "2026-11-06T12:00:00Z" },
 };
-const VERIFIED: SessionUser = { ...photographed, phone: E164, phone_verified: true };
+const cardPhoto = () => screen.getByTestId("card-photo").props.children as string;
+const PHOTO = "https://storage.example/photo.jpg";
+// Every user the API returns signs the photo's URL afresh.
+const VERIFIED: SessionUser = {
+  ...photographed,
+  phone: E164,
+  phone_verified: true,
+  photo: { url: `${PHOTO}?signed=2`, expires_at: "2026-11-06T13:00:00Z" },
+};
 
 const card = () => screen.getByTestId("card").props.children as string;
 const button = (name: string) => screen.getByRole("button", { name });
@@ -227,6 +240,8 @@ describe("SignUpScreen: the phone step", () => {
     expect(screen.getByText("Tap it to see the back.")).toBeTruthy();
     expect(sessionStore.getState().user?.phone_verified).toBe(true);
     expect(card()).toBe(`Ana Cruz|${SHOWN}`);
+    // The answer's fresh signed URL is the same photo: the card keeps the one it shows.
+    expect(cardPhoto()).toBe(PHOTO);
     // The steps are gone; the flow still holds the person until they go on.
     expect(screen.queryByText("Enter the code we sent")).toBeNull();
     expect(screen.queryByLabelText("Step 5 of 5")).toBeNull();

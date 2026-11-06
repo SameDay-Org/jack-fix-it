@@ -716,6 +716,8 @@ export function IdCard({
     variant === "pro" ? t("idCard.pro") : null,
     name.trim() || t("idCard.a11y.unnamed"),
     place || null,
+    // Read out as it is drawn: never on the share render, which draws none.
+    (!shareable && phone) || null,
   ]
     .filter(Boolean)
     .join(", ");

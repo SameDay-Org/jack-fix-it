@@ -74,6 +74,8 @@ export function useFinishMoment(startFinished: boolean, onArrived: () => void): 
   const headlineHeight = useSharedValue(0);
   const actionY = useSharedValue(0);
   const arrived = useRef(false);
+  // The card's own place and the headline's height are both known: the move can start.
+  const measured = useRef({ card: false, headline: false });
   const onArrivedRef = useRef(onArrived);
   useEffect(() => {
     onArrivedRef.current = onArrived;
@@ -111,8 +113,8 @@ export function useFinishMoment(startFinished: boolean, onArrived: () => void): 
     );
   };
 
-  // The headline mounts with the finished stage; its layout starts the move (or this, if none
-  // comes: the move must not wait on it forever).
+  // The headline mounts with the finished stage; its layout (and the card's, on a flow reopened
+  // here) starts the move, or this, if none comes: the move must not wait on it forever.
   useEffect(() => {
     if (stage !== "finished") return;
     const fallback = setTimeout(arrive, LAYOUT_WAIT_MS);
@@ -150,10 +152,13 @@ export function useFinishMoment(startFinished: boolean, onArrived: () => void): 
     onCardLayout: ({ nativeEvent: { layout } }) => {
       cardY.set(layout.y);
       cardHeight.set(layout.height);
+      measured.current.card = true;
+      if (measured.current.headline) arrive();
     },
     onHeadlineLayout: ({ nativeEvent: { layout } }) => {
       headlineHeight.set(layout.height);
-      arrive();
+      measured.current.headline = true;
+      if (measured.current.card) arrive();
     },
     onActionLayout: ({ nativeEvent: { layout } }) => actionY.set(layout.y),
     stepsStyle,
