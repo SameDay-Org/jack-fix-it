@@ -34,6 +34,11 @@ export type PhotoStep = {
   camera: RefObject<CameraView | null>;
   onCameraReady: () => void;
   onCameraError: () => void;
+  /**
+   * The step left the screen: its preview stops, and the next visit waits for the new one to be
+   * ready (or tries a camera that failed again).
+   */
+  onCameraStop: () => void;
   /** The share of the photo the storage has taken, 0 to 1, while it is saved; else `null`. */
   progress: number | null;
   /** What went wrong, in the app's language. */
@@ -165,6 +170,10 @@ export function usePhotoStep(onSaved: () => void): PhotoStep {
     [handOver],
   );
 
+  const onCameraReady = useCallback(() => setCameraState("ready"), []);
+  const onCameraError = useCallback(() => setCameraState("failed"), []);
+  const onCameraStop = useCallback(() => setCameraState("starting"), []);
+
   const retake = useCallback(() => {
     if (saving.current) return;
     setShot(null);
@@ -263,8 +272,9 @@ export function usePhotoStep(onSaved: () => void): PhotoStep {
     mode,
     photoUri,
     camera,
-    onCameraReady: () => setCameraState("ready"),
-    onCameraError: () => setCameraState("failed"),
+    onCameraReady,
+    onCameraError,
+    onCameraStop,
     progress,
     failure,
     submitting,

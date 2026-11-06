@@ -202,6 +202,8 @@ beforeEach(() => {
   requestCameraPermissionsAsync.mockReset().mockResolvedValue(CAMERA_PERMISSION.granted);
   takePictureAsync.mockClear();
   cameraMock.mountError = null;
+  cameraMock.holdReady = false;
+  cameraMock.pendingReady = [];
   announce = jest
     .spyOn(AccessibilityInfo, "announceForAccessibility")
     .mockImplementation(() => undefined);
@@ -478,6 +480,23 @@ describe("SignUpScreen: the selfie step, saving the photo", () => {
     expect(leaving.props.active).toBe(false);
     expect(await arrive("Where do you live?")).toBeTruthy();
     expect(preview).toThrow();
+  });
+
+  it("back on the step, Take photo waits for the new preview to be ready", async () => {
+    onFlow();
+    await renderStep();
+    await waitFor(() => expect(button("Take photo")).toBeEnabled());
+
+    await press("Back");
+    expect(await arrive("Where do you live?")).toBeTruthy();
+    cameraMock.holdReady = true;
+    jest.mocked(apiPatch).mockImplementation(async () => sessionStore.getState().user as never);
+    await press("Continue");
+    expect(await arrive("Let's see that face!")).toBeTruthy();
+
+    expect(button("Take photo")).toBeDisabled();
+    await act(async () => cameraMock.pendingReady.forEach((report) => report()));
+    expect(button("Take photo")).toBeEnabled();
   });
 
   it("the photo taken is still there after Back and Continue", async () => {

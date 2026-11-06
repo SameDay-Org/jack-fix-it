@@ -1,5 +1,5 @@
 import { CameraView } from "expo-camera";
-import type { RefObject } from "react";
+import { useEffect, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { Image, StyleSheet, View } from "react-native";
 import Svg, { Ellipse, Path } from "react-native-svg";
@@ -50,7 +50,13 @@ export type SelfieFrameProps = {
  */
 export function SelfieFrame({ photo, camera, active, testID }: SelfieFrameProps) {
   const { t } = useTranslation();
-  const { mode, photoUri, progress } = photo;
+  const { mode, photoUri, progress, onCameraStop } = photo;
+
+  // Leaving the step stops its preview: a later visit starts from "starting" again. Not on the
+  // preview's own unmount, which a camera that failed to start goes through too.
+  useEffect(() => {
+    if (!active) onCameraStop();
+  }, [active, onCameraStop]);
 
   return (
     <View className="items-center gap-4" testID={testID}>

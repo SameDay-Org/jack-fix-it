@@ -56,8 +56,15 @@ export const takePictureAsync = jest.fn(
 /** The part of the native view's instance a screen calls through its ref. */
 export type CameraHandle = { takePictureAsync: typeof takePictureAsync };
 
-/** With a message here, every active preview fails to mount with it instead of reporting ready. */
-export const cameraMock = { mountError: null as string | null };
+/**
+ * With a message here, every active preview fails to mount with it instead of reporting ready.
+ * With `holdReady`, a preview's ready report waits in `pendingReady` until a test calls it.
+ */
+export const cameraMock = {
+  mountError: null as string | null,
+  holdReady: false,
+  pendingReady: [] as (() => void)[],
+};
 
 type PermissionHook = [
   PermissionResponse | null,
@@ -114,6 +121,7 @@ export function CameraView({
   // a parent re-render alone (new callback identities) reports nothing.
   const report = useEffectEvent(() => {
     if (cameraMock.mountError) onMountError?.({ message: cameraMock.mountError });
+    else if (cameraMock.holdReady) cameraMock.pendingReady.push(() => onCameraReady?.());
     else onCameraReady?.();
   });
   useEffect(() => {
