@@ -2,8 +2,14 @@
 // asserted, and the mocks' answers drive each state the screen can show.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 import { ImpactFeedbackStyle, impactAsync } from "expo-haptics";
-import { shareAsync } from "expo-sharing";
-import { Image, Linking } from "react-native";
+import { isAvailableAsync, shareAsync } from "expo-sharing";
+import {
+  AppState,
+  Image,
+  Linking,
+  type AppStateStatus,
+  type NativeEventSubscription,
+} from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
 import { captureRef } from "react-native-view-shot";
 
@@ -39,7 +45,9 @@ beforeEach(() => {
   requestCameraPermissionsAsync.mockClear().mockResolvedValue(CAMERA_PERMISSION.granted);
   cameraMock.mountError = null;
   jest.mocked(captureRef).mockClear();
+  jest.mocked(isAvailableAsync).mockClear().mockResolvedValue(true);
   jest.mocked(shareAsync).mockClear();
+  jest.mocked(AppState.addEventListener).mockClear();
   jest.mocked(impactAsync).mockClear();
   Gyroscope.reset();
   jest.spyOn(Image, "getSize").mockImplementation(() => Promise.resolve(PNG_SIZE));
@@ -48,6 +56,16 @@ beforeEach(() => {
 afterEach(() => {
   jest.restoreAllMocks();
 });
+
+/** The one foreground listener the mounted screen registered, with its subscription. */
+function appStateSubscription() {
+  const { calls, results } = jest.mocked(AppState.addEventListener).mock;
+  expect(calls).toEqual([["change", expect.any(Function)]]);
+  return {
+    onChange: calls[0]?.[1] as (state: AppStateStatus) => void,
+    subscription: results[0]?.value as NativeEventSubscription,
+  };
+}
 
 describe("camera", () => {
   it("asks once, then shows the front preview and reports it ready", async () => {
@@ -61,6 +79,15 @@ describe("camera", () => {
     expect(preview.props.facing).toBe("front");
     expect(preview.props.active).toBe(true);
     expect(await screen.findByText("Ready")).toBeTruthy();
+
+    // The prompt itself sends the app to the background and back: the return re-reads (the system
+    // now answers granted), never asks again, and the preview stays.
+    getCameraPermissionsAsync.mockResolvedValue(CAMERA_PERMISSION.granted);
+    const { onChange } = appStateSubscription();
+    await act(async () => onChange("active"));
+    expect(getCameraPermissionsAsync).toHaveBeenCalledTimes(2);
+    expect(requestCameraPermissionsAsync).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("camera-preview")).toBeTruthy();
   });
 
   it("a lens that cannot start says why and offers the other one", async () => {
@@ -82,15 +109,34 @@ describe("camera", () => {
     expect(screen.queryByText("Camera could not start")).toBeNull();
   });
 
-  it("a refusal the system will not ask again about leads to Settings", async () => {
+  it("a blocked camera leads to Settings, and a grant there shows the preview on return", async () => {
     getCameraPermissionsAsync.mockResolvedValue(CAMERA_PERMISSION.blocked);
     const openSettings = jest.spyOn(Linking, "openSettings").mockResolvedValue(undefined);
     await render(<IdCardLibsSample />);
 
-    fireEvent.press(await screen.findByRole("button", { name: "Open settings" }));
+    const settings = await screen.findByRole("button", { name: "Open settings" });
+    await act(async () => fireEvent.press(settings));
 
     expect(openSettings).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: "Allow camera" })).toBeNull();
+    expect(getCameraPermissionsAsync).toHaveBeenCalledTimes(1);
+
+    // Granted in Settings, then back to this same mounted screen: leaving reads nothing, returning
+    // reads the permission again without a prompt, and the preview takes the notice's place.
+    getCameraPermissionsAsync.mockResolvedValue(CAMERA_PERMISSION.granted);
+    const { onChange, subscription } = appStateSubscription();
+    await act(async () => onChange("background"));
+    expect(getCameraPermissionsAsync).toHaveBeenCalledTimes(1);
+    await act(async () => onChange("active"));
+
+    expect(await screen.findByTestId("camera-preview")).toBeTruthy();
+    expect(screen.queryByText("Camera access is off")).toBeNull();
+    expect(await screen.findByText("Ready")).toBeTruthy();
+    expect(getCameraPermissionsAsync).toHaveBeenCalledTimes(2);
+    expect(requestCameraPermissionsAsync).not.toHaveBeenCalled();
+
+    await screen.unmount();
+    expect(subscription.remove).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -132,6 +178,20 @@ describe("card snapshot and share sheet", () => {
     expect(screen.getByRole("button", { name: "Capture PNG" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Share PNG" })).toBeDisabled();
   });
+
+  it("a share sheet probe that fails says why and keeps sharing off", async () => {
+    jest.mocked(isAvailableAsync).mockRejectedValueOnce(new Error("Sharing is not linked"));
+    await render(<IdCardLibsSample />);
+
+    expect(await screen.findByText("Could not check the share sheet")).toBeTruthy();
+    expect(screen.getByText("Sharing is not linked")).toBeTruthy();
+    expect(screen.getByText("Failed")).toBeTruthy();
+
+    await act(async () => fireEvent.press(screen.getByRole("button", { name: "Capture PNG" })));
+
+    expect(await screen.findByText("1038 x 654 px")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Share PNG" })).toBeDisabled();
+  });
 });
 
 describe("gyroscope", () => {
@@ -165,6 +225,17 @@ describe("gyroscope", () => {
     await render(<IdCardLibsSample />);
 
     expect(await screen.findByText("No gyroscope")).toBeTruthy();
+    expect(Gyroscope.addListener).not.toHaveBeenCalled();
+  });
+
+  it("a gyroscope probe that fails says why and never subscribes", async () => {
+    Gyroscope.isAvailableAsync.mockRejectedValueOnce(new Error("Sensor service down"));
+    await render(<IdCardLibsSample />);
+
+    expect(await screen.findByText("Could not check the gyroscope")).toBeTruthy();
+    expect(screen.getByText("Sensor service down")).toBeTruthy();
+    expect(screen.getByText("Failed")).toBeTruthy();
+    expect(screen.queryByText(/reports no gyroscope/)).toBeNull();
     expect(Gyroscope.addListener).not.toHaveBeenCalled();
   });
 });

@@ -1,10 +1,11 @@
 // Dev-only hooks behind the ID card libraries smoke screen (src/app/dev/id-card-libs.tsx, #251):
 // one per library, each small enough to read as that library's usage note for #250.
+import { useCameraPermissions } from "expo-camera";
 import * as Haptics from "expo-haptics";
 import { Gyroscope, type GyroscopeMeasurement } from "expo-sensors";
 import * as Sharing from "expo-sharing";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Image } from "react-native";
+import { AppState, Image, Linking } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
 import type { CaptureOptions, ViewShotRef } from "react-native-view-shot";
 
@@ -23,6 +24,28 @@ export type CardCapture =
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The camera permission, with the system settings as the way back from a refusal the system will
+ * not ask about again. Expo's hook reads the permission on mount and on an explicit call only, so
+ * a grant made in Settings reaches this same mounted screen through a re-read when the app comes
+ * back to the foreground; the re-read never prompts. That path is Android's: iOS ends the app when
+ * a privacy setting changes, and the relaunch reads the permission on mount.
+ */
+export function useCameraAccess() {
+  const [permission, requestPermission, getPermission] = useCameraPermissions();
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void getPermission();
+    });
+    return () => subscription.remove();
+  }, [getPermission]);
+
+  const openSettings = useCallback(() => Linking.openSettings(), []);
+
+  return { permission, requestPermission, openSettings };
 }
 
 /**
@@ -49,7 +72,10 @@ export function useCardCapture() {
   return { shot, capture, captureCard };
 }
 
-/** The system share sheet for a PNG file; `available` is null until the device has answered. */
+/**
+ * The system share sheet for a PNG file; `available` is null until the device has answered, and
+ * false with `error` set when the availability probe itself failed.
+ */
 export function useShareSheet() {
   const [available, setAvailable] = useState<boolean | null>(null);
   const [shares, setShares] = useState(0);
@@ -57,9 +83,16 @@ export function useShareSheet() {
 
   useEffect(() => {
     let live = true;
-    void Sharing.isAvailableAsync().then((value) => {
-      if (live) setAvailable(value);
-    });
+    void Sharing.isAvailableAsync().then(
+      (value) => {
+        if (live) setAvailable(value);
+      },
+      (cause: unknown) => {
+        if (!live) return;
+        setAvailable(false);
+        setError(messageOf(cause));
+      },
+    );
     return () => {
       live = false;
     };
@@ -79,19 +112,28 @@ export function useShareSheet() {
 }
 
 /**
- * A live gyroscope reading, or none: when the device has no gyroscope, or when the system asks for
- * reduced motion. Then the card falls back to drag only and nothing subscribes.
+ * A live gyroscope reading, or none: when the device has no gyroscope, when the availability probe
+ * itself fails (`error` says why), or when the system asks for reduced motion. Then the card falls
+ * back to drag only and nothing subscribes.
  */
 export function useGyroscopeReading(intervalMs: number) {
   const reduceMotion = useReducedMotion();
   const [available, setAvailable] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [reading, setReading] = useState<GyroscopeMeasurement | null>(null);
 
   useEffect(() => {
     let live = true;
-    void Gyroscope.isAvailableAsync().then((value) => {
-      if (live) setAvailable(value);
-    });
+    void Gyroscope.isAvailableAsync().then(
+      (value) => {
+        if (live) setAvailable(value);
+      },
+      (cause: unknown) => {
+        if (!live) return;
+        setAvailable(false);
+        setError(messageOf(cause));
+      },
+    );
     return () => {
       live = false;
     };
@@ -109,7 +151,7 @@ export function useGyroscopeReading(intervalMs: number) {
     };
   }, [listening, intervalMs]);
 
-  return { available, reduceMotion, listening, reading };
+  return { available, reduceMotion, listening, reading, error };
 }
 
 /** A light impact and how many were sent: the emulator cannot vibrate, so the count is the proof. */
