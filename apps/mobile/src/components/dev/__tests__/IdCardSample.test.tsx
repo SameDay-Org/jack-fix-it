@@ -8,6 +8,10 @@ import { IdCardSample } from "../IdCardSample";
 
 jest.mock("expo-sensors");
 jest.mock("react-native-view-shot");
+jest.mock(
+  "../../../api/config",
+  () => jest.requireActual("../../../api/__tests__/helpers").configMock,
+);
 
 const viewShot =
   jest.requireMock<typeof import("../../../../__mocks__/react-native-view-shot")>(

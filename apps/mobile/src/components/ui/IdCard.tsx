@@ -190,6 +190,12 @@ const PHONE_GAP = 2;
 const NAME_LINES = 2;
 const NAME_MIN_SCALE = 0.6;
 const NAME_LINE_HEIGHT = 32;
+/**
+ * Two hidden lines in the name's own type: they hold the name's room at whatever size the font
+ * scale (Android's non-linear one included) gives its lines, so a name that wraps as someone types
+ * never moves the place and phone below. Not shown to anyone.
+ */
+const NAME_ROOM = Array.from({ length: NAME_LINES }, () => "M").join("\n");
 /** The ascender space above the capitals, as a fraction of the font size: lifted off, the name's
  * capitals sit level with the photo's top edge (measured on Android at 25 dp: 7 dp of gap). */
 const NAME_CAP_GAP = 0.2;
@@ -330,6 +336,8 @@ function Front({
             </Svg>
             {photoUri ? (
               <Image
+                // One native image per URI: a late end from the previous photo never reaches this one.
+                key={photoUri}
                 source={{ uri: photoUri }}
                 resizeMode="cover"
                 onLoadEnd={onPhotoLoadEnd}
@@ -362,23 +370,40 @@ function Front({
           ) : null}
         </View>
         <View style={{ flex: 1, marginStart: columnGap * unit }}>
-          <Text
-            allowFontScaling={scaleFonts}
-            numberOfLines={NAME_LINES}
-            adjustsFontSizeToFit
-            minimumFontScale={NAME_MIN_SCALE}
-            style={[
-              nameType,
-              {
-                color: palette.text,
-                includeFontPadding: false,
-                marginTop: -(nameType.fontSize ?? 0) * NAME_CAP_GAP,
-                minHeight: (nameType.lineHeight ?? 0) * NAME_LINES,
-              },
-            ]}
-          >
-            {name}
-          </Text>
+          <View style={{ marginTop: -(nameType.fontSize ?? 0) * NAME_CAP_GAP }}>
+            <Text
+              allowFontScaling={scaleFonts}
+              numberOfLines={NAME_LINES}
+              accessible={false}
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              style={[nameType, { includeFontPadding: false, opacity: 0 }]}
+              testID={testID ? `${testID}-name-room` : undefined}
+            >
+              {NAME_ROOM}
+            </Text>
+            {/* Over its room, never in the flow: however it wraps, nothing below it moves. */}
+            <Text
+              allowFontScaling={scaleFonts}
+              numberOfLines={NAME_LINES}
+              adjustsFontSizeToFit
+              minimumFontScale={NAME_MIN_SCALE}
+              style={[
+                nameType,
+                {
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  color: palette.text,
+                  includeFontPadding: false,
+                },
+              ]}
+              testID={testID ? `${testID}-name` : undefined}
+            >
+              {name}
+            </Text>
+          </View>
           <Text
             allowFontScaling={scaleFonts}
             numberOfLines={PLACE_LINES}

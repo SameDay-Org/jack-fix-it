@@ -4,6 +4,7 @@
 import { useRef, useState } from "react";
 import { Image, Text, useWindowDimensions, View } from "react-native";
 
+import { apiConfig } from "@/api/config";
 import {
   Button,
   ID_CARD_ASPECT,
@@ -122,6 +123,7 @@ export function IdCardSample() {
         state={CUSTOMER.state}
         photoUri={SAMPLE_PHOTO}
         publicCode={CUSTOMER.publicCode}
+        photoTimeoutMs={apiConfig.timeoutMs}
         testID="id-card-share-render"
       />
     </View>
