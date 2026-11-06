@@ -3,6 +3,7 @@ import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 
 import { onSignOut } from "@/api";
+import { EMPTY_ADDRESS_FIELDS, type AddressFields } from "@/features/addresses/addressFields";
 
 import { flowRisen, setFlowRisen } from "./rise";
 import type { StepId } from "./steps";
@@ -11,13 +12,7 @@ import type { StepId } from "./steps";
 export type IntakeAnswer = number | string | boolean | readonly string[];
 
 /** A US service address as the customer types it in the Where step. */
-export type AddressFields = {
-  line1: string;
-  line2: string;
-  city: string;
-  state: string;
-  zipCode: string;
-};
+export type { AddressFields };
 
 /**
  * Which address the request goes to: a saved one, or the one typed in the form. `null` until the
@@ -46,13 +41,7 @@ export type RequestDraft = {
   refusal: StepRefusal | null;
 };
 
-export const EMPTY_ADDRESS: AddressFields = {
-  line1: "",
-  line2: "",
-  city: "",
-  state: "",
-  zipCode: "",
-};
+export const EMPTY_ADDRESS: AddressFields = EMPTY_ADDRESS_FIELDS;
 
 const EMPTY_DRAFT: RequestDraft = {
   categorySlug: null,

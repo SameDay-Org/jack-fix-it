@@ -226,6 +226,9 @@ async function signIn<P extends SignInPath>(
     await revokeRemote(auth.refresh_token);
     throw new SessionExpiredError("superseded");
   }
+  // A login never resumes a sign-up flow: a marker that a failed delete left on the device goes
+  // now, before a relaunch could read it.
+  if (!onboarding) void onboardingMarkerStorage.clear();
 }
 
 /**

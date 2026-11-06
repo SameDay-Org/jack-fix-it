@@ -11,7 +11,8 @@
     "showPassword": "Mostrar contraseña",
     "hidePassword": "Ocultar contraseña",
     "dismiss": "Cerrar",
-    "notSet": "Sin elegir"
+    "notSet": "Sin elegir",
+    "optionalLabel": "{{label}} (opcional)"
   },
   "welcome": {
     "support": "Cuéntaselo a Jack. Nosotros nos encargamos del resto.",
@@ -36,7 +37,31 @@
     "title": "Crea tu cuenta",
     "asCustomer": "Como cliente",
     "asPro": "Como profesional",
-    "submit": "Crear cuenta"
+    "submit": "Crear cuenta",
+    "progress": "Paso {{step}} de {{total}}",
+    "account": {
+      "title": "Empecemos con tu correo"
+    },
+    "name": {
+      "title": "¡Dinos tu nombre!",
+      "support": "Va en tu tarjeta, tal como lo escribes.",
+      "first": "Nombre",
+      "last": "Apellido"
+    },
+    "home": {
+      "title": "¿Dónde vives?",
+      "supportCustomer": "La guardamos como tu dirección de Casa. Tu tarjeta solo muestra la ciudad y el estado.",
+      "supportPro": "Tu tarjeta solo muestra la ciudad y el estado.",
+      "label": "Casa"
+    },
+    "next": "Continuar",
+    "finish": "Listo",
+    "errors": {
+      "nameInvalid": "Usa letras, espacios, guiones, apóstrofos o puntos.",
+      "nameSave": "No pudimos guardar tu nombre. Inténtalo de nuevo.",
+      "homeInvalid": "No pudimos usar esta dirección. Revisa los campos e inténtalo de nuevo.",
+      "homeSave": "No pudimos guardar dónde vives. Inténtalo de nuevo."
+    }
   },
   "login": {
     "title": "Hola de nuevo",
@@ -125,7 +150,6 @@
   "request": {
     "progress": "Paso {{current}} de {{total}}",
     "cancel": "Cancelar",
-    "optionalLabel": "{{label}} (opcional)",
     "counter": "{{length}} / {{max}}",
     "discard": {
       "title": "¿Descartar esta solicitud?",
@@ -169,17 +193,6 @@
       "savedNotServed": "{{address}}. Aún no llegamos a esta zona.",
       "another": "Usar otra dirección",
       "formTitle": "Otra dirección",
-      "line1": "Dirección",
-      "line2": "Apartamento, suite o unidad",
-      "city": "Ciudad",
-      "state": "Estado",
-      "zip": "Código postal",
-      "errors": {
-        "required": "Completa este campo.",
-        "state": "Usa el código de dos letras, como FL.",
-        "zip": "Escribe un código postal de 5 dígitos.",
-        "tooLong": "Usa {{max}} caracteres como máximo."
-      },
       "check": "Revisa algunos campos de la dirección.",
       "invalidTitle": "Revisa la dirección",
       "invalidBody": "No pudimos usar esta dirección. Corrige los campos marcados y vuelve a enviarla.",
@@ -231,6 +244,19 @@
       "next": "Los profesionales cercanos te enviarán presupuestos. Te avisaremos.",
       "see": "Ver mi solicitud",
       "home": "Volver al inicio"
+    }
+  },
+  "address": {
+    "line1": "Dirección",
+    "line2": "Apartamento, suite o unidad",
+    "city": "Ciudad",
+    "state": "Estado",
+    "zip": "Código postal",
+    "errors": {
+      "required": "Completa este campo.",
+      "state": "Usa el código de dos letras, como FL.",
+      "zip": "Escribe un código postal de 5 dígitos.",
+      "tooLong": "Usa {{max}} caracteres como máximo."
     }
   },
   "phone": {

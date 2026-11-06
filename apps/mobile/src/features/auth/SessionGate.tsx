@@ -18,10 +18,14 @@ import { OfflineScreen } from "./OfflineScreen";
  * screen instead of asking for a login the device may not need. Signed in goes to `(app)`,
  * everyone else to `(auth)`, deep links included: a protected group redirects to the other
  * group's entry. A sign-in or a sign-out switches groups in one commit (see `GroupStack`).
+ *
+ * An account still in its sign-up flow (#292) stays in `(auth)`, on the flow: a sign-up signs in
+ * mid-flow without changing groups, so the screen it happens on stays put, and a relaunch lands
+ * back on the flow. Finishing the flow moves it to `(app)` like any other sign-in.
  */
 export function SessionGate() {
   const { t } = useTranslation();
-  const { status, restoreFailure } = useSession();
+  const { status, user, restoreFailure, onboardingUserId } = useSession();
 
   if (status === "restoring") {
     return (
@@ -37,7 +41,13 @@ export function SessionGate() {
   }
   if (restoreFailure === "offline") return <OfflineScreen />;
 
-  return <GroupStack group={status === "signedIn" ? "(app)" : "(auth)"} />;
+  const onboarding = status === "signedIn" && user !== null && user.id === onboardingUserId;
+  return (
+    <GroupStack
+      group={status === "signedIn" && !onboarding ? "(app)" : "(auth)"}
+      onboarding={onboarding}
+    />
+  );
 }
 
 type Group = "(app)" | "(auth)";
@@ -72,7 +82,7 @@ function focusedGroup(navigation: ContainerRef): Group | undefined {
  * start signed out on the launch URL) guards from the session at once, as before, and is
  * replaced the same way.
  */
-function GroupStack({ group }: { group: Group }) {
+function GroupStack({ group, onboarding }: { group: Group; onboarding: boolean }) {
   const navigation = useNavigationContainerRef();
   const [shown, setShown] = useState(group);
   // The group of the last replace. Right after it the container can still report the group that
@@ -104,7 +114,11 @@ function GroupStack({ group }: { group: Group }) {
         contentStyle: { backgroundColor: tokens.colors["navy-900"] },
       }}
     >
-      <Stack.Protected guard={shown === "(app)"} redirectTo="/(auth)/welcome">
+      <Stack.Protected
+        guard={shown === "(app)"}
+        // An account in its sign-up flow is sent back to the flow, which resumes where it was.
+        redirectTo={onboarding ? "/(auth)/sign-up" : "/(auth)/welcome"}
+      >
         <Stack.Screen name="(app)" />
       </Stack.Protected>
       <Stack.Protected guard={shown === "(auth)"} redirectTo="/">

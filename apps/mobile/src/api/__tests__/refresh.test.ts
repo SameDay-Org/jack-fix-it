@@ -307,7 +307,7 @@ describe("session generation", () => {
 
     await expect(request).rejects.toBeInstanceOf(SessionExpiredError);
     expect(storedRefreshToken()).toBe("refresh-3");
-    expect(secureStoreMock.deleteItemAsync).not.toHaveBeenCalled();
+    expect(tokenCalls(secureStoreMock.deleteItemAsync)).toEqual([]); // the token stays
     expect(sessionStore.getState()).toMatchObject({
       status: "signedIn",
       user,

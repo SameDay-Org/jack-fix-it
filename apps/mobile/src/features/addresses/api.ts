@@ -1,6 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 
-import { apiGet, type GetResponse } from "@/api";
+import { apiGet, apiPost, type GetResponse, type PostBody } from "@/api";
 
 export type SavedAddress = GetResponse<"/v1/addresses">["items"][number];
 
@@ -16,3 +16,15 @@ export const useSavedAddresses = () =>
     queryFn: ({ signal }) => apiGet("/v1/addresses", { auth: true, signal }),
     retry: false,
   });
+
+/**
+ * Saves an address to the customer's book (POST /v1/addresses). The book is fetched again after
+ * any answer, so a screen that lists it never shows a stale one.
+ */
+export function useSaveAddress() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: PostBody<"/v1/addresses">) => apiPost("/v1/addresses", body, { auth: true }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: SAVED_ADDRESSES_QUERY_KEY }),
+  });
+}

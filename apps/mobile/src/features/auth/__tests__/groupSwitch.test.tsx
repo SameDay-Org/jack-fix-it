@@ -94,6 +94,7 @@ const routes = {
   "(auth)/_layout": { default: AuthLayout, unstable_settings },
   "(auth)/welcome": () => <Marker name="welcome" />,
   "(auth)/login": () => <Marker name="login" />,
+  "(auth)/sign-up": () => <Marker name="sign-up" />,
   "(app)/_layout": { default: AppLayout, unstable_settings: appSettings },
   "(app)/(tabs)/_layout": TabsLayout,
   "(app)/(tabs)/index": () => <Marker name="home" />,
@@ -106,6 +107,57 @@ beforeEach(() => {
   lifecycle.length = 0;
   instances = 0;
   commits = [];
+});
+
+describe("an account on its sign-up flow (#292)", () => {
+  const ON_FLOW: MockSession = { ...SESSION_SIGNED_IN, onboardingUserId: user.id };
+
+  it("a sign-up on the flow signs in without leaving the sign-up screen: same instance, no switch", async () => {
+    mockSession.state = SESSION_SIGNED_OUT;
+    const result = await renderRouter(routes, { initialUrl: "/sign-up" });
+    expect(lifecycle).toEqual(["welcome 1 mount", "sign-up 2 mount"]);
+    commits = [];
+
+    await act(async () => mockSession.set(ON_FLOW));
+    await act(async () => mockSession.set({ ...ON_FLOW })); // a later snapshot (a saved name)
+
+    expect(result.getPathname()).toBe("/sign-up");
+    expect(commits.every((commit) => commit.includes("sign-up"))).toBe(true);
+    expect(lifecycle).toEqual(["welcome 1 mount", "sign-up 2 mount"]);
+  });
+
+  it("ending the flow mounts home in the commit that takes the flow away, once", async () => {
+    mockSession.state = SESSION_SIGNED_OUT;
+    const result = await renderRouter(routes, { initialUrl: "/sign-up" });
+    await act(async () => mockSession.set(ON_FLOW));
+    lifecycle.length = 0;
+    commits = [];
+
+    await act(async () => mockSession.set(SESSION_SIGNED_IN));
+
+    expect(result.getPathname()).toBe("/");
+    expect(commits).not.toContainEqual([]);
+    expect(commits.at(-1)).toEqual(["home"]);
+    expect(lifecycle).toEqual(["welcome 1 unmount", "sign-up 2 unmount", "home 3 mount"]);
+  });
+
+  it("a relaunch on the flow lands on the sign-up screen, not home", async () => {
+    mockSession.state = ON_FLOW;
+
+    const result = await renderRouter(routes, { initialUrl: "/" });
+
+    expect(result.getPathname()).toBe("/sign-up");
+    expect(mounted.has("home")).toBe(false);
+  });
+
+  it("an account signed in with another account's marker is not held on any flow", async () => {
+    mockSession.state = { ...SESSION_SIGNED_IN, onboardingUserId: "someone-else" };
+
+    const result = await renderRouter(routes, { initialUrl: "/" });
+
+    expect(result.getPathname()).toBe("/");
+    expect(lifecycle).toEqual(["home 1 mount"]);
+  });
 });
 
 describe("the session gate switching groups (#177)", () => {

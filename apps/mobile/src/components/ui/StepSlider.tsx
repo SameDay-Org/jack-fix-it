@@ -111,14 +111,14 @@ export function StepSlider<Key extends string>({
   }, [shown, direction, reduceMotion]);
 
   const measureSlider = (event: LayoutChangeEvent) => {
-    paneWidth.value = event.nativeEvent.layout.width;
+    paneWidth.set(event.nativeEvent.layout.width);
   };
   // The current pane's height: the slider glides to it while a transition holds the height, and
   // keeps it as the height to glide from next time.
   const measureCurrent = (event: LayoutChangeEvent) => {
     const measured = event.nativeEvent.layout.height;
-    settledHeight.value = measured;
-    if (heightLocked.value) height.value = withTiming(measured, SLIDE);
+    settledHeight.set(measured);
+    if (heightLocked.get()) height.set(withTiming(measured, SLIDE));
   };
 
   const sliderStyle = useAnimatedStyle(() => ({
