@@ -575,3 +575,25 @@ def test_before_breadcrumb_and_before_send_redact_stripe_account_ids() -> None:
     # Only a whole id: a word that merely contains the prefix stays.
     plain: Any = {"type": "default", "message": "my_acct_total"}
     assert before_breadcrumb(plain, {})["message"] == "my_acct_total"
+
+
+def test_before_breadcrumb_and_before_send_redact_stripe_payment_ids() -> None:
+    """A customer's id, a PaymentIntent's id (its client secret starts with it) and an
+    ephemeral key's secret go the way of an account id (#58); the prefix says which."""
+    crumb: Any = {
+        "type": "http",
+        "message": "POST /v1/payment_intents/pi_3Abc_secret_Xyz9 then cus_1Abc, ek_test_Q1w2",
+        "data": {"url": "https://api.stripe.com/v1/customers/cus_1Abc?expand[]=x"},
+    }
+    assert before_breadcrumb(crumb, {}) == {
+        "type": "http",
+        "message": "POST /v1/payment_intents/pi_[Filtered] then cus_[Filtered], ek_[Filtered]",
+        "data": {"url": "https://api.stripe.com/v1/customers/cus_[Filtered]"},
+    }
+    event: Any = {"request": {"url": "https://api.example.invalid/v1/x/pi_1Abc?y=2"}}
+    assert (
+        before_send(event, {})["request"]["url"] == "https://api.example.invalid/v1/x/pi_[Filtered]"
+    )
+    # Only a whole id: a word that merely contains a prefix stays.
+    plain: Any = {"type": "default", "message": "api_key focus_cus_x my_pi_total"}
+    assert before_breadcrumb(plain, {})["message"] == "api_key focus_cus_x my_pi_total"

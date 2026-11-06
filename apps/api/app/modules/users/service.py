@@ -211,6 +211,15 @@ class UserService:
     async def update_password_hash(self, user_id: uuid.UUID, password_hash: str) -> None:
         await self._users.update_password_hash(user_id, password_hash)
 
+    async def stripe_customer_id(self, user_id: uuid.UUID) -> str | None:
+        """The user's Stripe Customer id (#58); None until a payment created one."""
+        return await self._users.get_stripe_customer_id(user_id)
+
+    async def set_stripe_customer_id_if_missing(self, user_id: uuid.UUID, customer_id: str) -> bool:
+        """Stores the user's Stripe Customer id unless one is stored already (another
+        payment's call got there first): False then, and the stored one is the user's."""
+        return await self._users.set_stripe_customer_id_if_missing(user_id, customer_id)
+
     async def phone_verified_by_other(self, phone: str, user_id: uuid.UUID) -> bool:
         """True when another account has verified this number."""
         return await self._users.phone_verified_by_other(phone, user_id)

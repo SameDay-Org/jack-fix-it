@@ -23,3 +23,5 @@ confirmation does both.
 - The take rate and who absorbs Stripe fees are still pending (#2); code reads them from
   `settings`.
 - Stripe stays in test mode until launch.
+- When charged funds become available, how a transfer before that works, payout schedules
+  and refund rules for a US platform: `docs/stripe-money.md` (#57).

@@ -667,6 +667,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/requests/{request_id}/quotes/{quote_id}/payment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pay for the quote I accepted
+         * @description What the Payment Sheet needs to charge the customer for the quote they accepted: the
+         *     PaymentIntent's client secret, the customer and an ephemeral key for it, the publishable
+         *     key, and the amount, the tax and the total shown before paying. The amounts are the
+         *     accepted quote's, computed on the server; the body takes no field. The first call creates
+         *     the PaymentIntent; later calls return the same one (a new ephemeral key each time), until
+         *     the payment succeeds (then the job exists: 409). The pro is checked again on every call:
+         *     one who can no longer be hired is a 409, and nothing is created.
+         */
+        post: operations["create_payment_v1_requests__request_id__quotes__quote_id__payment_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/devices": {
         parameters: {
             query?: never;
@@ -1554,6 +1580,61 @@ export interface components {
              * @description Between the server's minimum (setting PASSWORD_MIN_LENGTH, 10 by default) and 128 characters, as at registration.
              */
             new_password: string;
+        };
+        /**
+         * PaymentCreate
+         * @description No input: every amount comes from the accepted quote and the platform's take rate, read
+         *     from the database (AGENTS.md "Money"). A client sending any field, an amount above all,
+         *     gets a 422; an empty body or none at all is fine.
+         */
+        PaymentCreate: Record<string, never>;
+        /**
+         * PaymentSheetOut
+         * @description What the app's Payment Sheet (#59) needs, plus what the customer sees before paying.
+         *     Never the pro's payout or the platform's fee.
+         */
+        PaymentSheetOut: {
+            /**
+             * Payment Intent Client Secret
+             * @description The PaymentIntent's client secret: the sheet confirms the payment with it. Shown once per call, never logged; the same PaymentIntent on every call for the quote.
+             */
+            payment_intent_client_secret: string;
+            /**
+             * Customer Id
+             * @description The customer's Stripe Customer id, for the sheet.
+             */
+            customer_id: string;
+            /**
+             * Ephemeral Key Secret
+             * @description A short-lived key that lets the sheet act for the customer; new on each call.
+             */
+            ephemeral_key_secret: string;
+            /**
+             * Publishable Key
+             * @description The Stripe publishable key the sheet initializes with (pk_test_ until launch).
+             */
+            publishable_key: string;
+            /**
+             * Amount Cents
+             * @description The accepted quote's price, in integer cents.
+             */
+            amount_cents: number;
+            /**
+             * Tax Cents
+             * @description Tax on top of the price: 0, not charged in the MVP.
+             */
+            tax_cents: number;
+            /**
+             * Customer Total Cents
+             * @description What the sheet charges: the price plus the tax.
+             */
+            customer_total_cents: number;
+            /**
+             * Currency
+             * @description Stripe's lower-case currency code.
+             * @example usd
+             */
+            currency: string;
         };
         /** PayoutsOut */
         PayoutsOut: {
@@ -4228,6 +4309,96 @@ export interface operations {
             };
             /** @description The request is invalid. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_payment_v1_requests__request_id__quotes__quote_id__payment_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PaymentCreate"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSheetOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers pay for quotes. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no request of the caller with this id, or no quote with this id on it. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description payment_not_available: the request is not accepted or this quote is not its accepted one, or the payment already succeeded (the job exists or is being created) or its PaymentIntent is closed; pro_not_hireable: the quote's pro can no longer be hired (not approved, or payouts disabled). Nothing was created. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a malformed id, or a field in the body: the amounts come from the accepted quote, never from the client. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description payments_error: Stripe refused the call; nothing changed, the payment can be asked for again. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_configured: payments are not configured; payments_unavailable: Stripe is not reachable or asked to retry later; nothing changed, retry later. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

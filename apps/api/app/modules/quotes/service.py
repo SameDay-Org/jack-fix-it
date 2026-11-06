@@ -58,6 +58,10 @@ shows the job, so it is logged with ids and skipped. A push that cannot be queue
 never undone.
 
 Logs carry ids only: never the scope or approach text, or the amount.
+
+The payment (#58) reads the accepted quote through QuoteReader: its ids, price and status
+under its row lock, after the request's (ADR 0003: a module reaches a quote through this
+service, never the repository).
 """
 
 import logging
@@ -398,6 +402,43 @@ def _known(contact: ContactPoints | None) -> KnownValues:
 def _rating(value: Decimal | None) -> str | None:
     """The average rating as a decimal string, never the raw Decimal."""
     return None if value is None else format(value, ".2f")
+
+
+@dataclass(frozen=True)
+class LockedQuote:
+    """A quote as the payment (#58) reads it under its row lock: ids, the price, the status.
+    Never the scope, the approach or the pro's payout."""
+
+    id: uuid.UUID
+    request_id: uuid.UUID
+    pro_id: uuid.UUID
+    amount_cents: int
+    accepted: bool  # the request's accepted quote (status accepted)
+
+
+class QuoteReader:
+    """A request's quote for other modules (ADR 0003): the payment (#58) reads the accepted
+    one, locked."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._quotes = QuoteRepository(session)
+
+    async def lock_of_request(
+        self, quote_id: uuid.UUID, request_id: uuid.UUID
+    ) -> LockedQuote | None:
+        """The quote, locked until the transaction ends; None when it is not a quote of this
+        request. Take the request's lock first (RequestStateMachine.lock), as acceptance
+        does, so the two take turns."""
+        quote = await self._quotes.get_of_request_for_update(quote_id, request_id)
+        if quote is None:
+            return None
+        return LockedQuote(
+            id=quote.id,
+            request_id=quote.request_id,
+            pro_id=quote.pro_id,
+            amount_cents=quote.amount_cents,
+            accepted=quote.status is QuoteStatus.ACCEPTED,
+        )
 
 
 @dataclass(frozen=True)

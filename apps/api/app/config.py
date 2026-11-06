@@ -51,6 +51,7 @@ _STRIPE_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
 _STRIPE_SETTINGS: tuple[str, ...] = ("stripe_secret_key", "public_api_url")
 # Stripe stays in test mode until launch (ADR 0005): a live key works in production only.
 _STRIPE_LIVE_KEY_PREFIXES = ("sk_live_", "rk_live_")
+_STRIPE_LIVE_PUBLISHABLE_KEY_PREFIXES = ("pk_live_",)
 # Stripe keeps an idempotency key at least this long (its documented 24 hours): Stripe's fact,
 # not a setting.
 STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS = 86_400
@@ -276,6 +277,10 @@ class Settings(BaseSettings):
     # take, and the SDK's retries of a call that failed on the network, a 409, 429 or 5xx (with
     # the same idempotency key); 0 fails at once, and the app's retry is safe.
     stripe_secret_key: SecretStr | None = None
+    # The key the app's Payment Sheet initializes Stripe with (D11.1, #58): not a secret,
+    # but one per environment, and pk_test_ until launch like the secret key. Optional, so a
+    # deploy never fails for it: without it, the payment endpoint answers 503 not_configured.
+    stripe_publishable_key: str | None = None
     stripe_timeout_seconds: float = Field(default=10.0, gt=0)
     stripe_max_network_retries: int = Field(default=0, ge=0)
     # A profile with no stored account whose first create was attempted at least this many
@@ -347,6 +352,7 @@ class Settings(BaseSettings):
         "expo_access_token",
         "google_maps_api_key",
         "stripe_secret_key",
+        "stripe_publishable_key",
         "public_api_url",
         mode="before",
     )
@@ -484,10 +490,18 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _refuse_live_stripe_key_outside_production(self) -> Self:
+        if self.app_env == "production":
+            return self
         key = self.stripe_secret_key.get_secret_value() if self.stripe_secret_key else ""
-        if self.app_env != "production" and key.startswith(_STRIPE_LIVE_KEY_PREFIXES):
+        if key.startswith(_STRIPE_LIVE_KEY_PREFIXES):
             raise ValueError(
                 f"STRIPE_SECRET_KEY is a live key; it is refused when APP_ENV is {self.app_env}"
+            )
+        publishable = self.stripe_publishable_key or ""
+        if publishable.startswith(_STRIPE_LIVE_PUBLISHABLE_KEY_PREFIXES):
+            raise ValueError(
+                "STRIPE_PUBLISHABLE_KEY is a live key; it is refused when APP_ENV is "
+                f"{self.app_env}"
             )
         return self
 
