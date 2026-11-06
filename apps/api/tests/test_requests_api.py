@@ -33,8 +33,8 @@ from app.modules.requests.models import (
     ServiceRequest,
 )
 from app.modules.service_areas.models import ServiceArea
+from app.modules.uploads.keys import owned_upload, upload_content_type
 from app.modules.uploads.schemas import UploadPurpose
-from app.modules.uploads.service import owned_upload, upload_content_type
 from app.modules.users.models import User
 from app.modules.users.types import UserRole
 from app.observability import JsonFormatter

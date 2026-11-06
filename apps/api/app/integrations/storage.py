@@ -13,7 +13,7 @@ deletes uploads no row ever attached (list_older_than, delete_many: #191). These
 the worker runs them in a thread. Errors never carry the key: a key can hold a user id.
 """
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -240,6 +240,16 @@ class S3Storage:
             failed += errors
             deleted += len(batch) - errors
         return DeleteResult(deleted=deleted, failed=failed)
+
+
+StorageProvider = Callable[[], Storage]
+
+
+def get_storage_provider(request: Request) -> StorageProvider:
+    """FastAPI dependency for routes that need the storage only sometimes (an account with an
+    ID photo to sign, #250): get_storage on the first call, so a missing configuration fails
+    the request that needs a URL, not every sign-in."""
+    return lambda: get_storage(request)
 
 
 def get_storage(request: Request) -> Storage:

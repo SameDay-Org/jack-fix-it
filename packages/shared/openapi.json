@@ -338,7 +338,7 @@
           "auth"
         ],
         "summary": "Current user",
-        "description": "The caller's own account.",
+        "description": "The caller's own account, with the ID card fields (#250): the public code, the home\ncity and state, the ID photo as a signed URL and the member-since date.",
         "operationId": "me_v1_auth_me_get",
         "responses": {
           "200": {
@@ -383,7 +383,7 @@
           "auth"
         ],
         "summary": "Update the current user",
-        "description": "Sets the caller's own first and last name (#165). Both are required together while\nthey are not stored; afterwards either may change alone.",
+        "description": "Sets the caller's own first and last name (#165), home city and state and ID photo\n(#250). Both names are required together while they are not stored; afterwards either may\nchange alone. The city and the state are set together, or both cleared with null. The\nphoto is the caller's own profile_photo upload key; for a pro without a public profile\nphoto it becomes that photo too. Nothing changes when any field is refused.",
         "operationId": "update_me_v1_auth_me_patch",
         "requestBody": {
           "content": {
@@ -407,7 +407,7 @@
             }
           },
           "422": {
-            "description": "validation_error: an invalid or null name, another field, an empty body, or one name while the other is not stored yet.",
+            "description": "validation_error: an invalid or null name, an unknown field, an empty body, one name while the other is not stored yet, or home_city without home_state (or the other way round). invalid_media: photo_key is not the caller's own profile_photo upload.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4046,12 +4046,54 @@
             ],
             "title": "Last Name",
             "description": "1 to 60 characters after trimming (inner spaces collapsed): letters, spaces, hyphens, apostrophes and periods. No contact details (an email, phone number, website or handle, even spelled out). Both or neither."
+          },
+          "home_city": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80,
+                "minLength": 1,
+                "pattern": "^[^\\x00]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Home City",
+            "description": "With home_state: both set, or both null to clear."
+          },
+          "home_state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z]{2}$",
+                "description": "A US state or DC code, upper case, e.g. FL."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Home State",
+            "description": "A US state or DC code, upper case (FL); with home_city."
+          },
+          "photo_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Key",
+            "description": "Key of the caller's own profile_photo upload (POST /v1/uploads); null clears."
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "MeUpdateRequest",
-        "description": "PATCH /v1/auth/me: the caller's own names. Omit a field to keep it; null is refused."
+        "description": "PATCH /v1/auth/me: the caller's own names (#165) and ID card fields (#250). Omit a field\nto keep it. A name is never null. home_city and home_state travel together: both set, or\nboth null to clear them. photo_key null clears the ID photo."
       },
       "MediaOut": {
         "properties": {
@@ -4700,7 +4742,8 @@
           "url",
           "expires_at"
         ],
-        "title": "PhotoOut"
+        "title": "PhotoOut",
+        "description": "An image the caller may see: a pro's profile photo (#36), a user's ID photo (#250)."
       },
       "PreferenceChange": {
         "properties": {
@@ -6326,6 +6369,52 @@
             ],
             "title": "Last Name",
             "description": "Null for accounts created before names."
+          },
+          "public_code": {
+            "type": "string",
+            "title": "Public Code",
+            "description": "The ID card's code: 8 Crockford base32 characters (0-9, A-Z without I, L, O, U), fixed at sign-up. Shown grouped as XXXX-XXXX."
+          },
+          "home_city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Home City",
+            "description": "With home_state; null until set."
+          },
+          "home_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Home State",
+            "description": "A US state or DC code, e.g. FL; null until set."
+          },
+          "photo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhotoOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ID photo, a presigned GET; null until set."
+          },
+          "member_since": {
+            "type": "string",
+            "format": "date",
+            "title": "Member Since",
+            "description": "The day (UTC) the account was created."
           }
         },
         "type": "object",
@@ -6338,10 +6427,15 @@
           "phone",
           "phone_verified",
           "first_name",
-          "last_name"
+          "last_name",
+          "public_code",
+          "home_city",
+          "home_state",
+          "photo",
+          "member_since"
         ],
         "title": "UserOut",
-        "description": "The user as the API shows it. Never carries the password hash."
+        "description": "The user as the API shows it. Never carries the password hash; the ID photo comes as\na signed URL (#250)."
       },
       "UserRole": {
         "type": "string",

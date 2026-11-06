@@ -721,7 +721,13 @@ async def new_pro(test_database_url: URL) -> AsyncIterator[NewPro]:
         session.add(user)
         await session.commit()
         account = UserAccount(
-            id=user.id, email=user.email, role=user.role, locale=user.locale, status=user.status
+            id=user.id,
+            email=user.email,
+            role=user.role,
+            locale=user.locale,
+            status=user.status,
+            public_code=user.public_code,
+            created_at=user.created_at,
         )
     try:
         yield NewPro(sessions, account)

@@ -62,7 +62,7 @@ from app.modules.media.sanitize import (
 )
 from app.modules.requests.models import MediaSafeStatus
 from app.modules.requests.repository import ServiceRequestRepository
-from app.modules.uploads.service import upload_content_type
+from app.modules.uploads.keys import upload_content_type
 from app.queue import JobQueue, enqueue
 
 logger = logging.getLogger(__name__)

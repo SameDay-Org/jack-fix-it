@@ -115,7 +115,13 @@ async def customer_account(session: AsyncSession, world: World) -> UserAccount:
     user = await session.get(User, world.customer_id)
     assert user is not None
     return UserAccount(
-        id=user.id, email=user.email, role=user.role, locale=user.locale, status=user.status
+        id=user.id,
+        email=user.email,
+        role=user.role,
+        locale=user.locale,
+        status=user.status,
+        public_code=user.public_code,
+        created_at=user.created_at,
     )
 
 

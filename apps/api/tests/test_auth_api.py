@@ -98,6 +98,11 @@ async def test_register_customer_returns_tokens_and_user(
         "phone_verified": False,
         "first_name": None,
         "last_name": None,
+        "public_code": user.public_code,
+        "home_city": None,
+        "home_state": None,
+        "photo": None,
+        "member_since": user.created_at.astimezone(UTC).date().isoformat(),
     }
     assert body["token_type"] == "bearer"
     assert body["expires_in"] == 900

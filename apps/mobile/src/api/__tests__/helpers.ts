@@ -70,6 +70,11 @@ export const user: ApiSchema<"UserOut"> = {
   phone_verified: false,
   first_name: null,
   last_name: null,
+  public_code: "K7Q29MXA",
+  home_city: null,
+  home_state: null,
+  photo: null,
+  member_since: "2026-01-01",
 };
 
 /** The server's answer to register, login and refresh; `n` numbers the token pair. */

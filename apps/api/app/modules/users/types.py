@@ -3,7 +3,8 @@
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from enum import StrEnum
+from enum import Enum, StrEnum
+from typing import Final
 
 
 class UserRole(StrEnum):
@@ -17,6 +18,15 @@ class UserRole(StrEnum):
 class UserStatus(StrEnum):
     ACTIVE = "active"
     SUSPENDED = "suspended"
+
+
+class Keep(Enum):
+    """A field a PATCH did not send: the stored value stays (None would clear it)."""
+
+    KEEP = "keep"
+
+
+KEEP: Final = Keep.KEEP
 
 
 @dataclass(frozen=True)
@@ -35,12 +45,20 @@ class UserAccount:
     role: UserRole
     locale: str
     status: UserStatus
+    # The ID card's code (#250): 8 Crockford base32 characters, fixed at creation.
+    public_code: str
+    created_at: datetime
     # E.164; set together with phone_verified_at when verified by SMS code (#26).
     phone: str | None = None
     phone_verified_at: datetime | None = None
     # PII (#165): both set or both None. Never logged.
     first_name: str | None = None
     last_name: str | None = None
+    # The card's city and state (#250): both set or both None. PII, never logged.
+    home_city: str | None = None
+    home_state: str | None = None
+    # The ID photo's upload key (#250); the API signs a URL for it, never shows the key.
+    photo_key: str | None = None
 
 
 @dataclass(frozen=True)

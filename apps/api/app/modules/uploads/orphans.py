@@ -54,8 +54,8 @@ from app.integrations.storage import (
 )
 from app.modules.pros.service import ProService
 from app.modules.requests.service import media_keys_among
+from app.modules.uploads.keys import UploadKey, parse_upload_key
 from app.modules.uploads.schemas import UploadPurpose
-from app.modules.uploads.service import UploadKey, parse_upload_key
 from app.modules.users.service import UserService
 from app.modules.users.types import UserRole
 
@@ -70,6 +70,7 @@ class ReferencingColumn(StrEnum):
     REQUEST_MEDIA_FILE_KEY = "request_media.file_key"
     PRO_DOCUMENTS_FILE_KEY = "pro_documents.file_key"
     PRO_PROFILES_PHOTO_KEY = "pro_profiles.photo_key"
+    USERS_PHOTO_KEY = "users.photo_key"
 
 
 @dataclass(frozen=True)
@@ -87,9 +88,10 @@ class References:
 REFERENCED_BY: Final[Mapping[UploadPurpose, References]] = {
     UploadPurpose.REQUEST_MEDIA: References(frozenset({ReferencingColumn.REQUEST_MEDIA_FILE_KEY})),
     UploadPurpose.PRO_DOCUMENT: References(frozenset({ReferencingColumn.PRO_DOCUMENTS_FILE_KEY})),
-    # Customers have no profile-photo column yet.
+    # Every user may hold one as their ID photo (#250); a pro's public photo is a second
+    # column, so no owner role is excluded.
     UploadPurpose.PROFILE_PHOTO: References(
-        frozenset({ReferencingColumn.PRO_PROFILES_PHOTO_KEY}), owner_role=UserRole.PRO
+        frozenset({ReferencingColumn.PRO_PROFILES_PHOTO_KEY, ReferencingColumn.USERS_PHOTO_KEY})
     ),
 }
 # No table references these yet: job photos wait for #63.
@@ -101,6 +103,7 @@ KEY_STATEMENTS: Final[Mapping[ReferencingColumn, KeyStatement]] = {
     ReferencingColumn.REQUEST_MEDIA_FILE_KEY: media_keys_among,
     ReferencingColumn.PRO_DOCUMENTS_FILE_KEY: ProService.document_keys_among,
     ReferencingColumn.PRO_PROFILES_PHOTO_KEY: ProService.photo_keys_among,
+    ReferencingColumn.USERS_PHOTO_KEY: UserService.photo_keys_among,
 }
 
 SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]

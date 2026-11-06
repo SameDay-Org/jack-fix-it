@@ -94,6 +94,8 @@ async def committed_job(test_database_url: URL) -> AsyncIterator[CommittedJob]:
             role=customer.role,
             locale=customer.locale,
             status=customer.status,
+            public_code=customer.public_code,
+            created_at=customer.created_at,
         )
     try:
         yield CommittedJob(sessions=sessions, job_id=job.id, customer=account)

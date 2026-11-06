@@ -499,6 +499,8 @@ async def committed(test_database_url: URL) -> AsyncIterator[Committed]:
             role=second.role,
             locale=second.locale,
             status=second.status,
+            public_code=second.public_code,
+            created_at=second.created_at,
         )
     try:
         yield Committed(sessions, request.id, due_quote_id, account, waiting.id)

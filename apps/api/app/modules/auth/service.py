@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import REFRESH_ROTATION_SECRET_REQUIRED_IN, Settings
+from app.integrations.storage import StorageProvider
 from app.modules.auth import security
 from app.modules.auth.errors import (
     AccountSuspendedError,
@@ -30,9 +31,11 @@ from app.modules.auth.schemas import (
     MeUpdateRequest,
     RegisterRequest,
 )
+from app.modules.pros.service import ProService
+from app.modules.uploads.schemas import PhotoOut
 from app.modules.users.schemas import UserOut
 from app.modules.users.service import UserService
-from app.modules.users.types import UserAccount, UserStatus
+from app.modules.users.types import KEEP, UserAccount, UserRole, UserStatus
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,8 @@ class AuthConfig:
     password_min_length: int
     refresh_rotation_key: str
     refresh_reuse_grace_seconds: int
+    # How long a signed URL of the ID photo works (#250).
+    photo_url_ttl_seconds: int
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "AuthConfig":
@@ -66,15 +71,46 @@ class AuthConfig:
             password_min_length=settings.password_min_length,
             refresh_rotation_key=rotation_key,
             refresh_reuse_grace_seconds=settings.refresh_reuse_grace_seconds,
+            photo_url_ttl_seconds=settings.download_url_ttl_seconds,
         )
 
 
 class AuthService:
-    def __init__(self, session: AsyncSession, users: UserService, config: AuthConfig) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        users: UserService,
+        config: AuthConfig,
+        storage: StorageProvider,
+    ) -> None:
         self._session = session
         self._users = users
         self._refresh_tokens = RefreshTokenRepository(session)
         self._config = config
+        # Called only for an account with an ID photo (#250): the storage is otherwise
+        # not needed to sign in.
+        self._storage = storage
+
+    def prepare_photo(self, account: UserAccount) -> PhotoOut | None:
+        """The ID photo as a signed URL, or None for an account without one (#250).
+
+        The one step of showing an account that can fail: it resolves the storage and signs,
+        and a missing or broken storage configuration raises. A path that commits calls it
+        before anything becomes durable and presents with the prepared value, so a failure
+        never follows a committed rotation, update or verification (#290).
+        """
+        if account.photo_key is None:
+            return None
+        ttl = self._config.photo_url_ttl_seconds
+        return PhotoOut(
+            url=self._storage().presign_get(account.photo_key, ttl),
+            expires_at=datetime.now(UTC) + timedelta(seconds=ttl),
+        )
+
+    @staticmethod
+    def present(account: UserAccount, photo: PhotoOut | None) -> UserOut:
+        """The account as the API shows it, with its photo from prepare_photo. Never raises."""
+        return UserOut.from_account(account, photo=photo)
 
     async def register(self, data: RegisterRequest) -> AuthResponse:
         if len(data.password) < self._config.password_min_length:
@@ -91,12 +127,26 @@ class AuthService:
         return await self._start_session(user)
 
     async def update_me(self, user: UserAccount, data: MeUpdateRequest) -> UserOut:
-        """Sets the caller's own names and commits. Names are never logged."""
-        account = await self._users.update_names(
-            user.id, first_name=data.first_name, last_name=data.last_name
+        """Sets the caller's own names and ID card fields and commits, all or nothing. A pro's
+        new ID photo also becomes their public profile photo while they have none (#250).
+        Logs carry the user id and the field names: never a name, the city, the state or
+        the key."""
+        sent = data.model_fields_set
+        account = await self._users.update_profile(
+            user.id,
+            first_name=data.first_name,
+            last_name=data.last_name,
+            home_city=data.home_city if "home_city" in sent else KEEP,
+            home_state=data.home_state if "home_state" in sent else KEEP,
+            photo_key=data.photo_key if "photo_key" in sent else KEEP,
         )
+        if user.role is UserRole.PRO and account.photo_key is not None and "photo_key" in sent:
+            await ProService(self._session).adopt_photo_if_missing(user.id, account.photo_key)
+        # Signed before the commit: a storage failure leaves the update uncommitted (#290).
+        photo = self.prepare_photo(account)
         await self._session.commit()
-        return UserOut.model_validate(account)
+        logger.info("user_updated", extra={"user_id": str(user.id), "fields": sorted(sent)})
+        return self.present(account, photo)
 
     async def login(self, data: LoginRequest) -> AuthResponse:
         credentials = await self._users.get_credentials_by_email(data.email)
@@ -224,7 +274,11 @@ class AuthService:
     async def _issue_tokens(
         self, user: UserAccount, refresh_token: str, now: datetime
     ) -> AuthResponse:
-        """Creates the access token, commits the refresh token rows and builds the response."""
+        """Prepares the photo, creates the access token, commits the refresh token rows and
+        builds the response. The photo comes first: it is the step that can fail, and a
+        failure must leave the rotation uncommitted, with the presented token unspent (#290).
+        """
+        photo = self.prepare_photo(user)
         access_token = security.create_access_token(
             user_id=user.id,
             role=user.role,
@@ -234,7 +288,7 @@ class AuthService:
         )
         await self._session.commit()
         return AuthResponse(
-            user=UserOut.model_validate(user),
+            user=self.present(user, photo),
             access_token=access_token,
             refresh_token=refresh_token,
             expires_in=self._config.access_token_ttl_seconds,

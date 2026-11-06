@@ -95,6 +95,8 @@ async def committed(test_database_url: URL) -> AsyncIterator[Committed]:
             role=customer.role,
             locale=customer.locale,
             status=customer.status,
+            public_code=customer.public_code,
+            created_at=customer.created_at,
         )
     try:
         yield Committed(sessions, account, request.id, [quote.id for quote in quotes])

@@ -11,6 +11,7 @@ from app.config import Settings, get_app_settings
 from app.db import get_session
 from app.integrations.email import EmailSender, get_email_sender
 from app.integrations.sms_verify import PhoneVerifier, get_phone_verifier
+from app.integrations.storage import StorageProvider, get_storage_provider
 from app.modules.auth.errors import InvalidTokenError
 from app.modules.auth.password_reset import (
     PasswordResetConfig,
@@ -55,8 +56,9 @@ def get_auth_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     users: Annotated[UserService, Depends(get_user_service)],
     config: Annotated[AuthConfig, Depends(get_auth_config)],
+    storage: Annotated[StorageProvider, Depends(get_storage_provider)],
 ) -> AuthService:
-    return AuthService(session, users, config)
+    return AuthService(session, users, config, storage)
 
 
 async def get_current_user(
