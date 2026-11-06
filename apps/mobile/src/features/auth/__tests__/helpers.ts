@@ -33,4 +33,5 @@ export const SIGNED_OUT = {
   accessTokenExpiresAt: null,
   cleanupPending: false,
   restoreFailure: null,
+  onboardingUserId: null,
 };

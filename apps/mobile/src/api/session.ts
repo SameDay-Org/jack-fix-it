@@ -6,7 +6,7 @@ import { createStore } from "zustand/vanilla";
 
 import { ApiError, LocalCleanupError, NetworkError, SessionExpiredError } from "./errors";
 import { sendRequest, type PostBody } from "./http";
-import { refreshTokenStorage, type TakenToken } from "./tokenStorage";
+import { onboardingMarkerStorage, refreshTokenStorage, type TakenToken } from "./tokenStorage";
 
 export type SessionStatus = "restoring" | "signedOut" | "signedIn";
 export type SessionUser = ApiSchema<"UserOut">;
@@ -33,6 +33,12 @@ type SessionState = {
    * sign-out.
    */
   restoreFailure: RestoreFailure | null;
+  /**
+   * The id of the account whose sign-up flow this device has not finished (#292), while that is
+   * the signed-in account (or the one being restored): the gate keeps it on the flow. Set by a
+   * sign-up, kept across relaunches, ended by `endOnboarding`, a sign-out or another account.
+   */
+  onboardingUserId: string | null;
 };
 
 const SIGNED_OUT: SessionState = {
@@ -42,6 +48,7 @@ const SIGNED_OUT: SessionState = {
   accessTokenExpiresAt: null,
   cleanupPending: false,
   restoreFailure: null,
+  onboardingUserId: null,
 };
 const RESTORING: SessionState = { ...SIGNED_OUT, status: "restoring" };
 
@@ -55,7 +62,7 @@ export const sessionStore = createStore<SessionState>()(() => RESTORING);
 /** The session as screens read it. Tokens never leave this module. */
 export function useSession(): Pick<
   SessionState,
-  "status" | "user" | "cleanupPending" | "restoreFailure"
+  "status" | "user" | "cleanupPending" | "restoreFailure" | "onboardingUserId"
 > {
   return useStore(
     sessionStore,
@@ -64,6 +71,7 @@ export function useSession(): Pick<
       user: state.user,
       cleanupPending: state.cleanupPending,
       restoreFailure: state.restoreFailure,
+      onboardingUserId: state.onboardingUserId,
     })),
   );
 }
@@ -137,10 +145,12 @@ function beginSignOut(): number {
 
 /**
  * Takes the stored token off the device, queued ahead of any storage work started later, and
- * records a failed delete as `cleanupPending` while the sign-out of `startedIn` is current.
+ * records a failed delete as `cleanupPending` while the sign-out of `startedIn` is current. The
+ * onboarding marker goes with it: a later sign-in is never forced back into the flow.
  */
 async function forgetStoredToken(startedIn: number): Promise<TakenToken> {
   const taken = await refreshTokenStorage.take();
+  await onboardingMarkerStorage.clear();
   if (isCurrent(startedIn)) sessionStore.setState({ cleanupPending: !taken.deleted });
   return taken;
 }
@@ -150,12 +160,23 @@ function endSignOut(startedIn: number): void {
   if (signingOut === startedIn) signingOut = null;
 }
 
-/** Stores the pair for the session of `startedIn`; resolves to false when that session is gone. */
-async function applyAuth(auth: AuthResponse, startedIn: number): Promise<boolean> {
+/**
+ * Stores the pair for the session of `startedIn`; resolves to false when that session is gone.
+ * With `onboarding`, the account enters its sign-up flow in the same update that signs it in, so
+ * no render sees it signed in and off the flow. Otherwise the marker follows the account: the one
+ * being restored (or signing in again) keeps its own, and another account ends it.
+ */
+async function applyAuth(
+  auth: AuthResponse,
+  startedIn: number,
+  onboarding = false,
+): Promise<boolean> {
   const written = await refreshTokenStorage.write(auth.refresh_token, () => isCurrent(startedIn));
   if (!written || !isCurrent(startedIn)) return false;
-  const previous = sessionStore.getState().user;
-  if (previous && previous.id !== auth.user.id) forgetSessionData();
+  const previous = sessionStore.getState();
+  if (previous.user && previous.user.id !== auth.user.id) forgetSessionData();
+  const onboardingUserId =
+    onboarding || previous.onboardingUserId === auth.user.id ? auth.user.id : null;
   sessionStore.setState({
     status: "signedIn",
     user: auth.user,
@@ -163,7 +184,17 @@ async function applyAuth(auth: AuthResponse, startedIn: number): Promise<boolean
     accessTokenExpiresAt: Date.now() + auth.expires_in * MS_PER_SECOND,
     cleanupPending: false,
     restoreFailure: null,
+    onboardingUserId,
   });
+  if (onboarding) {
+    // Best effort, behind the token in the store's queue: without it the flow does not resume
+    // after a relaunch, and nothing else is lost.
+    void onboardingMarkerStorage
+      .write(auth.user.id, () => isCurrent(startedIn))
+      .catch(() => undefined);
+  } else if (previous.onboardingUserId !== null && onboardingUserId === null) {
+    void onboardingMarkerStorage.clear();
+  }
   return true;
 }
 
@@ -178,7 +209,11 @@ async function revokeRemote(refreshToken: string): Promise<void> {
   }
 }
 
-async function signIn<P extends SignInPath>(path: P, body: PostBody<P>): Promise<void> {
+async function signIn<P extends SignInPath>(
+  path: P,
+  body: PostBody<P>,
+  onboarding = false,
+): Promise<void> {
   const startedIn = generation;
   const auth = await sendRequest<AuthResponse>("POST", path, { body });
   // A sign-out or another sign-in won while the request was in flight: the new server session is
@@ -187,10 +222,13 @@ async function signIn<P extends SignInPath>(path: P, body: PostBody<P>): Promise
     await revokeRemote(auth.refresh_token);
     throw new SessionExpiredError("superseded");
   }
-  if (!(await applyAuth(auth, nextGeneration()))) {
+  if (!(await applyAuth(auth, nextGeneration(), onboarding))) {
     await revokeRemote(auth.refresh_token);
     throw new SessionExpiredError("superseded");
   }
+  // A login never resumes a sign-up flow: a marker that a failed delete left on the device goes
+  // now, before a relaunch could read it.
+  if (!onboarding) void onboardingMarkerStorage.clear();
 }
 
 /**
@@ -204,8 +242,29 @@ export function setSessionUser(user: SessionUser): void {
   sessionStore.setState({ user });
 }
 
-export function register(body: PostBody<"/v1/auth/register">): Promise<void> {
-  return signIn("/v1/auth/register", body);
+export type RegisterOptions = {
+  /**
+   * The new account enters the sign-up flow (#292): the gate keeps it on the flow, on this device
+   * and across relaunches, until `endOnboarding`.
+   */
+  onboarding?: boolean;
+};
+
+export function register(
+  body: PostBody<"/v1/auth/register">,
+  options: RegisterOptions = {},
+): Promise<void> {
+  return signIn("/v1/auth/register", body, options.onboarding ?? false);
+}
+
+/**
+ * The signed-in account finished its sign-up flow: the gate shows the app from the next update,
+ * and the device forgets the marker. Memory first, so the screen moves on even if the delete
+ * fails; a marker left on disk is cleared again when the finished flow is next restored.
+ */
+export async function endOnboarding(): Promise<void> {
+  sessionStore.setState({ onboardingUserId: null });
+  await onboardingMarkerStorage.clear();
 }
 
 export function login(body: PostBody<"/v1/auth/login">): Promise<void> {
@@ -315,6 +374,7 @@ async function retryCleanup(startedIn: number): Promise<void> {
     () => true,
     () => false,
   );
+  await onboardingMarkerStorage.clear();
   if (isCurrent(startedIn)) sessionStore.setState({ ...SIGNED_OUT, cleanupPending: !deleted });
 }
 
@@ -338,6 +398,11 @@ export async function restoreSession(): Promise<void> {
     sessionStore.setState(SIGNED_OUT);
     return;
   }
+  // Known before the session can be signed in, so the gate's first signed-in render already
+  // holds the account on its flow (no app screen in between).
+  const onboardingUserId = await onboardingMarkerStorage.read();
+  if (!isCurrent(startedIn)) return;
+  sessionStore.setState({ onboardingUserId });
   try {
     await refreshSession();
   } catch (error) {
