@@ -37,6 +37,15 @@ from app.integrations.stripe_connect import (
     StripeRejectedError,
     StripeUnavailableError,
 )
+from app.modules.audit.service import AuditService
+from app.modules.audit.types import (
+    AuditAction,
+    AuditEntity,
+    AuditEntityType,
+    AuditState,
+    Operator,
+    timestamp,
+)
 from app.modules.payouts.errors import (
     PaymentsProviderError,
     PaymentsUnavailableError,
@@ -61,6 +70,15 @@ STRIPE_KEY_RETENTION_HOURS: Final = STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS // 
 def account_idempotency_key(pro_id: uuid.UUID) -> str:
     """The same key for every attempt to create this profile's account (AGENTS.md "Money")."""
     return f"pro-express-account:{pro_id}"
+
+
+def _account_state(account: PayoutAccount) -> AuditState:
+    """What a staff recovery changes on the profile, as audit_log records it (ids and
+    timestamps; no PII)."""
+    return {
+        "stripe_account_id": account.stripe_account_id,
+        "stripe_account_requested_at": timestamp(account.stripe_account_requested_at),
+    }
 
 
 def payouts_status(state: AccountState) -> PayoutsStatus:
@@ -101,6 +119,7 @@ class PayoutsService:
         self._pros = pros
         self._stripe = stripe
         self._config = config
+        self._audit = AuditService(session)
 
     async def onboarding_link(self, user: UserAccount) -> OnboardingLinkOut:
         """A Stripe-hosted onboarding link for the caller's Express account, which the first
@@ -184,15 +203,19 @@ class PayoutsService:
         )
         raise PayoutsNeedsReviewError
 
-    async def adopt_account(self, pro_id: uuid.UUID, account_id: str, *, apply: bool) -> None:
+    async def adopt_account(
+        self, pro_id: uuid.UUID, account_id: str, operator: Operator, *, apply: bool
+    ) -> None:
         """Staff recovery of a 409 (scripts/resolve_payout_account.py): stores `account_id` as
         the profile's account, once Stripe shows the account's metadata naming this profile. The
-        profile must exist and hold no account. `apply` False checks only. Ends the transaction;
+        profile must exist and hold no account. `apply` False checks only; applied, the
+        audit_log row (app.modules.audit) is written in the same transaction, so its failure changes
+        nothing. Ends the transaction;
         PayoutsRecoveryRefusedError on a refusal, PaymentsUnavailableError or
         PaymentsProviderError when Stripe is unavailable or refuses the account."""
         stripe = self._require_stripe()
         try:
-            await self._account_to_resolve(pro_id)
+            before = _account_state(await self._account_to_resolve(pro_id))
             async with self._stripe_call(pro_id, "retrieve_account_profile"):
                 named = await stripe.account_profile_id(account_id)
             if named != str(pro_id):
@@ -207,21 +230,37 @@ class PayoutsService:
                     raise PayoutsRecoveryRefusedError(
                         "That account is already another profile's payout account; nothing changed."
                     ) from None
+                await self._audit.record(
+                    operator,
+                    AuditAction.PAYOUT_ACCOUNT_ADOPT,
+                    AuditEntity(AuditEntityType.PRO_PROFILE, pro_id),
+                    before,
+                    {**before, "stripe_account_id": account_id},
+                )
                 await self._session.commit()
                 logger.warning(
-                    "payouts_account_resolved", extra={"pro_id": str(pro_id), "action": "adopt"}
+                    "payouts_account_resolved",
+                    extra={
+                        "pro_id": str(pro_id),
+                        "action": "adopt",
+                        "operator_id": str(operator.user_id),
+                    },
                 )
         finally:
             await self._session.rollback()
 
-    async def allow_new_account(self, pro_id: uuid.UUID, *, apply: bool) -> None:
+    async def allow_new_account(
+        self, pro_id: uuid.UUID, operator: Operator, *, apply: bool
+    ) -> None:
         """Staff recovery of a 409 (scripts/resolve_payout_account.py), once the Stripe dashboard
         shows no account for the profile: forgets its unresolved create, so the pro's next
         onboarding link creates one. Refused while the attempt is younger than Stripe's key
         retention, when the profile holds an account, or when no create was attempted. `apply`
-        False checks only. Ends the transaction; PayoutsRecoveryRefusedError on a refusal."""
+        False checks only; applied, the audit_log row (app.modules.audit) is written in the same
+        transaction. Ends the transaction; PayoutsRecoveryRefusedError on a refusal."""
         try:
-            attempted = (await self._account_to_resolve(pro_id)).stripe_account_requested_at
+            account = await self._account_to_resolve(pro_id)
+            attempted = account.stripe_account_requested_at
             if attempted is None:
                 raise PayoutsRecoveryRefusedError(
                     "This profile has no account create to clear; nothing changed."
@@ -233,11 +272,23 @@ class PayoutsService:
                     "changed. Try again later."
                 )
             if apply:
+                before = _account_state(account)
                 await self._pros.clear_stripe_account_requested(pro_id)
+                await self._audit.record(
+                    operator,
+                    AuditAction.PAYOUT_ACCOUNT_ALLOW_NEW,
+                    AuditEntity(AuditEntityType.PRO_PROFILE, pro_id),
+                    before,
+                    {**before, "stripe_account_requested_at": None},
+                )
                 await self._session.commit()
                 logger.warning(
                     "payouts_account_resolved",
-                    extra={"pro_id": str(pro_id), "action": "allow_new"},
+                    extra={
+                        "pro_id": str(pro_id),
+                        "action": "allow_new",
+                        "operator_id": str(operator.user_id),
+                    },
                 )
         finally:
             await self._session.rollback()

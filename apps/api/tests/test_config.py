@@ -427,7 +427,7 @@ def test_password_reset_settings_defaults() -> None:
 
 # Fixture values only: shaped like Stripe keys, but not keys.
 LIVE_KEYS = ("sk_live_fixture-not-a-key", "rk_live_fixture-not-a-key")
-LIVE_PUBLISHABLE_KEY = "pk_live_fixture-not-a-key"
+LIVE_PUBLISHABLE_KEY = "pk_live_fixtureNotAKey"
 
 
 @pytest.mark.parametrize("app_env", ["staging", "production"])
@@ -490,6 +490,45 @@ def test_stripe_settings_optional_in_development(app_env: str) -> None:
             make_settings(app_env=app_env, stripe_secret_key=live)
     with pytest.raises(ValidationError, match="STRIPE_PUBLISHABLE_KEY is a live key"):
         make_settings(app_env=app_env, stripe_publishable_key=LIVE_PUBLISHABLE_KEY)
+
+
+# Private keys and malformed values (fixtures, not keys): none may pass as the publishable
+# key, which the payment endpoint returns to customers (#58, Vault round 1 B1).
+NOT_PUBLISHABLE_KEYS = (
+    "sk_test_fixtureNotAKey",
+    "sk_live_fixtureNotAKey",
+    "rk_test_fixtureNotAKey",
+    "rk_live_fixtureNotAKey",
+    "pk_test_",
+    "pk_prod_fixtureNotAKey",
+    "pk_test_fixture-not-a-key",
+    " pk_test_fixtureNotAKey",
+    "pk_test_fixtureNotAKey\n",
+    "fixtureNotAKey",
+)
+
+
+@pytest.mark.parametrize("app_env", ["development", "test", "staging", "production"])
+@pytest.mark.parametrize("value", NOT_PUBLISHABLE_KEYS)
+def test_publishable_key_accepts_only_pk_keys(app_env: str, value: str) -> None:
+    deployed: dict[str, object] = (
+        {}
+        if app_env in {"development", "test"}
+        else {
+            "jwt_secret": "s" * 32,
+            **TEST_STORAGE_SETTINGS,
+            **TEST_TWILIO_SETTINGS,
+            **TEST_RATE_LIMIT_SETTINGS,
+            **TEST_REFRESH_SETTINGS,
+            **TEST_EMAIL_SETTINGS,
+            **TEST_STRIPE_SETTINGS,
+        }
+    )
+    with pytest.raises(ValidationError, match="must be a Stripe publishable key") as error:
+        make_settings(**{**deployed, "app_env": app_env, "stripe_publishable_key": value})
+    # The message never repeats the value: it could be a secret pasted in the wrong variable.
+    assert "fixtureNotAKey" not in str(error.value)
+    assert "fixture-not-a-key" not in str(error.value)
 
 
 @pytest.mark.parametrize(

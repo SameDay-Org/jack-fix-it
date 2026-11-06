@@ -62,7 +62,7 @@ __all__ = ["sentry_transport"]  # a fixture, used by name
 
 # Fixture values only: a test-mode-shaped key that is not a key, and a take rate that is not
 # the default, so the tests prove the rate comes from settings.
-PUBLISHABLE_KEY = "pk_test_fixture-payments-58"
+PUBLISHABLE_KEY = "pk_test_fixturePayments58"
 SECRET_KEY = "sk_test_fixture-not-a-real-key"
 TAKE_RATE = "platform_take_rate_bps"
 TAKE_RATE_BPS = 1500
@@ -909,6 +909,39 @@ async def test_not_configured_is_503(
     assert (response.status_code, response.json()) == (503, NOT_CONFIGURED)
     assert await payments_of(db_session, quote_id) == []
     assert app.state.fake_stripe_payments.customer_calls == []
+
+
+@pytest.mark.parametrize(
+    "key", ["sk_live_fixtureNotAKey", "rk_test_fixtureNotAKey", "pk_test_", "fixtureNotAKey"]
+)
+async def test_a_key_that_is_not_publishable_never_reaches_a_response(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    stripe_fake: FakeStripePayments,
+    settings: Settings,
+    caplog: pytest.LogCaptureFixture,
+    key: str,
+) -> None:
+    """Settings refuse such a key at load (test_config); a copy that skipped validation still
+    gets 503 not_configured before any row or Stripe call, and the value is never logged
+    (#58, Vault round 1 B1)."""
+    request_id, quote_id, _ = await accepted_request(db_session, world)
+    # model_copy does not validate: the only way such a value can reach the service.
+    app.state.settings = settings.model_copy(update={"stripe_publishable_key": key})
+
+    with caplog.at_level(logging.DEBUG):
+        response = await pay(db_client, world, request_id, quote_id)
+
+    assert (response.status_code, response.json()) == (503, NOT_CONFIGURED)
+    assert key not in response.text
+    assert [r.message for r in caplog.records if r.levelno >= logging.ERROR] == [
+        "payments_publishable_key_invalid"
+    ]
+    assert all(key not in JsonFormatter().format(record) for record in caplog.records)
+    assert await payments_of(db_session, quote_id) == []
+    assert stripe_fake.customer_calls == []
 
 
 # What leaves the API
