@@ -13,6 +13,8 @@ export type { GlassShape, GlassSurfaceProps, GlassTone } from "./GlassSurface";
 export { ICON_TILE, ICON_TILE_TINT, IconTile } from "./IconTile";
 export type { IconTileProps, IconTileSize } from "./IconTile";
 export { Input } from "./Input";
+export { ListGroup, ListRow } from "./ListRow";
+export type { ListRowProps } from "./ListRow";
 export type { InputHandle, InputProps } from "./Input";
 export { Notice } from "./Notice";
 export type { NoticeProps } from "./Notice";
@@ -52,7 +54,7 @@ export type { WordRotatorProps } from "./WordRotator";
 export type { ReduceTransparency } from "./useReduceTransparency";
 export { CodeInput } from "./CodeInput";
 export type { CodeInputProps } from "./CodeInput";
-export { moveAccessibilityFocus } from "./focus";
+export { announce, moveAccessibilityFocus } from "./focus";
 export { IdCard } from "./IdCard";
 export type { IdCardProps } from "./IdCard";
 export {

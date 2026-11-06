@@ -60,7 +60,10 @@ export type IdCardProps = {
    * gestures and no font scaling, so the PNG looks the same on every phone.
    */
   shareable?: boolean;
-  /** Tilt, flip and gyroscope. Off, the card holds still until a parent brings it alive. */
+  /**
+   * Tilt, flip and gyroscope. Off, the card holds still until a parent brings it alive; turned off
+   * while it shows its back, it turns back to the front.
+   */
   interactive?: boolean;
   onFlip?: (face: IdCardFace) => void;
   /** The photo finished loading, or failed: the share render waits for it before capturing. */
@@ -601,6 +604,22 @@ export function IdCard({
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
     onFlip?.(next);
   };
+
+  // A card set back at rest (a parent turns `interactive` off) shows its front again, turning back
+  // the way it came: still, nothing could turn it over to the front any more. The accessible face
+  // follows in this render; the animation and the parent's callback in the effect.
+  const [wasLive, setWasLive] = useState(live);
+  if (wasLive !== live) {
+    setWasLive(live);
+    if (!live) setFace("front");
+  }
+  useEffect(() => {
+    if (live || shown.value === "front") return;
+    shown.value = "front";
+    if (reduceMotion) fade.value = withTiming(0, FADE);
+    else turn.value = withSpring(0, FLIP_SPRING);
+    onFlip?.("front");
+  }, [live, reduceMotion, shown, fade, turn, onFlip]);
 
   const gyro = live && !reduceMotion;
   useEffect(() => {

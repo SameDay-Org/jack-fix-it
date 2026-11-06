@@ -1,3 +1,4 @@
+import type { ComponentRef, Ref } from "react";
 import { useTranslation } from "react-i18next";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
@@ -23,6 +24,8 @@ export type ButtonProps = {
   loading?: boolean;
   /** Layout-only classes (margins, width). */
   className?: string;
+  /** The pressable host, to move screen-reader focus onto the button. */
+  ref?: Ref<ComponentRef<typeof View>>;
   testID?: string;
 };
 
@@ -83,6 +86,7 @@ export function Button({
   disabled = false,
   loading = false,
   className,
+  ref,
   testID,
 }: ButtonProps) {
   const { t } = useTranslation();
@@ -92,6 +96,7 @@ export function Button({
 
   return (
     <Pressable
+      ref={ref}
       accessibilityRole="button"
       accessibilityLabel={
         loading

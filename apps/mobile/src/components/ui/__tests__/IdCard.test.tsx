@@ -344,6 +344,40 @@ describe("IdCard", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 
+  it.each([
+    ["turns", false],
+    ["fades", true],
+  ])("%s back to its front when set at rest on its back (Reduce Motion %s)", async (_, reduced) => {
+    jest.mocked(useReducedMotion).mockReturnValue(reduced);
+    const onFlip = jest.fn();
+    const props: IdCardProps = { variant: "pro", width: 320, ...ALEX, onFlip, testID: "card" };
+    const view = await renderCard(props);
+    await act(async () => flipByAssistiveTech("card-front"));
+    expect(screen.getByRole("button", { name: BACK_LABEL })).toBeOnTheScreen();
+    jest.mocked(withSpring).mockClear();
+    jest.mocked(withTiming).mockClear();
+    jest.mocked(Haptics.impactAsync).mockClear();
+
+    await view.rerender(card({ ...props, interactive: false }));
+
+    expect(screen.getByRole("image", { name: FRONT_LABEL })).toBeOnTheScreen();
+    expect(screen.queryByRole("image", { name: BACK_LABEL })).toBeNull();
+    if (reduced) {
+      expect(withTiming).toHaveBeenCalledWith(0, { duration: 200, reduceMotion: "never" });
+    } else {
+      expect(withSpring).toHaveBeenCalledWith(0, expect.any(Object));
+    }
+    expect(onFlip).toHaveBeenLastCalledWith("front");
+    // Set down, not flipped by the person: no tap feedback.
+    expect(Haptics.impactAsync).not.toHaveBeenCalled();
+
+    // Already on its front, a card set at rest stays as it is.
+    onFlip.mockClear();
+    await view.rerender(card({ ...props, interactive: true }));
+    await view.rerender(card({ ...props, interactive: false }));
+    expect(onFlip).not.toHaveBeenCalled();
+  });
+
   it("never subscribes to a gyroscope that answers after the card is gone", async () => {
     let answer: (available: boolean) => void = () => undefined;
     Gyroscope.isAvailableAsync.mockImplementationOnce(
