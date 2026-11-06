@@ -117,13 +117,20 @@ function patchesMe() {
   }));
 }
 
+// A slide is 280 ms, but under the full parallel run this suite takes over twice as long as
+// alone and a 1 s wait for a slide's end missed now and then; the waits and the tests get room.
+const SLIDE_WAIT = { timeout: 4000 };
+jest.setTimeout(30_000);
+
 /** The step titled `title` is on screen and its slide is over: its action and fields take input. */
 async function arrive(title: string) {
-  const heading = await screen.findByText(title);
-  await waitFor(() =>
-    expect(
-      screen.getByTestId("sign-up-step-leaving", { includeHiddenElements: true }).props.children,
-    ).toBeNull(),
+  const heading = await screen.findByText(title, {}, SLIDE_WAIT);
+  await waitFor(
+    () =>
+      expect(
+        screen.getByTestId("sign-up-step-leaving", { includeHiddenElements: true }).props.children,
+      ).toBeNull(),
+    SLIDE_WAIT,
   );
   return heading;
 }
