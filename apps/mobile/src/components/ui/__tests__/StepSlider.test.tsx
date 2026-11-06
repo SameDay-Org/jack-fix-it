@@ -140,6 +140,30 @@ describe("StepSlider", () => {
     }
   });
 
+  it("a transition that another one replaced ends without settling its pane", async () => {
+    // The timings hold their end callbacks, to finish them in the order a quick Back would.
+    const ends: ((finished?: boolean) => void)[] = [];
+    jest.mocked(withTiming).mockImplementation(((
+      to: number,
+      _config?: object,
+      done?: (finished?: boolean) => void,
+    ) => {
+      if (done) ends.push(done);
+      return to;
+    }) as never);
+    const onSettled = jest.fn();
+    await render(<Harness onSettled={onSettled} />);
+
+    await go(); // one -> two
+    await go(); // back to one before two has settled
+    await act(async () => ends[0](true)); // the first transition's timing ends anyway
+
+    expect(onSettled).not.toHaveBeenCalledWith("two");
+    await act(async () => ends[1](true));
+    expect(onSettled).toHaveBeenCalledWith("one");
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
   it("crossfades in place under Reduce Motion", async () => {
     jest.mocked(useReducedMotion).mockReturnValue(true);
     const onSettled = jest.fn();

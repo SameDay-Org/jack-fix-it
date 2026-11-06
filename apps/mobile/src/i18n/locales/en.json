@@ -34,7 +34,6 @@
     "proDescription": "Receive requests near you and send your quotes."
   },
   "signUp": {
-    "title": "Create your account",
     "asCustomer": "As a customer",
     "asPro": "As a pro",
     "submit": "Create account",

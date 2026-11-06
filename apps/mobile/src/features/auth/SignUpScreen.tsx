@@ -93,6 +93,9 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
   const [step, setStep] = useState<SignUpStep>(firstStep);
   const [direction, setDirection] = useState<1 | -1>(1);
   const [finished, setFinished] = useState(false);
+  // A step is sliding in: its action and Back wait for it, so a second tap meant for the step that
+  // left never submits or validates the one arriving.
+  const [moving, setMoving] = useState(false);
   const headings = useRef<Partial<Record<SignUpStep, ComponentRef<typeof Text> | null>>>({});
   const firstFields = useRef<Partial<Record<SignUpStep, InputHandle | null>>>({});
   const lastName = useRef<InputHandle>(null);
@@ -107,6 +110,7 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
       return;
     }
     setDirection(1);
+    setMoving(true);
     setStep(next);
   }, []);
 
@@ -136,8 +140,9 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
       : null;
 
   const stepBack = () => {
-    if (busy || index < 2) return;
+    if (busy || moving || index < 2) return;
     setDirection(-1);
+    setMoving(true);
     setStep(SIGN_UP_STEPS[index - 1]);
   };
 
@@ -155,6 +160,7 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
 
   // Focus follows the step: a screen reader's to its heading, everyone else's to its first field.
   const onSettled = useCallback((settled: SignUpStep) => {
+    setMoving(false);
     moveAccessibilityFocus(headings.current[settled] ?? null);
     void AccessibilityInfo.isScreenReaderEnabled()
       .then((readerOn) => {
@@ -358,7 +364,9 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
             label={actionLabel}
             size="lg"
             loading={busy}
-            onPress={() => void submit()}
+            onPress={() => {
+              if (!moving) void submit();
+            }}
             testID="sign-up-screen-submit"
           />
         </ScrollView>

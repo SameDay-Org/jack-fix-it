@@ -18,8 +18,6 @@ export type AddressFormProps = {
   /** The server answered "not in this area" for this ZIP. */
   zipRefused?: boolean;
   disabled?: boolean;
-  /** The street field takes focus as the form mounts. */
-  autoFocus?: boolean;
   /** A heading over the fields, when the form sits under other choices. */
   title?: string;
   /**
@@ -53,7 +51,6 @@ export function AddressForm({
   onChange,
   zipRefused = false,
   disabled = false,
-  autoFocus = false,
   title,
   placeOnly = false,
   cityMax = ADDRESS_MAX.city,
@@ -85,7 +82,6 @@ export function AddressForm({
             onChangeText={(value) => onChange("line1", value)}
             error={message(errors.line1, ADDRESS_MAX.line1)}
             disabled={disabled}
-            autoFocus={autoFocus && !placeOnly}
             maxLength={ADDRESS_MAX.line1}
             autoComplete="address-line1"
             textContentType="streetAddressLine1"
@@ -121,7 +117,6 @@ export function AddressForm({
         onChangeText={(value) => onChange("city", value)}
         error={message(errors.city, cityMax)}
         disabled={disabled}
-        autoFocus={autoFocus && placeOnly}
         maxLength={cityMax}
         textContentType="addressCity"
         returnKeyType="next"

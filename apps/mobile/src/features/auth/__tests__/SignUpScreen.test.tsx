@@ -7,6 +7,7 @@ import { AccessibilityInfo } from "react-native";
 
 import {
   ApiError,
+  apiGet,
   apiPatch,
   apiPost,
   endOnboarding,
@@ -33,8 +34,13 @@ jest.mock("@/api", () => ({
   ...jest.requireActual("@/api"),
   register: jest.fn(),
   apiPatch: jest.fn(),
+  apiGet: jest.fn(),
   apiPost: jest.fn(),
-  endOnboarding: jest.fn(async () => undefined),
+  // The flow ends only once nothing blocks leaving: the gate's switch to the app must not be
+  // refused by the screen's own guard.
+  endOnboarding: jest.fn(async () => {
+    if (mockGuard.on) throw new Error("ended while the screen still blocks leaving");
+  }),
 }));
 // The last guard the screen set: whether it blocks leaving, and what a blocked Back does.
 const mockGuard = { on: false, onBlocked: (): void => undefined };
@@ -43,7 +49,9 @@ jest.mock("expo-router", () => ({
     push: jest.fn(),
     replace: jest.fn(),
     back: jest.fn(),
-    dismissTo: jest.fn(),
+    dismissTo: jest.fn(() => {
+      if (mockGuard.on) throw new Error("left while the screen still blocks leaving");
+    }),
     canGoBack: jest.fn(() => true),
   },
   useLocalSearchParams: jest.fn(() => ({ role: "pro" })),
@@ -53,6 +61,20 @@ jest.mock("expo-router", () => ({
     mockGuard.onBlocked = onBlocked;
   }),
 }));
+// Every timing ends at once and reports it: a step's slide settles inside the test (after the
+// slider's wait for the arriving pane's layout, which Jest never sends).
+jest.mock("react-native-reanimated", () => {
+  const actual =
+    jest.requireActual<typeof import("react-native-reanimated")>("react-native-reanimated");
+  return {
+    __esModule: true,
+    ...actual,
+    withTiming: (to: number, _config?: object, done?: (finished?: boolean) => void) => {
+      done?.(true);
+      return to;
+    },
+  };
+});
 jest.mock("expo-haptics", () => ({
   notificationAsync: jest.fn(async () => undefined),
   NotificationFeedbackType: { Success: "success" },
@@ -94,6 +116,17 @@ function patchesMe() {
   }));
 }
 
+/** The step titled `title` is on screen and its slide is over: its action and fields take input. */
+async function arrive(title: string) {
+  const heading = await screen.findByText(title);
+  await waitFor(() =>
+    expect(
+      screen.getByTestId("sign-up-step-leaving", { includeHiddenElements: true }).props.children,
+    ).toBeNull(),
+  );
+  return heading;
+}
+
 async function renderFlow() {
   const client = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
   return renderInSafeArea(
@@ -118,11 +151,13 @@ let announce: jest.SpyInstance;
 let announceQueued: jest.SpyInstance;
 
 beforeEach(() => {
+  mockGuard.on = false;
   sessionStore.setState(SIGNED_OUT);
   phoneFlowStore.setState({ pendingNumber: null, offeredAfterSignUp: false });
   jest.mocked(register).mockReset();
   jest.mocked(apiPatch).mockReset();
   jest.mocked(apiPost).mockReset();
+  jest.mocked(apiGet).mockReset();
   jest.mocked(endOnboarding).mockClear();
   jest.mocked(router.replace).mockClear();
   jest.mocked(router.back).mockClear();
@@ -157,7 +192,7 @@ describe("SignUpScreen: the account step", () => {
       { email: "maria@example.com", password: "correct horse battery", role: "pro", locale: "en" },
       { onboarding: true },
     );
-    expect(await screen.findByText("Tell us your name!")).toBeTruthy();
+    expect(await arrive("Tell us your name!")).toBeTruthy();
     expect(screen.getByLabelText("Step 2 of 3")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
     // The phone step waits for the end of the flow.
@@ -240,7 +275,7 @@ describe("SignUpScreen: the name step", () => {
   async function reachName() {
     await renderFlow();
     await createAccount();
-    await screen.findByText("Tell us your name!");
+    await arrive("Tell us your name!");
   }
 
   it("types the name into the card live and saves it, tidied, with PATCH /v1/auth/me", async () => {
@@ -259,7 +294,7 @@ describe("SignUpScreen: the name step", () => {
       { first_name: "Ana", last_name: "de la Cruz" },
       { auth: true },
     );
-    expect(await screen.findByText("Where do you live?")).toBeTruthy();
+    expect(await arrive("Where do you live?")).toBeTruthy();
     expect(sessionStore.getState().user?.first_name).toBe("Ana");
   });
 
@@ -311,10 +346,10 @@ describe("SignUpScreen: the home step", () => {
     patchesMe();
     await renderFlow();
     await createAccount();
-    await screen.findByText("Tell us your name!");
+    await arrive("Tell us your name!");
     await enterNames("Ana", "Cruz");
     await fireEvent.press(button("Continue"));
-    await screen.findByText("Where do you live?");
+    await arrive("Where do you live?");
     jest.mocked(apiPatch).mockClear();
   }
 
@@ -360,14 +395,29 @@ describe("SignUpScreen: the home step", () => {
     expect(mockGuard.on).toBe(false);
   });
 
-  it("a Home already saved by an earlier try (409) does not stop the card's update", async () => {
+  it("a Home saved by an earlier try (409) is updated with what was typed, then the card", async () => {
     await reachHome("customer");
     jest.mocked(apiPost).mockRejectedValue(new ApiError(409, "address_label_taken"));
+    jest.mocked(apiGet).mockResolvedValue({
+      items: [{ id: "home-1", label: "home", line1: "1 Old Rd", city: "Tampa", state: "FL" }],
+    } as never);
 
     await typeAddress();
     await fireEvent.press(button("Done"));
 
     await waitFor(() => expect(endOnboarding).toHaveBeenCalled());
+    expect(apiPatch).toHaveBeenCalledWith(
+      "/v1/addresses/{address_id}",
+      {
+        line1: "120 Main St",
+        line2: null,
+        city: "Miami",
+        state: "FL",
+        zip_code: "33101",
+        is_default: true,
+      },
+      { auth: true, params: { address_id: "home-1" } },
+    );
     expect(apiPatch).toHaveBeenCalledWith(
       "/v1/auth/me",
       { home_city: "Miami", home_state: "FL" },
@@ -425,14 +475,17 @@ describe("SignUpScreen: the home step", () => {
     await reachHome("pro");
 
     await fireEvent.press(button("Back"));
-    expect(await screen.findByText("Tell us your name!")).toBeTruthy();
+    expect(await arrive("Tell us your name!")).toBeTruthy();
     expect(field("First name").props.value).toBe("Ana");
 
+    // A double tap: the second press meets the home step while it slides in, and is ignored.
     await fireEvent.press(button("Continue"));
-    await screen.findByText("Where do you live?");
+    await fireEvent.press(button("Done"));
+    await arrive("Where do you live?");
     expect(apiPatch).not.toHaveBeenCalled(); // the names did not change
+    expect(screen.queryByText("Fill in this field.")).toBeNull();
     await act(async () => mockGuard.onBlocked());
-    expect(await screen.findByText("Tell us your name!")).toBeTruthy();
+    expect(await arrive("Tell us your name!")).toBeTruthy();
   });
 });
 

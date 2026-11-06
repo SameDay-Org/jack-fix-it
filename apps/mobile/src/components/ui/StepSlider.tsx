@@ -100,12 +100,19 @@ export function StepSlider<Key extends string>({
     onSettledRef.current = onSettled;
   });
 
-  // The transition's end: the slot that left is emptied, so its fields leave the tree.
+  // The transition's end: the slot that left is emptied, so its fields leave the tree. A transition
+  // that another one replaced meanwhile ends without a word: its pane is no longer the current one.
+  const shownSlots = useRef(slots);
+  useLayoutEffect(() => {
+    shownSlots.current = slots;
+  });
   const settle = (front: Slot, key: Key) => {
-    setSlots((current) =>
-      current.front === front && current[front] === key
-        ? { ...current, [other(front)]: null }
-        : current,
+    const current = shownSlots.current;
+    if (current.front !== front || current[front] !== key) return;
+    setSlots((latest) =>
+      latest.front === front && latest[front] === key
+        ? { ...latest, [other(front)]: null }
+        : latest,
     );
     onSettledRef.current?.(key);
   };

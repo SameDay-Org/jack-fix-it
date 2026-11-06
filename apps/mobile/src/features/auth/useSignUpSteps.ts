@@ -179,9 +179,9 @@ export function useHomeStep(
         try {
           await saveAddress(savedAddressInput(fields, t("signUp.home.label"), true));
         } catch (error) {
-          // 409: a "Home" saved by an earlier try whose card update failed, or a full book.
-          // Neither stops the card: the address book is the customer's to edit later.
-          if (!(error instanceof ApiError && error.status === 409)) throw error;
+          // A full book (only an account that already kept addresses): the card still goes on;
+          // the book is the customer's to edit later.
+          if (!(error instanceof ApiError && error.code === "address_limit_reached")) throw error;
         }
       }
       await updateMe({
