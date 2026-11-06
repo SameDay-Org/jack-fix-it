@@ -56,7 +56,12 @@ from app.modules.payouts.service import (
 )
 from app.modules.pros.service import ProService
 from app.observability import configure_logging
-from scripts.staff_operator import NOT_AN_ADMIN, add_operator_arguments, operator_of
+from scripts.staff_operator import (
+    NOT_AN_ADMIN,
+    add_operator_arguments,
+    operator_of,
+    report_failure,
+)
 
 _ACCOUNT_ID: Final = re.compile(r"acct_[A-Za-z0-9]+")
 
@@ -125,7 +130,8 @@ async def run(
     stripe: StripeConnect | None,
     io: Io,
 ) -> int:
-    """0 when the action is done, 1 on a refusal (printed). Raises SystemExit on bad flags."""
+    """0 when the action is done, 1 on a refusal or a failure (printed). Raises SystemExit
+    on bad flags."""
     args = parse_args(argv)
     pro_id: uuid.UUID = args.pro
     adopt: str | None = args.adopt
@@ -188,6 +194,8 @@ async def run(
             "nothing changed.",
             file=io.out,
         )
+    except Exception as error:  # noqa: BLE001 - the boundary: a summary only (report_failure)
+        report_failure(error, io.out, entity="pro profile")
     return 1
 
 

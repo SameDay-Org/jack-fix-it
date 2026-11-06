@@ -56,7 +56,12 @@ from app.modules.payments.service import (
 )
 from app.modules.payouts.errors import PaymentsProviderError, PaymentsUnavailableError
 from app.observability import configure_logging
-from scripts.staff_operator import NOT_AN_ADMIN, add_operator_arguments, operator_of
+from scripts.staff_operator import (
+    NOT_AN_ADMIN,
+    add_operator_arguments,
+    operator_of,
+    report_failure,
+)
 
 _INTENT_ID: Final = re.compile(r"pi_[A-Za-z0-9]+")
 
@@ -126,7 +131,8 @@ async def run(
     stripe: StripePayments | None,
     io: Io,
 ) -> int:
-    """0 when the action is done, 1 on a refusal (printed). Raises SystemExit on bad flags."""
+    """0 when the action is done, 1 on a refusal or a failure (printed). Raises SystemExit
+    on bad flags."""
     args = parse_args(argv)
     payment_id: uuid.UUID = args.payment
     adopt: str | None = args.adopt
@@ -189,6 +195,8 @@ async def run(
             "platform's); nothing changed.",
             file=io.out,
         )
+    except Exception as error:  # noqa: BLE001 - the boundary: a summary only (report_failure)
+        report_failure(error, io.out, entity="payment")
     return 1
 
 

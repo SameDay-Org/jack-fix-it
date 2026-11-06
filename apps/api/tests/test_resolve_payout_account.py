@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select, update
+from sqlalchemy import text as sql
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -608,6 +609,70 @@ async def test_an_audit_write_that_fails_changes_nothing(
 
     assert await stored(db_session, pro_id) == before
     assert await audit_rows(db_session) == []
+
+
+@pytest.mark.parametrize("failure", ["database", "unexpected"])
+async def test_a_failure_at_the_write_prints_and_logs_a_summary_only(
+    db_session: AsyncSession,
+    settings: Settings,
+    caplog: pytest.LogCaptureFixture,
+    operator: uuid.UUID,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    """Vault round 2 B3: a database error's text holds the INSERT and its parameters (the
+    reason, the account id), and any error's message can quote them. The script prints and
+    logs a summary only (app.db_errors), exits 1, and nothing is applied."""
+    pro_id = await make_profile(db_session)
+    before = await stored(db_session, pro_id)
+    if failure == "database":
+        # A real PostgreSQL refusal of the audit insert; NOT VALID spares the existing rows.
+        await db_session.execute(
+            sql("ALTER TABLE audit_log ADD CONSTRAINT audit_refused CHECK (false) NOT VALID")
+        )
+        await db_session.commit()
+    else:
+
+        async def fail(*_: object, **__: object) -> None:
+            raise RuntimeError(f"audit write failed: {ACCOUNT} {REASON}")
+
+        monkeypatch.setattr(AuditRepository, "add", fail)
+    terminal = Terminal()
+
+    code, logs = await resolve(
+        db_session,
+        settings,
+        FakeStripe(profiles={ACCOUNT: str(pro_id)}),
+        terminal,
+        caplog,
+        *("--pro", str(pro_id), "--adopt", ACCOUNT, "--yes", "--reason", REASON),
+    )
+
+    assert code == 1
+    fields = (
+        {
+            "error_class": "IntegrityError",
+            "sqlstate": "23514",
+            "constraint": "audit_refused",
+            "table": "audit_log",
+        }
+        if failure == "database"
+        else {"error_class": "RuntimeError"}
+    )
+    detail = " ".join(f"{name}={value}" for name, value in fields.items())
+    assert terminal.text.splitlines()[-1] == (
+        f"Error: the run failed ({detail}). The change and its audit row are saved together "
+        "or not at all: check the pro profile before running this again."
+    )
+    failed = [log for log in logs if log["message"] == "staff_script_failed"]
+    assert [{name: log.get(name) for name in ("entity", *fields)} for log in failed] == [
+        {"entity": "pro profile", **fields}
+    ]
+    assert all("exc_info" not in log and "INSERT" not in json.dumps(log) for log in logs)
+    assert "INSERT" not in terminal.text
+    assert await stored(db_session, pro_id) == before
+    assert await audit_rows(db_session) == []
+    assert resolved(logs) == []
 
 
 @pytest.mark.parametrize("action", ["adopt", "allow-new"])
