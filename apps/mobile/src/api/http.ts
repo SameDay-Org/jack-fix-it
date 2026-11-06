@@ -13,6 +13,11 @@ export type PostPath = {
   [P in keyof paths]: paths[P] extends { post: object } ? P : never;
 }[keyof paths];
 
+/** Paths that accept PATCH, from the OpenAPI schema. */
+export type PatchPath = {
+  [P in keyof paths]: paths[P] extends { patch: object } ? P : never;
+}[keyof paths];
+
 /**
  * The JSON body of an operation's success response: 200, 201 or 202 with JSON, `undefined` for a
  * 202 without content (an accepted request, like the SMS code send) and for 204.
@@ -33,9 +38,17 @@ type SuccessBody<Operation> = Operation extends { responses: infer Responses }
 
 export type GetResponse<P extends GetPath> = SuccessBody<paths[P]["get"]>;
 export type PostResponse<P extends PostPath> = SuccessBody<paths[P]["post"]>;
+export type PatchResponse<P extends PatchPath> = SuccessBody<paths[P]["patch"]>;
 
 /** The JSON request body a POST path takes; `undefined` for one that takes none (a quote's accept). */
 export type PostBody<P extends PostPath> = paths[P]["post"] extends {
+  requestBody: { content: { "application/json": infer Body } };
+}
+  ? Body
+  : undefined;
+
+/** The JSON request body a PATCH path takes: the fields to change, the rest left as they are. */
+export type PatchBody<P extends PatchPath> = paths[P]["patch"] extends {
   requestBody: { content: { "application/json": infer Body } };
 }
   ? Body
@@ -48,8 +61,9 @@ type PathParams<Operation> = Operation extends { parameters: { path: infer Param
 
 export type GetParams<P extends GetPath> = PathParams<paths[P]["get"]>;
 export type PostParams<P extends PostPath> = PathParams<paths[P]["post"]>;
+export type PatchParams<P extends PatchPath> = PathParams<paths[P]["patch"]>;
 
-type Method = "GET" | "POST";
+type Method = "GET" | "POST" | "PATCH";
 
 const ACCEPTED = 202;
 
@@ -119,7 +133,7 @@ async function readErrorCode(response: Response): Promise<string | undefined> {
  */
 export async function sendRequest<T>(
   method: Method,
-  path: GetPath | PostPath,
+  path: GetPath | PostPath | PatchPath,
   options: SendOptions = {},
 ): Promise<T> {
   throwIfAborted(options.signal);

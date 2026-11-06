@@ -53,6 +53,10 @@ export type { ReduceTransparency } from "./useReduceTransparency";
 export { CodeInput } from "./CodeInput";
 export type { CodeInputProps } from "./CodeInput";
 export { moveAccessibilityFocus } from "./focus";
+export { FlowProgress } from "./FlowProgress";
+export type { FlowProgressProps } from "./FlowProgress";
+export { StepSlider } from "./StepSlider";
+export type { StepSliderProps } from "./StepSlider";
 export { IdCard } from "./IdCard";
 export type { IdCardProps } from "./IdCard";
 export {

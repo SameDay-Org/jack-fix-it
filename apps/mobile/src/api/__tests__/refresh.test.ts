@@ -25,6 +25,7 @@ import {
   seedRefreshToken,
   settle,
   storedRefreshToken,
+  tokenCalls,
   user,
   watchConsole,
   type FetchMock,
@@ -45,6 +46,7 @@ const SIGNED_OUT = {
   accessTokenExpiresAt: null,
   cleanupPending: false,
   restoreFailure: null,
+  onboardingUserId: null,
 };
 
 let fetchMock: FetchMock;
@@ -164,7 +166,7 @@ describe("refresh", () => {
     await expect(apiGet(ME, { auth: true })).rejects.toBeInstanceOf(SessionExpiredError);
 
     expect(storedRefreshToken()).toBeNull();
-    expect(secureStoreMock.deleteItemAsync).toHaveBeenCalledTimes(1);
+    expect(tokenCalls(secureStoreMock.deleteItemAsync)).toHaveLength(1);
     expect(sessionStore.getState()).toEqual(SIGNED_OUT);
     expect(queryClient.getQueryData(["me"])).toBeUndefined();
     expect(callsTo(fetchMock, ME)).toHaveLength(1);
@@ -567,7 +569,7 @@ describe("sign-out barrier", () => {
       accessToken: "access-3",
       cleanupPending: false,
     });
-    expect(secureStoreMock.deleteItemAsync).toHaveBeenCalledTimes(1); // the old token, before the write
+    expect(tokenCalls(secureStoreMock.deleteItemAsync)).toHaveLength(1); // the old token, before the write
     expect(callHeader(callsTo(fetchMock, ME)[0], "Authorization")).toBe("Bearer access-3");
     expect(revokedTokens()).toEqual([{ refresh_token: "refresh-1" }]);
   });
@@ -608,7 +610,7 @@ describe("sign-out barrier", () => {
     await expect(first).rejects.toMatchObject({ name: "SessionExpiredError", reason: "expired" });
     expect(callsTo(fetchMock, ME)).toHaveLength(1);
     expect(callsTo(fetchMock, REFRESH)).toHaveLength(1);
-    expect(secureStoreMock.deleteItemAsync).toHaveBeenCalledTimes(1);
+    expect(tokenCalls(secureStoreMock.deleteItemAsync)).toHaveLength(1);
     expect(sessionStore.getState()).toEqual(SIGNED_OUT);
   });
 });

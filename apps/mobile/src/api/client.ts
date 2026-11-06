@@ -5,6 +5,10 @@ import {
   type GetParams,
   type GetPath,
   type GetResponse,
+  type PatchBody,
+  type PatchParams,
+  type PatchPath,
+  type PatchResponse,
   type PostBody,
   type PostParams,
   type PostPath,
@@ -58,6 +62,24 @@ export function apiPost<P extends PostPath>(
   const { params, query, ...session }: SentOptions = options ?? {};
   return withSession(session, (accessToken) =>
     sendRequest<PostResponse<P>>("POST", path, {
+      body,
+      accessToken,
+      signal: session.signal,
+      params,
+      query,
+    }),
+  );
+}
+
+/** Typed PATCH with a JSON body: the fields to change (a profile update). */
+export function apiPatch<P extends PatchPath>(
+  path: P,
+  body: PatchBody<P>,
+  ...[options]: OptionsFor<PatchParams<P>>
+): Promise<PatchResponse<P>> {
+  const { params, query, ...session }: SentOptions = options ?? {};
+  return withSession(session, (accessToken) =>
+    sendRequest<PatchResponse<P>>("PATCH", path, {
       body,
       accessToken,
       signal: session.signal,
