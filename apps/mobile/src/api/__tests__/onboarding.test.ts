@@ -41,7 +41,7 @@ const SIGN_UP = {
   email: user.email,
   password: "correct horse battery",
   role: "customer" as const,
-  locale: "en",
+  locale: "en" as const,
 };
 
 let fetchMock: FetchMock;

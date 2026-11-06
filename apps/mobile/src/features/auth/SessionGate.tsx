@@ -98,12 +98,16 @@ function GroupStack({ group, onboarding }: { group: Group; onboarding: boolean }
       const focused = focusedGroup(navigation);
       if (focused === undefined || focused === group) return;
     }
-    // Synchronous: `dispatch` queues the action for a later render, as the redirect does.
-    navigation.dispatchSync({ type: "REPLACE", payload: { name: group } });
+    // Synchronous: `dispatch` queues the action for a later render, as the redirect does. Not for
+    // an account on its sign-up flow, restored while the launch frame covered the router: the
+    // signed-in group's guard sends it to the flow, where a replace would open the group's first
+    // screen (Welcome), as Expo Router's navigators ignore a nested screen param. That redirect
+    // takes a few renders, under the launch intro.
+    if (!onboarding) navigation.dispatchSync({ type: "REPLACE", payload: { name: group } });
     replaced.current = group;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the guards must change in the same commit as the navigation state dispatched above; an update from a layout effect is committed before paint.
     setShown(group);
-  }, [group, navigation, shown]);
+  }, [group, navigation, onboarding, shown]);
 
   return (
     <Stack

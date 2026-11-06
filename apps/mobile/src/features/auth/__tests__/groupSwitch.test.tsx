@@ -150,6 +150,21 @@ describe("an account on its sign-up flow (#292)", () => {
     expect(mounted.has("home")).toBe(false);
   });
 
+  it("a relaunch restored after the launch frame lands on the sign-up screen too", async () => {
+    // A real launch: the gate shows the launch frame while the router already has the launch
+    // URL's group, (app), focused; the restore then puts the account on its flow.
+    mockSession.state = { ...SESSION_SIGNED_OUT, status: "restoring" };
+    const result = await renderRouter(routes, { initialUrl: "/" });
+
+    await act(async () => mockSession.set(ON_FLOW));
+
+    expect(result.getPathname()).toBe("/sign-up");
+    expect(mounted.has("home")).toBe(false);
+    // Built once, and not over Welcome: the group's first screen is never shown on the way.
+    expect(lifecycle.filter((entry) => entry.startsWith("sign-up"))).toHaveLength(1);
+    expect(lifecycle.some((entry) => entry.includes("unmount"))).toBe(false);
+  });
+
   it("an account signed in with another account's marker is not held on any flow", async () => {
     mockSession.state = { ...SESSION_SIGNED_IN, onboardingUserId: "someone-else" };
 

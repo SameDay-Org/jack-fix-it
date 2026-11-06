@@ -327,7 +327,7 @@ describe("SignUpScreen: the home step", () => {
 
   it("a customer's address is saved as Home, then the card's city and state; the flow ends", async () => {
     await reachHome("customer");
-    jest.mocked(apiPost).mockResolvedValue({});
+    jest.mocked(apiPost).mockResolvedValue({} as never);
     expect(screen.getByLabelText("Step 3 of 3")).toBeTruthy();
 
     await typeAddress();

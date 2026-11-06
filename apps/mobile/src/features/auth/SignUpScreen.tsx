@@ -40,10 +40,13 @@ import {
   type SignUpStep,
 } from "./signUpSteps";
 import { useCredentialsForm, type Credentials } from "./useCredentialsForm";
+import { useFocusedFieldInView } from "./useFocusedFieldInView";
 import { useHomeStep, useNameStep } from "./useSignUpSteps";
 
 /** The page's side margin: the card is as wide as the content, up to its design width. */
 const GUTTER = 16;
+/** Room kept under a focused field above the keyboard: its hint or error line. */
+const FIELD_FOOTER = 28;
 
 /**
  * Sign-up as one screen (#250 §1, #292): a progress bar, the ID card filling in as the person
@@ -93,6 +96,7 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
   const headings = useRef<Partial<Record<SignUpStep, ComponentRef<typeof Text> | null>>>({});
   const firstFields = useRef<Partial<Record<SignUpStep, InputHandle | null>>>({});
   const lastName = useRef<InputHandle>(null);
+  const scroll = useFocusedFieldInView(FIELD_FOOTER);
   const index = SIGN_UP_STEPS.indexOf(step);
 
   const advanceFrom = useCallback((done: SignUpStep) => {
@@ -298,6 +302,7 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
         className="flex-1"
       >
         <ScrollView
+          {...scroll}
           contentContainerClassName="flex-grow gap-6 px-4 pb-4 pt-2"
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
@@ -345,6 +350,7 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
             direction={direction}
             renderStep={renderStep}
             onSettled={onSettled}
+            gutter={GUTTER}
             testID="sign-up-step"
           />
           <View className="flex-1" />

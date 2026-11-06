@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react-native";
+import { act, fireEvent, render, screen } from "@testing-library/react-native";
 import { useState } from "react";
 import { Text, TextInput } from "react-native";
 import { useReducedMotion, withTiming } from "react-native-reanimated";
@@ -58,11 +58,22 @@ const finishAtOnce = (to: number, _config?: object, done?: (finished?: boolean) 
   return to;
 };
 
-const go = async () => act(async () => screen.getByTestId("go").props.onPress());
+const press = async () => act(async () => screen.getByTestId("go").props.onPress());
+
+/** The next step, as on a device: the arriving pane is laid out, which starts the slide. */
+async function go() {
+  await press();
+  await fireEvent(screen.getByTestId("slider-current"), "layout", {
+    nativeEvent: { layout: { x: 0, y: 0, width: 320, height: 120 } },
+  });
+}
 
 beforeEach(() => {
   jest.mocked(useReducedMotion).mockReturnValue(false);
-  jest.mocked(withTiming).mockReset().mockImplementation(finishAtOnce);
+  jest
+    .mocked(withTiming)
+    .mockReset()
+    .mockImplementation(finishAtOnce as never);
 });
 
 describe("StepSlider", () => {
@@ -76,7 +87,11 @@ describe("StepSlider", () => {
 
     expect(screen.getByRole("header", { name: "pane two" })).toBeTruthy();
     expect(screen.queryByRole("header", { name: "pane one" })).toBeNull();
-    expect(screen.queryByTestId("slider-leaving", { includeHiddenElements: true })).toBeNull();
+    // The slot it left is emptied: the old pane's fields are out of the tree.
+    expect(
+      screen.getByTestId("slider-leaving", { includeHiddenElements: true }).props.children,
+    ).toBeNull();
+    expect(screen.queryByText("pane one", { includeHiddenElements: true })).toBeNull();
     expect(onSettled).toHaveBeenCalledWith("two");
   });
 
@@ -94,7 +109,7 @@ describe("StepSlider", () => {
 
   it("keeps the leaving pane mounted, hidden from assistive technology, until it is gone", async () => {
     // The timings never finish here: the transition stays in the middle.
-    jest.mocked(withTiming).mockImplementation((to: number) => to);
+    jest.mocked(withTiming).mockImplementation(((to: number) => to) as never);
     await render(<Harness />);
     await act(async () => screen.getByLabelText("field").props.onChangeText("kept"));
 
@@ -107,6 +122,22 @@ describe("StepSlider", () => {
       "kept",
     );
     expect(screen.queryByLabelText("field")).toBeNull(); // not reachable while it leaves
+  });
+
+  it("waits for the arriving pane's layout to slide, and starts anyway when none comes", async () => {
+    jest.useFakeTimers();
+    try {
+      await render(<Harness />);
+      await press();
+      expect(withTiming).not.toHaveBeenCalled(); // nothing moves before the pane is laid out
+
+      await act(async () => jest.advanceTimersByTime(120));
+
+      expect(withTiming).toHaveBeenCalled();
+      expect(screen.getByRole("header", { name: "pane two" })).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("crossfades in place under Reduce Motion", async () => {
