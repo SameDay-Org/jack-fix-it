@@ -74,7 +74,7 @@ from typing import Final
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS, Settings
+from app.config import STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS, Settings, is_publishable_key
 from app.errors import NotFoundError
 from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailableError
 from app.integrations.stripe_payments import (
@@ -82,6 +82,15 @@ from app.integrations.stripe_payments import (
     PaymentIntentFacts,
     PaymentIntentState,
     StripePayments,
+)
+from app.modules.audit.service import AuditService
+from app.modules.audit.types import (
+    AuditAction,
+    AuditEntity,
+    AuditEntityType,
+    AuditState,
+    Operator,
+    timestamp,
 )
 from app.modules.payments.errors import (
     PaymentNeedsReviewError,
@@ -189,6 +198,16 @@ def _matches(intent: PaymentIntentFacts, payment: PaymentRecord, customer_id: st
     )
 
 
+def _intent_state(payment: Payment) -> AuditState:
+    """What a staff recovery changes on the payment, as audit_log records it (ids, status and
+    timestamps; no PII)."""
+    return {
+        "status": payment.status.value,
+        "stripe_payment_intent_id": payment.stripe_payment_intent_id,
+        "payment_intent_requested_at": timestamp(payment.payment_intent_requested_at),
+    }
+
+
 def _record(payment: Payment) -> PaymentRecord:
     return PaymentRecord(
         id=payment.id,
@@ -216,6 +235,7 @@ class PaymentService:
         self._pros = ProService(session)
         self._settings = SettingsService(session)
         self._users = UserService(session)
+        self._audit = AuditService(session)
 
     async def payment_sheet(
         self, user: UserAccount, request_id: uuid.UUID, quote_id: uuid.UUID
@@ -244,6 +264,11 @@ class PaymentService:
     def _require_stripe(self) -> tuple[StripePayments, str]:
         if self._stripe is None or self._config.publishable_key is None:
             logger.warning("payments_stripe_not_configured")
+            raise PaymentsNotConfiguredError
+        if not is_publishable_key(self._config.publishable_key):
+            # Settings refuse such a key at load; this keeps one built another way (a copy that
+            # skipped validation) out of the response. Never logs the value: it may be a secret.
+            logger.error("payments_publishable_key_invalid")
             raise PaymentsNotConfiguredError
         return self._stripe, self._config.publishable_key
 
@@ -446,18 +471,23 @@ class PaymentService:
         )
         raise PaymentNeedsReviewError
 
-    async def adopt_intent(self, payment_id: uuid.UUID, intent_id: str, *, apply: bool) -> None:
+    async def adopt_intent(
+        self, payment_id: uuid.UUID, intent_id: str, operator: Operator, *, apply: bool
+    ) -> None:
         """Staff recovery of a 409 payment_needs_review (scripts/resolve_payment_intent.py):
         stores `intent_id` as the payment's PaymentIntent, once Stripe shows its metadata naming
         the payment and its amount, currency and customer equal to the row's. The payment must
-        hold no intent. `apply` False checks only. Ends the transaction;
+        hold no intent. `apply` False checks only; applied, the audit_log row (app.modules.audit) is
+        written in the same transaction, so its failure changes nothing. Ends the transaction;
         PaymentRecoveryRefusedError on a refusal, PaymentsNotConfiguredError without Stripe,
         PaymentsUnavailableError or PaymentsProviderError when Stripe is unavailable or refuses
         the intent."""
         if self._stripe is None:
             raise PaymentsNotConfiguredError
         try:
-            payment = _record(await self._payment_to_resolve(payment_id))
+            row = await self._payment_to_resolve(payment_id)
+            before = _intent_state(row)
+            payment = _record(row)
             customer_id = await self._users.stripe_customer_id(payment.customer_id)
             async with self._stripe_call(payment, "payment_intent_facts"):
                 intent = await self._stripe.payment_intent_facts(intent_id)
@@ -468,23 +498,42 @@ class PaymentService:
                 )
             if apply:
                 try:
-                    await self._payments.set_payment_intent_if_missing(payment_id, intent_id)
+                    stored = await self._payments.set_payment_intent_if_missing(
+                        payment_id, intent_id
+                    )
                 except IntegrityError:
                     raise PaymentRecoveryRefusedError(
                         "That PaymentIntent is already another payment's; nothing changed."
                     ) from None
+                if not stored:  # pragma: no cover - the row is locked from the read to here
+                    raise PaymentRecoveryRefusedError(
+                        "This payment already has a PaymentIntent; nothing changed."
+                    )
+                await self._audit.record(
+                    operator,
+                    AuditAction.PAYMENT_INTENT_ADOPT,
+                    AuditEntity(AuditEntityType.PAYMENT, payment_id),
+                    before,
+                    {**before, "stripe_payment_intent_id": intent_id},
+                )
                 await self._session.commit()
-                logger.warning("payment_intent_resolved", extra={**payment.ids, "action": "adopt"})
+                logger.warning(
+                    "payment_intent_resolved",
+                    extra={**payment.ids, "action": "adopt", "operator_id": str(operator.user_id)},
+                )
         finally:
             await self._session.rollback()
 
-    async def allow_new_intent(self, payment_id: uuid.UUID, *, apply: bool) -> None:
+    async def allow_new_intent(
+        self, payment_id: uuid.UUID, operator: Operator, *, apply: bool
+    ) -> None:
         """Staff recovery of a 409 payment_needs_review (scripts/resolve_payment_intent.py), once
         the Stripe dashboard shows no PaymentIntent for the payment: forgets its unresolved
         create, so the customer's next call creates one. Refused while the create is younger
         than Stripe's key retention, when the payment holds an intent, or when no create was
-        attempted. `apply` False checks only. Ends the transaction; PaymentRecoveryRefusedError
-        on a refusal."""
+        attempted. `apply` False checks only; applied, the audit_log row (app.modules.audit) is
+        written in the same transaction. Ends the transaction; PaymentRecoveryRefusedError on a
+        refusal."""
         try:
             payment = await self._payment_to_resolve(payment_id)
             requested = payment.payment_intent_requested_at
@@ -500,9 +549,20 @@ class PaymentService:
                 )
             if apply:
                 ids = _record(payment).ids
+                before = _intent_state(payment)
                 await self._payments.clear_payment_intent_requested(payment_id)
+                await self._audit.record(
+                    operator,
+                    AuditAction.PAYMENT_INTENT_ALLOW_NEW,
+                    AuditEntity(AuditEntityType.PAYMENT, payment_id),
+                    before,
+                    {**before, "payment_intent_requested_at": None},
+                )
                 await self._session.commit()
-                logger.warning("payment_intent_resolved", extra={**ids, "action": "allow_new"})
+                logger.warning(
+                    "payment_intent_resolved",
+                    extra={**ids, "action": "allow_new", "operator_id": str(operator.user_id)},
+                )
         finally:
             await self._session.rollback()
 

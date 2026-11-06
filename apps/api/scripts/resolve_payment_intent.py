@@ -21,6 +21,11 @@ endpoint.
   hours, STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS) has passed since the attempt (a younger
   attempt is refused: Stripe may still answer its key with an intent).
 
+--operator <admin email> is required: an active admin account, else refused before anything
+else. Each applied action writes one audit_log row (operator, action, before and after, the
+optional --reason) in the same transaction as the change (scripts/staff_operator.py,
+app.modules.audit); a refusal or an unconfirmed run writes nothing.
+
 Checks first, prints what it will do, then asks to confirm (--yes skips that,
 non-interactive). Goes through PaymentService, which logs payment_intent_resolved with the
 payment's ids and the action. Prints the payment id only: never a PaymentIntent id, a customer
@@ -42,6 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_settings
 from app.db import create_engine, create_session_factory
 from app.integrations.stripe_payments import StripePayments, StripePaymentsClient
+from app.modules.audit.types import OperatorNotAdminError
 from app.modules.payments.errors import PaymentRecoveryRefusedError, PaymentsNotConfiguredError
 from app.modules.payments.service import (
     STRIPE_KEY_RETENTION_HOURS,
@@ -50,6 +56,7 @@ from app.modules.payments.service import (
 )
 from app.modules.payouts.errors import PaymentsProviderError, PaymentsUnavailableError
 from app.observability import configure_logging
+from scripts.staff_operator import NOT_AN_ADMIN, add_operator_arguments, operator_of
 
 _INTENT_ID: Final = re.compile(r"pi_[A-Za-z0-9]+")
 
@@ -107,6 +114,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         f"in its metadata, and at least {STRIPE_KEY_RETENTION_HOURS} hours after the attempt "
         "(younger is refused).",
     )
+    add_operator_arguments(parser)
     parser.add_argument("--yes", action="store_true", help="Non-interactive: skip the prompt.")
     return parser.parse_args(argv)
 
@@ -127,13 +135,18 @@ async def run(
             # Not repeated: the operator may have pasted something else, such as a secret.
             raise PaymentRecoveryRefusedError("--adopt takes a PaymentIntent id (pi_...).")
         async with sessions() as session:
+            # Before anything else: an unknown or non-admin operator changes nothing.
+            try:
+                operator = await operator_of(session, args)
+            finally:
+                await session.rollback()
             payments = PaymentService(session, stripe, PaymentsConfig.from_settings(settings))
 
             async def resolve(*, apply: bool) -> None:
                 if adopt is not None:
-                    await payments.adopt_intent(payment_id, adopt, apply=apply)
+                    await payments.adopt_intent(payment_id, adopt, operator, apply=apply)
                 else:
-                    await payments.allow_new_intent(payment_id, apply=apply)
+                    await payments.allow_new_intent(payment_id, operator, apply=apply)
 
             await resolve(apply=False)
             if adopt is not None:
@@ -161,6 +174,9 @@ async def run(
         return 0
     except PaymentRecoveryRefusedError as refusal:
         print(f"Error: {refusal}", file=io.out)
+    except OperatorNotAdminError:
+        # Before any change, or (demoted or suspended during the prompt) rolled back with it.
+        print(f"Error: {NOT_AN_ADMIN}", file=io.out)
     except (PaymentsNotConfiguredError, PaymentsUnavailableError):
         print(
             "Error: Stripe is not configured (STRIPE_SECRET_KEY) or not reachable right now; "

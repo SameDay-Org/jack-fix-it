@@ -58,7 +58,7 @@ TEST_EMAIL_SETTINGS: dict[str, object] = {
 # a public URL that never resolves.
 TEST_STRIPE_SETTINGS: dict[str, object] = {
     "stripe_secret_key": "sk_test_fixture-not-a-real-key",
-    "stripe_publishable_key": "pk_test_fixture-not-a-real-key",
+    "stripe_publishable_key": "pk_test_fixtureNotARealKey",
     "public_api_url": "https://api.example.invalid",
 }
 

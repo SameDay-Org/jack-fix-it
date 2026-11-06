@@ -16,11 +16,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.integrations.stripe_connect import StripeConnect, StripeUnavailableError
+from app.modules.audit.repository import AuditRepository
+from app.modules.audit.types import AuditValue, Operator, OperatorNotAdminError
+from app.modules.payouts.service import PayoutsConfig, PayoutsService
 from app.modules.pros.models import ProProfile
+from app.modules.pros.service import ProService
 from app.modules.users.models import User
-from app.modules.users.types import UserRole
+from app.modules.users.types import UserRole, UserStatus
 from app.observability import JsonFormatter
 from scripts.resolve_payout_account import Io, run
+from scripts.staff_operator import NOT_AN_ADMIN
+from tests.audit_helpers import (
+    OPERATOR_DOMAIN,
+    OPERATOR_EMAIL,
+    AuditRow,
+    audit_rows,
+    make_staff,
+)
 from tests.conftest import make_settings
 from tests.test_create_staff_user import sessions_of
 from tests.test_payouts_onboarding_api import FakeStripe
@@ -31,6 +43,12 @@ EMAIL_DOMAIN = "@resolve.example.invalid"
 # Older than the reconcile window (the app answers 409), younger than Stripe's key retention.
 YOUNG = timedelta(hours=23)
 OLD = timedelta(hours=25)
+
+
+@pytest.fixture(autouse=True)
+async def operator(db_session: AsyncSession) -> uuid.UUID:
+    """The active admin every run names with --operator (resolve adds the flag)."""
+    return await make_staff(db_session)
 
 
 @pytest.fixture
@@ -103,10 +121,14 @@ async def resolve(
     """Runs the script; asserts that neither its output nor its logs hold an account id or an
     email, and returns the exit code and the JSON log lines."""
     with caplog.at_level(logging.DEBUG):
+        if "--operator" not in argv:
+            argv = (*argv, "--operator", OPERATOR_EMAIL)
         code = await run(list(argv), sessions_of(session), settings, stripe, terminal.io)
     formatter = JsonFormatter()
     lines = [formatter.format(record) for record in caplog.records]
     for text in (terminal.text, *lines):
+        assert OPERATOR_DOMAIN not in text, text
+        assert REASON not in text, text
         assert not ACCOUNT_ID.search(text), text
         assert EMAIL_DOMAIN not in text, text
     return code, [json.loads(line) for line in lines]
@@ -431,9 +453,216 @@ async def test_flags_need_one_profile_and_one_action(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     with pytest.raises(SystemExit) as exit_info:
-        await run(argv, sessions_of(db_session), settings, None, Terminal().io)
+        await run(
+            [*argv, "--operator", OPERATOR_EMAIL],
+            sessions_of(db_session),
+            settings,
+            None,
+            Terminal().io,
+        )
 
     assert exit_info.value.code == 2
     err = capsys.readouterr().err
     assert ACCOUNT not in err
     assert EMAIL_DOMAIN not in err
+
+
+# audit_log (#58, Vault round 1 B2): every applied action is audited in its own transaction
+
+REASON = "Ticket 4522"
+
+
+@pytest.mark.parametrize("action", ["adopt", "allow-new"])
+async def test_an_applied_action_writes_one_audit_row(
+    db_session: AsyncSession,
+    settings: Settings,
+    caplog: pytest.LogCaptureFixture,
+    operator: uuid.UUID,
+    action: str,
+) -> None:
+    pro_id = await make_profile(db_session)
+    requested = (await stored(db_session, pro_id))[1]
+    assert requested is not None
+    flags = ["--adopt", ACCOUNT] if action == "adopt" else ["--allow-new"]
+
+    code, logs = await resolve(
+        db_session,
+        settings,
+        FakeStripe(profiles={ACCOUNT: str(pro_id)}),
+        Terminal(),
+        caplog,
+        *("--pro", str(pro_id), *flags, "--yes", "--reason", REASON),
+    )
+
+    assert code == 0
+    before: dict[str, AuditValue] = {
+        "stripe_account_id": None,
+        "stripe_account_requested_at": requested.isoformat(),
+    }
+    after = (
+        {**before, "stripe_account_id": ACCOUNT}
+        if action == "adopt"
+        else {**before, "stripe_account_requested_at": None}
+    )
+    verb = "adopt_payout_account" if action == "adopt" else "allow_new_payout_account"
+    # Ids, the Stripe account id and a timestamp: no email or secret.
+    assert await audit_rows(db_session) == [
+        AuditRow(operator, f"pro_profile.{verb}", "pro_profile", pro_id, before, after, REASON)
+    ]
+    assert [log["operator_id"] for log in logs if log["message"] == "payouts_account_resolved"] == [
+        str(operator)
+    ]
+
+
+async def test_refusals_and_unconfirmed_runs_write_no_audit_row(
+    db_session: AsyncSession, settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
+    pro_id = await make_profile(db_session)
+    young = await make_profile(db_session, attempted=YOUNG)
+    stripe = FakeStripe(profiles={ACCOUNT: str(pro_id)})
+
+    unconfirmed, _ = await resolve(
+        db_session,
+        settings,
+        stripe,
+        Terminal(["n"]),
+        caplog,
+        *("--pro", str(pro_id), "--adopt", ACCOUNT),
+    )
+    refused, _ = await resolve(
+        db_session,
+        settings,
+        stripe,
+        Terminal(),
+        caplog,
+        *("--pro", str(young), "--allow-new", "--yes"),
+    )
+
+    assert unconfirmed == refused == 1
+    assert (await stored(db_session, pro_id))[0] is None
+    assert await audit_rows(db_session) == []
+
+
+@pytest.mark.parametrize("who", ["unknown", "agent", "customer", "pro", "suspended admin"])
+async def test_an_operator_who_is_not_an_active_admin_is_refused_first(
+    db_session: AsyncSession, settings: Settings, caplog: pytest.LogCaptureFixture, who: str
+) -> None:
+    """Before the profile is read or Stripe asked: nothing is asked, changed or audited."""
+    pro_id = await make_profile(db_session)
+    before = await stored(db_session, pro_id)
+    email = f"{who.replace(' ', '-')}{OPERATOR_DOMAIN}"
+    if who == "suspended admin":
+        await make_staff(db_session, email=email, status=UserStatus.SUSPENDED)
+    elif who != "unknown":
+        await make_staff(db_session, email=email, role=UserRole(who))
+    terminal = Terminal(["y"])
+
+    code, logs = await resolve(
+        db_session,
+        settings,
+        FakeStripe(profiles={ACCOUNT: str(pro_id)}),
+        terminal,
+        caplog,
+        *("--pro", str(pro_id), "--adopt", ACCOUNT, "--operator", email),
+    )
+
+    assert code == 1
+    assert terminal.text == f"Error: {NOT_AN_ADMIN}\n"
+    assert terminal.prompts == []
+    assert await stored(db_session, pro_id) == before
+    assert await audit_rows(db_session) == []
+    assert resolved(logs) == []
+
+
+@pytest.mark.parametrize("action", ["adopt", "allow-new"])
+async def test_an_audit_write_that_fails_changes_nothing(
+    db_session: AsyncSession,
+    settings: Settings,
+    action: str,
+    operator: uuid.UUID,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The row is inserted after the change and before the commit, in the same transaction: an
+    insert that fails leaves the profile as it was."""
+    pro_id = await make_profile(db_session)
+    before = await stored(db_session, pro_id)
+    payouts = PayoutsService(
+        db_session,
+        ProService(db_session),
+        FakeStripe(profiles={ACCOUNT: str(pro_id)}),
+        PayoutsConfig.from_settings(settings),
+    )
+
+    async def fail(*_: object, **__: object) -> None:
+        raise RuntimeError("audit write failed")
+
+    monkeypatch.setattr(AuditRepository, "add", fail)
+    apply = (
+        payouts.adopt_account(pro_id, ACCOUNT, Operator(operator), apply=True)
+        if action == "adopt"
+        else payouts.allow_new_account(pro_id, Operator(operator), apply=True)
+    )
+
+    with pytest.raises(RuntimeError, match="audit write failed"):
+        await apply
+
+    assert await stored(db_session, pro_id) == before
+    assert await audit_rows(db_session) == []
+
+
+@pytest.mark.parametrize("action", ["adopt", "allow-new"])
+async def test_an_operator_no_longer_an_admin_at_the_write_changes_nothing(
+    db_session: AsyncSession, settings: Settings, action: str
+) -> None:
+    """The service checks the operator again before it records: one demoted, suspended or
+    deleted since the script's check (here an id with no account) is refused, rolled back."""
+    pro_id = await make_profile(db_session)
+    before = await stored(db_session, pro_id)
+    payouts = PayoutsService(
+        db_session,
+        ProService(db_session),
+        FakeStripe(profiles={ACCOUNT: str(pro_id)}),
+        PayoutsConfig.from_settings(settings),
+    )
+    apply = (
+        payouts.adopt_account(pro_id, ACCOUNT, Operator(uuid.uuid4()), apply=True)
+        if action == "adopt"
+        else payouts.allow_new_account(pro_id, Operator(uuid.uuid4()), apply=True)
+    )
+
+    with pytest.raises(OperatorNotAdminError):
+        await apply
+
+    assert await stored(db_session, pro_id) == before
+    assert await audit_rows(db_session) == []
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--allow-new"],
+        ["--allow-new", "--operator", OPERATOR_EMAIL, "--reason", "x" * 400 + REASON * 10],
+    ],
+)
+async def test_operator_is_required_and_reason_bounded(
+    argv: list[str],
+    settings: Settings,
+    db_session: AsyncSession,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No --operator, or a --reason over 500 characters: refused by argparse before anything,
+    and the reason is not echoed."""
+    with pytest.raises(SystemExit) as exit_info:
+        await run(
+            ["--pro", "3f0c6a2e-1111-4222-8333-444455556666", *argv],
+            sessions_of(db_session),
+            settings,
+            None,
+            Terminal().io,
+        )
+
+    assert exit_info.value.code == 2
+    err = capsys.readouterr().err
+    assert ("--operator" in err) if len(argv) == 1 else ("at most 500 characters" in err)
+    assert REASON not in err
+    assert await audit_rows(db_session) == []
