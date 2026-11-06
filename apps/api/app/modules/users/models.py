@@ -50,3 +50,7 @@ class User(IdTimestampsMixin, Base):
     home_state: Mapped[str | None] = mapped_column(String(2))
     # The ID photo: the user's own profile_photo upload key, never a URL (#250).
     photo_key: Mapped[str | None] = mapped_column(String(512))
+    # The Stripe Customer the user's payments attach to (#58): created at the first payment
+    # with an idempotency key derived from the user id, then reused; NULL until then. An id
+    # on Stripe's side, never logged.
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(255), unique=True)

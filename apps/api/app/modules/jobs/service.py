@@ -10,6 +10,10 @@ A rejected transition changes nothing and writes no event.
 
 The caller owns the transaction: transition() flushes and never commits, so a feature can
 change a job together with its own rows (payments, photos, disputes) atomically.
+
+JobScheduler creates a job (#61, once its payment succeeds): inserted in its default status,
+scheduled, with a `created` event, in the caller's transaction. Creating is not a status change,
+so the database guard lets the insert through.
 """
 
 import uuid
@@ -33,6 +37,8 @@ from app.modules.pros.service import ProService
 from app.modules.users.types import UserAccount, UserRole
 
 STATUS_CHANGED: Final = "status_changed"
+# The first event of every job: no from_status, to_status scheduled.
+CREATED: Final = "created"
 
 
 # The database guard (#163): triggers on service_requests and jobs refuse a status change unless
@@ -163,3 +169,54 @@ class JobStateMachine:
             if profile_id != job.pro_id:
                 raise NotFoundError
         return kind
+
+
+@dataclass(frozen=True)
+class NewJob:
+    """What a job is created with: its parties and the amounts frozen at payment (#61)."""
+
+    request_id: uuid.UUID
+    quote_id: uuid.UUID
+    customer_id: uuid.UUID
+    pro_id: uuid.UUID
+    customer_price_cents: int
+    pro_payout_cents: int
+    platform_fee_cents: int
+    tax_cents: int
+
+
+class JobScheduler:
+    """Creates jobs (#61). The caller owns the transaction: it flushes and never commits."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._jobs = JobRepository(session)
+
+    async def has_job(self, request_id: uuid.UUID) -> bool:
+        """Whether the request has a job already (one per request)."""
+        return await self._jobs.exists_for_request(request_id)
+
+    async def schedule(self, new: NewJob) -> uuid.UUID:
+        """Inserts the job, scheduled (the column's default), and its `created` event by the
+        system; returns the job's id."""
+        job = await self._jobs.add(
+            Job(
+                request_id=new.request_id,
+                quote_id=new.quote_id,
+                customer_id=new.customer_id,
+                pro_id=new.pro_id,
+                customer_price_cents=new.customer_price_cents,
+                pro_payout_cents=new.pro_payout_cents,
+                platform_fee_cents=new.platform_fee_cents,
+                tax_cents=new.tax_cents,
+            )
+        )
+        await self._jobs.add_event(
+            JobEvent(
+                job_id=job.id,
+                type=CREATED,
+                from_status=None,
+                to_status=JobStatus.SCHEDULED,
+                actor_id=None,
+            )
+        )
+        return job.id
