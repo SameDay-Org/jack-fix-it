@@ -100,4 +100,33 @@ describe("IdCardShareRender", () => {
     // Loaded once, the same photo needs no second wait.
     await expect(ref.current?.capture()).resolves.toMatchObject({ width: 960 });
   });
+
+  it("lets a waiting capture go on without the photo once it is taken away", async () => {
+    const ref = createRef<IdCardShareHandle>();
+    const view = await render(
+      <IdCardShareRender ref={ref} {...MARIA} photoUri={PHOTO} testID="share" />,
+    );
+    const capture = ref.current?.capture();
+
+    await view.rerender(<IdCardShareRender ref={ref} {...MARIA} testID="share" />);
+
+    await expect(capture).resolves.toMatchObject({ width: 960, height: 606 });
+    expect(viewShot.captureRef).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails a waiting capture when the render unmounts", async () => {
+    const ref = createRef<IdCardShareHandle>();
+    const view = await render(
+      <IdCardShareRender ref={ref} {...MARIA} photoUri={PHOTO} testID="share" />,
+    );
+    // The handler is attached before the unmount, as a real caller's await would be.
+    const failed = expect(ref.current?.capture()).rejects.toThrow(
+      "IdCardShareRender is not mounted",
+    );
+
+    await view.unmount();
+
+    await failed;
+    expect(viewShot.captureRef).not.toHaveBeenCalled();
+  });
 });

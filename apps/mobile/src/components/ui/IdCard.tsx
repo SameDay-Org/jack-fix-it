@@ -27,6 +27,7 @@ import Animated, {
   useSharedValue,
   withSpring,
   withTiming,
+  type SharedValue,
 } from "react-native-reanimated";
 import Svg, { Defs, LinearGradient, Path, Rect, Stop } from "react-native-svg";
 
@@ -85,8 +86,9 @@ type Palette = {
   sheen: string;
   sheenOpacity: number;
   stripe: string;
+  /** The engraved code and the edge that gives it depth, both at AA on the surface. */
   engraved: string;
-  engravedLight: string;
+  engravedEdge: string;
 };
 
 const PALETTE: Record<IdCardVariant, Palette> = {
@@ -104,8 +106,9 @@ const PALETTE: Record<IdCardVariant, Palette> = {
     sheen: tokens.colors["navy-900"],
     sheenOpacity: 0.07,
     stripe: tokens.colors["navy-900"],
-    engraved: withOpacity("navy-900", 0.45),
-    engravedLight: tokens.colors.white,
+    // navy-900 at 0.7 over white reads 6.6:1; the white edge below it is the debossed lip.
+    engraved: withOpacity("navy-900", 0.7),
+    engravedEdge: tokens.colors.white,
   },
   pro: {
     surface: tokens.colors["green-700"],
@@ -120,8 +123,9 @@ const PALETTE: Record<IdCardVariant, Palette> = {
     sheen: tokens.colors.white,
     sheenOpacity: 0.18,
     stripe: tokens.colors["navy-900"],
-    engraved: withOpacity("navy-900", 0.55),
-    engravedLight: withOpacity("white", 0.35),
+    // No dark ink reaches AA on green-700 (solid navy-900 is 3.7:1): white (4.89:1) with a navy edge.
+    engraved: tokens.colors.white,
+    engravedEdge: withOpacity("navy-900", 0.55),
   },
 };
 
@@ -152,19 +156,37 @@ const SETTLE_SPRING = { damping: 16, stiffness: 200 };
 const LIFT_SPRING = { damping: 20, stiffness: 320 };
 // The crossfade is the Reduce Motion flip itself, so Reanimated must not skip it to the end.
 const FADE = { duration: tokens.motion.transitionMs, reduceMotion: ReduceMotion.Never };
-/** The silhouette's width inside the photo frame. */
+/** The silhouette's width inside the photo frame, and the overlap that hides its flat bottom edge. */
 const SILHOUETTE_FRACTION = 0.62;
-/** The sheen covers twice the card, so sliding it never shows an edge. */
+const SILHOUETTE_BLEED = -1;
+/**
+ * The sheen covers one and a half cards (Android rasterizes an SVG view at its pixel size), a
+ * quarter past each edge: sliding it by a fifth of the card never shows an edge of the gradient.
+ */
 const SHEEN_FRAME: ViewStyle = {
   position: "absolute",
-  left: "-50%",
-  top: "-50%",
-  width: "200%",
-  height: "200%",
+  left: "-25%",
+  top: "-25%",
+  width: "150%",
+  height: "150%",
 };
-/** How far the sheen slides at the full lean, as a fraction of the card. */
-const SHEEN_TRAVEL = 0.25;
-/** The name column: two lines, and a long name shrinks before it takes a third. */
+/** How far the sheen slides at the full lean, as a fraction of the card, and its strength at rest. */
+const SHEEN_TRAVEL = 0.2;
+const SHEEN_REST = 0.6;
+/** Letter spacing at the design width, in dp: the eyebrow line, the PRO pill and the engraved code. */
+const HELLO_TRACKING = 0.4;
+const PRO_TRACKING = 1.5;
+const CODE_TRACKING = 3;
+/** The code's engraved edge: one design dp below the glyphs, softened by as much. */
+const ENGRAVE_DEPTH = 1;
+/** Vertical gaps in the name column at the design width, in dp. */
+const PLACE_GAP = 4;
+const PHONE_GAP = 2;
+/**
+ * The name column: two lines, and a long name shrinks before it takes a third. The floor holds on
+ * iOS; Android's native fit has no floor (RN 0.88 never hands it `minimumFontScale`), so a very
+ * long name keeps shrinking there until two lines fit.
+ */
 const NAME_LINES = 2;
 const NAME_MIN_SCALE = 0.6;
 const NAME_LINE_HEIGHT = 32;
@@ -214,10 +236,14 @@ function Sheen({
   palette,
   gradientId,
   style,
-}: Omit<FaceShellProps, "unit"> & { style: ComponentProps<typeof Animated.View>["style"] }) {
+  testID,
+}: Omit<FaceShellProps, "unit"> & {
+  style: ComponentProps<typeof Animated.View>["style"];
+  testID?: string;
+}) {
   const id = `${gradientId}-sheen`;
   return (
-    <Animated.View pointerEvents="none" style={[SHEEN_FRAME, style]}>
+    <Animated.View pointerEvents="none" style={[SHEEN_FRAME, style]} testID={testID}>
       <Svg width="100%" height="100%">
         <Defs>
           <LinearGradient id={id} x1="0" y1="0" x2="1" y2="1">
@@ -271,7 +297,7 @@ function Front({
         numberOfLines={1}
         style={[
           typeStyle("caption", unit),
-          { color: palette.muted, textAlign: "center", letterSpacing: 0.4 * unit },
+          { color: palette.muted, textAlign: "center", letterSpacing: HELLO_TRACKING * unit },
         ]}
       >
         {t("idCard.hello")}
@@ -298,7 +324,7 @@ function Front({
               width={silhouette}
               height={silhouette}
               viewBox={`0 0 ${SILHOUETTE_VIEW_BOX} ${SILHOUETTE_VIEW_BOX}`}
-              style={{ marginBottom: -1 }}
+              style={{ marginBottom: SILHOUETTE_BLEED }}
             >
               <Path d={SILHOUETTE_PATH} fill={palette.silhouette} />
             </Svg>
@@ -327,7 +353,7 @@ function Front({
                 numberOfLines={1}
                 style={[
                   typeStyle("caption", unit),
-                  { color: tokens.colors["navy-900"], letterSpacing: 1.5 * unit },
+                  { color: tokens.colors["navy-900"], letterSpacing: PRO_TRACKING * unit },
                 ]}
               >
                 {t("idCard.pro")}
@@ -360,7 +386,7 @@ function Front({
               placeType,
               {
                 color: palette.muted,
-                marginTop: 4 * unit,
+                marginTop: PLACE_GAP * unit,
                 minHeight: (placeType.lineHeight ?? 0) * PLACE_LINES,
               },
             ]}
@@ -373,7 +399,11 @@ function Front({
               numberOfLines={1}
               style={[
                 typeStyle("footnote", unit),
-                { color: palette.muted, marginTop: 2 * unit, fontVariant: ["tabular-nums"] },
+                {
+                  color: palette.muted,
+                  marginTop: PHONE_GAP * unit,
+                  fontVariant: ["tabular-nums"],
+                },
               ]}
             >
               {phone}
@@ -385,9 +415,9 @@ function Front({
   );
 }
 
-type BackProps = { palette: Palette; unit: number; publicCode?: string };
+type BackProps = { palette: Palette; unit: number; publicCode?: string; scaleFonts: boolean };
 
-function Back({ palette, unit, publicCode }: BackProps) {
+function Back({ palette, unit, publicCode, scaleFonts }: BackProps) {
   const { stripe, padding } = ID_CARD_BASE;
   return (
     <View style={{ flex: 1 }}>
@@ -403,17 +433,18 @@ function Back({ palette, unit, publicCode }: BackProps) {
       >
         {publicCode ? (
           <Text
-            allowFontScaling={false}
+            allowFontScaling={scaleFonts}
             numberOfLines={1}
+            adjustsFontSizeToFit
             style={[
               typeStyle("headline", unit),
               {
                 color: palette.engraved,
-                letterSpacing: 3 * unit,
+                letterSpacing: CODE_TRACKING * unit,
                 fontVariant: ["tabular-nums"],
-                textShadowColor: palette.engravedLight,
-                textShadowOffset: { width: 0, height: 1 * unit },
-                textShadowRadius: 1 * unit,
+                textShadowColor: palette.engravedEdge,
+                textShadowOffset: { width: 0, height: ENGRAVE_DEPTH * unit },
+                textShadowRadius: ENGRAVE_DEPTH * unit,
               },
             ]}
           >
@@ -423,6 +454,43 @@ function Back({ palette, unit, publicCode }: BackProps) {
       </View>
     </View>
   );
+}
+
+type SheenInputs = {
+  dragX: SharedValue<number>;
+  dragY: SharedValue<number>;
+  gyroX: SharedValue<number>;
+  gyroY: SharedValue<number>;
+  reduceMotion: boolean;
+  palette: Palette;
+  width: number;
+  height: number;
+};
+
+/** The band of light follows the lean, and brightens with it; under Reduce Motion it holds still. */
+function useSheenStyle({
+  dragX,
+  dragY,
+  gyroX,
+  gyroY,
+  reduceMotion,
+  palette,
+  width,
+  height,
+}: SheenInputs) {
+  return useAnimatedStyle(() => {
+    if (reduceMotion) return { opacity: palette.sheenOpacity, transform: [] };
+    const tiltX = clamp(dragX.value + gyroX.value, MAX_TILT);
+    const tiltY = clamp(dragY.value + gyroY.value, MAX_TILT);
+    const lean = Math.min(1, (Math.abs(tiltX) + Math.abs(tiltY)) / MAX_TILT);
+    return {
+      opacity: palette.sheenOpacity * (SHEEN_REST + (1 - SHEEN_REST) * lean),
+      transform: [
+        { translateX: (tiltY / MAX_TILT) * width * SHEEN_TRAVEL },
+        { translateY: (-tiltX / MAX_TILT) * height * SHEEN_TRAVEL },
+      ],
+    };
+  });
 }
 
 function surfaceStyle(palette: Palette, unit: number): ViewStyle[] {
@@ -472,6 +540,7 @@ export function IdCard({
   testID,
 }: IdCardProps) {
   const { t } = useTranslation();
+  // Reanimated reads the system setting once at app start, so this never changes while mounted.
   const reduceMotion = useReducedMotion();
   const gradientId = useId().replace(/:/g, "");
   const palette = PALETTE[variant];
@@ -507,13 +576,6 @@ export function IdCard({
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
     onFlip?.(next);
   };
-
-  // A Reduce Motion change mid-session moves the shown face between the two mechanisms.
-  useEffect(() => {
-    const back = shown.value === "back";
-    fade.value = reduceMotion && back ? 1 : 0;
-    turn.value = !reduceMotion && back ? HALF_TURN : 0;
-  }, [fade, reduceMotion, shown, turn]);
 
   const gyro = live && !reduceMotion;
   useEffect(() => {
@@ -597,7 +659,7 @@ export function IdCard({
         { rotateY: `${turn.value + tiltY}deg` },
       ],
     };
-  }, [reduceMotion, perspective]);
+  });
 
   const backStyle = useAnimatedStyle(() => {
     if (reduceMotion) return { opacity: fade.value, transform: [{ perspective }] };
@@ -613,20 +675,13 @@ export function IdCard({
         { rotateY: `${turn.value + HALF_TURN + tiltY}deg` },
       ],
     };
-  }, [reduceMotion, perspective]);
+  });
 
-  const sheenStyle = useAnimatedStyle(() => {
-    const tiltX = clamp(dragX.value + gyroX.value, MAX_TILT);
-    const tiltY = clamp(dragY.value + gyroY.value, MAX_TILT);
-    const lean = Math.min(1, (Math.abs(tiltX) + Math.abs(tiltY)) / MAX_TILT);
-    return {
-      opacity: palette.sheenOpacity * (0.6 + 0.4 * lean),
-      transform: [
-        { translateX: (tiltY / MAX_TILT) * width * SHEEN_TRAVEL },
-        { translateY: (-tiltX / MAX_TILT) * height * SHEEN_TRAVEL },
-      ],
-    };
-  }, [palette, width, height]);
+  // One animated style per face: a style shared by two views only drives one of them in Jest.
+  // No dependency arrays: the plugin tracks them on native, and Reanimated warns when one is given.
+  const sheenInputs = { dragX, dragY, gyroX, gyroY, reduceMotion, palette, width, height };
+  const frontSheenStyle = useSheenStyle(sheenInputs);
+  const backSheenStyle = useSheenStyle(sheenInputs);
 
   const frontLabel = [
     t("idCard.a11y.card"),
@@ -707,7 +762,12 @@ export function IdCard({
         >
           <View style={[{ flex: 1 }, ...clipStyle(unit)]}>
             <Shade palette={palette} gradientId={gradientId} />
-            <Sheen palette={palette} gradientId={`${gradientId}-f`} style={sheenStyle} />
+            <Sheen
+              palette={palette}
+              gradientId={`${gradientId}-f`}
+              style={frontSheenStyle}
+              testID={testID ? `${testID}-front-sheen` : undefined}
+            />
             {front}
           </View>
         </Animated.View>
@@ -730,8 +790,8 @@ export function IdCard({
         >
           <View style={[{ flex: 1 }, ...clipStyle(unit)]}>
             <Shade palette={palette} gradientId={`${gradientId}-b`} />
-            <Sheen palette={palette} gradientId={`${gradientId}-b`} style={sheenStyle} />
-            <Back palette={palette} unit={unit} publicCode={publicCode} />
+            <Sheen palette={palette} gradientId={`${gradientId}-b`} style={backSheenStyle} />
+            <Back palette={palette} unit={unit} publicCode={publicCode} scaleFonts />
           </View>
         </Animated.View>
       </View>

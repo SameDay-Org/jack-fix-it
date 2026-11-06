@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
+import { StyleSheet } from "react-native";
 import * as Haptics from "expo-haptics";
 import { GestureHandlerRootView, State } from "react-native-gesture-handler";
 import {
@@ -9,6 +10,7 @@ import {
 import { useReducedMotion, withSpring, withTiming } from "react-native-reanimated";
 
 import i18n from "@/i18n";
+import { tokens } from "@/theme";
 
 import { IdCard, type IdCardProps } from "../IdCard";
 
@@ -95,6 +97,9 @@ describe("IdCard", () => {
     expect(screen.getByText("(954) 555-0142")).toBeOnTheScreen();
     expect(screen.getByText("PRO")).toBeOnTheScreen();
     expect(screen.getByRole("button", { name: FRONT_LABEL })).toBeOnTheScreen();
+    expect(StyleSheet.flatten(face("card-front").props.style).backgroundColor).toBe(
+      tokens.colors["green-700"],
+    );
     // The back is drawn (turned away) but hidden from assistive technology until the flip.
     expect(screen.queryByText("K7Q2-9MXA")).toBeNull();
     expect(screen.getByText("K7Q2-9MXA", { includeHiddenElements: true })).toBeTruthy();
@@ -108,10 +113,14 @@ describe("IdCard", () => {
       name: "María Pérez",
       city: "Miami",
       state: "FL",
+      testID: "card",
     });
     await settle();
 
     expect(screen.queryByText("PRO")).toBeNull();
+    expect(StyleSheet.flatten(face("card-front").props.style).backgroundColor).toBe(
+      tokens.colors.white,
+    );
     expect(
       screen.getByRole("button", { name: "ID card, María Pérez, Miami, FL" }),
     ).toBeOnTheScreen();
@@ -160,6 +169,7 @@ describe("IdCard", () => {
 
     expect(screen.getByRole("button", { name: BACK_LABEL })).toBeOnTheScreen();
     expect(screen.getByText("K7Q2-9MXA")).toBeOnTheScreen();
+    expect(screen.getByText("K7Q2-9MXA").props.allowFontScaling).toBe(true);
     expect(screen.queryByRole("button", { name: FRONT_LABEL })).toBeNull();
     expect(withSpring).toHaveBeenLastCalledWith(180, expect.any(Object));
     expect(Haptics.impactAsync).toHaveBeenCalledTimes(1);
@@ -205,6 +215,9 @@ describe("IdCard", () => {
     expect(rotation(leaning.transform, "rotateX")).toBeCloseTo(9.5, 1);
     expect(leaning.opacity).toBe(1);
     expect(withSpring).toHaveBeenCalledWith(LIFT_SCALE, expect.any(Object));
+    const sheen = animatedStyle("card-front-sheen");
+    expect(sheen.transform?.[0]?.translateX).toBeGreaterThan(0);
+    expect(sheen.opacity).toBeGreaterThan(0.07 * 0.6);
 
     await act(async () => {
       pan.end({ translationX: 80, translationY: -40, velocityX: 0 });
@@ -283,6 +296,7 @@ describe("IdCard", () => {
     expect(still.transform).toEqual([{ perspective: 700 }]);
     expect(still.opacity).toBe(1);
     expect(animatedStyle("card-back").opacity).toBe(0);
+    expect(animatedStyle("card-front-sheen")).toEqual({ opacity: 0.18, transform: [] });
 
     await act(async () => flipByAssistiveTech("card-front"));
     expect(withTiming).toHaveBeenLastCalledWith(1, { duration: 200, reduceMotion: "never" });
@@ -291,15 +305,54 @@ describe("IdCard", () => {
   });
 
   it("stays still when not interactive: an image, no gestures, no gyroscope", async () => {
-    await renderCard({ variant: "pro", width: 320, ...ALEX, interactive: false, testID: "card" });
+    const onFlip = jest.fn();
+    await renderCard({
+      variant: "pro",
+      width: 320,
+      ...ALEX,
+      interactive: false,
+      onFlip,
+      testID: "card",
+    });
     await settle();
 
     expect(screen.getByRole("image", { name: FRONT_LABEL })).toBeOnTheScreen();
     expect(screen.getByTestId("card-front").props.accessibilityActions).toBeUndefined();
     expect(Gyroscope.addListener).not.toHaveBeenCalled();
-    expect(() => getByGestureTestId("card-pan")).not.toThrow();
-    fireGestureHandler(getByGestureTestId("card-tap"), [{ state: State.END }]);
+    expect(getByGestureTestId("card-tap").config.enabled).toBe(false);
+    expect(getByGestureTestId("card-pan").config.enabled).toBe(false);
+
+    // Even delivered, a tap and a swipe change nothing (the utility skips disabled gestures).
+    await act(async () => {
+      fireGestureHandler(getByGestureTestId("card-tap"), [
+        { state: State.BEGAN },
+        { state: State.ACTIVE },
+        { state: State.END },
+      ]);
+      fireGestureHandler(getByGestureTestId("card-pan"), [
+        { state: State.BEGAN },
+        { state: State.ACTIVE },
+        { translationX: 120 },
+        { state: State.END, translationX: 160, velocityX: 900 },
+      ]);
+    });
+    expect(onFlip).not.toHaveBeenCalled();
+    expect(screen.getByRole("image", { name: FRONT_LABEL })).toBeOnTheScreen();
+    expect(screen.queryByRole("image", { name: BACK_LABEL })).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("never subscribes to a gyroscope that answers after the card is gone", async () => {
+    let answer: (available: boolean) => void = () => undefined;
+    Gyroscope.isAvailableAsync.mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => (answer = resolve)),
+    );
+    const view = await renderCard({ variant: "pro", width: 320, ...ALEX, testID: "card" });
+    await view.unmount();
+
+    await act(async () => answer(true));
+    expect(Gyroscope.addListener).not.toHaveBeenCalled();
+    expect(Gyroscope.hasListeners()).toBe(false);
   });
 
   it("updates in place as a parent types: same instance, the shown face and the gyroscope kept", async () => {
@@ -314,6 +367,8 @@ describe("IdCard", () => {
     });
     await waitFor(() => expect(Gyroscope.addListener).toHaveBeenCalledTimes(1));
     await act(async () => flipByAssistiveTech("card-front"));
+    const front = face("card-front");
+    const back = face("card-back");
 
     await view.rerender(
       card({
@@ -346,5 +401,8 @@ describe("IdCard", () => {
     ).toBeOnTheScreen();
     expect(Gyroscope.addListener).toHaveBeenCalledTimes(1);
     expect(Gyroscope.hasListeners()).toBe(true);
+    // The very same host views: nothing under the card remounted (no flash).
+    expect(face("card-front")).toBe(front);
+    expect(face("card-back")).toBe(back);
   });
 });

@@ -1,4 +1,4 @@
-import { useCallback, useImperativeHandle, useRef, type Ref } from "react";
+import { useCallback, useEffect, useImperativeHandle, useRef, type Ref } from "react";
 import { Image, PixelRatio, View } from "react-native";
 import ViewShot, { type CaptureOptions, type ViewShotRef } from "react-native-view-shot";
 
@@ -33,6 +33,9 @@ export const ID_CARD_SHARE_MIN_RATIO = 3;
 const OFFSCREEN_GAP = 64;
 
 const CAPTURE: CaptureOptions = { format: "png", quality: 1, result: "tmpfile" };
+const NOT_MOUNTED = "IdCardShareRender is not mounted";
+
+type Waiter = { resolve: () => void; reject: (error: Error) => void };
 
 /**
  * The width to lay the card out at, in dp, so that the native capture comes out at
@@ -61,24 +64,38 @@ export function IdCardShareRender({
 }: IdCardShareRenderProps) {
   const width = idCardShareLayoutWidth(PixelRatio.get());
   const shot = useRef<ViewShotRef>(null);
-  // The URI whose load finished (or failed), and who waits for the current one.
+  // The URI whose load finished (or failed), and the captures waiting for the current one.
   const loadedUri = useRef<string | undefined>(undefined);
-  const waiting = useRef<(() => void)[]>([]);
+  const waiting = useRef<Waiter[]>([]);
 
   const onPhotoLoadEnd = useCallback(() => {
     loadedUri.current = photoUri;
-    for (const resolve of waiting.current.splice(0)) resolve();
+    for (const waiter of waiting.current.splice(0)) waiter.resolve();
   }, [photoUri]);
+
+  // A capture waits for the photo it was asked with. Without a photo there is nothing to wait for,
+  // so a photo taken away mid-wait lets the capture go on; an unmount fails it instead of leaving
+  // the caller hanging.
+  useEffect(() => {
+    if (photoUri) return;
+    for (const waiter of waiting.current.splice(0)) waiter.resolve();
+  }, [photoUri]);
+  useEffect(() => {
+    const pending = waiting.current;
+    return () => {
+      for (const waiter of pending.splice(0)) waiter.reject(new Error(NOT_MOUNTED));
+    };
+  }, []);
 
   useImperativeHandle(
     ref,
     () => ({
       capture: async () => {
         if (photoUri && loadedUri.current !== photoUri) {
-          await new Promise<void>((resolve) => waiting.current.push(resolve));
+          await new Promise<void>((resolve, reject) => waiting.current.push({ resolve, reject }));
         }
         const target = shot.current;
-        if (!target) throw new Error("IdCardShareRender is not mounted");
+        if (!target) throw new Error(NOT_MOUNTED);
         const uri = await target.capture();
         const size = await Image.getSize(uri);
         return { uri, width: size.width, height: size.height };
