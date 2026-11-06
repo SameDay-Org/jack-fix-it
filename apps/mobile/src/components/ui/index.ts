@@ -53,3 +53,25 @@ export type { ReduceTransparency } from "./useReduceTransparency";
 export { CodeInput } from "./CodeInput";
 export type { CodeInputProps } from "./CodeInput";
 export { moveAccessibilityFocus } from "./focus";
+export { IdCard } from "./IdCard";
+export type { IdCardProps } from "./IdCard";
+export {
+  formatPublicCode,
+  ID_CARD_ASPECT,
+  ID_CARD_BASE,
+  ID_CARD_BASE_WIDTH,
+  idCardGeometry,
+  placeOf,
+} from "./idCardModel";
+export type { IdCardFace, IdCardGeometry, IdCardVariant } from "./idCardModel";
+export {
+  ID_CARD_SHARE_BASE_WIDTH,
+  ID_CARD_SHARE_MIN_RATIO,
+  IdCardShareRender,
+  idCardShareLayoutWidth,
+} from "./IdCardShareRender";
+export type {
+  IdCardShareCapture,
+  IdCardShareHandle,
+  IdCardShareRenderProps,
+} from "./IdCardShareRender";
