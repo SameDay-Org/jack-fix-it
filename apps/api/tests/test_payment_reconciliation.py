@@ -3,6 +3,7 @@ sessions, and handlers that never commit, so the worker's transaction (#40) owns
 
 import asyncio
 import json
+import logging
 from datetime import UTC, datetime
 
 import pytest
@@ -79,7 +80,7 @@ async def test_concurrent_succeeded_events_create_one_job(market: Market) -> Non
         await holder.commit()
         outcomes = await runs
 
-    assert outcomes == ["processed", "processed"]
+    assert list(outcomes) == ["processed", "processed"]
     state = await market.state()
     assert state.payment is PaymentStatus.SUCCEEDED
     assert len(state.jobs) == 1
@@ -118,7 +119,11 @@ async def test_handlers_never_commit(market: Market, event_type: str) -> None:
     ids=["succeeded", "canceled"],
 )
 async def test_handler_error_rolls_back_the_job_and_quote_changes(
-    market: Market, monkeypatch: pytest.MonkeyPatch, event_type: str, failing: str
+    market: Market,
+    monkeypatch: pytest.MonkeyPatch,
+    event_type: str,
+    failing: str,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """The step that fails comes after the job's insert (succeeded) or after the quote's
     un-acceptance and the request's move (canceled): the savepoint takes all of it back, the
@@ -128,6 +133,7 @@ async def test_handler_error_rolls_back_the_job_and_quote_changes(
         raise RuntimeError("injected")
 
     monkeypatch.setattr(QuoteSettlement, failing, fail)
+    caplog.set_level(logging.INFO)
     before = await market.state()
     event_id = market.new_event_id()
     await market.post(market.body(event_id, event_type))
@@ -145,3 +151,5 @@ async def test_handler_error_rolls_back_the_job_and_quote_changes(
         1,
         "RuntimeError",
     )
+    # The move was rolled back, so it was never logged as made.
+    assert not [r for r in caplog.records if r.message == "payment_status_changed"]

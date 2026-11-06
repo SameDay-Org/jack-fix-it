@@ -56,6 +56,8 @@ FAILED = "payment_intent.payment_failed"
 CANCELED = "payment_intent.canceled"
 # What Stripe puts next to a decline code; it must never reach a log.
 DECLINE_MESSAGE = "Your card was declined."
+# body(customer=...) default: the customer's stored Stripe Customer.
+STORED_CUSTOMER = "<stored>"
 
 
 @dataclass
@@ -105,7 +107,7 @@ class Market:
         *,
         amount: int = AMOUNT_CENTS,
         currency: str = "usd",
-        customer: str | None = None,
+        customer: str | None = STORED_CUSTOMER,
         intent_id: str | None = None,
         failure_code: str | None = None,
     ) -> bytes:
@@ -114,7 +116,7 @@ class Market:
             "object": "payment_intent",
             "amount": amount,
             "currency": currency,
-            "customer": customer or self.stripe_customer_id,
+            "customer": self.stripe_customer_id if customer == STORED_CUSTOMER else customer,
             "status": "requires_payment_method",
             "metadata": {
                 "payment_id": str(self.payment_id),
@@ -450,10 +452,11 @@ async def test_succeeded_after_request_cancelled_creates_no_job_and_flags_staff(
         ({"amount": AMOUNT_CENTS - 1}, "amount"),
         ({"currency": "eur"}, "currency"),
         ({"customer": "cus_someone_else"}, "customer"),
+        ({"customer": None}, "customer"),
     ],
-    ids=["amount", "currency", "customer"],
+    ids=["amount", "currency", "customer", "no_customer"],
 )
-@pytest.mark.parametrize("event_type", [SUCCEEDED, CANCELED])
+@pytest.mark.parametrize("event_type", [SUCCEEDED, PROCESSING, FAILED, CANCELED])
 async def test_amount_or_currency_mismatch_changes_nothing_and_fails_the_event(
     market: Market,
     override: dict[str, Any],
@@ -708,3 +711,23 @@ async def test_payment_webhook_logs_carry_ids_only(
         assert not {str(amount) for amount in amounts} & {
             value for value in values if isinstance(value, str)
         }
+
+
+async def test_customer_without_stored_stripe_customer_fails_the_event(
+    market: Market, caplog: pytest.LogCaptureFixture
+) -> None:
+    """No Stripe Customer stored for the payment's customer: nothing can match the event's."""
+    async with market.sessions() as session:
+        await session.execute(
+            update(User).where(User.id == market.customer_id).values(stripe_customer_id=None)
+        )
+        await session.commit()
+    before = await market.state()
+    event_id = market.new_event_id()
+    await market.post(market.body(event_id, SUCCEEDED))
+
+    assert await market.process(event_id, job_try=MAX_ATTEMPTS) == "failed"
+
+    assert await market.state() == before
+    [mismatch] = records(caplog, "payment_event_mismatch")
+    assert mismatch.__dict__["fields"] == "customer"

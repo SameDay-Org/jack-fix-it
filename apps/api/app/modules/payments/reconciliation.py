@@ -115,14 +115,15 @@ class PaymentReconciler:
         if not await self._payments.move_status(locked.payment.id, current, to):
             # The row is locked from the read to the commit.
             raise RuntimeError("payment status changed under its lock")  # pragma: no cover
-        logger.info(
-            "payment_status_changed",
-            extra={**locked.ids, "from_status": str(current), "to_status": str(to)},
-        )
         if to is PaymentStatus.SUCCEEDED:
             await self._schedule(locked)
         elif to is PaymentStatus.CANCELED:
             await self._reopen(locked)
+        # After the last write: a step that fails above rolls the move back, unlogged.
+        logger.info(
+            "payment_status_changed",
+            extra={**locked.ids, "from_status": str(current), "to_status": str(to)},
+        )
 
     async def _lock(self, event: IntentEvent) -> _Locked | None:
         """The request, the quote and the payment, locked in that order; None (logged) for an
