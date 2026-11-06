@@ -5,13 +5,16 @@ import { act, renderHook } from "@testing-library/react-native";
 import type { ReactNode } from "react";
 
 import {
+  authResponse,
   callPath,
+  callsTo,
   deferred,
   installFetchMock,
   jsonResponse,
   user,
   type FetchMock,
 } from "../../../api/__tests__/helpers";
+import { login, sessionStore } from "../../../api/session";
 import { phoneConfig } from "../config";
 import { useCodeEntry } from "../useCodeEntry";
 import { CODE, DIGITS, E164, signIn } from "./helpers";
@@ -89,5 +92,47 @@ describe("useCodeEntry: one operation at a time, within a single turn (#178 roun
     expect(paths()).toEqual([SEND]);
     await act(async () => resent.resolve(jsonResponse(202)));
     expect(paths()).toEqual([SEND, VERIFY]);
+  });
+});
+
+describe("useCodeEntry: a resend's held digits stay with the resend's session (#295 Vault B1)", () => {
+  it("the code screen: a resend superseded by another sign-in checks nothing", async () => {
+    const second = { ...user, id: "22222222-2222-4222-8222-222222222222" };
+    const resent = deferred<Response>();
+    fetchMock.mockImplementation((url) =>
+      String(url).endsWith(SEND)
+        ? resent.promise
+        : String(url).endsWith("/login")
+          ? Promise.resolve(jsonResponse(200, { ...authResponse(2), user: second }))
+          : Promise.resolve(jsonResponse(200, { ...second, phone: E164, phone_verified: true })),
+    );
+    const onVerified = jest.fn();
+    const verifying: boolean[] = [];
+    const { result } = await renderHook(
+      () => {
+        const entry = useCodeEntry(DIGITS, onVerified); // no generation, as on the code screen
+        verifying.push(entry.verifying);
+        return entry;
+      },
+      { wrapper },
+    );
+    await act(async () => jest.advanceTimersByTime(phoneConfig.resendSeconds * 1000));
+    let resending!: Promise<void>;
+    await act(async () => {
+      resending = result.current.resend();
+    });
+    await act(async () => result.current.setCode(CODE)); // held: the resend runs
+
+    await act(async () => login({ email: second.email, password: "synthetic password" }));
+    await act(async () => {
+      resent.resolve(jsonResponse(202));
+      await resending;
+    });
+
+    expect(callsTo(fetchMock, VERIFY)).toEqual([]);
+    expect(verifying).not.toContain(true);
+    expect(result.current.error).toBeNull();
+    expect(onVerified).not.toHaveBeenCalled();
+    expect(sessionStore.getState().user).toEqual(second);
   });
 });

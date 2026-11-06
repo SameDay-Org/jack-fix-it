@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AccessibilityInfo } from "react-native";
 
-import { SessionExpiredError, sessionGeneration } from "@/api";
+import { isCurrentGeneration, SessionExpiredError, sessionGeneration } from "@/api";
 
 import { sendCode } from "./api";
 import { phoneConfig } from "./config";
@@ -61,6 +61,7 @@ export function usePhoneEntry(onSent: (generation: number) => void): PhoneEntry 
     try {
       await sendCode(toE164(countryCode, digits), signal, generation);
       if (signal.aborted) return; // the user left: this flow is over
+      if (!isCurrentGeneration(generation)) return; // sent for a session that is gone
       startCodeStep(digits);
       onSent(generation);
     } catch (failure) {

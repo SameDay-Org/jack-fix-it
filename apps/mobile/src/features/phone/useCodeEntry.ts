@@ -2,7 +2,13 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AccessibilityInfo } from "react-native";
 
-import { ApiError, SessionExpiredError, setSessionUser } from "@/api";
+import {
+  ApiError,
+  isCurrentGeneration,
+  SessionExpiredError,
+  sessionGeneration,
+  setSessionUser,
+} from "@/api";
 import { showToast } from "@/components/ui";
 
 import { sendCode, verifyCode } from "./api";
@@ -40,6 +46,8 @@ export type CodeEntryOptions = {
   /**
    * The session generation the code was sent in (`usePhoneEntry`'s `onSent`): the check and every
    * resend are pinned to it, so after another sign-in nothing is sent with that account's token.
+   * Without it each operation is pinned to the session it starts in, and the check a resend runs
+   * when it settles to the resend's.
    */
   generation?: number;
 };
@@ -56,7 +64,9 @@ const INVALID_CODE = "invalid_code";
  * One operation at a time: while a code is checked, edits are ignored and resend waits; while a
  * resend runs, digits can be typed but are held, and once it settles a complete code is checked,
  * once. Leaving the screen cancels whatever is in flight, and a late answer neither navigates,
- * toasts, announces nor writes the session.
+ * toasts, announces nor writes the session. The same holds once the session an operation belongs
+ * to is gone (a sign-out or another sign-in, #295 Vault B1): nothing more is sent, shown or
+ * called back, and a resend that ends that way never checks the digits held during it.
  */
 export function useCodeEntry(
   digits: string,
@@ -86,20 +96,26 @@ export function useCodeEntry(
     AccessibilityInfo.announceForAccessibility(message);
   };
 
-  const check = async (candidate: string) => {
+  // The session an operation belongs to: the code's, else the one current as the operation starts.
+  const pinnedNow = () => generation ?? sessionGeneration();
+
+  const check = async (candidate: string, pinned = pinnedNow()) => {
     if (inFlight.current || resendInFlight.current || candidate.length !== CODE_LENGTH) return;
+    // The session the code belongs to is gone: the check is not this session's to run.
+    if (!isCurrentGeneration(pinned)) return;
     const signal = unmountSignal();
     inFlight.current = true;
     setVerifying(true);
     try {
-      const user = await verifyCode(phone, candidate, signal, generation);
+      const user = await verifyCode(phone, candidate, signal, pinned);
       if (signal.aborted) return; // the user left: this flow is over
+      if (!isCurrentGeneration(pinned)) return; // a verified user for a session that is gone
       setSessionUser(user);
       onVerified();
     } catch (failure) {
       if (signal.aborted) return;
       // The session ended meanwhile: the gate is taking the user to welcome, nothing to say here.
-      if (failure instanceof SessionExpiredError) return;
+      if (failure instanceof SessionExpiredError || !isCurrentGeneration(pinned)) return;
       if (failure instanceof ApiError && failure.code === INVALID_CODE) keepCode("");
       fail(t(describePhoneFailure(failure)));
     } finally {
@@ -118,6 +134,8 @@ export function useCodeEntry(
 
   const resend = async () => {
     if (countdown.remaining > 0 || resendInFlight.current || inFlight.current) return;
+    const pinned = pinnedNow();
+    if (!isCurrentGeneration(pinned)) return;
     const signal = unmountSignal();
     resendInFlight.current = true;
     setResending(true);
@@ -126,26 +144,39 @@ export function useCodeEntry(
     keepCode("");
     setError(null);
     let restored = false;
+    // The session ended while the code went out: the chain stops here, with nothing checked.
+    let superseded = false;
     try {
-      await sendCode(phone, signal, generation);
+      await sendCode(phone, signal, pinned);
       if (signal.aborted) return;
+      if (!isCurrentGeneration(pinned)) {
+        superseded = true;
+        return;
+      }
       countdown.restart();
       showToast({ message: t("phone.codeResent"), tone: "neutral" });
     } catch (failure) {
       if (signal.aborted) return;
+      // The session ended meanwhile: the gate is taking the user away, nothing to say or check.
+      if (failure instanceof SessionExpiredError || !isCurrentGeneration(pinned)) {
+        superseded = true;
+        return;
+      }
       // No new code is coming: the one typed before is still good, unless something was typed since.
       if (codeNow.current === "" && before !== "") {
         keepCode(before);
         restored = true;
       }
-      if (!(failure instanceof SessionExpiredError)) fail(t(describePhoneFailure(failure)));
+      fail(t(describePhoneFailure(failure)));
     } finally {
       resendInFlight.current = false;
       if (!signal.aborted) setResending(false);
-      // Digits typed while the resend ran were held: a complete code is checked now, once. A code
-      // put back after a failed resend waits for the user, as it did before the resend.
-      if (!signal.aborted && !restored && codeNow.current.length === CODE_LENGTH) {
-        void check(codeNow.current);
+      // Digits typed while the resend ran were held: a complete code is checked now, once, in the
+      // resend's session. A code put back after a failed resend waits for the user, as it did
+      // before the resend; after a session change nothing is checked.
+      const held = codeNow.current;
+      if (!signal.aborted && !restored && !superseded && held.length === CODE_LENGTH) {
+        void check(held, pinned);
       }
     }
   };
