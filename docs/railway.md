@@ -80,7 +80,7 @@ environment as **shared variables** referenced from both services, so the two ne
 | `STRIPE_WEBHOOK_SECRET`       | optional until the Stripe endpoint exists; unset, the webhook gives 503  | yes             | D7.3 (#40) |
 | `GOOGLE_MAPS_API_KEY`         | optional until #14; without it `POST /v1/geo/reverse` answers 503        | yes             | #215       |
 | `STRIPE_SECRET_KEY`           | required; `sk_test_` until launch: a live key works in production only   | yes             | D7.1 (#39) |
-| `STRIPE_PUBLISHABLE_KEY`      | optional; `pk_test_` until launch; unset, the payment endpoint gives 503 | no | D11.1 (#58) |
+| `STRIPE_PUBLISHABLE_KEY`      | optional; `pk_test_` until launch; unset, payment gives 503              | no              | #58        |
 | `PUBLIC_API_URL`              | required; https, e.g. `https://${{api.RAILWAY_PUBLIC_DOMAIN}}`           | no              | D7.1 (#39) |
 
 "Required" means the API refuses to start in staging and production without it (the settings

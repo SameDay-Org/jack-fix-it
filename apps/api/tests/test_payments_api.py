@@ -109,7 +109,7 @@ REAL_EPHEMERAL_SECRET = "ek_test_sentry_fixture_secret"
 class FakeStripePayments:
     """Records every call and answers as Stripe does: the same idempotency key gets the same
     object back (customers and PaymentIntents alike). `errors` makes one operation fail;
-    `on_create_intent` runs inside the PaymentIntent create, before it answers;
+    `on_create_customer` and `on_create_intent` run inside those creates, before they answer;
     `lost_answers` makes that many creates make their PaymentIntent and then fail as a timeout
     would; `intent_status` is what Stripe reports for every PaymentIntent."""
 
@@ -121,6 +121,7 @@ class FakeStripePayments:
     retrieved: list[str] = field(default_factory=list)
     ephemeral_keys: list[str] = field(default_factory=list)  # the customer of each
     errors: dict[str, Exception] = field(default_factory=dict)
+    on_create_customer: Callable[[], Awaitable[None]] | None = None
     on_create_intent: Callable[[], Awaitable[None]] | None = None
     lost_answers: int = 0
     intent_status: str = "requires_payment_method"
@@ -129,6 +130,8 @@ class FakeStripePayments:
         if "create_customer" in self.errors:
             raise self.errors["create_customer"]
         self.customer_calls.append({"user_id": user_id, "idempotency_key": idempotency_key})
+        if self.on_create_customer is not None:
+            await self.on_create_customer()
         customer_id = self.customers.get(idempotency_key)
         if customer_id is None:
             customer_id = f"cus_fake{len(self.customers)}{uuid.uuid4().hex[:6]}"
@@ -669,8 +672,9 @@ async def test_succeeded_payment_is_not_reopened(
     status: PaymentStatus,
 ) -> None:
     """Once the webhook (#61) closed the payment, no sheet is issued: the job exists or is
-    being created, or the PaymentIntent is closed. Nothing is written or asked of Stripe."""
-    request_id, quote_id, _ = await accepted_request(db_session, world)
+    being created, or the PaymentIntent is closed. Nothing is written or asked of Stripe. The
+    closed payment is checked before the pro: a pro unhireable since changes nothing."""
+    request_id, quote_id, pro = await accepted_request(db_session, world)
     assert (await pay(db_client, world, request_id, quote_id)).status_code == 200
     [payment] = await payments_of(db_session, quote_id)
     await db_session.execute(update(Payment).where(Payment.id == payment.id).values(status=status))
@@ -686,6 +690,13 @@ async def test_succeeded_payment_is_not_reopened(
     )
     assert (len(stripe_fake.intent_calls), len(stripe_fake.retrieved)) == calls_before
     assert len(stripe_fake.ephemeral_keys) == 1
+
+    profile = await db_session.get(ProProfile, pro.profile_id)
+    assert profile is not None
+    profile.payouts_enabled = False
+    await db_session.flush()
+    again = await pay(db_client, world, request_id, quote_id)
+    assert (again.status_code, again.json()) == (409, NOT_AVAILABLE)
 
 
 @pytest.mark.parametrize("status", [PaymentStatus.FAILED, PaymentStatus.PROCESSING])

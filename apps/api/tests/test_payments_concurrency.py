@@ -188,3 +188,39 @@ async def test_concurrent_payments_create_one_intent(
     assert events(caplog, "payment_created", committed.request_id) == 1
     assert events(caplog, "payment_intent_created", committed.request_id) == 1
     assert events(caplog, "payment_sheet_issued", committed.request_id) == 2
+
+
+async def test_payment_row_is_committed_before_stripe_is_called(committed: Committed) -> None:
+    """When the first Stripe call (the customer create) runs, another connection already sees
+    the payment row, and the request's and quote's locks are released: a lost answer leaves
+    the row (and its key), and no lock is held over a network call."""
+    sessions = committed.sessions
+    stripe = FakeStripePayments()
+    seen: list[tuple[int, bool]] = []
+
+    async def look_from_another_connection() -> None:
+        async with sessions() as other:
+            rows = (
+                await other.scalars(select(Payment).where(Payment.quote_id == committed.quote_id))
+            ).all()
+            # NOWAIT: a lock still held raises at once instead of waiting.
+            locked = (
+                await other.execute(
+                    text(
+                        "SELECT r.id FROM service_requests r JOIN quotes q ON q.request_id = r.id "
+                        "WHERE r.id = :request_id AND q.id = :quote_id FOR UPDATE NOWAIT"
+                    ),
+                    {"request_id": committed.request_id, "quote_id": committed.quote_id},
+                )
+            ).all()
+            await other.rollback()
+        seen.append((len(rows), len(locked) == 1))
+
+    stripe.on_create_customer = look_from_another_connection
+    async with sessions() as session:
+        sheet = await PaymentService(session, stripe, PUBLISHABLE_KEY).payment_sheet(
+            committed.customer, committed.request_id, committed.quote_id
+        )
+
+    assert isinstance(sheet, PaymentSheetOut)
+    assert seen == [(1, True)]
