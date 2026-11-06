@@ -189,9 +189,7 @@ describe("CodeEntryScreen", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(callPath(fetchMock.mock.calls[0])).toBe(SEND);
     expect(callBody(fetchMock.mock.calls[0])).toEqual({ phone: E164 });
-    await waitFor(() =>
-      expect(resendButton()).toHaveTextContent(`Resend in ${resendSeconds} s`),
-    );
+    await waitFor(() => expect(resendButton()).toHaveTextContent(`Resend in ${resendSeconds} s`));
     expect(showToast).toHaveBeenCalledWith({ message: "We sent a new code.", tone: "neutral" });
   });
 
