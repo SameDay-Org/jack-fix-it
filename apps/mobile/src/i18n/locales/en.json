@@ -71,6 +71,18 @@
       "unavailableTitle": "The camera couldn't start",
       "unavailableBody": "Choose a photo from this phone instead."
     },
+    "phone": {
+      "title": "What's your number?",
+      "support": "It goes on your card, for your eyes only. We'll text you a {{length}}-digit code."
+    },
+    "code": {
+      "title": "Enter the code we sent"
+    },
+    "finish": {
+      "title": "Account created! Here's your ID:",
+      "support": "Tap it to see the back.",
+      "continue": "Let's go"
+    },
     "next": "Continue",
     "errors": {
       "nameInvalid": "Use letters, spaces, hyphens, apostrophes or periods.",
@@ -283,7 +295,6 @@
     "subtitle": "We'll text a {{length}}-digit code to this number.",
     "numberLabel": "Phone number",
     "send": "Send code",
-    "skip": "Skip for now",
     "codeTitle": "Enter the code",
     "codeSubtitle": "We sent it to {{phone}}.",
     "codeLabel": "Verification code",

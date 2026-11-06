@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { KeyboardAvoidingView, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Button, CodeInput, Screen } from "@/components/ui";
+import { Button, CodeInput, Screen, showToast } from "@/components/ui";
 
 import { CODE_LENGTH, phoneConfig } from "./config";
 import { forgetPendingNumber, leavePhoneFlow, usePendingNumber } from "./phoneFlow";
@@ -27,7 +27,10 @@ const changeNumber = () => {
 function CodeEntry({ digits }: { digits: string }) {
   const { t } = useTranslation();
   const { top } = useSafeAreaInsets();
-  const entry = useCodeEntry(digits, leavePhoneFlow);
+  const entry = useCodeEntry(digits, () => {
+    showToast({ message: t("phone.verified"), tone: "success" });
+    leavePhoneFlow();
+  });
   const { countryCode } = phoneConfig;
   // The number lives as long as this step does.
   useEffect(() => forgetPendingNumber, []);

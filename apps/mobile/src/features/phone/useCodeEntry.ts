@@ -23,6 +23,20 @@ export type CodeEntry = {
   resendIn: number;
   resending: boolean;
   resend: () => Promise<void>;
+  /**
+   * A new code was just sent from the phone step on the same screen: the field starts empty and
+   * "Resend code" waits its full time again.
+   */
+  startOver: () => void;
+};
+
+export type CodeEntryOptions = {
+  /**
+   * Whether a code is already on its way when the hook mounts, so the resend wait starts at once
+   * (the code screen). False when the code step shares a screen with the phone step: nothing ticks
+   * until `startOver`.
+   */
+  codeSent?: boolean;
 };
 
 const INVALID_CODE = "invalid_code";
@@ -31,14 +45,19 @@ const INVALID_CODE = "invalid_code";
  * The code step for the number a code was sent to (national digits): the code, sent as soon as it
  * is complete, a resend that waits `phoneConfig.resendSeconds` between codes, and errors mapped to
  * catalog text and announced. A wrong code is cleared so the next one can be typed straight away.
- * Neither the number nor the code is ever logged.
+ * Neither the number nor the code is ever logged. `onVerified` runs once the session holds the
+ * verified user; what the person is told is the caller's.
  *
  * One operation at a time: while a code is checked, edits are ignored and resend waits; while a
  * resend runs, digits can be typed but are held, and once it settles a complete code is checked,
  * once. Leaving the screen cancels whatever is in flight, and a late answer neither navigates,
  * toasts, announces nor writes the session.
  */
-export function useCodeEntry(digits: string, onVerified: () => void): CodeEntry {
+export function useCodeEntry(
+  digits: string,
+  onVerified: () => void,
+  { codeSent = true }: CodeEntryOptions = {},
+): CodeEntry {
   const { t } = useTranslation();
   const { countryCode, resendSeconds } = phoneConfig;
   const phone = toE164(countryCode, digits);
@@ -46,7 +65,7 @@ export function useCodeEntry(digits: string, onVerified: () => void): CodeEntry 
   const [error, setError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [resending, setResending] = useState(false);
-  const countdown = useCountdown(resendSeconds);
+  const countdown = useCountdown(resendSeconds, codeSent);
   const unmountSignal = useUnmountSignal();
   const inFlight = useRef(false);
   const resendInFlight = useRef(false);
@@ -71,7 +90,6 @@ export function useCodeEntry(digits: string, onVerified: () => void): CodeEntry 
       const user = await verifyCode(phone, candidate, signal);
       if (signal.aborted) return; // the user left: this flow is over
       setSessionUser(user);
-      showToast({ message: t("phone.verified"), tone: "success" });
       onVerified();
     } catch (failure) {
       if (signal.aborted) return;
@@ -127,6 +145,12 @@ export function useCodeEntry(digits: string, onVerified: () => void): CodeEntry 
     }
   };
 
+  const startOver = () => {
+    keepCode("");
+    setError(null);
+    countdown.restart();
+  };
+
   return {
     code,
     setCode,
@@ -136,5 +160,6 @@ export function useCodeEntry(digits: string, onVerified: () => void): CodeEntry 
     resendIn: countdown.remaining,
     resending,
     resend,
+    startOver,
   };
 }

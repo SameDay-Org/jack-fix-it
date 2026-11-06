@@ -178,7 +178,7 @@ beforeEach(() => {
   jest.spyOn(console, "warn").mockImplementation(() => undefined);
   resetSecureStore();
   sessionStore.setState(SIGNED_OUT);
-  phoneFlowStore.setState({ pendingNumber: null, offeredAfterSignUp: false });
+  phoneFlowStore.setState({ pendingNumber: null });
   fetchMock = installFetchMock();
   fetchMock.mockResolvedValue(jsonResponse(204));
 });

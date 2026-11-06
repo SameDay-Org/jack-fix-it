@@ -71,6 +71,18 @@
       "unavailableTitle": "No se pudo iniciar la cámara",
       "unavailableBody": "Elige una foto de este teléfono."
     },
+    "phone": {
+      "title": "¿Cuál es tu número?",
+      "support": "Va en tu tarjeta, solo para ti. Te enviaremos un código de {{length}} dígitos por SMS."
+    },
+    "code": {
+      "title": "Escribe el código que te enviamos"
+    },
+    "finish": {
+      "title": "¡Cuenta creada! Aquí tienes tu ID:",
+      "support": "Tócala para ver el reverso.",
+      "continue": "¡Vamos!"
+    },
     "next": "Continuar",
     "errors": {
       "nameInvalid": "Usa letras, espacios, guiones, apóstrofos o puntos.",
@@ -283,7 +295,6 @@
     "subtitle": "Te enviaremos un código de {{length}} dígitos por SMS a este número.",
     "numberLabel": "Número de teléfono",
     "send": "Enviar código",
-    "skip": "Omitir por ahora",
     "codeTitle": "Escribe el código",
     "codeSubtitle": "Lo enviamos al {{phone}}.",
     "codeLabel": "Código de verificación",

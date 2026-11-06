@@ -68,7 +68,7 @@ beforeEach(() => {
   announce = jest
     .spyOn(AccessibilityInfo, "announceForAccessibility")
     .mockImplementation(() => undefined);
-  phoneFlowStore.setState({ pendingNumber: DIGITS, offeredAfterSignUp: false });
+  phoneFlowStore.setState({ pendingNumber: DIGITS });
   jest.mocked(router.back).mockClear();
   jest.mocked(router.dismissTo).mockClear();
   jest.mocked(Redirect).mockClear();

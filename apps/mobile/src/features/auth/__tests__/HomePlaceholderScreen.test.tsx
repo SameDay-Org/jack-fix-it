@@ -6,7 +6,6 @@ import { router } from "expo-router";
 import { LocalCleanupError, logout, useSession } from "@/api";
 
 import { deferred, user } from "../../../api/__tests__/helpers";
-import { phoneFlowStore } from "../../phone/phoneFlow";
 import { HomePlaceholderScreen } from "../HomePlaceholderScreen";
 import { renderInSafeArea, SIGNED_OUT } from "./helpers";
 
@@ -80,19 +79,6 @@ describe("HomePlaceholderScreen", () => {
 
     expect(screen.getByTestId("home-phone")).toHaveTextContent("Phone+1 (415) 555-0123Verified");
     expect(screen.queryByRole("button", { name: "Verify your phone" })).toBeNull();
-  });
-
-  it("right after a sign-up: a bare page that opens the phone step over itself, once", async () => {
-    jest.mocked(router.push).mockClear();
-    phoneFlowStore.setState({ offeredAfterSignUp: true });
-    signedInAs("customer");
-
-    await renderInSafeArea(<HomePlaceholderScreen />);
-
-    expect(router.push).toHaveBeenCalledTimes(1);
-    expect(router.push).toHaveBeenCalledWith("/verify-phone?from=sign-up");
-    expect(screen.queryByTestId("home-welcome")).toBeNull(); // nothing shows through the push
-    phoneFlowStore.setState({ offeredAfterSignUp: false });
   });
 
   it("a customer sees the customer badge", async () => {
