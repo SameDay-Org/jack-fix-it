@@ -6,9 +6,10 @@ import { router } from "expo-router";
 
 import { ApiError, apiGet, NetworkError } from "@/api";
 
+import { deferred } from "../../../api/__tests__/helpers";
 import { flattenOpportunities, OPPORTUNITIES_QUERY_KEY } from "../../pro-home/useOpportunities";
 import { OpportunityDetailScreen } from "../OpportunityDetailScreen";
-import { opportunityQueryKey } from "../useOpportunity";
+import { opportunityQueryKey, type OpportunityDetail } from "../useOpportunity";
 import {
   detail,
   DISPATCH_ID,
@@ -127,8 +128,13 @@ describe("OpportunityDetailScreen", () => {
   });
 
   it("offers Send a quote once loaded, which opens the quote form over it", async () => {
+    // The answer waits for the test: an immediate one could land inside the render's act (#289).
+    const answer = deferred<OpportunityDetail>();
+    jest.mocked(apiGet).mockReturnValueOnce(answer.promise);
     await renderWithQuery(<OpportunityDetailScreen />);
+    expect(apiGet).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId("opportunity-send-quote")).toBeNull();
+    await act(async () => answer.resolve(detail()));
     await screen.findByText("JF-000124");
 
     const send = screen.getByRole("button", { name: "Send a quote" });

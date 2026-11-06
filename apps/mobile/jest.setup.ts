@@ -20,3 +20,13 @@ import {
 } from "react-native";
 
 void [ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, Text, TextInput, View];
+
+// react-native-gesture-handler 3 installs its UI-runtime bindings through react-native-worklets in
+// a microtask when it is first imported. Under Jest, worklets resolves to its web build (the
+// Reanimated resolver in package.json), whose `getUIRuntimeHolder` throws, and that stray throw
+// fails the suite after its tests ran. There is no UI runtime here: the holder is an empty object,
+// and the gesture module (a mock, `setupFiles`) accepts it.
+jest.mock("react-native-worklets", () => ({
+  ...jest.requireActual<typeof import("react-native-worklets")>("react-native-worklets"),
+  getUIRuntimeHolder: () => ({}),
+}));
