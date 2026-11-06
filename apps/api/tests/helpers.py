@@ -49,9 +49,10 @@ def gc_paused() -> Iterator[None]:
 def seconds_without_gc(
     work: Callable[[], object], *, clock: Callable[[], float] = time.perf_counter
 ) -> float:
-    """Wall-clock seconds of work() with the collector paused (gc_paused). Backtracking still
-    shows: the code itself runs slowly. clock is a seam for test_helpers.py, which scripts the
-    readings instead of sleeping."""
+    """Seconds of work() on clock (the wall clock by default) with the collector paused
+    (gc_paused). Backtracking still shows: the code itself runs slowly. clock is a seam for
+    test_helpers.py, which scripts the readings instead of sleeping, and lets the floor budget
+    of test_redaction.py read this thread's CPU time (#300)."""
     with gc_paused():
         started = clock()
         work()
