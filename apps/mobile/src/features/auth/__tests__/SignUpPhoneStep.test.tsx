@@ -6,6 +6,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { AccessibilityInfo } from "react-native";
 
 import { ApiError, apiPost, endOnboarding, type SessionUser } from "@/api";
+import { moveAccessibilityFocus } from "@/components/ui";
 
 import { deferred, user } from "../../../api/__tests__/helpers";
 import { sessionStore } from "../../../api/session";
@@ -57,6 +58,11 @@ jest.mock("react-native-reanimated", () => {
     },
   };
 });
+// Focus moves to a host node; recorded here to know which one.
+jest.mock("@/components/ui", () => ({
+  ...jest.requireActual("@/components/ui"),
+  moveAccessibilityFocus: jest.fn(),
+}));
 jest.mock("expo-haptics", () => ({
   notificationAsync: jest.fn(async () => undefined),
   NotificationFeedbackType: { Success: "success" },
@@ -231,6 +237,7 @@ describe("SignUpScreen: the phone step", () => {
     expect(button("Verify")).toBeDisabled();
 
     // The sixth digit sends the code on its own.
+    jest.mocked(moveAccessibilityFocus).mockClear();
     await act(async () => fireEvent.changeText(codeField(), CODE));
 
     expect(calls(VERIFY)).toEqual([
@@ -238,6 +245,9 @@ describe("SignUpScreen: the phone step", () => {
     ]);
     expect(await screen.findByText("Account created! Here's your ID:")).toBeTruthy();
     expect(screen.getByText("Tap it to see the back.")).toBeTruthy();
+    // A screen reader starts on the headline once it is there.
+    await waitFor(() => expect(moveAccessibilityFocus).toHaveBeenCalledTimes(1));
+    expect(jest.mocked(moveAccessibilityFocus).mock.calls[0][0]).toBeTruthy();
     expect(sessionStore.getState().user?.phone_verified).toBe(true);
     expect(card()).toBe(`Ana Cruz|${SHOWN}`);
     // The answer's fresh signed URL is the same photo: the card keeps the one it shows.

@@ -182,6 +182,8 @@ const ENGRAVE_DEPTH = 1;
 /** Vertical gaps in the name column at the design width, in dp. */
 const PLACE_GAP = 4;
 const PHONE_GAP = 2;
+/** The phone line's floor as it shrinks to keep the whole number on one line (iOS: see the name's). */
+const PHONE_MIN_SCALE = 0.5;
 /**
  * The name column: two lines, and a long name shrinks before it takes a third. The floor holds on
  * iOS; Android's native fit has no floor (RN 0.88 never hands it `minimumFontScale`), so a very
@@ -422,6 +424,9 @@ function Front({
             <Text
               allowFontScaling={scaleFonts}
               numberOfLines={1}
+              // A number cut short is a wrong number: at large text it shrinks to fit instead.
+              adjustsFontSizeToFit
+              minimumFontScale={PHONE_MIN_SCALE}
               style={[
                 typeStyle("footnote", unit),
                 {
@@ -790,7 +795,9 @@ export function IdCard({
             frontStyle,
           ]}
         >
-          <View style={[{ flex: 1 }, ...clipStyle(unit)]}>
+          {/* Grows with its content (not `flex: 1`, which holds it at the card's height): large
+              text that needs more room takes the shade and sheen down with it. */}
+          <View style={[{ flexGrow: 1 }, ...clipStyle(unit)]}>
             <Shade palette={palette} gradientId={gradientId} />
             <Sheen
               palette={palette}
