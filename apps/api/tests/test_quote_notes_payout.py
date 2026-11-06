@@ -519,6 +519,8 @@ def test_customer_quote_has_no_payout_fields(app: FastAPI) -> None:
         ("post", "/v1/pros/me/jobs/{job_id}/on-the-way"): pro_job,
         ("post", "/v1/pros/me/jobs/{job_id}/check-in"): pro_job,
         ("post", "/v1/pros/me/jobs/{job_id}/start"): pro_job,
+        ("post", "/v1/pros/me/jobs/{job_id}/photos"): pro_job,
+        ("post", "/v1/pros/me/jobs/{job_id}/complete"): pro_job,
         ("post", "/v1/pros/me/opportunities/{dispatch_id}/quote"): {
             "pro_payout_cents",
             "platform_fee_cents",
