@@ -22,7 +22,10 @@ const FRAME_HEIGHT = (FRAME_WIDTH * ID_CARD_BASE.photo.height) / ID_CARD_BASE.ph
  */
 const GUIDE = { cx: 0.5, cy: 0.46, rx: 0.32, ry: 0.34 } as const;
 const GUIDE_STROKE = 2;
-const GUIDE_COLOR = withOpacity("white", 0.7);
+const GUIDE_COLOR = withOpacity("white", 0.85);
+/** A soft dark line under the white one, so the guide reads over a bright scene too. */
+const GUIDE_SHADOW_STROKE = 4;
+const GUIDE_SHADOW_COLOR = withOpacity("navy-900", 0.3);
 /** The placeholder before the camera is on, as the card draws its empty photo. */
 const SILHOUETTE_SIZE = FRAME_WIDTH / 2;
 const SILHOUETTE_COLOR = withOpacity("white", 0.4);
@@ -86,15 +89,21 @@ export function SelfieFrame({ photo, camera, active, testID }: SelfieFrameProps)
               style={StyleSheet.absoluteFill}
             >
               <Svg width={FRAME_WIDTH} height={FRAME_HEIGHT}>
-                <Ellipse
-                  cx={GUIDE.cx * FRAME_WIDTH}
-                  cy={GUIDE.cy * FRAME_HEIGHT}
-                  rx={GUIDE.rx * FRAME_WIDTH}
-                  ry={GUIDE.ry * FRAME_HEIGHT}
-                  stroke={GUIDE_COLOR}
-                  strokeWidth={GUIDE_STROKE}
-                  fill="none"
-                />
+                {[
+                  { color: GUIDE_SHADOW_COLOR, width: GUIDE_SHADOW_STROKE },
+                  { color: GUIDE_COLOR, width: GUIDE_STROKE },
+                ].map((line) => (
+                  <Ellipse
+                    key={line.color}
+                    cx={GUIDE.cx * FRAME_WIDTH}
+                    cy={GUIDE.cy * FRAME_HEIGHT}
+                    rx={GUIDE.rx * FRAME_WIDTH}
+                    ry={GUIDE.ry * FRAME_HEIGHT}
+                    stroke={line.color}
+                    strokeWidth={line.width}
+                    fill="none"
+                  />
+                ))}
               </Svg>
             </View>
           </>

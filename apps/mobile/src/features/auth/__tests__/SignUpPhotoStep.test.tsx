@@ -225,7 +225,7 @@ describe("SignUpScreen: the selfie step, the camera", () => {
     expect(card()).toBe("Ana Cruz|");
     expect(screen.queryByTestId("sign-up-photo-camera")).toBeNull();
     // The library is there too, for a person who would rather not turn the camera on.
-    expect(button("Choose from library")).toBeTruthy();
+    expect(button("Choose a photo")).toBeTruthy();
 
     await press("Turn on camera");
 
@@ -233,7 +233,7 @@ describe("SignUpScreen: the selfie step, the camera", () => {
     await waitFor(() => expect(button("Take photo")).toBeEnabled());
     expect(preview().props.facing).toBe("front");
     expect(preview().props.active).toBe(true);
-    expect(screen.queryByRole("button", { name: "Choose from library" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Choose a photo" })).toBeNull();
     // No skip: the card needs a face. Back is still there.
     expect(screen.queryByRole("button", { name: /skip/i })).toBeNull();
     expect(button("Back")).toBeTruthy();
@@ -273,7 +273,7 @@ describe("SignUpScreen: the selfie step, the camera", () => {
       assets: [{ uri: PICKED, width: 1200, height: 1600 }],
     });
 
-    await press("Choose from library");
+    await press("Choose a photo");
 
     expect(launchImageLibraryAsync).toHaveBeenCalledWith({ mediaTypes: ["images"], exif: false });
     expect(await screen.findByTestId("sign-up-photo-photo")).toBeTruthy();
@@ -301,7 +301,7 @@ describe("SignUpScreen: the selfie step, a refused camera", () => {
     await renderStep();
 
     expect(await screen.findByText("Camera access is off")).toBeTruthy();
-    expect(button("Choose from library")).toBeTruthy();
+    expect(button("Choose a photo")).toBeTruthy();
     await press("Open settings");
     expect(openSettings).toHaveBeenCalledTimes(1);
     expect(requestCameraPermissionsAsync).not.toHaveBeenCalled();
@@ -324,7 +324,7 @@ describe("SignUpScreen: the selfie step, a refused camera", () => {
     expect(await screen.findByText("Camera access is off")).toBeTruthy();
 
     jest.mocked(launchImageLibraryAsync).mockResolvedValueOnce({ canceled: true, assets: null });
-    await press("Choose from library");
+    await press("Choose a photo");
     expect(screen.queryByTestId("sign-up-photo-photo")).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
 
@@ -332,7 +332,7 @@ describe("SignUpScreen: the selfie step, a refused camera", () => {
       canceled: false,
       assets: [{ uri: PICKED, width: 1200, height: 1600 }],
     });
-    await press("Choose from library");
+    await press("Choose a photo");
     expect(await screen.findByTestId("sign-up-photo-photo")).toBeTruthy();
 
     patchesPhoto();
