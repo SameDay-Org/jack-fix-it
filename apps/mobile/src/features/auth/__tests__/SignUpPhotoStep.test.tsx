@@ -505,33 +505,45 @@ describe("SignUpScreen: the selfie step, saving the photo", () => {
     expect(apiPatch).not.toHaveBeenCalled();
   });
 
-  it("Back stops the camera at once; it returns to the home step", async () => {
+  it("Back releases the camera at once; it returns to the home step", async () => {
     onFlow();
     await renderStep();
     await waitFor(() => expect(button("Take photo")).toBeEnabled());
 
     await press("Back");
-    // The step slides out with its preview, which is off from the press on.
-    const leaving = screen.getByTestId("sign-up-photo-camera", { includeHiddenElements: true });
-    expect(leaving.props.active).toBe(false);
+    // The step slides out without its preview: the camera is released from the press on, on
+    // Android too (`active={false}` only pauses it on iOS).
+    expect(screen.getByTestId("sign-up-photo", { includeHiddenElements: true })).toBeTruthy();
+    expect(
+      screen.queryByTestId("sign-up-photo-camera", { includeHiddenElements: true }),
+    ).toBeNull();
     expect(await arrive("Where do you live?")).toBeTruthy();
     expect(preview).toThrow();
   });
 
-  it("back on the step, Take photo waits for the new preview to be ready", async () => {
+  it("a late ready from the preview Back released cannot enable the next one", async () => {
+    cameraMock.holdReady = true;
     onFlow();
     await renderStep();
-    await waitFor(() => expect(button("Take photo")).toBeEnabled());
+    await waitFor(() => expect(cameraMock.pendingReady).toHaveLength(1));
+    const released = cameraMock.pendingReady[0];
+    expect(button("Take photo")).toBeDisabled();
 
     await press("Back");
+    // The released preview reports while its pane is still sliding out, then again once it is gone.
+    await act(async () => released?.());
     expect(await arrive("Where do you live?")).toBeTruthy();
-    cameraMock.holdReady = true;
+    await act(async () => released?.());
     jest.mocked(apiPatch).mockImplementation(async () => sessionStore.getState().user as never);
     await press("Continue");
     expect(await arrive("Let's see that face!")).toBeTruthy();
-
+    await waitFor(() => expect(cameraMock.pendingReady).toHaveLength(2));
     expect(button("Take photo")).toBeDisabled();
-    await act(async () => cameraMock.pendingReady.forEach((report) => report()));
+    await act(async () => released?.());
+    expect(button("Take photo")).toBeDisabled();
+
+    // Only the new preview's own report enables it.
+    await act(async () => cameraMock.pendingReady[1]?.());
     expect(button("Take photo")).toBeEnabled();
   });
 

@@ -1,7 +1,7 @@
 import type { CameraView } from "expo-camera";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -39,11 +39,11 @@ export type PhotoStep = {
   photoUri: string | undefined;
   /** The live preview, for the capture. */
   camera: RefObject<CameraView | null>;
-  onCameraReady: () => void;
-  onCameraError: () => void;
+  /** The preview to mount now; one mount per preview (its `id` is the view's key). */
+  preview: CameraPreview;
   /**
-   * The step left the screen: its preview stops, and the next visit waits for the new one to be
-   * ready (or tries a camera that failed again).
+   * The step left the screen: its preview is released, and the next visit waits for a new one to
+   * be ready (or tries a camera that failed again).
    */
   onCameraStop: () => void;
   /** The share of the photo the storage has taken, 0 to 1, while it is saved; else `null`. */
@@ -68,6 +68,12 @@ type Upload = { source: string; generation: number; prepared?: PreparedMedia; ke
 
 type CameraState = "starting" | "ready" | "failed";
 
+/**
+ * One mounted preview and its own reports. A preview that was released (the step left, the photo
+ * was set aside) can still report late; its reports name an older `id` and change nothing.
+ */
+export type CameraPreview = { id: number; onReady: () => void; onError: () => void };
+
 const isRefusal = (error: unknown): boolean =>
   error instanceof UploadRejectedError || (error instanceof ApiError && error.status === 422);
 
@@ -88,7 +94,12 @@ export function usePhotoStep(onSaved: () => void): PhotoStep {
   const [shot, setShot] = useState<string | null>(null);
   // Retake sets the account's own photo aside as well: the camera opens instead of it.
   const [savedSetAside, setSavedSetAside] = useState(false);
-  const [cameraState, setCameraState] = useState<CameraState>("starting");
+  // The current preview's id, and what that preview has reported.
+  const [preview, setPreview] = useState<{ id: number; state: CameraState }>({
+    id: 0,
+    state: "starting",
+  });
+  const cameraState = preview.state;
   const [capturing, setCapturing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
@@ -178,15 +189,32 @@ export function usePhotoStep(onSaved: () => void): PhotoStep {
     [handOver],
   );
 
-  const onCameraReady = useCallback(() => setCameraState("ready"), []);
-  const onCameraError = useCallback(() => setCameraState("failed"), []);
-  const onCameraStop = useCallback(() => setCameraState("starting"), []);
+  // A preview's report counts only while it is the current one.
+  const report = useCallback(
+    (id: number, state: CameraState) =>
+      setPreview((current) => (current.id === id ? { id, state } : current)),
+    [],
+  );
+  const previewId = preview.id;
+  const currentPreview = useMemo<CameraPreview>(
+    () => ({
+      id: previewId,
+      onReady: () => report(previewId, "ready"),
+      onError: () => report(previewId, "failed"),
+    }),
+    [previewId, report],
+  );
+  // The next preview is a new one: it has to report ready itself.
+  const onCameraStop = useCallback(
+    () => setPreview((current) => ({ id: current.id + 1, state: "starting" })),
+    [],
+  );
 
   const retake = useCallback(() => {
     if (saving.current) return;
     setShot(null);
     setSavedSetAside(true);
-    setCameraState("starting");
+    onCameraStop();
     setSaveFailed(false);
     setFailure(null);
   }, []);
@@ -236,7 +264,7 @@ export function usePhotoStep(onSaved: () => void): PhotoStep {
         upload.current = null;
         setShot(null);
         setSavedSetAside(true);
-        setCameraState("starting");
+        onCameraStop();
         fail(t("signUp.errors.photoRejected"));
       } else {
         setSaveFailed(true);
@@ -249,7 +277,7 @@ export function usePhotoStep(onSaved: () => void): PhotoStep {
         setProgress(null);
       }
     }
-  }, [fail, onSaved, shot, t, updateMe]);
+  }, [fail, onCameraStop, onSaved, shot, t, updateMe]);
 
   const action = ((): PhotoAction => {
     switch (mode) {
@@ -288,8 +316,7 @@ export function usePhotoStep(onSaved: () => void): PhotoStep {
     mode,
     photoUri,
     camera,
-    onCameraReady,
-    onCameraError,
+    preview: currentPreview,
     onCameraStop,
     progress,
     failure,
