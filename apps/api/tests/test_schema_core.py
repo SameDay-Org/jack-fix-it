@@ -91,8 +91,8 @@ async def test_user_role_and_status_reject_unknown_values(
     with pytest.raises(IntegrityError):
         await db_session.execute(
             text(
-                "INSERT INTO users (email, password_hash, role, status) "
-                "VALUES ('raw@x.com', 'x', :role, :status)"
+                "INSERT INTO users (email, password_hash, role, status, public_code) "
+                "VALUES ('raw@x.com', 'x', :role, :status, 'ABCD2345')"
             ),
             {"role": role, "status": status},
         )

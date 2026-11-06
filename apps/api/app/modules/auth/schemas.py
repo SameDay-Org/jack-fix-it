@@ -11,6 +11,7 @@ from pydantic import (
 )
 
 from app.config import PASSWORD_MAX_LENGTH
+from app.modules.users.locations import HomeCity, HomeState
 from app.modules.users.names import NAME_MAX_LENGTH, PersonName
 from app.modules.users.schemas import UserOut
 from app.modules.users.types import UserRole
@@ -62,19 +63,37 @@ class RegisterRequest(BaseModel):
 
 
 class MeUpdateRequest(BaseModel):
-    """PATCH /v1/auth/me: the caller's own names. Omit a field to keep it; null is refused."""
+    """PATCH /v1/auth/me: the caller's own names (#165) and ID card fields (#250). Omit a field
+    to keep it. A name is never null. home_city and home_state travel together: both set, or
+    both null to clear them. photo_key null clears the ID photo."""
 
     model_config = ConfigDict(extra="forbid")
 
     first_name: PersonName | None = Field(default=None, description=_NAME_RULES)
     last_name: PersonName | None = Field(default=None, description=_NAME_RULES)
+    home_city: HomeCity | None = Field(
+        default=None, description="With home_state: both set, or both null to clear."
+    )
+    home_state: HomeState | None = Field(
+        default=None, description="A US state or DC code, upper case (FL); with home_city."
+    )
+    photo_key: str | None = Field(
+        default=None,
+        max_length=512,  # the column's width; a longer string can never be a key
+        description="Key of the caller's own profile_photo upload (POST /v1/uploads); null clears.",
+    )
 
     @model_validator(mode="after")
-    def _something_to_set(self) -> Self:
-        if not self.model_fields_set:
+    def _consistent(self) -> Self:
+        sent = self.model_fields_set
+        if not sent:
             raise ValueError("nothing to change")
-        if any(getattr(self, name) is None for name in self.model_fields_set):
+        if any(getattr(self, name) is None for name in sent & {"first_name", "last_name"}):
             raise ValueError("a name cannot be null")
+        if ("home_city" in sent) != ("home_state" in sent) or (self.home_city is None) != (
+            self.home_state is None
+        ):
+            raise ValueError("home_city and home_state are set together or cleared together")
         return self
 
 

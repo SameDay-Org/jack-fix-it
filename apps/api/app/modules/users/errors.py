@@ -19,3 +19,27 @@ class PhoneUnavailableError(ConflictError):
 
     code = "phone_unavailable"
     message = "This phone number cannot be used for this account."
+
+
+class HomeLocationIncompleteError(AppError):
+    """The city would be set without the state or the other way round: both go together."""
+
+    status_code = 422
+    code = "validation_error"
+    message = "The request is invalid."
+
+
+class InvalidPhotoError(AppError):
+    """The photo key is not the caller's own profile_photo upload; never says which check."""
+
+    status_code = 422
+    code = "invalid_media"
+    message = "The attached media is invalid."
+
+
+class PublicCodeExhaustedError(RuntimeError):
+    """Every try at a public code collided (users.public_codes.MAX_TRIES): a generic 500,
+    logged without any code."""
+
+    def __init__(self) -> None:
+        super().__init__("no free public code found")

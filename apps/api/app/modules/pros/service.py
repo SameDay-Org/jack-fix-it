@@ -29,10 +29,10 @@ from app.modules.pros.errors import (
 )
 from app.modules.pros.models import ProProfile, ProVerificationStatus
 from app.modules.pros.repository import ProDocumentRepository, ProProfileRepository
-from app.modules.pros.schemas import PhotoOut, ProProfileOut, ProProfileUpdate
+from app.modules.pros.schemas import ProProfileOut, ProProfileUpdate
 from app.modules.service_areas.service import ServiceAreaService
-from app.modules.uploads.schemas import UploadPurpose
-from app.modules.uploads.service import owned_upload
+from app.modules.uploads.keys import owned_upload
+from app.modules.uploads.schemas import PhotoOut, UploadPurpose
 from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount
 
@@ -112,6 +112,19 @@ class ProService:
         """The upload keys among `keys` that a verification document holds, superseded ones
         too, as a statement (the uploads sweep of unreferenced uploads, #191)."""
         return ProDocumentRepository.file_keys_among(keys)
+
+    async def adopt_photo_if_missing(self, user_id: uuid.UUID, key: str) -> bool:
+        """Makes the pro's ID photo (#250; `key` is their own profile_photo upload, checked
+        by the caller) their public profile photo while they have none, so the selfie shows
+        until they pick another; a photo already set is untouched. The empty profile is
+        created first when missing, as the first GET /pros/me does. True when the photo was
+        set; the caller owns the commit."""
+        if await self._profiles.insert_if_missing(user_id):
+            logger.info("pro_profile_created", extra={"user_id": str(user_id)})
+        adopted = await self._profiles.set_photo_if_missing(user_id, key)
+        if adopted:
+            logger.info("pro_profile_photo_adopted", extra={"user_id": str(user_id)})
+        return adopted
 
     async def get_profile_id_for_user(self, user_id: uuid.UUID) -> uuid.UUID | None:
         """The pro_profiles.id of a user, or None when the user has no pro profile."""

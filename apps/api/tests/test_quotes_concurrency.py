@@ -87,6 +87,8 @@ async def committed(test_database_url: URL) -> AsyncIterator[Committed]:
                     role=user.role,
                     locale=user.locale,
                     status=user.status,
+                    public_code=user.public_code,
+                    created_at=user.created_at,
                 ),
                 profile.id,
                 row.id,

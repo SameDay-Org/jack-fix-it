@@ -21,8 +21,8 @@ from app.modules.pros.errors import InvalidDocumentError, InvalidMediaError
 from app.modules.pros.models import ProDocument, ProDocumentStatus, ProDocumentType
 from app.modules.pros.repository import ProDocumentRepository, ProProfileRepository
 from app.modules.pros.schemas import DocumentOut, DocumentsOut, DocumentSubmission
+from app.modules.uploads.keys import owned_upload
 from app.modules.uploads.schemas import UploadPurpose
-from app.modules.uploads.service import owned_upload
 from app.modules.users.types import UserAccount
 
 logger = logging.getLogger(__name__)

@@ -11,6 +11,13 @@ class UploadPurpose(StrEnum):
     PROFILE_PHOTO = "profile_photo"
 
 
+class PhotoOut(BaseModel):
+    """An image the caller may see: a pro's profile photo (#36), a user's ID photo (#250)."""
+
+    url: str = Field(description="Presigned GET URL.")
+    expires_at: datetime
+
+
 class UploadRequest(BaseModel):
     purpose: UploadPurpose
     content_type: str = Field(max_length=100, description="An allowed MIME type, e.g. image/jpeg.")

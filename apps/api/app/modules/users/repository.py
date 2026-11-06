@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Collection
 from datetime import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import Select, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.users.models import User
@@ -30,6 +30,12 @@ class UserRepository:
             return set()
         statement = select(User.id).where(User.id.in_(user_ids), User.role == role)
         return set((await self._session.scalars(statement)).all())
+
+    @staticmethod
+    def photo_keys_among(keys: Collection[str]) -> Select[str | None]:
+        """The upload keys among `keys` that a user holds as their ID photo, as a statement
+        (the uploads sweep of unreferenced uploads, #191)."""
+        return select(User.photo_key).where(User.photo_key.in_(keys))
 
     async def get_by_id(self, user_id: uuid.UUID) -> User | None:
         return await self._session.get(User, user_id)

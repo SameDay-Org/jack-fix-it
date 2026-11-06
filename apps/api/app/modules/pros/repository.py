@@ -116,6 +116,15 @@ class ProProfileRepository:
         )
         return (await self._session.scalar(statement)) is not None
 
+    async def set_photo_if_missing(self, user_id: uuid.UUID, key: str) -> bool:
+        """Sets the profile's photo only while it has none; True when this call set it."""
+        result = await self._session.execute(
+            update(ProProfile)
+            .where(ProProfile.user_id == user_id, ProProfile.photo_key.is_(None))
+            .values(photo_key=key)
+        )
+        return bool(result.rowcount)  # type: ignore[attr-defined]  # CursorResult of an UPDATE
+
     async def get_by_user_id(self, user_id: uuid.UUID, *, lock: bool = False) -> ProProfile | None:
         """`lock`: FOR UPDATE until the transaction ends, so two edits of one profile run one
         after the other (their set replacements would otherwise collide)."""

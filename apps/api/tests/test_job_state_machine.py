@@ -85,7 +85,13 @@ class World:
 
 def account(user: User) -> UserAccount:
     return UserAccount(
-        id=user.id, email=user.email, role=user.role, locale=user.locale, status=user.status
+        id=user.id,
+        email=user.email,
+        role=user.role,
+        locale=user.locale,
+        status=user.status,
+        public_code=user.public_code,
+        created_at=user.created_at,
     )
 
 

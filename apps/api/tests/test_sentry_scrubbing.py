@@ -6,7 +6,7 @@ import random
 import re
 import uuid
 from collections.abc import Callable, Iterator
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -532,6 +532,8 @@ async def test_captured_event_has_no_stripe_account_id(sentry_transport: MemoryT
         role=UserRole.PRO,
         locale="en",
         status=UserStatus.ACTIVE,
+        public_code="K7Q29MXA",
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
     with pytest.raises(PaymentsProviderError):
