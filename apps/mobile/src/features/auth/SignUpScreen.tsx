@@ -134,8 +134,13 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
 
   // Past the account step the session belongs to the flow; a session that ends meanwhile (expired,
   // refused) sends the person back to Welcome, signed out.
+  // A flow finished by a session that is gone since is not finished for this one.
   const ending =
-    finishedIn !== null ? "finished" : index >= 1 && status === "signedOut" ? "sessionLost" : null;
+    finishedIn !== null && isCurrentGeneration(finishedIn)
+      ? "finished"
+      : index >= 1 && status === "signedOut"
+        ? "sessionLost"
+        : null;
 
   const stepBack = () => {
     if (busy || moving || index < 2) return;
@@ -152,11 +157,9 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
   // After the commit that turned the guard off, so neither the gate's switch to the app nor the
   // way back to Welcome is blocked.
   useEffect(() => {
-    // A step's save calls this only while its session is current; another sign-in before this
-    // effect runs is not ended here (the gate routes that account).
-    if (ending === "finished" && finishedIn !== null && isCurrentGeneration(finishedIn)) endFlow();
+    if (ending === "finished") endFlow();
     if (ending === "sessionLost") router.dismissTo("/(auth)/welcome");
-  }, [ending, finishedIn]);
+  }, [ending]);
 
   // Focus follows the step: a screen reader's to its heading, everyone else's to its first field.
   const onSettled = useCallback((settled: SignUpStep) => {
