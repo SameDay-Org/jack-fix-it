@@ -562,5 +562,17 @@
       "body": "Revisa tu conexión e inténtalo de nuevo.",
       "retry": "Intentar de nuevo"
     }
+  },
+  "idCard": {
+    "hello": "Hola, soy:",
+    "pro": "PRO",
+    "a11y": {
+      "card": "Tarjeta de identificación",
+      "unnamed": "nombre aún sin definir",
+      "back": "Reverso de la tarjeta de identificación, código {{code}}",
+      "backBlank": "Reverso de la tarjeta de identificación, aún sin código",
+      "flip": "Voltear la tarjeta",
+      "hint": "Da la vuelta a la tarjeta."
+    }
   }
 }
