@@ -70,7 +70,8 @@ type CameraState = "starting" | "ready" | "failed";
 
 /**
  * One mounted preview and its own reports. A preview that was released (the step left, the photo
- * was set aside) can still report late; its reports name an older `id` and change nothing.
+ * was set aside, it failed to start) can still report late; its reports name an older `id` and
+ * change nothing.
  */
 export type CameraPreview = { id: number; onReady: () => void; onError: () => void };
 
@@ -201,10 +202,14 @@ export function usePhotoStep(onSaved: () => void): PhotoStep {
     [handOver],
   );
 
-  // A preview's report counts only while it is the current one.
+  // A preview's report counts only while it is the current one. A preview that failed is unmounted
+  // and retired at once: its id moves on, so a ready it had already queued changes nothing, and
+  // the camera stays off (the library takes over) until the step leaves or access comes back.
   const report = useCallback(
     (id: number, state: CameraState) =>
-      setPreview((current) => (current.id === id ? { id, state } : current)),
+      setPreview((current) =>
+        current.id !== id ? current : state === "failed" ? { id: id + 1, state } : { id, state },
+      ),
     [],
   );
   const previewId = preview.id;

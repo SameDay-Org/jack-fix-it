@@ -213,6 +213,7 @@ beforeEach(() => {
   cameraMock.mountError = null;
   cameraMock.holdReady = false;
   cameraMock.pendingReady = [];
+  cameraMock.pendingError = [];
   announce = jest
     .spyOn(AccessibilityInfo, "announceForAccessibility")
     .mockImplementation(() => undefined);
@@ -289,6 +290,40 @@ describe("SignUpScreen: the selfie step, the camera", () => {
     expect(launchImageLibraryAsync).toHaveBeenCalledWith({ mediaTypes: ["images"], exif: false });
     expect(await screen.findByTestId("sign-up-photo-photo")).toBeTruthy();
     expect(card()).toBe(`Ana Cruz|${PICKED}`);
+  });
+
+  it("a ready the failed preview had queued changes nothing; the next preview waits for its own", async () => {
+    cameraMock.holdReady = true;
+    onFlow();
+    await renderStep();
+    await waitFor(() => expect(cameraMock.pendingReady).toHaveLength(1));
+    const failedReady = cameraMock.pendingReady[0];
+
+    // The preview fails to start: it is unmounted and the library takes over.
+    await act(async () => cameraMock.pendingError[0]?.("Camera could not be started"));
+    expect(await screen.findByText("The camera couldn't start")).toBeTruthy();
+    expect(screen.queryByTestId("sign-up-photo-camera")).toBeNull();
+
+    // Its ready arrives afterwards: no camera comes back, and nothing can take a photo.
+    await act(async () => failedReady?.());
+    expect(screen.getByText("The camera couldn't start")).toBeTruthy();
+    expect(screen.queryByTestId("sign-up-photo-camera")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Take photo" })).toBeNull();
+    expect(cameraMock.pendingReady).toHaveLength(1);
+
+    // Leaving and coming back tries the camera again, with a preview that reports for itself.
+    await press("Back");
+    expect(await arrive("Where do you live?")).toBeTruthy();
+    jest.mocked(apiPatch).mockImplementation(async () => sessionStore.getState().user as never);
+    await press("Continue");
+    expect(await arrive("Let's see that face!")).toBeTruthy();
+    await waitFor(() => expect(cameraMock.pendingReady).toHaveLength(2));
+    expect(button("Take photo")).toBeDisabled();
+    await act(async () => failedReady?.());
+    expect(button("Take photo")).toBeDisabled();
+    await act(async () => cameraMock.pendingReady[1]?.());
+    expect(button("Take photo")).toBeEnabled();
+    expect(takePictureAsync).not.toHaveBeenCalled();
   });
 
   it("a shutter that fails says so and keeps the camera", async () => {

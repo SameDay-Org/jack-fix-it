@@ -58,12 +58,14 @@ export type CameraHandle = { takePictureAsync: typeof takePictureAsync };
 
 /**
  * With a message here, every active preview fails to mount with it instead of reporting ready.
- * With `holdReady`, a preview's ready report waits in `pendingReady` until a test calls it.
+ * With `holdReady`, a preview's ready report waits in `pendingReady` until a test calls it, and
+ * `pendingError` holds, at the same index, that preview's mount error for a test to send instead.
  */
 export const cameraMock = {
   mountError: null as string | null,
   holdReady: false,
   pendingReady: [] as (() => void)[],
+  pendingError: [] as ((message: string) => void)[],
 };
 
 type PermissionHook = [
@@ -121,8 +123,10 @@ export function CameraView({
   // a parent re-render alone (new callback identities) reports nothing.
   const report = useEffectEvent(() => {
     if (cameraMock.mountError) onMountError?.({ message: cameraMock.mountError });
-    else if (cameraMock.holdReady) cameraMock.pendingReady.push(() => onCameraReady?.());
-    else onCameraReady?.();
+    else if (cameraMock.holdReady) {
+      cameraMock.pendingReady.push(() => onCameraReady?.());
+      cameraMock.pendingError.push((message) => onMountError?.({ message }));
+    } else onCameraReady?.();
   });
   useEffect(() => {
     if (active) report();
