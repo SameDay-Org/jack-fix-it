@@ -1,9 +1,9 @@
 // Dev-only smoke screen content for the ID card libraries (#251), unreachable outside __DEV__: the
 // sample strings are literal on purpose. One section per library, each proving it loads and runs.
-import { CameraView, PermissionStatus, useCameraPermissions, type CameraType } from "expo-camera";
+import { CameraView, PermissionStatus, type CameraType } from "expo-camera";
 import { useIsFocused } from "expo-router";
 import { useState, type ReactNode, type RefObject } from "react";
-import { Image, Linking, StyleSheet, Text, View } from "react-native";
+import { Image, StyleSheet, Text, View } from "react-native";
 import ViewShot, { type ViewShotRef } from "react-native-view-shot";
 
 import { Button, Card, Notice, StatusBadge, type StatusTone } from "@/components/ui";
@@ -11,6 +11,7 @@ import { continuousCorners } from "@/theme";
 
 import {
   CARD_CAPTURE_OPTIONS,
+  useCameraAccess,
   useCardCapture,
   useGyroscopeReading,
   useHapticTaps,
@@ -41,7 +42,7 @@ function Section({ title, badge, children }: { title: string; badge: Badge; chil
 }
 
 function CameraSection() {
-  const [permission, requestPermission] = useCameraPermissions();
+  const { permission, requestPermission, openSettings } = useCameraAccess();
   const [facing, setFacing] = useState<CameraType>("front");
   const [ready, setReady] = useState(false);
   const [mountError, setMountError] = useState<string | null>(null);
@@ -120,13 +121,9 @@ function CameraSection() {
       <Notice
         tone="info"
         title="Camera access is off"
-        body="Turn it on for Jack in Settings to see the preview."
+        body="Turn it on for Jack in Settings, then come back: the preview starts on its own."
       >
-        <Button
-          label="Open settings"
-          variant="secondary"
-          onPress={() => void Linking.openSettings()}
-        />
+        <Button label="Open settings" variant="secondary" onPress={() => void openSettings()} />
       </Notice>
     </Section>
   );
@@ -197,7 +194,7 @@ function ShareSection({ uri }: { uri: string | null }) {
     available === null
       ? { label: "Checking", tone: "neutral" }
       : !available
-        ? { label: "Unavailable", tone: "danger" }
+        ? { label: error ? "Failed" : "Unavailable", tone: "danger" }
         : shares > 0
           ? { label: `Shared x${shares}`, tone: "success" }
           : { label: "Available", tone: "info" };
@@ -215,7 +212,13 @@ function ShareSection({ uri }: { uri: string | null }) {
           if (uri) void share(uri, "Share your ID card");
         }}
       />
-      {error ? <Notice tone="danger" title="Could not share" body={error} /> : null}
+      {error ? (
+        <Notice
+          tone="danger"
+          title={available ? "Could not share" : "Could not check the share sheet"}
+          body={error}
+        />
+      ) : null}
     </Section>
   );
 }
@@ -225,12 +228,13 @@ function formatReading({ x, y, z }: { x: number; y: number; z: number }): string
 }
 
 function GyroscopeSection() {
-  const { available, reduceMotion, listening, reading } = useGyroscopeReading(GYRO_INTERVAL_MS);
+  const { available, reduceMotion, listening, reading, error } =
+    useGyroscopeReading(GYRO_INTERVAL_MS);
   const badge: Badge =
     available === null
       ? { label: "Checking", tone: "neutral" }
       : !available
-        ? { label: "No gyroscope", tone: "danger" }
+        ? { label: error ? "Failed" : "No gyroscope", tone: "danger" }
         : listening
           ? { label: "Listening", tone: "success" }
           : { label: "Drag only", tone: "info" };
@@ -242,7 +246,8 @@ function GyroscopeSection() {
           Reduce Motion is on: the card tilts by drag only, so nothing subscribes.
         </Text>
       ) : null}
-      {available === false ? (
+      {error ? <Notice tone="danger" title="Could not check the gyroscope" body={error} /> : null}
+      {available === false && !error ? (
         <Text className="text-callout text-gray-500">
           This device reports no gyroscope: the card tilts by drag only.
         </Text>
