@@ -24,7 +24,7 @@ from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole
 from tests.conftest import LOCK_WAIT_DEADLINE_SECONDS, backend_pid
 from tests.helpers import as_status_writer
-from tests.test_payments_api import PUBLISHABLE_KEY, FakeStripePayments
+from tests.test_payments_api import CONFIG, FakeStripePayments
 
 
 @dataclass(frozen=True)
@@ -152,7 +152,7 @@ async def test_concurrent_payments_create_one_intent(
                 async with asyncio.timeout(2 * LOCK_WAIT_DEADLINE_SECONDS):
                     results = await asyncio.gather(
                         *(
-                            PaymentService(session, stripe, PUBLISHABLE_KEY).payment_sheet(
+                            PaymentService(session, stripe, CONFIG).payment_sheet(
                                 committed.customer, committed.request_id, committed.quote_id
                             )
                             for session in (one, two)
@@ -218,7 +218,7 @@ async def test_payment_row_is_committed_before_stripe_is_called(committed: Commi
 
     stripe.on_create_customer = look_from_another_connection
     async with sessions() as session:
-        sheet = await PaymentService(session, stripe, PUBLISHABLE_KEY).payment_sheet(
+        sheet = await PaymentService(session, stripe, CONFIG).payment_sheet(
             committed.customer, committed.request_id, committed.quote_id
         )
 

@@ -24,7 +24,7 @@ def upgrade() -> None:
     op.create_unique_constraint(
         op.f("uq_users_stripe_customer_id"), "users", ["stripe_customer_id"]
     )
-    # One payment per accepted quote, its amounts frozen at creation: the split of the amount
+    # One payment per acceptance, its amounts frozen at creation: the split of the amount
     # at the stored take rate (app.money.split_amount; the platform absorbs the card fee, so the
     # payout and the fee add up to the amount) and the customer's total, amount plus tax. Enum
     # as varchar plus one named CHECK (ADR 0007).
@@ -57,6 +57,9 @@ def upgrade() -> None:
             "status", sa.String(length=32), server_default="requires_payment", nullable=False
         ),
         sa.Column("stripe_payment_intent_id", sa.String(length=255), nullable=True),
+        # The first PaymentIntent create's attempt, committed before the call: once Stripe may
+        # have forgotten its key, a retry searches for the intent instead of creating again.
+        sa.Column("payment_intent_requested_at", sa.DateTime(timezone=True), nullable=True),
         sa.CheckConstraint("amount_cents > 0", name=op.f("ck_payments_amount_cents_positive")),
         sa.CheckConstraint("tax_cents >= 0", name=op.f("ck_payments_tax_cents_non_negative")),
         sa.CheckConstraint(
@@ -93,12 +96,20 @@ def upgrade() -> None:
             name=op.f("fk_payments_request_id_service_requests"),
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_payments")),
-        sa.UniqueConstraint("quote_id", name=op.f("uq_payments_quote_id")),
         sa.UniqueConstraint(
             "stripe_payment_intent_id", name=op.f("uq_payments_stripe_payment_intent_id")
         ),
     )
     op.create_index(op.f("ix_payments_customer_id"), "payments", ["customer_id"], unique=False)
+    op.create_index(op.f("ix_payments_quote_id"), "payments", ["quote_id"], unique=False)
+    # One live payment per quote: a canceled one stays beside the next acceptance's payment.
+    op.create_index(
+        "uq_payments_quote_id_live",
+        "payments",
+        ["quote_id"],
+        unique=True,
+        postgresql_where=sa.text("status <> 'canceled'"),
+    )
     op.create_index(op.f("ix_payments_request_id"), "payments", ["request_id"], unique=False)
     op.create_index(op.f("ix_payments_status"), "payments", ["status"], unique=False)
 
@@ -109,6 +120,8 @@ def downgrade() -> None:
     # creates a new Customer in Stripe, and a PaymentIntent created before has no row.
     op.drop_index(op.f("ix_payments_status"), table_name="payments")
     op.drop_index(op.f("ix_payments_request_id"), table_name="payments")
+    op.drop_index("uq_payments_quote_id_live", table_name="payments")
+    op.drop_index(op.f("ix_payments_quote_id"), table_name="payments")
     op.drop_index(op.f("ix_payments_customer_id"), table_name="payments")
     # Dropping the table drops its constraints.
     op.drop_table("payments")

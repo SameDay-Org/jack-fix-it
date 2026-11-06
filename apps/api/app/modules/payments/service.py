@@ -11,14 +11,17 @@ on the customer's own request (else 404, the same body as the request) under its
 one acceptance takes, so two payment calls, or a payment and an acceptance, take turns) and the
 quote's (else 404, the same body, for a quote of another request), in this order:
 - the request is accepted and the quote is its accepted one: else 409 payment_not_available.
-  A payment already succeeded or canceled: 409 too (the job exists or is being created, or the
-  PaymentIntent is closed and the reconciliation in #61 reopens the quote);
+  A live payment (any status but canceled) that succeeded: 409 too (the job exists or is
+  being created);
 - the quote's pro can still be hired (approved, payouts enabled; Cesar's #189 decision:
   rechecked at payment, on every call): else 409 pro_not_hireable, nothing created, a warning
   with ids. Un-accepting the quote belongs to #61.
-Then the payment row, one per accepted quote (unique on quote_id), with every amount computed
-here from database values (AGENTS.md "Money"): the quote's amount; the platform's fee and the
-pro's payout from app.money.split_amount at the current take rate (settings
+Then the quote's live payment row, or a new one: one per acceptance. A canceled payment (its
+PaymentIntent closed; #61 reopened the quote) stays as history, and accepting the same quote
+again makes a new row, with its own id, idempotency key and PaymentIntent; a partial unique
+index on quote_id (status <> 'canceled') keeps a quote to one live payment. Every amount is
+computed here from database values (AGENTS.md "Money"): the quote's amount; the platform's fee
+and the pro's payout from app.money.split_amount at the current take rate (settings
 platform_take_rate_bps; a malformed value is 503 not_configured, never a fee of 0); the tax, 0
 in the MVP (Cesar, 2026-11-06; to confirm with the accountant before launch); the customer's
 total, amount plus tax. It is committed before any Stripe call, with the id its idempotency key
@@ -36,8 +39,18 @@ Stripe, in three calls:
   or on_behalf_of, transfer_group `request:<request id>`, and the ids #61 reads in its
   metadata (payment_id, quote_id, request_id). Its id is stored and committed. A later call
   finds the id and retrieves the PaymentIntent instead, the lock released first; a concurrent
-  call waits on the lock and finds the id too, so one PaymentIntent exists per payment. A
-  retry after a lost create answer sends the same key, and Stripe replays the same intent.
+  call waits on the lock and finds the id too, so one PaymentIntent exists per payment.
+  The first create's time (payment_intent_requested_at) is committed before the call. A
+  retry after a lost create answer, within STRIPE_PAYMENT_INTENT_RECONCILE_AFTER_SECONDS of
+  that time, sends the same key, and Stripe replays the same intent. Later Stripe may have
+  forgotten the key (it keeps them at least 24 hours), so the retry creates nothing: it
+  searches Stripe for the intents whose metadata names the payment and adopts the one match
+  whose amount, currency and customer are the row's. No match, several, a mismatch or an
+  incomplete search: 409 payment_needs_review, an ERROR payment_intent_ambiguous (ids and the
+  count), the time kept. An empty search proves nothing (Search is eventually consistent, and
+  a delayed create can still land), so the payment waits for staff:
+  scripts/resolve_payment_intent.py adopts an intent or allows a new create (adopt_intent,
+  allow_new_intent here).
   Stripe showing it succeeded or canceled: 409 payment_not_available, the row left to #61;
 - an ephemeral key for the customer, new on every call.
 The response is what the Payment Sheet needs plus what the customer sees: the amount, the tax
@@ -45,9 +58,9 @@ and the total; never the pro's payout or the platform's fee.
 
 Stripe unreachable, a 409, 429 or 5xx: 503 payments_unavailable; any other 4xx: 502
 payments_error. Nothing stored changes on either (the transaction is rolled back), and the
-payment row stays for the retry. Logs carry ids only (payment, quote, request, the customer's
-user id, Stripe's request id and error code): never a client secret, an ephemeral key, a
-customer id or a PaymentIntent id.
+payment row and its create time stay for the retry. Logs carry ids only (payment, quote,
+request, the customer's user id, Stripe's request id and error code): never a client secret,
+an ephemeral key, a customer id or a PaymentIntent id.
 """
 
 import logging
@@ -55,18 +68,25 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import Final
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS, Settings
 from app.errors import NotFoundError
 from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailableError
 from app.integrations.stripe_payments import (
     PAYMENT_INTENT_CLOSED_STATUSES,
+    PaymentIntentFacts,
     PaymentIntentState,
     StripePayments,
 )
 from app.modules.payments.errors import (
+    PaymentNeedsReviewError,
     PaymentNotAvailableError,
+    PaymentRecoveryRefusedError,
     PaymentsNotConfiguredError,
     ProNotHireableError,
 )
@@ -91,6 +111,11 @@ from app.modules.users.types import UserAccount
 from app.money import split_amount
 
 logger = logging.getLogger(__name__)
+
+# How old an unresolved create must be before staff may allow a new one: Stripe may still
+# answer its key until then.
+STRIPE_KEY_RETENTION: Final = timedelta(seconds=STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS)
+STRIPE_KEY_RETENTION_HOURS: Final = STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS // 3600
 
 
 def customer_idempotency_key(user_id: uuid.UUID) -> str:
@@ -135,6 +160,35 @@ class PaymentRecord:
         }
 
 
+@dataclass(frozen=True)
+class PaymentsConfig:
+    # The key the Payment Sheet initializes Stripe with; None: payments are not configured.
+    publishable_key: str | None
+    # How old a payment's unanswered PaymentIntent create must be before a retry searches first.
+    intent_reconcile_after: timedelta
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> "PaymentsConfig":
+        return cls(
+            publishable_key=settings.stripe_publishable_key,
+            intent_reconcile_after=timedelta(
+                seconds=settings.stripe_payment_intent_reconcile_after_seconds
+            ),
+        )
+
+
+def _matches(intent: PaymentIntentFacts, payment: PaymentRecord, customer_id: str | None) -> bool:
+    """The intent is this payment's: its metadata names the payment, and it charges the row's
+    total, in its currency, to the customer's Stripe Customer."""
+    return (
+        intent.payment_id == str(payment.id)
+        and intent.amount_cents == payment.customer_total_cents
+        and intent.currency == payment.currency
+        and customer_id is not None
+        and intent.customer_id == customer_id
+    )
+
+
 def _record(payment: Payment) -> PaymentRecord:
     return PaymentRecord(
         id=payment.id,
@@ -150,11 +204,11 @@ def _record(payment: Payment) -> PaymentRecord:
 
 class PaymentService:
     def __init__(
-        self, session: AsyncSession, stripe: StripePayments | None, publishable_key: str | None
+        self, session: AsyncSession, stripe: StripePayments | None, config: PaymentsConfig
     ) -> None:
         self._session = session
         self._stripe = stripe
-        self._publishable_key = publishable_key
+        self._config = config
         self._payments = PaymentRepository(session)
         self._requests = RequestStateMachine(session)
         self._customer_requests = CustomerRequestReader(session)
@@ -188,10 +242,10 @@ class PaymentService:
         )
 
     def _require_stripe(self) -> tuple[StripePayments, str]:
-        if self._stripe is None or self._publishable_key is None:
+        if self._stripe is None or self._config.publishable_key is None:
             logger.warning("payments_stripe_not_configured")
             raise PaymentsNotConfiguredError
-        return self._stripe, self._publishable_key
+        return self._stripe, self._config.publishable_key
 
     async def _payment(
         self, user: UserAccount, request_id: uuid.UUID, quote_id: uuid.UUID
@@ -208,7 +262,8 @@ class PaymentService:
             raise NotFoundError
         if request.status is not RequestStatus.ACCEPTED or not quote.accepted:
             raise PaymentNotAvailableError
-        payment = await self._payments.get_by_quote_for_update(quote.id)
+        # A canceled payment is not live: the quote was accepted again, and gets a new one.
+        payment = await self._payments.get_live_by_quote_for_update(quote.id)
         if payment is not None and payment.status in CLOSED_STATUSES:
             raise PaymentNotAvailableError
         if quote.pro_id not in await self._pros.hireable_cards({quote.pro_id}):
@@ -280,16 +335,23 @@ class PaymentService:
     async def _payment_intent(
         self, stripe: StripePayments, payment: PaymentRecord, customer_id: str
     ) -> PaymentIntentState:
-        """The payment's PaymentIntent: created once under the row's lock and stored, else
-        retrieved by the stored id (see the module doc). Ends the transaction."""
-        locked = await self._payments.get_for_update(payment.id)
-        if locked is None:  # pragma: no cover - payments are never deleted
-            raise NotFoundError
-        if locked.status in CLOSED_STATUSES:
-            # A webhook (#61) closed it since the first read.
-            await self._session.rollback()
-            raise PaymentNotAvailableError
+        """The payment's PaymentIntent: created once under the row's lock and stored, adopted
+        from Stripe after a create answer lost too long ago, else retrieved by the stored id
+        (see the module doc). Ends the transaction."""
+        locked = await self._lock_open(payment)
         intent_id = locked.stripe_payment_intent_id
+        if intent_id is None:
+            requested = locked.payment_intent_requested_at
+            if requested is None:
+                # The first attempt: its time is committed before the call, so a rollback after
+                # a lost answer keeps it. Then the row is locked again; a call that stored the
+                # intent meanwhile is the one kept.
+                await self._payments.mark_payment_intent_requested(payment.id)
+                await self._session.commit()
+                locked = await self._lock_open(payment)
+                intent_id = locked.stripe_payment_intent_id
+            elif datetime.now(UTC) - requested >= self._config.intent_reconcile_after:
+                intent_id = await self._adopt_lost_intent(stripe, payment, customer_id)
         if intent_id is None:
             async with self._stripe_call(payment, "create_payment_intent"):
                 intent = await stripe.create_payment_intent(
@@ -328,6 +390,133 @@ class PaymentService:
             )
             raise PaymentNotAvailableError
         return intent
+
+    async def _lock_open(self, payment: PaymentRecord) -> Payment:
+        """The payment, locked until the transaction ends: 409 (rolled back) once closed."""
+        locked = await self._payments.get_for_update(payment.id)
+        if locked is None:  # pragma: no cover - payments are never deleted
+            raise NotFoundError
+        if locked.status in CLOSED_STATUSES:
+            # A webhook (#61) closed it since the first read.
+            await self._session.rollback()
+            raise PaymentNotAvailableError
+        return locked
+
+    async def _adopt_lost_intent(
+        self, stripe: StripePayments, payment: PaymentRecord, customer_id: str
+    ) -> str:
+        """An earlier create's answer was lost long enough ago that Stripe may have forgotten
+        its key: the intent it made is searched for by its metadata, the row still locked, and
+        the one match that is the payment's is stored and committed. Anything else creates
+        nothing and leaves the create's time as it was: 409 until staff resolve it."""
+        async with self._stripe_call(payment, "search_payment_intents"):
+            found = await stripe.search_payment_intents(payment.id)
+        if found.complete and len(found.intents) == 1:
+            [intent] = found.intents
+            if _matches(intent, payment, customer_id):
+                try:
+                    stored = await self._payments.set_payment_intent_if_missing(
+                        payment.id, intent.payment_intent_id
+                    )
+                except IntegrityError:
+                    # Another payment holds that intent: not this one's to adopt.
+                    stored = None
+                if stored is None:
+                    await self._session.rollback()
+                    logger.error(
+                        "payment_intent_ambiguous",
+                        extra={**payment.ids, "count": 1, "search_complete": True},
+                    )
+                    raise PaymentNeedsReviewError
+                if not stored:  # pragma: no cover - the row is locked from the read to the commit
+                    await self._session.rollback()
+                    logger.error("payment_intent_not_stored", extra=payment.ids)
+                    raise PaymentsUnavailableError
+                await self._session.commit()
+                logger.warning("payment_intent_adopted", extra=payment.ids)
+                return intent.payment_intent_id
+        await self._session.rollback()
+        logger.error(
+            "payment_intent_ambiguous",
+            extra={
+                **payment.ids,
+                "count": len(found.intents),
+                "search_complete": found.complete,
+            },
+        )
+        raise PaymentNeedsReviewError
+
+    async def adopt_intent(self, payment_id: uuid.UUID, intent_id: str, *, apply: bool) -> None:
+        """Staff recovery of a 409 payment_needs_review (scripts/resolve_payment_intent.py):
+        stores `intent_id` as the payment's PaymentIntent, once Stripe shows its metadata naming
+        the payment and its amount, currency and customer equal to the row's. The payment must
+        hold no intent. `apply` False checks only. Ends the transaction;
+        PaymentRecoveryRefusedError on a refusal, PaymentsNotConfiguredError without Stripe,
+        PaymentsUnavailableError or PaymentsProviderError when Stripe is unavailable or refuses
+        the intent."""
+        if self._stripe is None:
+            raise PaymentsNotConfiguredError
+        try:
+            payment = _record(await self._payment_to_resolve(payment_id))
+            customer_id = await self._users.stripe_customer_id(payment.customer_id)
+            async with self._stripe_call(payment, "payment_intent_facts"):
+                intent = await self._stripe.payment_intent_facts(intent_id)
+            if not _matches(intent, payment, customer_id):
+                raise PaymentRecoveryRefusedError(
+                    "That PaymentIntent is not this payment's (its metadata payment_id, amount, "
+                    "currency or customer differ); nothing changed."
+                )
+            if apply:
+                try:
+                    await self._payments.set_payment_intent_if_missing(payment_id, intent_id)
+                except IntegrityError:
+                    raise PaymentRecoveryRefusedError(
+                        "That PaymentIntent is already another payment's; nothing changed."
+                    ) from None
+                await self._session.commit()
+                logger.warning("payment_intent_resolved", extra={**payment.ids, "action": "adopt"})
+        finally:
+            await self._session.rollback()
+
+    async def allow_new_intent(self, payment_id: uuid.UUID, *, apply: bool) -> None:
+        """Staff recovery of a 409 payment_needs_review (scripts/resolve_payment_intent.py), once
+        the Stripe dashboard shows no PaymentIntent for the payment: forgets its unresolved
+        create, so the customer's next call creates one. Refused while the create is younger
+        than Stripe's key retention, when the payment holds an intent, or when no create was
+        attempted. `apply` False checks only. Ends the transaction; PaymentRecoveryRefusedError
+        on a refusal."""
+        try:
+            payment = await self._payment_to_resolve(payment_id)
+            requested = payment.payment_intent_requested_at
+            if requested is None:
+                raise PaymentRecoveryRefusedError(
+                    "This payment has no PaymentIntent create to clear; nothing changed."
+                )
+            if datetime.now(UTC) - requested < STRIPE_KEY_RETENTION:
+                raise PaymentRecoveryRefusedError(
+                    "The PaymentIntent create was attempted less than "
+                    f"{STRIPE_KEY_RETENTION_HOURS} hours ago and may still land; nothing "
+                    "changed. Try again later."
+                )
+            if apply:
+                ids = _record(payment).ids
+                await self._payments.clear_payment_intent_requested(payment_id)
+                await self._session.commit()
+                logger.warning("payment_intent_resolved", extra={**ids, "action": "allow_new"})
+        finally:
+            await self._session.rollback()
+
+    async def _payment_to_resolve(self, payment_id: uuid.UUID) -> Payment:
+        """The payment, its row locked: refused when no payment has this id or it already
+        holds a PaymentIntent."""
+        payment = await self._payments.get_for_update(payment_id)
+        if payment is None:
+            raise PaymentRecoveryRefusedError("No payment has this id; nothing changed.")
+        if payment.stripe_payment_intent_id is not None:
+            raise PaymentRecoveryRefusedError(
+                "This payment already has a PaymentIntent; nothing changed."
+            )
+        return payment
 
     async def _take_rate_bps(self) -> int:
         try:

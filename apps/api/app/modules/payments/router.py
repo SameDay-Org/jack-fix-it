@@ -10,7 +10,7 @@ from app.errors import ErrorResponse
 from app.integrations.stripe_payments import StripePayments, get_stripe_payments
 from app.modules.auth.permissions import CustomerUser
 from app.modules.payments.schemas import PaymentCreate, PaymentSheetOut
-from app.modules.payments.service import PaymentService
+from app.modules.payments.service import PaymentsConfig, PaymentService
 
 router = APIRouter(prefix="/requests", tags=["payments"])
 
@@ -24,7 +24,7 @@ def get_payment_service(
     stripe: Annotated[StripePayments | None, Depends(get_stripe_payments)],
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> PaymentService:
-    return PaymentService(session, stripe, settings.stripe_publishable_key)
+    return PaymentService(session, stripe, PaymentsConfig.from_settings(settings))
 
 
 @router.post(
@@ -42,7 +42,9 @@ def get_payment_service(
             "payment_not_available: the request is not accepted or this quote is not its "
             "accepted one, or the payment already succeeded (the job exists or is being "
             "created) or its PaymentIntent is closed; pro_not_hireable: the quote's pro can no "
-            "longer be hired (not approved, or payouts disabled). Nothing was created."
+            "longer be hired (not approved, or payouts disabled). Nothing was created. "
+            "payment_needs_review: an earlier PaymentIntent create never answered and Stripe "
+            "may have forgotten it; support resolves the payment before another is created."
         ),
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
             "validation_error: a malformed id, or a field in the body: the amounts come from "

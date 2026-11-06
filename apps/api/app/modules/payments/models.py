@@ -1,8 +1,9 @@
 import uuid
+from datetime import datetime
 from enum import StrEnum
 from typing import Final
 
-from sqlalchemy import CheckConstraint, ForeignKey, String
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, IdTimestampsMixin, str_enum
@@ -32,7 +33,11 @@ TAX_CENTS: Final = 0
 
 
 class Payment(IdTimestampsMixin, Base):
-    """What the customer pays for the quote they accepted (D11.1, #58): one per accepted quote.
+    """What the customer pays for the quote they accepted (D11.1, #58): one per acceptance.
+
+    A quote has at most one live payment (any status but canceled), enforced by a partial unique
+    index. A canceled payment's PaymentIntent is closed and its quote reopened (#61); accepting
+    the same quote again makes a new payment, with its own id, key and PaymentIntent.
 
     Every amount is computed by the backend from database values when the row is created, and
     frozen: the job copies them when the payment succeeds (#61). The split comes from
@@ -57,11 +62,17 @@ class Payment(IdTimestampsMixin, Base):
             f"take_rate_bps >= 0 AND take_rate_bps <= {BPS_DENOMINATOR}",
             name="take_rate_bps_range",
         ),
+        # One live payment per quote; canceled ones stay as history beside it.
+        Index(
+            "uq_payments_quote_id_live",
+            "quote_id",
+            unique=True,
+            postgresql_where=text("status <> 'canceled'"),
+        ),
     )
 
     request_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("service_requests.id"), index=True)
-    # One payment per quote; the unique index also serves the foreign key.
-    quote_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("quotes.id"), unique=True)
+    quote_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("quotes.id"), index=True)
     customer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
     # The quote's price, what the customer pays on top of it, and their total.
     amount_cents: Mapped[int]
@@ -79,3 +90,8 @@ class Payment(IdTimestampsMixin, Base):
     )
     # NULL until Stripe answered the create; the webhooks (#61) find the payment by it.
     stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    # When the first PaymentIntent create was attempted, committed before the call: past
+    # STRIPE_PAYMENT_INTENT_RECONCILE_AFTER_SECONDS Stripe may forget its key, so a retry
+    # searches for the intent instead of creating again. NULL before any attempt, or after
+    # staff allowed a new one (scripts/resolve_payment_intent.py).
+    payment_intent_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
