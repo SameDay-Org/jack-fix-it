@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, View } from "react-native";
 
@@ -14,6 +14,8 @@ import { ListGroup, ListRow } from "@/components/ui";
 export function AccountMenu() {
   const { t } = useTranslation();
   const [signingOut, setSigningOut] = useState(false);
+  // One question at a time: a second quick tap would stack a second dialog on Android.
+  const asking = useRef(false);
 
   // The gate leaves this screen as soon as the sign-out begins; a failed local delete is shown on
   // welcome through `cleanupPending`.
@@ -28,15 +30,29 @@ export function AccountMenu() {
     }
   };
 
-  const confirmSignOut = () =>
-    Alert.alert(t("account.logOut.title"), t("account.logOut.body"), [
-      { text: t("account.logOut.cancel"), style: "cancel" },
-      {
-        text: t("account.logOut.confirm"),
-        style: "destructive",
-        onPress: () => void signOut(),
-      },
-    ]);
+  const confirmSignOut = () => {
+    if (asking.current) return;
+    asking.current = true;
+    const answered = () => {
+      asking.current = false;
+    };
+    Alert.alert(
+      t("account.logOut.title"),
+      t("account.logOut.body"),
+      [
+        { text: t("account.logOut.cancel"), style: "cancel", onPress: answered },
+        {
+          text: t("account.logOut.confirm"),
+          style: "destructive",
+          onPress: () => {
+            answered();
+            void signOut();
+          },
+        },
+      ],
+      { onDismiss: answered },
+    );
+  };
 
   return (
     <View className="gap-4">

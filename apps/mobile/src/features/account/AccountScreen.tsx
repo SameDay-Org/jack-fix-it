@@ -6,7 +6,6 @@ import Animated from "react-native-reanimated";
 
 import { apiConfig, useSession, type SessionUser } from "@/api";
 import {
-  announce,
   Button,
   IdCard,
   IdCardShareRender,
@@ -73,19 +72,19 @@ function AccountContent({ user, focused }: { user: SessionUser; focused: boolean
   });
   useScrollToTop(tabPress);
 
-  // Screen readers: entering says where the person is, and lands on Back once the card has
-  // arrived; leaving lands back on the card.
-  const announcedFocus = useRef(inFocus);
+  // Screen readers: entering lands on Back once the card has arrived (its hint says where the
+  // person is and what the card does), leaving lands back on the card. One spoken element each
+  // way: a separate announcement would be cut off by the focus move.
+  const movedFocus = useRef(inFocus);
   useEffect(() => {
-    if (announcedFocus.current === inFocus) return;
-    announcedFocus.current = inFocus;
-    if (inFocus) announce(t("account.card.focused"));
+    if (movedFocus.current === inFocus) return;
+    movedFocus.current = inFocus;
     const timer = setTimeout(
       () => moveAccessibilityFocus(inFocus ? backRef.current : cardRef.current),
       focus.settleMs,
     );
     return () => clearTimeout(timer);
-  }, [inFocus, focus.settleMs, t]);
+  }, [inFocus, focus.settleMs]);
 
   const cardLabel = [t("account.card.label"), card.name, placeOf(card.city, card.state)]
     .filter(Boolean)
@@ -124,6 +123,7 @@ function AccountContent({ user, focused }: { user: SessionUser; focused: boolean
               ref={backRef}
               label={t("common.back")}
               accessibilityLabel={t("account.card.back")}
+              accessibilityHint={t("account.card.focused")}
               variant="ghost"
               onPress={focus.exit}
               className="-ml-5 self-start"
@@ -146,13 +146,17 @@ function AccountContent({ user, focused }: { user: SessionUser; focused: boolean
         onLayout={focus.onViewportLayout}
         onScroll={focus.onScroll}
         scrollEventThrottle={16}
-        contentContainerClassName="gap-6 px-4 pt-2"
+        contentContainerClassName="flex-grow gap-6 px-4 pt-2"
         contentContainerStyle={{ paddingBottom: inset + GUTTER }}
         testID="account-scroll"
       >
-        {/* Above the rows it passes over on its way to the middle. */}
+        {/* Above the rows it passes over on its way to the middle. The content grows to the
+            viewport, so the middle is always inside it and the card stays touchable there. Under
+            Reduce Motion it fades whole: its two faces and their shadows composite as one. */}
         <Animated.View
           onLayout={focus.onCardLayout}
+          needsOffscreenAlphaCompositing={focus.reduceMotion}
+          testID="account-card-stage"
           style={[styles.raised, focus.cardStyle]}
           className="items-center"
         >
@@ -181,7 +185,13 @@ function AccountContent({ user, focused }: { user: SessionUser; focused: boolean
             </View>
           </Pressable>
         </Animated.View>
-        <Animated.View style={focus.awayStyle} className="gap-6" {...away}>
+        {/* Fades as one layer: the list's shadow never shows through its half-faded bubbles. */}
+        <Animated.View
+          style={focus.awayStyle}
+          needsOffscreenAlphaCompositing
+          className="gap-6"
+          {...away}
+        >
           <AccountStats memberSince={user.member_since} />
           <AccountMenu />
         </Animated.View>

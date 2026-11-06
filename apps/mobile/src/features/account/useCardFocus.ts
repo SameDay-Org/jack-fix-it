@@ -75,10 +75,14 @@ export function useCardFocus({
     return () => subscription.remove();
   }, [inFocus, screenFocused]);
 
-  const enter = () => {
+  /** Aims the card at the middle of the free area, from where it sits in the scrolled list. */
+  const aim = () => {
     const { cardTop, cardHeight, viewport, scrollY } = geometry.current;
     const target = Math.max(TOP_GAP, (viewport - bottomRoom - cardHeight) / 2);
     travel.value = target - (cardTop - scrollY);
+  };
+  const enter = () => {
+    aim();
     setInFocus(true);
   };
   const exit = () => setInFocus(false);
@@ -86,9 +90,12 @@ export function useCardFocus({
   const onCardLayout = (event: LayoutChangeEvent) => {
     geometry.current.cardTop = event.nativeEvent.layout.y;
     geometry.current.cardHeight = event.nativeEvent.layout.height;
+    // A rotation, a split screen or a new font scale while in focus: the middle moved.
+    if (inFocus) aim();
   };
   const onViewportLayout = (event: LayoutChangeEvent) => {
     geometry.current.viewport = event.nativeEvent.layout.height;
+    if (inFocus) aim();
   };
   const onScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     geometry.current.scrollY = event.nativeEvent.contentOffset.y;
@@ -141,6 +148,7 @@ export function useCardFocus({
 
   return {
     inFocus,
+    reduceMotion,
     enter,
     exit,
     onCardLayout,

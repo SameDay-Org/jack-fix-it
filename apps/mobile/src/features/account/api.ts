@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Image } from "react-native";
 
 import {
@@ -19,18 +19,32 @@ import {
 export const fetchMe = (signal: AbortSignal) => apiGet("/v1/auth/me", { auth: true, signal });
 
 /**
+ * A URL this close to its expiry counts as expired: an image not loaded yet (the share render's)
+ * would start loading just as the signature runs out.
+ */
+const EXPIRY_MARGIN_MS = 30_000;
+
+/**
  * The ID photo's URL is presigned for a few minutes only (the API's `DOWNLOAD_URL_TTL_SECONDS`),
  * and the session's copy comes from sign-in or the launch. Each time the screen gains focus with
  * an expired one, this asks for the user again and puts the answer in the session once the new
  * photo is already in the image cache, so the card swaps one picture for the same picture
  * instead of blinking. Failing quietly: the card keeps what it shows (the photo it already
- * loaded, or the silhouette), and the next focus tries again.
+ * loaded, or the silhouette), and the next focus tries again. At most one refresh per focus: a
+ * device clock ahead of the server would read every fresh URL as expired and ask forever.
  */
 export function useFreshPhoto(user: SessionUser, focused: boolean): void {
   const expiresAt = user.photo?.expires_at;
+  const refreshed = useRef(false);
 
   useEffect(() => {
-    if (!focused || expiresAt === undefined || Date.parse(expiresAt) > Date.now()) return;
+    if (!focused) {
+      refreshed.current = false;
+      return;
+    }
+    if (refreshed.current || expiresAt === undefined) return;
+    if (Date.parse(expiresAt) - EXPIRY_MARGIN_MS > Date.now()) return;
+    refreshed.current = true;
     const controller = new AbortController();
     const startedIn = sessionGeneration();
     void (async () => {

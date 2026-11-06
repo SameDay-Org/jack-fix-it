@@ -80,7 +80,7 @@
     "card": {
       "label": "Your ID card",
       "hint": "Brings the card forward so you can tilt it and turn it over.",
-      "focused": "Your ID card is up front. Drag to tilt it, tap to turn it over.",
+      "focused": "Your ID card is up front. Double tap the card to turn it over.",
       "gesture": "Drag to tilt it. Tap to turn it over.",
       "back": "Back to your account"
     },

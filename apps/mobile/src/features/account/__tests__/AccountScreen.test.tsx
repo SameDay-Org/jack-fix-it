@@ -1,5 +1,3 @@
-import "@/i18n";
-
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react-native";
 import { router, useIsFocused, useScrollToTop } from "expo-router";
 import { isAvailableAsync, shareAsync } from "expo-sharing";
@@ -7,7 +5,7 @@ import { Alert, BackHandler, Image, type AlertButton } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useReducedMotion, withSpring, withTiming } from "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { MOCK_CAPTURE_URI } from "react-native-view-shot";
+import { createStore, useStore } from "zustand";
 
 import {
   apiGet,
@@ -17,7 +15,7 @@ import {
   useSession,
   type SessionUser,
 } from "@/api";
-import { announce, moveAccessibilityFocus } from "@/components/ui/focus";
+import { moveAccessibilityFocus } from "@/components/ui/focus";
 import { toastStore } from "@/components/ui/toast";
 import i18n from "@/i18n";
 
@@ -36,10 +34,7 @@ jest.mock("@/api", () => ({
   useSession: jest.fn(),
   logout: jest.fn(),
 }));
-jest.mock("@/components/ui/focus", () => ({
-  announce: jest.fn(),
-  moveAccessibilityFocus: jest.fn(),
-}));
+jest.mock("@/components/ui/focus", () => ({ moveAccessibilityFocus: jest.fn() }));
 jest.mock("expo-router", () => ({
   router: { push: jest.fn(), back: jest.fn(), canGoBack: () => true, replace: jest.fn() },
   useIsFocused: jest.fn(() => true),
@@ -68,6 +63,8 @@ jest.mock("expo-sharing");
 jest.mock("react-native-view-shot");
 
 const HIDDEN = { includeHiddenElements: true };
+/** What the root view-shot mock (apps/mobile/__mocks__) resolves every capture to. */
+const MOCK_CAPTURE_URI = "file:///mock/view-shot.png";
 const FUTURE = "2999-01-01T00:00:00Z";
 const PAST = "2000-01-01T00:00:00Z";
 const PHOTO = "https://media.test/id/alex.jpg?signature=1";
@@ -90,14 +87,22 @@ const FRONT_LABEL = "ID card, PRO, Alex Morgan, Fort Lauderdale, FL";
 const BACK_BUTTON = "Back to your account";
 const SHARE = "Share your ID card as an image";
 
-const renderAccount = () =>
-  render(
-    <GestureHandlerRootView>
-      <SafeAreaProvider initialMetrics={METRICS}>
-        <AccountScreen />
-      </SafeAreaProvider>
-    </GestureHandlerRootView>,
-  );
+const tree = () => (
+  <GestureHandlerRootView>
+    <SafeAreaProvider initialMetrics={METRICS}>
+      <AccountScreen />
+    </SafeAreaProvider>
+  </GestureHandlerRootView>
+);
+const renderAccount = () => render(tree());
+
+/** How far the card's stage is translated down, from Reanimated's Jest style. */
+const stageShift = () => {
+  const style = screen.getByTestId("account-card-stage").props.jestAnimatedStyle as {
+    value: { transform?: { translateY?: number }[] };
+  };
+  return style.value.transform?.[0]?.translateY;
+};
 
 /** The on-screen card (the share render holds a second, still one). */
 const onScreenCard = () => within(screen.getByTestId("account-card", HIDDEN));
@@ -114,6 +119,14 @@ const sharePhotoLoaded = () =>
     fireEvent(screen.getByTestId("account-share-render-card-photo", HIDDEN), "loadEnd"),
   );
 
+/** The test id of the host view a screen reader was sent to (compared by id: printing a host
+ * instance in a failed assertion walks the whole tree). */
+const focusTarget = (call: number) => {
+  const target = jest.mocked(moveAccessibilityFocus).mock.calls[call]?.[0] as
+    { props?: { testID?: string }; testID?: string } | null | undefined;
+  return String(target?.props?.testID ?? target?.testID ?? typeof target);
+};
+
 const busyOf = (name: string) =>
   screen.getByRole("button", { name }).props.accessibilityState as { busy?: boolean };
 
@@ -125,7 +138,6 @@ beforeEach(() => {
   jest.mocked(apiGet).mockReset();
   jest.mocked(setSessionUser).mockClear();
   jest.mocked(router.push).mockClear();
-  jest.mocked(announce).mockClear();
   jest.mocked(moveAccessibilityFocus).mockClear();
   jest.mocked(shareAsync).mockReset().mockResolvedValue(undefined);
   jest.mocked(isAvailableAsync).mockReset().mockResolvedValue(true);
@@ -196,10 +208,13 @@ describe("AccountScreen", () => {
     expect(screen.queryByRole("button", { name: "Settings" })).toBeNull();
     expect(screen.queryByLabelText("Member since, March 2026")).toBeNull();
     expect(screen.getByTestId("account-scroll").props.scrollEnabled).toBe(false);
-    expect(announce).toHaveBeenCalledWith(
-      "Your ID card is up front. Drag to tilt it, tap to turn it over.",
+    // A reader lands on Back once the card has arrived, and hears where it is and what to do.
+    const back = screen.getByRole("button", { name: BACK_BUTTON });
+    expect(back.props.accessibilityHint).toBe(
+      "Your ID card is up front. Double tap the card to turn it over.",
     );
     await waitFor(() => expect(moveAccessibilityFocus).toHaveBeenCalledTimes(1));
+    expect(focusTarget(0)).toBe("account-card-back");
     // Share stays where it was.
     expect(screen.getByRole("button", { name: SHARE })).toBeOnTheScreen();
 
@@ -210,8 +225,39 @@ describe("AccountScreen", () => {
     expect(screen.getByRole("button", { name: CARD_BUTTON })).toBeOnTheScreen();
     expect(screen.getByRole("button", { name: "Settings" })).toBeOnTheScreen();
     expect(screen.getByTestId("account-scroll").props.scrollEnabled).toBe(true);
+    // And back on the card when it returns.
     await waitFor(() => expect(moveAccessibilityFocus).toHaveBeenCalledTimes(2));
-    expect(announce).toHaveBeenCalledTimes(1);
+    expect(focusTarget(1)).toBe("account-card-open");
+  });
+
+  it("centers the card in the free area from where it sits in the scrolled list", async () => {
+    // The spring lands at once, so the style shows where the card ends up.
+    const actual =
+      jest.requireActual<typeof import("react-native-reanimated")>("react-native-reanimated");
+    jest.mocked(withSpring).mockImplementation(((to: number) => to) as typeof withSpring);
+    try {
+      await renderAccount();
+      const scroll = screen.getByTestId("account-scroll");
+      const layout = (height: number, y = 0) => ({
+        nativeEvent: { layout: { x: 0, y, width: 320, height } },
+      });
+      await fireEvent(scroll, "layout", layout(552));
+      await fireEvent(screen.getByTestId("account-card-stage"), "layout", layout(182, 8));
+      await fireEvent.scroll(scroll, { nativeEvent: { contentOffset: { x: 0, y: 40 } } });
+
+      await openCard();
+
+      // Free area: 552 tall less the hint's room above the bottom inset (16 + 56); the card's
+      // top lands at (552 - 72 - 182) / 2 = 149 from 8 - 40 = -32, so it travels 181.
+      expect(stageShift()).toBe(181);
+
+      // The viewport shrinks while in focus (a split screen): the card is aimed again.
+      await fireEvent(scroll, "layout", layout(400));
+      await act(async () => undefined);
+      expect(stageShift()).toBe((400 - 72 - 182) / 2 + 32);
+    } finally {
+      jest.mocked(withSpring).mockImplementation(actual.withSpring);
+    }
   });
 
   it("under Reduce Motion the card only fades out and in", async () => {
@@ -278,13 +324,20 @@ describe("AccountScreen", () => {
       "Log out?",
       "You can log back in anytime with your email and password.",
       expect.any(Array),
+      expect.any(Object),
     );
     const buttons = alert.mock.calls[0][2] as AlertButton[];
     expect(buttons.map(({ text, style }) => [text, style])).toEqual([
       ["Cancel", "cancel"],
       ["Log out", "destructive"],
     ]);
-    expect(buttons[0].onPress).toBeUndefined();
+    // A second tap while the question is up asks nothing more; once answered, it asks again.
+    await fireEvent.press(screen.getByRole("button", { name: "Log out" }));
+    expect(alert).toHaveBeenCalledTimes(1);
+    await act(async () => buttons[0].onPress?.());
+    expect(logout).not.toHaveBeenCalled();
+    await fireEvent.press(screen.getByRole("button", { name: "Log out" }));
+    expect(alert).toHaveBeenCalledTimes(2);
 
     await act(async () => buttons[1].onPress?.());
 
@@ -387,6 +440,44 @@ describe("AccountScreen", () => {
     await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(1));
     expect(setSessionUser).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: CARD_BUTTON })).toBeOnTheScreen();
+  });
+
+  it("refreshes at most once per focus: a clock ahead of the server never loops", async () => {
+    // Every answer looks expired to this device, and the session really takes it.
+    const store = createStore(() => signedIn({ ...ALEX, photo: { url: PHOTO, expires_at: PAST } }));
+    jest.mocked(useSession).mockImplementation(() => useStore(store));
+    jest.mocked(setSessionUser).mockImplementation((user) => store.setState({ user }));
+    const stale = {
+      ...store.getState().user,
+      photo: { url: FRESH_PHOTO, expires_at: "2000-01-02T00:00:00Z" },
+    };
+    jest.mocked(apiGet).mockResolvedValue(stale as never);
+    const view = await renderAccount();
+
+    await waitFor(() => expect(setSessionUser).toHaveBeenCalledTimes(1));
+    await act(async () => undefined);
+    expect(apiGet).toHaveBeenCalledTimes(1);
+
+    // The next visit to the tab tries once more.
+    jest.mocked(useIsFocused).mockReturnValue(false);
+    await view.rerender(tree());
+    jest.mocked(useIsFocused).mockReturnValue(true);
+    await view.rerender(tree());
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+    await act(async () => undefined);
+    expect(apiGet).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats a URL about to expire as expired", async () => {
+    const soon = new Date(Date.now() + 10_000).toISOString();
+    jest.mocked(apiGet).mockReturnValue(new Promise(() => undefined));
+    jest
+      .mocked(useSession)
+      .mockReturnValue(signedIn({ ...ALEX, photo: { url: PHOTO, expires_at: soon } }));
+
+    await renderAccount();
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(1));
   });
 
   it("does not refresh while the tab is not the one showing", async () => {

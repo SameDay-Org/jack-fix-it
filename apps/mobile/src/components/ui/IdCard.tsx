@@ -1,6 +1,6 @@
 import * as Haptics from "expo-haptics";
 import { Gyroscope } from "expo-sensors";
-import { useEffect, useId, useState, type ComponentProps } from "react";
+import { useEffect, useId, useRef, useState, type ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Image,
@@ -591,8 +591,16 @@ export function IdCard({
   /** The Reduce Motion flip: 0 front, 1 back. */
   const fade = useSharedValue(0);
 
+  // Gestures reach JS a moment after they end: a tap queued just as the card is set at rest must
+  // not turn it over again after the rest has brought its front back.
+  const liveRef = useRef(live);
+  useEffect(() => {
+    liveRef.current = live;
+  }, [live]);
+
   /** Turns the card over; `direction` is the way a swipe sent it (a tap turns it to the right). */
   const flip = (direction: 1 | -1) => {
+    if (!liveRef.current) return;
     const next: IdCardFace = shown.value === "front" ? "back" : "front";
     shown.value = next;
     setFace(next);

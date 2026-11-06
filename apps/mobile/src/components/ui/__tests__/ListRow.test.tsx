@@ -4,9 +4,8 @@ import { ACCOUNT_GLYPHS } from "@/components/icons";
 
 import { ListGroup, ListRow } from "../ListRow";
 
-const HIDDEN = { includeHiddenElements: true };
 const drawingsIn = (testID: string) =>
-  screen.getByTestId(testID).queryAll((node) => node.type === "RNSVGSvgView", HIDDEN);
+  screen.getByTestId(testID).queryAll((node) => node.type === "RNSVGSvgView");
 
 describe("ListRow", () => {
   it("a row that opens a screen is one button with its icon and a chevron", async () => {

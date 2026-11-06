@@ -70,7 +70,10 @@ export function ListRow({
       </View>
       {accessory}
       {busy ? (
-        <ActivityIndicator color={tokens.colors["navy-900"]} testID={`${testID}-busy`} />
+        <ActivityIndicator
+          color={tokens.colors["navy-900"]}
+          testID={testID ? `${testID}-busy` : undefined}
+        />
       ) : onPress && chevron ? (
         <ControlIcon name="chevron" size={CHEVRON} color={tokens.colors["gray-500"]} />
       ) : null}

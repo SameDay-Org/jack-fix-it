@@ -15,6 +15,8 @@ export type ButtonProps = {
   label: string;
   /** A fuller name for assistive technology, e.g. "Remove Photo 2" where many rows say "Remove". */
   accessibilityLabel?: string;
+  /** What the press does or where it lands, when the label alone does not say it. */
+  accessibilityHint?: string;
   onPress?: () => void;
   variant?: ButtonVariant;
   size?: ButtonSize;
@@ -80,6 +82,7 @@ const forState = (classes: StateClasses, pressed: boolean) =>
 export function Button({
   label,
   accessibilityLabel,
+  accessibilityHint,
   onPress,
   variant = "primary",
   size = "md",
@@ -103,6 +106,7 @@ export function Button({
           ? `${accessibilityLabel ?? label}, ${t("common.loading")}`
           : (accessibilityLabel ?? label)
       }
+      accessibilityHint={accessibilityHint}
       accessibilityState={{ disabled: inactive, busy: loading }}
       disabled={inactive}
       onPress={onPress}

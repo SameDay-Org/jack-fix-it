@@ -1,5 +1,3 @@
-import "@/i18n";
-
 import { fireEvent, render, screen } from "@testing-library/react-native";
 import { router } from "expo-router";
 import type { ReactElement } from "react";

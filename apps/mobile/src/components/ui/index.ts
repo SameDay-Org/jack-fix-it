@@ -54,7 +54,7 @@ export type { WordRotatorProps } from "./WordRotator";
 export type { ReduceTransparency } from "./useReduceTransparency";
 export { CodeInput } from "./CodeInput";
 export type { CodeInputProps } from "./CodeInput";
-export { announce, moveAccessibilityFocus } from "./focus";
+export { moveAccessibilityFocus } from "./focus";
 export { IdCard } from "./IdCard";
 export type { IdCardProps } from "./IdCard";
 export {

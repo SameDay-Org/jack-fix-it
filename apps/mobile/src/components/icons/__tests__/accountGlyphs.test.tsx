@@ -19,7 +19,7 @@ describe("ACCOUNT_GLYPHS", () => {
 
       const paths = screen
         .getByTestId("icon", HIDDEN)
-        .queryAll((node) => node.type === "RNSVGPath", HIDDEN);
+        .queryAll((node) => node.type === "RNSVGPath");
       expect(paths[0].props.d).toBe(ACCOUNT_GLYPHS[name].accent);
       expect(paths.slice(1).map((path) => path.props.d)).toEqual(ACCOUNT_GLYPHS[name].strokes);
       for (const path of paths.slice(1)) expect(path.props.strokeWidth).toBe(GLYPH_STROKE_WIDTH);
