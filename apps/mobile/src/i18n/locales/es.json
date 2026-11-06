@@ -310,8 +310,9 @@
     "itemRemove": "Quitar {{name}}"
   },
   "permissions": {
-    "camera": "Jack usa la cámara para tomar fotos de lo que hay que arreglar.",
-    "photos": "Jack usa las fotos que eliges para mostrar lo que hay que arreglar."
+    "camera": "Jack usa la cámara para tomar tu foto de perfil y fotos de lo que hay que arreglar.",
+    "photos": "Jack usa las fotos que eliges para mostrar lo que hay que arreglar.",
+    "motion": "Jack usa el movimiento del teléfono para inclinar tu tarjeta de identificación al moverlo."
   },
   "quotes": {
     "title": "Tus presupuestos",
@@ -560,6 +561,18 @@
       "title": "No pudimos cargar esta solicitud",
       "body": "Revisa tu conexión e inténtalo de nuevo.",
       "retry": "Intentar de nuevo"
+    }
+  },
+  "idCard": {
+    "hello": "Hola, soy:",
+    "pro": "PRO",
+    "a11y": {
+      "card": "Tarjeta de identificación",
+      "unnamed": "nombre aún sin definir",
+      "back": "Reverso de la tarjeta de identificación, código {{code}}",
+      "backBlank": "Reverso de la tarjeta de identificación, aún sin código",
+      "flip": "Voltear la tarjeta",
+      "hint": "Da la vuelta a la tarjeta."
     }
   }
 }

@@ -310,8 +310,9 @@
     "itemRemove": "Remove {{name}}"
   },
   "permissions": {
-    "camera": "Jack uses the camera to take photos of what needs fixing.",
-    "photos": "Jack uses the photos you choose to show what needs fixing."
+    "camera": "Jack uses the camera to take your profile photo and photos of what needs fixing.",
+    "photos": "Jack uses the photos you choose to show what needs fixing.",
+    "motion": "Jack uses your phone's motion to tilt your ID card as you move it."
   },
   "quotes": {
     "title": "Your quotes",
@@ -560,6 +561,18 @@
       "title": "We couldn't load this request",
       "body": "Check your connection and try again.",
       "retry": "Try again"
+    }
+  },
+  "idCard": {
+    "hello": "Hello, I'm:",
+    "pro": "PRO",
+    "a11y": {
+      "card": "ID card",
+      "unnamed": "name not set yet",
+      "back": "Back of the ID card, code {{code}}",
+      "backBlank": "Back of the ID card, no code yet",
+      "flip": "Flip the card",
+      "hint": "Turns the card over."
     }
   }
 }

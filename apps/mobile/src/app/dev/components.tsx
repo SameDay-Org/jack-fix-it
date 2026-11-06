@@ -6,6 +6,7 @@ import { ScrollView, Text, View } from "react-native";
 import { FloatingBar } from "@/components/dev/FloatingBar";
 import { FlowKitSample } from "@/components/dev/FlowKitSample";
 import { HeroSample } from "@/components/dev/HeroSample";
+import { IdCardSample } from "@/components/dev/IdCardSample";
 import {
   Avatar,
   Button,
@@ -200,6 +201,18 @@ function Gallery() {
             label="Open the media demo"
             variant="secondary"
             onPress={() => router.push("/dev/media")}
+          />
+        </Section>
+
+        <Section title="ID card">
+          <IdCardSample />
+        </Section>
+
+        <Section title="ID card libraries">
+          <Button
+            label="Open the libraries smoke screen"
+            variant="secondary"
+            onPress={() => router.push("/dev/id-card-libs")}
           />
         </Section>
 
