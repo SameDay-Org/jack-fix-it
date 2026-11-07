@@ -1,7 +1,7 @@
 import "@/i18n";
 
 import { act, renderRouter, screen } from "expo-router/testing-library";
-import { router, useLocalSearchParams, usePreventRemove } from "expo-router";
+import { router, useLocalSearchParams, usePreventRemove, type Href } from "expo-router";
 import { createElement } from "react";
 import { Text } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -371,7 +371,8 @@ describe("a push for Home (`/`, #338)", () => {
     "a %s's tap goes back to their Home from %s, asking the API nothing",
     async (_, session, url, text) => {
       const result = await signedInAtHome(session);
-      await act(async () => router.push(url));
+      // A screen of the table above: its path is a typed route.
+      await act(async () => router.push(url as Href));
       expect(screen.getByText(text)).toBeTruthy();
 
       await tap("/");
