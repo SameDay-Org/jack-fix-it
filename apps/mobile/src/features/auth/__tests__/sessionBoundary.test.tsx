@@ -3,7 +3,8 @@ import "@/i18n";
 import { useNavigationContainerRef } from "expo-router";
 import { act, fireEvent, renderRouter, screen } from "expo-router/testing-library";
 import { createElement, Profiler, useLayoutEffect } from "react";
-import { Text } from "react-native";
+import { Alert, Text, type AlertButton } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { logout } from "@/api";
@@ -52,6 +53,12 @@ const PRIVATE_IDS = [
   "home-log-out",
   "account-screen",
   "account-identity",
+  "account-card",
+  "account-card-open",
+  "account-share",
+  "account-share-render",
+  "account-stats",
+  "account-menu",
   "account-log-out",
   "phone-entry-screen",
   "phone-number",
@@ -63,7 +70,25 @@ const PRIVATE_IDS = [
 ];
 const TYPED_PHONE = "4155550123";
 const TYPED_CODE = "12345";
-const PRIVATE_VALUES = [user.email, "555-0123", TYPED_PHONE, TYPED_CODE];
+// The ID card's person (#293): the name, the place and the public code on its back and on the
+// off-screen share render.
+const CARD_USER = {
+  ...user,
+  first_name: "Maria",
+  last_name: "Lopez",
+  home_city: "Hialeah",
+  home_state: "FL",
+};
+const CARD_CODE = "K7Q2-9MXA";
+const PRIVATE_VALUES = [
+  user.email,
+  "555-0123",
+  TYPED_PHONE,
+  TYPED_CODE,
+  "Maria Lopez",
+  "Hialeah, FL",
+  CARD_CODE,
+];
 
 type Commit = {
   /** Private test ids still in the committed tree (hidden elements included). */
@@ -109,18 +134,23 @@ function Root() {
   useLayoutEffect(() => {
     navigation = container; // for the tests to spy on, as of the router's first commit
   }, [container]);
+  // The app's root wraps everything in the gesture root, the ID card's tilt and flip need it.
   return createElement(
-    SafeAreaProvider,
-    { initialMetrics: METRICS },
+    GestureHandlerRootView,
+    { style: { flex: 1 } },
     createElement(
-      Profiler,
-      {
-        id: "boundary",
-        onRender: () => {
-          if (capture && sessionStore.getState().status === "signedOut") commits.push(inspect());
+      SafeAreaProvider,
+      { initialMetrics: METRICS },
+      createElement(
+        Profiler,
+        {
+          id: "boundary",
+          onRender: () => {
+            if (capture && sessionStore.getState().status === "signedOut") commits.push(inspect());
+          },
         },
-      },
-      createElement(SessionGate),
+        createElement(SessionGate),
+      ),
     ),
   );
 }
@@ -138,11 +168,11 @@ const routes = {
   "(app)/verify-phone/code": CodeEntryScreen,
 };
 
-const signIn = (expiresIn = 900_000) =>
+const signIn = (expiresIn = 900_000, who = user) =>
   sessionStore.setState({
     ...SIGNED_OUT,
     status: "signedIn",
-    user,
+    user: who,
     accessToken: "access-boundary",
     accessTokenExpiresAt: Date.now() + expiresIn,
   });
@@ -189,10 +219,15 @@ afterEach(() => {
 });
 
 describe("the first signed-out commit holds nothing private (#205, Vault round 1)", () => {
-  it("a log-out from the account screen removes the email and the controls at once", async () => {
-    signIn();
+  it("a log-out from the account screen removes the card and the controls at once", async () => {
+    signIn(undefined, CARD_USER);
     const view = await renderRouter(routes, { initialUrl: "/account" });
-    expect(screen.getByText(user.email)).toBeTruthy();
+    expect(JSON.stringify(screen.toJSON())).toContain("Maria Lopez");
+    expect(JSON.stringify(screen.toJSON())).toContain(CARD_CODE);
+    // The screen asks first (#293): the person confirms at once.
+    jest.spyOn(Alert, "alert").mockImplementation((_title, _message, buttons?: AlertButton[]) => {
+      buttons?.find(({ style }) => style === "destructive")?.onPress?.();
+    });
     const spy = jest.spyOn(navigation, "dispatchSync");
     capture = true;
 
