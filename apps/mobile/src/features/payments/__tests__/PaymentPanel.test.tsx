@@ -74,6 +74,10 @@ jest.mock("@stripe/stripe-react-native");
 jest.mock("expo-haptics");
 
 const session = jest.requireMock<{ mockSession: SessionDouble }>("@/api").mockSession;
+// Each test renders the whole quote screen and walks a payment through it, several steps of
+// fetches and timers. Alone that takes about 1 s; under `pnpm -r test` contention one run went
+// past Jest's 5 s default (the sign-out test), so these get the same room as the sign-up suite.
+jest.setTimeout(30_000);
 
 const PAY_NAME = "Pay $180.50 for the quote from María P.";
 const payButton = () => screen.getByRole("button", { name: PAY_NAME });
