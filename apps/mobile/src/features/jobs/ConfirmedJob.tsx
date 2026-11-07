@@ -11,6 +11,7 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { ControlIcon } from "@/components/icons";
+import { ChatEntry } from "@/features/chat";
 import { tokens } from "@/theme";
 
 import { PhotoThumbs } from "./AfterPhotos";
@@ -18,7 +19,7 @@ import { jobPhotosHref } from "./api";
 import { MapBack, Sheet } from "./JobChrome";
 import { PaidRow } from "./JobDetails";
 import { JobTimeline } from "./JobTimeline";
-import { timelineOf, type CustomerJob, type JobText } from "./phase";
+import { proNames, timelineOf, type CustomerJob, type JobText } from "./phase";
 
 // The seal: a lime disc with a navy check, in a soft lime ring, centered on a navy hero.
 const HERO_HEIGHT = 220;
@@ -46,8 +47,8 @@ type ConfirmedJobProps = {
  * The job is confirmed (#66; also once paid out): a calm screen. A navy hero holds a lime seal
  * with a check; the sheet says it in one headline ("Thanks! Job confirmed" right after the
  * customer's own confirmation, "Job confirmed" when they come back to it) and one line about the
- * payment, then the after photos, what was paid and what happened. Nothing is asked of the
- * customer any more, so there is no action.
+ * payment, then the after photos, the way back into the chat, what was paid and what happened.
+ * Nothing is asked of the customer any more, so there is no other action.
  */
 export function ConfirmedJob({
   job,
@@ -85,6 +86,14 @@ export function ConfirmedJob({
           photos={job.photos.after}
           now={photosNow}
           onOpen={(index) => push(jobPhotosHref(requestId, index))}
+        />
+        {/* The conversation stays readable once the job is confirmed ("View messages", #74). */}
+        <ChatEntry
+          jobId={job.id}
+          requestId={requestId}
+          name={proNames(t, job).inline}
+          status={job.status}
+          unread={job.unread_messages}
         />
         <PaidRow job={job} />
         <JobTimeline items={timelineOf(t, job, now)} />

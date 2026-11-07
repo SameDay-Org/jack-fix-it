@@ -1,9 +1,10 @@
 import type { Href } from "expo-router";
 import { useTranslation } from "react-i18next";
-import { Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui";
+import { chatHref } from "@/features/chat";
 import { bubbleShadow, continuousCorners } from "@/theme";
 
 import { PhotoHero } from "./AfterPhotos";
@@ -14,7 +15,7 @@ import { MapBack, Sheet } from "./JobChrome";
 import { PaidRow } from "./JobDetails";
 import { JobMap } from "./JobMap";
 import { JobTimeline } from "./JobTimeline";
-import { timelineOf, type CustomerJob, type JobText } from "./phase";
+import { proNames, timelineOf, type CustomerJob, type JobText } from "./phase";
 
 const DOCK_PADDING = 12;
 
@@ -33,7 +34,8 @@ type FinishedJobProps = {
 /**
  * The pro marked the job done (#66): the whole screen is about checking the work. The after
  * photos are the hero, edge to edge (a tap opens one full screen); the sheet says who finished
- * and asks for a look, then what was paid and what happened. The confirmation itself is the
+ * and asks for a look, with "Problems? Message Dan" into the job's chat (#74; reporting a problem
+ * itself is #75), then what was paid and what happened. The confirmation itself is the
  * dock under the page (`ConfirmDock`). Without a photo to show (none listed yet), the drawn map
  * with its check on the door stands in.
  */
@@ -61,11 +63,48 @@ export function FinishedJob({ job, requestId, text, now, photosNow, push }: Fini
           <Text className="text-callout text-gray-500" testID="job-support">
             {text.support}
           </Text>
+          <ProblemsLine job={job} requestId={requestId} push={push} />
         </View>
         <PaidRow job={job} />
         <JobTimeline items={timelineOf(t, job, now)} />
       </Sheet>
     </View>
+  );
+}
+
+type ProblemsLineProps = {
+  job: CustomerJob;
+  requestId: string;
+  push: (href: Href) => void;
+};
+
+/** "Problems? Message Dan": one line into the job's chat, with the unread count said aloud. */
+function ProblemsLine({ job, requestId, push }: ProblemsLineProps) {
+  const { t } = useTranslation();
+  const message = t("chat.entry.message", { name: proNames(t, job).inline });
+  const line = `${t("jobs.finished.problems")} ${message}`;
+  const unread = job.unread_messages;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={
+        unread > 0
+          ? t("chat.entry.label", {
+              action: line,
+              unread: t("chat.entry.unread", { count: unread }),
+            })
+          : line
+      }
+      onPress={() => push(chatHref(job.id, requestId))}
+      className="min-h-12 justify-center self-start"
+      testID="job-problems"
+    >
+      <Text className="text-callout text-gray-500">
+        {`${t("jobs.finished.problems")} `}
+        <Text className="font-semibold text-navy-900 underline">{message}</Text>
+        {unread > 0 ? <Text className="font-semibold text-navy-900">{` (${unread})`}</Text> : null}
+      </Text>
+    </Pressable>
   );
 }
 

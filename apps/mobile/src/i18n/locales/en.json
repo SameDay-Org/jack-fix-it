@@ -996,6 +996,7 @@
     },
     "finished": {
       "confirm": "Confirm the job is done",
+      "problems": "Problems?",
       "deadline": {
         "today_one": "Confirms automatically today at {{time}} if you don't answer.",
         "today_other": "Confirms automatically today at {{time}} if you don't answer.",

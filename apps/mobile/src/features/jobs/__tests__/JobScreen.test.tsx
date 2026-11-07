@@ -772,6 +772,30 @@ describe("JobScreen, the finished job (#66)", () => {
     });
   });
 
+  it("Problems? Message Dan opens the job's chat, its unread count said with it", async () => {
+    answerJob({ ...FINISHED_JOB, unread_messages: 2 });
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+
+    const line = screen.getByRole("button", {
+      name: "Problems? Message Dan, 2 unread messages",
+    });
+    await act(async () => fireEvent.press(line));
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/jobs/[id]/chat",
+      params: { id: FINISHED_JOB.id, request: REQUEST_ID },
+    });
+  });
+
+  it("the confirmed job keeps its conversation readable", async () => {
+    answerJob(CONFIRMED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Job confirmed");
+
+    expect(screen.getByRole("button", { name: "View messages" })).toBeTruthy();
+    expect(screen.queryByTestId("job-problems")).toBeNull();
+  });
+
   it("a photo opens full screen at that photo", async () => {
     answerJob(FINISHED_JOB);
     await renderWithQuery(<JobScreen />);
@@ -825,6 +849,8 @@ describe("JobScreen, the finished job (#66)", () => {
   /** The customer confirms from the sheet over the screen, which is blurred meanwhile. */
   async function confirmHere(client: QueryClient) {
     post.mockResolvedValue(CONFIRMED_JOB);
+    // The server holds the confirmed job from then on: a refetch on focus answers it.
+    answerJob(CONFIRMED_JOB);
     await setFocused(false);
     await act(async () => {
       await confirmJob(client, REQUEST_ID, 1);
