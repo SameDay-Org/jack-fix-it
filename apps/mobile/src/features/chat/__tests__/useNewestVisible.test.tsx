@@ -260,4 +260,51 @@ describe("useNewestVisible (#74 round 2): local bubbles below the newest message
 
     expect(rendered.result.current.newest).toBeUndefined();
   });
+
+  it("one of my messages on screen certifies nothing: the hidden reply above it stays unseen", async () => {
+    const mine = row({ ...message(6), sender: "me" });
+    const rendered = await renderVisible({
+      generation: 1,
+      newestStored: newest.id,
+      below: [local(1), mine],
+    });
+    // 400 - 16 - 300 leaves my 60 dp message 84 dp: on screen; the reply above it is not.
+    await layOut(rendered, 400, { [local(1).key]: 300, [mine.key]: 60, [newest.id]: 60 });
+    expect(rendered.result.current.newest).toBeUndefined();
+
+    // Reported on screen through the list, mine still counts for nothing.
+    await report(rendered, [{ ...message(6), sender: "me" }]);
+    expect(rendered.result.current.newest).toBeUndefined();
+  });
+
+  it("with no local bubble, my own tall message below the reply is measured too", async () => {
+    const mine = row({ ...message(6), sender: "me" });
+    const rendered = await renderVisible({ generation: 1, newestStored: newest.id, below: [mine] });
+    expect(rendered.result.current.newest).toBeUndefined();
+
+    await layOut(rendered, 400, { [mine.key]: 700, [newest.id]: 60 });
+    expect(rendered.result.current.newest).toBeUndefined();
+
+    await layOut(rendered, 400, { [mine.key]: 120 });
+    expect(rendered.result.current.newest).toBe(newest.id);
+  });
+
+  it("a day heading between the bubbles and the reply is measured with them", async () => {
+    const heading: Row = { kind: "day", key: "day-local-1-1", at: NOW };
+    const rendered = await renderVisible({
+      generation: 1,
+      newestStored: newest.id,
+      below: [local(1), heading],
+    });
+    await layOut(rendered, 400, { [local(1).key]: 300, [newest.id]: 60 });
+    // The heading has not laid out yet: unknown, not seen.
+    expect(rendered.result.current.newest).toBeUndefined();
+
+    await layOut(rendered, 400, { [heading.key]: 60 });
+    // 400 - 16 - 300 - 60 = 24 of 60 dp: under half.
+    expect(rendered.result.current.newest).toBeUndefined();
+
+    await layOut(rendered, 400, { [heading.key]: 20 });
+    expect(rendered.result.current.newest).toBe(newest.id);
+  });
 });

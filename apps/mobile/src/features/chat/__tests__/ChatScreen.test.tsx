@@ -1698,4 +1698,30 @@ describe("round 2 (#74): local bubbles below the newest message", () => {
 
     expect(readsUpTo(unread.id)).toHaveLength(1);
   });
+
+  it("my message sent above a covering bubble certifies nothing: the hidden reply stays unread", async () => {
+    const previous = [message(1)];
+    mockApi.messages = () => Promise.resolve(page(previous));
+    mockApi.send = () => Promise.reject(new NetworkError(false));
+    await renderChat();
+    await screen.findByTestId("chat-input");
+    await typeAndSend("A message that will not go");
+    await screen.findByText(FAILED);
+    const unread = message(905, { created_at: iso(MINUTE_MS) });
+    await receive(unread, previous);
+
+    // The next send goes through: my stored message lands between the bubble and the reply.
+    const mine = message(906, {
+      sender: "me",
+      body: "Back online",
+      created_at: iso(2 * MINUTE_MS),
+    });
+    mockApi.send = () => Promise.resolve(mine);
+    await typeAndSend("Back online");
+    await screen.findByTestId(`chat-message-${mine.id}`);
+    await layOut({ "local-1-1": 300, [mine.id]: 60, [unread.id]: 60, [previous[0]!.id]: 60 });
+    await flush();
+
+    expect(postCalls(READ_PATH)).toHaveLength(0);
+  });
 });

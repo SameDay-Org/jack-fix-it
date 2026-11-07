@@ -35,7 +35,11 @@ const storedMessages = (tokens: ListViewToken[]): ChatMessage[] =>
   tokens.flatMap(({ item, isViewable }) => {
     // The list's items are its rows (the token types them loosely).
     const row: Row = item;
-    return isViewable && row.kind === "message" && row.message ? [row.message] : [];
+    // Only the other side's messages count unread: one of mine on screen certifies nothing above
+    // it (#74 round 2).
+    return isViewable && row.kind === "message" && row.message && row.message.sender !== "me"
+      ? [row.message]
+      : [];
   });
 
 /** The newer of two stored messages, in the API's order: time, then id. */
@@ -46,8 +50,9 @@ const newer = (a: ChatMessage, b: ChatMessage): ChatMessage => {
 };
 
 /**
- * Whether the newest stored message is on screen with the list at its bottom, behind the rows
- * drawn below it (`below`: pending or failed bubbles, a day heading) and the list's own padding
+ * Whether the newest message from the other side is on screen with the list at its bottom, behind
+ * the rows drawn below it (`below`: pending or failed bubbles, my own messages, a day heading)
+ * and the list's own padding
  * under its first row (`inset`), by the seen rules. Unknown
  * until the viewport and every one of those rows has laid out: then false, never a guess.
  */
@@ -74,9 +79,13 @@ function shownAtBottom(
  * The newest stored message on screen in the chat's list (#74 rounds 1 and 2): what the read
  * marker may mark up to. Two sources, as the list can tell:
  *
- * - At the bottom (`onScroll` reports the list at its start), the newest message of the thread
- *   (the first stored row of `rows`) is on screen when nothing is drawn below it, or when the
- *   rows below it (local bubbles, which the list puts first) leave it room by the seen rules, as
+ * Only the other side's messages count, as only they count unread: marking up to one of mine
+ * would mark every message of theirs above it, seen or not.
+ *
+ * - At the bottom (`onScroll` reports the list at its start), the newest message from the other
+ *   side (its first such row in `rows`) is on screen when nothing is drawn below it, or when the
+ *   rows below it (local bubbles, which the list puts first, and my own messages) leave it room
+ *   by the seen rules, as
  *   the rows' and the list's layouts measure (`onRowLayout`, `onLayout`). The list's viewability
  *   cannot say so on its own: after a message lands at the bottom it reports nothing until the
  *   next scroll, and a chat that fits on screen never scrolls; a layout comes with every new or
@@ -167,7 +176,9 @@ export function useNewestVisible(
           )?.id
       : undefined;
   const bottom = atNewest.generation === generation ? atNewest.at : true;
-  const newestIndex = rows.findIndex((row) => row.kind === "message" && row.message);
+  const newestIndex = rows.findIndex(
+    (row) => row.kind === "message" && row.message && row.message.sender !== "me",
+  );
   const newestRow = rows[newestIndex];
   const newestStored = newestRow?.kind === "message" ? newestRow.message?.id : undefined;
   const below = newestIndex > 0 ? rows.slice(0, newestIndex) : [];
