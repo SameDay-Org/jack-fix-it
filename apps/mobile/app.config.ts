@@ -132,6 +132,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         "@stripe/stripe-react-native",
         { merchantIdentifier: APPLE_MERCHANT_ID, enableGooglePay: true, disableSPM: true },
       ],
+      // Notifications (#323; a change here needs a new dev build): the app opens a tapped push on
+      // its screen. The tray icon is tinted navy until the logo (#8) brings a monochrome icon.
+      // iOS uses production APNs: every device build is ad hoc (internal distribution: the dev
+      // client, preview) or the store's; only a simulator would use development. Registration and
+      // the credentials come in #334 and #335.
+      ["expo-notifications", { color: colors["navy-900"], mode: "production" }],
     ],
     locales: {
       en: { ios: PERMISSION_PROMPTS.en },
