@@ -23,6 +23,8 @@ const CONTROL_GLYPHS = {
   back: ["M14.5 6l-6 6 6 6"],
   // A box with an arrow rising out of it, for sharing.
   share: ["M12 14.5V4", "M8 8l4-4 4 4", "M6 11.5v7.5a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-7.5"],
+  // An arrow rising, for sending a message.
+  send: ["M12 19V5.5", "M6 11.5l6-6 6 6"],
 } as const satisfies Record<string, readonly string[]>;
 
 export type ControlGlyphName = keyof typeof CONTROL_GLYPHS;

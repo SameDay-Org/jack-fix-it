@@ -971,7 +971,9 @@
       "finished": "{{name}} finished the job",
       "hint": "Opens your job",
       "finishedConfirm": "{{name}} finished the job · confirm",
-      "confirm": "confirm"
+      "confirm": "confirm",
+      "unread_one": "{{count}} unread message",
+      "unread_other": "{{count}} unread messages"
     },
     "booked": {
       "title": "Your job is booked",
@@ -1020,6 +1022,89 @@
       "page": "{{number}} of {{total}}",
       "openHint": "Opens it full screen",
       "close": "Close photos"
+    }
+  },
+  "chat": {
+    "peer": {
+      "pro": {
+        "fallback": "Your pro",
+        "inline": "your pro",
+        "role": "Your pro on this job"
+      },
+      "customer": {
+        "fallback": "Your customer",
+        "inline": "your customer",
+        "role": "Your customer on this job"
+      }
+    },
+    "loading": "Loading messages",
+    "empty": {
+      "title": "Say hello to {{name}}",
+      "body": "Ask about the job, the time or anything you need to know. Your messages stay in Jack Fix It.",
+      "closedTitle": "No messages here",
+      "closedBody": "Nothing was sent in this chat before it closed."
+    },
+    "start": "This is the start of your messages about this job.",
+    "older": {
+      "load": "Load older messages",
+      "failed": "We couldn't load older messages.",
+      "retry": "Try again"
+    },
+    "error": {
+      "title": "We couldn't load your messages",
+      "body": "Check your connection and try again.",
+      "retry": "Try again"
+    },
+    "notFound": {
+      "title": "This conversation isn't available",
+      "body": "It may belong to another account, or the link is out of date.",
+      "home": "Go to Home"
+    },
+    "day": {
+      "today": "Today",
+      "yesterday": "Yesterday"
+    },
+    "you": "You",
+    "bubble": {
+      "label": "{{sender}}, {{time}}: {{text}}",
+      "pendingLabel": "You, {{state}}: {{text}}",
+      "stateSending": "sending",
+      "stateNotSent": "not sent",
+      "failed": "Not sent. Tap to try again.",
+      "failedShort": "Not sent",
+      "retryHint": "Sends it again",
+      "refused": "Not sent"
+    },
+    "redacted": "We hid contact details. Keep the conversation in Jack Fix It.",
+    "receipt": {
+      "sent": "Sent",
+      "delivered": "Delivered",
+      "seen": "Seen"
+    },
+    "composer": {
+      "label": "Message",
+      "placeholder": "Message {{name}}",
+      "send": "Send",
+      "left_one": "{{count}} character left",
+      "left_other": "{{count}} characters left",
+      "over_one": "{{count}} character over the limit",
+      "over_other": "{{count}} characters over the limit"
+    },
+    "tooFast": "You're sending messages too fast. Wait a moment, then try again.",
+    "closed": {
+      "title": "This chat is closed",
+      "body": "You can still read your messages here."
+    },
+    "announce": {
+      "sent": "Message sent",
+      "failed": "Message not sent"
+    },
+    "entry": {
+      "message": "Message {{name}}",
+      "view": "View messages",
+      "unread_one": "{{count}} unread message",
+      "unread_other": "{{count}} unread messages",
+      "label": "{{action}}, {{unread}}"
     }
   }
 }

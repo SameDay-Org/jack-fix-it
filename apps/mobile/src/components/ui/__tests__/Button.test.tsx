@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react-native";
+import { fireEvent, render, screen, within } from "@testing-library/react-native";
 
 import "@/i18n";
 
@@ -96,5 +96,62 @@ describe("Button", () => {
     expect(button("Medium").props.style).toMatchObject({ borderCurve: "continuous" });
     expect(screen.getByText("Medium").props.className).toContain("text-headline");
     expect(screen.getByText("Medium").props.numberOfLines).toBe(1); // one line by contract
+  });
+});
+
+describe("Button badge (#74)", () => {
+  const badgeText = () =>
+    within(screen.getByTestId("chat-badge"))
+      .getAllByText(/./)
+      .map((node) => [node.props.children as string | number].flat().join(""))
+      .join("");
+
+  it("shows the count beside the label above zero", async () => {
+    await render(<Button label="Message Dan" badge={3} testID="chat" />);
+
+    expect(badgeText()).toBe("3");
+    expect(screen.getByText("Message Dan")).toBeTruthy();
+  });
+
+  it.each([
+    ["zero", 0],
+    ["no badge", undefined],
+  ] as const)("shows no badge with %s", async (_, badge) => {
+    await render(<Button label="Message Dan" badge={badge} testID="chat" />);
+
+    expect(screen.queryByTestId("chat-badge")).toBeNull();
+  });
+
+  it("caps the count at 99+", async () => {
+    await render(<Button label="Message Dan" badge={150} testID="chat" />);
+
+    expect(badgeText()).toBe("99+");
+  });
+
+  it("a glyph button never shows a badge", async () => {
+    await render(<Button label="Share" glyph="share" badge={3} testID="chat" />);
+
+    expect(screen.queryByTestId("chat-badge")).toBeNull();
+    expect(screen.queryByText("3")).toBeNull();
+  });
+
+  it("keeps the caller's accessible name: the count is not appended", async () => {
+    await render(
+      <>
+        <Button label="Message Dan" badge={3} testID="chat" />
+        <Button
+          label="Reply"
+          accessibilityLabel="Reply to Dan, 2 unread messages"
+          badge={2}
+          testID="reply"
+        />
+      </>,
+    );
+
+    expect(screen.getByTestId("chat").props.accessibilityLabel).toBe("Message Dan");
+    expect(screen.getByTestId("reply").props.accessibilityLabel).toBe(
+      "Reply to Dan, 2 unread messages",
+    );
+    expect(button("Message Dan")).toBeTruthy();
   });
 });

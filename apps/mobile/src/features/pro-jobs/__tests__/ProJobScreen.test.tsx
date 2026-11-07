@@ -649,3 +649,34 @@ describe("ProJobScreen", () => {
     });
   });
 });
+
+describe("the chat with the customer (#74)", () => {
+  it("offers a message to the customer by first name, with their unread count", async () => {
+    await open(proJob({ customer_first_name: "Jamie", unread_messages: 2 }));
+
+    const entry = screen.getByTestId("chat-entry");
+    expect(within(entry).getByText("Message Jamie")).toBeTruthy();
+    expect(within(entry).getByTestId("chat-entry-badge")).toBeTruthy();
+    expect(entry.props.accessibilityLabel).toBe("Message Jamie, 2 unread messages");
+
+    await act(async () => fireEvent.press(entry));
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/jobs/[id]/chat",
+      params: { id: JOB_ID },
+    });
+  });
+
+  it("says 'your customer' when the API withholds the name, and no badge with nothing unread", async () => {
+    await open(proJob({ customer_first_name: null, unread_messages: 0 }));
+
+    const entry = screen.getByTestId("chat-entry");
+    expect(entry.props.accessibilityLabel).toBe("Message your customer");
+    expect(screen.queryByTestId("chat-entry-badge")).toBeNull();
+  });
+
+  it("only offers to read the messages once the job is cancelled", async () => {
+    await open(proJob({ status: "cancelled", address: null }));
+
+    expect(screen.getByTestId("chat-entry").props.accessibilityLabel).toBe("View messages");
+  });
+});
