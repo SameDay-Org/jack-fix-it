@@ -51,11 +51,8 @@ Then, in one transaction: the quote accepted, and the request quote_ready -> acc
 its state machine (CUSTOMER). The other quotes stay pending: after a failed payment the customer
 may pick another (#61), and rejecting them belongs to the payment's success. No money moves
 here: the payment attaches to this step (#58), and the job is created once it succeeds (#61).
-Once that commits, the quote's pro gets a quote accepted push (#55) that opens their dispatch
-of the request (#49); the repeat sends none. A quote whose pro has no dispatch of the request
-(quotes come from one, so it should not happen) gets no push: no other screen of the pro's
-shows the job, so it is logged with ids and skipped. A push that cannot be queued is logged,
-never undone.
+Once that commits, the quote's pro gets a quote accepted push (#55) that opens their home
+(#338); the repeat sends none. A push that cannot be queued is logged, never undone.
 
 Logs carry ids only: never the scope or approach text, or the amount.
 
@@ -273,7 +270,6 @@ class QuoteService:
         if not await self._quotes.mark_accepted(quote.id):
             raise QuoteNotAcceptableError  # pragma: no cover - checked above, under the locks
         await self._requests.transition(request.id, RequestStatus.ACCEPTED, user)
-        dispatch_id = await self._dispatches.dispatch_id_for(request.id, quote.pro_id)
         await self._session.commit()
         ids = {
             "quote_id": str(quote.id),
@@ -281,17 +277,13 @@ class QuoteService:
             "pro_id": str(quote.pro_id),
         }
         logger.info("quote_accepted", extra=ids)
-        if dispatch_id is None:
-            logger.warning("quote_accepted_push_skipped", extra=ids)
-        else:
-            await push_quote_accepted(
-                self._queue,
-                pro_user_id=card.user_id,
-                quote_id=quote.id,
-                dispatch_id=dispatch_id,
-                public_code=request.public_code,
-                timeout_seconds=self._enqueue_timeout,
-            )
+        await push_quote_accepted(
+            self._queue,
+            pro_user_id=card.user_id,
+            quote_id=quote.id,
+            public_code=request.public_code,
+            timeout_seconds=self._enqueue_timeout,
+        )
         return item.model_copy(update={"status": QuoteStatus.ACCEPTED})
 
     async def _listed(self, user: UserAccount, request_id: uuid.UUID) -> list[Quote]:
