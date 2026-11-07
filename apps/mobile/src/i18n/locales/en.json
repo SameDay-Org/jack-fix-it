@@ -132,7 +132,38 @@
     "retry": "Try again"
   },
   "account": {
-    "title": "Account"
+    "title": "Account",
+    "card": {
+      "label": "Your ID card",
+      "hint": "Brings the card forward so you can tilt it and turn it over.",
+      "hintStill": "Brings the card forward so you can turn it over.",
+      "focused": "Your ID card is up front. Double tap the card to turn it over.",
+      "gesture": "Drag to tilt it. Tap to turn it over.",
+      "gestureStill": "Tap to turn it over.",
+      "back": "Back to your account"
+    },
+    "memberSince": "Member since",
+    "rating": "Rating",
+    "noRatings": "No ratings yet",
+    "share": {
+      "label": "Share",
+      "a11y": "Share your ID card as an image",
+      "dialogTitle": "Share your ID card",
+      "failed": "We couldn't share your ID card. Give it another try in a moment."
+    },
+    "menu": {
+      "settings": "Settings",
+      "help": "Help",
+      "legal": "Legal",
+      "logOut": "Log out"
+    },
+    "logOut": {
+      "title": "Log out?",
+      "body": "You can log back in anytime with your email and password.",
+      "cancel": "Cancel",
+      "confirm": "Log out",
+      "hint": "Asks before it logs you out."
+    }
   },
   "tabs": {
     "home": "Home",
@@ -685,5 +716,23 @@
       "flip": "Flip the card",
       "hint": "Turns the card over."
     }
+  },
+  "settings": {
+    "title": "Settings",
+    "sections": {
+      "account": "Your account"
+    },
+    "email": "Email",
+    "phone": "Phone",
+    "phoneNotVerified": "Not verified yet"
+  },
+  "help": {
+    "title": "Support when you need it",
+    "body": "Answers to common questions and a way to reach the Jack Fix It team will live here. We're still putting them together."
+  },
+  "legal": {
+    "title": "Legal",
+    "lead": "Our Terms of Service and Privacy Policy will be published here.",
+    "body": "They're being finalized. Once they're ready, you'll be able to read them in full on this page."
   }
 }

@@ -13,6 +13,8 @@ export type { GlassShape, GlassSurfaceProps, GlassTone } from "./GlassSurface";
 export { ICON_TILE, ICON_TILE_TINT, IconTile } from "./IconTile";
 export type { IconTileProps, IconTileSize } from "./IconTile";
 export { Input } from "./Input";
+export { ListGroup, ListRow } from "./ListRow";
+export type { ListRowProps } from "./ListRow";
 export type { InputHandle, InputProps } from "./Input";
 export { Notice } from "./Notice";
 export type { NoticeProps } from "./Notice";
@@ -70,6 +72,7 @@ export {
 export type { IdCardFace, IdCardGeometry, IdCardVariant } from "./idCardModel";
 export {
   ID_CARD_SHARE_BASE_WIDTH,
+  ID_CARD_SHARE_DIR,
   ID_CARD_SHARE_MIN_RATIO,
   IdCardShareRender,
   idCardShareLayoutWidth,
