@@ -7,6 +7,7 @@ import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { router, useIsFocused } from "expo-router";
 import { act, renderRouter, screen, waitFor } from "expo-router/testing-library";
+import { useEffect } from "react";
 import { Text } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -63,10 +64,18 @@ const placed = {
   photo: null,
 };
 
-/** Whether the sign-up screen is the one in front, as the router last rendered it. */
-let signUpFocused = false;
+/** Whether the sign-up screen is the one in front, as the router last committed it. */
+const signUp = { focused: false };
+/** Each sign-up screen the router mounted: the one that comes back must be the same. */
+const mounts = { count: 0 };
 function ObservedSignUp() {
-  signUpFocused = useIsFocused();
+  const focused = useIsFocused();
+  useEffect(() => {
+    signUp.focused = focused;
+  }, [focused]);
+  useEffect(() => {
+    mounts.count += 1;
+  }, []);
   return <SignUpScreen />;
 }
 
@@ -77,6 +86,8 @@ const takePhoto = () => screen.getByRole("button", { name: "Take photo" });
 let client: QueryClient;
 
 beforeEach(async () => {
+  signUp.focused = false;
+  mounts.count = 0;
   resetSecureStore();
   sessionStore.setState(SIGNED_OUT);
   cameraMock.mountError = null;
@@ -125,22 +136,26 @@ describe("SignUpScreen: the selfie camera under the router", () => {
       const covered = cameraMock.pendingReady[0];
       const coveredError = cameraMock.pendingError[0];
       await act(async () => covered?.());
-      expect(signUpFocused).toBe(true);
+      expect(signUp.focused).toBe(true);
       expect(takePhoto()).toBeEnabled();
+      expect(mounts.count).toBe(1);
 
       await act(async () => router.push("/(auth)/login"));
       await screen.findByText("Another screen");
       expect(view.getPathname()).toBe("/login");
-      expect(signUpFocused).toBe(false);
-      // Sign-up stays in the stack behind the other screen, without a camera.
+      expect(signUp.focused).toBe(false);
+      // Sign-up stays in the stack behind the other screen, on its step, without a camera.
+      expect(screen.getByTestId("sign-up-photo", { includeHiddenElements: true })).toBeTruthy();
       expect(cameras()).toHaveLength(0);
       // The released preview reports late: neither report counts.
       await act(async () => covered?.());
       await act(async () => coveredError?.("late"));
 
       await act(async () => router.back());
-      await waitFor(() => expect(signUpFocused).toBe(true));
+      await waitFor(() => expect(signUp.focused).toBe(true));
       expect(view.getPathname()).toBe("/sign-up");
+      // The same screen came back (not a new mount): the old preview's id was retired in it.
+      expect(mounts.count).toBe(1);
       await waitFor(() => expect(cameraMock.pendingReady).toHaveLength(2));
       expect(cameras()).toHaveLength(1);
       expect(takePhoto()).toBeDisabled();

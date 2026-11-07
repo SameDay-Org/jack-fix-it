@@ -655,6 +655,35 @@ describe("SignUpScreen: the selfie step, saving the photo", () => {
     expect(button("Take photo")).toBeEnabled();
   });
 
+  it("a photo the covered preview was still taking is dropped; back in front, the new preview takes one", async () => {
+    onFlow();
+    await renderStep();
+    await waitFor(() => expect(button("Take photo")).toBeEnabled());
+    // The released view's capture may never answer: nothing waits for it.
+    const late = deferred<Awaited<ReturnType<typeof takePictureAsync>>>();
+    takePictureAsync.mockReturnValueOnce(late.promise);
+    await press("Take photo");
+    expect(takePictureAsync).toHaveBeenCalledTimes(1);
+
+    await act(async () => mockFocus.set(false));
+    await act(async () => mockFocus.set(true));
+    await takePhoto();
+    expect(takePictureAsync).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("sign-up-photo-photo").props.source).toEqual({ uri: SHOT });
+
+    // The dropped capture answers late: the photo on screen stays the new preview's.
+    await act(async () =>
+      late.resolve({
+        uri: "file:///data/cache/Camera/late.jpg",
+        width: 1,
+        height: 1,
+        format: "jpg",
+      }),
+    );
+    expect(screen.getByTestId("sign-up-photo-photo").props.source).toEqual({ uri: SHOT });
+    expect(screen.queryByTestId("sign-up-photo-error")).toBeNull();
+  });
+
   it("the photo taken is still there after Back and Continue", async () => {
     onFlow();
     await renderStep();
