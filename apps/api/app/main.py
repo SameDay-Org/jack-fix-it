@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import v1_router
-from app.config import Settings, get_settings
+from app.config import CHAT_ORIGINAL_KEY_EXPECTED_IN, Settings, get_settings
 from app.db import create_engine, create_session_factory
 from app.errors import register_error_handlers
 from app.middleware import REQUEST_ID_HEADER, RequestIdMiddleware
@@ -34,6 +34,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.engine = engine
         app.state.session_factory = create_session_factory(engine)
         app.state.redis = redis
+        if (
+            settings.app_env in CHAT_ORIGINAL_KEY_EXPECTED_IN
+            and settings.chat_original_cipher() is None
+        ):
+            # Fail closed (#72): redacted chat messages keep no original until it is set.
+            logger.warning("chat_original_key_missing", extra={"app_env": settings.app_env})
         logger.info("api_started", extra={"app_env": settings.app_env})
         try:
             yield

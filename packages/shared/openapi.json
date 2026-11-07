@@ -3400,7 +3400,7 @@
           "chat"
         ],
         "summary": "Send a message in my job's chat",
-        "description": "Stores the message with contact details masked (phones, emails, links, addresses): the\noriginal is never kept. Answers what was stored.",
+        "description": "Stores the message with contact details masked (phones, emails, links, addresses).\nAnswers what was stored, with `warning: contact_details_hidden` when something was masked.\nThe other side only ever reads the masked text; the original is kept encrypted for staff,\nfor a limited time.",
         "operationId": "send_message_v1_jobs__job_id__messages_post",
         "security": [
           {
@@ -3435,7 +3435,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ChatMessageOut"
+                  "$ref": "#/components/schemas/SentMessageOut"
                 }
               }
             }
@@ -3606,7 +3606,7 @@
           "chat"
         ],
         "summary": "Read a job's chat (staff)",
-        "description": "Any job's messages, newest first, for the BDC and admins. Read-only: no read marker\nmoves, and the parties' unread counts do not change.",
+        "description": "Any job's messages, newest first, for the BDC and admins, with the original of each\nredacted message while it is kept. Read-only: no read marker moves, and the parties' unread\ncounts do not change. A response that carries an original is recorded in the audit log.",
         "operationId": "staff_list_messages_v1_admin_jobs__job_id__messages_get",
         "security": [
           {
@@ -3704,6 +3704,113 @@
           },
           "404": {
             "description": "not_found: no job with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/chat/flags": {
+      "get": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "List repeat-offender flags (staff)",
+        "description": "Senders whose chat messages were redacted CHAT_OFFENDER_THRESHOLD times within\nCHAT_OFFENDER_WINDOW_DAYS, newest first: ids, counts and timestamps, never message text.",
+        "operationId": "list_offender_flags_v1_admin_chat_flags_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "open",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "true: flags not resolved yet; false: resolved ones.",
+              "default": true,
+              "title": "Open"
+            },
+            "description": "true: flags not resolved yet; false: resolved ones."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size; capped.",
+              "title": "Limit"
+            },
+            "description": "Page size; capped."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatOffenderFlagPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a bad cursor or limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4837,6 +4944,97 @@
         ],
         "title": "ChatMessageOut"
       },
+      "ChatOffenderFlagOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id",
+            "description": "The sender whose messages were redacted."
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id",
+            "description": "The job of the redaction that opened the flag."
+          },
+          "window_count": {
+            "type": "integer",
+            "title": "Window Count",
+            "description": "The most redacted messages of the sender seen within one window (CHAT_OFFENDER_WINDOW_DAYS) while the flag is open."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "job_id",
+          "window_count",
+          "created_at",
+          "updated_at",
+          "resolved_at"
+        ],
+        "title": "ChatOffenderFlagOut"
+      },
+      "ChatOffenderFlagPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ChatOffenderFlagOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Newest first."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Pass as `cursor` for older flags."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "ChatOffenderFlagPage"
+      },
       "ChatPage": {
         "properties": {
           "items": {
@@ -4904,6 +5102,14 @@
           "unread_count"
         ],
         "title": "ChatReadOut"
+      },
+      "ChatWarning": {
+        "type": "string",
+        "enum": [
+          "contact_details_hidden"
+        ],
+        "title": "ChatWarning",
+        "description": "Why the sender should look at what was stored; the app shows its own copy (#74)."
       },
       "CheckInIn": {
         "properties": {
@@ -8173,6 +8379,56 @@
         ],
         "title": "Sender"
       },
+      "SentMessageOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "sender": {
+            "$ref": "#/components/schemas/Sender",
+            "description": "me for the caller's own messages, else the other side: customer or pro."
+          },
+          "body": {
+            "type": "string",
+            "title": "Body",
+            "description": "The text as stored: contact details (phones, emails, links, addresses) were replaced by \u2022\u2022\u2022 when it was sent."
+          },
+          "redacted": {
+            "type": "boolean",
+            "title": "Redacted",
+            "description": "True when something in the text was masked."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatWarning"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "contact_details_hidden when something in the text was masked (redacted is true): the app tells the sender that contact details are not shared in the chat. Null otherwise."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "sender",
+          "body",
+          "redacted",
+          "created_at",
+          "warning"
+        ],
+        "title": "SentMessageOut"
+      },
       "ServedCheckOut": {
         "properties": {
           "zip_code": {
@@ -8306,6 +8562,18 @@
             "type": "boolean",
             "title": "Redacted"
           },
+          "original": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original",
+            "description": "What the sender typed, for a redacted message whose original is still kept (encrypted, for CHAT_ORIGINAL_RETENTION_DAYS); null otherwise, or when it cannot be read. Every response that carries one is audited."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -8319,6 +8587,7 @@
           "sender",
           "body",
           "redacted",
+          "original",
           "created_at"
         ],
         "title": "StaffChatMessageOut"

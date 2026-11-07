@@ -879,8 +879,10 @@ export interface paths {
         put?: never;
         /**
          * Send a message in my job's chat
-         * @description Stores the message with contact details masked (phones, emails, links, addresses): the
-         *     original is never kept. Answers what was stored.
+         * @description Stores the message with contact details masked (phones, emails, links, addresses).
+         *     Answers what was stored, with `warning: contact_details_hidden` when something was masked.
+         *     The other side only ever reads the masked text; the original is kept encrypted for staff,
+         *     for a limited time.
          */
         post: operations["send_message_v1_jobs__job_id__messages_post"];
         delete?: never;
@@ -919,10 +921,32 @@ export interface paths {
         };
         /**
          * Read a job's chat (staff)
-         * @description Any job's messages, newest first, for the BDC and admins. Read-only: no read marker
-         *     moves, and the parties' unread counts do not change.
+         * @description Any job's messages, newest first, for the BDC and admins, with the original of each
+         *     redacted message while it is kept. Read-only: no read marker moves, and the parties' unread
+         *     counts do not change. A response that carries an original is recorded in the audit log.
          */
         get: operations["staff_list_messages_v1_admin_jobs__job_id__messages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/chat/flags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List repeat-offender flags (staff)
+         * @description Senders whose chat messages were redacted CHAT_OFFENDER_THRESHOLD times within
+         *     CHAT_OFFENDER_WINDOW_DAYS, newest first: ids, counts and timestamps, never message text.
+         */
+        get: operations["list_offender_flags_v1_admin_chat_flags_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1263,6 +1287,56 @@ export interface components {
              */
             created_at: string;
         };
+        /** ChatOffenderFlagOut */
+        ChatOffenderFlagOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * User Id
+             * Format: uuid
+             * @description The sender whose messages were redacted.
+             */
+            user_id: string;
+            /**
+             * Job Id
+             * Format: uuid
+             * @description The job of the redaction that opened the flag.
+             */
+            job_id: string;
+            /**
+             * Window Count
+             * @description The most redacted messages of the sender seen within one window (CHAT_OFFENDER_WINDOW_DAYS) while the flag is open.
+             */
+            window_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Resolved At */
+            resolved_at: string | null;
+        };
+        /** ChatOffenderFlagPage */
+        ChatOffenderFlagPage: {
+            /**
+             * Items
+             * @description Newest first.
+             */
+            items: components["schemas"]["ChatOffenderFlagOut"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor` for older flags.
+             */
+            next_cursor: string | null;
+        };
         /** ChatPage */
         ChatPage: {
             /**
@@ -1298,6 +1372,12 @@ export interface components {
              */
             unread_count: number;
         };
+        /**
+         * ChatWarning
+         * @description Why the sender should look at what was stored; the app shows its own copy (#74).
+         * @enum {string}
+         */
+        ChatWarning: "contact_details_hidden";
         /** CheckInIn */
         CheckInIn: {
             /**
@@ -2859,6 +2939,33 @@ export interface components {
          * @enum {string}
          */
         Sender: "me" | "customer" | "pro";
+        /** SentMessageOut */
+        SentMessageOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** @description me for the caller's own messages, else the other side: customer or pro. */
+            sender: components["schemas"]["Sender"];
+            /**
+             * Body
+             * @description The text as stored: contact details (phones, emails, links, addresses) were replaced by ••• when it was sent.
+             */
+            body: string;
+            /**
+             * Redacted
+             * @description True when something in the text was masked.
+             */
+            redacted: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** @description contact_details_hidden when something in the text was masked (redacted is true): the app tells the sender that contact details are not shared in the chat. Null otherwise. */
+            warning: components["schemas"]["ChatWarning"] | null;
+        };
         /** ServedCheckOut */
         ServedCheckOut: {
             /**
@@ -2929,6 +3036,11 @@ export interface components {
             body: string;
             /** Redacted */
             redacted: boolean;
+            /**
+             * Original
+             * @description What the sender typed, for a redacted message whose original is still kept (encrypted, for CHAT_ORIGINAL_RETENTION_DAYS); null otherwise, or when it cannot be read. Every response that carries one is audited.
+             */
+            original: string | null;
             /**
              * Created At
              * Format: date-time
@@ -5650,7 +5762,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ChatMessageOut"];
+                    "application/json": components["schemas"]["SentMessageOut"];
                 };
             };
             /** @description invalid_token: missing or expired. */
@@ -5817,6 +5929,59 @@ export interface operations {
             };
             /** @description not_found: no job with this id. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a bad cursor or limit. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_offender_flags_v1_admin_chat_flags_get: {
+        parameters: {
+            query?: {
+                /** @description true: flags not resolved yet; false: resolved ones. */
+                open?: boolean;
+                /** @description Page size; capped. */
+                limit?: number | null;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatOffenderFlagPage"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

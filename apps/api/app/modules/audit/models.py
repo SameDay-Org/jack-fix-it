@@ -9,7 +9,8 @@ from app.modules.audit.types import AuditValue
 
 
 class AuditLog(IdTimestampsMixin, Base):
-    """One staff action on money (#58, Vault round 1 B2; written only by AuditService.record).
+    """One staff action on money (#58, Vault round 1 B2; AuditService.record), or one staff read
+    of what only staff may see (#72, AuditService.record_read).
     Append-only: a trigger refuses UPDATE, DELETE and TRUNCATE. before/after hold ids,
     statuses, Stripe object ids and timestamps: never PII or secrets."""
 

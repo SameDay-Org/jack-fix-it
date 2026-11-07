@@ -45,6 +45,8 @@ OPEN = (
 )
 CLOSED = (JobStatus.CONFIRMED, JobStatus.PAID_OUT, JobStatus.REFUNDED, JobStatus.CANCELLED)
 MESSAGE_KEYS = {"id", "sender", "body", "redacted", "created_at"}
+# The POST answer adds the sender's warning (#72).
+SENT_KEYS = MESSAGE_KEYS | {"warning"}
 T0 = datetime(2030, 1, 15, 15, 0, tzinfo=UTC)
 # Redaction samples (tests/test_redaction.py's kinds): what is typed, and what is stored.
 REDACTED = [
@@ -264,11 +266,12 @@ async def test_a_message_is_stored_trimmed_and_answered(
 
     assert plain.status_code == 201, plain.text
     body = plain.json()
-    assert set(body) == MESSAGE_KEYS
-    assert (body["sender"], body["body"], body["redacted"]) == (
+    assert set(body) == SENT_KEYS
+    assert (body["sender"], body["body"], body["redacted"], body["warning"]) == (
         "me",
         "The faucet still drips at 7 pm",
         False,
+        None,
     )
     assert full.status_code == 201, full.text
     stored = await rows(db_session, job)

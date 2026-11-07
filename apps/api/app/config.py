@@ -9,6 +9,8 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from starlette.requests import Request
 
+from app.crypto import KeyringError, OriginalCipher, parse_keyring
+
 AppEnv = Literal["development", "test", "staging", "production"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 # What the orphan upload sweep does (#191): nothing, count only, or delete.
@@ -55,6 +57,9 @@ _STRIPE_LIVE_PUBLISHABLE_KEY_PREFIXES = ("pk_live_",)
 # A Stripe publishable key, test or live: it is returned to customers (the Payment Sheet), so a
 # secret (sk_) or restricted (rk_) key, or anything else, must never pass as one (#58).
 _STRIPE_PUBLISHABLE_KEY = re.compile(r"pk_(test|live)_[A-Za-z0-9]+")
+# Where a missing chat original key is logged at startup (#72): the API still starts, and no
+# original is stored until the key is set (fail closed).
+CHAT_ORIGINAL_KEY_EXPECTED_IN = _JWT_SECRET_REQUIRED_IN
 
 
 def is_publishable_key(value: str) -> bool:
@@ -331,6 +336,23 @@ class Settings(BaseSettings):
     # Job chat (D14.1, #71): messages one user may send in one job's chat per window.
     chat_message_rate_limit: int = Field(default=20, gt=0)
     chat_message_rate_window_seconds: int = Field(default=60, gt=0)
+    # The original of a redacted chat message (#72, Cesar 2026-11-07): kept encrypted for staff
+    # only (app.crypto), deleted after CHAT_ORIGINAL_RETENTION_DAYS. CHAT_ORIGINAL_KEYS is a JSON
+    # object {key_id: base64 32-byte key}; CHAT_ORIGINAL_ACTIVE_KEY_ID names the key new originals
+    # use. Unset: no original is stored (never plaintext), and staging and production log
+    # chat_original_key_missing at startup.
+    chat_original_keys: SecretStr | None = None
+    chat_original_active_key_id: str | None = None
+    chat_original_retention_days: int = Field(default=90, gt=0)
+    # The worker's purge of expired originals: how often, how many rows per transaction, and the
+    # longest one run may take.
+    chat_original_purge_minutes: int = Field(default=60, ge=1, le=60)
+    chat_original_purge_batch: int = Field(default=500, gt=0)
+    chat_original_purge_timeout_seconds: int = Field(default=600, gt=0)
+    # Repeat offenders (#72, Cesar 2026-11-07): a sender with CHAT_OFFENDER_THRESHOLD redacted
+    # messages, across all jobs, within CHAT_OFFENDER_WINDOW_DAYS is flagged for the BDC.
+    chat_offender_threshold: int = Field(default=3, gt=0)
+    chat_offender_window_days: int = Field(default=7, gt=0)
     # The API's public base URL, such as https://api.example.com: Stripe sends the pro's browser
     # back to its onboarding pages there. Required with Stripe in staging and production (https).
     public_api_url: str | None = None
@@ -469,6 +491,29 @@ class Settings(BaseSettings):
                 "may still attach"
             )
         return self
+
+    @model_validator(mode="after")
+    def _chat_original_keyring(self) -> Self:
+        # Parsed here so a malformed keyring stops startup instead of failing each message. The
+        # errors name the setting and at most a key id, never a key (app.crypto).
+        if self.chat_original_keys is None:
+            if self.chat_original_active_key_id is not None:
+                raise ValueError("CHAT_ORIGINAL_ACTIVE_KEY_ID is set without CHAT_ORIGINAL_KEYS")
+            return self
+        if self.chat_original_active_key_id is None:
+            raise ValueError("CHAT_ORIGINAL_KEYS is set without CHAT_ORIGINAL_ACTIVE_KEY_ID")
+        try:
+            self.chat_original_cipher()
+        except KeyringError as error:
+            raise ValueError(str(error)) from None
+        return self
+
+    def chat_original_cipher(self) -> OriginalCipher | None:
+        """The cipher of the chat originals; None when no key is configured."""
+        if self.chat_original_keys is None or self.chat_original_active_key_id is None:
+            return None
+        keys = parse_keyring(self.chat_original_keys.get_secret_value())
+        return OriginalCipher(keys, self.chat_original_active_key_id)
 
     @model_validator(mode="after")
     def _list_default_within_max(self) -> Self:

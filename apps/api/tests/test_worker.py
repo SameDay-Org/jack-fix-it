@@ -15,6 +15,7 @@ from sqlalchemy.exc import ProgrammingError
 import app.worker as app_worker
 from app.config import Settings, get_settings
 from app.integrations.stripe_payments import StripePaymentsClient
+from app.modules.chat.tasks import purge_chat_originals
 from app.modules.dispatch.tasks import dispatch_request
 from app.modules.notifications.push_tasks import check_push_receipts
 from app.modules.payments.tasks import cancel_unpaid_payments
@@ -117,6 +118,12 @@ def test_cron_jobs_keep_names_cadences_and_timeouts() -> None:
             get_settings().payment_unpaid_sweep_timeout_seconds,
             1,
         ),
+        "cron:purge_chat_originals": (
+            purge_chat_originals,
+            every(get_settings().chat_original_purge_minutes),
+            get_settings().chat_original_purge_timeout_seconds,
+            1,
+        ),
     }
 
 
@@ -150,6 +157,22 @@ def test_worker_registers_cancel_unpaid_payments_without_results(
     assert (job.keep_result_s, job.keep_result_forever) == (0, False)
     assert job.minute == {0, 15, 30, 45}
     assert job.timeout_s == 222
+
+
+def test_worker_registers_purge_chat_originals_without_results(
+    worker_module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # #72: the cadence and the timeout come from the settings, read when the worker starts.
+    monkeypatch.setenv("CHAT_ORIGINAL_PURGE_MINUTES", "30")
+    monkeypatch.setenv("CHAT_ORIGINAL_PURGE_TIMEOUT_SECONDS", "333")
+    get_settings.cache_clear()
+    module = importlib.reload(worker_module)
+
+    [job] = [j for j in module.WorkerSettings.cron_jobs if j.coroutine is purge_chat_originals]
+    assert job.name == "cron:purge_chat_originals"
+    assert (job.keep_result_s, job.keep_result_forever) == (0, False)
+    assert job.minute == {0, 30}
+    assert job.timeout_s == 333
 
 
 @pytest.mark.parametrize("value", ["0", "-1"])
