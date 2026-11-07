@@ -39,9 +39,9 @@ const ALEX = {
   phone: "(954) 555-0142",
   publicCode: "K7Q29MXA",
 };
-const FRONT_LABEL = "ID card, PRO, Alex Morgan, Fort Lauderdale, FL";
+const FRONT_LABEL = "ID card, PRO, Alex Morgan, Fort Lauderdale, FL, (954) 555-0142";
 const BACK_LABEL = "Back of the ID card, code K7Q2-9MXA";
-const CUSTOMER_LABEL = "ID card, Alex Morgan, Fort Lauderdale, FL";
+const CUSTOMER_LABEL = "ID card, Alex Morgan, Fort Lauderdale, FL, (954) 555-0142";
 /** The card rises to a touch by this much (IdCard's LIFT_SCALE). */
 const LIFT_SCALE = 1.03;
 
@@ -143,7 +143,7 @@ describe("IdCard", () => {
     expect(screen.getByText("Hola, soy:")).toBeOnTheScreen();
     expect(
       screen.getByRole("button", {
-        name: "Tarjeta de identificación, PRO, Alex Morgan, Fort Lauderdale, FL",
+        name: "Tarjeta de identificación, PRO, Alex Morgan, Fort Lauderdale, FL, (954) 555-0142",
       }),
     ).toBeOnTheScreen();
   });
@@ -161,7 +161,10 @@ describe("IdCard", () => {
 
     expect(screen.queryByText(ALEX.phone)).toBeNull();
     expect(screen.getByText("Alex Morgan")).toBeOnTheScreen();
-    expect(screen.getByRole("image", { name: FRONT_LABEL })).toBeOnTheScreen();
+    // Nor reads it out: the image is the card as drawn.
+    expect(
+      screen.getByRole("image", { name: "ID card, PRO, Alex Morgan, Fort Lauderdale, FL" }),
+    ).toBeOnTheScreen();
     expect(screen.queryByRole("button")).toBeNull();
     expect(Gyroscope.addListener).not.toHaveBeenCalled();
     expect(screen.getByTestId("share").props.style).toEqual(

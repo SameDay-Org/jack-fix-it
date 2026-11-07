@@ -34,6 +34,8 @@ jest.mock("@/api", () => {
   const { useSyncExternalStore } = jest.requireActual<typeof import("react")>("react");
   return {
     ...jest.requireActual("../../../api/errors"),
+    // The phone flow registers its sign-out cleanup on import.
+    onSignOut: jest.fn(() => () => undefined),
     apiGet: jest.fn(),
     logout: jest.fn(async () => undefined),
     restoreSession: jest.fn(async () => undefined),

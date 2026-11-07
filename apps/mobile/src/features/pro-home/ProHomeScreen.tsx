@@ -4,33 +4,21 @@ import { Text, View } from "react-native";
 
 import { useSession } from "@/api";
 import { Screen, useTabBarInset } from "@/components/ui";
-import { useOpenPhoneStepAfterSignUp } from "@/features/phone/useOpenPhoneStepAfterSignUp";
 
 import { OpportunityList } from "./OpportunityList";
 
 /**
  * The pro's home (#219), the Home tab: a greeting, then the new opportunities,
  * which scroll the header along. The wallet (#70) and the current job (#63) come later.
- *
- * Right after a sign-up it opens the phone step over itself, once, and shows only its bare page
- * until then (`useOpenPhoneStepAfterSignUp`).
  */
 export function ProHomeScreen() {
   const { t } = useTranslation();
   const { user } = useSession();
-  const phoneStepOffered = useOpenPhoneStepAfterSignUp();
   // Tabs stay mounted while another one shows: only the focused tab owns the status bar.
   const focused = useIsFocused();
   const inset = useTabBarInset();
 
   if (!user) return null;
-  if (phoneStepOffered) {
-    return (
-      <Screen bar="light" ownsStatusBar={focused} testID="pro-home">
-        {null}
-      </Screen>
-    );
-  }
 
   const firstName = user.first_name?.trim();
   return (

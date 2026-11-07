@@ -45,7 +45,7 @@ type FailureKey =
   | "signUp.errors.homeSave";
 
 /** A save that failed: the connection, the rate limit, or the step's own line. A raw server message is never shown. */
-function failureKey<Key extends string>(
+export function failureKey<Key extends string>(
   error: unknown,
   fallback: Key,
 ): Key | "auth.errors.offline" | "auth.errors.rateLimited" {

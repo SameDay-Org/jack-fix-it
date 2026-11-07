@@ -33,6 +33,7 @@ export {
   sessionGeneration,
   setSessionUser,
   useSession,
+  useSessionGeneration,
 } from "./session";
 export type { RegisterOptions, RestoreFailure, SessionStatus, SessionUser } from "./session";
 export { localFileSize, uploadMedia } from "./upload";

@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AccessibilityInfo } from "react-native";
 
-import { SessionExpiredError } from "@/api";
+import { isCurrentGeneration, SessionExpiredError, sessionGeneration } from "@/api";
 
 import { sendCode } from "./api";
 import { phoneConfig } from "./config";
@@ -26,7 +26,7 @@ export type PhoneEntry = {
  * number is never logged; it leaves this hook only in the request and in the flow store. Leaving
  * the screen cancels the request, and a late answer neither opens the code step nor says anything.
  */
-export function usePhoneEntry(onSent: () => void): PhoneEntry {
+export function usePhoneEntry(onSent: (generation: number) => void): PhoneEntry {
   const { t } = useTranslation();
   const { countryCode } = phoneConfig;
   const [digits, setDigits] = useState("");
@@ -54,13 +54,16 @@ export function usePhoneEntry(onSent: () => void): PhoneEntry {
       return;
     }
     const signal = unmountSignal();
+    // The session the code is sent for: the caller pins the code's check to it.
+    const generation = sessionGeneration();
     inFlight.current = true;
     setSending(true);
     try {
-      await sendCode(toE164(countryCode, digits), signal);
+      await sendCode(toE164(countryCode, digits), signal, generation);
       if (signal.aborted) return; // the user left: this flow is over
-      startCodeStep(digits);
-      onSent();
+      if (!isCurrentGeneration(generation)) return; // sent for a session that is gone
+      startCodeStep(digits, generation);
+      onSent(generation);
     } catch (failure) {
       if (signal.aborted) return;
       // The session ended meanwhile: the gate is taking the user to welcome, nothing to say here.

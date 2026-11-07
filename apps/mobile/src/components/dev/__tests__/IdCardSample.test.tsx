@@ -41,10 +41,12 @@ describe("IdCardSample", () => {
     await act(async () => undefined);
 
     expect(
-      screen.getByRole("button", { name: "ID card, PRO, Alex Morgan, Fort Lauderdale, FL" }),
+      screen.getByRole("button", {
+        name: "ID card, PRO, Alex Morgan, Fort Lauderdale, FL, (954) 555-0142",
+      }),
     ).toBeOnTheScreen();
     expect(
-      screen.getByRole("button", { name: "ID card, María Pérez, Miami, FL" }),
+      screen.getByRole("button", { name: "ID card, María Pérez, Miami, FL, (305) 555-0199" }),
     ).toBeOnTheScreen();
     expect(screen.getByText("PRO")).toBeOnTheScreen();
   });
@@ -56,9 +58,11 @@ describe("IdCardSample", () => {
     await fireEvent.changeText(screen.getByLabelText("Name on the card"), "Lucía Gómez");
 
     expect(
-      screen.getByRole("button", { name: "ID card, Lucía Gómez, Miami, FL" }),
+      screen.getByRole("button", { name: "ID card, Lucía Gómez, Miami, FL, (305) 555-0199" }),
     ).toBeOnTheScreen();
-    expect(screen.queryByRole("button", { name: "ID card, María Pérez, Miami, FL" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "ID card, María Pérez, Miami, FL, (305) 555-0199" }),
+    ).toBeNull();
   });
 
   it("captures the share PNG and shows its pixel size", async () => {
