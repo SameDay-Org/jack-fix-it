@@ -129,6 +129,24 @@ describe("JobBookedNotice (#64)", () => {
     });
   });
 
+  it("a scheduled job shows its start under 'booked', not its headline again", async () => {
+    freezeClock();
+    const scheduled: CustomerJob = {
+      ...ON_THE_WAY,
+      status: "scheduled",
+      eta_at: null,
+      arrival_code: null,
+      timeline: [entry("created", "scheduled", -120)],
+    };
+    jest.mocked(apiGet).mockResolvedValue(scheduled as Awaited<ReturnType<typeof apiGet>>);
+    await renderNotice(true);
+
+    expect(await screen.findByRole("header", { name: "Your job is booked" })).toBeTruthy();
+    expect(screen.getByText(/^Scheduled for /)).toBeTruthy();
+    expect(screen.queryByText("Dan is booked")).toBeNull();
+    expect(screen.getByRole("button", { name: "Follow your job" })).toBeTruthy();
+  });
+
   it.each([
     ["cancelled", "This job was cancelled", "Nothing more is needed from you."],
     ["disputed", "This job needs attention", "A problem was reported on this job."],

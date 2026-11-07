@@ -301,7 +301,7 @@ describe("JobScreen", () => {
       "on_the_way",
       ON_THE_WAY,
       "Dan is on the way",
-      `Arriving around ${clock(at(12))} · in 12${NBSP}min`,
+      `Arriving around ${clock(at(12))} · in${NBSP}12${NBSP}min`,
       1,
       true,
     ],
@@ -594,10 +594,10 @@ describe("JobScreen", () => {
     await renderWithQuery(<JobScreen />);
     await loaded("Dan is on the way");
     const support = () => screen.getByTestId("job-support").props.children as string;
-    expect(support()).toContain(`in 2${NBSP}min`);
+    expect(support()).toContain(`in${NBSP}2${NBSP}min`);
 
     await advance(30_000);
-    await waitFor(() => expect(support()).toContain(`in 1${NBSP}min`));
+    await waitFor(() => expect(support()).toContain(`in${NBSP}1${NBSP}min`));
     await advance(60_000);
     await waitFor(() => expect(support()).toBe("Arriving any minute now"));
   });

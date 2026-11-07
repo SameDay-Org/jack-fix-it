@@ -102,10 +102,12 @@ export function PaidRow({ job }: { job: CustomerJob }) {
           ? t("jobs.paid.labelWithTax", { total, tax: formatMoneyExact(job.tax_cents) })
           : t("jobs.paid.label", { total })
       }
-      className="flex-row items-baseline justify-between gap-3 border-t border-gray-500/15 pt-4"
+      // When the label and the amount no longer fit side by side (large text), the amount moves
+      // under the label instead of squeezing it mid-word.
+      className="flex-row flex-wrap items-baseline justify-between gap-x-3 border-t border-gray-500/15 pt-4"
       testID="job-paid"
     >
-      <View className="flex-1 gap-0.5">
+      <View className="grow gap-0.5">
         <Text className="text-headline text-navy-900">{t("jobs.paid.title")}</Text>
         {job.tax_cents > 0 ? (
           <Text className="text-footnote text-gray-500">

@@ -1,7 +1,12 @@
 import type { ApiSchema } from "@jack/shared";
 import type { TFunction } from "i18next";
 
-import { formatDateTime, formatLocale, formatMinutes } from "@/features/quotes/format";
+import {
+  formatDateTime,
+  formatLocale,
+  formatMinutes,
+  keepTogether,
+} from "@/features/quotes/format";
 
 export type CustomerJob = ApiSchema<"CustomerJob">;
 export type JobStatus = CustomerJob["status"];
@@ -212,7 +217,11 @@ export function etaText(t: TFunction, eta: Eta | null, now: number, locale: stri
   const time = formatMoment(eta.at, now, locale);
   switch (eta.kind) {
     case "close":
-      return t("jobs.eta.close", { time, span: formatMinutes(t, eta.minutes) });
+      // "in 12 min" never breaks inside.
+      return t("jobs.eta.close", {
+        time,
+        countdown: keepTogether(t("jobs.eta.in", { span: formatMinutes(t, eta.minutes) })),
+      });
     case "later":
       return t("jobs.eta.later", { time });
     case "due":

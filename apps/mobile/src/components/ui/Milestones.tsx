@@ -64,8 +64,9 @@ export function Milestones({ labels, reached, label, valueText, testID }: Milest
         {labels.map((text, index) => (
           <Text
             key={index}
-            // A long word ("Trabajando" at font scale 2) shrinks to its column rather than split.
-            numberOfLines={2}
+            // One line that shrinks to its column: a long word ("Trabajando" at font scale 2) is
+            // never split, which a second line would allow.
+            numberOfLines={1}
             adjustsFontSizeToFit
             minimumFontScale={MIN_LABEL_SCALE}
             className={cx(

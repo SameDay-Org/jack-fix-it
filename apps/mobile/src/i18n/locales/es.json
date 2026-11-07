@@ -716,7 +716,8 @@
       "cancelled": "No necesitas hacer nada más."
     },
     "eta": {
-      "close": "Llegada estimada: {{time}} · en {{span}}",
+      "close": "Llegada estimada: {{time}} · {{countdown}}",
+      "in": "en {{span}}",
       "later": "Llegada estimada: {{time}}",
       "due": "Está por llegar",
       "none": "Va en camino hacia ti"

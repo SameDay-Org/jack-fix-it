@@ -716,7 +716,8 @@
       "cancelled": "Nothing more is needed from you."
     },
     "eta": {
-      "close": "Arriving around {{time}} · in {{span}}",
+      "close": "Arriving around {{time}} · {{countdown}}",
+      "in": "in {{span}}",
       "later": "Arriving around {{time}}",
       "due": "Arriving any minute now",
       "none": "On the way to you"

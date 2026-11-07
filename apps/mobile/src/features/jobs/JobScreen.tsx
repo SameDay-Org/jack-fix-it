@@ -174,9 +174,15 @@ function Sheet({ children, testID }: { children: ReactNode; testID?: string }) {
       style={{ marginTop: -SHEET_OVERLAP, paddingBottom: bottom + SHEET_BOTTOM }}
       testID={testID}
     >
+      {/* White below the end too, so an iOS bounce past the bottom never shows the navy page.
+          First, so everything in the sheet paints over it. */}
+      <View
+        pointerEvents="none"
+        className="absolute left-0 right-0 bg-white"
+        style={{ bottom: -height, height }}
+        testID="job-sheet-skirt"
+      />
       {children}
-      {/* White below the end too, so an iOS bounce past the bottom never shows the navy page. */}
-      <View className="absolute inset-x-0 bg-white" style={{ top: "100%", height: height }} />
     </View>
   );
 }
