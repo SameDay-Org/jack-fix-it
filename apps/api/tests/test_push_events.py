@@ -65,6 +65,7 @@ CALLERS = (
     ),
     Caller("push_job_started", "customer_id", "job_started:{job_id}", "/requests/{request_id}/job"),
     Caller("push_job_done", "customer_id", "job_done:{job_id}", "/requests/{request_id}/job"),
+    Caller("push_job_confirmed", "pro_user_id", "job_confirmed:{job_id}", "/jobs/{job_id}"),
     Caller(
         "push_booking_not_completed",
         "customer_id",
