@@ -50,6 +50,7 @@ def test_render_uses_locale_and_falls_back_to_english() -> None:
         f"/jobs/{uuid.UUID(int=2)}",
         f"/quotes/{uuid.UUID(int=3)}",
         f"/opportunities/{uuid.UUID(int=4)}",
+        "/",
     ],
 )
 def test_allowed_deep_links(path: str) -> None:
@@ -251,5 +252,24 @@ def test_opportunities_deep_link_allowed_and_others_still_refused() -> None:
         f"https://evil.example/opportunities/{dispatch_id}",
         f"//evil.example/opportunities/{dispatch_id}",
         f"/pros/me/opportunities/{dispatch_id}",
+    ):
+        assert not deep_links.is_allowed(path), path
+
+
+def test_home_deep_link_allowed_alone() -> None:
+    """The quote accepted push opens the pro's home (#338): "/" exactly, nothing after it."""
+    assert deep_links.is_allowed("/")
+    for path in (
+        "",
+        "//",
+        "///",
+        "/ ",
+        "/?x=1",
+        "/#top",
+        "/\n",
+        "/home",
+        "/.",
+        "\\",
+        "https://evil.example/",
     ):
         assert not deep_links.is_allowed(path), path
