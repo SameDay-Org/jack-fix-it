@@ -729,7 +729,7 @@ export interface paths {
          * Confirm the job of one of my service requests is done
          * @description Completed -> confirmed: the customer agrees the work is done, before confirm_by (after it,
          *     the system confirms on its own unless a problem is open). Again once confirmed: the job
-         *     unchanged.
+         *     unchanged. The pro hears once the job is confirmed.
          */
         post: operations["confirm_request_job_v1_requests__request_id__job_confirm_post"];
         delete?: never;

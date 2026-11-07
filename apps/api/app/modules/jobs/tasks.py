@@ -7,8 +7,10 @@ confirmed in a transaction of its own (JobAutoConfirmer.confirm_if_due: locked a
 which holds that job's lock for its own few statements only: a customer confirming another job
 never waits for the batch. A job that fails is rolled back and logged by error class, and the
 run goes on with the next one; a batch that cannot be read ends the run. Whatever is left, the
-next run does. Nothing raises out of the cron. Logs carry ids and counts only. One
-`jobs_auto_confirmed` summary per run, even when the run is cut short.
+next run does. Nothing raises out of the cron. Each confirmed job pushes its pro once its
+transaction commits (job_confirmed, #65's pushes; a push that cannot be queued is logged with ids,
+never raised). Logs carry ids and counts only. One `jobs_auto_confirmed` summary per run, even
+when the run is cut short.
 """
 
 import logging
@@ -23,8 +25,9 @@ from arq.worker import Function
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.modules.jobs.confirmation import JobAutoConfirmer
+from app.modules.jobs.confirmation import AutoConfirmed, JobAutoConfirmer
 from app.modules.jobs.photos import JobPhotoRows
+from app.modules.notifications.events import push_job_confirmed
 from app.modules.requests.tasks import media_copy_task, run_media_copy
 
 logger = logging.getLogger(__name__)
@@ -75,7 +78,16 @@ async def auto_confirm_jobs(ctx: dict[str, Any]) -> None:
                 logger.error("job_auto_confirm_unavailable", extra={"error": type(error).__name__})
                 return
             for job_id in due:
-                await _confirm_one(sessions, job_id, completed_before, counts)
+                confirmed = await _confirm_one(sessions, job_id, completed_before, counts)
+                if confirmed is not None and confirmed.pro_user_id is not None:
+                    # After its commit; ARQ's own pool (an ArqRedis), a fake one in tests.
+                    await push_job_confirmed(
+                        ctx["redis"],
+                        pro_user_id=confirmed.pro_user_id,
+                        job_id=confirmed.job_id,
+                        public_code=confirmed.public_code,
+                        timeout_seconds=settings.job_enqueue_timeout_seconds,
+                    )
             if len(due) < AUTO_CONFIRM_BATCH:
                 return
             after = due[-1]
@@ -92,8 +104,9 @@ async def auto_confirm_jobs(ctx: dict[str, Any]) -> None:
 
 async def _confirm_one(
     sessions: SessionFactory, job_id: uuid.UUID, completed_before: datetime, counts: _Counts
-) -> None:
-    """One job in its own transaction. Counted once; never raises."""
+) -> AutoConfirmed | None:
+    """One job in its own transaction. Counted once; never raises. Returns the job it confirmed,
+    committed, for its push."""
     try:
         async with sessions() as session:
             confirmed = await JobAutoConfirmer(session).confirm_if_due(job_id, completed_before)
@@ -106,11 +119,12 @@ async def _confirm_one(
             "job_auto_confirm_failed",
             extra={"job_id": str(job_id), "error": type(error).__name__},
         )
-        return
-    if confirmed:
-        counts.confirmed += 1
-        logger.info("job_auto_confirmed", extra={"job_id": str(job_id)})
-    else:
+        return None
+    if confirmed is None:
         # Confirmed by the customer or another run meanwhile, a problem opened, or gone.
         counts.skipped += 1
         logger.debug("job_auto_confirm_skipped", extra={"job_id": str(job_id)})
+        return None
+    counts.confirmed += 1
+    logger.info("job_auto_confirmed", extra={"job_id": str(job_id)})
+    return confirmed

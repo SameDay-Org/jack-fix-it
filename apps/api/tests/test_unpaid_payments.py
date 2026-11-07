@@ -45,6 +45,7 @@ from tests.test_payment_webhooks import (
     SUCCEEDED,
     TAKE_RATE_BPS,
     Market,
+    RecordingQueue,
     market,
     records,
     wait_until_any_waits_on,
@@ -75,8 +76,14 @@ def settings() -> Settings:
 def context(
     sessions: async_sessionmaker[AsyncSession], settings: Settings, stripe: FakeStripePayments
 ) -> dict[str, Any]:
-    """What the worker's startup puts in the cron's context."""
-    return {"session_factory": sessions, "settings": settings, "stripe_payments": stripe}
+    """What the worker's startup puts in the cron's context, and ARQ's own pool: a local cancel
+    pushes the customer (#65, tests/test_job_status_pushes.py)."""
+    return {
+        "session_factory": sessions,
+        "settings": settings,
+        "stripe_payments": stripe,
+        "redis": RecordingQueue(),
+    }
 
 
 async def sweep(market: Market, stripe: FakeStripePayments) -> None:

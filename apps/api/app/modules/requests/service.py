@@ -359,7 +359,7 @@ def _has_nul(value: JsonValue) -> bool:
 
 class CustomerRequestReader:
     """A customer's own request for other modules (ADR 0003): its status, for the quotes the
-    customer compares (#188)."""
+    customer compares (#188), and its public code, for the job pushes (#65)."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._requests = ServiceRequestRepository(session)
@@ -372,6 +372,14 @@ class CustomerRequestReader:
             raise NotFoundError
         ensure_owner(request.customer_id, user)
         return request.status
+
+    async def public_code(self, request_id: uuid.UUID) -> str:
+        """The request's public code, the only request detail a push shows (#65). The caller
+        already holds the request's job, so the request exists."""
+        request = await self._requests.get(request_id)
+        if request is None:  # pragma: no cover - jobs.request_id is a foreign key
+            raise NotFoundError
+        return request.public_code
 
 
 # What a pro sees before a job (#49): the work, the place coarsely, never the customer.

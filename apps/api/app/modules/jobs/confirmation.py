@@ -12,10 +12,12 @@ reading it again: only a job still completed, with completed_at at or before the
 through JobStateMachine with the system as actor (its job_events row has no actor_id). A job the
 customer confirmed meanwhile, or one with a problem open (disputed), or anything else, is left
 as it is. So a run racing the customer, or another run, makes exactly one transition and one
-event. The caller owns the transaction (tasks.py: one per job).
+event. The caller owns the transaction (tasks.py: one per job), and pushes the pro once it
+commits (#65's job_confirmed, the same message id the customer's confirm uses).
 """
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +26,16 @@ from app.modules.jobs.models import Job, JobStatus
 from app.modules.jobs.repository import JobRepository
 from app.modules.jobs.service import SYSTEM, JobStateMachine
 from app.modules.pros.service import ProService
+from app.modules.requests.service import CustomerRequestReader
+
+
+@dataclass(frozen=True)
+class AutoConfirmed:
+    """A job the system confirmed, with what its pro's push needs once the commit is done."""
+
+    job_id: uuid.UUID
+    pro_user_id: uuid.UUID | None
+    public_code: str
 
 
 def confirm_by(job: Job, window: timedelta) -> datetime | None:
@@ -37,7 +49,9 @@ def confirm_by(job: Job, window: timedelta) -> datetime | None:
 class JobAutoConfirmer:
     def __init__(self, session: AsyncSession) -> None:
         self._jobs = JobRepository(session)
-        self._machine = JobStateMachine(session, ProService(session))
+        self._pros = ProService(session)
+        self._machine = JobStateMachine(session, self._pros)
+        self._requests = CustomerRequestReader(session)
 
     async def due(
         self, completed_before: datetime, after: uuid.UUID | None, limit: int
@@ -46,9 +60,11 @@ class JobAutoConfirmer:
         `completed_before` (now minus the window), by id, after `after`. Unlocked."""
         return await self._jobs.completed_before(completed_before, after, limit)
 
-    async def confirm_if_due(self, job_id: uuid.UUID, completed_before: datetime) -> bool:
+    async def confirm_if_due(
+        self, job_id: uuid.UUID, completed_before: datetime
+    ) -> AutoConfirmed | None:
         """Confirms the job as the system if, under its lock, it is still completed with
-        completed_at at or before `completed_before`; False (nothing changed) otherwise. Flushes,
+        completed_at at or before `completed_before`; None (nothing changed) otherwise. Flushes,
         never commits."""
         job = await self._jobs.get_for_update(job_id)
         if (
@@ -57,6 +73,10 @@ class JobAutoConfirmer:
             or job.completed_at is None
             or job.completed_at > completed_before
         ):
-            return False
+            return None
         await self._machine.transition(job.id, JobStatus.CONFIRMED, SYSTEM)
-        return True
+        return AutoConfirmed(
+            job_id=job.id,
+            pro_user_id=await self._pros.user_id_of(job.pro_id),
+            public_code=await self._requests.public_code(job.request_id),
+        )

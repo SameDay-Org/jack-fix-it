@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from redis.exceptions import RedisError
 from sqlalchemy import URL, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -24,7 +25,7 @@ from app.config import Settings
 from app.integrations.storage import Storage
 from app.modules.addresses.models import Address
 from app.modules.jobs import tasks
-from app.modules.jobs.confirmation import JobAutoConfirmer
+from app.modules.jobs.confirmation import AutoConfirmed, JobAutoConfirmer
 from app.modules.jobs.execution import JobExecutionService
 from app.modules.jobs.models import Job, JobEvent, JobStatus
 from app.modules.jobs.service import JobStateMachine
@@ -40,6 +41,7 @@ from tests.conftest import backend_pid, make_settings
 from tests.helpers import as_status_writer
 from tests.test_arrival_code import CONFIG
 from tests.test_payment_webhooks import wait_until_any_waits_on
+from tests.test_requests_api import RecordingQueue
 
 WINDOW = timedelta(hours=48)
 NOW = datetime(2001, 1, 1, 12, 0, tzinfo=UTC)
@@ -74,6 +76,8 @@ class World:
     profile_id: uuid.UUID
     address_id: uuid.UUID
     settings: Settings = field(default_factory=lambda: make_settings())
+    # ARQ's own pool in the worker's context: the cron's pushes (#65), recorded.
+    queue: RecordingQueue = field(default_factory=RecordingQueue)
     jobs: list[tuple[uuid.UUID, uuid.UUID, uuid.UUID]] = field(default_factory=list)
 
     async def add_job(self, status: JobStatus, completed_at: datetime | None) -> Job:
@@ -121,7 +125,11 @@ class World:
 
     def context(self) -> dict[str, Any]:
         """What the worker's startup puts in the cron's context."""
-        return {"session_factory": self.sessions, "settings": self.settings}
+        return {"session_factory": self.sessions, "settings": self.settings, "redis": self.queue}
+
+    def pushed(self) -> set[str]:
+        """The jobs of the queued job_confirmed pushes."""
+        return {job_id.removeprefix("push:job_confirmed:") for job_id in self.queue.jobs}
 
     async def state(self, job_id: uuid.UUID) -> tuple[JobStatus, datetime | None, list[JobEvent]]:
         async with self.sessions() as session:
@@ -230,6 +238,7 @@ async def test_due_jobs_are_confirmed_by_the_system_at_the_window_boundary(
     assert_system_confirmed(await world.state(long_due.id))
     assert await world.state(not_yet.id) == (JobStatus.COMPLETED, None, [])
     assert summaries(logs) == [counts(confirmed=2)]
+    assert world.pushed() == {str(at_boundary.id), str(long_due.id)}
 
 
 @pytest.mark.parametrize(
@@ -251,6 +260,7 @@ async def test_only_completed_jobs_are_confirmed(
 
     assert await world.state(job.id) == (status, None, [])
     assert summaries(logs) == [counts()]
+    assert world.queue.before == []
 
 
 async def test_a_job_disputed_after_the_read_is_skipped(
@@ -278,6 +288,7 @@ async def test_a_job_disputed_after_the_read_is_skipped(
     assert (status, confirmed_at) == (JobStatus.DISPUTED, None)
     assert [event.to_status for event in events] == [JobStatus.DISPUTED]
     assert summaries(logs) == [counts(skipped=1)]
+    assert world.queue.before == []
 
 
 async def test_confirm_if_due_checks_the_cut_off_again_under_the_lock(world: World) -> None:
@@ -285,9 +296,14 @@ async def test_confirm_if_due_checks_the_cut_off_again_under_the_lock(world: Wor
 
     async with world.sessions() as session:
         early = CUT_OFF - timedelta(microseconds=1)
-        assert await JobAutoConfirmer(session).confirm_if_due(job.id, early) is False
-        assert await JobAutoConfirmer(session).confirm_if_due(uuid.uuid4(), CUT_OFF) is False
-        assert await JobAutoConfirmer(session).confirm_if_due(job.id, CUT_OFF) is True
+        assert await JobAutoConfirmer(session).confirm_if_due(job.id, early) is None
+        assert await JobAutoConfirmer(session).confirm_if_due(uuid.uuid4(), CUT_OFF) is None
+        confirmed = await JobAutoConfirmer(session).confirm_if_due(job.id, CUT_OFF)
+        assert confirmed is not None
+        assert confirmed == AutoConfirmed(
+            job_id=job.id, pro_user_id=world.pro_user_id, public_code=confirmed.public_code
+        )
+        assert confirmed.public_code.startswith("JF-")
         await session.commit()
 
     assert_system_confirmed(await world.state(job.id))
@@ -317,6 +333,9 @@ async def test_overlapping_runs_confirm_each_job_once(
     assert sum(run["confirmed"] for run in runs) == 3
     assert sum(run["skipped"] for run in runs) == 3
     assert all(run["failed"] == 0 for run in runs)
+    # Only the run that confirmed a job pushes it: three enqueues, none deduplicated.
+    assert len(world.queue.before) == 3
+    assert world.pushed() == {str(job.id) for job in jobs}
 
 
 async def test_a_failing_job_does_not_stop_the_batch(
@@ -331,7 +350,7 @@ async def test_a_failing_job_does_not_stop_the_batch(
 
     async def confirm_or_fail(
         self: JobAutoConfirmer, job_id: uuid.UUID, completed_before: datetime
-    ) -> bool:
+    ) -> AutoConfirmed | None:
         confirmed = await real_confirm(self, job_id, completed_before)
         if job_id == failing.id:
             # After the transition: the failure must roll it back. The text must not be logged.
@@ -346,6 +365,7 @@ async def test_a_failing_job_does_not_stop_the_batch(
     for job in jobs[1:]:
         assert_system_confirmed(await world.state(job.id))
     assert summaries(logs) == [counts(confirmed=2, failed=1)]
+    assert world.pushed() == {str(job.id) for job in jobs[1:]}
     [failure] = [r for r in logs.records if r.getMessage() == "job_auto_confirm_failed"]
     assert (failure.levelno, failure.job_id, failure.error) == (  # type: ignore[attr-defined]
         logging.ERROR,
@@ -360,7 +380,9 @@ async def test_the_next_run_confirms_a_job_that_failed(
 ) -> None:
     job = await world.add_job(JobStatus.COMPLETED, CUT_OFF)
 
-    async def fail(self: JobAutoConfirmer, job_id: uuid.UUID, completed_before: datetime) -> bool:
+    async def fail(
+        self: JobAutoConfirmer, job_id: uuid.UUID, completed_before: datetime
+    ) -> AutoConfirmed | None:
         raise RuntimeError("database away")
 
     with monkeypatch.context() as patch:
@@ -432,13 +454,52 @@ async def test_cron_logs_carry_ids_and_counts_only(
     assert str(world.customer.id) not in text
 
 
+async def test_the_push_is_queued_after_the_commit(world: World) -> None:
+    job = await world.add_job(JobStatus.COMPLETED, CUT_OFF)
+    seen: list[JobStatus | None] = []
+    enqueue = world.queue.enqueue_job
+
+    async def checked(function: str, *args: object, _job_id: str | None = None) -> object:
+        async with world.sessions() as session:  # another connection: committed rows only
+            seen.append(await session.scalar(select(Job.status).where(Job.id == job.id)))
+        return await enqueue(function, *args, _job_id=_job_id)
+
+    world.queue.enqueue_job = checked  # type: ignore[method-assign]
+
+    await auto_confirm_jobs(world.context())
+
+    assert seen == [JobStatus.CONFIRMED]
+    [(function, args)] = world.queue.jobs.values()
+    assert function == "send_push"
+    assert args[:2] == (str(world.pro_user_id), f"job_confirmed:{job.id}")
+    assert args[2:4] == ("push.job_confirmed.title", "push.job_confirmed.body")
+    assert args[5] == f"/jobs/{job.id}"
+
+
+async def test_a_failed_push_enqueue_never_fails_the_run(
+    world: World, logs: pytest.LogCaptureFixture
+) -> None:
+    jobs = [await world.add_job(JobStatus.COMPLETED, CUT_OFF) for _ in range(2)]
+    world.queue.failure = RedisError("probe-secret-text-67")
+    logs.set_level(logging.INFO)
+
+    await auto_confirm_jobs(world.context())
+
+    for job in jobs:
+        assert_system_confirmed(await world.state(job.id))
+    assert summaries(logs) == [counts(confirmed=2)]
+    failed = [r for r in logs.records if r.getMessage() == "push_enqueue_failed"]
+    assert len(failed) == 2
+    assert "probe-secret-text-67" not in logs.text
+
+
 # The customer's confirm racing the cron: one transition and one event, whoever locks first.
 
 
 async def customer_confirm(world: World, request_id: uuid.UUID) -> JobStatus:
     async with world.sessions() as session:
         view = await JobExecutionService(session, CONFIG, no_storage).confirm(
-            world.customer, request_id
+            world.customer, request_id, world.queue
         )
     return view.status
 
@@ -456,7 +517,7 @@ async def test_customer_confirm_waiting_on_the_cron_answers_the_confirmed_job(
     async with world.sessions() as cron:
         cron_pid = await backend_pid(cron)
         # The cron confirms and holds its transaction open...
-        assert await JobAutoConfirmer(cron).confirm_if_due(job.id, CUT_OFF) is True
+        assert await JobAutoConfirmer(cron).confirm_if_due(job.id, CUT_OFF) is not None
         # ...while the customer's confirm waits on the job's lock, then reads it confirmed.
         confirming = asyncio.create_task(customer_confirm(world, job.request_id))
         await wait_until_any_waits_on(world.sessions, cron_pid)
@@ -464,6 +525,7 @@ async def test_customer_confirm_waiting_on_the_cron_answers_the_confirmed_job(
 
     assert await wait_for(confirming) is JobStatus.CONFIRMED
     assert_system_confirmed(await world.state(job.id))
+    assert world.queue.before == []  # the customer's answer was a repeat: no push
 
 
 async def test_cron_waiting_on_the_customer_skips_the_job(
@@ -491,6 +553,7 @@ async def test_cron_waiting_on_the_customer_skips_the_job(
         world.customer.id,
     )
     assert summaries(logs) == [counts(skipped=1)]
+    assert world.queue.before == []  # the skipped run pushes nothing
 
 
 async def test_customer_confirms_while_the_cron_waits_on_a_second_customer_confirm(
@@ -512,3 +575,4 @@ async def test_customer_confirms_while_the_cron_waits_on_a_second_customer_confi
     results = await wait_for(asyncio.gather(*waiters))
     assert results[0] is JobStatus.CONFIRMED
     assert_system_confirmed(await world.state(job.id))
+    assert world.queue.before == []

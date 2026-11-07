@@ -88,11 +88,16 @@ async def get_request_job(request_id: uuid.UUID, user: CustomerUser, jobs: Jobs)
         ),
     },
 )
-async def confirm_request_job(request_id: uuid.UUID, user: CustomerUser, jobs: Jobs) -> CustomerJob:
+async def confirm_request_job(
+    request_id: uuid.UUID,
+    user: CustomerUser,
+    jobs: Jobs,
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
+) -> CustomerJob:
     """Completed -> confirmed: the customer agrees the work is done, before confirm_by (after it,
     the system confirms on its own unless a problem is open). Again once confirmed: the job
-    unchanged."""
-    return await jobs.confirm(user, request_id)
+    unchanged. The pro hears once the job is confirmed."""
+    return await jobs.confirm(user, request_id, queue)
 
 
 @router.get(
@@ -139,11 +144,17 @@ async def get_my_job(job_id: uuid.UUID, user: ProUser, jobs: Jobs) -> ProJob:
         ),
     },
 )
-async def mark_on_the_way(job_id: uuid.UUID, data: OnTheWayIn, user: ProUser, jobs: Jobs) -> ProJob:
+async def mark_on_the_way(
+    job_id: uuid.UUID,
+    data: OnTheWayIn,
+    user: ProUser,
+    jobs: Jobs,
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
+) -> ProJob:
     """Scheduled -> on the way, with an ETA the customer sees; the customer gets an arrival
     code to give the pro on arrival. Again while on the way: only the ETA changes (the code
     stays)."""
-    return await jobs.on_the_way(user, job_id, data.eta_minutes)
+    return await jobs.on_the_way(user, job_id, data.eta_minutes, queue)
 
 
 @router.post(
@@ -163,10 +174,16 @@ async def mark_on_the_way(job_id: uuid.UUID, data: OnTheWayIn, user: ProUser, jo
         ),
     },
 )
-async def check_in(job_id: uuid.UUID, data: CheckInIn, user: ProUser, jobs: Jobs) -> ProJob:
+async def check_in(
+    job_id: uuid.UUID,
+    data: CheckInIn,
+    user: ProUser,
+    jobs: Jobs,
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
+) -> ProJob:
     """Arrived: the code the customer gives the pro, and where the pro is (recorded only). Once
     checked in, calling it again answers the job unchanged."""
-    return await jobs.check_in(user, job_id, data.arrival_code, data.lat, data.lng)
+    return await jobs.check_in(user, job_id, data.arrival_code, data.lat, data.lng, queue)
 
 
 @router.post(
@@ -180,9 +197,14 @@ async def check_in(job_id: uuid.UUID, data: CheckInIn, user: ProUser, jobs: Jobs
         ),
     },
 )
-async def start_job(job_id: uuid.UUID, user: ProUser, jobs: Jobs) -> ProJob:
+async def start_job(
+    job_id: uuid.UUID,
+    user: ProUser,
+    jobs: Jobs,
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
+) -> ProJob:
     """On the way -> working, after the check-in."""
-    return await jobs.start(user, job_id)
+    return await jobs.start(user, job_id, queue)
 
 
 @router.post(
