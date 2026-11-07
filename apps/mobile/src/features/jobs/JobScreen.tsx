@@ -1,6 +1,6 @@
 import { queryOptions, useQuery } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AccessibilityInfo,
@@ -10,11 +10,10 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { apiGet, SessionExpiredError, useSessionGeneration } from "@/api";
 import { Button, Milestones, Screen, showToast, Skeleton, TextSkeleton } from "@/components/ui";
-import { backToPrevious } from "@/features/auth/components/BackButton";
+import { useRefreshExpiredMedia } from "@/features/opportunities/useOpportunity";
 import { isUuid, useGuardedPush } from "@/features/quotes/navigation";
 import { useSettledError } from "@/features/quotes/useRequestQuotes";
 import { tokens } from "@/theme";
@@ -23,6 +22,9 @@ import { isNoJobYet, useCustomerJob } from "./api";
 import { ArrivalCode } from "./ArrivalCode";
 import { useMinuteClock } from "./clock";
 import { jobsConfig } from "./config";
+import { ConfirmedJob } from "./ConfirmedJob";
+import { ConfirmDock, FinishedJob } from "./FinishedJob";
+import { MapBack, Sheet } from "./JobChrome";
 import { JobMap } from "./JobMap";
 import { PaidRow, ProRow } from "./JobDetails";
 import { JobTimeline } from "./JobTimeline";
@@ -35,6 +37,8 @@ import {
   timelineOf,
   travelOf,
   type CustomerJob,
+  type JobPhase,
+  type JobText,
 } from "./phase";
 
 /** The accepted quote behind the job, whose id opens the pro's profile; it never changes. */
@@ -60,10 +64,6 @@ const jobProfileHref = (requestId: string, quoteId: string) => ({
   params: { id: requestId, quoteId, from: "job" },
 });
 
-// The sheet rides this far up over the map's bottom edge, its top corners rounded.
-const SHEET_OVERLAP = 32;
-const SHEET_BOTTOM = 24;
-
 /**
  * The customer's ongoing job (`/requests/[id]/job`, #64): the whole screen for the one job. A
  * drawn map runs edge to edge under the status bar with the way back on it; a white sheet rises
@@ -72,7 +72,9 @@ const SHEET_BOTTOM = 24;
  * pro (to their profile), what was paid and what happened so far. It keeps itself fresh
  * (`useCustomerJob`) and pulls to refresh. A request with no job yet (the payment has not created
  * it) shows that and keeps asking; chat, problems and cancelling are not built yet, so nothing
- * here offers them.
+ * here offers them. Once the pro marks the job done the screen turns to checking the work and
+ * confirming it (`FinishedJob` with its `ConfirmDock`, #66), then to the confirmed job
+ * (`ConfirmedJob`).
  */
 export function JobScreen() {
   const { t } = useTranslation();
@@ -83,6 +85,7 @@ export function JobScreen() {
   });
   const shownError = useSettledError(data, error);
   const [pulling, setPulling] = useState(false);
+  const finished = data !== undefined && jobPhase(data) === "finished";
 
   // A pull that fails over a job already on screen keeps it and says so.
   const refresh = async () => {
@@ -113,7 +116,7 @@ export function JobScreen() {
         testID="job-scroll"
       >
         {data ? (
-          <JobContent job={data} requestId={id} updatedAt={dataUpdatedAt} />
+          <JobView job={data} requestId={id} updatedAt={dataUpdatedAt} refetch={refetch} />
         ) : !valid ? (
           <JobState
             map="bare"
@@ -144,61 +147,87 @@ export function JobScreen() {
           <JobSkeleton />
         )}
       </ScrollView>
+      {data && finished ? (
+        <ConfirmDock job={data} requestId={id} updatedAt={dataUpdatedAt} />
+      ) : null}
     </Screen>
   );
 }
 
-/** The round way back, over the map's top left corner. */
-function MapBack() {
+type JobViewProps = {
+  job: CustomerJob;
+  requestId: string;
+  /** When the job's last answer arrived: the words are never drawn against an older clock. */
+  updatedAt: number;
+  /** Asks for the job again: an expired photo URL comes back fresh. */
+  refetch: () => Promise<unknown>;
+};
+
+/**
+ * The job as its phase draws it: the ongoing job, the finished one to check and confirm, or the
+ * confirmed one. A step change while the screen is up is said aloud with its new headline, and a
+ * confirmation seen landing here reads "Thanks! Job confirmed".
+ */
+function JobView({ job, requestId, updatedAt, refetch }: JobViewProps) {
   const { t } = useTranslation();
-  return (
-    <View className="absolute left-4 top-2">
-      <Button
-        glyph="back"
-        variant="hero"
-        label={t("common.back")}
-        onPress={() => backToPrevious("/")}
-        testID="job-back"
+  const phase = jobPhase(job);
+  const ticking = useMinuteClock(updatedAt, job.eta_at === null ? null : Date.parse(job.eta_at));
+  // The photos' URLs expire: the finished and confirmed pages draw at this clock, which also asks
+  // for the job again when one does.
+  const photosNow = useRefreshExpiredMedia(job.photos.after, updatedAt, refetch);
+  const justConfirmed = useJustConfirmed(phase);
+  const text = jobText(t, job, ticking, jobsConfig.etaCloseMinutes);
+  const shown = justConfirmed ? { ...text, headline: t("jobs.headline.thanks") } : text;
+  useAnnounceChange(phase, shown.headline);
+
+  if (phase === "finished") {
+    return <FinishedJob job={job} requestId={requestId} text={shown} now={photosNow} />;
+  }
+  if (phase === "done") {
+    return (
+      <ConfirmedJob
+        job={job}
+        requestId={requestId}
+        text={shown}
+        justConfirmed={justConfirmed}
+        now={photosNow}
       />
-    </View>
+    );
+  }
+  return (
+    <JobContent job={job} requestId={requestId} updatedAt={updatedAt} text={shown} now={ticking} />
   );
 }
 
-/** The white sheet over the map's bottom edge, padded down to the home indicator. */
-function Sheet({ children, testID }: { children: ReactNode; testID?: string }) {
-  const { bottom } = useSafeAreaInsets();
-  const { height } = useWindowDimensions();
-  return (
-    <View
-      className="flex-grow gap-8 rounded-t-xl bg-white px-4 pt-6"
-      style={{ marginTop: -SHEET_OVERLAP, paddingBottom: bottom + SHEET_BOTTOM }}
-      testID={testID}
-    >
-      {/* White below the end too, so an iOS bounce past the bottom never shows the navy page.
-          First, so everything in the sheet paints over it. */}
-      <View
-        pointerEvents="none"
-        className="absolute left-0 right-0 bg-white"
-        style={{ bottom: -height, height }}
-        testID="job-sheet-skirt"
-      />
-      {children}
-    </View>
-  );
+/**
+ * True once the job turned from finished to confirmed while the screen was up (the customer's
+ * own confirmation, or the automatic one landing under their eyes), and from then on; a job
+ * opened confirmed is not "just" confirmed. Kept while rendering (React's pattern for state
+ * derived from the previous render), so the thanks shows from the first confirmed frame.
+ */
+function useJustConfirmed(phase: JobPhase): boolean {
+  const [seen, setSeen] = useState({ phase, confirmed: false });
+  if (seen.phase !== phase) {
+    const confirmed = phase === "done" && (seen.confirmed || seen.phase === "finished");
+    setSeen({ phase, confirmed });
+    return confirmed;
+  }
+  return seen.confirmed;
 }
 
 type JobContentProps = {
   job: CustomerJob;
   requestId: string;
-  /** When the job's last answer arrived: the words are never drawn against an older clock. */
   updatedAt: number;
+  text: JobText;
+  /** The time the words are drawn at (`useMinuteClock`). */
+  now: number;
 };
 
-function JobContent({ job, requestId, updatedAt }: JobContentProps) {
+function JobContent({ job, requestId, updatedAt, text, now }: JobContentProps) {
   const { t } = useTranslation();
-  const now = useMinuteClock(updatedAt, job.eta_at === null ? null : Date.parse(job.eta_at));
   const phase = jobPhase(job);
-  const { headline, support } = jobText(t, job, now, jobsConfig.etaCloseMinutes);
+  const { headline, support } = text;
   const reached = milestoneOf(phase);
   const names = proNames(t, job);
   const generation = useSessionGeneration();
@@ -220,7 +249,6 @@ function JobContent({ job, requestId, updatedAt }: JobContentProps) {
     }
   }, [acceptedFailed, refetchAccepted, updatedAt]);
   const push = useGuardedPush();
-  useAnnounceChange(phase, headline);
 
   const milestoneLabels = [
     t("jobs.milestones.onTheWay"),

@@ -3,8 +3,15 @@ import { useIsFocused } from "expo-router";
 import { useCallback, useSyncExternalStore } from "react";
 import { AppState } from "react-native";
 
-import { apiGet, ApiError, useSession, useSessionGeneration } from "@/api";
-import { MY_REQUESTS_PAGE_SIZE } from "@/features/history/useMyRequests";
+import {
+  apiGet,
+  ApiError,
+  apiPost,
+  isCurrentGeneration,
+  useSession,
+  useSessionGeneration,
+} from "@/api";
+import { invalidateMyRequests, MY_REQUESTS_PAGE_SIZE } from "@/features/history/useMyRequests";
 import { useRefetchOnReturn } from "@/features/quotes/useRequestQuotes";
 
 import { jobsConfig } from "./config";
@@ -17,6 +24,14 @@ export const jobHref = (requestId: string): Href => ({
   pathname: "/requests/[id]/job",
   params: { id: requestId },
 });
+
+/** The confirmation sheet over a finished job (#66). */
+export const confirmJobHref = (requestId: string) =>
+  ({ pathname: "/requests/[id]/confirm", params: { id: requestId } }) as const;
+
+/** The job's after photos full screen, starting at the `index`th one. */
+export const jobPhotosHref = (requestId: string, index: number) =>
+  ({ pathname: "/requests/[id]/photos", params: { id: requestId, index: String(index) } }) as const;
 
 /**
  * One request's job, as the session that asked for it sees it: the generation is part of the key
@@ -162,4 +177,36 @@ export function useActiveJob(): ActiveJobState {
   // `refetch` runs even on a disabled query: a pro (no requests) would be refused each time.
   const refresh = useCallback(() => (enabled ? refetch() : Promise.resolve()), [enabled, refetch]);
   return { active, updatedAt: Math.max(listedAt, jobAt), refetch: refresh };
+}
+
+/**
+ * The customer confirms the finished job is done (#66): completed -> confirmed, or the job as it
+ * is when it was confirmed already. The answer replaces the job on screen at once (the screen
+ * under the sheet turns to "confirmed" as the sheet closes, and the banner, which reads the same
+ * query, lets it go), and the banner's list and History are asked again. Every step is pinned to
+ * the session the confirmation started in: after a sign-out the answer goes nowhere.
+ */
+export async function confirmJob(
+  client: QueryClient,
+  requestId: string,
+  generation: number,
+): Promise<CustomerJob> {
+  const job = await apiPost("/v1/requests/{request_id}/job/confirm", undefined, {
+    auth: true,
+    generation,
+    params: { request_id: requestId },
+  });
+  if (isCurrentGeneration(generation)) {
+    client.setQueryData(customerJobQueryKey(requestId, generation), job);
+    void client.invalidateQueries({ queryKey: activeJobQueryKey(generation) });
+    void invalidateMyRequests(client);
+  }
+  return job;
+}
+
+/** The job and the banner's list asked again: a confirmation found the job moved on or gone. */
+export function refreshCustomerJob(client: QueryClient, requestId: string, generation: number) {
+  if (!isCurrentGeneration(generation)) return;
+  void client.invalidateQueries({ queryKey: customerJobQueryKey(requestId, generation) });
+  void client.invalidateQueries({ queryKey: activeJobQueryKey(generation) });
 }

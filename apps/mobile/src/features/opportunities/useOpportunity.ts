@@ -78,7 +78,7 @@ export async function forgetOpportunity(client: QueryClient, dispatchId: string)
 }
 
 /** Its signed URL is past `expires_at` at `now`: never shown, fetched again instead. */
-export const mediaExpired = (media: OpportunityMedia, now: number): boolean =>
+export const mediaExpired = (media: Pick<OpportunityMedia, "expires_at">, now: number): boolean =>
   Date.parse(media.expires_at) <= now;
 
 const NO_EXPIRIES: readonly string[] = [];
@@ -91,7 +91,7 @@ const NO_EXPIRIES: readonly string[] = [];
  * for again: the clocks disagree, and asking would loop.
  */
 export function useRefreshExpiredMedia(
-  media: readonly OpportunityMedia[] | undefined,
+  media: readonly Pick<OpportunityMedia, "expires_at">[] | undefined,
   dataUpdatedAt: number,
   refetch: () => Promise<unknown>,
 ): number {
