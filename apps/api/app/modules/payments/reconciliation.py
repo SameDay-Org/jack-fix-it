@@ -12,9 +12,9 @@ raises, so the event is retried and then ends failed for staff.
 
 An intent no payment holds (#296) can be one whose create answer was lost (#58): the row has its
 payment_intent_requested_at and no PaymentIntent id, and no payment call has adopted the intent
-yet. The event's `metadata.payment_id` then names the payment: when it is a UUID of an existing
-payment, that payment's request, quote and payment are locked in the same order, and on the
-locked row:
+yet. The event's `metadata.payment_id` then names the payment: when it is the id of an existing
+payment, as the payment call writes it (a lowercase UUID with hyphens), that payment's request,
+quote and payment are locked in the same order, and on the locked row:
 - no PaymentIntent stored: the integrity check above, then the event's intent is stored (a
   conditional UPDATE in a savepoint) and the event applied as for a known intent, all in the
   worker's transaction, so a step that fails after the adoption rolls it back too. Once the
@@ -209,6 +209,9 @@ class PaymentReconciler:
         try:
             payment_id = uuid.UUID(event.metadata_payment_id)
         except ValueError:
+            return None
+        if str(payment_id) != event.metadata_payment_id:
+            # Only the form the payment call writes (str of the id), as its own adoption reads.
             return None
         return await self._payments.find_ids(payment_id)
 

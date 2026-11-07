@@ -507,12 +507,13 @@ async def test_amount_or_currency_mismatch_changes_nothing_and_fails_the_event(
 async def test_unknown_intent_is_logged_and_ignored(
     market: Market, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """No metadata to adopt it from (#296 covers the metadata cases below)."""
     before = await market.state()
     event_id = market.new_event_id()
 
-    assert await market.deliver(SUCCEEDED, event_id=event_id, intent_id="pi_test_unknown") == (
-        "processed"
-    )
+    assert await market.deliver(
+        SUCCEEDED, event_id=event_id, intent_id="pi_test_unknown", metadata=OMITTED
+    ) == ("processed")
 
     assert await market.state() == before
     assert (await market.event_row(event_id)).status is WebhookEventStatus.PROCESSED
@@ -523,6 +524,7 @@ async def test_unknown_intent_is_logged_and_ignored(
         SUCCEEDED,
     )
     assert "payment_id" not in warning.__dict__
+    assert "reason" not in warning.__dict__
 
 
 async def test_processing_then_failed_then_retry_succeeds(
@@ -992,6 +994,7 @@ async def test_metadata_naming_a_payment_with_another_intent_changes_nothing(
         {"payment_id": 7},
         {"payment_id": "not-a-uuid"},
         {"payment_id": "<unknown uuid>"},
+        {"payment_id": "<the payment's id, uppercase>"},
     ],
     ids=[
         "absent",
@@ -1003,6 +1006,7 @@ async def test_metadata_naming_a_payment_with_another_intent_changes_nothing(
         "int_id",
         "non_uuid",
         "unknown_uuid",
+        "non_canonical_uuid",
     ],
 )
 async def test_missing_or_bad_metadata_keeps_the_unknown_intent_warning(
@@ -1011,6 +1015,8 @@ async def test_missing_or_bad_metadata_keeps_the_unknown_intent_warning(
     await lose_the_create(market)
     if metadata == {"payment_id": "<unknown uuid>"}:
         metadata = {"payment_id": str(uuid.uuid4())}
+    elif metadata == {"payment_id": "<the payment's id, uppercase>"}:
+        metadata = {"payment_id": str(market.payment_id).upper()}
     before = await market.state()
     event_id = market.new_event_id()
 
