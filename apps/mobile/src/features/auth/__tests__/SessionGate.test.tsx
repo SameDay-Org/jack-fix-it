@@ -17,7 +17,7 @@ import AuthLayout, { unstable_settings } from "../../../app/(auth)/_layout";
 import { TabsLayout } from "../../tabs/TabsLayout";
 import { HomePlaceholderScreen } from "../HomePlaceholderScreen";
 import { SessionGate } from "../SessionGate";
-import { METRICS, SIGNED_OUT } from "./helpers";
+import { METRICS, SIGNED_OUT, WithQuery } from "./helpers";
 
 jest.mock("@/api", () => ({
   useSession: jest.fn(),
@@ -25,6 +25,8 @@ jest.mock("@/api", () => ({
   restoreSession: jest.fn(async () => undefined),
   // The phone flow registers its sign-out cleanup on import.
   onSignOut: jest.fn(() => () => undefined),
+  // The tabs' job banner (#64) pins its reads to the session generation.
+  useSessionGeneration: () => 1,
 }));
 jest.mock("expo-splash-screen", () => ({
   preventAutoHideAsync: jest.fn(async () => true),
@@ -54,7 +56,11 @@ const session = (overrides: Partial<Session>) =>
 
 const routes = {
   _layout: () =>
-    createElement(SafeAreaProvider, { initialMetrics: METRICS }, createElement(SessionGate)),
+    createElement(
+      SafeAreaProvider,
+      { initialMetrics: METRICS },
+      createElement(WithQuery, null, createElement(SessionGate)),
+    ),
   "(auth)/_layout": { default: AuthLayout, unstable_settings },
   "(auth)/welcome": () => <Text>welcome stub</Text>,
   "(app)/_layout": { default: AppLayout, unstable_settings: appSettings },

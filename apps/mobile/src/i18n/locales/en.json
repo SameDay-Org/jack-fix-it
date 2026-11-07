@@ -877,5 +877,114 @@
     "title": "Legal",
     "lead": "Our Terms of Service and Privacy Policy will be published here.",
     "body": "They're being finalized. Once they're ready, you'll be able to read them in full on this page."
+  },
+  "jobs": {
+    "loading": "Loading your job",
+    "refreshFailed": "Couldn't refresh your job. Check your connection.",
+    "backToJob": "Back to your job",
+    "pro": {
+      "fallback": "Your pro",
+      "fallbackInline": "your pro",
+      "title": "Your pro",
+      "verified": "verified",
+      "rating": "★ {{rating}}",
+      "rated": "rated {{rating}}",
+      "jobs_one": "{{count}} job",
+      "jobs_other": "{{count}} jobs",
+      "hint": "Opens their profile"
+    },
+    "headline": {
+      "scheduled": "{{name}} is booked",
+      "onTheWay": "{{name}} is on the way",
+      "arrived": "{{name}} has arrived",
+      "working": "{{name}} is working",
+      "done": "Job's done",
+      "attention": "This job needs attention",
+      "cancelled": "This job was cancelled"
+    },
+    "support": {
+      "scheduled": "Scheduled for {{date}}",
+      "arrived": "Checked in at {{time}}",
+      "arrivedNow": "Checked in with your code",
+      "working": "Started at {{time}}",
+      "workingNow": "The work is under way",
+      "finished": "{{name}} marked the job as done. Take a look at the work.",
+      "done": "Thanks for booking with Jack Fix It.",
+      "attention": "A problem was reported on this job.",
+      "cancelled": "Nothing more is needed from you."
+    },
+    "eta": {
+      "close": "Arriving around {{time}} · {{countdown}}",
+      "in": "in {{span}}",
+      "later": "Arriving around {{time}}",
+      "due": "Arriving any minute now",
+      "none": "On the way to you"
+    },
+    "code": {
+      "title": "Your arrival code",
+      "label": "Arrival code: {{digits}}",
+      "hint": "Give this code to {{name}} at the door."
+    },
+    "milestones": {
+      "label": "Job progress",
+      "onTheWay": "On the way",
+      "arrived": "Arrived",
+      "working": "Working",
+      "done": "Done",
+      "value": "Step {{current}} of {{total}}, {{step}}",
+      "none": "Not started yet"
+    },
+    "map": {
+      "estimate": "The map is an estimate from the arrival time, not a live location."
+    },
+    "paid": {
+      "title": "Paid",
+      "tax": "Includes {{tax}} in tax",
+      "label": "Paid {{total}}",
+      "labelWithTax": "Paid {{total}}, including {{tax}} in tax"
+    },
+    "timeline": {
+      "title": "What's happened",
+      "row": "{{event}}, {{time}}",
+      "created": "Booked and paid",
+      "onTheWay": "On the way",
+      "etaUpdated": "New arrival time",
+      "checkedIn": "Arrived",
+      "started": "Started working",
+      "completed": "Marked as done",
+      "confirmed": "Confirmed",
+      "disputed": "Problem reported",
+      "cancelled": "Cancelled"
+    },
+    "banner": {
+      "scheduled": "{{name}} is booked · {{date}}",
+      "onTheWay": "{{name}} is on the way",
+      "onTheWayIn": "{{name}} is on the way · {{span}}",
+      "onTheWayAt": "{{name}} is on the way · {{time}}",
+      "almostThere": "{{name}} is almost there",
+      "arrived": "{{name}} has arrived",
+      "working": "{{name}} is working",
+      "finished": "{{name}} finished the job",
+      "hint": "Opens your job"
+    },
+    "booked": {
+      "title": "Your job is booked",
+      "follow": "Follow your job",
+      "see": "See your job"
+    },
+    "booking": {
+      "title": "Your job isn't ready yet",
+      "body": "Once your payment goes through, your pro and their progress show up here. This page updates on its own."
+    },
+    "notFound": {
+      "title": "We couldn't find this job",
+      "body": "It may belong to another account, or the link is broken.",
+      "home": "Go to Home"
+    },
+    "error": {
+      "title": "We couldn't load your job",
+      "body": "Check your connection and try again.",
+      "retry": "Try again"
+    }
   }
 }

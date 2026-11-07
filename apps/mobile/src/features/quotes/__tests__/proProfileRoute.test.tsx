@@ -12,7 +12,7 @@ import RequestLayout, {
   unstable_settings as requestSettings,
 } from "../../../app/(app)/requests/[id]/_layout";
 import AuthLayout, { unstable_settings } from "../../../app/(auth)/_layout";
-import { METRICS, SIGNED_OUT } from "../../auth/__tests__/helpers";
+import { METRICS, SIGNED_OUT, WithQuery } from "../../auth/__tests__/helpers";
 import { SessionGate } from "../../auth/SessionGate";
 import { TabsLayout } from "../../tabs/TabsLayout";
 import { redirectSystemPath, useProfileFromLink } from "../links";
@@ -46,6 +46,8 @@ jest.mock("@/api", () => {
       ),
     logout: jest.fn(async () => undefined),
     restoreSession: jest.fn(async () => undefined),
+    // The tabs' job banner (#64) pins its reads to the session generation.
+    useSessionGeneration: () => 1,
   };
 });
 jest.mock("expo-splash-screen", () => ({
@@ -93,7 +95,11 @@ function CompareStub() {
 // The real gate, groups and request stack around stub screens: what the link resolves to.
 const routes = {
   _layout: () =>
-    createElement(SafeAreaProvider, { initialMetrics: METRICS }, createElement(SessionGate)),
+    createElement(
+      SafeAreaProvider,
+      { initialMetrics: METRICS },
+      createElement(WithQuery, null, createElement(SessionGate)),
+    ),
   "(auth)/_layout": { default: AuthLayout, unstable_settings },
   "(auth)/welcome": () => <Text>welcome stub</Text>,
   "(app)/_layout": { default: AppLayout, unstable_settings: appSettings },
