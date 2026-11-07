@@ -11,8 +11,10 @@ import { isRetryable, type MediaItem } from "./useMediaUpload";
 
 export type MediaItemRowProps = {
   item: MediaItem;
-  /** Its place in the list, from 0; names it "Photo 1", "Video 2". */
+  /** Its place in the list, from 0; names it "Photo 1", "Video 2" unless `name` is given. */
   index: number;
+  /** What the row calls its file where the list's own numbering would mislead ("After photo 3"). */
+  name?: string;
   onRetry: () => void;
   onRemove: () => void;
 };
@@ -44,9 +46,10 @@ function statusText(t: TFunction, item: MediaItem): string {
  * never moves the layout. Assistive technology hears the outcome once (uploaded, or what went
  * wrong), not every percent.
  */
-export function MediaItemRow({ item, index, onRetry, onRemove }: MediaItemRowProps) {
+export function MediaItemRow({ item, index, name: given, onRetry, onRemove }: MediaItemRowProps) {
   const { t } = useTranslation();
-  const name = t(item.kind === "video" ? "media.video" : "media.photo", { number: index + 1 });
+  const name =
+    given ?? t(item.kind === "video" ? "media.video" : "media.photo", { number: index + 1 });
   const working = item.status === "compressing" || item.status === "uploading";
   const failed = item.status === "failed";
   const status = statusText(t, item);

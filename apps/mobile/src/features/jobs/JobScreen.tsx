@@ -24,6 +24,7 @@ import { ArrivalCode } from "./ArrivalCode";
 import { useMinuteClock } from "./clock";
 import { jobsConfig } from "./config";
 import { JobMap } from "./JobMap";
+import { JobPhotos } from "./JobPhotos";
 import { PaidRow, ProRow } from "./JobDetails";
 import { JobTimeline } from "./JobTimeline";
 import {
@@ -113,7 +114,7 @@ export function JobScreen() {
         testID="job-scroll"
       >
         {data ? (
-          <JobContent job={data} requestId={id} updatedAt={dataUpdatedAt} />
+          <JobContent job={data} requestId={id} updatedAt={dataUpdatedAt} refetch={refetch} />
         ) : !valid ? (
           <JobState
             map="bare"
@@ -192,9 +193,11 @@ type JobContentProps = {
   requestId: string;
   /** When the job's last answer arrived: the words are never drawn against an older clock. */
   updatedAt: number;
+  /** Asks for the job again (the photos' expired URLs). */
+  refetch: () => Promise<unknown>;
 };
 
-function JobContent({ job, requestId, updatedAt }: JobContentProps) {
+function JobContent({ job, requestId, updatedAt, refetch }: JobContentProps) {
   const { t } = useTranslation();
   const now = useMinuteClock(updatedAt, job.eta_at === null ? null : Date.parse(job.eta_at));
   const phase = jobPhase(job);
@@ -269,6 +272,7 @@ function JobContent({ job, requestId, updatedAt }: JobContentProps) {
           onPress={accepted ? () => push(jobProfileHref(requestId, accepted)) : undefined}
         />
         <PaidRow job={job} />
+        <JobPhotos photos={job.photos} updatedAt={updatedAt} refetch={refetch} />
         <JobTimeline items={timelineOf(t, job, now)} />
       </Sheet>
     </View>

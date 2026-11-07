@@ -687,11 +687,10 @@
         "onTheWay": "When you get there, ask {{name}} for the 4-digit arrival code in their app.",
         "arrived": "You're checked in. Start the job when you begin the work.",
         "done": "You marked this job done.",
-        "closed": "This job was cancelled."
-      },
-      "next": {
-        "title": "Next: photos and Job's done",
-        "body": "Adding before and after photos and marking the job done are coming to the app soon."
+        "closed": "This job was cancelled.",
+        "working": "When the work is finished, tap Job's done.",
+        "workingNoPhoto": "When the work is finished, add at least one after photo, then tap Job's done.",
+        "waiting": "Job's done. Waiting for {{name}} to confirm."
       },
       "locked": {
         "title": "Check-in is locked",
@@ -706,7 +705,8 @@
       "onTheWay": "You're on your way, and {{name}} can see when you'll arrive.",
       "etaUpdated": "Arrival time updated.",
       "arrived": "Checked in. You can start the job.",
-      "working": "Job started."
+      "working": "Job started.",
+      "done": "Job's done. Waiting for {{name}} to confirm."
     },
     "failure": {
       "changed": "This job changed. Here's where it stands now.",
@@ -761,6 +761,52 @@
         "body": "This can take a moment indoors. Try again in a few seconds.",
         "retry": "Try again"
       }
+    },
+    "photos": {
+      "before": {
+        "title": "Before photos",
+        "body": "Optional. Show how things look before you start; {{name}} can see them in the app.",
+        "add": "Add before photos",
+        "tile": "Before photo {{number}} of {{total}}",
+        "item": "Before photo {{number}}",
+        "full": "This job already has {{max}} before photos.",
+        "savedAnnounce_one": "Before photo saved.",
+        "savedAnnounce_other": "{{count}} before photos saved."
+      },
+      "after": {
+        "title": "After photos",
+        "body": "Required. Show the finished work: Job's done needs at least one, and {{name}} can see them in the app.",
+        "add": "Add after photos",
+        "tile": "After photo {{number}} of {{total}}",
+        "item": "After photo {{number}}",
+        "full": "This job already has {{max}} after photos.",
+        "savedAnnounce_one": "After photo saved.",
+        "savedAnnounce_other": "{{count}} after photos saved."
+      },
+      "count": "{{count}} of {{max}} photos",
+      "full": "That's the most this job holds ({{max}}).",
+      "final": "Saved photos can't be removed.",
+      "save_one": "Save {{count}} photo",
+      "save_other": "Save {{count}} photos",
+      "saveHint": "Adds them to the job. Saved photos can't be removed.",
+      "addMore": "Add more",
+      "expired": {
+        "title_one": "This photo took too long",
+        "title_other": "{{count}} photos took too long"
+      },
+      "refused": {
+        "title_one": "This photo couldn't be saved",
+        "title_other": "{{count}} photos couldn't be saved"
+      },
+      "again_one": "Add it again.",
+      "again_other": "Add them again."
+    },
+    "done": {
+      "action": "Job's done",
+      "tryAgain": "Try again",
+      "processing": "Finishing your photos…",
+      "slow": "Your photos are taking longer than usual. Try again in a moment.",
+      "photosRequired": "Add at least one after photo first."
     }
   },
   "quoteForm": {
@@ -987,6 +1033,15 @@
       "title": "We couldn't load your job",
       "body": "Check your connection and try again.",
       "retry": "Try again"
+    },
+    "photos": {
+      "title": "Photos",
+      "before": "Before",
+      "after": "After",
+      "beforeTile": "Before photo {{number}} of {{total}}",
+      "afterTile": "After photo {{number}} of {{total}}",
+      "pending_one": "{{count}} more photo is being prepared.",
+      "pending_other": "{{count}} more photos are being prepared."
     }
   }
 }
