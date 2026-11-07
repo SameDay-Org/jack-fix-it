@@ -29,7 +29,7 @@ export function CheckInSheet() {
   // Read from the screen under the sheet, never fetched here.
   const { data: job } = useQuery({ ...proJobQueryOptions(id, generation), enabled: false });
   const name = (job && customerName(job)) ?? t("proJobs.customerFallback");
-  const { leave, leaving } = useSheetExit();
+  const { leave, leaving, sameSession } = useSheetExit(generation);
   const checkIn = useCheckIn(id, name, leave);
   const { phase } = checkIn;
 
@@ -38,8 +38,8 @@ export function CheckInSheet() {
   const open = job !== undefined && (jobStep(job) === "onTheWay" || phase === "locked");
   const working = phase === "locating" || phase === "sending";
   useEffect(() => {
-    if (!open && !working && !leaving.current) leave();
-  }, [leave, leaving, open, working]);
+    if (sameSession && !open && !working && !leaving.current) leave();
+  }, [leave, leaving, open, sameSession, working]);
   if (!job) return null;
 
   const close = leave;

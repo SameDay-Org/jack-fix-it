@@ -42,7 +42,7 @@ export function OnTheWaySheet() {
   const [custom, setCustom] = useState(presets[presets.length - 1]);
   const [offline, setOffline] = useState(false);
   const { busy, run, mounted } = useSingleFlight();
-  const { leave, leaving } = useSheetExit();
+  const { leave, leaving, sameSession } = useSheetExit(generation);
   // As the sheet opened: its words stay put while the answer redraws the job under it.
   const [updating] = useState(() => job !== undefined && jobStep(job) === "onTheWay");
   const [openedAt] = useState(Date.now);
@@ -52,8 +52,8 @@ export function OnTheWaySheet() {
   const step = job ? jobStep(job) : null;
   const usable = step === "scheduled" || step === "onTheWay";
   useEffect(() => {
-    if (!usable && !busy && !leaving.current) leave();
-  }, [busy, leave, leaving, usable]);
+    if (sameSession && !usable && !busy && !leaving.current) leave();
+  }, [busy, leave, leaving, sameSession, usable]);
   if (!job) return null;
 
   const name = customerName(job) ?? t("proJobs.customerFallback");

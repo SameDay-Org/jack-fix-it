@@ -680,7 +680,7 @@
       "noAddress": "The address is no longer shown for this job.",
       "theJob": "The job",
       "guide": {
-        "scheduled": "When you head out, tap On my way. {{name}} will see when you'll arrive.",
+        "scheduled": "When you head out, tap On my way so {{name}} sees when you'll arrive.",
         "onTheWay": "When you get there, ask {{name}} for the 4-digit arrival code in their app.",
         "arrived": "You're checked in. Start the job when you begin the work.",
         "done": "You marked this job done.",
@@ -700,7 +700,7 @@
       "start": "Start job"
     },
     "announce": {
-      "onTheWay": "You're on your way. {{name}} can see when you'll arrive.",
+      "onTheWay": "You're on your way, and {{name}} can see when you'll arrive.",
       "etaUpdated": "Arrival time updated.",
       "arrived": "Checked in. You can start the job.",
       "working": "Job started.",
@@ -715,7 +715,7 @@
     "eta": {
       "title": "When will you get there?",
       "titleUpdate": "Update your arrival time",
-      "body": "{{name}} will see the time you expect to arrive.",
+      "body": "We'll show {{name}} the time you expect to arrive.",
       "current": "You said you'd arrive by {{time}}.",
       "choices": "Arrival time",
       "other": "Other",

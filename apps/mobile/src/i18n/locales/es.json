@@ -680,7 +680,7 @@
       "noAddress": "La dirección ya no se muestra para este trabajo.",
       "theJob": "El trabajo",
       "guide": {
-        "scheduled": "Cuando salgas, toca Voy en camino. {{name}} verá a qué hora llegarás.",
+        "scheduled": "Cuando salgas, toca Voy en camino para que {{name}} vea a qué hora llegarás.",
         "onTheWay": "Cuando llegues, pídele a {{name}} el código de llegada de 4 dígitos que ve en su app.",
         "arrived": "Ya registraste tu llegada. Empieza el trabajo cuando comiences.",
         "done": "Marcaste este trabajo como terminado.",
@@ -700,7 +700,7 @@
       "start": "Empezar trabajo"
     },
     "announce": {
-      "onTheWay": "Vas en camino. {{name}} puede ver a qué hora llegarás.",
+      "onTheWay": "Vas en camino y {{name}} puede ver a qué hora llegarás.",
       "etaUpdated": "Hora de llegada actualizada.",
       "arrived": "Llegada registrada. Puedes empezar el trabajo.",
       "working": "Trabajo empezado.",
@@ -715,7 +715,7 @@
     "eta": {
       "title": "¿Cuándo llegarás?",
       "titleUpdate": "Cambia tu hora de llegada",
-      "body": "{{name}} verá la hora a la que esperas llegar.",
+      "body": "Le mostraremos a {{name}} la hora a la que esperas llegar.",
       "current": "Dijiste que llegarías a las {{time}}.",
       "choices": "Hora de llegada",
       "other": "Otra",
