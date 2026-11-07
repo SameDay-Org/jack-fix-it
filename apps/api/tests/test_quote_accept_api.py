@@ -599,7 +599,7 @@ async def test_accepting_a_quote_pushes_the_pro_once(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     request_id, [other, chosen], pros = await open_request(db_session, world, count=2)
-    [_, dispatch_id] = await dispatched(db_session, request_id, pros)
+    await dispatched(db_session, request_id, pros)
     await probe_amount(db_session, chosen)
     code = await public_code_of(db_session, request_id)
     timeouts = spy_enqueue_timeouts(monkeypatch)
@@ -619,13 +619,14 @@ async def test_accepting_a_quote_pushes_the_pro_once(
                 "push.quote_accepted.title",
                 "push.quote_accepted.body",
                 {"public_code": code},
-                f"/opportunities/{dispatch_id}",
+                # Home (#338): the pro's dispatch answers 404 once quoted, and the job only
+                # exists once the customer's payment succeeds (#61).
+                "/",
             ),
         )
     }
     assert queue.before == ["commit"]  # queued after the acceptance's commit, once
     assert timeouts == [ENQUEUE_TIMEOUT]  # the configured bound, not the default
-    assert events(caplog, "quote_accepted_push_skipped") == []
     # No personal data in the logs: no name, amount, scope or contact.
     output = "\n".join(JsonFormatter().format(record) for record in caplog.records)
     for secret in (pros[1].email, "María", "Pérez", str(AMOUNT_PROBE), "Replace the faucet", code):
@@ -767,30 +768,26 @@ async def test_accept_survives_a_failed_push_enqueue(
         assert secret not in output, secret
 
 
-async def test_a_quote_without_a_dispatch_is_accepted_and_its_push_skipped(
+async def test_a_quote_without_a_dispatch_still_pushes_its_pro_home(
     db_client: httpx.AsyncClient,
     db_session: AsyncSession,
     world: World,
     queue: RecordingQueue,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Quotes come from a dispatch, so this should not happen. No other screen of the pro's
-    shows the job, so there is no deep link to fall back to: logged with ids, no push."""
+    """Quotes come from a dispatch, so this should not happen; the push opens the pro's home
+    (#338), not the dispatch, so it no longer depends on one."""
     request_id, [quote_id], pros = await open_request(db_session, world, count=1)
 
-    with caplog.at_level(logging.DEBUG):
-        response = await accept(db_client, world, request_id, quote_id)
+    response = await accept(db_client, world, request_id, quote_id)
 
     assert response.status_code == 200
-    assert queue.before == []
-    [skipped] = events(caplog, "quote_accepted_push_skipped")
-    assert skipped.levelno == logging.WARNING
-    extra = {key: value for key, value in skipped.__dict__.items() if key not in _RECORD_FIELDS}
-    assert extra == {
-        "quote_id": str(quote_id),
-        "service_request_id": str(request_id),
-        "pro_id": str(pros[0].profile_id),
-    }
+    [(task, (user_id, message_id, *_, link))] = queue.jobs.values()
+    assert (task, user_id, message_id, link) == (
+        "send_push",
+        str(pros[0].user_id),
+        f"quote_accepted:{quote_id}",
+        "/",
+    )
 
 
 # The contract
