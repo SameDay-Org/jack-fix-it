@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from sqlalchemy import text, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
@@ -95,8 +95,12 @@ def aged(by: timedelta = AGED) -> datetime:
     return datetime.now(UTC) - by
 
 
-def cancel_key(payment_id: uuid.UUID) -> str:
-    return payment_intent_cancel_idempotency_key(payment_id)
+async def cancel_key(sessions: async_sessionmaker[AsyncSession], payment_id: uuid.UUID) -> str:
+    """The key the sweep sends for this payment as it stands now."""
+    async with sessions() as session:
+        version = await session.scalar(select(Payment.updated_at).where(Payment.id == payment_id))
+    assert version is not None
+    return payment_intent_cancel_idempotency_key(payment_id, version)
 
 
 def summary(caplog: pytest.LogCaptureFixture) -> dict[str, object]:
@@ -165,7 +169,9 @@ async def test_unpaid_payment_past_the_window_is_canceled_in_stripe(
 
     await sweep(market, stripe)
 
-    assert stripe.cancels == [(market.intent_id, f"payment_intent_cancel:{market.payment_id}")]
+    key = await cancel_key(market.sessions, market.payment_id)
+    assert key.startswith(f"payment_intent_cancel:{market.payment_id}:")
+    assert stripe.cancels == [(market.intent_id, key)]
     state = await market.state()
     assert (state.payment, state.request, state.quotes) == (
         unpaid,
@@ -434,7 +440,9 @@ async def test_stripe_unexpected_state_changes_nothing(
 
     await sweep(market, stripe)
 
-    assert stripe.cancels == [(market.intent_id, cancel_key(market.payment_id))]
+    assert stripe.cancels == [
+        (market.intent_id, await cancel_key(market.sessions, market.payment_id))
+    ]
     state = await market.state()
     assert (state.payment, state.request, state.quotes) == (
         PaymentStatus.REQUIRES_PAYMENT,
@@ -488,13 +496,36 @@ async def test_stripe_unavailable_is_retried_next_run(
     stripe.errors.clear()
     await sweep(market, stripe)
 
-    assert stripe.cancels == [(market.intent_id, cancel_key(market.payment_id))]
+    assert stripe.cancels == [
+        (market.intent_id, await cancel_key(market.sessions, market.payment_id))
+    ]
+    assert summary(caplog) == counts(canceled_remote=1)
+
+
+async def test_a_refused_cancel_is_sent_again_under_a_new_key_once_the_payment_changes(
+    market: Market, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Stripe keeps a refusal (the intent was processing) under its key for 24 h: once the charge
+    fails and the payment changes, the next run's cancel carries a key of its own."""
+    await set_payment(market, created_at=aged())
+    stripe = FakeStripePayments(cancel_refused=True)
+    await sweep(market, stripe)
+    refused = await cancel_key(market.sessions, market.payment_id)
+
+    await set_payment(market, status=PaymentStatus.FAILED)
+    stripe.cancel_refused = False
+    caplog.set_level(logging.INFO)
+    await sweep(market, stripe)
+
+    retried = await cancel_key(market.sessions, market.payment_id)
+    assert retried != refused
+    assert stripe.cancels == [(market.intent_id, refused), (market.intent_id, retried)]
     assert summary(caplog) == counts(canceled_remote=1)
 
 
 async def test_cron_is_idempotent(market: Market, caplog: pytest.LogCaptureFixture) -> None:
-    """Two runs before Stripe's event send one cancel key twice (Stripe replays it); after the
-    event the payment is canceled and never selected again."""
+    """Two runs before Stripe's event send the same cancel with the same key (Stripe replays
+    it); after the event the payment is canceled and never selected again."""
     await set_payment(market, created_at=aged())
     stripe = FakeStripePayments()
     caplog.set_level(logging.INFO)
@@ -502,7 +533,8 @@ async def test_cron_is_idempotent(market: Market, caplog: pytest.LogCaptureFixtu
     await sweep(market, stripe)
     await sweep(market, stripe)
 
-    assert stripe.cancels == [(market.intent_id, cancel_key(market.payment_id))] * 2
+    key = await cancel_key(market.sessions, market.payment_id)
+    assert stripe.cancels == [(market.intent_id, key)] * 2
     assert (await market.state()).payment is PaymentStatus.REQUIRES_PAYMENT
 
     assert await market.deliver(CANCELED) == "processed"
@@ -561,7 +593,7 @@ async def test_one_failing_payment_does_not_stop_the_batch(
 
     await sweep(market, stripe)
 
-    assert stripe.cancels == [(other_intent, cancel_key(other))]
+    assert stripe.cancels == [(other_intent, await cancel_key(committed.sessions, other))]
     [failure] = records(caplog, "payment_unpaid_cancel_failed")
     assert extra_of(failure) == {"payment_id": str(market.payment_id), "error": "RuntimeError"}
     assert "a literal" not in caplog.text
@@ -642,7 +674,7 @@ async def test_concurrent_payment_sheet_wins_and_the_intent_is_canceled_in_strip
 
     assert isinstance(sheet, PaymentSheetOut)
     [intent_id] = stripe.intents
-    assert stripe.cancels == [(intent_id, cancel_key(payment_id))]
+    assert stripe.cancels == [(intent_id, await cancel_key(committed.sessions, payment_id))]
     payment = await committed_payment(committed, payment_id)
     assert (payment.status, payment.stripe_payment_intent_id) == (
         PaymentStatus.REQUIRES_PAYMENT,

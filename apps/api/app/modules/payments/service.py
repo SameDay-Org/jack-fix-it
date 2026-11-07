@@ -139,9 +139,13 @@ def payment_intent_idempotency_key(payment_id: uuid.UUID) -> str:
     return f"payment_intent:{payment_id}"
 
 
-def payment_intent_cancel_idempotency_key(payment_id: uuid.UUID) -> str:
-    """The same key for every attempt to cancel this payment's PaymentIntent (#297)."""
-    return f"payment_intent_cancel:{payment_id}"
+def payment_intent_cancel_idempotency_key(payment_id: uuid.UUID, version: datetime) -> str:
+    """The key to cancel this payment's PaymentIntent (#297), versioned by the payment's
+    updated_at: retries of an unchanged payment share it, and Stripe replays its answer. Stripe
+    keeps a refusal (the intent was processing) or a 500 under a key for 24 h, so once the
+    payment changes (the charge failed) the next cancel gets a key of its own."""
+    micros = (version - datetime(1970, 1, 1, tzinfo=UTC)) // timedelta(microseconds=1)
+    return f"payment_intent_cancel:{payment_id}:{micros}"
 
 
 def transfer_group(request_id: uuid.UUID) -> str:

@@ -3,19 +3,20 @@
 A customer who accepts a quote and never pays leaves the request accepted and the quote held:
 Stripe never cancels an unconfirmed PaymentIntent on its own. So a run takes one `now` and reads
 the payments still unpaid (requires_payment or failed; never processing) created more than
-PAYMENT_UNPAID_CANCEL_AFTER_SECONDS before it, in batches of UNPAID_BATCH, by id, so each comes
-up once per run. Each payment is then checked in a transaction of its own
-(PaymentReconciler.close_unpaid: locks request -> quote -> payment, and the status, the age and
-the request read again under them), which also cancels a payment that never had a PaymentIntent
-and reopens its quote. A payment with a PaymentIntent is canceled in Stripe after that
-transaction ends, so no lock is held over the network call, with a deterministic idempotency
-key; the payment_intent.canceled event that follows reopens the quote (#61), one path for every
-canceled intent. Until it arrives the payment stays unpaid, and the next run sends the same
-cancel again (Stripe replays it). Stripe refusing the cancel because the intent is processing,
-succeeded or canceled already (the customer paid meanwhile) changes nothing; Stripe unavailable
-or refusing otherwise is logged by error class and code, and the next run tries again. A payment
-whose PaymentIntent create was attempted with no answer stored is left to #296, the payment
-call's search and staff: the cron never creates or searches.
+PAYMENT_UNPAID_CANCEL_AFTER_SECONDS before it, in batches of UNPAID_BATCH, by id, so each comes up
+once per run. Each payment is then checked in a transaction of its own
+(PaymentReconciler.close_unpaid: locks request -> quote -> payment, and the status, the age and the
+request read again under them), which also cancels a payment that never had a PaymentIntent and
+reopens its quote. A payment with a PaymentIntent is canceled in Stripe after that transaction
+ends, so no lock is held over the network call, with a deterministic idempotency key versioned by
+the payment's updated_at; the payment_intent.canceled event that follows reopens the quote (#61),
+one path for every canceled intent. Until it arrives the payment stays unpaid, and the next run
+sends the same cancel again (Stripe replays it); once the payment changes, a new key, so an answer
+Stripe kept (a refusal while processing, a 500) is not replayed past it. Stripe refusing the cancel
+because the intent is processing, succeeded or canceled already (the customer paid meanwhile)
+changes nothing; Stripe unavailable or refusing otherwise is logged by error class and code, and
+the next run tries again. A payment whose PaymentIntent create was attempted with no answer stored
+is left to #296, the payment call's search and staff: the cron never creates or searches.
 
 A payment that fails is rolled back and logged, and the run goes on with the next one; a batch
 that cannot be read ends the run. Nothing raises out of the cron. Logs carry ids, counts,
@@ -136,13 +137,14 @@ async def _cancel_in_stripe(
     stripe: StripePayments | None, payment_id: uuid.UUID, check: UnpaidCheck, counts: _Counts
 ) -> None:
     """Asks Stripe to cancel the payment's PaymentIntent; its canceled event reopens the quote."""
-    if stripe is None or check.intent_id is None:
+    if stripe is None or check.intent_id is None or check.version is None:
         counts.failed += 1
         logger.error("payment_unpaid_stripe_not_configured", extra=check.ids)
         return
     try:
         canceled = await stripe.cancel_payment_intent(
-            check.intent_id, idempotency_key=payment_intent_cancel_idempotency_key(payment_id)
+            check.intent_id,
+            idempotency_key=payment_intent_cancel_idempotency_key(payment_id, check.version),
         )
     except StripeCallError as error:
         counts.failed += 1

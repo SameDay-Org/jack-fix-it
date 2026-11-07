@@ -139,6 +139,8 @@ class UnpaidCheck:
     ids: dict[str, str] = field(default_factory=dict)
     # The PaymentIntent to cancel (cancel_in_stripe only). Never logged.
     intent_id: str | None = None
+    # The payment's updated_at under the lock (cancel_in_stripe only): versions the cancel key.
+    version: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -196,7 +198,10 @@ class PaymentReconciler:
             return UnpaidCheck(UnpaidOutcome.NOT_DUE, locked.ids)
         if payment.stripe_payment_intent_id is not None:
             return UnpaidCheck(
-                UnpaidOutcome.CANCEL_IN_STRIPE, locked.ids, payment.stripe_payment_intent_id
+                UnpaidOutcome.CANCEL_IN_STRIPE,
+                locked.ids,
+                payment.stripe_payment_intent_id,
+                payment.updated_at,
             )
         if payment.payment_intent_requested_at is not None:
             return UnpaidCheck(UnpaidOutcome.UNRESOLVED, locked.ids)

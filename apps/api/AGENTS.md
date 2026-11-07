@@ -94,7 +94,8 @@ them idempotent: they can run twice.
   `PAYMENT_UNPAID_SWEEP_MINUTES`, a run bounded by `PAYMENT_UNPAID_SWEEP_TIMEOUT_SECONDS`.
   Each payment is checked under the locks request -> quote -> payment
   (`PaymentReconciler.close_unpaid`). With a PaymentIntent: canceled in Stripe after the
-  commit (key `payment_intent_cancel:<payment id>`, reason `abandoned`), and the
+  commit (key `payment_intent_cancel:<payment id>:<updated_at micros>`, so a payment that
+  changed is not answered with a refusal Stripe kept; reason `abandoned`), and the
   `payment_intent.canceled` webhook reopens the quote; Stripe refusing because the intent is
   processing, succeeded or canceled changes nothing. Without one and with no create ever
   attempted: canceled locally, the quote reopened the same way. A lost create (attempted, no
