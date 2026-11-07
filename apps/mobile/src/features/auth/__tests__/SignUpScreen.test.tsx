@@ -162,7 +162,7 @@ let announceQueued: jest.SpyInstance;
 beforeEach(() => {
   mockGuard.on = false;
   sessionStore.setState(SIGNED_OUT);
-  phoneFlowStore.setState({ pendingNumber: null, offeredAfterSignUp: false });
+  phoneFlowStore.setState({ pendingNumber: null });
   jest.mocked(register).mockReset();
   jest.mocked(apiPatch).mockReset();
   jest.mocked(apiPost).mockReset();
@@ -192,7 +192,7 @@ describe("SignUpScreen: the account step", () => {
     await renderFlow();
     expect(screen.getByText("Let's start with your email")).toBeTruthy();
     expect(screen.getByText("As a pro")).toBeTruthy();
-    expect(screen.getByLabelText("Step 1 of 4")).toBeTruthy();
+    expect(screen.getByLabelText("Step 1 of 5")).toBeTruthy();
     expect(card()).toBe("pro|||"); // blank while the account is made
 
     await createAccount("  Maria@Example.com ");
@@ -202,10 +202,8 @@ describe("SignUpScreen: the account step", () => {
       { onboarding: true },
     );
     expect(await arrive("Tell us your name!")).toBeTruthy();
-    expect(screen.getByLabelText("Step 2 of 4")).toBeTruthy();
+    expect(screen.getByLabelText("Step 2 of 5")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
-    // The phone step waits for the end of the flow.
-    expect(phoneFlowStore.getState().offeredAfterSignUp).toBe(false);
   });
 
   it("checks email and password on the device before any request", async () => {
@@ -341,6 +339,10 @@ describe("SignUpScreen: the name step", () => {
     await reachName();
 
     expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+    // Out of sight too, not only out of reach (the steps' fade wraps it, never overrides it).
+    expect(screen.getByTestId("sign-up-back-row", { includeHiddenElements: true })).toHaveStyle({
+      opacity: 0,
+    });
     expect(mockGuard.on).toBe(true);
     await act(async () => mockGuard.onBlocked());
     expect(screen.getByText("Tell us your name!")).toBeTruthy();
@@ -372,14 +374,14 @@ describe("SignUpScreen: the home step", () => {
   it("a customer's address is saved as Home, then the card's city and state; the selfie is next", async () => {
     await reachHome("customer");
     jest.mocked(apiPost).mockResolvedValue({} as never);
-    expect(screen.getByLabelText("Step 3 of 4")).toBeTruthy();
+    expect(screen.getByLabelText("Step 3 of 5")).toBeTruthy();
 
     await typeAddress();
     expect(card()).toBe("customer|Ana Cruz|Miami|FL");
     await fireEvent.press(button("Continue"));
 
     expect(await arrive("Let's see that face!")).toBeTruthy();
-    expect(screen.getByLabelText("Step 4 of 4")).toBeTruthy();
+    expect(screen.getByLabelText("Step 4 of 5")).toBeTruthy();
     expect(apiPost).toHaveBeenCalledWith(
       "/v1/addresses",
       {
@@ -512,7 +514,7 @@ describe("SignUpScreen: resume", () => {
     await renderFlow();
 
     expect(screen.getByText("Where do you live?")).toBeTruthy();
-    expect(screen.getByLabelText("Step 3 of 4")).toBeTruthy();
+    expect(screen.getByLabelText("Step 3 of 5")).toBeTruthy();
     expect(card()).toBe("pro|Ana Cruz||");
     expect(screen.queryByLabelText("Street address")).toBeNull();
   });
@@ -524,22 +526,6 @@ describe("SignUpScreen: resume", () => {
 
     expect(screen.getByText("Tell us your name!")).toBeTruthy();
     expect(register).not.toHaveBeenCalled();
-  });
-
-  it("an account with every step answered ends the flow at once", async () => {
-    onFlow({
-      ...user,
-      first_name: "Ana",
-      last_name: "Cruz",
-      home_city: "Miami",
-      home_state: "FL",
-      photo: { url: "https://storage.example/photo.jpg", expires_at: "2026-11-06T12:00:00Z" },
-    });
-
-    await renderFlow();
-
-    await waitFor(() => expect(endOnboarding).toHaveBeenCalledTimes(1));
-    expect(phoneFlowStore.getState().offeredAfterSignUp).toBe(true);
   });
 
   it("a session that ends mid-flow goes back to Welcome, unguarded", async () => {

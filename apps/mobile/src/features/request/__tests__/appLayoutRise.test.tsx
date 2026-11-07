@@ -6,7 +6,11 @@ import { useSession } from "@/api";
 import AppLayout from "../../../app/(app)/_layout";
 import { requestFlowOptions } from "../rise";
 
-jest.mock("@/api", () => ({ useSession: jest.fn() }));
+jest.mock("@/api", () => ({
+  useSession: jest.fn(),
+  // The phone flow registers its sign-out cleanup on import.
+  onSignOut: jest.fn(() => () => undefined),
+}));
 jest.mock("expo-router", () => {
   const Stack = ({ children }: { children?: unknown }) => children ?? null;
   Stack.Screen = jest.fn(() => null);

@@ -215,7 +215,7 @@ beforeEach(() => {
   mockFocus.focused = true;
   mockFocus.listeners.clear();
   sessionStore.setState(SIGNED_OUT);
-  phoneFlowStore.setState({ pendingNumber: null, offeredAfterSignUp: false });
+  phoneFlowStore.setState({ pendingNumber: null });
   jest.mocked(useLocalSearchParams).mockReturnValue({});
   jest.mocked(apiPatch).mockReset();
   jest.mocked(uploadMedia).mockReset().mockResolvedValue({ key: "profile_photo/ana.jpg" });
@@ -253,7 +253,7 @@ describe("SignUpScreen: the selfie step, the camera", () => {
     getCameraPermissionsAsync.mockResolvedValue(CAMERA_PERMISSION.undetermined);
     onFlow();
     await renderStep();
-    expect(screen.getByLabelText("Step 4 of 4")).toBeTruthy();
+    expect(screen.getByLabelText("Step 4 of 5")).toBeTruthy();
     expect(card()).toBe("Ana Cruz|");
     expect(screen.queryByTestId("sign-up-photo-camera")).toBeNull();
     // The library is there too, for a person who would rather not turn the camera on.
@@ -423,13 +423,13 @@ describe("SignUpScreen: the selfie step, a refused camera", () => {
     patchesPhoto();
     await press("Use photo");
 
-    await waitFor(() => expect(endOnboarding).toHaveBeenCalledTimes(1));
+    expect(await arrive("What's your number?")).toBeTruthy();
     expect(prepareMedia).toHaveBeenCalledWith({ uri: PICKED, kind: "image" });
   });
 });
 
 describe("SignUpScreen: the selfie step, saving the photo", () => {
-  it("compresses and uploads it, with progress, then sets it on the account; the flow ends", async () => {
+  it("compresses and uploads it, with progress, then sets it on the account; the phone is next", async () => {
     onFlow();
     await renderStep();
     await takePhoto();
@@ -461,14 +461,14 @@ describe("SignUpScreen: the selfie step, saving the photo", () => {
 
     await act(async () => upload.resolve({ key: "profile_photo/ana.jpg" }));
 
-    await waitFor(() => expect(endOnboarding).toHaveBeenCalledTimes(1));
+    expect(await arrive("What's your number?")).toBeTruthy();
     expect(apiPatch).toHaveBeenCalledWith(
       "/v1/auth/me",
       { photo_key: "profile_photo/ana.jpg" },
       { auth: true, generation: sessionGeneration() },
     );
     expect(sessionStore.getState().user?.photo?.url).toBe(SAVED);
-    expect(phoneFlowStore.getState().offeredAfterSignUp).toBe(true);
+    expect(endOnboarding).not.toHaveBeenCalled();
   });
 
   it("another sign-in during the upload: no PATCH as the next account, no failure, the flow goes on (#292 Vault B1)", async () => {
@@ -511,7 +511,7 @@ describe("SignUpScreen: the selfie step, saving the photo", () => {
 
     await press("Try again");
 
-    await waitFor(() => expect(endOnboarding).toHaveBeenCalledTimes(1));
+    expect(await arrive("What's your number?")).toBeTruthy();
     expect(prepareMedia).toHaveBeenCalledTimes(1);
     expect(uploadMedia).toHaveBeenCalledTimes(2);
     expect(jest.mocked(uploadMedia).mock.calls[1]?.[0].file).toEqual(prepared(SHOT));
@@ -533,7 +533,7 @@ describe("SignUpScreen: the selfie step, saving the photo", () => {
     patchesPhoto();
     await press("Try again");
 
-    await waitFor(() => expect(endOnboarding).toHaveBeenCalledTimes(1));
+    expect(await arrive("What's your number?")).toBeTruthy();
     expect(uploadMedia).toHaveBeenCalledTimes(1);
     expect(apiPatch).toHaveBeenCalledTimes(2);
   });
@@ -574,7 +574,7 @@ describe("SignUpScreen: the selfie step, saving the photo", () => {
 
     await press("Use photo");
 
-    await waitFor(() => expect(endOnboarding).toHaveBeenCalledTimes(1));
+    expect(await arrive("What's your number?")).toBeTruthy();
     expect(uploadMedia).not.toHaveBeenCalled();
     expect(apiPatch).not.toHaveBeenCalled();
   });

@@ -18,8 +18,8 @@ const photographed = {
 };
 
 describe("sign-up steps", () => {
-  it("runs account, name, home, photo, in that order", () => {
-    expect(SIGN_UP_STEPS).toEqual(["account", "name", "home", "photo"]);
+  it("runs account, name, home, photo, phone, in that order", () => {
+    expect(SIGN_UP_STEPS).toEqual(["account", "name", "home", "photo", "phone"]);
   });
 
   it("resumes after the last step the account already answered", () => {
@@ -28,7 +28,12 @@ describe("sign-up steps", () => {
     expect(firstUnfinishedStep({ ...named, last_name: "  " })).toBe("name");
     expect(firstUnfinishedStep(named)).toBe("home");
     expect(firstUnfinishedStep(placed)).toBe("photo");
-    expect(firstUnfinishedStep(photographed)).toBeNull();
+    // An unverified phone is the step left; a number on the account that is not verified, too.
+    expect(firstUnfinishedStep(photographed)).toBe("phone");
+    expect(firstUnfinishedStep({ ...photographed, phone: "+14155550123" })).toBe("phone");
+    expect(
+      firstUnfinishedStep({ ...photographed, phone: "+14155550123", phone_verified: true }),
+    ).toBeNull();
   });
 });
 
@@ -52,8 +57,15 @@ describe("signUpEntry", () => {
     expect(signUpEntry(undefined, placed, user.id)).toEqual({ role: "customer", step: "photo" });
     expect(signUpEntry(undefined, photographed, user.id)).toEqual({
       role: "customer",
-      step: null,
+      step: "phone",
     });
+    expect(
+      signUpEntry(
+        undefined,
+        { ...photographed, phone: "+14155550123", phone_verified: true },
+        user.id,
+      ),
+    ).toEqual({ role: "customer", step: null });
   });
 
   it("an account that is not on a flow never gets one", () => {

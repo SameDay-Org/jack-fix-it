@@ -1,32 +1,32 @@
-import { router, useLocalSearchParams } from "expo-router";
+import { router } from "expo-router";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { KeyboardAvoidingView, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useSession } from "@/api";
 import { Button, Input, Screen } from "@/components/ui";
 import { BackButton } from "@/features/auth/components/BackButton";
 
 import { CODE_LENGTH, phoneConfig } from "./config";
-import { forgetPendingNumber, leavePhoneFlow, withdrawPhoneStepOffer } from "./phoneFlow";
+import { forgetPendingNumber } from "./phoneFlow";
 import { usePhoneEntry } from "./usePhoneEntry";
 
 /**
- * The phone step: a US number behind the fixed calling code, then "Send code". Reached from home
- * it has a Back button; right after a sign-up (`from: "sign-up"`) it offers "Skip for now"
- * instead, since verification is not required yet.
+ * The phone step for an account that has none verified (from Account): a US number behind the
+ * fixed calling code, then "Send code". A sign-up verifies its phone inside its own flow (#295).
  */
 export function PhoneEntryScreen() {
+  // The number typed belongs to the account it was typed for: another account signing in while
+  // the step is open starts it empty (#295 Vault B2).
+  const userId = useSession().user?.id;
+  return <PhoneEntry key={userId} />;
+}
+
+function PhoneEntry() {
   const { t } = useTranslation();
   const { top } = useSafeAreaInsets();
-  const { from } = useLocalSearchParams<{ from?: string }>();
-  const afterSignUp = from === "sign-up";
   const entry = usePhoneEntry(() => router.push("/verify-phone/code"));
-
-  // Shown once: a later sign-in lands on home again.
-  useEffect(() => {
-    if (afterSignUp) withdrawPhoneStepOffer();
-  }, [afterSignUp]);
 
   // Leaving the flow from here (Back, sign-out) forgets any number a code was sent to, even if the
   // code step never opened. The code step forgets it too when it goes.
@@ -48,7 +48,7 @@ export function PhoneEntryScreen() {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
         >
-          {afterSignUp ? <View className="h-12" /> : <BackButton />}
+          <BackButton />
           <View className="gap-2">
             <Text accessibilityRole="header" className="text-title-1 text-navy-900">
               {t("phone.title")}
@@ -76,24 +76,13 @@ export function PhoneEntryScreen() {
             testID="phone-number"
           />
           <View className="flex-1" />
-          <View className="gap-3">
-            <Button
-              label={t("phone.send")}
-              size="lg"
-              loading={entry.sending}
-              onPress={() => void entry.submit()}
-              testID="phone-send"
-            />
-            {afterSignUp ? (
-              <Button
-                label={t("phone.skip")}
-                variant="ghost"
-                disabled={entry.sending}
-                onPress={leavePhoneFlow}
-                testID="phone-skip"
-              />
-            ) : null}
-          </View>
+          <Button
+            label={t("phone.send")}
+            size="lg"
+            loading={entry.sending}
+            onPress={() => void entry.submit()}
+            testID="phone-send"
+          />
         </ScrollView>
       </KeyboardAvoidingView>
     </Screen>

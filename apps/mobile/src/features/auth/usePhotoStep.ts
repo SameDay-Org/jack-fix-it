@@ -124,7 +124,10 @@ export function usePhotoStep(onSaved: () => void): PhotoStep {
     };
   }, []);
 
-  const savedUri = savedSetAside ? undefined : user?.photo?.url;
+  // Every user the API returns carries a fresh signed URL for the same photo (the phone step's
+  // answer too): the first one is kept, or the card would reload the photo it already shows.
+  const [firstSavedUri] = useState(user?.photo?.url);
+  const savedUri = savedSetAside || !user?.photo ? undefined : (firstSavedUri ?? user.photo.url);
   const photoUri = shot ?? savedUri;
   const mode: PhotoMode = photoUri
     ? "review"
