@@ -8,7 +8,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSession } from "@/api";
 import { Screen } from "@/components/ui";
 import { CONTENT_FROM, usePanelTransition } from "@/features/auth";
-import { useOpenPhoneStepAfterSignUp } from "@/features/phone/useOpenPhoneStepAfterSignUp";
 import { forgetUnopenedRequest, startRequest } from "@/features/request";
 import { tokens } from "@/theme";
 
@@ -24,8 +23,7 @@ const NO_PREFETCH: Href[] = [];
  * categories below, the one way into a request (every request starts from a category, #232).
  * Account is a tab now, so the hero carries no account control.
  *
- * Right after a sign-up it opens the phone step over itself, once, and shows only its bare page
- * until then (`useOpenPhoneStepAfterSignUp`). Pressing the Home tab again scrolls it to the top.
+ * Pressing the Home tab again scrolls it to the top.
  *
  * A category card opens the request with the panel rise Welcome uses (`usePanelTransition`): the
  * categories panel slides up to the top of the screen, its corners square off and its cards fade
@@ -35,7 +33,6 @@ const NO_PREFETCH: Href[] = [];
 export function CustomerHomeScreen() {
   const { t } = useTranslation();
   const { user } = useSession();
-  const phoneStepOffered = useOpenPhoneStepAfterSignUp();
   // Tabs stay mounted while another one shows: only the focused tab owns the status bar.
   const focused = useIsFocused();
   const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
@@ -80,13 +77,6 @@ export function CustomerHomeScreen() {
   }));
 
   if (!user) return null;
-  if (phoneStepOffered) {
-    return (
-      <Screen bar="light" ownsStatusBar={focused} testID="customer-home">
-        {null}
-      </Screen>
-    );
-  }
 
   // No bottom edge: the categories panel pads the tab bar itself. Rising (or covering the screen,
   // or lowering), Home takes no taps and is out of the accessibility tree, and its scroll view

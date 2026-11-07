@@ -12,10 +12,14 @@ import {
 
 const named = { ...user, first_name: "Ana", last_name: "Cruz" };
 const placed = { ...named, home_city: "Miami", home_state: "FL" };
+const photographed = {
+  ...placed,
+  photo: { url: "https://storage.example/photo.jpg", expires_at: "2026-11-06T12:00:00Z" },
+};
 
 describe("sign-up steps", () => {
-  it("runs account, name, home, in that order", () => {
-    expect(SIGN_UP_STEPS).toEqual(["account", "name", "home"]);
+  it("runs account, name, home, photo, phone, in that order", () => {
+    expect(SIGN_UP_STEPS).toEqual(["account", "name", "home", "photo", "phone"]);
   });
 
   it("resumes after the last step the account already answered", () => {
@@ -23,7 +27,13 @@ describe("sign-up steps", () => {
     expect(firstUnfinishedStep({ ...user, first_name: "Ana" })).toBe("name");
     expect(firstUnfinishedStep({ ...named, last_name: "  " })).toBe("name");
     expect(firstUnfinishedStep(named)).toBe("home");
-    expect(firstUnfinishedStep(placed)).toBeNull();
+    expect(firstUnfinishedStep(placed)).toBe("photo");
+    // An unverified phone is the step left; a number on the account that is not verified, too.
+    expect(firstUnfinishedStep(photographed)).toBe("phone");
+    expect(firstUnfinishedStep({ ...photographed, phone: "+14155550123" })).toBe("phone");
+    expect(
+      firstUnfinishedStep({ ...photographed, phone: "+14155550123", phone_verified: true }),
+    ).toBeNull();
   });
 });
 
@@ -44,7 +54,18 @@ describe("signUpEntry", () => {
       step: "home",
     });
     expect(signUpEntry("pro", user, user.id)).toEqual({ role: "customer", step: "name" });
-    expect(signUpEntry(undefined, placed, user.id)).toEqual({ role: "customer", step: null });
+    expect(signUpEntry(undefined, placed, user.id)).toEqual({ role: "customer", step: "photo" });
+    expect(signUpEntry(undefined, photographed, user.id)).toEqual({
+      role: "customer",
+      step: "phone",
+    });
+    expect(
+      signUpEntry(
+        undefined,
+        { ...photographed, phone: "+14155550123", phone_verified: true },
+        user.id,
+      ),
+    ).toEqual({ role: "customer", step: null });
   });
 
   it("an account that is not on a flow never gets one", () => {

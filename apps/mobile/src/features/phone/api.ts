@@ -7,13 +7,18 @@ import { apiPost } from "@/api";
  * with the screen.
  */
 
+/*
+ * `generation` pins a call to the session a longer operation started in (`RequestOptions`): a code
+ * sent for one account is never resent or checked with another account's token.
+ */
+
 /** Texts a verification code to an E.164 number. The server answers 202 whether or not it sends. */
-export const sendCode = (phone: string, signal: AbortSignal) =>
-  apiPost("/v1/auth/phone/send", { phone }, { auth: true, signal });
+export const sendCode = (phone: string, signal: AbortSignal, generation?: number) =>
+  apiPost("/v1/auth/phone/send", { phone }, { auth: true, signal, generation });
 
 /**
  * Checks the code and resolves with the verified user. The caller hands that user to the session
  * (`setSessionUser`) only while its screen is still there, so a late answer writes nothing.
  */
-export const verifyCode = (phone: string, code: string, signal: AbortSignal) =>
-  apiPost("/v1/auth/phone/verify", { phone, code }, { auth: true, signal });
+export const verifyCode = (phone: string, code: string, signal: AbortSignal, generation?: number) =>
+  apiPost("/v1/auth/phone/verify", { phone, code }, { auth: true, signal, generation });
