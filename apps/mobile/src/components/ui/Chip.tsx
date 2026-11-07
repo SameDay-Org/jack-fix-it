@@ -16,6 +16,11 @@ export type ChipProps = {
    * selected. Left out, the chip is a plain button.
    */
   selected?: boolean;
+  /**
+   * With `selected`: `checkbox` for one of a multi-select set (the default), `radio` for one of a
+   * set where a single choice holds (an arrival time). Group radios in a `radiogroup`.
+   */
+  selectionRole?: "checkbox" | "radio";
   /** Read after the label by screen readers: what the choice covers. */
   hint?: string;
   /** Ignores presses and dims the chip. */
@@ -34,6 +39,7 @@ export function Chip({
   label,
   onPress,
   selected,
+  selectionRole = "checkbox",
   hint,
   disabled = false,
   className,
@@ -44,7 +50,7 @@ export function Chip({
 
   return (
     <Pressable
-      accessibilityRole={toggle ? "checkbox" : "button"}
+      accessibilityRole={toggle ? selectionRole : "button"}
       accessibilityLabel={label}
       accessibilityHint={hint}
       accessibilityState={toggle ? { disabled, checked: selected } : { disabled }}
