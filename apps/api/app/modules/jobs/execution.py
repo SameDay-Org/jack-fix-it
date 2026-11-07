@@ -50,7 +50,9 @@ Job photos and Job's done (part 2, #298), also on the job's row lock:
   ready, the copy that proves to the customer a real image was taken. With none ready: 409
   after_photos_processing while one is still being made (the app waits and tries again; each
   try queues the pending ones' copies again, so a lost enqueue or a run that ended unsettled
-  recovers, and a run still going for them makes it a no-op: photos.py), else
+  recovers, and a run still going for them makes it a no-op: photos.py; the answer and the
+  batch come from one read, so a copy settled just after it still answers this 409 and the
+  next try decides), else
   409 after_photos_required (none, or all failed: the pro adds another). Nothing changes on a
   409. The state machine sets completed_at, which opens the customer's confirmation window
   (#66, #67). Again once completed: 200, unchanged, no second event.
@@ -384,13 +386,16 @@ class JobExecutionService:
             await self._session.commit()  # nothing changed: ends the transaction and its lock
             return await self.pro_job(user, job.id)
         if job.status is JobStatus.IN_PROGRESS:
-            # Under the job's lock: a photo added meanwhile waits; a copy the worker finishes
-            # meanwhile is seen by the pro's next try.
-            after = await self._photos.count_by_status(job.id, JobPhotoKind.AFTER)
-            if after[MediaSafeStatus.READY] == 0:
-                if after[MediaSafeStatus.PENDING] == 0:
+            # Under the job's lock a photo added meanwhile waits, but the worker settles copies
+            # without it: the decision and the batch come from one read, so a copy settled
+            # after it answers 409 processing and the pro's next try sees it (#298 R2-B1).
+            after = await self._photos.statuses(job.id, JobPhotoKind.AFTER)
+            if all(status is not MediaSafeStatus.READY for _, status in after):
+                pending = [
+                    photo_id for photo_id, status in after if status is MediaSafeStatus.PENDING
+                ]
+                if not pending:
                     raise AfterPhotosRequiredError
-                pending = await self._photos.pending_ids(job.id, JobPhotoKind.AFTER)
                 await self._session.commit()  # nothing changed: ends the transaction and its lock
                 await self._queue_copies(job, pending, queue)
                 raise AfterPhotosProcessingError

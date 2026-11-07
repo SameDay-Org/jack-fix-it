@@ -73,7 +73,9 @@ async def enqueue_photo_sanitize(
 ) -> bool:
     """Queues sanitize_job_photos for one batch of the job's photos (after the commit), named
     after its first photo: a run already going for an earlier batch never hides a new one, and
-    copies only its own photos."""
+    copies only its own photos. An empty batch queues nothing (False)."""
+    if not photo_ids:
+        return False
     return await enqueue(
         queue,
         SANITIZE_PHOTOS_TASK,
