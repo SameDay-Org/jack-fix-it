@@ -14,6 +14,7 @@ import {
   type PaymentSummary,
 } from "./paymentStore";
 import { useJobConfirmation } from "./useJobConfirmation";
+import type { CustomerJob } from "./useRequestJob";
 import { usePayQuote, type PayFailure } from "./usePayQuote";
 
 export type PaymentPanelProps = {
@@ -34,6 +35,21 @@ const VISUAL_ONLY = {
 
 /** The kit's large pill (min-h-14): the placeholder Pay leaves while the job is first looked up. */
 const PAY_PLACEHOLDER_HEIGHT = 56;
+/** About the note bubble's height (one callout line and its padding) while the job is looked up. */
+const NOTE_PLACEHOLDER_HEIGHT = 48;
+
+/** What the customer sees for a job past Scheduled (docs/glossary.md, the job mapping). */
+const JOB_STATUS_KEYS = {
+  scheduled: "customerStatus.scheduled",
+  on_the_way: "customerStatus.professionalOnTheWay",
+  in_progress: "customerStatus.inProgress",
+  completed: "customerStatus.waitingForConfirmation",
+  confirmed: "customerStatus.completed",
+  paid_out: "customerStatus.completed",
+  disputed: "customerStatus.needsAttention",
+  refunded: "customerStatus.cancelled",
+  cancelled: "customerStatus.cancelled",
+} as const satisfies Record<CustomerJob["status"], string>;
 
 // Nothing for the customer to fix, so no alarm: the info tint. A failed payment is the danger one.
 const CALM_FAILURES: ReadonlySet<PayFailure> = new Set([
@@ -74,11 +90,14 @@ export function PaymentPanel({ requestId, quoteId, amountCents, pro, testID }: P
         testID={`${testID}-booked`}
       >
         <Text accessibilityRole="header" className="text-headline text-navy-900">
-          {t("payment.booked.title")}
+          {job.status === "scheduled" ? t("payment.booked.title") : t(JOB_STATUS_KEYS[job.status])}
         </Text>
-        <Text className="text-callout text-navy-900">
-          {t("payment.booked.body", { pro, date: formatDateTime(job.scheduled_start_at) })}
-        </Text>
+        {/* The date is the plan only while the job is Scheduled; its own screens come with #64. */}
+        {job.status === "scheduled" ? (
+          <Text className="text-callout text-navy-900">
+            {t("payment.booked.body", { pro, date: formatDateTime(job.scheduled_start_at) })}
+          </Text>
+        ) : null}
       </View>
     );
   }
@@ -109,6 +128,21 @@ export function PaymentPanel({ requestId, quoteId, amountCents, pro, testID }: P
     );
   }
 
+  // The first look at the job claims nothing: a paid quote must not read "Payment comes next".
+  if (phase === "loading") {
+    return (
+      <View className="gap-3" testID={`${testID}-loading`}>
+        <Skeleton width="100%" height={NOTE_PLACEHOLDER_HEIGHT} radius="md" />
+        <Skeleton
+          width="100%"
+          height={PAY_PLACEHOLDER_HEIGHT}
+          radius="pill"
+          testID={`${testID}-pay-placeholder`}
+        />
+      </View>
+    );
+  }
+
   const price = formatMoney(summary?.customer_total_cents ?? amountCents);
   return (
     <View className="gap-3">
@@ -126,23 +160,14 @@ export function PaymentPanel({ requestId, quoteId, amountCents, pro, testID }: P
           testID={`${testID}-failure`}
         />
       ) : null}
-      {phase === "loading" ? (
-        <Skeleton
-          width="100%"
-          height={PAY_PLACEHOLDER_HEIGHT}
-          radius="pill"
-          testID={`${testID}-pay-placeholder`}
-        />
-      ) : (
-        <Button
-          label={t("payment.pay", { price })}
-          accessibilityLabel={t("payment.payLabel", { price, pro })}
-          size="lg"
-          loading={busy}
-          onPress={() => void pay()}
-          testID={`${testID}-pay`}
-        />
-      )}
+      <Button
+        label={t("payment.pay", { price })}
+        accessibilityLabel={t("payment.payLabel", { price, pro })}
+        size="lg"
+        loading={busy}
+        onPress={() => void pay()}
+        testID={`${testID}-pay`}
+      />
     </View>
   );
 }

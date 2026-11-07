@@ -196,6 +196,10 @@ describe("paying an accepted quote", () => {
     const view = await renderWithQuery(<App />);
     // While the job is first looked up, a pill-shaped placeholder holds Pay's place.
     await screen.findByTestId(`${payTestId(ACCEPTED)}-pay-placeholder`);
+    // A paid quote could be behind it: nothing says payment comes next yet.
+    expect(
+      screen.queryByText("Quote accepted. Payment comes next.", { includeHiddenElements: true }),
+    ).toBeNull();
     expect(screen.queryByRole("button", { name: PAY_NAME })).toBeNull();
     await act(async () => job.reject(notFound()));
     await screen.findByRole("button", { name: PAY_NAME });
@@ -371,9 +375,9 @@ describe("paying an accepted quote", () => {
     expect(presentPaymentSheet).not.toHaveBeenCalled();
     expect(toastStore.getState().current).toBeNull();
     expect(payButton()).toBeTruthy();
-    const after = callsTo(apiGet, "/v1/requests/{request_id}/quotes").length;
-    if (refetches) await waitFor(() => expect(after).toBeGreaterThan(quoteFetches));
-    else expect(after).toBe(quoteFetches);
+    const quoteCalls = () => callsTo(apiGet, "/v1/requests/{request_id}/quotes").length;
+    if (refetches) await waitFor(() => expect(quoteCalls()).toBeGreaterThan(quoteFetches));
+    else expect(quoteCalls()).toBe(quoteFetches);
   });
 
   it.each([
@@ -416,6 +420,15 @@ describe("paying an accepted quote", () => {
       "You're booked. Your payment is confirmed.",
     );
     expect(Haptics.notificationAsync).not.toHaveBeenCalled();
+  });
+
+  it("a job past Scheduled shows its status from the glossary, with no planned date", async () => {
+    api.job = () => Promise.resolve({ ...JOB, status: "on_the_way" });
+    await renderWithQuery(<App />);
+    const booked = await screen.findByTestId(`${payTestId(ACCEPTED)}-booked`);
+    expect(within(booked).getByText("Professional On The Way")).toBeTruthy();
+    expect(within(booked).queryByText(/is set for/)).toBeNull();
+    expect(screen.queryByRole("button", { name: PAY_NAME })).toBeNull();
   });
 
   it("a job lookup that fails still offers Pay (paying again is safe)", async () => {
@@ -557,10 +570,14 @@ describe("the confirmation", () => {
 
   it("stops asking after a sign-out", async () => {
     const { client } = await paidAndConfirming();
+    const before = callsTo(apiGet, JOB_PATH).length;
     await signOut(session, client);
-    const asked = callsTo(apiGet, JOB_PATH).length;
     await act(async () => jest.advanceTimersByTime(10_000));
-    expect(callsTo(apiGet, JOB_PATH)).toHaveLength(asked);
+    // The cleared cache may reload the card's job once for the new session (its screens replace
+    // this one in the app); the old session's polling never sends again.
+    const after = callsTo(apiGet, JOB_PATH).slice(before);
+    expect(after.length).toBeLessThanOrEqual(1);
+    expect(after.filter(([, options]) => options?.generation === 1)).toEqual([]);
     session.generation = 1;
   });
 
@@ -570,7 +587,9 @@ describe("the confirmation", () => {
 
     const delayed = await screen.findByTestId(`${payTestId(ACCEPTED)}-delayed`);
     expect(within(delayed).getByText("We're confirming your payment")).toBeTruthy();
-    expect(within(delayed).getByText("We'll let you know as soon as it's done.")).toBeTruthy();
+    expect(
+      within(delayed).getByText("This can take a little longer. Check back here soon."),
+    ).toBeTruthy();
     expect(screen.queryByRole("button", { name: PAY_NAME })).toBeNull();
     const asked = callsTo(apiGet, JOB_PATH).length;
     await act(async () => jest.advanceTimersByTime(10_000));
@@ -581,6 +600,22 @@ describe("the confirmation", () => {
     await act(async () => navigation.setFocused(false));
     await act(async () => navigation.setFocused(true));
     await screen.findByTestId(`${payTestId(ACCEPTED)}-booked`);
+  });
+
+  it("a card that remounts after the wait ran out shows the calm message from its first frame", async () => {
+    const view = await paidAndConfirming();
+    await act(async () => jest.advanceTimersByTime(60_000));
+    await screen.findByTestId(`${payTestId(ACCEPTED)}-delayed`);
+    await view.unmount();
+    jest.mocked(AccessibilityInfo.announceForAccessibilityWithOptions).mockClear();
+
+    await renderWithQuery(<App />);
+    await screen.findByTestId(`${payTestId(ACCEPTED)}-delayed`);
+    expect(screen.queryByText(CONFIRMING)).toBeNull();
+    const shown = jest
+      .mocked(AccessibilityInfo.announceForAccessibilityWithOptions)
+      .mock.calls.map(([message]) => message);
+    expect(shown.filter((message) => message.startsWith(CONFIRMING)).length).toBe(0);
   });
 
   it("a card that remounts while confirming keeps confirming", async () => {

@@ -20,7 +20,10 @@ export type PaymentPhase = "loading" | "unpaid" | "confirming" | "delayed" | "bo
 
 /** True once `deadline` (ms since the epoch) has passed; false while it is null. */
 function useDeadlinePassed(deadline: number | null): boolean {
-  const [passed, setPassed] = useState<number | null>(null);
+  // Already past when the card mounts (back after the wait ran out): delayed from the first frame.
+  const [passed, setPassed] = useState<number | null>(() =>
+    deadline !== null && deadline <= Date.now() ? deadline : null,
+  );
 
   useEffect(() => {
     if (deadline === null) return;

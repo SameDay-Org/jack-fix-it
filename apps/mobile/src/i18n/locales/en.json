@@ -481,7 +481,7 @@
     },
     "delayed": {
       "title": "We're confirming your payment",
-      "body": "We'll let you know as soon as it's done."
+      "body": "This can take a little longer. Check back here soon."
     },
     "booked": {
       "title": "You're booked",
