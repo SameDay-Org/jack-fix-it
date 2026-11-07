@@ -14,6 +14,7 @@ from app.modules.quotes.models import QuoteStatus
 from app.modules.quotes.service import QuoteSettlement
 from app.modules.requests.models import RequestStatus
 from app.modules.webhooks import handlers
+from app.modules.webhooks.events import AfterCommit
 from app.modules.webhooks.handlers import StripeEvent
 from app.modules.webhooks.models import WebhookEventStatus
 from tests.conftest import LOCK_WAIT_DEADLINE_SECONDS, backend_pid
@@ -104,7 +105,7 @@ async def test_handlers_never_commit(market: Market, event_type: str) -> None:
     before = await market.state()
 
     async with market.sessions() as session:
-        await handler(session, event)
+        await handler(session, event, AfterCommit())
         assert session.in_transaction()
         # Seen from another connection: nothing yet.
         assert await market.state() == before

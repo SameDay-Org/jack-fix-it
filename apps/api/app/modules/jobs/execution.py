@@ -59,6 +59,12 @@ Job photos and Job's done (part 2, #298), also on the job's row lock:
 - Both views list the photos by kind, oldest first, signed for DOWNLOAD_URL_TTL_SECONDS: the
   customer only their safe copies (photos.py says why).
 
+Pushes (#65): once On my way, the check-in or the start commits, the customer hears about it,
+once per job (notifications.events: the job's id and the step name the event); Job's done too,
+once its move to completed commits. An ETA update, a repeated check-in or Job's done, and a
+refused action push nothing. A push that cannot be queued is logged with ids and never fails
+the action. No push carries the arrival code or the ETA.
+
 The arrival code is never logged, never in an error, never in a pro response. Logs carry ids:
 never an upload key.
 """
@@ -110,6 +116,12 @@ from app.modules.jobs.schemas import (
 from app.modules.jobs.service import JobStateMachine
 from app.modules.jobs.transitions import CUSTOMER_STATUS
 from app.modules.media.safe_status import MediaSafeStatus
+from app.modules.notifications.events import (
+    push_job_checked_in,
+    push_job_done,
+    push_job_on_the_way,
+    push_job_started,
+)
 from app.modules.pros.service import ProService
 from app.modules.quotes.schemas import QuotePro
 from app.modules.quotes.service import QuoteReader
@@ -254,13 +266,16 @@ class JobExecutionService:
 
     # Actions
 
-    async def on_the_way(self, user: UserAccount, job_id: uuid.UUID, eta_minutes: int) -> ProJob:
+    async def on_the_way(
+        self, user: UserAccount, job_id: uuid.UUID, eta_minutes: int, queue: JobQueue
+    ) -> ProJob:
         job = await self._own_locked(user, job_id)
         eta_at = datetime.now(UTC) + timedelta(minutes=eta_minutes)
         if job.status is JobStatus.ON_THE_WAY:
             job.eta_at = eta_at
             await self._jobs.add_event(JobEvent(job_id=job.id, type=ETA_UPDATED, actor_id=user.id))
             event = "job_eta_updated"
+            public_code = None  # an ETA update pushes nothing (#65)
         else:
             # 409 for anything but scheduled; the event is the state machine's.
             await self._machine.transition(job.id, JobStatus.ON_THE_WAY, user)
@@ -270,12 +285,28 @@ class JobExecutionService:
             job.arrival_code_locked_at = None
             await self._session.flush()
             event = "job_on_the_way"
+            public_code = await self._customer_requests.public_code(job.request_id)
         await self._session.commit()
         logger.info(event, extra={"job_id": str(job.id), "pro_id": str(job.pro_id)})
+        if public_code is not None:
+            await push_job_on_the_way(
+                queue,
+                customer_id=job.customer_id,
+                job_id=job.id,
+                request_id=job.request_id,
+                public_code=public_code,
+                timeout_seconds=self._config.enqueue_timeout_seconds,
+            )
         return await self.pro_job(user, job.id)
 
     async def check_in(
-        self, user: UserAccount, job_id: uuid.UUID, arrival_code: str, lat: float, lng: float
+        self,
+        user: UserAccount,
+        job_id: uuid.UUID,
+        arrival_code: str,
+        lat: float,
+        lng: float,
+        queue: JobQueue,
     ) -> ProJob:
         job = await self._own_locked(user, job_id)
         ids = {"job_id": str(job.id), "pro_id": str(job.pro_id)}
@@ -298,8 +329,17 @@ class JobExecutionService:
                     lng=_coordinate(lng),
                 )
             )
+            public_code = await self._customer_requests.public_code(job.request_id)
             await self._session.commit()
             logger.info("job_checked_in", extra=ids)
+            await push_job_checked_in(
+                queue,
+                customer_id=job.customer_id,
+                job_id=job.id,
+                request_id=job.request_id,
+                public_code=public_code,
+                timeout_seconds=self._config.enqueue_timeout_seconds,
+            )
             return await self.pro_job(user, job.id)
         # A wrong code: counted under the row lock, so concurrent tries cannot pass the limit.
         job.arrival_code_attempts += 1
@@ -315,14 +355,23 @@ class JobExecutionService:
         logger.info("arrival_code_rejected", extra={**ids, "attempts_remaining": remaining})
         raise ArrivalCodeInvalidError(remaining)
 
-    async def start(self, user: UserAccount, job_id: uuid.UUID) -> ProJob:
+    async def start(self, user: UserAccount, job_id: uuid.UUID, queue: JobQueue) -> ProJob:
         job = await self._own_locked(user, job_id)
         if job.status in (JobStatus.SCHEDULED, JobStatus.ON_THE_WAY) and job.checked_in_at is None:
             raise CheckInRequiredError
         # 409 for anything but on the way; the state machine sets started_at.
         await self._machine.transition(job.id, JobStatus.IN_PROGRESS, user)
+        public_code = await self._customer_requests.public_code(job.request_id)
         await self._session.commit()
         logger.info("job_started", extra={"job_id": str(job.id), "pro_id": str(job.pro_id)})
+        await push_job_started(
+            queue,
+            customer_id=job.customer_id,
+            job_id=job.id,
+            request_id=job.request_id,
+            public_code=public_code,
+            timeout_seconds=self._config.enqueue_timeout_seconds,
+        )
         return await self.pro_job(user, job.id)
 
     async def add_photos(
@@ -401,8 +450,17 @@ class JobExecutionService:
                 raise AfterPhotosProcessingError
         # 409 for anything but working; the state machine sets completed_at.
         await self._machine.transition(job.id, JobStatus.COMPLETED, user)
+        public_code = await self._customer_requests.public_code(job.request_id)
         await self._session.commit()
         logger.info("job_completed", extra={"job_id": str(job.id), "pro_id": str(job.pro_id)})
+        await push_job_done(
+            queue,
+            customer_id=job.customer_id,
+            job_id=job.id,
+            request_id=job.request_id,
+            public_code=public_code,
+            timeout_seconds=self._config.enqueue_timeout_seconds,
+        )
         return await self.pro_job(user, job.id)
 
     # Helpers

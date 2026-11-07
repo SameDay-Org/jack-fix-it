@@ -173,6 +173,8 @@ class Market:
             "settings": self.settings,
             "session_factory": self.sessions,
             "job_try": job_try,
+            # The worker's own pool: the job pushes (#65) are queued on it after the commit.
+            "redis": self.queue,
         }
         return await process_stripe_event(context, str(args[0]))
 

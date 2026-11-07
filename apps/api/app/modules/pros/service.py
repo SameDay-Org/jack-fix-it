@@ -126,6 +126,11 @@ class ProService:
             logger.info("pro_profile_photo_adopted", extra={"user_id": str(user_id)})
         return adopted
 
+    async def user_id_of(self, pro_id: uuid.UUID) -> uuid.UUID | None:
+        """The user behind a profile, for a push to the pro (#65); None when there is none."""
+        profile = await self._profiles.get_by_id(pro_id)
+        return None if profile is None else profile.user_id
+
     async def get_profile_id_for_user(self, user_id: uuid.UUID) -> uuid.UUID | None:
         """The pro_profiles.id of a user, or None when the user has no pro profile."""
         return await self._profiles.get_id_by_user_id(user_id)

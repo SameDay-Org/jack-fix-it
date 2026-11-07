@@ -116,11 +116,17 @@ async def get_my_job(job_id: uuid.UUID, user: ProUser, jobs: Jobs) -> ProJob:
         ),
     },
 )
-async def mark_on_the_way(job_id: uuid.UUID, data: OnTheWayIn, user: ProUser, jobs: Jobs) -> ProJob:
+async def mark_on_the_way(
+    job_id: uuid.UUID,
+    data: OnTheWayIn,
+    user: ProUser,
+    jobs: Jobs,
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
+) -> ProJob:
     """Scheduled -> on the way, with an ETA the customer sees; the customer gets an arrival
     code to give the pro on arrival. Again while on the way: only the ETA changes (the code
     stays)."""
-    return await jobs.on_the_way(user, job_id, data.eta_minutes)
+    return await jobs.on_the_way(user, job_id, data.eta_minutes, queue)
 
 
 @router.post(
@@ -140,10 +146,16 @@ async def mark_on_the_way(job_id: uuid.UUID, data: OnTheWayIn, user: ProUser, jo
         ),
     },
 )
-async def check_in(job_id: uuid.UUID, data: CheckInIn, user: ProUser, jobs: Jobs) -> ProJob:
+async def check_in(
+    job_id: uuid.UUID,
+    data: CheckInIn,
+    user: ProUser,
+    jobs: Jobs,
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
+) -> ProJob:
     """Arrived: the code the customer gives the pro, and where the pro is (recorded only). Once
     checked in, calling it again answers the job unchanged."""
-    return await jobs.check_in(user, job_id, data.arrival_code, data.lat, data.lng)
+    return await jobs.check_in(user, job_id, data.arrival_code, data.lat, data.lng, queue)
 
 
 @router.post(
@@ -157,9 +169,14 @@ async def check_in(job_id: uuid.UUID, data: CheckInIn, user: ProUser, jobs: Jobs
         ),
     },
 )
-async def start_job(job_id: uuid.UUID, user: ProUser, jobs: Jobs) -> ProJob:
+async def start_job(
+    job_id: uuid.UUID,
+    user: ProUser,
+    jobs: Jobs,
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
+) -> ProJob:
     """On the way -> working, after the check-in."""
-    return await jobs.start(user, job_id)
+    return await jobs.start(user, job_id, queue)
 
 
 @router.post(

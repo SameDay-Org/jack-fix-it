@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 import sentry_sdk
+from fastapi import FastAPI
 from sqlalchemy import URL, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -31,7 +32,8 @@ from app.modules.users.types import UserAccount, UserRole
 from app.observability import JsonFormatter, init_sentry
 from tests.conftest import make_settings
 from tests.helpers import as_status_writer
-from tests.job_world import JobWorld, build_world, make_job
+from tests.job_world import JobWorld, build_world, make_job, record_pushes
+from tests.test_requests_api import RecordingQueue
 from tests.test_sentry_scrubbing import TEST_DSN, MemoryTransport, _payloads, sentry_transport
 
 __all__ = ["sentry_transport"]  # a fixture, used by name
@@ -153,7 +155,9 @@ async def test_concurrent_wrong_codes_cannot_exceed_five(committed_job: Committe
         async with committed_job.sessions() as session:
             service = JobExecutionService(session, CONFIG, no_storage)
             try:
-                await service.check_in(committed_job.pro, committed_job.job_id, "9999", 0.0, 0.0)
+                await service.check_in(
+                    committed_job.pro, committed_job.job_id, "9999", 0.0, 0.0, RecordingQueue()
+                )
             except (ArrivalCodeInvalidError, ArrivalCodeLockedError) as error:
                 return error
             raise AssertionError("a wrong code was accepted")
@@ -193,8 +197,8 @@ async def test_the_code_is_compared_in_constant_time(
     service = JobExecutionService(db_session, CONFIG, no_storage)
 
     with pytest.raises(ArrivalCodeInvalidError):
-        await service.check_in(pro, job.id, "9999", 0.0, 0.0)
-    await service.check_in(pro, job.id, CODE, 0.0, 0.0)
+        await service.check_in(pro, job.id, "9999", 0.0, 0.0, RecordingQueue())
+    await service.check_in(pro, job.id, CODE, 0.0, 0.0, RecordingQueue())
 
     assert calls == [(CODE.encode(), b"9999"), (CODE.encode(), CODE.encode())]
 
@@ -223,6 +227,7 @@ def _shows(code: str, text: str) -> bool:
 
 
 async def test_arrival_code_never_logged_or_in_sentry(
+    app: FastAPI,
     db_client: httpx.AsyncClient,
     db_session: AsyncSession,
     sentry_transport: MemoryTransport,
@@ -238,6 +243,7 @@ async def test_arrival_code_never_logged_or_in_sentry(
     job = await make_job(db_session, world)
     base = f"/v1/pros/me/jobs/{job.id}"
     here = {"lat": 28.5, "lng": -81.3}
+    queue = record_pushes(app)  # the On my way push (#65)
 
     with caplog.at_level(logging.DEBUG):
         moved = await db_client.post(
@@ -272,3 +278,6 @@ async def test_arrival_code_never_logged_or_in_sentry(
         assert not _shows(code, logs), code
     # Neither does any response to the pro.
     assert not _shows(issued, moved.text)
+    # Nor the push to the customer (#65): it points to the app instead.
+    assert list(queue.jobs) == [f"push:job_on_the_way:{job.id}"]
+    assert not _shows(issued, repr(queue.jobs))

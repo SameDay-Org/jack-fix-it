@@ -18,6 +18,10 @@ changes nothing; Stripe unavailable or refusing otherwise is logged by error cla
 the next run tries again. A payment whose PaymentIntent create was attempted with no answer stored
 is left to #296, the payment call's search and staff: the cron never creates or searches.
 
+A payment canceled locally pushes its customer that the booking was not completed (#65), after
+its transaction commits; the canceled event of a remote cancel pushes it in the webhook worker.
+A push that cannot be queued is logged with ids, never raised.
+
 A payment that fails is rolled back and logged, and the run goes on with the next one; a batch
 that cannot be read ends the run. Nothing raises out of the cron. Logs carry ids, counts,
 outcomes and Stripe's error codes only: no PaymentIntent id, amount or customer data. One
@@ -37,7 +41,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.integrations.stripe_errors import StripeCallError
 from app.integrations.stripe_payments import StripePayments
-from app.modules.payments.reconciliation import PaymentReconciler, UnpaidCheck, UnpaidOutcome
+from app.modules.notifications.events import push_booking_not_completed
+from app.modules.payments.reconciliation import (
+    BookingReopened,
+    PaymentReconciler,
+    UnpaidCheck,
+    UnpaidOutcome,
+)
 from app.modules.payments.repository import PaymentRepository
 from app.modules.payments.service import payment_intent_cancel_idempotency_key
 
@@ -81,7 +91,17 @@ async def cancel_unpaid_payments(ctx: dict[str, Any]) -> None:
                 logger.error("unpaid_payments_unavailable", extra={"error": type(error).__name__})
                 return
             for payment_id in due:
-                await _close_one(sessions, stripe, payment_id, created_before, counts)
+                reopened = await _close_one(sessions, stripe, payment_id, created_before, counts)
+                if reopened is not None:
+                    # After its commit; ARQ's own pool (an ArqRedis), a fake one in tests.
+                    await push_booking_not_completed(
+                        ctx["redis"],
+                        customer_id=reopened.customer_id,
+                        payment_id=reopened.payment_id,
+                        request_id=reopened.request_id,
+                        public_code=reopened.public_code,
+                        timeout_seconds=settings.job_enqueue_timeout_seconds,
+                    )
             if len(due) < UNPAID_BATCH:
                 return
             after = due[-1]
@@ -104,9 +124,10 @@ async def _close_one(
     payment_id: uuid.UUID,
     created_before: datetime,
     counts: _Counts,
-) -> None:
+) -> BookingReopened | None:
     """One payment: checked (and canceled locally) in its own transaction, then canceled in
-    Stripe when it holds a PaymentIntent. Counted once; never raises."""
+    Stripe when it holds a PaymentIntent. Counted once; never raises. Returns the booking a
+    local cancel reopened, committed, for its push (#65)."""
     try:
         async with sessions() as session:
             check = await PaymentReconciler(session).close_unpaid(payment_id, created_before)
@@ -119,10 +140,11 @@ async def _close_one(
             "payment_unpaid_cancel_failed",
             extra={"payment_id": str(payment_id), "error": type(error).__name__},
         )
-        return
+        return None
     match check.outcome:
         case UnpaidOutcome.CANCELED_LOCALLY:
             counts.canceled_local += 1
+            return check.reopened
         case UnpaidOutcome.NOT_DUE:
             counts.skipped += 1
             logger.debug("payment_unpaid_not_due", extra={"payment_id": str(payment_id)})
@@ -131,6 +153,7 @@ async def _close_one(
             logger.warning("payment_unpaid_unresolved", extra=check.ids)
         case UnpaidOutcome.CANCEL_IN_STRIPE:
             await _cancel_in_stripe(stripe, payment_id, check, counts)
+    return None
 
 
 async def _cancel_in_stripe(
