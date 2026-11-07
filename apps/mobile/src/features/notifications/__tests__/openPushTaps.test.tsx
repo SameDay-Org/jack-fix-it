@@ -16,6 +16,7 @@ import RequestLayout, {
 } from "../../../app/(app)/requests/[id]/_layout";
 import { METRICS, SIGNED_OUT, WithQuery } from "../../auth/__tests__/helpers";
 import { SessionGate } from "../../auth/SessionGate";
+import { TabsLayout } from "../../tabs/TabsLayout";
 import { receivePushTap } from "../pushTaps";
 
 type MockSession = ReturnType<typeof import("@/api").useSession>;
@@ -422,5 +423,60 @@ describe("a push for Home (`/`, #338)", () => {
 
     expect(result.getPathname()).toBe("/");
     expect(screen.getByText("home")).toBeTruthy();
+  });
+});
+
+describe("a push for Home from the app's other tabs (#338)", () => {
+  // The real tab shell: Home, History and Account under it.
+  const tabRoutes = {
+    ...routes,
+    "(app)/(tabs)/_layout": TabsLayout,
+    "(app)/(tabs)/history": () => <Text>history</Text>,
+    "(app)/(tabs)/account": () => <Text>account</Text>,
+  };
+
+  async function onTab(session: MockSession, tab: "/history" | "/account") {
+    mockSession.state = session;
+    const result = await renderRouter(tabRoutes, { initialUrl: "/" });
+    await act(async () => router.navigate(tab));
+    expect(result.getPathname()).toBe(tab);
+    return result;
+  }
+
+  it.each([
+    ["customer", CUSTOMER, "/history"],
+    ["customer", CUSTOMER, "/account"],
+    ["pro", PRO, "/history"],
+    ["pro", PRO, "/account"],
+  ] as const)("a %s on %s: the Home tab shows", async (_, session, tab) => {
+    const result = await onTab(session, tab);
+
+    await tap("/");
+
+    expect(result.getPathname()).toBe("/");
+    expect(screen.getByText("home")).toBeTruthy();
+  });
+
+  it("a screen opened over another tab comes off, and Home shows", async () => {
+    const result = await onTab(CUSTOMER, "/history");
+    await act(async () => router.push(`/requests/${ID}`));
+    expect(result.getPathname()).toBe(`/requests/${ID}`);
+
+    await tap("/");
+
+    expect(result.getPathname()).toBe("/");
+    expect(screen.getByText("home")).toBeTruthy();
+  });
+
+  it("after a sign-in in this launch: the Home tab shows from Account", async () => {
+    const result = await renderRouter(tabRoutes, { initialUrl: "/" });
+    expect(screen.getByText("welcome")).toBeTruthy();
+    await act(async () => mockSession.set(PRO, { newGeneration: true }));
+    await act(async () => router.navigate("/account"));
+    expect(result.getPathname()).toBe("/account");
+
+    await tap("/");
+
+    expect(result.getPathname()).toBe("/");
   });
 });

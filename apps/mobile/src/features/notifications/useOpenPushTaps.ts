@@ -39,7 +39,11 @@ export async function openPushTap(
   if (!wanted()) return;
   const link = parsePushLink(tap.url);
   if (link?.path === HOME_PUSH_PATH) {
-    if (currentPath() !== HOME_PUSH_PATH) router.dismissTo(HOME_PUSH_PATH);
+    if (currentPath() === HOME_PUSH_PATH) return;
+    // Screens over the tabs come off (a draft asks first); on another tab, the Home tab shows (the
+    // tab navigator ignores a dismiss).
+    if (router.canDismiss()) router.dismissTo(HOME_PUSH_PATH);
+    else router.navigate(HOME_PUSH_PATH);
     return;
   }
   const route = pushRoute(link, role);

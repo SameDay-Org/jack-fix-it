@@ -554,6 +554,64 @@ describe("a removal that never reached the server, across a restart (#334 B1)", 
     expect(server.holders.size).toBe(0);
   });
 
+  it("settle: the move lands but its DELETE fails: still owed, and the retry sends the DELETE", async () => {
+    const server = deviceServer();
+    await offlineLogoutOfA(server);
+    restart();
+    notifications.getPermissionsAsync.mockImplementation(async () => permission("denied", false));
+    await signInAs(userB);
+    const reachable = routes["/v1/devices"];
+    routes["/v1/devices"] = async (init) => {
+      if (init?.method === "DELETE") throw new TypeError("Network request failed");
+      return reachable(init);
+    };
+
+    await expect(settleOwedPushToken()).resolves.toBe(false);
+    expect(server.holders.get(MOCK_PUSH_TOKEN)).toBe("Bearer access-2");
+    expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: true });
+
+    routes["/v1/devices"] = reachable;
+    await expect(settleOwedPushToken()).resolves.toBe(true);
+
+    expect(server.holders.size).toBe(0);
+    expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: false });
+  });
+
+  it("the logout's bound runs out while a registration holds the queue: the token stays owed", async () => {
+    const server = deviceServer();
+    await signInAs(userA);
+    await syncPushToken();
+    const reachable = routes["/v1/devices"];
+    const slowPut = deferred<void>();
+    routes["/v1/devices"] = async (init) => {
+      if (init?.method === "PUT") await slowPut.promise;
+      return reachable(init);
+    };
+    jest.useFakeTimers();
+    const sync = syncPushToken(); // its PUT is slow to answer
+    const done = logout(); // the removal waits behind it
+    await jest.advanceTimersByTimeAsync(3_000);
+    await done;
+    expect(sessionStore.getState().status).toBe("signedOut");
+
+    slowPut.resolve(); // the server applied A's PUT; the app drops the answer
+    await sync;
+    await jest.advanceTimersByTimeAsync(0);
+    jest.useRealTimers();
+
+    // The skipped removal left the token owed: A still holds it on the server.
+    expect(server.holders.get(MOCK_PUSH_TOKEN)).toBe("Bearer access-1");
+    expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: true });
+
+    restart();
+    routes["/v1/devices"] = reachable;
+    notifications.getPermissionsAsync.mockImplementation(async () => permission("denied", false));
+    await signInAs(userB);
+    await expect(settleOwedPushToken()).resolves.toBe(true);
+
+    expect(server.holders.size).toBe(0);
+  });
+
   it("B logs out while A's removal is still owed: the token moves to B first, then comes off", async () => {
     const server = deviceServer();
     await offlineLogoutOfA(server);
