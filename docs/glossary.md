@@ -68,7 +68,10 @@ Once the request is paid, the job's status takes over (see the job mapping below
 | `expired`     | `customerStatus.cancelled`       |
 | `cancelled`   | `customerStatus.cancelled`       |
 
-`accepted` keeps the quote screen while the payment is pending.
+`accepted` keeps the quote screen while the payment is pending. A payment still unpaid
+`PAYMENT_UNPAID_CANCEL_AFTER_SECONDS` after it was created (2 h by default, #297) is canceled:
+the quote reopens (pending, or expired past its `expires_at`) and the request goes back to
+`quote_ready`, or `finding_pro` with no live quote left, so another quote can be accepted.
 
 **Quote** (`quotes.status`)
 

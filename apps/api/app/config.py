@@ -309,6 +309,15 @@ class Settings(BaseSettings):
     stripe_payment_intent_reconcile_after_seconds: int = Field(
         default=72_000, gt=0, lt=STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS
     )
+    # Unpaid payments (#297): a payment still unpaid (requires_payment or failed) this many
+    # seconds after its creation is canceled, so its quote and request reopen and another quote
+    # can be accepted. The default (2 h) is provisional, tied to the request expiry and dispatch
+    # windows still open in #51 part 2. How often the worker sweeps (a cron, in minutes of the
+    # hour) and the longest one run may take; two runs that overlap are safe (each payment is
+    # locked and checked again), so the timeout only bounds a stuck run.
+    payment_unpaid_cancel_after_seconds: int = Field(default=7_200, gt=0)
+    payment_unpaid_sweep_minutes: int = Field(default=10, ge=1, le=60)
+    payment_unpaid_sweep_timeout_seconds: int = Field(default=540, gt=0)
     # Job execution (D12.2, #63): wrong arrival codes a pro may enter at check-in before the
     # code locks and the BDC is alerted (Cesar, 2026-10-29: 5).
     arrival_code_max_attempts: int = Field(default=5, gt=0)

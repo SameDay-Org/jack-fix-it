@@ -88,6 +88,19 @@ them idempotent: they can run twice.
   `orphan_uploads_swept` log) or `delete`. One run is bounded by
   `ORPHAN_UPLOAD_SWEEP_TIMEOUT_SECONDS`; the next starts over. A new upload purpose or key
   column must be added to `REFERENCED_BY` or `SKIPPED` there; tests fail until it is.
+- **Unpaid payments (#297).** The cron `cancel_unpaid_payments` (`payments/tasks.py`) closes
+  payments still `requires_payment` or `failed` (never `processing`)
+  `PAYMENT_UNPAID_CANCEL_AFTER_SECONDS` after their creation, every
+  `PAYMENT_UNPAID_SWEEP_MINUTES`, a run bounded by `PAYMENT_UNPAID_SWEEP_TIMEOUT_SECONDS`.
+  Each payment is checked under the locks request -> quote -> payment
+  (`PaymentReconciler.close_unpaid`). With a PaymentIntent: canceled in Stripe after the
+  commit (key `payment_intent_cancel:<payment id>:<updated_at micros>`, so a payment that
+  changed is not answered with a refusal Stripe kept; reason `abandoned`), and the
+  `payment_intent.canceled` webhook reopens the quote; Stripe refusing because the intent is
+  processing, succeeded or canceled changes nothing. Without one and with no create ever
+  attempted: canceled locally, the quote reopened the same way. A lost create (attempted, no
+  intent stored) is only logged (`payment_unpaid_unresolved`). One `unpaid_payments_swept`
+  summary per run.
 
 ## Tests
 
