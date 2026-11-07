@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 
 import { isCurrentGeneration, sessionGeneration } from "@/api";
-import { showToast, type IdCardShareHandle } from "@/components/ui";
+import { showToast, type IdCardShareCapture, type IdCardShareHandle } from "@/components/ui";
 
 /** Why a share could not start; never shown, the toast says it calmly. */
 const UNAVAILABLE = "The share sheet is not available on this device";
@@ -18,6 +18,10 @@ const NOT_MOUNTED = "The share render is not mounted";
  * A share belongs to the signed-in screen that started it: once that session ends (log out, an
  * expired session, another account) or the screen goes away, whatever is still pending ends
  * silently. The sheet never opens with the previous account's card, and no toast outlives it.
+ *
+ * The PNG lives in the app's private cache only while it is needed: it is deleted once the sheet
+ * closes (shared or not), and at once when the share ends any other way (failed, too late, the
+ * screen gone).
  */
 export function useShareIdCard(render: RefObject<IdCardShareHandle | null>) {
   const { t } = useTranslation();
@@ -39,16 +43,17 @@ export function useShareIdCard(render: RefObject<IdCardShareHandle | null>) {
     setSharing(true);
     const startedIn = sessionGeneration();
     const stillOurs = () => mounted.current && isCurrentGeneration(startedIn);
+    let capture: IdCardShareCapture | undefined;
     try {
       const available = await Sharing.isAvailableAsync();
       if (!stillOurs()) return;
       if (!available) throw new Error(UNAVAILABLE);
       const handle = render.current;
       if (!handle) throw new Error(NOT_MOUNTED);
-      const { uri } = await handle.capture();
+      capture = await handle.capture();
       // The last check before the image leaves the app: the capture can finish after logout.
       if (!stillOurs()) return;
-      await Sharing.shareAsync(uri, {
+      await Sharing.shareAsync(capture.uri, {
         mimeType: "image/png",
         UTI: "public.png",
         dialogTitle: t("account.share.dialogTitle"),
@@ -56,6 +61,7 @@ export function useShareIdCard(render: RefObject<IdCardShareHandle | null>) {
     } catch {
       if (stillOurs()) showToast({ message: t("account.share.failed"), tone: "neutral" });
     } finally {
+      capture?.discard();
       inFlight.current = false;
       if (mounted.current) setSharing(false);
     }

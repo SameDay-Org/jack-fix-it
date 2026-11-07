@@ -1,10 +1,12 @@
 import { act, fireEvent, render, screen } from "@testing-library/react-native";
+import { Directory, File, Paths } from "expo-file-system";
 import { createRef } from "react";
 import { Image, PixelRatio } from "react-native";
 
 import "@/i18n";
 
 import {
+  ID_CARD_SHARE_DIR,
   idCardShareLayoutWidth,
   IdCardShareRender,
   type IdCardShareHandle,
@@ -30,6 +32,22 @@ const MARIA = {
 };
 const LABEL = "ID card, María Pérez, Miami, FL";
 
+/** The app-private folder the PNGs are written to (expo-file-system's in-memory mock). */
+const shareDir = () => new Directory(Paths.cache, ID_CARD_SHARE_DIR);
+const pngs = () =>
+  shareDir().exists
+    ? shareDir()
+        .list()
+        .map((entry) => entry.uri)
+    : [];
+/** A capture as it resolves, without the discard function a deep equality cannot compare. */
+const SHOT = {
+  uri: expect.stringMatching(/\.png$/),
+  width: 960,
+  height: 606,
+  discard: expect.any(Function),
+};
+
 const card = () => screen.getByRole("image", { name: LABEL, includeHiddenElements: true });
 const photo = () => screen.getByTestId("share-card-photo", { includeHiddenElements: true });
 /** Ends the current photo's load: RN's Image calls onLoadEnd on success and on failure alike. */
@@ -43,6 +61,7 @@ beforeEach(() => {
     .mockImplementation((() =>
       Promise.resolve({ width: 960, height: 606 })) as typeof Image.getSize);
   viewShot.captureRef.mockClear();
+  if (shareDir().exists) shareDir().delete();
 });
 
 describe("idCardShareLayoutWidth", () => {
@@ -73,21 +92,77 @@ describe("IdCardShareRender", () => {
     expect(screen.getByText("María Pérez", { includeHiddenElements: true })).toBeTruthy();
   });
 
-  it("captures a PNG at native size and reports its pixel size", async () => {
+  it("captures a PNG at native size into the app's private cache, until it is discarded", async () => {
     const ref = createRef<IdCardShareHandle>();
     await render(<IdCardShareRender ref={ref} {...MARIA} testID="share" />);
 
-    await expect(ref.current?.capture()).resolves.toEqual({
-      uri: viewShot.MOCK_CAPTURE_URI,
-      width: 960,
-      height: 606,
-    });
+    const shot = await ref.current?.capture();
+    expect(shot).toEqual(SHOT);
+    // Pixels, never a view-shot file: view-shot may put its files in Android's external cache.
     expect(viewShot.captureRef).toHaveBeenCalledTimes(1);
     expect(viewShot.captureRef).toHaveBeenCalledWith(expect.anything(), {
       format: "png",
       quality: 1,
-      result: "tmpfile",
+      result: "base64",
     });
+    // The app writes them itself, into its private cache: the size is read off that file.
+    expect(shot?.uri.startsWith(`${Paths.cache.uri}${ID_CARD_SHARE_DIR}/`)).toBe(true);
+    expect(Image.getSize).toHaveBeenCalledWith(shot?.uri);
+    expect(pngs()).toEqual([shot?.uri]);
+    await expect(new File(shot?.uri ?? "").base64()).resolves.toBe(viewShot.MOCK_CAPTURE_BASE64);
+
+    // Two captures are two files: one discard never takes the other's.
+    const second = await ref.current?.capture();
+    expect(second?.uri).not.toBe(shot?.uri);
+    shot?.discard();
+    shot?.discard();
+    expect(pngs()).toEqual([second?.uri]);
+    second?.discard();
+    expect(pngs()).toEqual([]);
+  });
+
+  it("leaves no file behind when the capture ends without a result", async () => {
+    const ref = createRef<IdCardShareHandle>();
+    const view = await render(<IdCardShareRender ref={ref} {...MARIA} testID="share" />);
+
+    // Its size cannot be read: the written file goes with the failure.
+    jest
+      .mocked(Image.getSize)
+      .mockImplementationOnce((() => Promise.reject(new Error("decode"))) as typeof Image.getSize);
+    await expect(ref.current?.capture()).rejects.toThrow("decode");
+    expect(pngs()).toEqual([]);
+
+    // The native capture answers after the unmount: nothing is written at all.
+    let answer: (base64: string) => void = () => undefined;
+    viewShot.captureRef.mockReturnValueOnce(new Promise<string>((resolve) => (answer = resolve)));
+    const late = ref.current?.capture();
+    await act(async () => undefined);
+    await view.unmount();
+    jest.mocked(Image.getSize).mockClear();
+    answer(viewShot.MOCK_CAPTURE_BASE64);
+    await expect(late).rejects.toThrow("not mounted");
+    // It stopped before the write: no file was ever there to size.
+    expect(Image.getSize).not.toHaveBeenCalled();
+    expect(shareDir().exists ? shareDir().list() : []).toEqual([]);
+  });
+
+  it("deletes a written PNG whose size arrives after the unmount", async () => {
+    const ref = createRef<IdCardShareHandle>();
+    const view = await render(<IdCardShareRender ref={ref} {...MARIA} testID="share" />);
+    let sized: (size: { width: number; height: number }) => void = () => undefined;
+    jest
+      .mocked(Image.getSize)
+      .mockImplementationOnce(
+        (() => new Promise((resolve) => (sized = resolve))) as typeof Image.getSize,
+      );
+
+    const late = ref.current?.capture();
+    await act(async () => undefined);
+    expect(pngs()).toHaveLength(1);
+    await view.unmount();
+    sized({ width: 960, height: 606 });
+    await expect(late).rejects.toThrow("not mounted");
+    expect(pngs()).toEqual([]);
   });
 
   it("waits for the photo to load before capturing", async () => {
@@ -106,7 +181,7 @@ describe("IdCardShareRender", () => {
     );
     await capture;
     expect(viewShot.captureRef).toHaveBeenCalledTimes(1);
-    expect(done).toHaveBeenCalledWith({ uri: viewShot.MOCK_CAPTURE_URI, width: 960, height: 606 });
+    expect(done).toHaveBeenCalledWith(SHOT);
 
     // Loaded once, the same photo needs no second wait.
     await expect(ref.current?.capture()).resolves.toMatchObject({ width: 960 });

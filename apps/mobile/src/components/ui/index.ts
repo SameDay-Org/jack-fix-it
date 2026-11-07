@@ -72,6 +72,7 @@ export {
 export type { IdCardFace, IdCardGeometry, IdCardVariant } from "./idCardModel";
 export {
   ID_CARD_SHARE_BASE_WIDTH,
+  ID_CARD_SHARE_DIR,
   ID_CARD_SHARE_MIN_RATIO,
   IdCardShareRender,
   idCardShareLayoutWidth,

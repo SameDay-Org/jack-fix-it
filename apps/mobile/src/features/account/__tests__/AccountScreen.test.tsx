@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react-native";
+import { Directory, File, Paths } from "expo-file-system";
 import { router, useIsFocused, useScrollToTop } from "expo-router";
 import { isAvailableAsync, shareAsync } from "expo-sharing";
 import {
@@ -12,6 +13,7 @@ import {
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useReducedMotion, withSpring, withTiming } from "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { captureRef } from "react-native-view-shot";
 import { createStore, useStore } from "zustand";
 
 import {
@@ -23,6 +25,7 @@ import {
   useSession,
   type SessionUser,
 } from "@/api";
+import { ID_CARD_SHARE_DIR } from "@/components/ui";
 import { moveAccessibilityFocus } from "@/components/ui/focus";
 import { toastStore } from "@/components/ui/toast";
 import i18n from "@/i18n";
@@ -71,8 +74,17 @@ jest.mock("expo-sharing");
 jest.mock("react-native-view-shot");
 
 const HIDDEN = { includeHiddenElements: true };
-/** What the root view-shot mock (apps/mobile/__mocks__) resolves every capture to. */
-const MOCK_CAPTURE_URI = "file:///mock/view-shot.png";
+/** What the root view-shot mock (apps/mobile/__mocks__) resolves a base64 capture to. */
+const MOCK_CAPTURE_BASE64 = "iVBORw0KGgo=";
+/** The app-private folder the shared PNGs are written to (expo-file-system's in-memory mock). */
+const shareDir = () => new Directory(Paths.cache, ID_CARD_SHARE_DIR);
+/** The PNGs the share left behind in the app's private cache. */
+const sharedPngs = () =>
+  shareDir().exists
+    ? shareDir()
+        .list()
+        .map((entry) => entry.uri)
+    : [];
 const FUTURE = "2999-01-01T00:00:00Z";
 const PAST = "2000-01-01T00:00:00Z";
 const PHOTO = "https://media.test/id/alex.jpg?signature=1";
@@ -91,7 +103,8 @@ const ALEX: Partial<SessionUser> = {
 };
 const PHONE = "+1 (954) 555-0142";
 const CARD_BUTTON = "Your ID card, Alex Morgan, Fort Lauderdale, FL";
-const FRONT_LABEL = "ID card, PRO, Alex Morgan, Fort Lauderdale, FL";
+// The live card reads its phone out too (#295); the share render never does.
+const FRONT_LABEL = `ID card, PRO, Alex Morgan, Fort Lauderdale, FL, ${PHONE}`;
 const BACK_BUTTON = "Back to your account";
 const SHARE = "Share your ID card as an image";
 
@@ -150,6 +163,8 @@ beforeEach(() => {
   jest.mocked(moveAccessibilityFocus).mockClear();
   jest.mocked(shareAsync).mockReset().mockResolvedValue(undefined);
   jest.mocked(isAvailableAsync).mockReset().mockResolvedValue(true);
+  jest.mocked(captureRef).mockClear();
+  if (shareDir().exists) shareDir().delete();
   jest.mocked(withSpring).mockClear();
   jest.mocked(withTiming).mockClear();
   // getSize is overloaded (promise and callback forms), so the spy spells out the promise form.
@@ -456,14 +471,34 @@ describe("AccountScreen", () => {
     await fireEvent.press(screen.getByTestId("account-share"));
 
     expect(shareAsync).toHaveBeenCalledTimes(1);
-    expect(shareAsync).toHaveBeenCalledWith(MOCK_CAPTURE_URI, {
+    expect(shareAsync).toHaveBeenCalledWith(expect.any(String), {
       mimeType: "image/png",
       UTI: "public.png",
       dialogTitle: "Share your ID card",
     });
+    // While the sheet is up the PNG is there, and only there; it is gone once the sheet closes.
+    const [shared = ""] = jest.mocked(shareAsync).mock.calls[0] ?? [];
+    expect(sharedPngs()).toEqual([shared]);
+    await expect(new File(shared).base64()).resolves.toBe(MOCK_CAPTURE_BASE64);
     sheet.resolve();
     await waitFor(() => expect(busyOf(SHARE)).toMatchObject({ busy: false }));
+    expect(sharedPngs()).toEqual([]);
     expect(toastStore.getState().current).toBeNull();
+  });
+
+  it("writes the PNG into the app's private cache itself: view-shot never picks a folder", async () => {
+    // view-shot's own temporary file can land in Android's external cache, which other apps can
+    // read before Android 10 (#293): the capture must come back as pixels, never as a file.
+    await renderAccount();
+    await sharePhotoLoaded();
+    await fireEvent.press(screen.getByRole("button", { name: SHARE }));
+    await waitFor(() => expect(shareAsync).toHaveBeenCalledTimes(1));
+
+    expect(captureRef).toHaveBeenCalledTimes(1);
+    expect(jest.mocked(captureRef).mock.calls[0]?.[1]).toMatchObject({ result: "base64" });
+    const [shared = ""] = jest.mocked(shareAsync).mock.calls[0] ?? [];
+    expect(shared.startsWith(`${Paths.cache.uri}${ID_CARD_SHARE_DIR}/`)).toBe(true);
+    await waitFor(() => expect(sharedPngs()).toEqual([]));
   });
 
   it.each([
@@ -483,6 +518,7 @@ describe("AccountScreen", () => {
       }),
     );
     await waitFor(() => expect(busyOf(SHARE)).toMatchObject({ busy: false }));
+    expect(sharedPngs()).toEqual([]);
   });
 
   describe("a share belongs to the signed-in screen that started it", () => {
@@ -509,6 +545,23 @@ describe("AccountScreen", () => {
 
       expect(shareAsync).not.toHaveBeenCalled();
       expect(toastStore.getState().current).toBeNull();
+      expect(sharedPngs()).toEqual([]);
+    });
+
+    it("writes nothing when the native capture itself answers after log out", async () => {
+      const pixels = deferred<string>();
+      jest.mocked(captureRef).mockReturnValueOnce(pixels.promise);
+      const view = await renderAccount();
+      await sharePhotoLoaded();
+      await fireEvent.press(screen.getByRole("button", { name: SHARE }));
+      await waitFor(() => expect(captureRef).toHaveBeenCalledTimes(1));
+      jest.mocked(isCurrentGeneration).mockReturnValue(false);
+      await view.unmount();
+      await act(async () => pixels.resolve(MOCK_CAPTURE_BASE64));
+
+      expect(shareAsync).not.toHaveBeenCalled();
+      expect(toastStore.getState().current).toBeNull();
+      expect(sharedPngs()).toEqual([]);
     });
 
     it.each([
@@ -530,15 +583,19 @@ describe("AccountScreen", () => {
       expect(shareAsync).not.toHaveBeenCalled();
       expect(toastStore.getState().current).toBeNull();
       await waitFor(() => expect(busyOf(SHARE)).toMatchObject({ busy: false }));
+      // The PNG was written before its size was read: an unused one is deleted.
+      expect(sharedPngs()).toEqual([]);
     });
 
     it("opens no sheet when the capture finishes after the screen went away", async () => {
       const { view, size } = await shareHeldAtCapture();
+      expect(sharedPngs()).toHaveLength(1);
       await view.unmount();
       await act(async () => size.resolve({ width: 960, height: 606 }));
 
       expect(shareAsync).not.toHaveBeenCalled();
       expect(toastStore.getState().current).toBeNull();
+      expect(sharedPngs()).toEqual([]);
     });
 
     it("shows no toast when log out cancels a share still waiting for the photo", async () => {
@@ -552,6 +609,8 @@ describe("AccountScreen", () => {
 
       expect(shareAsync).not.toHaveBeenCalled();
       expect(toastStore.getState().current).toBeNull();
+      expect(captureRef).not.toHaveBeenCalled();
+      expect(sharedPngs()).toEqual([]);
     });
 
     it("keeps a photo refresh that finishes after the session changed out of the session", async () => {
