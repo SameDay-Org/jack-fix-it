@@ -2,7 +2,13 @@ import type { ApiSchema } from "@jack/shared";
 import { QueryClient } from "@tanstack/react-query";
 import { Platform } from "react-native";
 
-import { attachQueryClient, login, logout, sessionStore } from "../../../api/session";
+import {
+  attachQueryClient,
+  login,
+  logout,
+  refreshSession,
+  sessionStore,
+} from "../../../api/session";
 import {
   authResponse,
   callBody,
@@ -312,7 +318,13 @@ describe("logout", () => {
 
     await logout();
 
+    // No record on the device, so any account may hold it: it moves here, then comes off.
     expect(deviceCalls()).toEqual([
+      {
+        method: "PUT",
+        auth: "Bearer access-1",
+        body: { expo_push_token: MOCK_PUSH_TOKEN, platform: Platform.OS },
+      },
       { method: "DELETE", auth: "Bearer access-1", body: { expo_push_token: MOCK_PUSH_TOKEN } },
     ]);
   });
@@ -424,9 +436,126 @@ describe("a removal that never reached the server, across a restart (#334 B1)", 
       await expect(syncPushToken()).resolves.toBe(true);
 
       expect(server.holders.get(MOCK_PUSH_TOKEN)).toBe("Bearer access-2");
-      expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: false });
+      // Still owed, by B now: whatever ends B's session, the next sign-in moves it off B.
+      expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: true });
     },
   );
+
+  /** A registers the token, then the server refuses A's refresh token: no removal runs. */
+  async function expiredSessionOfA(server: ReturnType<typeof deviceServer>) {
+    await signInAs(userA);
+    await syncPushToken();
+    routes["/v1/auth/refresh"] = async () =>
+      jsonResponse(401, { error: { code: "invalid_refresh_token" } });
+    await expect(refreshSession()).rejects.toMatchObject({ name: "SessionExpiredError" });
+    expect(server.holders.get(MOCK_PUSH_TOKEN)).toBe("Bearer access-1");
+  }
+
+  it("A's refresh token refused, then B signs in without a restart, notifications off: the token moves to B and comes off", async () => {
+    const server = deviceServer();
+    await expiredSessionOfA(server);
+    notifications.getPermissionsAsync.mockImplementation(async () => permission("denied", false));
+    await signInAs(userB);
+
+    // A's own registration in this process is no reason to skip the move: B is another session.
+    await expect(settleOwedPushToken()).resolves.toBe(true);
+
+    expect(server.holders.size).toBe(0);
+    expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: false });
+  });
+
+  it("the device's record unreadable after a restart: B's logout still moves the token off A", async () => {
+    const server = deviceServer();
+    await expiredSessionOfA(server);
+    restart();
+    const read = secureStoreMock.getItemAsync.getMockImplementation();
+    let failures = 1;
+    secureStoreMock.getItemAsync.mockImplementation(async (key: string) => {
+      if (key === PUSH_TOKEN_KEY && failures-- > 0) throw new Error("keystore");
+      return read ? read(key) : null;
+    });
+    try {
+      notifications.getPermissionsAsync.mockImplementation(async () => permission("denied", false));
+      await signInAs(userB);
+      await expect(settleOwedPushToken()).resolves.toBe(true); // the read failed: nothing seen
+
+      await logout();
+    } finally {
+      if (read) secureStoreMock.getItemAsync.mockImplementation(read);
+    }
+
+    expect(server.holders.size).toBe(0);
+    expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: false });
+  });
+
+  it("notifications turned off while signed in: the token comes off this account, no move first", async () => {
+    const server = deviceServer();
+    await signInAs(userA);
+    await syncPushToken();
+    notifications.getPermissionsAsync.mockImplementation(async () => permission("denied", false));
+    const before = deviceCalls().length;
+
+    await expect(settleOwedPushToken()).resolves.toBe(true);
+
+    expect(deviceCalls().slice(before)).toEqual([
+      { method: "DELETE", auth: "Bearer access-1", body: { expo_push_token: MOCK_PUSH_TOKEN } },
+    ]);
+    expect(server.holders.size).toBe(0);
+    expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: false });
+  });
+
+  describe.each([
+    ["off", false],
+    ["on", true],
+  ])("the app dies during A's logout, then B signs in with notifications %s", (_label, on) => {
+    it.each([
+      ["before the DELETE reaches the server", "before"],
+      ["mid-request: the server applied the DELETE, its answer never came", "mid"],
+      ["after the DELETE's 204, before the cleared mark is written", "after"],
+    ] as const)("%s: B's sign-in settles the token, idempotently", async (_step, cut) => {
+      const server = deviceServer();
+      await signInAs(userA);
+      await syncPushToken();
+      const reachable = routes["/v1/devices"];
+      routes["/v1/devices"] = async (init) => {
+        if (init?.method !== "DELETE") return reachable(init);
+        if (cut === "before") return new Promise<Response>(() => undefined);
+        const answer = await reachable(init);
+        return cut === "mid" ? new Promise<Response>(() => undefined) : answer;
+      };
+      // The kill lands before the cleared mark reaches the store.
+      const write = secureStoreMock.setItemAsync.getMockImplementation();
+      secureStoreMock.setItemAsync.mockImplementation(async (key: string, value: string) => {
+        if (cut === "after" && key === PUSH_TOKEN_KEY && value.includes('"owed":false')) return;
+        await write?.(key, value);
+      });
+      try {
+        jest.useFakeTimers();
+        const done = logout();
+        await jest.advanceTimersByTimeAsync(3_000);
+        await done;
+        jest.useRealTimers();
+      } finally {
+        if (write) secureStoreMock.setItemAsync.mockImplementation(write);
+      }
+      expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: true });
+      expect(server.holders.has(MOCK_PUSH_TOKEN)).toBe(cut === "before");
+
+      restart();
+      routes["/v1/devices"] = reachable;
+      if (!on) {
+        notifications.getPermissionsAsync.mockImplementation(async () =>
+          permission("denied", false),
+        );
+      }
+      await signInAs(userB);
+
+      await expect(on ? syncPushToken() : settleOwedPushToken()).resolves.toBe(true);
+
+      expect([...server.holders]).toEqual(on ? [[MOCK_PUSH_TOKEN, "Bearer access-2"]] : []);
+      expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: on });
+    });
+  });
 
   it("the device marks the removal owed until the server confirms it", async () => {
     const server = deviceServer();
@@ -691,5 +820,95 @@ describe("a removal that never reached the server, across a restart (#334 B1)", 
       if (read) secureStoreMock.getItemAsync.mockImplementation(read);
       if (write) secureStoreMock.setItemAsync.mockImplementation(write);
     }
+  });
+});
+
+// The Gatekeeper's round-two probes (#334 B1), as written: a logout cut off by its bound, killed
+// before the old queue drains (and the drained control), and a session ended by an expired
+// refresh token, each followed by a restart and another account with notifications off.
+describe("Gatekeeper334 durable removal boundaries round two", () => {
+  function server() {
+    const holders = new Map<string, string>();
+    let holdPut = false;
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    routes["/v1/devices"] = async (init) => {
+      const auth = new Headers(init?.headers).get("Authorization") ?? "";
+      const { expo_push_token: token } = JSON.parse(String(init?.body)) as {
+        expo_push_token: string;
+      };
+      if (init?.method === "PUT") {
+        holders.set(token, auth);
+        if (holdPut) {
+          entered.resolve();
+          await release.promise;
+        }
+      }
+      if (init?.method === "DELETE" && holders.get(token) === auth) holders.delete(token);
+      return jsonResponse(204);
+    };
+    return {
+      holders,
+      entered,
+      release,
+      setHold: (value: boolean) => {
+        holdPut = value;
+      },
+    };
+  }
+
+  it.each([true, false])(
+    "settles after timeout and restart; allow old queue to drain before kill=%s",
+    async (drain) => {
+      const api = server();
+      await signInAs(userA);
+      await syncPushToken();
+      expect(api.holders.get(MOCK_PUSH_TOKEN)).toBe("Bearer access-1");
+      jest.useFakeTimers();
+      api.setHold(true);
+      const sync = syncPushToken();
+      await api.entered.promise; // PUT committed at the server, its response is delayed.
+      const done = logout();
+      await jest.advanceTimersByTimeAsync(3_000);
+      await done;
+      expect(sessionStore.getState().status).toBe("signedOut");
+      try {
+        if (drain) {
+          api.release.resolve();
+          await sync;
+          await jest.advanceTimersByTimeAsync(0);
+        }
+        // Process death now: volatile queue/cache disappear, secure storage remains as at death.
+        // In the no-drain case old promises remain frozen until finally, after the assertion.
+        resetPushTokenForTests();
+        api.setHold(false);
+        notifications.getPermissionsAsync.mockImplementation(async () =>
+          permission("denied", false),
+        );
+        await signInAs(userB);
+        await expect(settleOwedPushToken()).resolves.toBe(true);
+        expect(api.holders.size).toBe(0);
+      } finally {
+        api.release.resolve();
+        await sync;
+        await jest.advanceTimersByTimeAsync(0);
+      }
+    },
+  );
+
+  it("settles A's token after server expiry, restart and B signing in with permission off", async () => {
+    const api = server();
+    await signInAs(userA);
+    await syncPushToken();
+    routes["/v1/auth/refresh"] = async () =>
+      jsonResponse(401, { error: { code: "invalid_refresh_token" } });
+    await expect(refreshSession()).rejects.toMatchObject({ name: "SessionExpiredError" });
+    expect(sessionStore.getState().status).toBe("signedOut");
+    expect(api.holders.get(MOCK_PUSH_TOKEN)).toBe("Bearer access-1");
+    resetPushTokenForTests();
+    notifications.getPermissionsAsync.mockImplementation(async () => permission("denied", false));
+    await signInAs(userB);
+    await expect(settleOwedPushToken()).resolves.toBe(true);
+    expect(api.holders.size).toBe(0);
   });
 });

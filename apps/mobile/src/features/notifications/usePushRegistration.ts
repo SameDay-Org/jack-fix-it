@@ -11,8 +11,8 @@ import { armPushTokenRemoval, settleOwedPushToken, syncPushToken } from "./pushT
  * Keeps this device's push token registered for the signed-in customer or pro (#334), from the
  * signed-in layout: at each sign-in and app start, when notifications turn on (from the pre-prompt,
  * Settings, or the phone's settings on return to the app) and when the token changes. With
- * notifications off, it only settles a removal an account that signed out still owes. Reads the
- * permission, never asks for it.
+ * notifications off, it only settles a removal still owed (by an account that signed out, or by
+ * this one from before they went off). Reads the permission, never asks for it.
  */
 export function usePushRegistration(): void {
   const { user } = useSession();

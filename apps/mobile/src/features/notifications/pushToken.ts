@@ -28,9 +28,16 @@ class MissingProjectIdError extends Error {
 type DevicePlatform = "ios" | "android";
 
 // The token this device last sent the API, kept on the device (`pushTokenStorage`) so it outlives
-// the process as well as the session: the next account, even after a restart, registers it and so
-// moves it off an account whose removal failed. `undefined` until read in this process.
+// the process as well as the session. `owed` is written ahead: true before any request about the
+// token goes out, false only once the server confirms its DELETE. So whatever ends a session (a
+// logout cut off by its bound, an expired refresh token, the process killed at any step), an
+// account may still hold the token only while it is marked owed, and the next sign-in on this
+// device moves it off that account. `undefined` until read in this process.
 let known: StoredPushToken | null | undefined;
+
+// The token this process registered with a confirmed PUT, and the session it did it in: while that
+// session lasts its account holds the token, so removing it there needs no move first.
+let registered: { token: string; generation: number } | null = null;
 
 // Registration and removal run one at a time, in the order they were asked for: a removal at
 // logout waits for a registration still in flight, so the server never sees the account's PUT
@@ -93,34 +100,32 @@ async function remember(next: StoredPushToken): Promise<void> {
 
 const pinnedTo = (startedIn: number) => ({ auth: true, generation: startedIn }) as const;
 
-/**
- * A token an account that signed out may still hold (its removal never completed: a logout
- * offline, a restart since) moves to the signed-in account first, whatever Expo answers next: the
- * API's upsert moves a token to whoever registers it. `stays`: a registration keeps it here, so
- * nothing is owed any more; otherwise (a settle, a removal) it is on its way off this account too
- * and stays owed until that DELETE lands, so a failed one is tried again. Resolves to the token
- * moved, or null.
- */
-async function moveOwedToken(
-  startedIn: number,
-  platform: DevicePlatform,
-  stays: boolean,
-): Promise<string | null> {
-  const last = await lastSent();
-  if (!last?.owed || !isCurrentGeneration(startedIn)) return null;
-  await apiPut("/v1/devices", { expo_push_token: last.token, platform }, pinnedTo(startedIn));
-  if (stays) await remember({ token: last.token, owed: false });
-  return last.token;
+/** Registers `token` for the session's account; marked owed before the call (`remember`). */
+async function put(token: string, platform: DevicePlatform, startedIn: number): Promise<void> {
+  await apiPut("/v1/devices", { expo_push_token: token, platform }, pinnedTo(startedIn));
+  registered = { token, generation: startedIn };
+}
+
+/** Takes `token` off the session's account; only the server's confirmation clears the mark. */
+async function unregister(token: string, startedIn: number): Promise<void> {
+  await apiDelete("/v1/devices", { expo_push_token: token }, pinnedTo(startedIn));
+  registered = null;
+  await remember({ token, owed: false });
 }
 
 /**
- * The session a removal was for ended before the removal ran or finished (the logout's bound ran
- * out while a slow registration held the queue): that account may still hold the token, so it
- * stays owed for the next sign-in on this device to settle.
+ * A token marked owed may be held by an account that signed out (its removal never completed),
+ * so it moves to the signed-in account first, whatever Expo answers next: the API's upsert moves a
+ * token to whoever registers it, and its DELETE only takes a token off its caller. Skipped when
+ * this session's own PUT already put it here. The mark stays: this account holds it now. Resolves
+ * to the token moved, or null.
  */
-async function owedAfterCutOff(): Promise<void> {
+async function moveOwedToken(startedIn: number, platform: DevicePlatform): Promise<string | null> {
   const last = await lastSent();
-  if (last && !last.owed) await remember({ token: last.token, owed: true });
+  if (!last?.owed || !isCurrentGeneration(startedIn)) return null;
+  if (registered?.token === last.token && registered.generation === startedIn) return null;
+  await put(last.token, platform, startedIn);
+  return last.token;
 }
 
 async function register(startedIn: number): Promise<void> {
@@ -128,7 +133,7 @@ async function register(startedIn: number): Promise<void> {
   if (!platform || !isCurrentGeneration(startedIn)) return;
   if ((await bounded(refreshPermission())) !== "granted") return;
   await bounded(ensureNotificationChannel());
-  const moved = await moveOwedToken(startedIn, platform, true);
+  const moved = await moveOwedToken(startedIn, platform);
   const previous = (await lastSent())?.token ?? null;
   let token: string;
   try {
@@ -141,8 +146,9 @@ async function register(startedIn: number): Promise<void> {
     token = previous;
   }
   if (!isCurrentGeneration(startedIn)) return;
-  // Known before the PUT, so a logout removes it even when the PUT's answer is lost.
-  await remember({ token, owed: false });
+  // Owed before the PUT: from here on this account may hold the token, so a logout removes it even
+  // when the PUT's answer is lost, and the next sign-in moves it if the logout never lands.
+  await remember({ token, owed: true });
   // A rotated token: the old one comes off the account first (best effort; the server also drops
   // a token Expo reports as gone).
   if (previous && previous !== token) {
@@ -151,9 +157,7 @@ async function register(startedIn: number): Promise<void> {
     );
   }
   // The owed token just moved here is already registered.
-  if (moved !== token) {
-    await apiPut("/v1/devices", { expo_push_token: token, platform }, pinnedTo(startedIn));
-  }
+  if (moved !== token) await put(token, platform, startedIn);
 }
 
 /** Runs `operation` in the queue for the session current now; resolves to whether it succeeded. */
@@ -180,48 +184,53 @@ export function syncPushToken(): Promise<boolean> {
 }
 
 /**
- * For a signed-in account with notifications off: a token an account that signed out may still
- * hold moves to this one and then comes off it too, so no account keeps this device. Sends
- * nothing when no removal is owed. Never rejects; resolves to false after a failure, to try again.
+ * For a signed-in account with notifications off: a token still marked owed (an account that
+ * signed out may hold it, or this one did before notifications went off) moves to this account
+ * and then comes off it too, so no account keeps this device. Sends nothing when nothing is owed.
+ * Never rejects; resolves to false after a failure, to try again.
  */
 export function settleOwedPushToken(): Promise<boolean> {
   armPushTokenRemoval();
   return settled("Owed push token removal failed", async (startedIn) => {
     const platform = devicePlatform();
-    if (!platform) return;
-    const moved = await moveOwedToken(startedIn, platform, false);
-    if (moved === null) return;
-    // Turned on meanwhile: the token stays on this account, for the registration that follows.
-    if ((await bounded(refreshPermission())) !== "granted") {
-      await apiDelete("/v1/devices", { expo_push_token: moved }, pinnedTo(startedIn));
-    }
-    await remember({ token: moved, owed: false });
+    const owed = await lastSent();
+    if (!platform || !owed?.owed || !isCurrentGeneration(startedIn)) return;
+    await moveOwedToken(startedIn, platform);
+    // Turned on meanwhile: the token stays on this account (still owed, by it now), for the
+    // registration that follows.
+    if ((await bounded(refreshPermission())) === "granted") return;
+    await unregister(owed.token, startedIn);
   });
 }
 
 /**
  * Takes this device's token off the signed-in account, after any registration still queued.
- * Runs at logout before the session is cleared (`beforeSignOut`, bounded). Until the server
- * confirms, the token is marked owed on the device: if the removal cannot reach the server, or the
- * logout's bound runs out first, the next sign-in on this device (any account, after a restart
- * too) moves the token off this account.
+ * Runs at logout before the session is cleared (`beforeSignOut`, bounded). A token this account
+ * may hold is already marked owed on the device (written before its PUT), and only the server's
+ * confirmation clears the mark: if the removal cannot reach the server, the logout's bound runs out
+ * first, or the process dies at any step, the next sign-in on this device (any account, after a
+ * restart too) moves the token off this account.
  */
 export function removePushToken(): Promise<void> {
   const startedIn = sessionGeneration();
   return serialized(async () => {
-    if (!isCurrentGeneration(startedIn)) return owedAfterCutOff();
+    // Cut off (the logout's bound ran out while a registration held the queue): what the account
+    // may hold is marked owed already, for the next sign-in to settle.
+    if (!isCurrentGeneration(startedIn)) return;
     // Still owed by an earlier account (notifications off since, the move failed): the DELETE
     // only takes a token off its caller, so the token moves here first.
     const platform = devicePlatform();
-    if (platform) await moveOwedToken(startedIn, platform, false);
+    if (platform) await moveOwedToken(startedIn, platform);
     // No token sent from this install yet (a logout right after the first start, notifications
     // off): ask Expo for it. The fetch needs no permission; the logout's own bound limits the wait.
-    const token = (await lastSent())?.token ?? (await fetchDeviceToken().catch(() => null));
-    if (!token) return;
-    if (!isCurrentGeneration(startedIn)) return owedAfterCutOff();
-    await remember({ token, owed: true });
-    await apiDelete("/v1/devices", { expo_push_token: token }, pinnedTo(startedIn));
-    await remember({ token, owed: false });
+    const last = await lastSent();
+    const token = last?.token ?? (await fetchDeviceToken().catch(() => null));
+    if (!token || !isCurrentGeneration(startedIn)) return;
+    if (!last?.owed) await remember({ token, owed: true });
+    // With no record on the device (none sent, or the store could not be read) any account may
+    // hold the token: it moves here first, as an owed one does.
+    if (!last && platform) await put(token, platform, startedIn);
+    await unregister(token, startedIn);
   }).catch((error: unknown) => reportFailure("Push token removal failed", error));
 }
 
@@ -240,6 +249,7 @@ export function armPushTokenRemoval(): void {
  */
 export function resetPushTokenForTests(): void {
   known = undefined;
+  registered = null;
   queue = Promise.resolve();
   disarm?.();
   disarm = null;
