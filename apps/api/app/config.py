@@ -314,9 +314,10 @@ class Settings(BaseSettings):
     arrival_code_max_attempts: int = Field(default=5, gt=0)
     # Job photos (#298): the most a job holds of each kind (before, after).
     job_photo_max_per_kind: int = Field(default=10, gt=0)
-    # The oldest job_photo upload a job accepts, by the time its key was issued (#298). Under
-    # half of ORPHAN_UPLOAD_MIN_AGE_HOURS (checked below): the sweep only deletes older uploads,
-    # so a key attach accepts was referenced long before the sweep can pick it (orphans.py).
+    # The oldest job_photo upload a job accepts, by the time its key was issued (#298). At most
+    # half of ORPHAN_UPLOAD_MIN_AGE_HOURS (checked below; the api and the worker must share both
+    # values): the sweep only deletes older uploads, so a key attach accepted was referenced
+    # long before the sweep can pick it (orphans.py).
     job_photo_attach_max_age_minutes: int = Field(default=720, gt=0)
     # The API's public base URL, such as https://api.example.com: Stripe sends the pro's browser
     # back to its onboarding pages there. Required with Stripe in staging and production (https).

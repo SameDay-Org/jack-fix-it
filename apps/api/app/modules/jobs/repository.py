@@ -121,6 +121,19 @@ class JobPhotoRepository:
             counts[status] = count
         return counts
 
+    async def pending_ids(self, job_id: uuid.UUID, kind: JobPhotoKind) -> list[uuid.UUID]:
+        """The job's photos of the kind still without a safe copy, oldest first."""
+        statement = (
+            select(JobPhoto.id)
+            .where(
+                JobPhoto.job_id == job_id,
+                JobPhoto.kind == kind,
+                JobPhoto.safe_status == MediaSafeStatus.PENDING,
+            )
+            .order_by(JobPhoto.created_at, JobPhoto.id)
+        )
+        return list((await self._session.scalars(statement)).all())
+
     async def held_keys(self, keys: Collection[str]) -> set[str]:
         """The keys among `keys` that any job photo already holds."""
         return set((await self._session.scalars(self.keys_among(keys))).all())

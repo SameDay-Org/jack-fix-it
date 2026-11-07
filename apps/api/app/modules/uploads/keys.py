@@ -144,6 +144,8 @@ _VERSION_7: Final = 0x7 << 76
 _VERSION_MASK: Final = 0xF << 76
 _VARIANT_RFC: Final = 0x2 << 62
 _VARIANT_MASK: Final = 0x3 << 62
+# The latest issue time read back from a key: 2999-12-31, within every platform's datetime.
+_LATEST_MS: Final = int(datetime(2999, 12, 31, tzinfo=UTC).timestamp() * 1_000)
 
 
 def time_ordered_token(at: datetime) -> str:
@@ -165,4 +167,9 @@ def upload_issued_at(key: str) -> datetime | None:
     token = uuid.UUID(match["token"])
     if token.version != 7 or token.variant != uuid.RFC_4122:
         return None
-    return datetime.fromtimestamp((token.int >> _RANDOM_BITS) / 1_000, UTC)
+    milliseconds = token.int >> _RANDOM_BITS
+    # A made-up token can say any time up to the year 10889; datetime ends with 9999 (and
+    # Windows' clock functions sooner): such a key has no time the API could have issued.
+    if milliseconds > _LATEST_MS:
+        return None
+    return datetime.fromtimestamp(milliseconds / 1_000, UTC)

@@ -207,8 +207,13 @@ async def add_job_photos(
         ),
     },
 )
-async def complete_job(job_id: uuid.UUID, user: ProUser, jobs: Jobs) -> ProJob:
+async def complete_job(
+    job_id: uuid.UUID,
+    user: ProUser,
+    jobs: Jobs,
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
+) -> ProJob:
     """Working -> completed (Job's done), with at least one after photo whose privacy-safe
     copy is ready. The customer then has a window to confirm. Again once completed: the job
     unchanged."""
-    return await jobs.complete(user, job_id)
+    return await jobs.complete(user, job_id, queue)

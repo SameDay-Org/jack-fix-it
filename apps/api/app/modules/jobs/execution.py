@@ -42,12 +42,15 @@ Job photos and Job's done (part 2, #298), also on the job's row lock:
   twice, or one a job photo already holds: 409 duplicate_photo. More than
   JOB_PHOTO_MAX_PER_KIND of a kind whose safe copy has not failed, or more than twice that
   counting the failed ones: 409 job_photo_limit (checked before the keys are looked up). So a
-  pro replaces failed photos, never without bound. They keep the order given. After the commit
+  pro replaces failed photos, never without bound: a job with twice the cap of a kind, none of
+  its after photos ready, is the BDC's to resolve. They keep the order given. After the commit
   their privacy-safe copies are queued, one run per batch (photos.py); a failed enqueue never
   fails the call (the photos stay pending).
 - Job's done: in_progress -> completed only with at least one after photo whose safe copy is
   ready, the copy that proves to the customer a real image was taken. With none ready: 409
-  after_photos_processing while one is still being made (the app waits and tries again), else
+  after_photos_processing while one is still being made (the app waits and tries again; each
+  try queues the pending ones' copies again, so a lost enqueue or a run that ended unsettled
+  recovers, and a run still going for them makes it a no-op: photos.py), else
   409 after_photos_required (none, or all failed: the pro adds another). Nothing changes on a
   409. The state machine sets completed_at, which opens the customer's confirmation window
   (#66, #67). Again once completed: 200, unchanged, no second event.
@@ -363,17 +366,19 @@ class JobExecutionService:
             await self._session.rollback()
             raise DuplicateJobPhotoError from None
         await self._session.commit()
-        ids = {"job_id": str(job.id), "pro_id": str(job.pro_id)}
-        logger.info("job_photos_added", extra={**ids, "kind": kind.value, "count": len(photos)})
-        try:
-            await enqueue_photo_sanitize(
-                queue, job.id, [photo.id for photo in photos], self._config.enqueue_timeout_seconds
-            )
-        except (RedisError, OSError):  # TimeoutError is an OSError
-            logger.error("job_photo_sanitize_enqueue_failed", extra=ids)
+        logger.info(
+            "job_photos_added",
+            extra={
+                "job_id": str(job.id),
+                "pro_id": str(job.pro_id),
+                "kind": kind.value,
+                "count": len(photos),
+            },
+        )
+        await self._queue_copies(job, [photo.id for photo in photos], queue)
         return await self.pro_job(user, job.id)
 
-    async def complete(self, user: UserAccount, job_id: uuid.UUID) -> ProJob:
+    async def complete(self, user: UserAccount, job_id: uuid.UUID, queue: JobQueue) -> ProJob:
         job = await self._own_locked(user, job_id)
         if job.status is JobStatus.COMPLETED:
             await self._session.commit()  # nothing changed: ends the transaction and its lock
@@ -383,9 +388,12 @@ class JobExecutionService:
             # meanwhile is seen by the pro's next try.
             after = await self._photos.count_by_status(job.id, JobPhotoKind.AFTER)
             if after[MediaSafeStatus.READY] == 0:
-                if after[MediaSafeStatus.PENDING]:
-                    raise AfterPhotosProcessingError
-                raise AfterPhotosRequiredError
+                if after[MediaSafeStatus.PENDING] == 0:
+                    raise AfterPhotosRequiredError
+                pending = await self._photos.pending_ids(job.id, JobPhotoKind.AFTER)
+                await self._session.commit()  # nothing changed: ends the transaction and its lock
+                await self._queue_copies(job, pending, queue)
+                raise AfterPhotosProcessingError
         # 409 for anything but working; the state machine sets completed_at.
         await self._machine.transition(job.id, JobStatus.COMPLETED, user)
         await self._session.commit()
@@ -393,6 +401,19 @@ class JobExecutionService:
         return await self.pro_job(user, job.id)
 
     # Helpers
+
+    async def _queue_copies(self, job: Job, photo_ids: list[uuid.UUID], queue: JobQueue) -> None:
+        """Queues the photos' safe copies, after the commit; a failure is logged, never raised
+        (the photos stay pending, and Job's done queues them again)."""
+        try:
+            await enqueue_photo_sanitize(
+                queue, job.id, photo_ids, self._config.enqueue_timeout_seconds
+            )
+        except (RedisError, OSError):  # TimeoutError is an OSError
+            logger.error(
+                "job_photo_sanitize_enqueue_failed",
+                extra={"job_id": str(job.id), "pro_id": str(job.pro_id)},
+            )
 
     async def _own_locked(self, user: UserAccount, job_id: uuid.UUID) -> Job:
         """The caller's job, locked until the transaction ends; 404 for anyone else's."""

@@ -531,16 +531,26 @@ def test_an_issued_key_carries_its_issue_time() -> None:
     assert upload_issued_at(key_of(owner, issued_at=at)) == at
     assert upload_issued_at(f"u/{owner}/job_photo/{uuid.uuid4().hex}.jpg") is None
     assert upload_issued_at(f"x/{owner}/job_photo/{time_ordered_token(at)}.jpg") is None
+    late = datetime(2999, 12, 30, tzinfo=UTC)
+    assert upload_issued_at(key_of(owner, issued_at=late)) == late
+    assert upload_issued_at(key_of(owner, issued_at=datetime(3000, 1, 2, tzinfo=UTC))) is None
 
 
+@pytest.mark.parametrize(
+    "token",
+    [
+        uuid.uuid4().hex,  # issued before time-ordered keys: its age is unknown
+        "ffffffffffff7fffbfffffffffffffff",  # made up: the year 10889, past any datetime
+    ],
+    ids=["legacy", "out-of-range"],
+)
 async def test_a_key_with_no_issue_time_is_expired(
-    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld, token: str
 ) -> None:
-    # A key issued before time-ordered keys: a random UUIDv4 token, so its age is unknown.
     job = await make_job(db_session, world, JobStatus.IN_PROGRESS)
-    legacy = f"u/{world.pro.id}/job_photo/{uuid.uuid4().hex}.jpg"
+    key = f"u/{world.pro.id}/job_photo/{token}.jpg"
 
-    response = await add(db_client, job, world.pro.headers, "after", [legacy])
+    response = await add(db_client, job, world.pro.headers, "after", [key])
 
     assert (response.status_code, response.json()) == (422, EXPIRED)
     assert await stored(db_session, job) == []
@@ -704,6 +714,42 @@ async def test_no_completion_without_a_valid_after_photo(
     row = await job_row(db_session, job.id)
     assert (row.status, row.completed_at) == (JobStatus.IN_PROGRESS, None)
     assert view.json()["photos"] == {"before": [], "after": [], "pending": 0}
+
+
+async def test_complete_queues_pending_copies_again(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    queue: RecordingQueue,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # A lost enqueue (Redis down) must not leave the job waiting for ever: each try of Job's
+    # done queues the pending after photos' copies again, under the batch's run name.
+    job = await make_job(db_session, world, JobStatus.IN_PROGRESS)
+    queue.failure = RedisConnectionError("down")
+    keys = [key_of(world.pro.id) for _ in range(2)]
+    assert (await add(db_client, job, world.pro.headers, "after", keys)).status_code == 201
+    await photo_row(db_session, world, job, JobPhotoKind.BEFORE)  # pending, not an after photo
+    await photo_row(db_session, world, job, JobPhotoKind.AFTER, F)
+    first, second = [p for p in await stored(db_session, job) if p.file_key in keys]
+
+    with caplog.at_level(logging.ERROR):
+        still_down = await db_client.post(f"{BASE}/{job.id}/complete", headers=world.pro.headers)
+    queue.failure = None
+    again = await db_client.post(f"{BASE}/{job.id}/complete", headers=world.pro.headers)
+    once_more = await db_client.post(f"{BASE}/{job.id}/complete", headers=world.pro.headers)
+
+    for response in (still_down, again, once_more):
+        assert (response.status_code, response.json()) == (409, AFTER_PROCESSING)
+    assert [r.message for r in caplog.records].count("job_photo_sanitize_enqueue_failed") == 2
+    assert queue.jobs == {
+        f"sanitize-job-photos:{first.id}": (
+            "sanitize_job_photos",
+            (str(job.id), [str(first.id), str(second.id)]),
+        )
+    }
+    row = await job_row(db_session, job.id)
+    assert (row.status, row.completed_at) == (JobStatus.IN_PROGRESS, None)
 
 
 async def test_a_valid_after_photo_completes_once_its_copy_is_ready(
