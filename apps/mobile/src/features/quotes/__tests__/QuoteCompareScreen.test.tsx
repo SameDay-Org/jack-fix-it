@@ -43,6 +43,8 @@ jest.mock("@/api", () => ({
   isCurrentGeneration: (generation: number) => generation === 1,
 }));
 jest.mock("expo-router", () => jest.requireActual("./helpers").routerMock);
+// The job notice over the list (#64) has its own tests (features/jobs); here the list is alone.
+jest.mock("@/features/jobs/JobBookedNotice", () => ({ JobBookedNotice: () => null }));
 // The accepted card's payment has its own suite (features/payments): here it is a stand-in that
 // shows the note and records what the list handed it.
 jest.mock("@/features/payments", () => {

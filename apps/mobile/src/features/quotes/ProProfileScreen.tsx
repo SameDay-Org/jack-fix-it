@@ -39,7 +39,13 @@ import { quotesQueryOptions, useSettledError, type CustomerQuote } from "./useRe
  */
 export function ProProfileScreen() {
   const { t } = useTranslation();
-  const { id: requestId, quoteId } = useLocalSearchParams<{ id: string; quoteId: string }>();
+  const {
+    id: requestId,
+    quoteId,
+    from,
+  } = useLocalSearchParams<{ id: string; quoteId: string; from?: string }>();
+  // Opened from the ongoing job (#64): the way back goes there, and says so.
+  const backLabel = t(from === "job" ? "jobs.backToJob" : "quotes.profile.backToQuotes");
   const client = useQueryClient();
   // A link can carry anything here: ids that are not ids ask nothing and read as gone.
   const valid = isUuid(requestId) && isUuid(quoteId);
@@ -73,7 +79,7 @@ export function ProProfileScreen() {
           <ProfileState
             title={t("quotes.profile.gone.title")}
             body={t("quotes.profile.gone.body")}
-            action={t("quotes.profile.backToQuotes")}
+            action={backLabel}
             onAction={backToPrevious}
             testID="pro-profile-gone"
           />
@@ -110,7 +116,7 @@ export function ProProfileScreen() {
             />
           ) : null}
           <Button
-            label={t("quotes.profile.backToQuotes")}
+            label={backLabel}
             variant="ghost"
             size="lg"
             onPress={backToPrevious}

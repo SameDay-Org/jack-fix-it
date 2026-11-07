@@ -37,6 +37,8 @@ jest.mock("@/api", () => {
     // The phone flow registers its sign-out cleanup on import.
     onSignOut: jest.fn(() => () => undefined),
     apiGet: jest.fn(),
+    // The tabs' job banner (#64) pins its reads to the session generation.
+    useSessionGeneration: () => 1,
     logout: jest.fn(async () => undefined),
     restoreSession: jest.fn(async () => undefined),
     useSession: () =>

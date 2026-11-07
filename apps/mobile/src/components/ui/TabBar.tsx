@@ -1,5 +1,5 @@
 import { BottomTabBarHeightCallbackContext, BottomTabBarHeightContext } from "expo-router/js-tabs";
-import { useContext, useLayoutEffect } from "react";
+import { createContext, useContext, useLayoutEffect, type ReactNode } from "react";
 import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import Animated, { useAnimatedStyle, type SharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -32,8 +32,21 @@ export type TabBarProps = {
   slideOut?: SharedValue<number>;
   /** Out of sight or on its way: the bar takes no taps and screen readers skip it. */
   hidden?: boolean;
+  /**
+   * A one-line control floating just above the tabs (an ongoing job), drawn while
+   * `TabBarAccessoryContext` says one is shown: the context also grows `useTabBarInset`, so the
+   * screens under the bar keep their last row clear of it. It fills a pill of the height
+   * `tabBarGeometry` gives it.
+   */
+  accessory?: ReactNode;
   testID?: string;
 };
+
+/**
+ * Whether the tab bar shows its accessory. Provided by the tab layout around the navigator, so
+ * the bar and every tab root's `useTabBarInset` read the same answer on the same render.
+ */
+export const TabBarAccessoryContext = createContext(false);
 
 // The bar's geometry on the 4-pt grid. The glyph never scales; the label does, so the bar's height
 // follows the font scale and the label keeps one line at every scale (the tab is 48 dp at least).
@@ -46,6 +59,9 @@ const MIN_TARGET = 48;
 const FLOAT_MARGIN = 16;
 const FLOAT_GAP = 8;
 const LABEL_LINE_HEIGHT = tokens.fontSize.caption.lineHeight;
+// The accessory: one line of callout text with this padding above and below, 48 dp at least.
+const ACCESSORY_LINE_HEIGHT = tokens.fontSize.callout.lineHeight;
+const ACCESSORY_PADDING_Y = 12;
 const RIPPLE_OPACITY = 0.1;
 const HAIRLINE_OPACITY = 0.1;
 
@@ -56,6 +72,9 @@ export type TabBarGeometry = {
   bottom: number;
   /** What a tab root keeps free at its bottom edge, so its last row clears the bar. */
   inset: number;
+  /** The accessory's height, and its bottom edge's distance from the window's (0 without one). */
+  accessoryHeight: number;
+  accessoryBottom: number;
 };
 
 /** The bar floats as a pill on iOS (the system's own tab bar shape) and docks on Android. */
@@ -70,20 +89,34 @@ export function tabBarGeometry(
   fontScale: number,
   bottomInset: number,
   floating: boolean,
+  accessory = false,
 ): TabBarGeometry {
   const label = Math.ceil(LABEL_LINE_HEIGHT * fontScale);
   const barHeight = Math.max(MIN_TARGET, ICON_SIZE + ICON_LABEL_GAP + label + 2 * ITEM_PADDING_Y);
-  if (floating) {
-    const bottom = Math.max(bottomInset + FLOAT_GAP, FLOAT_MARGIN);
-    return { barHeight, bottom, inset: bottom + barHeight + FLOAT_GAP };
-  }
-  return { barHeight, bottom: 0, inset: bottomInset + barHeight };
+  const bottom = floating ? Math.max(bottomInset + FLOAT_GAP, FLOAT_MARGIN) : 0;
+  // The top of the tabs, from the window's bottom edge: the docked bar pads the inset itself.
+  const top = floating ? bottom + barHeight : bottomInset + barHeight;
+  const base = floating ? top + FLOAT_GAP : top;
+  if (!accessory) return { barHeight, bottom, inset: base, accessoryHeight: 0, accessoryBottom: 0 };
+  const accessoryHeight = Math.max(
+    MIN_TARGET,
+    Math.ceil(ACCESSORY_LINE_HEIGHT * fontScale) + 2 * ACCESSORY_PADDING_Y,
+  );
+  const accessoryBottom = top + FLOAT_GAP;
+  return {
+    barHeight,
+    bottom,
+    inset: accessoryBottom + accessoryHeight + FLOAT_GAP,
+    accessoryHeight,
+    accessoryBottom,
+  };
 }
 
 function useGeometry(): [TabBarGeometry, number] {
   const { fontScale } = useWindowDimensions();
   const { bottom } = useSafeAreaInsets();
-  return [tabBarGeometry(fontScale, bottom, floats()), bottom];
+  const accessory = useContext(TabBarAccessoryContext);
+  return [tabBarGeometry(fontScale, bottom, floats(), accessory), bottom];
 }
 
 /**
@@ -105,7 +138,7 @@ export function useTabBarInset(): number {
  * padding the gesture bar itself. It is absolutely positioned over the screens, which pad it
  * with `useTabBarInset`.
  */
-export function TabBar({ items, slideOut, hidden = false, testID }: TabBarProps) {
+export function TabBar({ items, slideOut, hidden = false, accessory, testID }: TabBarProps) {
   const [geometry, bottom] = useGeometry();
   const reportHeight = useContext(BottomTabBarHeightCallbackContext);
   // Its whole footprint and the gap its shadow spreads into: nothing of it is left on screen.
@@ -139,36 +172,59 @@ export function TabBar({ items, slideOut, hidden = false, testID }: TabBarProps)
     </View>
   );
 
-  if (floats()) {
-    return (
+  // Above the tabs, sliding with them; a sibling, so the bar's own surface stays as it is.
+  const accessoryView =
+    geometry.accessoryHeight > 0 && accessory ? (
       <Animated.View
         pointerEvents={hidden ? "none" : "box-none"}
-        style={[styles.floating, { bottom: geometry.bottom }, slideStyle]}
+        style={[
+          styles.accessory,
+          { bottom: geometry.accessoryBottom, height: geometry.accessoryHeight },
+          slideStyle,
+        ]}
         {...hiding}
-        testID={testID}
+        testID={testID ? `${testID}-accessory` : undefined}
       >
-        <GlassSurface
-          tone="light"
-          shape="pill"
-          interactive
-          testID={testID ? `${testID}-surface` : undefined}
-        >
-          {row}
-        </GlassSurface>
+        {accessory}
       </Animated.View>
+    ) : null;
+
+  if (floats()) {
+    return (
+      <>
+        {accessoryView}
+        <Animated.View
+          pointerEvents={hidden ? "none" : "box-none"}
+          style={[styles.floating, { bottom: geometry.bottom }, slideStyle]}
+          {...hiding}
+          testID={testID}
+        >
+          <GlassSurface
+            tone="light"
+            shape="pill"
+            interactive
+            testID={testID ? `${testID}-surface` : undefined}
+          >
+            {row}
+          </GlassSurface>
+        </Animated.View>
+      </>
     );
   }
 
   return (
-    <Animated.View
-      pointerEvents={hidden ? "none" : "auto"}
-      className="bg-white"
-      style={[styles.docked, bubbleShadow, { paddingBottom: bottom }, slideStyle]}
-      {...hiding}
-      testID={testID}
-    >
-      {row}
-    </Animated.View>
+    <>
+      {accessoryView}
+      <Animated.View
+        pointerEvents={hidden ? "none" : "auto"}
+        className="bg-white"
+        style={[styles.docked, bubbleShadow, { paddingBottom: bottom }, slideStyle]}
+        {...hiding}
+        testID={testID}
+      >
+        {row}
+      </Animated.View>
+    </>
   );
 }
 
@@ -208,6 +264,11 @@ function TabBarButton({ item }: { item: TabBarItem }) {
 
 const styles = StyleSheet.create({
   floating: {
+    position: "absolute",
+    left: FLOAT_MARGIN,
+    right: FLOAT_MARGIN,
+  },
+  accessory: {
     position: "absolute",
     left: FLOAT_MARGIN,
     right: FLOAT_MARGIN,
