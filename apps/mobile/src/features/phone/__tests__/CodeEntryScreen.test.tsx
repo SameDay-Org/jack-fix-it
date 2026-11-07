@@ -16,10 +16,10 @@ import {
   user,
   type FetchMock,
 } from "../../../api/__tests__/helpers";
-import { sessionStore } from "../../../api/session";
+import { sessionGeneration, sessionStore } from "../../../api/session";
 import { CodeEntryScreen } from "../CodeEntryScreen";
 import { phoneConfig } from "../config";
-import { phoneFlowStore } from "../phoneFlow";
+import { phoneFlowStore, startCodeStep } from "../phoneFlow";
 import { CODE, DIGITS, E164, renderScreen, signIn, watchConsoleForPii } from "./helpers";
 
 jest.mock(
@@ -68,7 +68,7 @@ beforeEach(() => {
   announce = jest
     .spyOn(AccessibilityInfo, "announceForAccessibility")
     .mockImplementation(() => undefined);
-  phoneFlowStore.setState({ pendingNumber: DIGITS, offeredAfterSignUp: false });
+  startCodeStep(DIGITS, sessionGeneration());
   jest.mocked(router.back).mockClear();
   jest.mocked(router.dismissTo).mockClear();
   jest.mocked(Redirect).mockClear();
@@ -173,12 +173,12 @@ describe("CodeEntryScreen", () => {
     const { resendSeconds } = phoneConfig;
 
     expect(resendButton().props.accessibilityState).toMatchObject({ disabled: true });
-    expect(resendButton()).toHaveTextContent(`Resend code in ${resendSeconds} s`);
+    expect(resendButton()).toHaveTextContent(`Resend in ${resendSeconds} s`);
     await fireEvent.press(resendButton());
     expect(fetchMock).not.toHaveBeenCalled();
 
     await act(async () => jest.advanceTimersByTime((resendSeconds - 1) * 1000));
-    expect(resendButton()).toHaveTextContent("Resend code in 1 s");
+    expect(resendButton()).toHaveTextContent("Resend in 1 s");
     expect(resendButton().props.accessibilityState).toMatchObject({ disabled: true });
 
     await act(async () => jest.advanceTimersByTime(1000));
@@ -189,9 +189,7 @@ describe("CodeEntryScreen", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(callPath(fetchMock.mock.calls[0])).toBe(SEND);
     expect(callBody(fetchMock.mock.calls[0])).toEqual({ phone: E164 });
-    await waitFor(() =>
-      expect(resendButton()).toHaveTextContent(`Resend code in ${resendSeconds} s`),
-    );
+    await waitFor(() => expect(resendButton()).toHaveTextContent(`Resend in ${resendSeconds} s`));
     expect(showToast).toHaveBeenCalledWith({ message: "We sent a new code.", tone: "neutral" });
   });
 

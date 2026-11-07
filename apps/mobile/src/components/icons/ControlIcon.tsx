@@ -10,6 +10,10 @@ const CONTROL_GLYPHS = {
   play: ["M9 6.5v11l8.5-5.5Z"],
   // A check mark, for a request that went through.
   check: ["M5.5 12.5l4.5 4.5 8.5-10"],
+  // A chevron pointing on, for a row that opens its screen.
+  chevron: ["M9.5 6l6 6-6 6"],
+  // A box with an arrow rising out of it, for sharing.
+  share: ["M12 14.5V4", "M8 8l4-4 4 4", "M6 11.5v7.5a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-7.5"],
 } as const satisfies Record<string, readonly string[]>;
 
 export type ControlGlyphName = keyof typeof CONTROL_GLYPHS;

@@ -39,9 +39,9 @@ const ALEX = {
   phone: "(954) 555-0142",
   publicCode: "K7Q29MXA",
 };
-const FRONT_LABEL = "ID card, PRO, Alex Morgan, Fort Lauderdale, FL";
+const FRONT_LABEL = "ID card, PRO, Alex Morgan, Fort Lauderdale, FL, (954) 555-0142";
 const BACK_LABEL = "Back of the ID card, code K7Q2-9MXA";
-const CUSTOMER_LABEL = "ID card, Alex Morgan, Fort Lauderdale, FL";
+const CUSTOMER_LABEL = "ID card, Alex Morgan, Fort Lauderdale, FL, (954) 555-0142";
 /** The card rises to a touch by this much (IdCard's LIFT_SCALE). */
 const LIFT_SCALE = 1.03;
 
@@ -71,8 +71,17 @@ const card = (props: IdCardProps) => (
 );
 const renderCard = (props: IdCardProps) => render(card(props));
 
-/** Lets the gyroscope's availability answer land. */
-const settle = () => act(async () => undefined);
+/**
+ * Lets the gyroscope's availability answer land, then one UI frame pass. Under Jest, Reanimated
+ * starts each animated style on the first frame after mount (the worklets UI queue runs on
+ * `requestAnimationFrame`), so a drag driven before that frame moves shared values no style is
+ * listening to yet, and the lean reads 0° (CI job 128243933434). On a phone that frame has long
+ * passed before a finger lands. Frames run in order, so this one comes after the mount's.
+ */
+const settle = () =>
+  act(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  });
 
 beforeEach(() => {
   jest.mocked(useReducedMotion).mockReturnValue(false);
@@ -134,7 +143,7 @@ describe("IdCard", () => {
     expect(screen.getByText("Hola, soy:")).toBeOnTheScreen();
     expect(
       screen.getByRole("button", {
-        name: "Tarjeta de identificación, PRO, Alex Morgan, Fort Lauderdale, FL",
+        name: "Tarjeta de identificación, PRO, Alex Morgan, Fort Lauderdale, FL, (954) 555-0142",
       }),
     ).toBeOnTheScreen();
   });
@@ -152,7 +161,10 @@ describe("IdCard", () => {
 
     expect(screen.queryByText(ALEX.phone)).toBeNull();
     expect(screen.getByText("Alex Morgan")).toBeOnTheScreen();
-    expect(screen.getByRole("image", { name: FRONT_LABEL })).toBeOnTheScreen();
+    // Nor reads it out: the image is the card as drawn.
+    expect(
+      screen.getByRole("image", { name: "ID card, PRO, Alex Morgan, Fort Lauderdale, FL" }),
+    ).toBeOnTheScreen();
     expect(screen.queryByRole("button")).toBeNull();
     expect(Gyroscope.addListener).not.toHaveBeenCalled();
     expect(screen.getByTestId("share").props.style).toEqual(
@@ -342,6 +354,40 @@ describe("IdCard", () => {
     expect(screen.getByRole("image", { name: FRONT_LABEL })).toBeOnTheScreen();
     expect(screen.queryByRole("image", { name: BACK_LABEL })).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it.each([
+    ["turns", false],
+    ["fades", true],
+  ])("%s back to its front when set at rest on its back (Reduce Motion %s)", async (_, reduced) => {
+    jest.mocked(useReducedMotion).mockReturnValue(reduced);
+    const onFlip = jest.fn();
+    const props: IdCardProps = { variant: "pro", width: 320, ...ALEX, onFlip, testID: "card" };
+    const view = await renderCard(props);
+    await act(async () => flipByAssistiveTech("card-front"));
+    expect(screen.getByRole("button", { name: BACK_LABEL })).toBeOnTheScreen();
+    jest.mocked(withSpring).mockClear();
+    jest.mocked(withTiming).mockClear();
+    jest.mocked(Haptics.impactAsync).mockClear();
+
+    await view.rerender(card({ ...props, interactive: false }));
+
+    expect(screen.getByRole("image", { name: FRONT_LABEL })).toBeOnTheScreen();
+    expect(screen.queryByRole("image", { name: BACK_LABEL })).toBeNull();
+    if (reduced) {
+      expect(withTiming).toHaveBeenCalledWith(0, { duration: 200, reduceMotion: "never" });
+    } else {
+      expect(withSpring).toHaveBeenCalledWith(0, expect.any(Object));
+    }
+    expect(onFlip).toHaveBeenLastCalledWith("front");
+    // Set down, not flipped by the person: no tap feedback.
+    expect(Haptics.impactAsync).not.toHaveBeenCalled();
+
+    // Already on its front, a card set at rest stays as it is.
+    onFlip.mockClear();
+    await view.rerender(card({ ...props, interactive: true }));
+    await view.rerender(card({ ...props, interactive: false }));
+    expect(onFlip).not.toHaveBeenCalled();
   });
 
   it("never subscribes to a gyroscope that answers after the card is gone", async () => {

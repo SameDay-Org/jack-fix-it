@@ -39,6 +39,8 @@ jest.mock("@/api", () => {
       ),
     logout: jest.fn(async () => undefined),
     restoreSession: jest.fn(async () => undefined),
+    // The phone flow registers its sign-out cleanup on import.
+    onSignOut: jest.fn(() => () => undefined),
   };
 });
 jest.mock("expo-splash-screen", () => ({

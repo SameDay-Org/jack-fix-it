@@ -1,6 +1,6 @@
 import * as Haptics from "expo-haptics";
 import { Gyroscope } from "expo-sensors";
-import { useEffect, useId, useState, type ComponentProps } from "react";
+import { useEffect, useId, useRef, useState, type ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Image,
@@ -60,7 +60,10 @@ export type IdCardProps = {
    * gestures and no font scaling, so the PNG looks the same on every phone.
    */
   shareable?: boolean;
-  /** Tilt, flip and gyroscope. Off, the card holds still until a parent brings it alive. */
+  /**
+   * Tilt, flip and gyroscope. Off, the card holds still until a parent brings it alive; turned off
+   * while it shows its back, it turns back to the front.
+   */
   interactive?: boolean;
   onFlip?: (face: IdCardFace) => void;
   /** The photo finished loading, or failed: the share render waits for it before capturing. */
@@ -182,6 +185,8 @@ const ENGRAVE_DEPTH = 1;
 /** Vertical gaps in the name column at the design width, in dp. */
 const PLACE_GAP = 4;
 const PHONE_GAP = 2;
+/** The phone line's floor as it shrinks to keep the whole number on one line (iOS: see the name's). */
+const PHONE_MIN_SCALE = 0.5;
 /**
  * The name column: two lines, and a long name shrinks before it takes a third. The floor holds on
  * iOS; Android's native fit has no floor (RN 0.88 never hands it `minimumFontScale`), so a very
@@ -422,6 +427,9 @@ function Front({
             <Text
               allowFontScaling={scaleFonts}
               numberOfLines={1}
+              // A number cut short is a wrong number: at large text it shrinks to fit instead.
+              adjustsFontSizeToFit
+              minimumFontScale={PHONE_MIN_SCALE}
               style={[
                 typeStyle("footnote", unit),
                 {
@@ -575,6 +583,10 @@ export function IdCard({
   const place = placeOf(city, state);
 
   const [face, setFace] = useState<IdCardFace>("front");
+  // The faces' height once laid out. react-native-svg resolves the shade's and the sheen's
+  // percentages at the size they first drew at: a card that grows after (large text, a phone
+  // line typed in) draws them again at its new height.
+  const [faceHeight, setFaceHeight] = useState(0);
   /** The face shown, readable at once from a gesture's JS callback (state would lag a render). */
   const shown = useSharedValue<IdCardFace>("front");
 
@@ -588,8 +600,16 @@ export function IdCard({
   /** The Reduce Motion flip: 0 front, 1 back. */
   const fade = useSharedValue(0);
 
+  // Gestures reach JS a moment after they end: a tap queued just as the card is set at rest must
+  // not turn it over again after the rest has brought its front back.
+  const liveRef = useRef(live);
+  useEffect(() => {
+    liveRef.current = live;
+  }, [live]);
+
   /** Turns the card over; `direction` is the way a swipe sent it (a tap turns it to the right). */
   const flip = (direction: 1 | -1) => {
+    if (!liveRef.current) return;
     const next: IdCardFace = shown.value === "front" ? "back" : "front";
     shown.value = next;
     setFace(next);
@@ -601,6 +621,22 @@ export function IdCard({
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
     onFlip?.(next);
   };
+
+  // A card set back at rest (a parent turns `interactive` off) shows its front again, turning back
+  // the way it came: still, nothing could turn it over to the front any more. The accessible face
+  // follows in this render; the animation and the parent's callback in the effect.
+  const [wasLive, setWasLive] = useState(live);
+  if (wasLive !== live) {
+    setWasLive(live);
+    if (!live) setFace("front");
+  }
+  useEffect(() => {
+    if (live || shown.value === "front") return;
+    shown.value = "front";
+    if (reduceMotion) fade.value = withTiming(0, FADE);
+    else turn.value = withSpring(0, FLIP_SPRING);
+    onFlip?.("front");
+  }, [live, reduceMotion, shown, fade, turn, onFlip]);
 
   const gyro = live && !reduceMotion;
   useEffect(() => {
@@ -716,6 +752,8 @@ export function IdCard({
     variant === "pro" ? t("idCard.pro") : null,
     name.trim() || t("idCard.a11y.unnamed"),
     place || null,
+    // Read out as it is drawn: never on the share render, which draws none.
+    (!shareable && phone) || null,
   ]
     .filter(Boolean)
     .join(", ");
@@ -788,9 +826,14 @@ export function IdCard({
             frontStyle,
           ]}
         >
-          <View style={[{ flex: 1 }, ...clipStyle(unit)]}>
-            <Shade palette={palette} gradientId={gradientId} />
+          {/* Grows with its content (not `flex: 1`, which holds it at the card's height). */}
+          <View
+            style={[{ flexGrow: 1 }, ...clipStyle(unit)]}
+            onLayout={({ nativeEvent }) => setFaceHeight(Math.round(nativeEvent.layout.height))}
+          >
+            <Shade key={`shade-${faceHeight}`} palette={palette} gradientId={gradientId} />
             <Sheen
+              key={`sheen-${faceHeight}`}
               palette={palette}
               gradientId={`${gradientId}-f`}
               style={frontSheenStyle}
@@ -817,8 +860,13 @@ export function IdCard({
           ]}
         >
           <View style={[{ flex: 1 }, ...clipStyle(unit)]}>
-            <Shade palette={palette} gradientId={`${gradientId}-b`} />
-            <Sheen palette={palette} gradientId={`${gradientId}-b`} style={backSheenStyle} />
+            <Shade key={`shade-${faceHeight}`} palette={palette} gradientId={`${gradientId}-b`} />
+            <Sheen
+              key={`sheen-${faceHeight}`}
+              palette={palette}
+              gradientId={`${gradientId}-b`}
+              style={backSheenStyle}
+            />
             <Back palette={palette} unit={unit} publicCode={publicCode} scaleFonts />
           </View>
         </Animated.View>

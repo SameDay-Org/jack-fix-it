@@ -26,6 +26,17 @@ describe("Button", () => {
     expect(button("Save").props.accessibilityState).toMatchObject({ disabled: true });
   });
 
+  it("with a glyph it is a round icon button that keeps its label as the name", async () => {
+    const onPress = jest.fn();
+    await render(<Button label="Share" variant="secondary" glyph="share" onPress={onPress} />);
+
+    await fireEvent.press(button("Share"));
+
+    expect(onPress).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Share")).toBeNull();
+    expect(button("Share").queryAll((node) => node.type === "RNSVGSvgView")).toHaveLength(1);
+  });
+
   it("shows spinner and ignores presses while loading", async () => {
     const onPress = jest.fn();
     await render(<Button label="Save" onPress={onPress} loading />);

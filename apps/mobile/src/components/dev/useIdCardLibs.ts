@@ -1,13 +1,15 @@
 // Dev-only hooks behind the ID card libraries smoke screen (src/app/dev/id-card-libs.tsx, #251):
 // one per library, each small enough to read as that library's usage note for #250.
-import { useCameraPermissions } from "expo-camera";
 import * as Haptics from "expo-haptics";
 import { Gyroscope, type GyroscopeMeasurement } from "expo-sensors";
 import * as Sharing from "expo-sharing";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppState, Image, Linking } from "react-native";
+import { Image } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
 import type { CaptureOptions, ViewShotRef } from "react-native-view-shot";
+
+// The selfie step (#294) took the camera permission hook over; the smoke screen keeps using it.
+export { useCameraAccess } from "@/features/media/useCameraAccess";
 
 /** The card as a lossless PNG in a temporary file: the share sheet takes a file, not pixels. */
 export const CARD_CAPTURE_OPTIONS: CaptureOptions = {
@@ -24,28 +26,6 @@ export type CardCapture =
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-/**
- * The camera permission, with the system settings as the way back from a refusal the system will
- * not ask about again. Expo's hook reads the permission on mount and on an explicit call only, so
- * a grant made in Settings reaches this same mounted screen through a re-read when the app comes
- * back to the foreground; the re-read never prompts. That path is Android's: iOS ends the app when
- * a privacy setting changes, and the relaunch reads the permission on mount.
- */
-export function useCameraAccess() {
-  const [permission, requestPermission, getPermission] = useCameraPermissions();
-
-  useEffect(() => {
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") void getPermission();
-    });
-    return () => subscription.remove();
-  }, [getPermission]);
-
-  const openSettings = useCallback(() => Linking.openSettings(), []);
-
-  return { permission, requestPermission, openSettings };
 }
 
 /**

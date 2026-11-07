@@ -95,6 +95,12 @@ const isCurrent = (startedIn: number): boolean => startedIn === generation;
 /** The generation an authenticated operation starts in; it binds every later step to that session. */
 export const sessionGeneration = (): number => generation;
 
+/**
+ * The current generation for a screen that must leave once the session its data belongs to is gone
+ * (every sign-in and sign-out moves it, and each updates the session store).
+ */
+export const useSessionGeneration = (): number => useStore(sessionStore, () => generation);
+
 /** Whether the session an operation started in is still the one on the device. */
 export const isCurrentGeneration = (startedIn: number): boolean => isCurrent(startedIn);
 
