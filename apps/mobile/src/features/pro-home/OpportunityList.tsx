@@ -20,6 +20,8 @@ import {
 export type OpportunityListProps = {
   /** Scrolls above the cards and every state: the home's greeting and the section title. */
   header?: ReactElement;
+  /** Asked again with the list on a pull: what the header shows (the pro's jobs). */
+  onRefresh?: () => Promise<unknown>;
   testID?: string;
 };
 
@@ -35,7 +37,11 @@ const Separator = () => <View className="h-4" />;
  * (skeletons, empty, error with retry). A virtualized list that loads the next page as the pro
  * nears the end and refreshes on pull, on focus and on foreground; a card opens its detail.
  */
-export function OpportunityList({ header, testID = "opportunity-list" }: OpportunityListProps) {
+export function OpportunityList({
+  header,
+  onRefresh,
+  testID = "opportunity-list",
+}: OpportunityListProps) {
   const { t } = useTranslation();
   const {
     data,
@@ -62,7 +68,7 @@ export function OpportunityList({ header, testID = "opportunity-list" }: Opportu
   // screen the error state says it instead.
   const refresh = async () => {
     setPulling(true);
-    const result = await refetch();
+    const [result] = await Promise.all([refetch(), onRefresh?.()]);
     setPulling(false);
     const failed = result.isError && result.data !== undefined;
     if (failed && !(result.error instanceof SessionExpiredError)) {
