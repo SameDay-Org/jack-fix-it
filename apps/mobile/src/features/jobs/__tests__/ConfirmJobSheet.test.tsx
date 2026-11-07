@@ -1,7 +1,7 @@
 import i18n from "@/i18n";
 
 import type { QueryClient } from "@tanstack/react-query";
-import { act, fireEvent, screen } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import { AccessibilityInfo } from "react-native";
@@ -235,9 +235,12 @@ describe("ConfirmJobSheet (#66)", () => {
     const { client } = await open();
 
     await act(async () => client.setQueryData(customerJobQueryKey(REQUEST_ID, 1), CONFIRMED));
+    // The cache tells its observers on the next tick.
+    await waitFor(() => expect(router.back).toHaveBeenCalledTimes(1));
     await act(async () =>
       client.setQueryData(customerJobQueryKey(REQUEST_ID, 1), { ...CONFIRMED }),
     );
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
 
     expect(router.back).toHaveBeenCalledTimes(1);
     expect(posts()).toHaveLength(0);

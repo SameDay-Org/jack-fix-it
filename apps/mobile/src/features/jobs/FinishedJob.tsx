@@ -1,9 +1,9 @@
+import type { Href } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui";
-import { useGuardedPush } from "@/features/quotes/navigation";
 import { bubbleShadow, continuousCorners } from "@/theme";
 
 import { PhotoHero } from "./AfterPhotos";
@@ -22,8 +22,12 @@ type FinishedJobProps = {
   job: CustomerJob;
   requestId: string;
   text: JobText;
-  /** The time the page is drawn at (the photos' expiry, the timeline's days). */
+  /** The time the words are drawn at (the timeline's days). */
   now: number;
+  /** The time the photos are drawn at: an expired URL shows a frame (`useRefreshExpiredMedia`). */
+  photosNow: number;
+  /** The screen's one guarded push, shared with the dock. */
+  push: (href: Href) => void;
 };
 
 /**
@@ -33,9 +37,8 @@ type FinishedJobProps = {
  * dock under the page (`ConfirmDock`). Without a photo to show (none listed yet), the drawn map
  * with its check on the door stands in.
  */
-export function FinishedJob({ job, requestId, text, now }: FinishedJobProps) {
+export function FinishedJob({ job, requestId, text, now, photosNow, push }: FinishedJobProps) {
   const { t } = useTranslation();
-  const push = useGuardedPush();
   const photos = job.photos.after;
 
   return (
@@ -43,7 +46,7 @@ export function FinishedJob({ job, requestId, text, now }: FinishedJobProps) {
       {photos.length > 0 ? (
         <PhotoHero
           photos={photos}
-          now={now}
+          now={photosNow}
           onOpen={(index) => push(jobPhotosHref(requestId, index))}
         />
       ) : (
@@ -71,6 +74,7 @@ type ConfirmDockProps = {
   requestId: string;
   /** When the job was last answered: the deadline is never worded against an older clock. */
   updatedAt: number;
+  push: (href: Href) => void;
 };
 
 /**
@@ -78,10 +82,9 @@ type ConfirmDockProps = {
  * the confirmation sheet, and under it when the job confirms itself if the customer does not
  * answer, in plain words ("Confirms automatically tomorrow at 3:40 PM if you don't answer").
  */
-export function ConfirmDock({ job, requestId, updatedAt }: ConfirmDockProps) {
+export function ConfirmDock({ job, requestId, updatedAt, push }: ConfirmDockProps) {
   const { t } = useTranslation();
   const { bottom } = useSafeAreaInsets();
-  const push = useGuardedPush();
   const confirmBy = job.confirm_by === null ? null : Date.parse(job.confirm_by);
   const now = useMinuteClock(updatedAt, confirmBy);
   const deadline = deadlineText(t, job.confirm_by, now);

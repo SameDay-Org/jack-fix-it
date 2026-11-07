@@ -1,24 +1,18 @@
-import { queryOptions, useQuery } from "@tanstack/react-query";
-import { router, useLocalSearchParams } from "expo-router";
+import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
+import { router, useIsFocused, useLocalSearchParams, type Href } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  AccessibilityInfo,
-  RefreshControl,
-  ScrollView,
-  Text,
-  useWindowDimensions,
-  View,
-} from "react-native";
+import { RefreshControl, ScrollView, Text, useWindowDimensions, View } from "react-native";
 
 import { apiGet, SessionExpiredError, useSessionGeneration } from "@/api";
 import { Button, Milestones, Screen, showToast, Skeleton, TextSkeleton } from "@/components/ui";
+import { announce } from "@/components/ui/focus";
 import { useRefreshExpiredMedia } from "@/features/opportunities/useOpportunity";
 import { isUuid, useGuardedPush } from "@/features/quotes/navigation";
 import { useSettledError } from "@/features/quotes/useRequestQuotes";
 import { tokens } from "@/theme";
 
-import { isNoJobYet, useCustomerJob } from "./api";
+import { isNoJobYet, useCustomerJob, wasConfirmedHere } from "./api";
 import { ArrivalCode } from "./ArrivalCode";
 import { useMinuteClock } from "./clock";
 import { jobsConfig } from "./config";
@@ -85,7 +79,10 @@ export function JobScreen() {
   });
   const shownError = useSettledError(data, error);
   const [pulling, setPulling] = useState(false);
-  const finished = data !== undefined && jobPhase(data) === "finished";
+  // One guard for the finished job's photos and its dock: a photo tap and Confirm never both open.
+  const push = useGuardedPush();
+  // A 404 over a finished job on screen (the confirmation found it gone): nothing to confirm.
+  const confirmable = data !== undefined && jobPhase(data) === "finished" && !isNoJobYet(error);
 
   // A pull that fails over a job already on screen keeps it and says so.
   const refresh = async () => {
@@ -116,7 +113,13 @@ export function JobScreen() {
         testID="job-scroll"
       >
         {data ? (
-          <JobView job={data} requestId={id} updatedAt={dataUpdatedAt} refetch={refetch} />
+          <JobView
+            job={data}
+            requestId={id}
+            updatedAt={dataUpdatedAt}
+            refetch={refetch}
+            push={push}
+          />
         ) : !valid ? (
           <JobState
             map="bare"
@@ -147,8 +150,8 @@ export function JobScreen() {
           <JobSkeleton />
         )}
       </ScrollView>
-      {data && finished ? (
-        <ConfirmDock job={data} requestId={id} updatedAt={dataUpdatedAt} />
+      {data && confirmable ? (
+        <ConfirmDock job={data} requestId={id} updatedAt={dataUpdatedAt} push={push} />
       ) : null}
     </Screen>
   );
@@ -161,27 +164,44 @@ type JobViewProps = {
   updatedAt: number;
   /** Asks for the job again: an expired photo URL comes back fresh. */
   refetch: () => Promise<unknown>;
+  /** The screen's one guarded push (`useGuardedPush`). */
+  push: (href: Href) => void;
 };
 
 /**
  * The job as its phase draws it: the ongoing job, the finished one to check and confirm, or the
- * confirmed one. A step change while the screen is up is said aloud with its new headline, and a
- * confirmation seen landing here reads "Thanks! Job confirmed".
+ * confirmed one. A step change while the screen is up is said aloud with its new headline, and the
+ * customer's own confirmation landing here reads "Thanks! Job confirmed".
  */
-function JobView({ job, requestId, updatedAt, refetch }: JobViewProps) {
+function JobView({ job, requestId, updatedAt, refetch, push }: JobViewProps) {
   const { t } = useTranslation();
+  const generation = useSessionGeneration();
+  const client = useQueryClient();
   const phase = jobPhase(job);
   const ticking = useMinuteClock(updatedAt, job.eta_at === null ? null : Date.parse(job.eta_at));
-  // The photos' URLs expire: the finished and confirmed pages draw at this clock, which also asks
-  // for the job again when one does.
+  // The photos' URLs expire: they are drawn at this clock, which moves exactly when one does and
+  // asks for the job again then. The words go on with the minute clock.
   const photosNow = useRefreshExpiredMedia(job.photos.after, updatedAt, refetch);
-  const justConfirmed = useJustConfirmed(phase);
+  const now = Math.max(ticking, photosNow);
+  // The thanks is for the customer's own confirmation; the automatic one is just "Job confirmed".
+  const justConfirmed = useJustConfirmed(phase, () =>
+    wasConfirmedHere(client, requestId, generation),
+  );
   const text = jobText(t, job, ticking, jobsConfig.etaCloseMinutes);
   const shown = justConfirmed ? { ...text, headline: t("jobs.headline.thanks") } : text;
   useAnnounceChange(phase, shown.headline);
 
   if (phase === "finished") {
-    return <FinishedJob job={job} requestId={requestId} text={shown} now={photosNow} />;
+    return (
+      <FinishedJob
+        job={job}
+        requestId={requestId}
+        text={shown}
+        now={now}
+        photosNow={photosNow}
+        push={push}
+      />
+    );
   }
   if (phase === "done") {
     return (
@@ -190,7 +210,9 @@ function JobView({ job, requestId, updatedAt, refetch }: JobViewProps) {
         requestId={requestId}
         text={shown}
         justConfirmed={justConfirmed}
-        now={photosNow}
+        now={now}
+        photosNow={photosNow}
+        push={push}
       />
     );
   }
@@ -200,15 +222,16 @@ function JobView({ job, requestId, updatedAt, refetch }: JobViewProps) {
 }
 
 /**
- * True once the job turned from finished to confirmed while the screen was up (the customer's
- * own confirmation, or the automatic one landing under their eyes), and from then on; a job
- * opened confirmed is not "just" confirmed. Kept while rendering (React's pattern for state
+ * True once the job turned from finished to confirmed while the screen was up, and from then on;
+ * a job opened confirmed is not "just" confirmed, nor one the automatic confirmation turned:
+ * `confirmedHere` (asked at the turn only) says whether the customer confirmed it from here. Kept while rendering (React's pattern for state
  * derived from the previous render), so the thanks shows from the first confirmed frame.
  */
-function useJustConfirmed(phase: JobPhase): boolean {
+function useJustConfirmed(phase: JobPhase, confirmedHere: () => boolean): boolean {
   const [seen, setSeen] = useState({ phase, confirmed: false });
   if (seen.phase !== phase) {
-    const confirmed = phase === "done" && (seen.confirmed || seen.phase === "finished");
+    const confirmed =
+      phase === "done" && (seen.confirmed || (seen.phase === "finished" && confirmedHere()));
     setSeen({ phase, confirmed });
     return confirmed;
   }
@@ -305,15 +328,24 @@ function JobContent({ job, requestId, updatedAt, text, now }: JobContentProps) {
 
 /**
  * Says the new headline when the job moves on while the screen is up ("Dan has arrived"), so a
- * screen reader hears the step change; the first answer is the screen's own, not a change.
+ * screen reader hears the step change; the first answer is the screen's own, not a change. A
+ * change under a sheet (the confirmation's own) waits until the job screen is focused again, and
+ * is queued: the sheet closing moves the screen reader's focus, which would cut it short.
  */
 function useAnnounceChange(phase: string, headline: string): void {
+  const focused = useIsFocused();
   const previous = useRef(phase);
+  const pending = useRef<string | null>(null);
   useEffect(() => {
-    if (previous.current === phase) return;
-    previous.current = phase;
-    AccessibilityInfo.announceForAccessibility(headline);
-  }, [headline, phase]);
+    if (previous.current !== phase) {
+      previous.current = phase;
+      pending.current = headline;
+    }
+    if (focused && pending.current !== null) {
+      announce(pending.current);
+      pending.current = null;
+    }
+  }, [focused, headline, phase]);
 }
 
 type JobStateProps = {

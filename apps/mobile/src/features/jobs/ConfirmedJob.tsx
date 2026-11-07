@@ -1,3 +1,4 @@
+import type { Href } from "expo-router";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
@@ -10,7 +11,6 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { ControlIcon } from "@/components/icons";
-import { useGuardedPush } from "@/features/quotes/navigation";
 import { tokens } from "@/theme";
 
 import { PhotoThumbs } from "./AfterPhotos";
@@ -35,7 +35,11 @@ type ConfirmedJobProps = {
   text: JobText;
   /** The confirmation landed while the screen was up: the seal grows in (not under Reduce Motion). */
   justConfirmed: boolean;
+  /** The time the words are drawn at (the timeline's days). */
   now: number;
+  /** The time the photos are drawn at: an expired URL shows a frame. */
+  photosNow: number;
+  push: (href: Href) => void;
 };
 
 /**
@@ -45,9 +49,16 @@ type ConfirmedJobProps = {
  * payment, then the after photos, what was paid and what happened. Nothing is asked of the
  * customer any more, so there is no action.
  */
-export function ConfirmedJob({ job, requestId, text, justConfirmed, now }: ConfirmedJobProps) {
+export function ConfirmedJob({
+  job,
+  requestId,
+  text,
+  justConfirmed,
+  now,
+  photosNow,
+  push,
+}: ConfirmedJobProps) {
   const { t } = useTranslation();
-  const push = useGuardedPush();
 
   return (
     <View className="flex-grow" testID="job-confirmed">
@@ -72,7 +83,7 @@ export function ConfirmedJob({ job, requestId, text, justConfirmed, now }: Confi
         </View>
         <PhotoThumbs
           photos={job.photos.after}
-          now={now}
+          now={photosNow}
           onOpen={(index) => push(jobPhotosHref(requestId, index))}
         />
         <PaidRow job={job} />

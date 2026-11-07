@@ -94,7 +94,15 @@ export function useCustomerJob(requestId: string, { enabled = true, poll = true 
       if (!polling) return false;
       const job = current.state.data;
       const waiting = job ? isMoving(job) : isNoJobYet(current.state.error);
-      return waiting ? jobsConfig.pollMs : false;
+      if (waiting) return jobsConfig.pollMs;
+      // A finished job is asked for again when its automatic confirmation is due, then polled
+      // until the worker confirms it: "any moment now" turns into the confirmed job by itself.
+      if (job?.status !== "completed" || job.confirm_by === null) return false;
+      const left = Date.parse(job.confirm_by) - Date.now();
+      if (!Number.isFinite(left)) return false;
+      return left <= 0
+        ? jobsConfig.pollMs
+        : Math.min(MAX_TIMER_MS, Math.max(jobsConfig.pollMs, left));
     },
   });
   useRefetchOnReturn(query.refetch, live);
@@ -179,6 +187,22 @@ export function useActiveJob(): ActiveJobState {
   return { active, updatedAt: Math.max(listedAt, jobAt), refetch: refresh };
 }
 
+// setTimeout's ceiling (about 24.8 days).
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+/**
+ * A mark that this session confirmed the job from this phone, so the confirmed screen thanks the
+ * customer for their own confirmation only (the automatic one landing under their eyes reads "Job
+ * confirmed"). It lives in the session's cache, keyed by its generation, and goes with it.
+ */
+const confirmedHereKey = (requestId: string, generation: number) =>
+  ["job-confirmed-here", requestId, generation] as const;
+export const wasConfirmedHere = (
+  client: QueryClient,
+  requestId: string,
+  generation: number,
+): boolean => client.getQueryData<boolean>(confirmedHereKey(requestId, generation)) === true;
+
 /**
  * The customer confirms the finished job is done (#66): completed -> confirmed, or the job as it
  * is when it was confirmed already. The answer replaces the job on screen at once (the screen
@@ -197,6 +221,7 @@ export async function confirmJob(
     params: { request_id: requestId },
   });
   if (isCurrentGeneration(generation)) {
+    client.setQueryData(confirmedHereKey(requestId, generation), true);
     client.setQueryData(customerJobQueryKey(requestId, generation), job);
     void client.invalidateQueries({ queryKey: activeJobQueryKey(generation) });
     void invalidateMyRequests(client);

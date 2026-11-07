@@ -10,7 +10,6 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { isCurrentGeneration, useSessionGeneration } from "@/api";
 import { Button, Screen } from "@/components/ui";
@@ -19,7 +18,7 @@ import { useRefreshExpiredMedia } from "@/features/opportunities/useOpportunity"
 import { PhotoImage } from "./AfterPhotos";
 import { customerJobQueryOptions } from "./api";
 
-// The close button and the count sit this far below the status bar, inset from the edges.
+// The close button and the count sit this far below the status bar (the page starts under it).
 const BAR_TOP = 8;
 const NO_PHOTOS: readonly never[] = [];
 
@@ -40,7 +39,6 @@ export function JobPhotosScreen() {
   const { t } = useTranslation();
   const { id, index } = useLocalSearchParams<{ id: string; index?: string }>();
   const generation = useSessionGeneration();
-  const { top } = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const {
     data: job,
@@ -106,7 +104,7 @@ export function JobPhotosScreen() {
       </ScrollView>
       <View
         className="absolute left-4 right-4 flex-row items-center justify-between"
-        style={{ top: top + BAR_TOP }}
+        style={{ top: BAR_TOP }}
       >
         <Button
           glyph="close"

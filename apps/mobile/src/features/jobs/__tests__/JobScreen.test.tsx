@@ -1,5 +1,6 @@
 import i18n from "@/i18n";
 
+import type { QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import { router } from "expo-router";
 import {
@@ -12,7 +13,7 @@ import {
 } from "react-native";
 import { useReducedMotion, withTiming } from "react-native-reanimated";
 
-import { ApiError, apiGet, NetworkError } from "@/api";
+import { ApiError, apiGet, apiPost, NetworkError } from "@/api";
 import { dismissToast } from "@/components/ui/toast";
 import { tokens } from "@/theme";
 
@@ -21,12 +22,14 @@ import {
   fakeClock,
   freezeClock,
   navigation,
+  newQueryClient,
   NOW,
   quote,
   renderWithQuery,
   REQUEST_ID,
 } from "../../quotes/__tests__/helpers";
 import type { CustomerQuoteList } from "../../quotes/useRequestQuotes";
+import { confirmJob } from "../api";
 import { jobsConfig } from "../config";
 import { JobScreen } from "../JobScreen";
 import { formatMoment, type CustomerJob, type JobStatus, type JobTimelineEntry } from "../phase";
@@ -54,6 +57,8 @@ jest.mock("@/api", () => {
   return {
     ...jest.requireActual("../../../api/errors"),
     apiGet: jest.fn(),
+    apiPost: jest.fn(),
+    isCurrentGeneration: (generation: number) => generation === mockSession.generation,
     useSession: () => ({
       status: useSyncExternalStore(subscribe, () => mockSession.status),
       user: null,
@@ -213,6 +218,10 @@ const holdJob = () => {
   api.job = () => held.promise;
   return held;
 };
+const post = apiPost as unknown as jest.MockedFunction<(...args: unknown[]) => Promise<unknown>>;
+/** What was said aloud, in order (queued announcements, `announce`). */
+const announced = () =>
+  jest.mocked(AccessibilityInfo.announceForAccessibilityWithOptions).mock.calls.map(([m]) => m);
 const jobCalls = () => get.mock.calls.filter(([path]) => path === JOB_PATH).length;
 
 /** AppState listeners currently subscribed: a removed one is never called again. */
@@ -290,7 +299,7 @@ beforeEach(() => {
     });
   jest.mocked(router.push).mockClear();
   jest.mocked(router.dismissTo).mockClear();
-  jest.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+  jest.mocked(AccessibilityInfo.announceForAccessibilityWithOptions).mockClear();
   jest.mocked(useReducedMotion).mockReturnValue(false);
 });
 
@@ -626,17 +635,16 @@ describe("JobScreen", () => {
     fakeClock();
     await renderWithQuery(<JobScreen />);
     await loaded("Dan is on the way");
-    expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+    expect(announced()).toEqual([]);
 
     answerJob(ARRIVED);
     await advance(jobsConfig.pollMs);
     expect(await loaded("Dan has arrived")).toBeTruthy();
-    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledTimes(1);
-    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith("Dan has arrived");
+    expect(announced()).toEqual(["Dan has arrived"]);
 
     await advance(jobsConfig.pollMs);
     await waitFor(() => expect(jobCalls()).toBe(3));
-    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledTimes(1);
+    expect(announced()).toEqual(["Dan has arrived"]);
   });
 
   it.each([
@@ -814,18 +822,28 @@ describe("JobScreen, the finished job (#66)", () => {
     expect(screen.getByTestId("job-photo-hero-0-frame")).toBeTruthy();
   });
 
-  it("confirmed while the screen is up: thanks, said aloud, the seal grows and the dock leaves", async () => {
+  /** The customer confirms from the sheet over the screen, which is blurred meanwhile. */
+  async function confirmHere(client: QueryClient) {
+    post.mockResolvedValue(CONFIRMED_JOB);
+    await setFocused(false);
+    await act(async () => {
+      await confirmJob(client, REQUEST_ID, 1);
+    });
+  }
+
+  it("confirmed here: thanks, said once the screen is back in focus, the seal grows, the dock leaves", async () => {
     answerJob(FINISHED_JOB);
-    await renderWithQuery(<JobScreen />);
+    const client = newQueryClient();
+    await renderWithQuery(<JobScreen />, client);
     await headline("Dan marked the job done");
 
-    answerJob(CONFIRMED_JOB);
-    await act(async () => pullToRefresh());
+    await confirmHere(client);
 
     expect(await headline("Thanks! Job confirmed")).toBeTruthy();
-    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith(
-      "Thanks! Job confirmed",
-    );
+    // Under the sheet nothing is said: the sheet closing would cut it short.
+    expect(announced()).toEqual([]);
+    await setFocused(true);
+    expect(announced()).toEqual(["Thanks! Job confirmed"]);
     expect(screen.getByTestId("job-support").props.children).toBe("Payment is released to Dan.");
     expect(screen.queryByTestId("job-confirm-dock")).toBeNull();
     expect(grows()).toHaveLength(1);
@@ -846,14 +864,81 @@ describe("JobScreen, the finished job (#66)", () => {
   it("under Reduce Motion the seal simply stands", async () => {
     jest.mocked(useReducedMotion).mockReturnValue(true);
     answerJob(FINISHED_JOB);
+    const client = newQueryClient();
+    await renderWithQuery(<JobScreen />, client);
+    await headline("Dan marked the job done");
+
+    await confirmHere(client);
+
+    expect(await headline("Thanks! Job confirmed")).toBeTruthy();
+    expect(grows()).toHaveLength(0);
+  });
+
+  it("the automatic confirmation landing under the customer's eyes is just 'Job confirmed'", async () => {
+    answerJob(FINISHED_JOB);
     await renderWithQuery(<JobScreen />);
     await headline("Dan marked the job done");
 
     answerJob(CONFIRMED_JOB);
     await act(async () => pullToRefresh());
 
-    expect(await headline("Thanks! Job confirmed")).toBeTruthy();
+    expect(await headline("Job confirmed")).toBeTruthy();
+    expect(screen.queryByText("Thanks! Job confirmed")).toBeNull();
+    expect(announced()).toEqual(["Job confirmed"]);
     expect(grows()).toHaveLength(0);
+  });
+
+  it("once the confirmation is due it is asked for, then polled until the worker confirms it", async () => {
+    fakeClock();
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+
+    await advance(10 * MINUTE_MS);
+    expect(jobCalls()).toBe(1);
+    // The clock reaches confirm_by (20 min): the words say so and the job is asked for again.
+    for (let minute = 0; minute < 10; minute += 1) await advance(MINUTE_MS);
+    expect(screen.getByTestId("job-confirm-deadline").props.children).toBe(
+      "Confirms automatically any moment now.",
+    );
+    await waitFor(() => expect(jobCalls()).toBe(2));
+
+    answerJob(CONFIRMED_JOB);
+    await advance(jobsConfig.pollMs);
+    await waitFor(() => expect(jobCalls()).toBe(3));
+    expect(await headline("Job confirmed")).toBeTruthy();
+    expect(screen.queryByTestId("job-confirm-dock")).toBeNull();
+
+    await advance(jobsConfig.pollMs * 3);
+    expect(jobCalls()).toBe(3);
+  });
+
+  it("a finished job found gone (404) stays to look at, with nothing left to confirm", async () => {
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+
+    failJob(new ApiError(404, "not_found"));
+    await act(async () => pullToRefresh());
+
+    await waitFor(() => expect(screen.queryByTestId("job-confirm-dock")).toBeNull());
+    expect(screen.getByTestId("job-finished")).toBeTruthy();
+  });
+
+  it("a photo tap and Confirm in a row open only the first", async () => {
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+    navigation.setNavigating(true);
+
+    await act(async () => fireEvent.press(screen.getByTestId("job-photo-hero-0")));
+    await act(async () => fireEvent.press(screen.getByTestId("job-confirm")));
+
+    expect(router.push).toHaveBeenCalledTimes(1);
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/requests/[id]/photos",
+      params: { id: REQUEST_ID, index: "0" },
+    });
   });
 
   it("opened confirmed, it says Job confirmed, calmly: no thanks, no seal growing, no dock", async () => {

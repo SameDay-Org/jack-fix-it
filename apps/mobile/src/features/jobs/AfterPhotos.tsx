@@ -92,8 +92,8 @@ type PhotoHeroProps = {
 
 /**
  * The pro's after photos as the screen's hero, edge to edge: one page per photo, swiped through,
- * with "2 / 3" over the corner when there are several. Each page is a button that opens the photo
- * full screen, named for screen readers ("After photo 2 of 3").
+ * with "2 of 3" over the corner when there are several. Each page is a button that opens the photo
+ * full screen, named for screen readers ("Photo of the finished work, 2 of 3").
  */
 export function PhotoHero({ photos, now, onOpen }: PhotoHeroProps) {
   const { t } = useTranslation();
