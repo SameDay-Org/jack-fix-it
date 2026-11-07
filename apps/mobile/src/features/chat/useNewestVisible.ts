@@ -51,10 +51,12 @@ const newer = (a: ChatMessage, b: ChatMessage): ChatMessage => {
 
 /**
  * Whether the newest message from the other side is on screen with the list at its bottom, behind
- * the rows drawn below it (`below`: pending or failed bubbles, my own messages, a day heading)
- * and the list's own padding
- * under its first row (`inset`), by the seen rules. Unknown
- * until the viewport and every one of those rows has laid out: then false, never a guess.
+ * the rows drawn below it (`below`: pending or failed bubbles, my own messages, a day heading;
+ * often none) and the list's own padding under its first row (`inset`), by the seen rules.
+ * Unknown until the viewport and every row below have laid out: then false, never a guess. It
+ * always needs real pixels of the message on screen: a viewport collapsed to its padding or less
+ * (the keyboard and a tall composer on a small screen) shows nothing, whatever is below it (#74
+ * Vault round 1).
  */
 function shownAtBottom(
   geometry: Geometry,
@@ -63,16 +65,24 @@ function shownAtBottom(
   inset: number,
 ): boolean {
   const { viewport } = geometry;
-  const height = geometry.rows[newestKey];
-  if (viewport === undefined || height === undefined || height <= 0) return false;
+  if (viewport === undefined || viewport <= 0) return false;
   let covered = inset;
   for (const row of below) {
     const rowHeight = geometry.rows[row.key];
     if (rowHeight === undefined) return false;
     covered += rowHeight;
   }
-  const shown = Math.max(0, Math.min(height, viewport - covered));
-  return shown * PERCENT >= height * SEEN_PERCENT || shown * PERCENT >= viewport * SEEN_PERCENT;
+  // What the viewport leaves the message, right above what is drawn below it.
+  const room = viewport - covered;
+  if (room <= 0) return false;
+  const fillsView = (shown: number) => shown * PERCENT >= viewport * SEEN_PERCENT;
+  const height = geometry.rows[newestKey];
+  // Not laid out yet: it either fits the room (all of it shows) or fills it, so a room that is
+  // half the viewport answers both ways; a smaller one waits for the message's height.
+  if (height === undefined) return fillsView(room);
+  if (height <= 0) return false;
+  const shown = Math.min(height, room);
+  return shown * PERCENT >= height * SEEN_PERCENT || fillsView(shown);
 }
 
 /**
@@ -83,9 +93,9 @@ function shownAtBottom(
  * would mark every message of theirs above it, seen or not.
  *
  * - At the bottom (`onScroll` reports the list at its start), the newest message from the other
- *   side (its first such row in `rows`) is on screen when nothing is drawn below it, or when the
- *   rows below it (local bubbles, which the list puts first, and my own messages) leave it room
- *   by the seen rules, as
+ *   side (its first such row in `rows`) is on screen when the list's padding and the rows below
+ *   it, if any (local bubbles, which the list puts first, and my own messages), leave it room in
+ *   the measured viewport by the seen rules, as
  *   the rows' and the list's layouts measure (`onRowLayout`, `onLayout`). The list's viewability
  *   cannot say so on its own: after a message lands at the bottom it reports nothing until the
  *   next scroll, and a chat that fits on screen never scrolls; a layout comes with every new or
@@ -185,6 +195,7 @@ export function useNewestVisible(
   const shown =
     bottom &&
     newestStored !== undefined &&
-    (below.length === 0 || shownAtBottom(geometry, below, newestRow?.key ?? "", inset));
+    newestRow !== undefined &&
+    shownAtBottom(geometry, below, newestRow.key, inset);
   return { newest: shown ? newestStored : reported, pairs, onScroll, onLayout, onRowLayout };
 }

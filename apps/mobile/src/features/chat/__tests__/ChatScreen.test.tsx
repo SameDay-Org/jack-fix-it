@@ -1461,6 +1461,14 @@ describe("round 1 (#74): the session and the viewport bound what the chat does",
     const marksOf = (stored: ChatMessage) =>
       postCalls(READ_PATH).filter(([, body]) => body.up_to === stored.id);
 
+    /** The list's viewport lays out at 400 dp: seen at the bottom needs it measured. */
+    const measureList = () =>
+      act(async () =>
+        fireEvent(screen.getByTestId("chat-list"), "layout", {
+          nativeEvent: { layout: { x: 0, y: 0, width: 320, height: 400 } },
+        }),
+      );
+
     it("does not mark a newly polled message read while older history stays visible", async () => {
       const held = await openHistory();
       await scrollList(1200);
@@ -1498,6 +1506,7 @@ describe("round 1 (#74): the session and the viewport bound what the chat does",
       // After a message lands at the bottom the list reports no visibility until the next
       // scroll, and a short chat never scrolls: the bottom alone says the message is on screen.
       const held = await openHistory();
+      await measureList();
       await see(...held.slice(0, 5));
       const unread = message(901, { created_at: iso(MINUTE_MS) });
       await poll(unread, held);
@@ -1510,6 +1519,7 @@ describe("round 1 (#74): the session and the viewport bound what the chat does",
       mockApi.messages = () => Promise.resolve(page([first]));
       await renderChat();
       await screen.findByTestId("chat-list");
+      await measureList();
       const unread = message(901, { created_at: iso(MINUTE_MS) });
       await act(async () =>
         client.setQueryData(["chat", JOB_ID, 1], {
@@ -1692,6 +1702,7 @@ describe("round 2 (#74): local bubbles below the newest message", () => {
     mockApi.messages = () => Promise.resolve(page(previous));
     await renderChat();
     await screen.findByTestId("chat-list");
+    await layOut({});
     const unread = message(904, { created_at: iso(MINUTE_MS) });
 
     await receive(unread, previous);

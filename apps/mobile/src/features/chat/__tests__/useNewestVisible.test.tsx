@@ -67,10 +67,21 @@ const scrollTo = (rendered: Rendered, y: number) =>
     } as NativeSyntheticEvent<NativeScrollEvent>),
   );
 
+/** The list's viewport lays out at `height` dp (its rows have not yet). */
+const measure = (rendered: Rendered, height: number) =>
+  act(async () =>
+    rendered.result.current.onLayout({
+      nativeEvent: { layout: { x: 0, y: 0, width: 320, height } },
+    } as LayoutChangeEvent),
+  );
+
 describe("useNewestVisible (#74 round 1)", () => {
   it("at the bottom, the newest stored message is the one on screen", async () => {
     const rendered = await renderVisible({ generation: 1, newestStored: message(5).id });
+    // The viewport not measured yet: unknown, so not seen (#74 Vault round 1).
+    expect(rendered.result.current.newest).toBeUndefined();
 
+    await measure(rendered, 400);
     expect(rendered.result.current.newest).toBe(message(5).id);
   });
 
@@ -117,6 +128,7 @@ describe("useNewestVisible (#74 round 1)", () => {
 
   it("back at the bottom, the newest stored message again", async () => {
     const rendered = await renderVisible({ generation: 1, newestStored: message(5).id });
+    await measure(rendered, 400);
     await scrollTo(rendered, 300);
     await report(rendered, [message(2)]);
     await scrollTo(rendered, 0);
@@ -243,9 +255,12 @@ describe("useNewestVisible (#74 round 2): local bubbles below the newest message
     expect(rendered.result.current.newest).toBe(newest.id);
   });
 
-  it("with no local bubble the newest message is seen at once, before any layout", async () => {
+  it("with no local bubble the newest message is seen once the list measures, before its row", async () => {
     const rendered = await renderVisible({ generation: 1, newestStored: newest.id });
+    expect(rendered.result.current.newest).toBeUndefined();
 
+    // The whole room is free: the message fits it or fills it, whatever its height.
+    await measure(rendered, 400);
     expect(rendered.result.current.newest).toBe(newest.id);
   });
 
@@ -306,5 +321,66 @@ describe("useNewestVisible (#74 round 2): local bubbles below the newest message
 
     await layOut(rendered, 400, { [heading.key]: 20 });
     expect(rendered.result.current.newest).toBe(newest.id);
+  });
+});
+
+describe("useNewestVisible (#74 Vault round 1): seen needs pixels on screen", () => {
+  const newest = message(5);
+
+  it.each([0, 8, 16])(
+    "a %i dp viewport, no more than the list's padding, shows nothing until it grows",
+    async (viewport) => {
+      const rendered = await renderVisible({ generation: 1, newestStored: newest.id });
+      await measure(rendered, viewport);
+      expect(rendered.result.current.newest).toBeUndefined();
+      await layOut(rendered, viewport, { [newest.id]: 60 });
+      expect(rendered.result.current.newest).toBeUndefined();
+
+      // The keyboard goes down: the list grows and the reply shows.
+      await measure(rendered, 400);
+      expect(rendered.result.current.newest).toBe(newest.id);
+
+      // The keyboard and a tall composer again: hidden, nothing new is seen.
+      await measure(rendered, viewport);
+      expect(rendered.result.current.newest).toBeUndefined();
+    },
+  );
+
+  it("a zero viewport shows nothing, even with the rows below it measured", async () => {
+    const rendered = await renderVisible({
+      generation: 1,
+      newestStored: newest.id,
+      below: [local(1)],
+    });
+    await layOut(rendered, 0, { [local(1).key]: 80, [newest.id]: 60 });
+    expect(rendered.result.current.newest).toBeUndefined();
+
+    await measure(rendered, 400);
+    expect(rendered.result.current.newest).toBe(newest.id);
+  });
+
+  it("a small room waits for the message's height, then applies the seen rules", async () => {
+    const rendered = await renderVisible({
+      generation: 1,
+      newestStored: newest.id,
+      below: [local(1)],
+    });
+    // 100 - 16 - 60 leaves 24 dp: under half the list, so it depends on the message.
+    await layOut(rendered, 100, { [local(1).key]: 60 });
+    expect(rendered.result.current.newest).toBeUndefined();
+
+    await layOut(rendered, 100, { [newest.id]: 20 });
+    expect(rendered.result.current.newest).toBe(newest.id);
+
+    // 24 of 60 dp, and under half the list: not seen.
+    await layOut(rendered, 100, { [newest.id]: 60 });
+    expect(rendered.result.current.newest).toBeUndefined();
+  });
+
+  it("a message that lays out with no height is never seen at the bottom", async () => {
+    const rendered = await renderVisible({ generation: 1, newestStored: newest.id });
+    await layOut(rendered, 400, { [newest.id]: 0 });
+
+    expect(rendered.result.current.newest).toBeUndefined();
   });
 });
