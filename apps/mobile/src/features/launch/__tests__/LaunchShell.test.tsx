@@ -12,7 +12,7 @@ import { tokens } from "@/theme";
 import { user } from "../../../api/__tests__/helpers";
 import AppLayout from "../../../app/(app)/_layout";
 import AuthLayout, { unstable_settings } from "../../../app/(auth)/_layout";
-import { METRICS, SIGNED_OUT } from "../../auth/__tests__/helpers";
+import { METRICS, SIGNED_OUT, WithQuery } from "../../auth/__tests__/helpers";
 import { resetHeroMeasurementsForTests } from "../BrandHero";
 import { LaunchShell } from "../LaunchShell";
 import { resetSplashForTests } from "../splash";
@@ -60,8 +60,13 @@ jest.mock(
 const reduceMotion = () => jest.spyOn(Reanimated, "useReducedMotion");
 
 const routes = {
+  // The app's root provides a Query cache; the signed-in shell opens tapped pushes with it (#323).
   _layout: () =>
-    createElement(SafeAreaProvider, { initialMetrics: METRICS }, createElement(LaunchShell)),
+    createElement(
+      SafeAreaProvider,
+      { initialMetrics: METRICS },
+      createElement(WithQuery, null, createElement(LaunchShell)),
+    ),
   "(auth)/_layout": { default: AuthLayout, unstable_settings },
   "(auth)/welcome": () => <Text accessibilityRole="header">welcome stub</Text>,
   "(app)/_layout": AppLayout,

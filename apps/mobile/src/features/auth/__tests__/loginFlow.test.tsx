@@ -20,7 +20,7 @@ import AppLayout from "../../../app/(app)/_layout";
 import AuthLayout, { unstable_settings } from "../../../app/(auth)/_layout";
 import { LoginScreen } from "../LoginScreen";
 import { SessionGate } from "../SessionGate";
-import { METRICS, SIGNED_OUT } from "./helpers";
+import { METRICS, SIGNED_OUT, WithQuery } from "./helpers";
 
 jest.mock(
   "../../../api/config",
@@ -42,8 +42,13 @@ jest.mock(
 
 // The real gate and the real login screen inside the real route groups; the other screens are stubs.
 const routes = {
+  // The app's root provides a Query cache; the signed-in shell opens tapped pushes with it (#323).
   _layout: () =>
-    createElement(SafeAreaProvider, { initialMetrics: METRICS }, createElement(SessionGate)),
+    createElement(
+      SafeAreaProvider,
+      { initialMetrics: METRICS },
+      createElement(WithQuery, null, createElement(SessionGate)),
+    ),
   "(auth)/_layout": { default: AuthLayout, unstable_settings },
   "(auth)/welcome": () => <Text>welcome stub</Text>,
   "(auth)/login": LoginScreen,
