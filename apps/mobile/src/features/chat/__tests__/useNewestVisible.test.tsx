@@ -1,10 +1,11 @@
 import { act, renderHook } from "@testing-library/react-native";
-import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
+import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 
 import type { ChatMessage, Row } from "../thread";
 import { useNewestVisible } from "../useNewestVisible";
 
 const NOW = Date.UTC(2026, 10, 7, 15, 0, 0);
+const INSET = 16;
 const MINUTE_MS = 60_000;
 
 const message = (n: number): ChatMessage => ({
@@ -25,13 +26,20 @@ const row = (stored: ChatMessage): Row => ({
   message: stored,
 });
 
-type Props = { generation: number; newestStored: string | undefined };
+/** The thread's rows: `below` (local bubbles, a heading) first, as the list draws them, then the newest stored message. */
+type Props = { generation: number; newestStored: string | undefined; below?: Row[] };
+
+const rowsOf = ({ newestStored, below = [] }: Props): Row[] => {
+  const newest = newestStored
+    ? [message(0)].map((stored) => row({ ...stored, id: newestStored }))
+    : [];
+  return [...below, ...newest];
+};
 
 async function renderVisible(initial: Props) {
-  return renderHook(
-    ({ generation, newestStored }: Props) => useNewestVisible(generation, newestStored),
-    { initialProps: initial },
-  );
+  return renderHook((props: Props) => useNewestVisible(props.generation, rowsOf(props), INSET), {
+    initialProps: initial,
+  });
 }
 
 type Rendered = Awaited<ReturnType<typeof renderVisible>>;
@@ -138,5 +146,118 @@ describe("useNewestVisible (#74 round 1)", () => {
     await rendered.rerender({ generation: 2, newestStored: message(1).id });
 
     expect(rendered.result.current.pairs).toBe(first);
+  });
+});
+
+/** A local bubble (pending or failed) as the list draws it, below every stored message. */
+const local = (n: number): Row => ({
+  kind: "message",
+  key: `local-1-${n}`,
+  side: "mine",
+  at: NOW,
+  endsRun: true,
+  startsRun: true,
+  pending: { localId: `1-${n}`, body: `Local ${n}`, at: NOW, state: "failed" },
+});
+
+/** The list and its rows lay out: the viewport's height, then each row's, by key. */
+const layOut = (rendered: Rendered, viewport: number, heights: Record<string, number>) =>
+  act(async () => {
+    rendered.result.current.onLayout({
+      nativeEvent: { layout: { x: 0, y: 0, width: 320, height: viewport } },
+    } as LayoutChangeEvent);
+    for (const [key, height] of Object.entries(heights)) {
+      rendered.result.current.onRowLayout(key)({
+        nativeEvent: { layout: { x: 0, y: 0, width: 320, height } },
+      } as LayoutChangeEvent);
+    }
+  });
+
+describe("useNewestVisible (#74 round 2): local bubbles below the newest message", () => {
+  const newest = message(5);
+
+  it("a failed bubble taller than the list covers it: unseen at the bottom until the list reports it", async () => {
+    const rendered = await renderVisible({
+      generation: 1,
+      newestStored: newest.id,
+      below: [local(1)],
+    });
+    await layOut(rendered, 400, { [local(1).key]: 600, [newest.id]: 60 });
+    expect(rendered.result.current.newest).toBeUndefined();
+
+    await report(rendered, [newest]);
+    expect(rendered.result.current.newest).toBe(newest.id);
+  });
+
+  it("several short failed bubbles leave it room: seen from the layouts, without a scroll", async () => {
+    const below = [local(1), local(2), local(3)];
+    const rendered = await renderVisible({ generation: 1, newestStored: newest.id, below });
+    // Before the rows lay out the answer is unknown, so not seen.
+    expect(rendered.result.current.newest).toBeUndefined();
+
+    await layOut(rendered, 400, {
+      [local(1).key]: 60,
+      [local(2).key]: 60,
+      [local(3).key]: 60,
+      [newest.id]: 60,
+    });
+    expect(rendered.result.current.newest).toBe(newest.id);
+  });
+
+  it("follows the layouts: a bubble that grows to cover it takes the shortcut away", async () => {
+    const rendered = await renderVisible({
+      generation: 1,
+      newestStored: newest.id,
+      below: [local(1)],
+    });
+    await layOut(rendered, 400, { [local(1).key]: 80, [newest.id]: 60 });
+    expect(rendered.result.current.newest).toBe(newest.id);
+
+    await layOut(rendered, 400, { [local(1).key]: 390 });
+    expect(rendered.result.current.newest).toBeUndefined();
+  });
+
+  it("counts the list's padding under the first row", async () => {
+    // 400 - 16 - 304 leaves 80 of a 160 dp message: exactly half, seen. 4 dp more covered: not.
+    const rendered = await renderVisible({
+      generation: 1,
+      newestStored: newest.id,
+      below: [local(1)],
+    });
+    await layOut(rendered, 400, { [local(1).key]: 304, [newest.id]: 160 });
+    expect(rendered.result.current.newest).toBe(newest.id);
+
+    await layOut(rendered, 400, { [local(1).key]: 308 });
+    expect(rendered.result.current.newest).toBeUndefined();
+  });
+
+  it("a message taller than the list is seen once it fills half of it", async () => {
+    const rendered = await renderVisible({
+      generation: 1,
+      newestStored: newest.id,
+      below: [local(1)],
+    });
+    // 400 - 16 - 100 = 284 of a 900 dp message on screen: over half the list.
+    await layOut(rendered, 400, { [local(1).key]: 100, [newest.id]: 900 });
+
+    expect(rendered.result.current.newest).toBe(newest.id);
+  });
+
+  it("with no local bubble the newest message is seen at once, before any layout", async () => {
+    const rendered = await renderVisible({ generation: 1, newestStored: newest.id });
+
+    expect(rendered.result.current.newest).toBe(newest.id);
+  });
+
+  it("up in the history the layouts never certify it: only the reports count", async () => {
+    const rendered = await renderVisible({
+      generation: 1,
+      newestStored: newest.id,
+      below: [local(1)],
+    });
+    await layOut(rendered, 400, { [local(1).key]: 60, [newest.id]: 60 });
+    await scrollTo(rendered, 300);
+
+    expect(rendered.result.current.newest).toBeUndefined();
   });
 });

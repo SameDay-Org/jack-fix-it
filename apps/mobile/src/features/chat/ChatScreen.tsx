@@ -32,6 +32,9 @@ import { useSendQueue, type SendOutcome } from "./useSendQueue";
 // The list keeps what is on screen in place when a message lands below it, unless the reader is
 // this close to the newest one: then it follows down to it.
 const FOLLOW_NEWEST_WITHIN = 48;
+// The list's padding under its first row, in dp (its `py-4`): the newest-visible check counts it
+// (#74 round 2).
+const LIST_EDGE = 16;
 const MAINTAIN_POSITION = { minIndexForVisible: 0, autoscrollToTopThreshold: FOLLOW_NEWEST_WITHIN };
 
 /**
@@ -83,14 +86,14 @@ export function ChatScreen() {
     onClosed: () => setClosedBySend(true),
     onDone,
   });
-  const visible = useNewestVisible(generation, thread?.messages[0]?.id);
-  useReadMarker(id, generation, thread, visible.newest, peer.onUnread);
-
-  const names = peerNames(t, peer);
   const rows = useMemo(
     () => (thread ? threadRows(thread.messages, queue.pending) : []),
     [queue.pending, thread],
   );
+  const visible = useNewestVisible(generation, rows, LIST_EDGE);
+  useReadMarker(id, generation, thread, visible.newest, peer.onUnread);
+
+  const names = peerNames(t, peer);
   const sending = queue.pending.some((item) => item.state === "sending");
 
   const send = (body: string) => {
@@ -120,14 +123,17 @@ export function ChatScreen() {
           inverted
           data={rows}
           keyExtractor={(row) => row.key}
+          // Each row reports its height: whether local bubbles cover the newest message (#74 r2).
           renderItem={({ item }) => (
-            <MessageRow
-              row={item}
-              peerName={names.lead}
-              now={dataUpdatedAt}
-              closed={closed}
-              onRetry={queue.retry}
-            />
+            <View onLayout={visible.onRowLayout(item.key)} testID={`chat-row-${item.key}`}>
+              <MessageRow
+                row={item}
+                peerName={names.lead}
+                now={dataUpdatedAt}
+                closed={closed}
+                onRetry={queue.retry}
+              />
+            </View>
           )}
           // Pages load on their own only from rest: after a failure the footer's button asks again,
           // or the footer's changing height would ask again and again.
@@ -138,6 +144,7 @@ export function ChatScreen() {
           maintainVisibleContentPosition={MAINTAIN_POSITION}
           viewabilityConfigCallbackPairs={visible.pairs}
           onScroll={visible.onScroll}
+          onLayout={visible.onLayout}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
           contentContainerClassName="px-4 py-4"

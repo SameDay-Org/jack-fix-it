@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   FlatListProps,
+  LayoutChangeEvent,
   ListViewToken,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -10,10 +11,16 @@ import type { ChatMessage, Row } from "./thread";
 
 export type VisibilityPairs = NonNullable<FlatListProps<Row>["viewabilityConfigCallbackPairs"]>;
 export type ScrollHandler = (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+export type LayoutHandler = (event: LayoutChangeEvent) => void;
 
 // A message counts as seen once half of it is on screen, or, when it is taller than the list
 // leaves room for, once it fills half the list: either rule, whichever it meets.
-const SEEN_RULES = [{ itemVisiblePercentThreshold: 50 }, { viewAreaCoveragePercentThreshold: 50 }];
+const SEEN_PERCENT = 50;
+const SEEN_RULES = [
+  { itemVisiblePercentThreshold: SEEN_PERCENT },
+  { viewAreaCoveragePercentThreshold: SEEN_PERCENT },
+];
+const PERCENT = 100;
 
 // The list sits at the newest message while it is scrolled no further than this from its start
 // (the bottom, the list being upside down).
@@ -21,6 +28,8 @@ const AT_NEWEST_WITHIN = 1;
 
 type Seen = { generation: number; byRule: readonly ChatMessage[][] };
 type AtNewest = { generation: number; at: boolean };
+/** Heights in dp: the list's viewport, and each row by key, as they last laid out. */
+type Geometry = { viewport: number | undefined; rows: Readonly<Record<string, number>> };
 
 const storedMessages = (tokens: ListViewToken[]): ChatMessage[] =>
   tokens.flatMap(({ item, isViewable }) => {
@@ -37,25 +46,63 @@ const newer = (a: ChatMessage, b: ChatMessage): ChatMessage => {
 };
 
 /**
- * The newest stored message on screen in the chat's list (#74 round 1): what the read marker may
- * mark up to. Two sources, as the list can tell:
+ * Whether the newest stored message is on screen with the list at its bottom, behind the rows
+ * drawn below it (`below`: pending or failed bubbles, a day heading) and the list's own padding
+ * under its first row (`inset`), by the seen rules. Unknown
+ * until the viewport and every one of those rows has laid out: then false, never a guess.
+ */
+function shownAtBottom(
+  geometry: Geometry,
+  below: readonly Row[],
+  newestKey: string,
+  inset: number,
+): boolean {
+  const { viewport } = geometry;
+  const height = geometry.rows[newestKey];
+  if (viewport === undefined || height === undefined || height <= 0) return false;
+  let covered = inset;
+  for (const row of below) {
+    const rowHeight = geometry.rows[row.key];
+    if (rowHeight === undefined) return false;
+    covered += rowHeight;
+  }
+  const shown = Math.max(0, Math.min(height, viewport - covered));
+  return shown * PERCENT >= height * SEEN_PERCENT || shown * PERCENT >= viewport * SEEN_PERCENT;
+}
+
+/**
+ * The newest stored message on screen in the chat's list (#74 rounds 1 and 2): what the read
+ * marker may mark up to. Two sources, as the list can tell:
  *
  * - At the bottom (`onScroll` reports the list at its start), the newest message of the thread
- *   (`newestStored`) is on screen: the list opens there and follows a new message down while it
- *   sits there. The list's viewability cannot say so on its own: after a message lands at the
- *   bottom it reports nothing until the next scroll, and a chat that fits on screen never scrolls.
- * - Up in the history, what the list's viewability reports (`pairs`, given to the FlatList once:
- *   it refuses pairs that change). A local bubble or a day heading never counts.
+ *   (the first stored row of `rows`) is on screen when nothing is drawn below it, or when the
+ *   rows below it (local bubbles, which the list puts first) leave it room by the seen rules, as
+ *   the rows' and the list's layouts measure (`onRowLayout`, `onLayout`). The list's viewability
+ *   cannot say so on its own: after a message lands at the bottom it reports nothing until the
+ *   next scroll, and a chat that fits on screen never scrolls; a layout comes with every new or
+ *   resized row, so the answer follows without a scroll. A tall failed bubble that covers the
+ *   message keeps it unseen until the list reports it.
+ * - Otherwise, what the list's viewability reports (`pairs`, given to the FlatList once: it
+ *   refuses pairs that change). A local bubble or a day heading never counts.
  *
  * What the list reported under another session generation counts for nothing: a new session
  * starts at the bottom of its own list and sees only what that list reports.
  */
 export function useNewestVisible(
   generation: number,
-  newestStored: string | undefined,
-): { newest: string | undefined; pairs: VisibilityPairs; onScroll: ScrollHandler } {
+  rows: readonly Row[],
+  /** The list's padding under its first row, in dp. */
+  inset = 0,
+): {
+  newest: string | undefined;
+  pairs: VisibilityPairs;
+  onScroll: ScrollHandler;
+  onLayout: LayoutHandler;
+  onRowLayout: (key: string) => LayoutHandler;
+} {
   const [seen, setSeen] = useState<Seen>({ generation, byRule: SEEN_RULES.map(() => []) });
   const [atNewest, setAtNewest] = useState<AtNewest>({ generation, at: true });
+  const [geometry, setGeometry] = useState<Geometry>({ viewport: undefined, rows: {} });
   const current = useRef(generation);
   useEffect(() => {
     current.current = generation;
@@ -90,6 +137,26 @@ export function useNewestVisible(
     );
   }, []);
 
+  // A new state only when a height changes: a row lays out again on every list render.
+  const onLayout = useCallback<LayoutHandler>(({ nativeEvent }) => {
+    const viewport = nativeEvent.layout.height;
+    setGeometry((previous) =>
+      previous.viewport === viewport ? previous : { ...previous, viewport },
+    );
+  }, []);
+  const onRowLayout = useCallback(
+    (key: string): LayoutHandler =>
+      ({ nativeEvent }) => {
+        const height = nativeEvent.layout.height;
+        setGeometry((previous) =>
+          previous.rows[key] === height
+            ? previous
+            : { ...previous, rows: { ...previous.rows, [key]: height } },
+        );
+      },
+    [],
+  );
+
   const reported =
     seen.generation === generation
       ? seen.byRule
@@ -100,5 +167,13 @@ export function useNewestVisible(
           )?.id
       : undefined;
   const bottom = atNewest.generation === generation ? atNewest.at : true;
-  return { newest: bottom ? (newestStored ?? reported) : reported, pairs, onScroll };
+  const newestIndex = rows.findIndex((row) => row.kind === "message" && row.message);
+  const newestRow = rows[newestIndex];
+  const newestStored = newestRow?.kind === "message" ? newestRow.message?.id : undefined;
+  const below = newestIndex > 0 ? rows.slice(0, newestIndex) : [];
+  const shown =
+    bottom &&
+    newestStored !== undefined &&
+    (below.length === 0 || shownAtBottom(geometry, below, newestRow?.key ?? "", inset));
+  return { newest: shown ? newestStored : reported, pairs, onScroll, onLayout, onRowLayout };
 }

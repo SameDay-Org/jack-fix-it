@@ -32,7 +32,7 @@ import type { CustomerJob, JobStatus } from "../../jobs/phase";
 import { freezeClock, newQueryClient, NOW } from "../../quotes/__tests__/helpers";
 import { ChatScreen } from "../ChatScreen";
 import { MESSAGE_COUNTER_FROM, MESSAGE_MAX_LENGTH } from "../config";
-import type { ChatMessage, ChatPage } from "../thread";
+import type { ChatMessage, ChatPage, Row } from "../thread";
 
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../../api/errors"),
@@ -1533,5 +1533,169 @@ describe("round 1 (#74): the session and the viewport bound what the chat does",
 
       expect(postCalls(READ_PATH)).toHaveLength(0);
     });
+  });
+});
+
+describe("round 2 (#74): local bubbles below the newest message", () => {
+  type Token = { item: Row; key: string; index: number; isViewable: boolean };
+  type Pairs = {
+    onViewableItemsChanged: (info: { viewableItems: Token[]; changed: Token[] }) => void;
+  }[];
+
+  const list = () => screen.getByTestId("chat-list");
+  const scrollList = (y: number, height: number) =>
+    act(async () =>
+      fireEvent.scroll(list(), {
+        nativeEvent: {
+          contentOffset: { x: 0, y },
+          contentSize: { width: 320, height },
+          layoutMeasurement: { width: 320, height: 400 },
+        },
+      }),
+    );
+  /** What the list's viewability reports on screen, through every rule. */
+  const reportShown = (shown: Token[]) =>
+    act(async () => {
+      for (const pair of list().props.viewabilityConfigCallbackPairs as Pairs) {
+        pair.onViewableItemsChanged({ viewableItems: shown, changed: shown });
+      }
+    });
+  const layout = (height: number) => ({
+    nativeEvent: { layout: { x: 0, y: 0, width: 320, height } },
+  });
+  /** The list lays out at 400 dp, then each row at its height, by row key. */
+  const layOut = (heights: Record<string, number>) =>
+    act(async () => {
+      fireEvent(list(), "layout", layout(400));
+      for (const [key, height] of Object.entries(heights)) {
+        fireEvent(screen.getByTestId(`chat-row-${key}`), "layout", layout(height));
+      }
+    });
+  const readsUpTo = (id: string) => postCalls(READ_PATH).filter(([, body]) => body.up_to === id);
+  /** The other side's reply arrives through the poll, newest first. */
+  const receive = async (reply: ChatMessage, previous: ChatMessage[]) => {
+    await act(async () =>
+      client.setQueryData(["chat", JOB_ID, 1], {
+        messages: [reply, ...previous],
+        olderCursor: null,
+        unreadCount: 1,
+      }),
+    );
+    await screen.findByTestId(`chat-message-${reply.id}`);
+    await flush();
+  };
+
+  // The Gatekeeper's round-2 probe, as it reproduced the boundary.
+  it("does not mark a received message hidden above a tall failed bubble at offset zero", async () => {
+    const previous = [message(1)];
+    mockApi.messages = () => Promise.resolve(page(previous));
+    mockApi.send = () => Promise.reject(new NetworkError(false));
+    await renderChat();
+    await screen.findByTestId("chat-input");
+    const pendingBody = Array.from({ length: 24 }, (_, i) => `Pending line ${i + 1}`).join("\n");
+    await typeAndSend(pendingBody);
+    await screen.findByText(FAILED);
+
+    // A 24-line failed bubble (>576 dp) fills this 400 dp viewport. threadRows puts it
+    // before every stored message in the inverted list, including a later poll's reply.
+    await scrollList(0, 900);
+    const localRow: Token = {
+      item: {
+        kind: "message",
+        key: "local-1-1",
+        side: "mine",
+        at: NOW,
+        endsRun: true,
+        startsRun: true,
+        pending: { localId: "1-1", body: pendingBody, at: NOW, state: "failed" },
+      },
+      key: "local-1-1",
+      index: 0,
+      isViewable: true,
+    };
+    await reportShown([localRow]);
+    expect(postCalls(READ_PATH)).toHaveLength(0);
+    const unread = message(901, { created_at: iso(MINUTE_MS) });
+    await receive(unread, previous);
+    // Even a fresh native visibility report still shows only the failed local row.
+    await reportShown([localRow]);
+    const beforeVisible = readsUpTo(unread.id).length;
+
+    await scrollList(620, 1000);
+    await reportShown([
+      {
+        item: {
+          kind: "message",
+          key: unread.id,
+          side: "theirs",
+          at: Date.parse(unread.created_at),
+          endsRun: true,
+          startsRun: true,
+          message: unread,
+        },
+        key: unread.id,
+        index: 1,
+        isViewable: true,
+      },
+    ]);
+    await flush();
+    const afterVisible = readsUpTo(unread.id).length;
+    expect({ beforeVisible, afterVisible }).toEqual({ beforeVisible: 0, afterVisible: 1 });
+  });
+
+  it("measured: a tall failed bubble keeps the reply unread at the bottom, and its unread count", async () => {
+    const previous = [message(1)];
+    mockApi.messages = () => Promise.resolve(page(previous));
+    mockApi.send = () => Promise.reject(new NetworkError(false));
+    await renderChat();
+    await screen.findByTestId("chat-input");
+    await typeAndSend("A message that will not go");
+    await screen.findByText(FAILED);
+    const unread = message(902, { created_at: iso(MINUTE_MS) });
+    await receive(unread, previous);
+
+    await layOut({ "local-1-1": 600, [unread.id]: 60, [previous[0]!.id]: 60 });
+    await flush();
+
+    expect(readsUpTo(unread.id)).toHaveLength(0);
+    expect(client.getQueryData<{ unreadCount: number }>(["chat", JOB_ID, 1])?.unreadCount).toBe(1);
+  });
+
+  it("several short failed bubbles leave the reply on screen: marked from the layouts, no scroll", async () => {
+    const previous = [message(1)];
+    mockApi.messages = () => Promise.resolve(page(previous));
+    mockApi.send = () => Promise.reject(new NetworkError(false));
+    await renderChat();
+    await screen.findByTestId("chat-input");
+    for (const text of ["First that fails", "Second that fails", "Third that fails"]) {
+      await typeAndSend(text);
+    }
+    await waitFor(() => expect(screen.getAllByText(FAILED)).toHaveLength(3));
+    const unread = message(903, { created_at: iso(MINUTE_MS) });
+    await receive(unread, previous);
+    expect(readsUpTo(unread.id)).toHaveLength(0);
+
+    await layOut({
+      "local-1-1": 60,
+      "local-1-2": 60,
+      "local-1-3": 60,
+      [unread.id]: 60,
+      [previous[0]!.id]: 60,
+    });
+    await flush();
+
+    expect(readsUpTo(unread.id)).toHaveLength(1);
+  });
+
+  it("with no local bubble a reply at the bottom is still marked at once", async () => {
+    const previous = [message(1)];
+    mockApi.messages = () => Promise.resolve(page(previous));
+    await renderChat();
+    await screen.findByTestId("chat-list");
+    const unread = message(904, { created_at: iso(MINUTE_MS) });
+
+    await receive(unread, previous);
+
+    expect(readsUpTo(unread.id)).toHaveLength(1);
   });
 });
