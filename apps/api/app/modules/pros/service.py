@@ -130,6 +130,10 @@ class ProService:
         """The pro_profiles.id of a user, or None when the user has no pro profile."""
         return await self._profiles.get_id_by_user_id(user_id)
 
+    async def get_user_id_for_profile(self, pro_id: uuid.UUID) -> uuid.UUID | None:
+        """The user behind a pro_profiles.id, or None for an unknown profile."""
+        return await self._profiles.get_user_id(pro_id)
+
     async def lock_payout_account(self, user_id: uuid.UUID) -> tuple[bool, PayoutAccount]:
         """(created, account): the user's payout account (#39), its profile row locked FOR
         UPDATE until the transaction ends and inserted first when missing, empty and pending,

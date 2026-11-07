@@ -49,6 +49,7 @@ CUSTOMER_KEYS = {
     "amount_cents",
     "tax_cents",
     "customer_total_cents",
+    "unread_messages",
 }
 PRO_KEYS = {
     "id",
@@ -65,6 +66,7 @@ PRO_KEYS = {
     "completed_at",
     "photos",
     "pro_payout_cents",
+    "unread_messages",
 }
 BASE = "/v1/pros/me/jobs"
 

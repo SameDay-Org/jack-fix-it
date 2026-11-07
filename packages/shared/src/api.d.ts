@@ -863,6 +863,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/jobs/{job_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read my job's chat
+         * @description The job's messages, newest first, with the caller's unread count. Reading does not move
+         *     the read marker: POST .../read does. Readable in every job status.
+         */
+        get: operations["list_messages_v1_jobs__job_id__messages_get"];
+        put?: never;
+        /**
+         * Send a message in my job's chat
+         * @description Stores the message with contact details masked (phones, emails, links, addresses): the
+         *     original is never kept. Answers what was stored.
+         */
+        post: operations["send_message_v1_jobs__job_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/jobs/{job_id}/messages/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark my job's chat read up to a message
+         * @description Moves the caller's read marker to the message, only forward: an older one, or the same
+         *     again, changes nothing. Allowed in every job status.
+         */
+        post: operations["mark_read_v1_jobs__job_id__messages_read_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/jobs/{job_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a job's chat (staff)
+         * @description Any job's messages, newest first, for the BDC and admins. Read-only: no read marker
+         *     moves, and the parties' unread counts do not change.
+         */
+        get: operations["staff_list_messages_v1_admin_jobs__job_id__messages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/devices": {
         parameters: {
             query?: never;
@@ -1162,6 +1230,74 @@ export interface components {
              */
             locked: boolean;
         };
+        /** ChatMessageIn */
+        ChatMessageIn: {
+            /**
+             * Body
+             * @description The text, trimmed. Contact details in it are masked before it is stored; only the masked text is kept.
+             */
+            body: string;
+        };
+        /** ChatMessageOut */
+        ChatMessageOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** @description me for the caller's own messages, else the other side: customer or pro. */
+            sender: components["schemas"]["Sender"];
+            /**
+             * Body
+             * @description The text as stored: contact details (phones, emails, links, addresses) were replaced by ••• when it was sent.
+             */
+            body: string;
+            /**
+             * Redacted
+             * @description True when something in the text was masked.
+             */
+            redacted: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** ChatPage */
+        ChatPage: {
+            /**
+             * Items
+             * @description Newest first.
+             */
+            items: components["schemas"]["ChatMessageOut"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor` for older messages.
+             */
+            next_cursor: string | null;
+            /**
+             * Unread Count
+             * @description The other side's messages after the caller's read marker (all of the chat, not only this page).
+             */
+            unread_count: number;
+        };
+        /** ChatReadIn */
+        ChatReadIn: {
+            /**
+             * Up To
+             * Format: uuid
+             * @description The newest message the caller has seen. The marker only moves forward: an older message changes nothing.
+             */
+            up_to: string;
+        };
+        /** ChatReadOut */
+        ChatReadOut: {
+            /**
+             * Unread Count
+             * @description The caller's unread count once the marker moved.
+             */
+            unread_count: number;
+        };
         /** CheckInIn */
         CheckInIn: {
             /**
@@ -1272,6 +1408,11 @@ export interface components {
              * @description What the customer paid: amount plus tax.
              */
             customer_total_cents: number;
+            /**
+             * Unread Messages
+             * @description The pro's chat messages the customer has not marked read (#71).
+             */
+            unread_messages: number;
         };
         /**
          * CustomerJobPhotos
@@ -2143,6 +2284,11 @@ export interface components {
              * @description What the pro receives for the job.
              */
             pro_payout_cents: number;
+            /**
+             * Unread Messages
+             * @description The customer's chat messages the pro has not marked read (#71).
+             */
+            unread_messages: number;
         };
         /** ProJobPage */
         ProJobPage: {
@@ -2708,6 +2854,11 @@ export interface components {
             /** Is Default */
             is_default?: true | null;
         };
+        /**
+         * Sender
+         * @enum {string}
+         */
+        Sender: "me" | "customer" | "pro";
         /** ServedCheckOut */
         ServedCheckOut: {
             /**
@@ -2764,6 +2915,38 @@ export interface components {
              * @enum {string}
              */
             type: "single_choice";
+        };
+        /** StaffChatMessageOut */
+        StaffChatMessageOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** @description customer or pro. */
+            sender: components["schemas"]["Sender"];
+            /** Body */
+            body: string;
+            /** Redacted */
+            redacted: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** StaffChatPage */
+        StaffChatPage: {
+            /**
+             * Items
+             * @description Newest first.
+             */
+            items: components["schemas"]["StaffChatMessageOut"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor` for older messages.
+             */
+            next_cursor: string | null;
         };
         /** TextQuestion */
         TextQuestion: {
@@ -5374,6 +5557,274 @@ export interface operations {
                 };
             };
             /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_messages_v1_jobs__job_id__messages_get: {
+        parameters: {
+            query?: {
+                /** @description Page size; capped. */
+                limit?: number | null;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatPage"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros have job chats. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job with this id of which the caller is the customer or the pro. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a bad cursor or limit. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    send_message_v1_jobs__job_id__messages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatMessageIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatMessageOut"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros have job chats. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job with this id of which the caller is the customer or the pro. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description chat_closed: the job is confirmed, paid out, refunded or cancelled; the chat is read-only. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: an empty or blank body, or longer than 2000 characters. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many messages in this chat; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    mark_read_v1_jobs__job_id__messages_read_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatReadIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatReadOut"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros have job chats. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job with this id of which the caller is the customer or the pro. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description invalid_message: up_to is not a message of this chat; validation_error: a bad body. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_list_messages_v1_admin_jobs__job_id__messages_get: {
+        parameters: {
+            query?: {
+                /** @description Page size; capped. */
+                limit?: number | null;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffChatPage"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a bad cursor or limit. */
             422: {
                 headers: {
                     [name: string]: unknown;
