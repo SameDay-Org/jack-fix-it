@@ -314,6 +314,10 @@ class Settings(BaseSettings):
     arrival_code_max_attempts: int = Field(default=5, gt=0)
     # Job photos (#298): the most a job holds of each kind (before, after).
     job_photo_max_per_kind: int = Field(default=10, gt=0)
+    # The oldest job_photo upload a job accepts, by the time its key was issued (#298). Under
+    # half of ORPHAN_UPLOAD_MIN_AGE_HOURS (checked below): the sweep only deletes older uploads,
+    # so a key attach accepts was referenced long before the sweep can pick it (orphans.py).
+    job_photo_attach_max_age_minutes: int = Field(default=720, gt=0)
     # The API's public base URL, such as https://api.example.com: Stripe sends the pro's browser
     # back to its onboarding pages there. Required with Stripe in staging and production (https).
     public_api_url: str | None = None
@@ -439,6 +443,17 @@ class Settings(BaseSettings):
                 "MEDIA_SANITIZE_JOB_TIMEOUT_SECONDS must cover one file: at least "
                 "6 x MEDIA_SANITIZE_TIMEOUT_SECONDS + 2 x MEDIA_SANITIZE_OVERHEAD_SECONDS "
                 "+ MEDIA_SANITIZE_SETTLE_SECONDS"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _job_photo_attach_window_before_sweep(self) -> Self:
+        # Disjoint windows (#298): an upload old enough to be swept is far too old to attach.
+        if 2 * self.job_photo_attach_max_age_minutes > 60 * self.orphan_upload_min_age_hours:
+            raise ValueError(
+                "JOB_PHOTO_ATTACH_MAX_AGE_MINUTES must be at most half of "
+                "ORPHAN_UPLOAD_MIN_AGE_HOURS: the sweep must never reach an upload a job "
+                "may still attach"
             )
         return self
 

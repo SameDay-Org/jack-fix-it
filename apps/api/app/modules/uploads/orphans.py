@@ -21,6 +21,15 @@ while the listing ran is kept. The residual: a row that attaches a key after its
 (or commits after it) points at a deleted file. Only an object older than the minimum age is
 ever in that window; a fresh upload never is.
 
+Job photos (#298) close that window by disjoint ages, with no lock shared with the sweep: a
+job accepts a job_photo key issued at most JOB_PHOTO_ATTACH_MAX_AGE_MINUTES ago (the issue time
+is in the key, uploads/keys.py), at most half of ORPHAN_UPLOAD_MIN_AGE_HOURS (config.py). An
+object is last modified after its key was issued, so one this sweep deletes had its key issued
+over the minimum age before the run started, and any attach of it committed over half that
+age before this page's check: the check sees it. The assumption: an attach commits within
+minutes of its age check (one request), far under the margin, and the storage's and the
+API's clocks agree within it.
+
 Modes (ORPHAN_UPLOAD_MODE): `off` does nothing, not even a storage call; `dry_run` (the
 default) counts and logs what it would delete; `delete` deletes. The logs are one
 `orphan_uploads_swept` line of counts per run, and `orphan_upload_sweep_failed` with an error

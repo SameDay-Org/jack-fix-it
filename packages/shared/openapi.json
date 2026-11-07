@@ -3140,7 +3140,7 @@
             }
           },
           "422": {
-            "description": "invalid_photo: a key that is not one of the caller's own job_photo uploads (nothing is stored); validation_error: a bad kind or no keys.",
+            "description": "invalid_photo: a key that is not one of the caller's own job_photo uploads (nothing is stored); upload_expired: an upload issued too long ago, upload it again (nothing is stored); validation_error: a bad kind or no keys.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3180,7 +3180,7 @@
             }
           },
           "409": {
-            "description": "job_photo_not_allowed: before photos need the job on the way or working, after photos working; duplicate_photo: a key given twice or already attached; job_photo_limit: more photos of the kind than a job holds.",
+            "description": "job_photo_not_allowed: before photos need the job on the way or working, after photos working; duplicate_photo: a key given twice or already attached; job_photo_limit: more photos of the kind than a job holds (a photo whose privacy-safe copy failed frees its place, a bounded number of times).",
             "content": {
               "application/json": {
                 "schema": {
@@ -3198,7 +3198,7 @@
           "jobs"
         ],
         "summary": "Mark the job done",
-        "description": "Working -> completed (Job's done), with at least one after photo. The customer then has\na window to confirm. Again once completed: the job unchanged.",
+        "description": "Working -> completed (Job's done), with at least one after photo whose privacy-safe\ncopy is ready. The customer then has a window to confirm. Again once completed: the job\nunchanged.",
         "operationId": "complete_job_v1_pros_me_jobs__job_id__complete_post",
         "security": [
           {
@@ -3269,7 +3269,7 @@
             }
           },
           "409": {
-            "description": "after_photos_required: no after photo yet; invalid_transition: the job is not working.",
+            "description": "after_photos_processing: the after photos' privacy-safe copies are still being made, try again shortly; after_photos_required: no after photo the customer can see (none, or all failed: add another); invalid_transition: the job is not working.",
             "content": {
               "application/json": {
                 "schema": {

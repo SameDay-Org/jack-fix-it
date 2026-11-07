@@ -106,15 +106,20 @@ class JobPhotoRepository:
         )
         return list((await self._session.scalars(statement)).all())
 
-    async def count(
-        self, job_id: uuid.UUID, kind: JobPhotoKind, *, usable_only: bool = False
-    ) -> int:
-        """The job's photos of the kind; `usable_only` leaves out those whose safe copy failed
-        (never shown to the customer)."""
-        statement = select(func.count()).where(JobPhoto.job_id == job_id, JobPhoto.kind == kind)
-        if usable_only:
-            statement = statement.where(JobPhoto.safe_status != MediaSafeStatus.FAILED)
-        return int(await self._session.scalar(statement) or 0)
+    async def count_by_status(
+        self, job_id: uuid.UUID, kind: JobPhotoKind
+    ) -> dict[MediaSafeStatus, int]:
+        """How many of the job's photos of the kind are in each safe-copy status (every status
+        present, zero when none)."""
+        statement = (
+            select(JobPhoto.safe_status, func.count())
+            .where(JobPhoto.job_id == job_id, JobPhoto.kind == kind)
+            .group_by(JobPhoto.safe_status)
+        )
+        counts = dict.fromkeys(MediaSafeStatus, 0)
+        for status, count in (await self._session.execute(statement)).tuples():
+            counts[status] = count
+        return counts
 
     async def held_keys(self, keys: Collection[str]) -> set[str]:
         """The keys among `keys` that any job photo already holds."""

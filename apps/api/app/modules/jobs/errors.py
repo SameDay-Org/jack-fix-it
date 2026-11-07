@@ -79,8 +79,26 @@ class InvalidJobPhotoError(AppError):
     message = "One or more photos are not valid uploads."
 
 
+class JobPhotoUploadExpiredError(AppError):
+    """A job_photo upload issued more than JOB_PHOTO_ATTACH_MAX_AGE_MINUTES ago, or before #298
+    (no issue time in its key): the orphan sweep may be about to delete it (#298)."""
+
+    status_code = 422
+    code = "upload_expired"
+    message = "One or more photos were uploaded too long ago. Upload them again."
+
+
 class AfterPhotosRequiredError(ConflictError):
-    """Job's done needs at least one after photo (#298, epic #272)."""
+    """Job's done needs at least one after photo the customer can see: none yet, or all of
+    them failed their privacy-safe copy (#298, epic #272)."""
 
     code = "after_photos_required"
     message = "Add at least one photo of the finished work before marking the job done."
+
+
+class AfterPhotosProcessingError(ConflictError):
+    """Job's done while the after photos' privacy-safe copies are still being made, none ready
+    yet (#298): try again shortly."""
+
+    code = "after_photos_processing"
+    message = "The photos of the finished work are still processing. Try again in a moment."

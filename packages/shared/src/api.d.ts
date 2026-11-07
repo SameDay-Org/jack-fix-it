@@ -852,8 +852,9 @@ export interface paths {
         put?: never;
         /**
          * Mark the job done
-         * @description Working -> completed (Job's done), with at least one after photo. The customer then has
-         *     a window to confirm. Again once completed: the job unchanged.
+         * @description Working -> completed (Job's done), with at least one after photo whose privacy-safe
+         *     copy is ready. The customer then has a window to confirm. Again once completed: the job
+         *     unchanged.
          */
         post: operations["complete_job_v1_pros_me_jobs__job_id__complete_post"];
         delete?: never;
@@ -5296,7 +5297,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description job_photo_not_allowed: before photos need the job on the way or working, after photos working; duplicate_photo: a key given twice or already attached; job_photo_limit: more photos of the kind than a job holds. */
+            /** @description job_photo_not_allowed: before photos need the job on the way or working, after photos working; duplicate_photo: a key given twice or already attached; job_photo_limit: more photos of the kind than a job holds (a photo whose privacy-safe copy failed frees its place, a bounded number of times). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5305,7 +5306,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description invalid_photo: a key that is not one of the caller's own job_photo uploads (nothing is stored); validation_error: a bad kind or no keys. */
+            /** @description invalid_photo: a key that is not one of the caller's own job_photo uploads (nothing is stored); upload_expired: an upload issued too long ago, upload it again (nothing is stored); validation_error: a bad kind or no keys. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -5363,7 +5364,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description after_photos_required: no after photo yet; invalid_transition: the job is not working. */
+            /** @description after_photos_processing: the after photos' privacy-safe copies are still being made, try again shortly; after_photos_required: no after photo the customer can see (none, or all failed: add another); invalid_transition: the job is not working. */
             409: {
                 headers: {
                     [name: string]: unknown;

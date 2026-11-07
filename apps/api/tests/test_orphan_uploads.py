@@ -550,7 +550,11 @@ async def test_the_task_sweeps_with_the_settings(
     orphan = upload_key(world.customer.id, UploadPurpose.REQUEST_MEDIA)
     storage = ListingStorage({orphan: datetime.now(UTC) - timedelta(hours=3)})
     ctx: dict[str, object] = {
-        "settings": make_settings(orphan_upload_mode="delete", orphan_upload_min_age_hours=2),
+        "settings": make_settings(
+            orphan_upload_mode="delete",
+            orphan_upload_min_age_hours=2,
+            job_photo_attach_max_age_minutes=60,  # at most half the minimum age (config.py)
+        ),
         "storage": storage,
         "session_factory": sessions_of(db_session),
     }
@@ -783,7 +787,7 @@ async def test_pagination(db_session: AsyncSession, world: World) -> None:
         ({}, True),
         ({"orphan_upload_mode": "delete"}, True),
         ({"orphan_upload_mode": "everything"}, False),
-        ({"orphan_upload_min_age_hours": 1}, True),
+        ({"orphan_upload_min_age_hours": 1, "job_photo_attach_max_age_minutes": 30}, True),
         ({"orphan_upload_min_age_hours": 0}, False),
         ({"orphan_upload_sweep_minutes": 60}, True),
         ({"orphan_upload_sweep_minutes": 0}, False),
@@ -804,4 +808,5 @@ def test_sweep_settings(overrides: dict[str, object], valid: bool) -> None:
         "orphan_upload_sweep_minutes": 60,
         "orphan_upload_sweep_timeout_seconds": 1_800,
     }
-    assert {name: getattr(settings, name) for name in defaults} == defaults | overrides
+    expected = defaults | overrides
+    assert {name: getattr(settings, name) for name in expected} == expected

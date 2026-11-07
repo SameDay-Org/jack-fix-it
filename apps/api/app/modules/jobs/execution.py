@@ -33,16 +33,24 @@ service commits; every status change goes through JobStateMachine, which writes 
 
 Job photos and Job's done (part 2, #298), also on the job's row lock:
 - Add photos (kind, upload_keys): the caller's own job_photo uploads only (else 422
-  invalid_photo, nothing stored). Before photos while on the way or working, after photos while
-  working (else 409 job_photo_not_allowed). A key given twice, or one a job photo already holds:
-  409 duplicate_photo. More than JOB_PHOTO_MAX_PER_KIND of a kind on the job: 409
-  job_photo_limit (checked before the keys are looked up). They keep the order given. After
-  the commit their privacy-safe copies are queued, one run per batch (photos.py); a failed
-  enqueue never fails the call (the photos stay pending).
-- Job's done: in_progress -> completed with at least one after photo whose safe copy did not
-  fail (else 409 after_photos_required); one still being made counts. The state machine sets
-  completed_at, which opens the customer's confirmation window (#66, #67). Again once
-  completed: 200, unchanged, no second event.
+  invalid_photo, nothing stored), issued at most JOB_PHOTO_ATTACH_MAX_AGE_MINUTES ago (else 422
+  upload_expired: the pro uploads again). That window is at most half of the orphan sweep's
+  minimum age (config.py), so the sweep never deletes a key this call accepted: the sweep
+  reads the references of an upload at least ORPHAN_UPLOAD_MIN_AGE_HOURS old, and any
+  attach of that key had committed half that time before (orphans.py). Before photos while on
+  the way or working, after photos while working (else 409 job_photo_not_allowed). A key given
+  twice, or one a job photo already holds: 409 duplicate_photo. More than
+  JOB_PHOTO_MAX_PER_KIND of a kind whose safe copy has not failed, or more than twice that
+  counting the failed ones: 409 job_photo_limit (checked before the keys are looked up). So a
+  pro replaces failed photos, never without bound. They keep the order given. After the commit
+  their privacy-safe copies are queued, one run per batch (photos.py); a failed enqueue never
+  fails the call (the photos stay pending).
+- Job's done: in_progress -> completed only with at least one after photo whose safe copy is
+  ready, the copy that proves to the customer a real image was taken. With none ready: 409
+  after_photos_processing while one is still being made (the app waits and tries again), else
+  409 after_photos_required (none, or all failed: the pro adds another). Nothing changes on a
+  409. The state machine sets completed_at, which opens the customer's confirmation window
+  (#66, #67). Again once completed: 200, unchanged, no second event.
 - Both views list the photos by kind, oldest first, signed for DOWNLOAD_URL_TTL_SECONDS: the
   customer only their safe copies (photos.py says why).
 
@@ -71,6 +79,7 @@ from app.errors import NotFoundError
 from app.integrations.storage import StorageProvider
 from app.modules.categories.service import CategoryService
 from app.modules.jobs.errors import (
+    AfterPhotosProcessingError,
     AfterPhotosRequiredError,
     ArrivalCodeInvalidError,
     ArrivalCodeLockedError,
@@ -79,6 +88,7 @@ from app.modules.jobs.errors import (
     InvalidJobPhotoError,
     JobPhotoLimitError,
     JobPhotoNotAllowedError,
+    JobPhotoUploadExpiredError,
     NotOnTheWayError,
 )
 from app.modules.jobs.models import Job, JobEvent, JobPhoto, JobPhotoKind, JobStatus
@@ -94,12 +104,13 @@ from app.modules.jobs.schemas import (
 )
 from app.modules.jobs.service import JobStateMachine
 from app.modules.jobs.transitions import CUSTOMER_STATUS
+from app.modules.media.safe_status import MediaSafeStatus
 from app.modules.pros.service import ProService
 from app.modules.quotes.schemas import QuotePro
 from app.modules.quotes.service import QuoteReader
 from app.modules.requests.errors import InvalidRequestError
 from app.modules.requests.service import CustomerRequestReader, ProRequestReader
-from app.modules.uploads.keys import owned_upload
+from app.modules.uploads.keys import owned_upload, upload_issued_at
 from app.modules.uploads.schemas import UploadPurpose
 from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount
@@ -117,6 +128,10 @@ _PHOTO_STATUSES: Final = {
     JobPhotoKind.BEFORE: frozenset({JobStatus.ON_THE_WAY, JobStatus.IN_PROGRESS}),
     JobPhotoKind.AFTER: frozenset({JobStatus.IN_PROGRESS}),
 }
+# Every photo row of a kind, failed copies included, counts against this many times
+# JOB_PHOTO_MAX_PER_KIND: a failed copy frees its slot for a replacement, a bounded number of
+# times.
+_ROWS_PER_SLOT: Final = 2
 # jobs_events.lat/lng are Numeric(9, 6).
 _COORDINATE: Final = Decimal("0.000001")
 
@@ -127,6 +142,7 @@ class JobExecutionConfig:
     list_default_limit: int
     list_max_limit: int
     photo_max_per_kind: int
+    photo_attach_max_age: timedelta
     photo_url_ttl_seconds: int
     enqueue_timeout_seconds: float
 
@@ -137,6 +153,7 @@ class JobExecutionConfig:
             list_default_limit=settings.request_list_default_limit,
             list_max_limit=settings.request_list_max_limit,
             photo_max_per_kind=settings.job_photo_max_per_kind,
+            photo_attach_max_age=timedelta(minutes=settings.job_photo_attach_max_age_minutes),
             photo_url_ttl_seconds=settings.download_url_ttl_seconds,
             enqueue_timeout_seconds=settings.job_enqueue_timeout_seconds,
         )
@@ -316,8 +333,14 @@ class JobExecutionService:
             raise JobPhotoNotAllowedError
         if any(owned_upload(key, user.id, UploadPurpose.JOB_PHOTO) is None for key in keys):
             raise InvalidJobPhotoError
+        oldest = datetime.now(UTC) - self._config.photo_attach_max_age
+        if any((issued_at := upload_issued_at(key)) is None or issued_at < oldest for key in keys):
+            raise JobPhotoUploadExpiredError
         # The cap before any query on the keys: a huge body never reaches the database.
-        if await self._photos.count(job.id, kind) + len(keys) > self._config.photo_max_per_kind:
+        counts = await self._photos.count_by_status(job.id, kind)
+        cap = self._config.photo_max_per_kind
+        live = counts[MediaSafeStatus.PENDING] + counts[MediaSafeStatus.READY]
+        if live + len(keys) > cap or sum(counts.values()) + len(keys) > _ROWS_PER_SLOT * cap:
             raise JobPhotoLimitError
         if len(set(keys)) != len(keys) or await self._photos.held_keys(keys):
             raise DuplicateJobPhotoError
@@ -355,11 +378,14 @@ class JobExecutionService:
         if job.status is JobStatus.COMPLETED:
             await self._session.commit()  # nothing changed: ends the transaction and its lock
             return await self.pro_job(user, job.id)
-        if (
-            job.status is JobStatus.IN_PROGRESS
-            and await self._photos.count(job.id, JobPhotoKind.AFTER, usable_only=True) == 0
-        ):
-            raise AfterPhotosRequiredError
+        if job.status is JobStatus.IN_PROGRESS:
+            # Under the job's lock: a photo added meanwhile waits; a copy the worker finishes
+            # meanwhile is seen by the pro's next try.
+            after = await self._photos.count_by_status(job.id, JobPhotoKind.AFTER)
+            if after[MediaSafeStatus.READY] == 0:
+                if after[MediaSafeStatus.PENDING]:
+                    raise AfterPhotosProcessingError
+                raise AfterPhotosRequiredError
         # 409 for anything but working; the state machine sets completed_at.
         await self._machine.transition(job.id, JobStatus.COMPLETED, user)
         await self._session.commit()

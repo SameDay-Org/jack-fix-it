@@ -18,16 +18,22 @@ from app.config import Settings
 from app.integrations.storage import PresignedUpload
 from app.modules.jobs.models import Job, JobPhoto, JobPhotoKind, JobStatus
 from app.modules.jobs.repository import JobPhotoRepository
+from app.modules.jobs.tasks import sanitize_job_photos
 from app.modules.media.safe_status import MediaSafeStatus
+from app.modules.requests.tasks import SANITIZE_SPARE_TRIES
+from app.modules.uploads.keys import make_key, time_ordered_token, upload_issued_at
+from app.modules.uploads.schemas import UploadPurpose
 from app.observability import configure_logging
 from app.queue import get_job_queue
 from tests.conftest import make_settings
 from tests.job_world import JobWorld, build_world, events, job_row, make_job
+from tests.test_media_copies import MAX_TRIES, MemoryStorage, ctx, gps_jpeg
 from tests.test_media_logging import leaks
 
 BASE = "/v1/pros/me/jobs"
 CAP = 3
 TTL = 120
+ATTACH_MINUTES = 60
 ENQUEUE_TIMEOUT = 0.5
 INVALID_PHOTO = {
     "error": {"code": "invalid_photo", "message": "One or more photos are not valid uploads."}
@@ -46,6 +52,18 @@ AFTER_REQUIRED = {
     "error": {
         "code": "after_photos_required",
         "message": "Add at least one photo of the finished work before marking the job done.",
+    }
+}
+AFTER_PROCESSING = {
+    "error": {
+        "code": "after_photos_processing",
+        "message": "The photos of the finished work are still processing. Try again in a moment.",
+    }
+}
+EXPIRED = {
+    "error": {
+        "code": "upload_expired",
+        "message": "One or more photos were uploaded too long ago. Upload them again.",
     }
 }
 INVALID_TRANSITION = {
@@ -91,6 +109,7 @@ class RecordingQueue:
 def settings() -> Settings:
     return make_settings(
         job_photo_max_per_kind=CAP,
+        job_photo_attach_max_age_minutes=ATTACH_MINUTES,
         download_url_ttl_seconds=TTL,
         job_enqueue_timeout_seconds=ENQUEUE_TIMEOUT,
     )
@@ -115,8 +134,33 @@ async def world(db_session: AsyncSession, storage: FakeStorage, queue: Recording
     return await build_world(db_session)
 
 
-def key_of(user_id: uuid.UUID, purpose: str = "job_photo", extension: str = ".jpg") -> str:
-    return f"u/{user_id}/{purpose}/{uuid.uuid4().hex}{extension}"
+def key_of(
+    user_id: uuid.UUID,
+    purpose: str = "job_photo",
+    extension: str = ".jpg",
+    issued_at: datetime | None = None,
+) -> str:
+    """An upload key as the API issues it (uploads/keys.py), issued now unless `issued_at`."""
+    token = time_ordered_token(issued_at or datetime.now(UTC))
+    return f"u/{user_id}/{purpose}/{token}{extension}"
+
+
+@dataclass
+class PhotoStorage(MemoryStorage):
+    """Files in memory for the real copier, plus signed GETs for the views."""
+
+    def presign_get(self, key: str, expires_in: int) -> str:
+        return f"https://storage.example.invalid/get/{key}?sig=fake"
+
+
+async def sanitize_to_the_end(
+    session: AsyncSession, storage: MemoryStorage, job: Job, photo: JobPhoto
+) -> None:
+    """The real copier on its last try: the photo ends ready or failed. The worker's bulk
+    update bypasses the identity map, so the photo is refreshed as a fresh request would."""
+    last_try = MAX_TRIES + SANITIZE_SPARE_TRIES
+    await sanitize_job_photos(ctx(session, storage, last_try), str(job.id), [str(photo.id)])
+    await session.refresh(photo)
 
 
 def add(
@@ -442,6 +486,84 @@ async def test_a_failed_enqueue_never_fails_the_call(
     assert [r.message for r in caplog.records] == ["job_photo_sanitize_enqueue_failed"]
 
 
+# Upload age: the orphan sweep never deletes a key a job accepted (Vault B2)
+
+
+@pytest.mark.parametrize(
+    ("age", "accepted"),
+    [
+        (timedelta(minutes=ATTACH_MINUTES) - timedelta(seconds=30), True),
+        (timedelta(minutes=ATTACH_MINUTES) + timedelta(seconds=30), False),
+    ],
+)
+async def test_an_upload_issued_before_the_attach_window_is_expired(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    queue: RecordingQueue,
+    age: timedelta,
+    accepted: bool,
+) -> None:
+    job = await make_job(db_session, world, JobStatus.IN_PROGRESS)
+    old = key_of(world.pro.id, issued_at=datetime.now(UTC) - age)
+    keys = [key_of(world.pro.id), old]
+
+    response = await add(db_client, job, world.pro.headers, "after", keys)
+
+    if accepted:
+        assert response.status_code == 201
+        assert [photo.file_key for photo in await stored(db_session, job)] == keys
+    else:
+        assert (response.status_code, response.json()) == (422, EXPIRED)
+        assert await stored(db_session, job) == []
+        assert queue.jobs == {}
+
+
+def test_an_issued_key_carries_its_issue_time() -> None:
+    owner = uuid.uuid4()
+    started = datetime.now(UTC)
+    key = make_key(owner, UploadPurpose.JOB_PHOTO, "image/jpeg")
+    issued_at = upload_issued_at(key)
+    at = datetime(2026, 1, 2, 3, 4, 5, 678_000, tzinfo=UTC)
+
+    assert issued_at is not None
+    assert started - timedelta(milliseconds=1) <= issued_at <= datetime.now(UTC)
+    assert upload_issued_at(key_of(owner, issued_at=at)) == at
+    assert upload_issued_at(f"u/{owner}/job_photo/{uuid.uuid4().hex}.jpg") is None
+    assert upload_issued_at(f"x/{owner}/job_photo/{time_ordered_token(at)}.jpg") is None
+
+
+async def test_a_key_with_no_issue_time_is_expired(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    # A key issued before time-ordered keys: a random UUIDv4 token, so its age is unknown.
+    job = await make_job(db_session, world, JobStatus.IN_PROGRESS)
+    legacy = f"u/{world.pro.id}/job_photo/{uuid.uuid4().hex}.jpg"
+
+    response = await add(db_client, job, world.pro.headers, "after", [legacy])
+
+    assert (response.status_code, response.json()) == (422, EXPIRED)
+    assert await stored(db_session, job) == []
+
+
+@pytest.mark.parametrize(
+    ("minutes", "hours", "valid"),
+    [(720, 24, True), (721, 24, False), (30, 1, True), (31, 1, False)],
+)
+def test_the_attach_window_is_at_most_half_the_sweep_age(
+    minutes: int, hours: int, valid: bool
+) -> None:
+    overrides = {
+        "job_photo_attach_max_age_minutes": minutes,
+        "orphan_upload_min_age_hours": hours,
+    }
+    if valid:
+        assert make_settings(**overrides).job_photo_attach_max_age_minutes == minutes
+    else:
+        with pytest.raises(ValueError, match="JOB_PHOTO_ATTACH_MAX_AGE_MINUTES"):
+            make_settings(**overrides)
+
+
 # Job's done
 
 
@@ -478,8 +600,7 @@ async def test_complete_sets_completed_at_once(
     db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
 ) -> None:
     job = await make_job(db_session, world, JobStatus.IN_PROGRESS)
-    # A pending after photo counts: its safe copy is the customer's view, not the rule.
-    await photo_row(db_session, world, job, JobPhotoKind.AFTER)
+    await photo_row(db_session, world, job, JobPhotoKind.AFTER, MediaSafeStatus.READY, safe_key())
     started = datetime.now(UTC)
 
     first = await db_client.post(f"{BASE}/{job.id}/complete", headers=world.pro.headers)
@@ -501,6 +622,168 @@ async def test_complete_sets_completed_at_once(
         JobStatus.IN_PROGRESS,
         world.pro.id,
     )
+
+
+P, R, F = MediaSafeStatus.PENDING, MediaSafeStatus.READY, MediaSafeStatus.FAILED
+
+
+@pytest.mark.parametrize(
+    ("after", "expected"),
+    [
+        ([P], AFTER_PROCESSING),
+        ([P, F], AFTER_PROCESSING),
+        ([F, F], AFTER_REQUIRED),
+    ],
+)
+async def test_complete_needs_an_after_photo_whose_copy_is_ready(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    after: list[MediaSafeStatus],
+    expected: dict[str, object],
+) -> None:
+    # Vault B1: a pending copy is no proof yet (a key with no file, or bytes that are not an
+    # image, pass the attach and only fail in the copier). A ready before photo is no proof.
+    job = await make_job(db_session, world, JobStatus.IN_PROGRESS)
+    for status in after:
+        await photo_row(db_session, world, job, JobPhotoKind.AFTER, status)
+    await photo_row(db_session, world, job, JobPhotoKind.BEFORE, R, safe_key())
+    before = len(await events(db_session, job.id))
+
+    response = await db_client.post(f"{BASE}/{job.id}/complete", headers=world.pro.headers)
+
+    assert (response.status_code, response.json()) == (409, expected)
+    row = await job_row(db_session, job.id)
+    assert (row.status, row.completed_at) == (JobStatus.IN_PROGRESS, None)
+    assert len(await events(db_session, job.id)) == before
+
+
+async def test_one_ready_after_photo_completes_among_pending_and_failed(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    job = await make_job(db_session, world, JobStatus.IN_PROGRESS)
+    await photo_row(db_session, world, job, JobPhotoKind.AFTER, P)
+    await photo_row(db_session, world, job, JobPhotoKind.AFTER, F)
+    await photo_row(db_session, world, job, JobPhotoKind.AFTER, R, safe_key())
+
+    response = await db_client.post(f"{BASE}/{job.id}/complete", headers=world.pro.headers)
+
+    assert (response.status_code, response.json()["status"]) == (200, "completed")
+
+
+@pytest.mark.parametrize(
+    "contents", [None, b"this is not a JPEG"], ids=["never-uploaded", "invalid-image"]
+)
+async def test_no_completion_without_a_valid_after_photo(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    app: FastAPI,
+    contents: bytes | None,
+) -> None:
+    # The Vault's B1 probe through the real copier: while the copy is made the job waits;
+    # once it failed the pro must add another photo. The job never completes meanwhile.
+    job = await make_job(db_session, world, JobStatus.IN_PROGRESS)
+    files = PhotoStorage()
+    app.state.storage = files
+    key = key_of(world.pro.id)
+    if contents is not None:
+        files.objects[key] = contents
+    attached = await add(db_client, job, world.pro.headers, "after", [key])
+    [photo] = await stored(db_session, job)
+
+    waiting = await db_client.post(f"{BASE}/{job.id}/complete", headers=world.pro.headers)
+    await sanitize_to_the_end(db_session, files, job, photo)
+    refused = await db_client.post(f"{BASE}/{job.id}/complete", headers=world.pro.headers)
+    view = await db_client.get(f"/v1/requests/{job.request_id}/job", headers=world.customer.headers)
+
+    assert attached.status_code == 201
+    assert photo.safe_status is MediaSafeStatus.FAILED
+    assert (waiting.status_code, waiting.json()) == (409, AFTER_PROCESSING)
+    assert (refused.status_code, refused.json()) == (409, AFTER_REQUIRED)
+    row = await job_row(db_session, job.id)
+    assert (row.status, row.completed_at) == (JobStatus.IN_PROGRESS, None)
+    assert view.json()["photos"] == {"before": [], "after": [], "pending": 0}
+
+
+async def test_a_valid_after_photo_completes_once_its_copy_is_ready(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld, app: FastAPI
+) -> None:
+    job = await make_job(db_session, world, JobStatus.IN_PROGRESS)
+    files = PhotoStorage()
+    app.state.storage = files
+    key = key_of(world.pro.id)
+    files.objects[key] = gps_jpeg()
+    assert (await add(db_client, job, world.pro.headers, "after", [key])).status_code == 201
+    [photo] = await stored(db_session, job)
+
+    waiting = await db_client.post(f"{BASE}/{job.id}/complete", headers=world.pro.headers)
+    await sanitize_to_the_end(db_session, files, job, photo)
+    done = await db_client.post(f"{BASE}/{job.id}/complete", headers=world.pro.headers)
+    view = await db_client.get(f"/v1/requests/{job.request_id}/job", headers=world.customer.headers)
+
+    assert (waiting.status_code, waiting.json()) == (409, AFTER_PROCESSING)
+    assert (done.status_code, done.json()["status"]) == (200, "completed")
+    [shown] = view.json()["photos"]["after"]
+    assert "/m/" in shown["url"]
+    assert key not in shown["url"]
+
+
+async def test_failed_after_photos_free_their_slots_for_a_replacement(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld, app: FastAPI
+) -> None:
+    # Gatekeeper B1: every slot held by a failed copy left no way to complete.
+    job = await make_job(db_session, world, JobStatus.IN_PROGRESS)
+    for _ in range(CAP):
+        await photo_row(db_session, world, job, JobPhotoKind.AFTER, F)
+    refused = await db_client.post(f"{BASE}/{job.id}/complete", headers=world.pro.headers)
+    files = PhotoStorage()
+    app.state.storage = files
+    key = key_of(world.pro.id)
+    files.objects[key] = gps_jpeg()
+
+    replaced = await add(db_client, job, world.pro.headers, "after", [key])
+    [replacement] = [photo for photo in await stored(db_session, job) if photo.file_key == key]
+    await sanitize_to_the_end(db_session, files, job, replacement)
+    done = await db_client.post(f"{BASE}/{job.id}/complete", headers=world.pro.headers)
+
+    assert (refused.status_code, refused.json()) == (409, AFTER_REQUIRED)
+    assert replaced.status_code == 201
+    assert replacement.safe_status is MediaSafeStatus.READY
+    assert (done.status_code, done.json()["status"]) == (200, "completed")
+
+
+async def test_failed_photos_count_against_twice_the_cap(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    # Replacements are bounded: every row of the kind, failed or not, counts against 2 x CAP.
+    job = await make_job(db_session, world, JobStatus.IN_PROGRESS)
+    for _ in range(2 * CAP - 1):
+        await photo_row(db_session, world, job, JobPhotoKind.AFTER, F)
+
+    last = await add(db_client, job, world.pro.headers, "after", [key_of(world.pro.id)])
+    over = await add(db_client, job, world.pro.headers, "after", [key_of(world.pro.id)])
+    before = await add(db_client, job, world.pro.headers, "before", [key_of(world.pro.id)])
+
+    assert last.status_code == 201
+    assert (over.status_code, over.json()) == (409, LIMIT)
+    assert before.status_code == 201  # per kind
+    kinds = [photo.kind for photo in await stored(db_session, job)]
+    assert kinds.count(JobPhotoKind.AFTER) == 2 * CAP
+
+
+async def test_pending_and_ready_photos_fill_the_cap(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    job = await make_job(db_session, world, JobStatus.IN_PROGRESS)
+    await photo_row(db_session, world, job, JobPhotoKind.AFTER, R, safe_key())
+    await photo_row(db_session, world, job, JobPhotoKind.AFTER, F)
+    for _ in range(CAP - 1):
+        await photo_row(db_session, world, job, JobPhotoKind.AFTER, P)
+
+    response = await add(db_client, job, world.pro.headers, "after", [key_of(world.pro.id)])
+
+    assert (response.status_code, response.json()) == (409, LIMIT)
 
 
 @pytest.mark.parametrize("status", [JobStatus.SCHEDULED, JobStatus.ON_THE_WAY, JobStatus.CONFIRMED])
@@ -686,6 +969,7 @@ async def test_logs_carry_ids_never_keys(
         assert (await add(db_client, job, world.pro.headers, "after", keys)).status_code == 201
         bad = await add(db_client, job, world.pro.headers, "after", [key_of(world.other_pro.id)])
         assert bad.status_code == 422
+        await photo_row(db_session, world, job, JobPhotoKind.AFTER, R, safe_key())
         done = await db_client.post(f"{BASE}/{job.id}/complete", headers=world.pro.headers)
         assert done.status_code == 200
 

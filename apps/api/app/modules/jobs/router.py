@@ -172,11 +172,13 @@ async def start_job(job_id: uuid.UUID, user: ProUser, jobs: Jobs) -> ProJob:
         status.HTTP_409_CONFLICT: _error(
             "job_photo_not_allowed: before photos need the job on the way or working, after "
             "photos working; duplicate_photo: a key given twice or already attached; "
-            "job_photo_limit: more photos of the kind than a job holds."
+            "job_photo_limit: more photos of the kind than a job holds (a photo whose "
+            "privacy-safe copy failed frees its place, a bounded number of times)."
         ),
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
             "invalid_photo: a key that is not one of the caller's own job_photo uploads "
-            "(nothing is stored); validation_error: a bad kind or no keys."
+            "(nothing is stored); upload_expired: an upload issued too long ago, upload it "
+            "again (nothing is stored); validation_error: a bad kind or no keys."
         ),
     },
 )
@@ -199,11 +201,14 @@ async def add_job_photos(
     responses={
         **_PRO_JOB_ERRORS,
         status.HTTP_409_CONFLICT: _error(
-            "after_photos_required: no after photo yet; invalid_transition: the job is not working."
+            "after_photos_processing: the after photos' privacy-safe copies are still being "
+            "made, try again shortly; after_photos_required: no after photo the customer can "
+            "see (none, or all failed: add another); invalid_transition: the job is not working."
         ),
     },
 )
 async def complete_job(job_id: uuid.UUID, user: ProUser, jobs: Jobs) -> ProJob:
-    """Working -> completed (Job's done), with at least one after photo. The customer then has
-    a window to confirm. Again once completed: the job unchanged."""
+    """Working -> completed (Job's done), with at least one after photo whose privacy-safe
+    copy is ready. The customer then has a window to confirm. Again once completed: the job
+    unchanged."""
     return await jobs.complete(user, job_id)

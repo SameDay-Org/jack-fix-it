@@ -42,6 +42,7 @@ CONFIG = JobExecutionConfig(
     list_default_limit=20,
     list_max_limit=50,
     photo_max_per_kind=10,
+    photo_attach_max_age=timedelta(minutes=720),
     photo_url_ttl_seconds=300,
     enqueue_timeout_seconds=1.0,
 )
