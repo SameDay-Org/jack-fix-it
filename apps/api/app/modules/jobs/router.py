@@ -72,6 +72,34 @@ async def get_request_job(request_id: uuid.UUID, user: CustomerUser, jobs: Jobs)
     return await jobs.customer_job(user, request_id)
 
 
+@customer_router.post(
+    "/{request_id}/job/confirm",
+    response_model=CustomerJob,
+    summary="Confirm the job of one of my service requests is done",
+    responses={
+        status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN: _error("forbidden: only customers have service requests."),
+        status.HTTP_404_NOT_FOUND: _error(
+            "not_found: no request of the caller with this id, or no job on it yet."
+        ),
+        status.HTTP_409_CONFLICT: _error(
+            "job_not_completed: the pro has not marked the job done, or it is past confirmation "
+            "(a problem reported, paid out, refunded or cancelled)."
+        ),
+    },
+)
+async def confirm_request_job(
+    request_id: uuid.UUID,
+    user: CustomerUser,
+    jobs: Jobs,
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
+) -> CustomerJob:
+    """Completed -> confirmed: the customer agrees the work is done, before confirm_by (after it,
+    the system confirms on its own unless a problem is open). Again once confirmed: the job
+    unchanged. The pro hears once the job is confirmed."""
+    return await jobs.confirm(user, request_id, queue)
+
+
 @router.get(
     "",
     response_model=ProJobPage,

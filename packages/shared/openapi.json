@@ -2610,6 +2610,95 @@
         }
       }
     },
+    "/v1/requests/{request_id}/job/confirm": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Confirm the job of one of my service requests is done",
+        "description": "Completed -> confirmed: the customer agrees the work is done, before confirm_by (after it,\nthe system confirms on its own unless a problem is open). Again once confirmed: the job\nunchanged. The pro hears once the job is confirmed.",
+        "operationId": "confirm_request_job_v1_requests__request_id__job_confirm_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerJob"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers have service requests.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no request of the caller with this id, or no job on it yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "job_not_completed: the pro has not marked the job done, or it is past confirmation (a problem reported, paid out, refunded or cancelled).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/pros/me/jobs": {
       "get": {
         "tags": [
@@ -4896,7 +4985,7 @@
             "minLength": 1,
             "pattern": "^[^\\x00]*$",
             "title": "Body",
-            "description": "The text, trimmed. Contact details in it are masked before it is stored; only the masked text is kept."
+            "description": "The text, trimmed. Contact details in it are masked before it is stored; only the masked text is shown. When something was masked, the original is kept encrypted for staff only and deleted after the retention period (90 days by default)."
           }
         },
         "additionalProperties": false,
@@ -5286,6 +5375,19 @@
               "0427"
             ]
           },
+          "confirm_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirm By",
+            "description": "While the job is completed: when it is confirmed automatically if the customer neither confirms it nor reports a problem (the pro's Job's done plus JOB_AUTO_CONFIRM_AFTER_HOURS). Null in every other status."
+          },
           "timeline": {
             "items": {
               "$ref": "#/components/schemas/JobTimelineEntry"
@@ -5327,6 +5429,7 @@
           "pro",
           "eta_at",
           "arrival_code",
+          "confirm_by",
           "timeline",
           "photos",
           "amount_cents",

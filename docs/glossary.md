@@ -147,7 +147,9 @@ proposed date. Expires after a configurable time.
 **Job**: an accepted and paid quote. Its amounts are frozen at payment.
 
 **Confirmation window**: the 48 h after the pro completes a job, during which the customer
-confirms or reports a problem; with no action, the job is confirmed automatically.
+confirms or reports a problem; with no action, the job is confirmed automatically. Its length is
+`JOB_AUTO_CONFIRM_AFTER_HOURS`; the customer's job view shows its end as `confirm_by` (#66,
+#67). A job with a problem open (disputed) is never confirmed automatically.
 
 **Dispute** (disputa): a problem the customer opens on a job. It blocks the transfer until an
 admin releases it or refunds partially or fully.

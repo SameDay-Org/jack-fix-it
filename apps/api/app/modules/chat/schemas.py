@@ -90,7 +90,8 @@ class ChatMessageIn(BaseModel):
         ),
     ] = Field(
         description="The text, trimmed. Contact details in it are masked before it is stored; "
-        "only the masked text is kept."
+        "only the masked text is shown. When something was masked, the original is kept "
+        "encrypted for staff only and deleted after the retention period (90 days by default)."
     )
 
 

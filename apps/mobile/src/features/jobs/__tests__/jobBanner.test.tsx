@@ -87,6 +87,7 @@ const job = (status: JobStatus, overrides: Partial<CustomerJob> = {}): CustomerJ
   },
   eta_at: null,
   arrival_code: null,
+  confirm_by: null,
   timeline: [entry("created", "scheduled", -120)],
   amount_cents: 18_000,
   tax_cents: 0,

@@ -1,7 +1,8 @@
 """Push copy in English and Spanish (D10.3, #54). Titles and bodies show on lock screens, so
 they carry no personal data: placeholders are limited to PLACEHOLDERS (a test scans for it).
 #55 adds a new request (to a dispatched pro), a new quote (to the customer) and a quote
-accepted (to its pro); #65 the job's steps and a booking whose payment was canceled. The On my
+accepted (to its pro); #65 the job's steps and a booking whose payment was canceled; #66/#67 the
+job confirmed (to its pro). The On my
 way copy points to the app for the arrival code: the code itself never leaves the customer's job
 view. `push.test.*` is a neutral message.
 """
@@ -46,6 +47,8 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "push.job_started.body": "Work on job {public_code} has started.",
                 "push.job_done.title": "Your pro marked the job done",
                 "push.job_done.body": "Please take a look at job {public_code} in the app.",
+                "push.job_confirmed.title": "Job confirmed",
+                "push.job_confirmed.body": "Job {public_code} is confirmed as complete.",
                 "push.booking_not_completed.title": "Your booking was not completed",
                 "push.booking_not_completed.body": (
                     "The payment for {public_code} did not go through. See your request in the app."
@@ -86,6 +89,10 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "push.job_started.body": "Comenzó el trabajo {public_code}.",
                 "push.job_done.title": "Tu profesional marcó el trabajo como terminado",
                 "push.job_done.body": "Revisa el trabajo {public_code} en la app.",
+                "push.job_confirmed.title": "Trabajo confirmado",
+                "push.job_confirmed.body": (
+                    "El trabajo {public_code} quedó confirmado como terminado."
+                ),
                 "push.booking_not_completed.title": "Tu reserva no se completó",
                 "push.booking_not_completed.body": (
                     "El pago de {public_code} no se completó. Mira tu solicitud en la app."

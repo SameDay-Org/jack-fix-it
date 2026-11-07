@@ -18,7 +18,7 @@ from app.integrations.storage import S3Storage, StorageNotConfiguredError
 from app.integrations.stripe_payments import StripePaymentsClient
 from app.modules.chat.tasks import purge_chat_originals
 from app.modules.dispatch.tasks import dispatch_request
-from app.modules.jobs.tasks import photo_sanitize_task
+from app.modules.jobs.tasks import auto_confirm_jobs, photo_sanitize_task
 from app.modules.notifications.push_tasks import check_push_receipts, send_push
 from app.modules.payments.tasks import cancel_unpaid_payments
 from app.modules.quotes.tasks import expire_quotes
@@ -133,6 +133,13 @@ class WorkerSettings:
             cancel_unpaid_payments,
             minute=every(get_settings().payment_unpaid_sweep_minutes),
             timeout=get_settings().payment_unpaid_sweep_timeout_seconds,
+            keep_result=0,
+            keep_result_forever=False,
+        ),
+        cron(
+            auto_confirm_jobs,
+            minute=every(get_settings().job_auto_confirm_sweep_minutes),
+            timeout=get_settings().job_auto_confirm_sweep_timeout_seconds,
             keep_result=0,
             keep_result_forever=False,
         ),
