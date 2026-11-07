@@ -5,6 +5,7 @@ import {
   initStripe,
   PaymentSheetError,
   presentPaymentSheet,
+  resetPaymentSheetCustomer,
 } from "@stripe/stripe-react-native";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import * as Haptics from "expo-haptics";
@@ -88,6 +89,7 @@ beforeEach(() => {
   freezeClock();
   navigation.reset();
   resetPayments();
+  session.generation = 1; // a failed test may leave a later session behind
   api.quotes = () => Promise.resolve(list([ACCEPTED, OTHER]));
   api.job = () => Promise.reject(notFound());
   api.accept = () => Promise.resolve(ACCEPTED);
@@ -96,6 +98,7 @@ beforeEach(() => {
   jest.mocked(initStripe).mockReset().mockResolvedValue(undefined);
   jest.mocked(initPaymentSheet).mockReset().mockResolvedValue({});
   jest.mocked(presentPaymentSheet).mockReset().mockResolvedValue({});
+  jest.mocked(resetPaymentSheetCustomer).mockReset().mockResolvedValue(null);
   jest.mocked(Haptics.notificationAsync).mockClear();
   jest.mocked(router.back).mockClear();
   jest.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
@@ -537,6 +540,90 @@ describe("the session pin", () => {
     expect(paymentStore.getState()).toEqual({ autoPay: null, summaries: {}, confirming: {} });
     session.generation = 1;
   });
+
+  it("a sign-out resets Stripe's saved customer, not only the payment store", async () => {
+    const { client } = await openUnpaid();
+    await act(async () => fireEvent.press(payButton()));
+    await screen.findByText(CONFIRMING);
+    expect(resetPaymentSheetCustomer).not.toHaveBeenCalled();
+
+    await signOut(session, client);
+    expect(paymentStore.getState()).toEqual({ autoPay: null, summaries: {}, confirming: {} });
+    await waitFor(() => expect(resetPaymentSheetCustomer).toHaveBeenCalledTimes(1));
+    session.generation = 1;
+  });
+
+  it("the next account's sheet starts only once the last account's reset is done", async () => {
+    const reset = deferred<null>();
+    jest.mocked(resetPaymentSheetCustomer).mockReturnValueOnce(reset.promise);
+    try {
+      await signOut(session, newQueryClient()); // the last account leaves; its reset hangs
+      await waitFor(() => expect(resetPaymentSheetCustomer).toHaveBeenCalledTimes(1));
+
+      await openUnpaid();
+      await act(async () => fireEvent.press(payButton()));
+      await waitFor(() => expect(callsTo(apiPost, PAYMENT_PATH)).toHaveLength(1));
+      expect(initStripe).not.toHaveBeenCalled();
+      expect(initPaymentSheet).not.toHaveBeenCalled();
+
+      await act(async () => reset.resolve(null));
+      await waitFor(() => expect(presentPaymentSheet).toHaveBeenCalledTimes(1));
+      expect(initStripe).toHaveBeenCalledTimes(1);
+      expect(initPaymentSheet).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => reset.resolve(null)); // a failure must not hold later suites' sheets
+    }
+  });
+
+  it("a reset that fails still signs out, logs only the error's class and blocks no payment", async () => {
+    jest
+      .mocked(resetPaymentSheetCustomer)
+      .mockRejectedValueOnce(new TypeError(`native detail ${SECRETS.join(" ")}`));
+    const spies = LOG_METHODS.map((method) =>
+      jest.spyOn(console, method).mockImplementation(() => undefined),
+    );
+    try {
+      const { client } = await openUnpaid();
+      await act(async () => fireEvent.press(payButton()));
+      await screen.findByText(CONFIRMING);
+
+      await signOut(session, client);
+      expect(paymentStore.getState()).toEqual({ autoPay: null, summaries: {}, confirming: {} });
+      const warn = spies[LOG_METHODS.indexOf("warn")];
+      await waitFor(() =>
+        expect(warn).toHaveBeenCalledWith("Payment sheet reset failed: TypeError"),
+      );
+      const logged = JSON.stringify(spies.flatMap((spy) => spy.mock.calls));
+      expect(logged).not.toContain("native detail");
+      for (const secret of SECRETS) expect(logged).not.toContain(secret);
+    } finally {
+      spies.forEach((spy) => spy.mockRestore());
+    }
+
+    // The next session pays as usual: the failed reset does not hold the sheet back.
+    resetPayments();
+    await openUnpaid();
+    await act(async () => fireEvent.press(payButton()));
+    await waitFor(() => expect(presentPaymentSheet).toHaveBeenCalledTimes(2));
+    session.generation = 1;
+  });
+
+  it("a sign-out while the sheet is open resets again once the sheet closes", async () => {
+    const present = deferred<Awaited<ReturnType<typeof presentPaymentSheet>>>();
+    jest.mocked(presentPaymentSheet).mockReturnValue(present.promise);
+    const { client } = await openUnpaid();
+    await act(async () => fireEvent.press(payButton()));
+    await waitFor(() => expect(presentPaymentSheet).toHaveBeenCalledTimes(1));
+
+    try {
+      await signOut(session, client);
+      await waitFor(() => expect(resetPaymentSheetCustomer).toHaveBeenCalledTimes(1));
+    } finally {
+      await act(async () => present.resolve({})); // a failure must not keep the sheet in use
+    }
+    // Whatever the sheet saved after the first reset is reset too.
+    await waitFor(() => expect(resetPaymentSheetCustomer).toHaveBeenCalledTimes(2));
+  });
 });
 
 describe("the confirmation", () => {
@@ -562,6 +649,24 @@ describe("the confirmation", () => {
     const back = callsTo(apiGet, JOB_PATH).length;
     await act(async () => jest.advanceTimersByTime(2_000));
     await waitFor(() => expect(callsTo(apiGet, JOB_PATH).length).toBeGreaterThan(back));
+  });
+
+  it("a payment reported while the screen is out of focus is asked for when it is back", async () => {
+    fakeClock();
+    const present = deferred<Awaited<ReturnType<typeof presentPaymentSheet>>>();
+    jest.mocked(presentPaymentSheet).mockReturnValueOnce(present.promise);
+    await openUnpaid();
+    await act(async () => fireEvent.press(payButton()));
+    await waitFor(() => expect(presentPaymentSheet).toHaveBeenCalledTimes(1));
+
+    await act(async () => navigation.setFocused(false));
+    const asked = callsTo(apiGet, JOB_PATH).length;
+    await act(async () => present.resolve({}));
+    await act(async () => jest.advanceTimersByTime(8_000));
+    expect(callsTo(apiGet, JOB_PATH)).toHaveLength(asked);
+
+    await act(async () => navigation.setFocused(true));
+    await waitFor(() => expect(callsTo(apiGet, JOB_PATH).length).toBeGreaterThan(asked));
   });
 
   it("stops asking once the card is gone", async () => {

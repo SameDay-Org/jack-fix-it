@@ -22,4 +22,5 @@ export const initPaymentSheet = jest.fn(
 export const presentPaymentSheet = jest.fn(
   async (_options?: PaymentSheet.PresentOptions): Promise<PresentPaymentSheetResult> => ({}),
 );
+export const resetPaymentSheetCustomer = jest.fn(async (): Promise<null> => null);
 export const handleURLCallback = jest.fn(async (_url: string): Promise<boolean> => true);

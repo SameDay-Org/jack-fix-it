@@ -1,6 +1,6 @@
 import * as Haptics from "expo-haptics";
 import { useIsFocused } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AccessibilityInfo } from "react-native";
 
@@ -63,10 +63,16 @@ export function useJobConfirmation(
   });
   useRefetchOnReturn(refetch);
 
-  // A new wait asks at once, through the observer that now carries the payment's session.
+  // A new wait asks at once, through the observer that now carries the payment's session, if the
+  // screen is in front: a payment reported behind another screen is asked for by the return to
+  // focus (`useRefetchOnReturn`), so the focus is read here without re-running the effect on it.
+  const focusedNow = useRef(focused);
+  useEffect(() => {
+    focusedNow.current = focused;
+  }, [focused]);
   const since = confirming?.since;
   useEffect(() => {
-    if (since !== undefined) void refetch();
+    if (since !== undefined && focusedNow.current) void refetch();
   }, [since, refetch]);
 
   const booked = Boolean(job);

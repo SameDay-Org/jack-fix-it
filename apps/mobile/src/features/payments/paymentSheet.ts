@@ -10,13 +10,13 @@ import { tokens } from "@/theme";
 
 import { paymentConfig } from "./config";
 import type { PaymentSheetOut } from "./paymentStore";
+import { resetSheetCustomer, sheetCustomerReady } from "./sheetCustomer";
+import { STRIPE_RETURN_PATH } from "./stripeReturn";
 
 /** Where the platform's business is registered: Apple Pay and Google Pay need its country. */
 const MERCHANT_COUNTRY = "US";
 /** Live keys start with this; any other key is Stripe's test mode, and Google Pay's test wallet. */
 const LIVE_KEY_PREFIX = "pk_live_";
-/** The path a bank's 3-D Secure page returns to (`links.ts` hands it to Stripe, not the router). */
-export const STRIPE_RETURN_PATH = "stripe-redirect";
 
 /**
  * How the sheet ended: `paid` (Stripe confirmed the PaymentIntent); `canceled` (the customer
@@ -53,19 +53,24 @@ const APPEARANCE: AppearanceParams = {
  * goes from the sheet to Stripe and never through this code, and neither secret is logged, kept
  * or returned. `stillWanted` is asked after every step that waits: once it says no (the session
  * ended, the screen went away) nothing more is opened. Stripe's error text is never passed on,
- * since it may describe the card: only the error's code decides the result.
+ * since it may describe the card: only the error's code decides the result. The sheet starts
+ * only after the customer resets of earlier sessions (`sheetCustomer`); when its own session ends
+ * while Stripe is working, the reset is asked for again once Stripe is done.
  */
 export async function openPaymentSheet(
   sheet: PaymentSheetOut,
   { merchantName, stillWanted }: { merchantName: string; stillWanted: () => boolean },
 ): Promise<SheetResult> {
+  const session = await sheetCustomerReady();
+  const wanted = () => !session.ended() && stillWanted();
+  if (!wanted()) return { kind: "superseded" };
   try {
     await initStripe({
       publishableKey: sheet.publishable_key,
       merchantIdentifier: paymentConfig.appleMerchantId,
       urlScheme: paymentConfig.urlScheme,
     });
-    if (!stillWanted()) return { kind: "superseded" };
+    if (!wanted()) return { kind: "superseded" };
 
     const init = await initPaymentSheet({
       merchantDisplayName: merchantName,
@@ -85,7 +90,7 @@ export async function openPaymentSheet(
       appearance: APPEARANCE,
     });
     if (init.error) return { kind: "failed", reason: "unavailable" };
-    if (!stillWanted()) return { kind: "superseded" };
+    if (!wanted()) return { kind: "superseded" };
 
     const { error } = await presentPaymentSheet();
     if (!error) return { kind: "paid" };
@@ -97,5 +102,8 @@ export async function openPaymentSheet(
   } catch {
     // initStripe rejects on a key it cannot use; the other two answer with `error` instead.
     return { kind: "failed", reason: "unavailable" };
+  } finally {
+    // Stripe may have saved this customer's sign-in after the reset ran: reset it again.
+    if (session.ended()) resetSheetCustomer();
   }
 }

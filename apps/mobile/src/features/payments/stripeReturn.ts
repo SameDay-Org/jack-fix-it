@@ -1,6 +1,10 @@
 import { handleURLCallback } from "@stripe/stripe-react-native";
 
-import { STRIPE_RETURN_PATH } from "./paymentSheet";
+/**
+ * The path a bank's 3-D Secure page returns to (`links.ts` hands it to Stripe, not the router).
+ * It lives here, not with the sheet, so the link handler loads neither the sheet nor the API.
+ */
+export const STRIPE_RETURN_PATH = "stripe-redirect";
 
 /**
  * Whether a link's path (after the app's prefix) is where a bank's 3-D Secure page sends the
