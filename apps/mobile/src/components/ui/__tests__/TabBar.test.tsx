@@ -1,13 +1,19 @@
 import { fireEvent, render, renderHook, screen } from "@testing-library/react-native";
 import { BottomTabBarHeightContext } from "expo-router/js-tabs";
 import { createElement, type ReactNode } from "react";
-import { Dimensions, Platform, StyleSheet } from "react-native";
+import { Dimensions, Platform, StyleSheet, Text } from "react-native";
 import { makeMutable } from "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { glassFallback, tokens } from "@/theme";
 
-import { tabBarGeometry, TabBar, useTabBarInset, type TabBarItem } from "../TabBar";
+import {
+  tabBarGeometry,
+  TabBar,
+  TabBarAccessoryContext,
+  useTabBarInset,
+  type TabBarItem,
+} from "../TabBar";
 
 jest.mock(
   "react-native-safe-area-context",
@@ -64,6 +70,8 @@ const renderBar = () => render(<TabBar items={items} testID="tab-bar" />, { wrap
 beforeEach(() => jest.clearAllMocks());
 afterEach(() => jest.restoreAllMocks());
 
+const NO_ACCESSORY = { accessoryHeight: 0, accessoryBottom: 0 };
+
 describe("tabBarGeometry", () => {
   it("a 56 dp row at scale 1.0 that grows with the label at 1.3, never under 48", () => {
     expect(tabBarGeometry(1, 0, false).barHeight).toBe(56);
@@ -76,12 +84,44 @@ describe("tabBarGeometry", () => {
       barHeight: 56,
       bottom: 0,
       inset: BOTTOM_INSET + 56,
+      ...NO_ACCESSORY,
     });
   });
 
   it("floating: 8 dp over the home indicator (16 dp at least), and a gap above the pill", () => {
-    expect(tabBarGeometry(1, 34, true)).toEqual({ barHeight: 56, bottom: 42, inset: 42 + 56 + 8 });
-    expect(tabBarGeometry(1, 0, true)).toEqual({ barHeight: 56, bottom: 16, inset: 16 + 56 + 8 });
+    expect(tabBarGeometry(1, 34, true)).toEqual({
+      barHeight: 56,
+      bottom: 42,
+      inset: 42 + 56 + 8,
+      ...NO_ACCESSORY,
+    });
+    expect(tabBarGeometry(1, 0, true)).toEqual({
+      barHeight: 56,
+      bottom: 16,
+      inset: 16 + 56 + 8,
+      ...NO_ACCESSORY,
+    });
+  });
+
+  it("an accessory floats 8 dp over the tabs, one callout line tall (48 dp at least), and the inset clears it", () => {
+    // Docked: the tabs' top is the inset plus the row; the accessory 8 dp above, then 8 dp of air.
+    expect(tabBarGeometry(1, BOTTOM_INSET, false, true)).toEqual({
+      barHeight: 56,
+      bottom: 0,
+      accessoryHeight: 48,
+      accessoryBottom: BOTTOM_INSET + 56 + 8,
+      inset: BOTTOM_INSET + 56 + 8 + 48 + 8,
+    });
+    // Floating: over the pill, which already floats 8 dp over the home indicator.
+    expect(tabBarGeometry(1, 34, true, true)).toEqual({
+      barHeight: 56,
+      bottom: 42,
+      accessoryHeight: 48,
+      accessoryBottom: 42 + 56 + 8,
+      inset: 42 + 56 + 8 + 48 + 8,
+    });
+    // The line grows with the font scale: 20 dp x 2 + 12 dp above and below.
+    expect(tabBarGeometry(2, 0, false, true).accessoryHeight).toBe(64);
   });
 });
 
@@ -177,6 +217,73 @@ describe("TabBar", () => {
     expect(bar().props.pointerEvents).toBe("none");
     expect(bar().props.accessibilityElementsHidden).toBe(true);
     expect(screen.queryByRole("tab", { name: "Home" })).toBeNull();
+  });
+});
+
+describe("TabBar accessory", () => {
+  const withAccessory = (shown: boolean) =>
+    function AccessoryWrapper({ children }: { children: ReactNode }) {
+      return createElement(
+        TabBarAccessoryContext.Provider,
+        { value: shown },
+        createElement(wrapper, null, children),
+      );
+    };
+  const accessory = <Text testID="accessory-content">Dan is on the way</Text>;
+
+  it.each(["android", "ios"] as const)(
+    "draws the accessory over the tabs while the context says one shows (%s)",
+    async (os) => {
+      jest.replaceProperty(Platform, "OS", os);
+      await render(<TabBar items={items} accessory={accessory} testID="tab-bar" />, {
+        wrapper: withAccessory(true),
+      });
+
+      const geometry = tabBarGeometry(fontScale, BOTTOM_INSET, os === "ios", true);
+      expect(StyleSheet.flatten(screen.getByTestId("tab-bar-accessory").props.style)).toMatchObject(
+        {
+          position: "absolute",
+          left: 16,
+          right: 16,
+          bottom: geometry.accessoryBottom,
+          height: geometry.accessoryHeight,
+        },
+      );
+      expect(screen.getByTestId("accessory-content")).toBeTruthy();
+    },
+  );
+
+  it("draws nothing without the context, so the screens never pad for a missing accessory", async () => {
+    await render(<TabBar items={items} accessory={accessory} testID="tab-bar" />, {
+      wrapper: withAccessory(false),
+    });
+
+    expect(screen.queryByTestId("tab-bar-accessory")).toBeNull();
+    expect(screen.queryByTestId("accessory-content")).toBeNull();
+  });
+
+  it("hides with the bar: no taps, and screen readers skip it", async () => {
+    await render(<TabBar items={items} accessory={accessory} hidden testID="tab-bar" />, {
+      wrapper: withAccessory(true),
+    });
+
+    const slot = screen.getByTestId("tab-bar-accessory", { includeHiddenElements: true });
+    expect(slot.props.pointerEvents).toBe("none");
+    expect(slot.props.accessibilityElementsHidden).toBe(true);
+    expect(screen.queryByTestId("accessory-content")).toBeNull();
+  });
+
+  it("grows a tab root's inset by the accessory's footprint", async () => {
+    jest.replaceProperty(Platform, "OS", "android");
+    const underTabs = ({ children }: { children: ReactNode }) =>
+      createElement(
+        BottomTabBarHeightContext.Provider,
+        { value: 0 },
+        createElement(withAccessory(true), null, children),
+      );
+    const { result } = await renderHook(() => useTabBarInset(), { wrapper: underTabs });
+
+    expect(result.current).toBe(tabBarGeometry(fontScale, BOTTOM_INSET, false, true).inset);
   });
 });
 

@@ -10,6 +10,7 @@ export default function RequestLayout() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
+      <Stack.Screen name="job" />
       <Stack.Screen name="quotes/[quoteId]/pro" />
       <Stack.Screen name="accept" options={sheetOptions("fitToContents")} />
     </Stack>
