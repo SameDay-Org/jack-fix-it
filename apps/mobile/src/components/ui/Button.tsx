@@ -1,7 +1,9 @@
+import type { ComponentRef, Ref } from "react";
 import { useTranslation } from "react-i18next";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
-import { continuousCorners, type ColorToken } from "@/theme";
+import { ControlIcon, type ControlGlyphName } from "@/components/icons";
+import { continuousCorners, tokens, type ColorToken } from "@/theme";
 
 import { cx } from "./cx";
 import { useFlag } from "./useFlag";
@@ -14,6 +16,13 @@ export type ButtonProps = {
   label: string;
   /** A fuller name for assistive technology, e.g. "Remove Photo 2" where many rows say "Remove". */
   accessibilityLabel?: string;
+  /** What the press does or where it lands, when the label alone does not say it. */
+  accessibilityHint?: string;
+  /**
+   * Shows this glyph in place of the visible label: a round icon button, for a row too tight for
+   * the word. The label stays its accessible name.
+   */
+  glyph?: ControlGlyphName;
   onPress?: () => void;
   variant?: ButtonVariant;
   size?: ButtonSize;
@@ -23,6 +32,8 @@ export type ButtonProps = {
   loading?: boolean;
   /** Layout-only classes (margins, width). */
   className?: string;
+  /** The pressable host, to move screen-reader focus onto the button. */
+  ref?: Ref<ComponentRef<typeof View>>;
   testID?: string;
 };
 
@@ -70,6 +81,9 @@ const SIZE: Record<ButtonSize, string> = {
   md: "min-h-12 min-w-12 px-5",
   lg: "min-h-14 min-w-14 px-6",
 };
+// An icon button is a circle of the same touch target.
+const ROUND: Record<ButtonSize, string> = { md: "h-12 w-12", lg: "h-14 w-14" };
+const GLYPH_SIZE = 24;
 
 const forState = (classes: StateClasses, pressed: boolean) =>
   pressed ? classes.pressed : classes.rest;
@@ -77,12 +91,15 @@ const forState = (classes: StateClasses, pressed: boolean) =>
 export function Button({
   label,
   accessibilityLabel,
+  accessibilityHint,
+  glyph,
   onPress,
   variant = "primary",
   size = "md",
   disabled = false,
   loading = false,
   className,
+  ref,
   testID,
 }: ButtonProps) {
   const { t } = useTranslation();
@@ -92,12 +109,14 @@ export function Button({
 
   return (
     <Pressable
+      ref={ref}
       accessibilityRole="button"
       accessibilityLabel={
         loading
           ? `${accessibilityLabel ?? label}, ${t("common.loading")}`
           : (accessibilityLabel ?? label)
       }
+      accessibilityHint={accessibilityHint}
       accessibilityState={{ disabled: inactive, busy: loading }}
       disabled={inactive}
       onPress={onPress}
@@ -109,7 +128,7 @@ export function Button({
         "flex-row items-center justify-center rounded-pill",
         classes.base,
         forState(classes.fill, pressed),
-        SIZE[size],
+        glyph ? ROUND[size] : SIZE[size],
         disabled && "opacity-50",
         className,
       )}
@@ -117,16 +136,31 @@ export function Button({
       {/* The label stays mounted, invisible, while loading so the width does not jump. A button label
           is one line by contract: without `numberOfLines`, Android can wrap a label that measures as
           one line by a fraction of a pixel and hide its second half. */}
-      <Text
-        numberOfLines={1}
-        className={cx(
-          "text-center text-headline",
-          forState(classes.label, pressed),
-          loading && "opacity-0",
-        )}
-      >
-        {label}
-      </Text>
+      {glyph ? (
+        <View className={cx(loading && "opacity-0")}>
+          <ControlIcon
+            name={glyph}
+            size={GLYPH_SIZE}
+            // The label's colour in the same state: white on hero, and on primary while pressed.
+            color={
+              variant === "hero" || (variant === "primary" && pressed)
+                ? tokens.colors.white
+                : tokens.colors["navy-900"]
+            }
+          />
+        </View>
+      ) : (
+        <Text
+          numberOfLines={1}
+          className={cx(
+            "text-center text-headline",
+            forState(classes.label, pressed),
+            loading && "opacity-0",
+          )}
+        >
+          {label}
+        </Text>
+      )}
       {loading ? (
         <View className="pointer-events-none absolute inset-0 items-center justify-center">
           <ActivityIndicator className={classes.label.rest} />

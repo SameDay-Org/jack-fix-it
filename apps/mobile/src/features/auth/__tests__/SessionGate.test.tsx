@@ -23,6 +23,8 @@ jest.mock("@/api", () => ({
   useSession: jest.fn(),
   logout: jest.fn(async () => undefined),
   restoreSession: jest.fn(async () => undefined),
+  // The phone flow registers its sign-out cleanup on import.
+  onSignOut: jest.fn(() => () => undefined),
 }));
 jest.mock("expo-splash-screen", () => ({
   preventAutoHideAsync: jest.fn(async () => true),
@@ -66,7 +68,7 @@ beforeEach(() => {
   jest.mocked(logout).mockClear();
   jest.mocked(restoreSession).mockClear();
   jest.mocked(Stack).mockClear();
-  phoneFlowStore.setState({ pendingNumber: null, offeredAfterSignUp: false });
+  phoneFlowStore.setState({ pendingNumber: null });
 });
 
 describe("session gate", () => {
@@ -114,25 +116,22 @@ describe("session gate", () => {
     expect(screen.getByText("app stub")).toBeTruthy();
   });
 
-  it("a sign-up opens the phone step over home, so Skip and Back end on home", async () => {
-    phoneFlowStore.setState({ offeredAfterSignUp: true });
-    session({ status: "signedIn", user });
+  it("a sign-up whose flow just ended lands on home, with no phone step over it (#295)", async () => {
+    // The flow verified the phone itself and ended (`endOnboarding`): nothing opens over home.
+    session({
+      status: "signedIn",
+      user: { ...user, phone: "+14155550123", phone_verified: true },
+      onboardingUserId: null,
+    });
 
-    // Signed in while on an auth screen: the auth guard sends the session home, and home opens
-    // the phone step over itself.
     const result = await renderRouter(
       { ...routes, "(app)/(tabs)/index": HomePlaceholderScreen },
       { initialUrl: "/welcome" },
     );
 
-    expect(result.getPathname()).toBe("/verify-phone");
-    expect(result.getSearchParams()).toEqual({ from: "sign-up" });
-    expect(screen.getByText("phone step stub")).toBeTruthy();
-
-    await act(async () => phoneFlowStore.setState({ offeredAfterSignUp: false })); // shown once
-    await act(async () => router.back());
     expect(result.getPathname()).toBe("/");
-    expect(screen.getByRole("button", { name: "Verify your phone" })).toBeTruthy();
+    expect(screen.queryByText("phone step stub")).toBeNull();
+    expect(screen.getByTestId("home-welcome")).toBeTruthy();
   });
 
   it("any other sign-in lands on home", async () => {

@@ -53,13 +53,45 @@
       "supportPro": "Your card shows only the city and state.",
       "label": "Home"
     },
+    "photo": {
+      "title": "Let's see that face!",
+      "support": "Your photo goes on your card. Face the camera in good light.",
+      "take": "Take photo",
+      "use": "Use photo",
+      "retry": "Try again",
+      "retake": "Retake",
+      "allow": "Turn on camera",
+      "openSettings": "Open settings",
+      "library": "Choose a photo",
+      "preview": "Camera preview",
+      "yours": "Your photo",
+      "uploading": "Uploading your photo",
+      "blockedTitle": "Camera access is off",
+      "blockedBody": "Turn it on for Jack in Settings, or choose a photo from this phone.",
+      "unavailableTitle": "The camera couldn't start",
+      "unavailableBody": "Choose a photo from this phone instead."
+    },
+    "phone": {
+      "title": "What's your number?",
+      "support": "It goes on your card, for your eyes only. We'll text you a {{length}}-digit code."
+    },
+    "code": {
+      "title": "Enter the code we sent"
+    },
+    "finish": {
+      "title": "Account created! Here's your ID:",
+      "support": "Tap it to see the back.",
+      "continue": "Let's go"
+    },
     "next": "Continue",
-    "finish": "Done",
     "errors": {
       "nameInvalid": "Use letters, spaces, hyphens, apostrophes or periods.",
       "nameSave": "We couldn't save your name. Try again.",
       "homeInvalid": "We couldn't use this address. Check the fields and try again.",
-      "homeSave": "We couldn't save where you live. Try again."
+      "homeSave": "We couldn't save where you live. Try again.",
+      "photoSave": "We couldn't save your photo. Try again.",
+      "photoRejected": "We couldn't use this photo. Take another one.",
+      "photoPick": "We couldn't get the photo. Try again."
     }
   },
   "login": {
@@ -100,7 +132,38 @@
     "retry": "Try again"
   },
   "account": {
-    "title": "Account"
+    "title": "Account",
+    "card": {
+      "label": "Your ID card",
+      "hint": "Brings the card forward so you can tilt it and turn it over.",
+      "hintStill": "Brings the card forward so you can turn it over.",
+      "focused": "Your ID card is up front. Double tap the card to turn it over.",
+      "gesture": "Drag to tilt it. Tap to turn it over.",
+      "gestureStill": "Tap to turn it over.",
+      "back": "Back to your account"
+    },
+    "memberSince": "Member since",
+    "rating": "Rating",
+    "noRatings": "No ratings yet",
+    "share": {
+      "label": "Share",
+      "a11y": "Share your ID card as an image",
+      "dialogTitle": "Share your ID card",
+      "failed": "We couldn't share your ID card. Give it another try in a moment."
+    },
+    "menu": {
+      "settings": "Settings",
+      "help": "Help",
+      "legal": "Legal",
+      "logOut": "Log out"
+    },
+    "logOut": {
+      "title": "Log out?",
+      "body": "You can log back in anytime with your email and password.",
+      "cancel": "Cancel",
+      "confirm": "Log out",
+      "hint": "Asks before it logs you out."
+    }
   },
   "tabs": {
     "home": "Home",
@@ -263,13 +326,12 @@
     "subtitle": "We'll text a {{length}}-digit code to this number.",
     "numberLabel": "Phone number",
     "send": "Send code",
-    "skip": "Skip for now",
     "codeTitle": "Enter the code",
     "codeSubtitle": "We sent it to {{phone}}.",
     "codeLabel": "Verification code",
     "verify": "Verify",
     "resend": "Resend code",
-    "resendIn": "Resend code in {{seconds}} s",
+    "resendIn": "Resend in {{seconds}} s",
     "codeResent": "We sent a new code.",
     "changeNumber": "Change number",
     "verified": "Phone verified",
@@ -599,5 +661,23 @@
       "flip": "Flip the card",
       "hint": "Turns the card over."
     }
+  },
+  "settings": {
+    "title": "Settings",
+    "sections": {
+      "account": "Your account"
+    },
+    "email": "Email",
+    "phone": "Phone",
+    "phoneNotVerified": "Not verified yet"
+  },
+  "help": {
+    "title": "Support when you need it",
+    "body": "Answers to common questions and a way to reach the Jack Fix It team will live here. We're still putting them together."
+  },
+  "legal": {
+    "title": "Legal",
+    "lead": "Our Terms of Service and Privacy Policy will be published here.",
+    "body": "They're being finalized. Once they're ready, you'll be able to read them in full on this page."
   }
 }

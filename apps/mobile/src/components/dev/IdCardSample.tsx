@@ -1,7 +1,7 @@
 // Dev-only gallery content for the ID card (#291), unreachable outside __DEV__: the sample people
 // and places below are literal on purpose. Both variants, a field that types into one of them, and
 // the off-screen share render with the pixel size of what it captures.
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Image, Text, useWindowDimensions, View } from "react-native";
 
 import { apiConfig } from "@/api/config";
@@ -44,13 +44,25 @@ export function IdCardSample() {
   const [name, setName] = useState("María Pérez");
   const share = useRef<IdCardShareHandle>(null);
   const [capture, setCapture] = useState<Capture>({ status: "idle" });
+  // The preview's PNG lives until the next capture replaces it or the gallery closes.
+  const shown = useRef<IdCardShareCapture | null>(null);
+  const release = () => {
+    shown.current?.discard();
+    shown.current = null;
+  };
+  useEffect(() => () => shown.current?.discard(), []);
 
   const captureShare = async () => {
     const target = share.current;
     if (!target) return;
     setCapture({ status: "capturing" });
+    release();
     try {
-      setCapture({ status: "captured", ...(await target.capture()) });
+      const next = await target.capture();
+      // Two quick taps: the capture this one replaces may have landed meanwhile.
+      release();
+      shown.current = next;
+      setCapture({ status: "captured", ...next });
     } catch (error) {
       setCapture({
         status: "failed",

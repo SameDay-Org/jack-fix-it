@@ -1,7 +1,7 @@
 import "@/i18n";
 
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
-import { router, useLocalSearchParams } from "expo-router";
+import { router } from "expo-router";
 import { AccessibilityInfo } from "react-native";
 
 import {
@@ -34,7 +34,6 @@ jest.mock("expo-router", () => ({
     dismissTo: jest.fn(),
     canGoBack: jest.fn(() => true),
   },
-  useLocalSearchParams: jest.fn(() => ({})),
 }));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
@@ -57,8 +56,7 @@ beforeEach(() => {
   announce = jest
     .spyOn(AccessibilityInfo, "announceForAccessibility")
     .mockImplementation(() => undefined);
-  phoneFlowStore.setState({ pendingNumber: null, offeredAfterSignUp: false });
-  jest.mocked(useLocalSearchParams).mockReturnValue({});
+  phoneFlowStore.setState({ pendingNumber: null });
   jest.mocked(router.push).mockClear();
   jest.mocked(router.dismissTo).mockClear();
   signIn();
@@ -161,23 +159,9 @@ describe("PhoneEntryScreen", () => {
     await waitFor(() => expect(router.push).toHaveBeenCalledTimes(1));
   });
 
-  it("from home: a Back button and no skip", async () => {
+  it("has a Back button", async () => {
     await renderScreen(<PhoneEntryScreen />);
     expect(screen.getByRole("button", { name: "Back" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
-  });
-
-  it("right after a sign-up: Skip for now goes home, and the step is offered only once", async () => {
-    jest.mocked(useLocalSearchParams).mockReturnValue({ from: "sign-up" });
-    phoneFlowStore.setState({ offeredAfterSignUp: true });
-    await renderScreen(<PhoneEntryScreen />);
-
-    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
-    expect(phoneFlowStore.getState().offeredAfterSignUp).toBe(false);
-
-    await fireEvent.press(screen.getByRole("button", { name: "Skip for now" }));
-    expect(router.dismissTo).toHaveBeenCalledWith("/");
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
