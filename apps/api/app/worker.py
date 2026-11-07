@@ -16,6 +16,7 @@ from app.db import create_engine, create_session_factory
 from app.integrations.expo_push import ExpoPushSender
 from app.integrations.storage import S3Storage, StorageNotConfiguredError
 from app.modules.dispatch.tasks import dispatch_request
+from app.modules.jobs.tasks import photo_sanitize_task
 from app.modules.notifications.push_tasks import check_push_receipts, send_push
 from app.modules.quotes.tasks import expire_quotes
 from app.modules.requests.tasks import sanitize_task
@@ -85,6 +86,7 @@ class WorkerSettings:
         # again once the first run is over; the tries match the sends per device.
         discarding_result(send_push, max_tries=get_settings().push_max_attempts),
         sanitize_task(get_settings()),
+        photo_sanitize_task(get_settings()),
         # A run per handler attempt: a failing event is failed on its last one.
         discarding_result(
             process_stripe_event, max_tries=get_settings().stripe_webhook_max_attempts

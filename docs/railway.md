@@ -52,36 +52,38 @@ environment as **shared variables** referenced from both services, so the two ne
 
 ### api
 
-| Variable                      | Value                                                                    | Secret          | Source     |
-| ----------------------------- | ------------------------------------------------------------------------ | --------------- | ---------- |
-| `APP_ENV`                     | `staging` or `production`                                                | no              | D3.1 (#22) |
-| `LOG_LEVEL`                   | `INFO`                                                                   | no              | D3.1 (#22) |
-| `PORT`                        | `8000` (set it explicitly so web can reference it)                       | no              | D3.1 (#22) |
-| `DATABASE_URL`                | `${{Postgres.DATABASE_URL}}` (normalized to asyncpg by the app)          | yes (reference) | D3.1 (#22) |
-| `REDIS_URL`                   | `${{Redis.REDIS_URL}}`                                                   | yes (reference) | D3.1 (#22) |
-| `CORS_ORIGINS`                | empty until a browser calls the API directly                             | no              | D3.1 (#22) |
-| `SENTRY_DSN`                  | per environment                                                          | no              | D3.1 (#22) |
-| `FORWARDED_ALLOW_IPS`         | the addresses Railway's proxy connects from; confirm at first setup      | no              | D4.4 (#28) |
-| `RATE_LIMIT_TIMEOUT_SECONDS`  | optional; `0.5` by default                                               | no              | D4.4 (#28) |
-| `JWT_SECRET`                  | required; random, at least 32 characters                                 | yes             | D4.2 (#25) |
-| `RATE_LIMIT_KEY_SECRET`       | required; random, at least 32 characters, one per environment            | yes             | #137       |
-| `REFRESH_ROTATION_SECRET`     | required; random, at least 32 characters, one per environment            | yes             | #152       |
-| `REFRESH_REUSE_GRACE_SECONDS` | optional; `30` by default                                                | no              | #152       |
-| `TWILIO_ACCOUNT_SID`          | required                                                                 | no              | D4.3 (#26) |
-| `TWILIO_AUTH_TOKEN`           | required                                                                 | yes             | D4.3 (#26) |
-| `TWILIO_VERIFY_SERVICE_SID`   | required                                                                 | no              | D4.3 (#26) |
-| `RESEND_API_KEY`              | required                                                                 | yes             | D4.3 (#27) |
-| `EMAIL_FROM`                  | required; e.g. `Jack Fix It <no-reply@…>` on a domain verified in Resend | no              | D4.3 (#27) |
-| `S3_ENDPOINT_URL`             | required                                                                 | no              | D6.2 (#35) |
-| `S3_BUCKET`                   | required                                                                 | no              | D6.2 (#35) |
-| `S3_ACCESS_KEY_ID`            | required                                                                 | yes             | D6.2 (#35) |
-| `S3_SECRET_ACCESS_KEY`        | required                                                                 | yes             | D6.2 (#35) |
-| `S3_REGION`                   | `auto` (the default) for Cloudflare R2                                   | no              | D6.2 (#35) |
-| `STRIPE_WEBHOOK_SECRET`       | optional until the Stripe endpoint exists; unset, the webhook gives 503  | yes             | D7.3 (#40) |
-| `GOOGLE_MAPS_API_KEY`         | optional until #14; without it `POST /v1/geo/reverse` answers 503        | yes             | #215       |
-| `STRIPE_SECRET_KEY`           | required; `sk_test_` until launch: a live key works in production only   | yes             | D7.1 (#39) |
-| `STRIPE_PUBLISHABLE_KEY`      | only a `pk_` key (`pk_test_` until launch); unset, payment gives 503     | no              | #58        |
-| `PUBLIC_API_URL`              | required; https, e.g. `https://${{api.RAILWAY_PUBLIC_DOMAIN}}`           | no              | D7.1 (#39) |
+| Variable                           | Value                                                                       | Secret          | Source     |
+| ---------------------------------- | --------------------------------------------------------------------------- | --------------- | ---------- |
+| `APP_ENV`                          | `staging` or `production`                                                   | no              | D3.1 (#22) |
+| `LOG_LEVEL`                        | `INFO`                                                                      | no              | D3.1 (#22) |
+| `PORT`                             | `8000` (set it explicitly so web can reference it)                          | no              | D3.1 (#22) |
+| `DATABASE_URL`                     | `${{Postgres.DATABASE_URL}}` (normalized to asyncpg by the app)             | yes (reference) | D3.1 (#22) |
+| `REDIS_URL`                        | `${{Redis.REDIS_URL}}`                                                      | yes (reference) | D3.1 (#22) |
+| `CORS_ORIGINS`                     | empty until a browser calls the API directly                                | no              | D3.1 (#22) |
+| `SENTRY_DSN`                       | per environment                                                             | no              | D3.1 (#22) |
+| `FORWARDED_ALLOW_IPS`              | the addresses Railway's proxy connects from; confirm at first setup         | no              | D4.4 (#28) |
+| `RATE_LIMIT_TIMEOUT_SECONDS`       | optional; `0.5` by default                                                  | no              | D4.4 (#28) |
+| `JWT_SECRET`                       | required; random, at least 32 characters                                    | yes             | D4.2 (#25) |
+| `RATE_LIMIT_KEY_SECRET`            | required; random, at least 32 characters, one per environment               | yes             | #137       |
+| `REFRESH_ROTATION_SECRET`          | required; random, at least 32 characters, one per environment               | yes             | #152       |
+| `REFRESH_REUSE_GRACE_SECONDS`      | optional; `30` by default                                                   | no              | #152       |
+| `TWILIO_ACCOUNT_SID`               | required                                                                    | no              | D4.3 (#26) |
+| `TWILIO_AUTH_TOKEN`                | required                                                                    | yes             | D4.3 (#26) |
+| `TWILIO_VERIFY_SERVICE_SID`        | required                                                                    | no              | D4.3 (#26) |
+| `RESEND_API_KEY`                   | required                                                                    | yes             | D4.3 (#27) |
+| `EMAIL_FROM`                       | required; e.g. `Jack Fix It <no-reply@…>` on a domain verified in Resend    | no              | D4.3 (#27) |
+| `S3_ENDPOINT_URL`                  | required                                                                    | no              | D6.2 (#35) |
+| `S3_BUCKET`                        | required                                                                    | no              | D6.2 (#35) |
+| `S3_ACCESS_KEY_ID`                 | required                                                                    | yes             | D6.2 (#35) |
+| `S3_SECRET_ACCESS_KEY`             | required                                                                    | yes             | D6.2 (#35) |
+| `S3_REGION`                        | `auto` (the default) for Cloudflare R2                                      | no              | D6.2 (#35) |
+| `STRIPE_WEBHOOK_SECRET`            | optional until the Stripe endpoint exists; unset, the webhook gives 503     | yes             | D7.3 (#40) |
+| `GOOGLE_MAPS_API_KEY`              | optional until #14; without it `POST /v1/geo/reverse` answers 503           | yes             | #215       |
+| `STRIPE_SECRET_KEY`                | required; `sk_test_` until launch: a live key works in production only      | yes             | D7.1 (#39) |
+| `STRIPE_PUBLISHABLE_KEY`           | only a `pk_` key (`pk_test_` until launch); unset, payment gives 503        | no              | #58        |
+| `PUBLIC_API_URL`                   | required; https, e.g. `https://${{api.RAILWAY_PUBLIC_DOMAIN}}`              | no              | D7.1 (#39) |
+| `ORPHAN_UPLOAD_MIN_AGE_HOURS`      | optional; `24` by default; a shared variable (see below)                    | no              | #191, #298 |
+| `JOB_PHOTO_ATTACH_MAX_AGE_MINUTES` | optional; `720` by default, at most half the hours above; a shared variable | no              | #298       |
 
 "Required" means the API refuses to start in staging and production without it (the settings
 validators in `apps/api/app/config.py`). Every other setting has a working default; the
@@ -96,28 +98,36 @@ The worker builds the same settings when `app/worker.py` is imported, so the sam
 stop it: without every required variable it crash-loops under its `ALWAYS` restart policy and
 never logs `worker_started`. Use the same values as api.
 
-| Variable                    | Value                                                      | Secret          | Source      |
-| --------------------------- | ---------------------------------------------------------- | --------------- | ----------- |
-| `APP_ENV`                   | same as api                                                | no              | D3.1 (#22)  |
-| `LOG_LEVEL`                 | same as api                                                | no              | D3.1 (#22)  |
-| `DATABASE_URL`              | `${{Postgres.DATABASE_URL}}`                               | yes (reference) | D3.1 (#22)  |
-| `REDIS_URL`                 | `${{Redis.REDIS_URL}}`                                     | yes (reference) | D3.1 (#22)  |
-| `SENTRY_DSN`                | same as api                                                | no              | D3.1 (#22)  |
-| `JWT_SECRET`                | same as api                                                | yes             | D4.2 (#25)  |
-| `RATE_LIMIT_KEY_SECRET`     | same as api                                                | yes             | #137        |
-| `REFRESH_ROTATION_SECRET`   | same as api                                                | yes             | #152        |
-| `TWILIO_ACCOUNT_SID`        | same as api                                                | no              | D4.3 (#26)  |
-| `TWILIO_AUTH_TOKEN`         | same as api                                                | yes             | D4.3 (#26)  |
-| `TWILIO_VERIFY_SERVICE_SID` | same as api                                                | no              | D4.3 (#26)  |
-| `RESEND_API_KEY`            | same as api                                                | yes             | D4.3 (#27)  |
-| `EMAIL_FROM`                | same as api                                                | no              | D4.3 (#27)  |
-| `S3_ENDPOINT_URL`           | same as api                                                | no              | D6.2 (#35)  |
-| `S3_BUCKET`                 | same as api                                                | no              | D6.2 (#35)  |
-| `S3_ACCESS_KEY_ID`          | same as api                                                | yes             | D6.2 (#35)  |
-| `S3_SECRET_ACCESS_KEY`      | same as api                                                | yes             | D6.2 (#35)  |
-| `STRIPE_SECRET_KEY`         | same as api                                                | yes             | D7.1 (#39)  |
-| `PUBLIC_API_URL`            | same as api                                                | no              | D7.1 (#39)  |
-| `EXPO_ACCESS_TOKEN`         | optional; set it only if Expo enhanced push security is on | yes             | D10.3 (#54) |
+| Variable                           | Value                                                      | Secret          | Source      |
+| ---------------------------------- | ---------------------------------------------------------- | --------------- | ----------- |
+| `APP_ENV`                          | same as api                                                | no              | D3.1 (#22)  |
+| `LOG_LEVEL`                        | same as api                                                | no              | D3.1 (#22)  |
+| `DATABASE_URL`                     | `${{Postgres.DATABASE_URL}}`                               | yes (reference) | D3.1 (#22)  |
+| `REDIS_URL`                        | `${{Redis.REDIS_URL}}`                                     | yes (reference) | D3.1 (#22)  |
+| `SENTRY_DSN`                       | same as api                                                | no              | D3.1 (#22)  |
+| `JWT_SECRET`                       | same as api                                                | yes             | D4.2 (#25)  |
+| `RATE_LIMIT_KEY_SECRET`            | same as api                                                | yes             | #137        |
+| `REFRESH_ROTATION_SECRET`          | same as api                                                | yes             | #152        |
+| `TWILIO_ACCOUNT_SID`               | same as api                                                | no              | D4.3 (#26)  |
+| `TWILIO_AUTH_TOKEN`                | same as api                                                | yes             | D4.3 (#26)  |
+| `TWILIO_VERIFY_SERVICE_SID`        | same as api                                                | no              | D4.3 (#26)  |
+| `RESEND_API_KEY`                   | same as api                                                | yes             | D4.3 (#27)  |
+| `EMAIL_FROM`                       | same as api                                                | no              | D4.3 (#27)  |
+| `S3_ENDPOINT_URL`                  | same as api                                                | no              | D6.2 (#35)  |
+| `S3_BUCKET`                        | same as api                                                | no              | D6.2 (#35)  |
+| `S3_ACCESS_KEY_ID`                 | same as api                                                | yes             | D6.2 (#35)  |
+| `S3_SECRET_ACCESS_KEY`             | same as api                                                | yes             | D6.2 (#35)  |
+| `STRIPE_SECRET_KEY`                | same as api                                                | yes             | D7.1 (#39)  |
+| `PUBLIC_API_URL`                   | same as api                                                | no              | D7.1 (#39)  |
+| `EXPO_ACCESS_TOKEN`                | optional; set it only if Expo enhanced push security is on | yes             | D10.3 (#54) |
+| `ORPHAN_UPLOAD_MIN_AGE_HOURS`      | same as api (shared variable)                              | no              | #191, #298  |
+| `JOB_PHOTO_ATTACH_MAX_AGE_MINUTES` | same as api (shared variable)                              | no              | #298        |
+
+`ORPHAN_UPLOAD_MIN_AGE_HOURS` and `JOB_PHOTO_ATTACH_MAX_AGE_MINUTES` must hold the same values
+on api and worker: the api refuses job photo uploads older than the window, and the worker's
+orphan sweep deletes only uploads older than the minimum age. Each service checks the rule
+(window at most half the minimum age) against its own values only, so set both as shared
+variables, or the sweep can delete a photo a job just attached (#298).
 
 `apps/api/tests/test_railway_doc.py` fails when a setting that staging or production requires
 is missing from either table, so this list cannot fall behind `app/config.py`.

@@ -11,7 +11,7 @@ from typing import Annotated, Final
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from app.modules.jobs.models import JobStatus
+from app.modules.jobs.models import JobPhotoKind, JobStatus
 from app.modules.quotes.schemas import QuotePro
 
 # "On my way" asks how far the pro is: from 5 minutes to 4 hours (#63).
@@ -37,6 +37,34 @@ class JobTimelineEntry(_Out):
     at: datetime
 
 
+class JobPhotoOut(_Out):
+    """One photo of the job, signed for a short while."""
+
+    id: uuid.UUID
+    content_type: str = Field(examples=["image/jpeg"])
+    url: str = Field(description="A signed GET URL, valid until expires_at.")
+    expires_at: datetime
+
+
+class ProJobPhotos(_Out):
+    """The pro's own photos of the job, oldest first: each as its privacy-safe copy once it is
+    made, else the pro's original."""
+
+    before: list[JobPhotoOut]
+    after: list[JobPhotoOut]
+
+
+class CustomerJobPhotos(_Out):
+    """The pro's photos of the job, oldest first: only their privacy-safe copies (no location or
+    camera details)."""
+
+    before: list[JobPhotoOut]
+    after: list[JobPhotoOut]
+    pending: int = Field(
+        description="Photos not listed yet: their privacy-safe copy is still being made."
+    )
+
+
 class CustomerJob(_Out):
     """The customer's job on their request, once paid."""
 
@@ -57,6 +85,7 @@ class CustomerJob(_Out):
         "on the way and the pro has not checked in; null before and after.",
     )
     timeline: list[JobTimelineEntry] = Field(description="The job's history, oldest first.")
+    photos: CustomerJobPhotos
     amount_cents: int = Field(description="The price paid for the service.")
     tax_cents: int
     customer_total_cents: int = Field(description="What the customer paid: amount plus tax.")
@@ -104,6 +133,10 @@ class ProJob(_Out):
         "support resolves it."
     )
     started_at: datetime | None = Field(description="When the work started (Working).")
+    completed_at: datetime | None = Field(
+        description="When the pro marked the job done: the customer's confirmation window opens."
+    )
+    photos: ProJobPhotos
     pro_payout_cents: int = Field(description="What the pro receives for the job.")
 
 
@@ -131,3 +164,16 @@ class CheckInIn(BaseModel):
     )
     lat: float = Field(ge=-90, le=90, allow_inf_nan=False, description="The pro's latitude.")
     lng: float = Field(ge=-180, le=180, allow_inf_nan=False, description="The pro's longitude.")
+
+
+class JobPhotosIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: JobPhotoKind = Field(
+        description="before: while on the way or working; after: while working."
+    )
+    upload_keys: list[Annotated[str, StringConstraints(min_length=1, max_length=256)]] = Field(
+        min_length=1,
+        description="Keys of the caller's own job_photo uploads (POST /v1/uploads), in the "
+        "order to show them.",
+    )

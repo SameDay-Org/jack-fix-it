@@ -10,6 +10,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, IdTimestampsMixin, str_enum
 
+# Shared with the job photos' safe copies (#298); this module's importers keep this name.
+from app.modules.media.safe_status import MediaSafeStatus as MediaSafeStatus
+
 # JF- plus the sequence number, zero-padded to at least 6 digits and never truncated:
 # lpad() would cut 1234567 to 123456, so to_char with 13 digit positions (the sequence's
 # maximum), the last 6 forced. The migration creates the sequence.
@@ -94,14 +97,6 @@ class ServiceRequest(IdTimestampsMixin, Base):
 class RequestMediaKind(StrEnum):
     PHOTO = "photo"
     VIDEO = "video"
-
-
-class MediaSafeStatus(StrEnum):
-    """The privacy-safe copy of a request's photo or video (#173)."""
-
-    PENDING = "pending"  # not made yet
-    READY = "ready"  # safe_key holds it
-    FAILED = "failed"  # the file could not be made safe: it is never served
 
 
 class RequestMedia(IdTimestampsMixin, Base):
