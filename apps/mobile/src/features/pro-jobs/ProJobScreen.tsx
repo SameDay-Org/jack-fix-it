@@ -21,6 +21,7 @@ import {
 } from "@/components/ui";
 import { announce } from "@/components/ui/focus";
 import { BackButton } from "@/features/auth/components/BackButton";
+import { ChatEntry } from "@/features/chat";
 import { categoryLabel, categoryTileProps, formatTimeOfDay } from "@/features/opportunities/format";
 import { RetryNotice } from "@/features/opportunities/RetryNotice";
 import { StateCard } from "@/features/opportunities/StateCard";
@@ -172,6 +173,13 @@ export function ProJobScreen() {
             ) : null}
             <JobHero job={data} now={dataUpdatedAt} />
             <JobFacts job={data} />
+            <ChatEntry
+              jobId={data.id}
+              // The chat's own fallback reads inside "Message …" in both languages ("tu cliente").
+              name={customerName(data) ?? t("chat.peer.customer.inline")}
+              status={data.status}
+              unread={data.unread_messages}
+            />
             <JobAddress job={data} />
             <JobAbout job={data} />
           </View>

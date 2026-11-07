@@ -986,7 +986,9 @@
       "arrived": "{{name}} llegó",
       "working": "{{name}} está trabajando",
       "finished": "{{name}} terminó el trabajo",
-      "hint": "Abre tu trabajo"
+      "hint": "Abre tu trabajo",
+      "unread_one": "{{count}} mensaje sin leer",
+      "unread_other": "{{count}} mensajes sin leer"
     },
     "booked": {
       "title": "Tu trabajo está reservado",
@@ -1006,6 +1008,89 @@
       "title": "No pudimos cargar tu trabajo",
       "body": "Revisa tu conexión e inténtalo de nuevo.",
       "retry": "Intentar de nuevo"
+    }
+  },
+  "chat": {
+    "peer": {
+      "pro": {
+        "fallback": "Tu profesional",
+        "inline": "tu profesional",
+        "role": "Tu profesional en este trabajo"
+      },
+      "customer": {
+        "fallback": "Tu cliente",
+        "inline": "tu cliente",
+        "role": "Tu cliente en este trabajo"
+      }
+    },
+    "loading": "Cargando mensajes",
+    "empty": {
+      "title": "Saluda a {{name}}",
+      "body": "Pregunta por el trabajo, el horario o lo que necesites saber. Tus mensajes se quedan en Jack Fix It.",
+      "closedTitle": "No hay mensajes aquí",
+      "closedBody": "No se envió ningún mensaje antes de que se cerrara este chat."
+    },
+    "start": "Aquí empiezan sus mensajes sobre este trabajo.",
+    "older": {
+      "load": "Ver mensajes anteriores",
+      "failed": "No pudimos cargar los mensajes anteriores.",
+      "retry": "Intentar de nuevo"
+    },
+    "error": {
+      "title": "No pudimos cargar tus mensajes",
+      "body": "Revisa tu conexión e inténtalo de nuevo.",
+      "retry": "Intentar de nuevo"
+    },
+    "notFound": {
+      "title": "Esta conversación no está disponible",
+      "body": "Puede ser de otra cuenta, o el enlace ya no es válido.",
+      "home": "Ir al inicio"
+    },
+    "day": {
+      "today": "Hoy",
+      "yesterday": "Ayer"
+    },
+    "you": "Tú",
+    "bubble": {
+      "label": "{{sender}}, {{time}}: {{text}}",
+      "pendingLabel": "Tú, {{state}}: {{text}}",
+      "stateSending": "enviando",
+      "stateNotSent": "no enviado",
+      "failed": "No se envió. Toca para intentarlo de nuevo.",
+      "failedShort": "No se envió",
+      "retryHint": "Lo envía de nuevo",
+      "refused": "No se envió"
+    },
+    "redacted": "Ocultamos datos de contacto. Mantén la conversación en Jack Fix It.",
+    "receipt": {
+      "sent": "Enviado",
+      "delivered": "Entregado",
+      "seen": "Visto"
+    },
+    "composer": {
+      "label": "Mensaje",
+      "placeholder": "Escribe a {{name}}",
+      "send": "Enviar",
+      "left_one": "Queda {{count}} carácter",
+      "left_other": "Quedan {{count}} caracteres",
+      "over_one": "{{count}} carácter de más",
+      "over_other": "{{count}} caracteres de más"
+    },
+    "tooFast": "Estás enviando mensajes muy rápido. Espera un momento y vuelve a intentarlo.",
+    "closed": {
+      "title": "Este chat está cerrado",
+      "body": "Todavía puedes leer tus mensajes aquí."
+    },
+    "announce": {
+      "sent": "Mensaje enviado",
+      "failed": "No se envió el mensaje"
+    },
+    "entry": {
+      "message": "Escribir a {{name}}",
+      "view": "Ver mensajes",
+      "unread_one": "{{count}} mensaje sin leer",
+      "unread_other": "{{count}} mensajes sin leer",
+      "label": "{{action}}, {{unread}}"
     }
   }
 }
