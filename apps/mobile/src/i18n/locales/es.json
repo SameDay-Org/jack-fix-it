@@ -80,8 +80,10 @@
     "card": {
       "label": "Tu tarjeta de identificación",
       "hint": "Trae la tarjeta al frente para inclinarla y darle la vuelta.",
+      "hintStill": "Trae la tarjeta al frente para darle la vuelta.",
       "focused": "Tu tarjeta de identificación está al frente. Toca dos veces la tarjeta para darle la vuelta.",
       "gesture": "Arrástrala para inclinarla. Tócala para darle la vuelta.",
+      "gestureStill": "Tócala para darle la vuelta.",
       "back": "Volver a tu cuenta"
     },
     "memberSince": "Miembro desde",

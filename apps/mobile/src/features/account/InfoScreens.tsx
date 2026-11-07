@@ -20,10 +20,17 @@ export function HelpScreen() {
         <BackButton fallbackHref="/account" />
         <View className="flex-1 items-center justify-center gap-4 pb-16">
           <IconTile slug="" glyph={ACCOUNT_GLYPHS.help} size="lg" />
-          <Text accessibilityRole="header" className="text-center text-title-2 text-navy-900">
+          {/* Full width, not shrunk to fit: Android draws a centered line a hair wider than it
+              measures it and would drop the last word. */}
+          <Text
+            accessibilityRole="header"
+            className="w-full text-center text-title-2 text-navy-900"
+          >
             {t("help.title")}
           </Text>
-          <Text className="max-w-xs text-center text-body text-gray-500">{t("help.body")}</Text>
+          <Text className="w-full max-w-xs text-center text-body text-gray-500">
+            {t("help.body")}
+          </Text>
         </View>
       </View>
     </Screen>

@@ -11,8 +11,9 @@ import { useFlag } from "./useFlag";
 /** The row's icon tile and glyph, in dp; the tile's radius is the small token, its squircle. */
 const TILE = { side: 40, icon: 24 } as const;
 const CHEVRON = 20;
-/** The separator starts where the label does: the row's `px-4`, the tile, the `gap-3`. */
-const SEPARATOR_INSET = 16 + TILE.side + 12;
+/** The separator starts where the label does: the row's `px-4`, then the tile and the `gap-3`. */
+const ROW_PADDING = 16;
+const SEPARATOR_INSET = ROW_PADDING + TILE.side + 12;
 
 export type ListRowProps = {
   label: string;
@@ -65,8 +66,16 @@ export function ListRow({
         </View>
       ) : null}
       <View className="flex-1 gap-0.5">
-        <Text className="text-body text-navy-900">{label}</Text>
-        {value ? <Text className="text-callout text-gray-500">{value}</Text> : null}
+        {/* A word longer than the line (Configuración at a large font) is hyphenated on Android
+            rather than cut at any letter. */}
+        <Text android_hyphenationFrequency="full" className="text-body text-navy-900">
+          {label}
+        </Text>
+        {value ? (
+          <Text android_hyphenationFrequency="full" className="text-callout text-gray-500">
+            {value}
+          </Text>
+        ) : null}
       </View>
       {accessory}
       {busy ? (
@@ -129,7 +138,13 @@ export function ListGroup({ children, className, testID }: ListGroupProps) {
             {index > 0 ? (
               <View
                 className="h-px bg-navy-900/10"
-                style={{ marginStart: SEPARATOR_INSET }}
+                style={{
+                  // From the label's edge of the row below: past its tile, or the padding alone.
+                  marginStart:
+                    isValidElement<ListRowProps>(row) && row.props.glyph
+                      ? SEPARATOR_INSET
+                      : ROW_PADDING,
+                }}
                 testID={testID ? `${testID}-separator` : undefined}
               />
             ) : null}

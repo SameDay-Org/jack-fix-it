@@ -1,7 +1,14 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react-native";
 import { router, useIsFocused, useScrollToTop } from "expo-router";
 import { isAvailableAsync, shareAsync } from "expo-sharing";
-import { Alert, BackHandler, Image, type AlertButton } from "react-native";
+import {
+  Alert,
+  BackHandler,
+  Dimensions,
+  Image,
+  type AlertButton,
+  type AlertOptions,
+} from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useReducedMotion, withSpring, withTiming } from "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -180,6 +187,55 @@ describe("AccountScreen", () => {
     expect(screen.getByRole("button", { name: SHARE })).toBeOnTheScreen();
   });
 
+  it("shows Share as a word beside the title, and as its glyph when the title would not fit", async () => {
+    const jestWindow = Dimensions.get("window");
+    const shareWord = () => within(screen.getByTestId("account-share")).queryByText("Share");
+    try {
+      await act(async () =>
+        Dimensions.set({ window: { ...jestWindow, width: 320, fontScale: 1 } }),
+      );
+      await renderAccount();
+      expect(shareWord()).toBeOnTheScreen();
+
+      // The title wraps beside the word (a longer language, a narrower phone): the glyph it is.
+      const twoLines = { nativeEvent: { lines: [{ text: "Acc" }, { text: "ount" }] } };
+      await fireEvent(screen.getByTestId("account-title"), "textLayout", twoLines);
+      expect(shareWord()).toBeNull();
+      expect(screen.getByRole("button", { name: SHARE })).toBeOnTheScreen();
+
+      // A large font starts from the glyph.
+      await act(async () =>
+        Dimensions.set({ window: { ...jestWindow, width: 320, fontScale: 1.5 } }),
+      );
+      expect(shareWord()).toBeNull();
+    } finally {
+      await act(async () => Dimensions.set({ window: jestWindow }));
+    }
+  });
+
+  it("stacks the stats once a value wraps, so no word is broken, and stays stacked", async () => {
+    await renderAccount();
+    expect(screen.getByTestId("account-stats-divider")).toBeOnTheScreen();
+    const lines = (count: number) => ({
+      nativeEvent: { lines: Array.from({ length: count }, () => ({ text: "x" })) },
+    });
+
+    // One line each: side by side.
+    await fireEvent(screen.getByTestId("account-since-value"), "textLayout", lines(1));
+    await fireEvent(screen.getByTestId("account-rating-value"), "textLayout", lines(1));
+    expect(screen.queryByTestId("account-stats-rule")).toBeNull();
+
+    // "Aún sin calificaciones" at a large font needs two lines in a half-width column.
+    await fireEvent(screen.getByTestId("account-rating-value"), "textLayout", lines(2));
+    expect(screen.getByTestId("account-stats-rule")).toBeOnTheScreen();
+    expect(screen.queryByTestId("account-stats-divider")).toBeNull();
+    expect(screen.getByLabelText("Rating, No ratings yet")).toBeOnTheScreen();
+
+    // Full width, the value fits again: it does not go back and forth.
+    await fireEvent(screen.getByTestId("account-rating-value"), "textLayout", lines(1));
+    expect(screen.getByTestId("account-stats-rule")).toBeOnTheScreen();
+  });
+
   it("shows an older account's card gracefully: no name, no city, the silhouette", async () => {
     jest.mocked(useSession).mockReturnValue(signedIn({ member_since: "2025-11-02" }));
 
@@ -271,6 +327,16 @@ describe("AccountScreen", () => {
       expect.objectContaining({ duration: 400, reduceMotion: "never" }),
     );
     expect(withSpring).not.toHaveBeenCalledWith(1, expect.any(Object));
+    // The card never leans under Reduce Motion, so neither the hint nor the opener offers a tilt.
+    expect(screen.getByTestId("account-card-gesture", HIDDEN)).toHaveTextContent(
+      "Tap to turn it over.",
+      {
+        exact: true,
+      },
+    );
+    expect(screen.getByTestId("account-card-open").props.accessibilityHint).toBe(
+      "Brings the card forward so you can turn it over.",
+    );
   });
 
   it("the Android back gesture and a second tap on the tab leave focus mode", async () => {
@@ -324,7 +390,7 @@ describe("AccountScreen", () => {
       "Log out?",
       "You can log back in anytime with your email and password.",
       expect.any(Array),
-      expect.any(Object),
+      expect.objectContaining({ cancelable: true }),
     );
     const buttons = alert.mock.calls[0][2] as AlertButton[];
     expect(buttons.map(({ text, style }) => [text, style])).toEqual([
@@ -338,6 +404,10 @@ describe("AccountScreen", () => {
     expect(logout).not.toHaveBeenCalled();
     await fireEvent.press(screen.getByRole("button", { name: "Log out" }));
     expect(alert).toHaveBeenCalledTimes(2);
+    // Android's back closes it like Cancel: it asks again next time.
+    await act(async () => (alert.mock.calls[1][3] as AlertOptions).onDismiss?.());
+    await fireEvent.press(screen.getByRole("button", { name: "Log out" }));
+    expect(alert).toHaveBeenCalledTimes(3);
 
     await act(async () => buttons[1].onPress?.());
 

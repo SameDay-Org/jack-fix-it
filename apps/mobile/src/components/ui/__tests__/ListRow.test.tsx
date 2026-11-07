@@ -62,6 +62,13 @@ describe("ListRow", () => {
       screen.getByRole("button", { name: "Verify your phone, Not verified yet" }),
     ).toBeOnTheScreen();
   });
+
+  it("hyphenates a word too long for the line instead of cutting it at any letter", async () => {
+    await render(<ListRow label="Configuración" value="Aún no verificado" onPress={jest.fn()} />);
+
+    expect(screen.getByText("Configuración").props.android_hyphenationFrequency).toBe("full");
+    expect(screen.getByText("Aún no verificado").props.android_hyphenationFrequency).toBe("full");
+  });
 });
 
 describe("ListGroup", () => {
@@ -81,5 +88,20 @@ describe("ListGroup", () => {
       "Help",
       "Legal",
     ]);
+  });
+
+  it("starts each separator at the label of the row below: past its icon tile, or at the padding", async () => {
+    await render(
+      <ListGroup testID="group">
+        <ListRow label="Email" value="maria@example.com" />
+        <ListRow label="Phone" value="+1 (415) 555-0123" />
+        <ListRow label="Settings" glyph={ACCOUNT_GLYPHS.settings} onPress={jest.fn()} />
+      </ListGroup>,
+    );
+
+    // 16 of padding; then a 40 dp tile and a 12 dp gap before the label.
+    expect(
+      screen.getAllByTestId("group-separator").map((line) => line.props.style.marginStart),
+    ).toEqual([16, 16 + 40 + 12]);
   });
 });

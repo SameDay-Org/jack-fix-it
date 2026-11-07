@@ -1,5 +1,5 @@
 import { useIsFocused, useScrollToTop } from "expo-router";
-import { useEffect, useRef, type ComponentRef } from "react";
+import { useEffect, useRef, useState, type ComponentRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import Animated from "react-native-reanimated";
@@ -30,6 +30,8 @@ const GUTTER = 16;
 const MAX_CARD_WIDTH = 420;
 /** Kept free under the centered card for the gesture hint, above the tab bar. */
 const HINT_ROOM = 56;
+/** Above this font scale the header has no room for "Compartir" beside the title. */
+const COMPACT_SHARE_SCALE = 1.3;
 
 /**
  * The Account tab (#293), the same for a customer and a pro: the ID card on top, then how long the
@@ -49,8 +51,13 @@ export function AccountScreen() {
 function AccountContent({ user, focused }: { user: SessionUser; focused: boolean }) {
   const { t } = useTranslation();
   const inset = useTabBarInset();
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, fontScale } = useWindowDimensions();
   const cardWidth = Math.min(windowWidth - GUTTER * 2, MAX_CARD_WIDTH);
+  // Share turns into its glyph when the title would not fit beside the word: from a large font on,
+  // or once the title wraps. A wrap counts for the width and font scale it happened at.
+  const fit = `${windowWidth}:${fontScale}`;
+  const [titleWrappedAt, setTitleWrappedAt] = useState<string | null>(null);
+  const compactShare = fontScale > COMPACT_SHARE_SCALE || titleWrappedAt === fit;
   const card = cardDetails(user);
   useFreshPhoto(user, focused);
 
@@ -109,8 +116,11 @@ function AccountContent({ user, focused }: { user: SessionUser; focused: boolean
           <Animated.View style={focus.titleStyle} {...away}>
             <Text
               accessibilityRole="header"
-              numberOfLines={1}
               className="text-title-1 text-navy-900"
+              onTextLayout={(event) => {
+                if (event.nativeEvent.lines.length > 1) setTitleWrappedAt(fit);
+              }}
+              testID="account-title"
             >
               {t("account.title")}
             </Text>
@@ -135,6 +145,7 @@ function AccountContent({ user, focused }: { user: SessionUser; focused: boolean
           label={t("account.share.label")}
           accessibilityLabel={t("account.share.a11y")}
           variant="secondary"
+          glyph={compactShare ? "share" : undefined}
           loading={sharing}
           onPress={() => void share()}
           testID="account-share"
@@ -166,7 +177,9 @@ function AccountContent({ user, focused }: { user: SessionUser; focused: boolean
             accessible={!inFocus}
             accessibilityRole="button"
             accessibilityLabel={cardLabel}
-            accessibilityHint={t("account.card.hint")}
+            accessibilityHint={t(
+              focus.reduceMotion ? "account.card.hintStill" : "account.card.hint",
+            )}
             onPress={focus.enter}
             style={({ pressed }) => (pressed ? pressedTransform : undefined)}
             testID="account-card-open"
@@ -203,7 +216,10 @@ function AccountContent({ user, focused }: { user: SessionUser; focused: boolean
         style={[styles.hint, { bottom: inset + GUTTER }, focus.hintStyle]}
         testID="account-card-gesture"
       >
-        <Text className="text-center text-callout text-gray-500">{t("account.card.gesture")}</Text>
+        {/* Under Reduce Motion the card holds still: it turns over, it never leans. */}
+        <Text className="text-center text-callout text-gray-500">
+          {t(focus.reduceMotion ? "account.card.gestureStill" : "account.card.gesture")}
+        </Text>
       </Animated.View>
       <IdCardShareRender
         ref={shareRender}
@@ -220,27 +236,56 @@ function AccountContent({ user, focused }: { user: SessionUser; focused: boolean
   );
 }
 
-/** Member since and the rating, side by side with a divider; each one element for a reader. */
+/**
+ * Member since and the rating, each one element for a reader, side by side while each value fits
+ * on one line. A value that wraps (a long Spanish phrase, a large font) stacks them, so a word is
+ * never broken across lines.
+ */
 function AccountStats({ memberSince }: { memberSince: string }) {
+  const { width, fontScale } = useWindowDimensions();
+  // A new width or font scale measures again from side by side.
+  return <StatsLayout key={`${width}:${fontScale}`} memberSince={memberSince} />;
+}
+
+function StatsLayout({ memberSince }: { memberSince: string }) {
   const { t } = useTranslation();
+  // Once stacked it stays stacked: side by side again could only wrap again.
+  const [stacked, setStacked] = useState(false);
   const stats = [
     { key: "since", label: t("account.memberSince"), value: formatMonth(memberSince) },
     // Ratings come with reviews (#252): until then every account reads the same, quietly.
     { key: "rating", label: t("account.rating"), value: t("account.noRatings") },
   ];
   return (
-    <View className="flex-row" testID="account-stats">
+    <View className={stacked ? "gap-3" : "flex-row"} testID="account-stats">
       {stats.map((stat, index) => (
-        <View key={stat.key} className="flex-1 flex-row">
-          {index > 0 ? <View className="mr-4 w-px self-stretch bg-navy-900/10" /> : null}
+        <View key={stat.key} className={stacked ? "gap-3" : "flex-1 flex-row"}>
+          {index > 0 ? (
+            <View
+              className={stacked ? "h-px bg-navy-900/10" : "mr-4 w-px self-stretch bg-navy-900/10"}
+              testID={stacked ? "account-stats-rule" : "account-stats-divider"}
+            />
+          ) : null}
           <View
             accessible
             accessibilityLabel={`${stat.label}, ${stat.value}`}
-            className="flex-1 gap-1"
+            className={stacked ? "gap-1" : "flex-1 gap-1"}
             testID={`account-${stat.key}`}
           >
             <Text className="text-footnote text-gray-500">{stat.label}</Text>
-            <Text className="text-headline text-navy-900">{stat.value}</Text>
+            <Text
+              className="text-headline text-navy-900"
+              onTextLayout={
+                stacked
+                  ? undefined
+                  : (event) => {
+                      if (event.nativeEvent.lines.length > 1) setStacked(true);
+                    }
+              }
+              testID={`account-${stat.key}-value`}
+            >
+              {stat.value}
+            </Text>
           </View>
         </View>
       ))}

@@ -50,7 +50,8 @@ export function AccountMenu() {
           },
         },
       ],
-      { onDismiss: answered },
+      // Back or a tap outside closes it on Android, the same as Cancel.
+      { cancelable: true, onDismiss: answered },
     );
   };
 
