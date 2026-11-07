@@ -127,6 +127,17 @@ options={sheetOptions([0.5, 0.95])} />`, or `"fitToContents"`), rendering `Sheet
   yet) while the screen is focused. Card data, the client secret and the ephemeral key never
   reach our code's logs, state or screens. Jest uses the root mock
   `__mocks__/@stripe/stripe-react-native.ts`.
+- Pro jobs (#63 part A): `src/features/pro-jobs`. "Your jobs" on the pro's home lists the active
+  jobs soonest first (every page of `GET /v1/pros/me/jobs?active=true`); `/jobs/[id]` (the deep
+  link of #65's pushes) is the job, one primary action per step (`jobStep`): On my way and Update
+  arrival time (`jobs/[id]/on-the-way`, presets from `EXPO_PUBLIC_JOB_ETA_PRESETS`), I've arrived
+  (`jobs/[id]/check-in`: the customer's 4-digit code plus the phone's position, read once at
+  submit through `expo-location`, foreground only, after an in-app explanation; refused for good
+  opens Settings; no fix within `EXPO_PUBLIC_CHECK_IN_LOCATION_TIMEOUT_SECONDS` offers a retry),
+  then Start job. Queries are keyed by and every POST pinned to the session generation; the code
+  and the position go into the one request and nowhere else (no state after submit, no cache, no
+  log). The tries left after a wrong code come from `ApiError.header()`. A sheet closes once
+  (`useSheetExit`), and only for the session it opened in.
 - Strings: `src/i18n/locales/{en,es}.json` through `useTranslation()`; the device language
   picks the catalog, English is the fallback.
 - Config: `app.config.ts` reads `APP_VARIANT` (development, preview, production) to suffix the

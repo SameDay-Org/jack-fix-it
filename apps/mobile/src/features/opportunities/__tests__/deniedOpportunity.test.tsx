@@ -33,6 +33,11 @@ jest.mock("@/api", () => ({
   useSession: jest.fn(),
 }));
 jest.mock("expo-router", () => jest.requireActual("./helpers").routerMock);
+// "Your jobs" on the pro's home (#63) has its own suite (features/pro-jobs); stubbed here.
+jest.mock("@/features/pro-jobs", () => ({
+  YourJobs: () => null,
+  useProJobs: () => ({ refetch: () => Promise.resolve() }),
+}));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
   "react-native-safe-area-context",
