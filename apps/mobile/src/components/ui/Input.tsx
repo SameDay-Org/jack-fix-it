@@ -168,7 +168,11 @@ export function Input({
  * matter while typing, when it first shows and when the text reaches the limit, never per keystroke.
  * A counter already showing when the field takes focus (a draft read back) stays quiet.
  */
-function useCounterAnnouncement(counter: string | undefined, atLimit: boolean, focused: boolean) {
+export function useCounterAnnouncement(
+  counter: string | undefined,
+  atLimit: boolean,
+  focused: boolean,
+) {
   const previous = useRef({ shown: Boolean(counter), atLimit });
   useEffect(() => {
     const before = previous.current;

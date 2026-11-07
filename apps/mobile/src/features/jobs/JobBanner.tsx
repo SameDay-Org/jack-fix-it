@@ -13,6 +13,8 @@ import { bannerParts, bannerText, type ActiveJob } from "./phase";
 
 const CHEVRON = 20;
 const DOT = 10;
+// Past this the unread count reads "99+".
+const BADGE_MAX = 99;
 const RIPPLE_OPACITY = 0.15;
 const RIPPLE = { color: withOpacity("white", RIPPLE_OPACITY) };
 
@@ -26,8 +28,8 @@ export type JobBannerProps = {
  * The tabs' one line about the job under way ("Dan is on the way · 12 min"; when it does not fit,
  * the sentence is cut short, never the time it ends with), floating over the
  * tab bar as its accessory: a dark pill on the controls layer (Liquid Glass where the device
- * draws it) with a green dot, the line and a chevron. A tap opens the ongoing job screen. It
- * never carries the arrival code.
+ * draws it) with a green dot, the line, the pro's unread messages as a small count (#74) and a
+ * chevron. A tap opens the ongoing job screen. It never carries the arrival code.
  */
 export function JobBanner({ active, updatedAt }: JobBannerProps) {
   const { t } = useTranslation();
@@ -38,12 +40,15 @@ export function JobBanner({ active, updatedAt }: JobBannerProps) {
   const text = bannerText(t, job, now, jobsConfig.etaCloseMinutes);
   const parts = bannerParts(t, job, now, jobsConfig.etaCloseMinutes);
   if (text === null || parts === null) return null;
+  const unread = job.unread_messages;
 
   return (
     <GlassSurface tone="dark" shape="pill" interactive className="flex-1 overflow-hidden">
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={text}
+        accessibilityLabel={
+          unread > 0 ? `${text}, ${t("jobs.banner.unread", { count: unread })}` : text
+        }
         accessibilityHint={t("jobs.banner.hint")}
         onPress={() => push(jobHref(active.requestId))}
         onPressIn={pressIn}
@@ -66,6 +71,16 @@ export function JobBanner({ active, updatedAt }: JobBannerProps) {
             </Text>
           ) : null}
         </View>
+        {unread > 0 ? (
+          <View
+            className="min-h-6 min-w-6 items-center justify-center rounded-pill bg-green-500 px-1.5"
+            testID="job-banner-unread"
+          >
+            <Text className="text-caption font-semibold text-navy-900">
+              {unread > BADGE_MAX ? `${BADGE_MAX}+` : unread}
+            </Text>
+          </View>
+        ) : null}
         <ControlIcon name="chevron" size={CHEVRON} color={tokens.colors.white} />
       </Pressable>
     </GlassSurface>
