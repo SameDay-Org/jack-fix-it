@@ -11,7 +11,9 @@ the event again, and the redelivery queues the pending row.
 Processing (the worker, `StripeEventProcessor`): the row is locked; anything but pending is left
 alone. The handler runs in a savepoint, and the row is marked processed (payload dropped) in the
 same transaction. A handler error rolls its writes back, counts the attempt, keeps the class
-name of the error and asks for a later run, until the last attempt fails the row.
+name of the error and asks for a later run, until the last attempt fails the row. What the
+handler announces (AfterCommit, e.g. the job pushes of #65) comes back with a processed result
+only, once the commit returned; the task runs it then. A failed or retried run returns none.
 
 Logs carry the Stripe event id, its type, the row id, attempts and status only: never the body,
 the signature header, the secret or an error's text.
@@ -19,7 +21,7 @@ the signature header, the secret or an error's text.
 
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Final, Self
 
@@ -35,6 +37,7 @@ from app.modules.webhooks.errors import (
     InvalidSignatureError,
     WebhookNotConfiguredError,
 )
+from app.modules.webhooks.events import AfterCommit, AfterCommitAction
 from app.modules.webhooks.handlers import StripeEvent, handler_for
 from app.modules.webhooks.models import WebhookEventStatus
 from app.modules.webhooks.repository import WebhookEventRepository
@@ -180,6 +183,8 @@ class ProcessOutcome(StrEnum):
 class ProcessResult:
     outcome: ProcessOutcome
     retry_in_seconds: int | None = None
+    # PROCESSED only: what the handler announced, to run now that its writes are committed.
+    after_commit: tuple[AfterCommitAction, ...] = field(default=())
 
 
 @dataclass(frozen=True)
@@ -235,9 +240,10 @@ class StripeEventProcessor:
         )
         # Read before the handler runs: a rolled-back savepoint can expire the row.
         row_id, attempts = row.id, row.attempts + 1
+        after_commit = AfterCommit()
         try:
             async with self._session.begin_nested():
-                await handler(self._session, event)
+                await handler(self._session, event, after_commit)
         except Exception as error:  # noqa: BLE001 - any handler error is counted, never its text
             return await self._record_failure(
                 row_id, attempts, type(error).__name__, last_try=last_try, log=log
@@ -245,7 +251,7 @@ class StripeEventProcessor:
         await self._events.settle(row_id, WebhookEventStatus.PROCESSED, attempts=attempts)
         await self._session.commit()
         logger.info("stripe_webhook_processed", extra={**log, "attempts": attempts})
-        return ProcessResult(ProcessOutcome.PROCESSED)
+        return ProcessResult(ProcessOutcome.PROCESSED, after_commit=after_commit.actions)
 
     async def _record_failure(
         self,

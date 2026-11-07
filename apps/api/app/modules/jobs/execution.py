@@ -31,6 +31,11 @@ service commits; every status change goes through JobStateMachine, which writes 
   `check_in_required` without one. The table's direct scheduled -> in_progress edge is not
   offered here: a scheduled job answers check_in_required too.
 
+Pushes (#65): once an action commits, the customer hears about it: On my way, the check-in
+and the start, each once per job (notifications.events, the job's id names the event). An ETA
+update, a repeated check-in and a refused action push nothing. A push that cannot be queued is
+logged with ids and never fails the action. No push carries the arrival code or the ETA.
+
 The arrival code is never logged, never in an error, never in a pro response. Logs carry ids.
 """
 
@@ -69,6 +74,11 @@ from app.modules.jobs.schemas import (
 )
 from app.modules.jobs.service import JobStateMachine
 from app.modules.jobs.transitions import CUSTOMER_STATUS
+from app.modules.notifications.events import (
+    push_job_checked_in,
+    push_job_on_the_way,
+    push_job_started,
+)
 from app.modules.pros.service import ProService
 from app.modules.quotes.schemas import QuotePro
 from app.modules.quotes.service import QuoteReader
@@ -76,6 +86,7 @@ from app.modules.requests.errors import InvalidRequestError
 from app.modules.requests.service import CustomerRequestReader, ProRequestReader
 from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount
+from app.queue import JobQueue
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +104,7 @@ class JobExecutionConfig:
     max_attempts: int
     list_default_limit: int
     list_max_limit: int
+    enqueue_timeout_seconds: float  # how long a push may wait on Redis (#65)
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "JobExecutionConfig":
@@ -100,6 +112,7 @@ class JobExecutionConfig:
             max_attempts=settings.arrival_code_max_attempts,
             list_default_limit=settings.request_list_default_limit,
             list_max_limit=settings.request_list_max_limit,
+            enqueue_timeout_seconds=settings.job_enqueue_timeout_seconds,
         )
 
 
@@ -109,9 +122,10 @@ def new_arrival_code() -> str:
 
 
 class JobExecutionService:
-    def __init__(self, session: AsyncSession, config: JobExecutionConfig) -> None:
+    def __init__(self, session: AsyncSession, config: JobExecutionConfig, queue: JobQueue) -> None:
         self._session = session
         self._config = config
+        self._queue = queue
         self._jobs = JobRepository(session)
         self._pros = ProService(session)
         self._machine = JobStateMachine(session, self._pros)
@@ -194,6 +208,7 @@ class JobExecutionService:
             job.eta_at = eta_at
             await self._jobs.add_event(JobEvent(job_id=job.id, type=ETA_UPDATED, actor_id=user.id))
             event = "job_eta_updated"
+            public_code = None  # an ETA update pushes nothing (#65)
         else:
             # 409 for anything but scheduled; the event is the state machine's.
             await self._machine.transition(job.id, JobStatus.ON_THE_WAY, user)
@@ -203,8 +218,18 @@ class JobExecutionService:
             job.arrival_code_locked_at = None
             await self._session.flush()
             event = "job_on_the_way"
+            public_code = await self._customer_requests.public_code(job.request_id)
         await self._session.commit()
         logger.info(event, extra={"job_id": str(job.id), "pro_id": str(job.pro_id)})
+        if public_code is not None:
+            await push_job_on_the_way(
+                self._queue,
+                customer_id=job.customer_id,
+                job_id=job.id,
+                request_id=job.request_id,
+                public_code=public_code,
+                timeout_seconds=self._config.enqueue_timeout_seconds,
+            )
         return await self.pro_job(user, job.id)
 
     async def check_in(
@@ -231,8 +256,17 @@ class JobExecutionService:
                     lng=_coordinate(lng),
                 )
             )
+            public_code = await self._customer_requests.public_code(job.request_id)
             await self._session.commit()
             logger.info("job_checked_in", extra=ids)
+            await push_job_checked_in(
+                self._queue,
+                customer_id=job.customer_id,
+                job_id=job.id,
+                request_id=job.request_id,
+                public_code=public_code,
+                timeout_seconds=self._config.enqueue_timeout_seconds,
+            )
             return await self.pro_job(user, job.id)
         # A wrong code: counted under the row lock, so concurrent tries cannot pass the limit.
         job.arrival_code_attempts += 1
@@ -254,8 +288,17 @@ class JobExecutionService:
             raise CheckInRequiredError
         # 409 for anything but on the way; the state machine sets started_at.
         await self._machine.transition(job.id, JobStatus.IN_PROGRESS, user)
+        public_code = await self._customer_requests.public_code(job.request_id)
         await self._session.commit()
         logger.info("job_started", extra={"job_id": str(job.id), "pro_id": str(job.pro_id)})
+        await push_job_started(
+            self._queue,
+            customer_id=job.customer_id,
+            job_id=job.id,
+            request_id=job.request_id,
+            public_code=public_code,
+            timeout_seconds=self._config.enqueue_timeout_seconds,
+        )
         return await self.pro_job(user, job.id)
 
     # Helpers

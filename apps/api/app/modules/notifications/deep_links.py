@@ -10,6 +10,7 @@ from typing import Final
 _UUID: Final = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 ALLOWED_DEEP_LINKS: Final = (
     re.compile(rf"/requests/{_UUID}"),
+    re.compile(rf"/requests/{_UUID}/job"),  # the customer's ongoing job (#64), job pushes (#65)
     re.compile(rf"/jobs/{_UUID}"),
     re.compile(rf"/quotes/{_UUID}"),
     re.compile(rf"/opportunities/{_UUID}"),  # a pro's dispatch (#49), from the new request push

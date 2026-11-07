@@ -1,7 +1,9 @@
 """Push copy in English and Spanish (D10.3, #54). Titles and bodies show on lock screens, so
 they carry no personal data: placeholders are limited to PLACEHOLDERS (a test scans for it).
 #55 adds a new request (to a dispatched pro), a new quote (to the customer) and a quote
-accepted (to its pro); the job status kinds come with #65. `push.test.*` is a neutral message.
+accepted (to its pro); #65 the job's steps and a booking whose payment was canceled. The On my
+way copy points to the app for the arrival code: the code itself never leaves the customer's job
+view. `push.test.*` is a neutral message.
 """
 
 import string
@@ -28,6 +30,25 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                     "The customer accepted your quote for {public_code}. "
                     "We'll confirm the job once payment goes through."
                 ),
+                "push.job_booked.title": "You're booked",
+                "push.job_booked.body": (
+                    "Job {public_code} is scheduled. See the details in the app."
+                ),
+                "push.job_scheduled.title": "New job scheduled",
+                "push.job_scheduled.body": "Job {public_code} is confirmed and on your schedule.",
+                "push.job_on_the_way.title": "Your pro is on the way",
+                "push.job_on_the_way.body": (
+                    "Your pro is heading to job {public_code}. Your arrival code is in the app."
+                ),
+                "push.job_checked_in.title": "Your pro has arrived",
+                "push.job_checked_in.body": "Your pro checked in for job {public_code}.",
+                "push.job_started.title": "Your job has started",
+                "push.job_started.body": "Work on job {public_code} has started.",
+                "push.booking_not_completed.title": "Your booking was not completed",
+                "push.booking_not_completed.body": (
+                    "The payment for {public_code} did not go through. "
+                    "You can choose a quote again."
+                ),
             }
         ),
         "es": MappingProxyType(
@@ -42,6 +63,30 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "push.quote_accepted.body": (
                     "El cliente aceptó tu presupuesto para {public_code}. "
                     "Confirmaremos el trabajo cuando se procese el pago."
+                ),
+                "push.job_booked.title": "Tu trabajo está reservado",
+                "push.job_booked.body": (
+                    "El trabajo {public_code} está programado. Mira los detalles en la app."
+                ),
+                "push.job_scheduled.title": "Nuevo trabajo programado",
+                "push.job_scheduled.body": (
+                    "El trabajo {public_code} está confirmado y en tu agenda."
+                ),
+                "push.job_on_the_way.title": "Tu profesional va en camino",
+                "push.job_on_the_way.body": (
+                    "Tu profesional va en camino al trabajo {public_code}. "
+                    "Tu código de llegada está en la app."
+                ),
+                "push.job_checked_in.title": "Tu profesional llegó",
+                "push.job_checked_in.body": (
+                    "Tu profesional registró su llegada al trabajo {public_code}."
+                ),
+                "push.job_started.title": "Tu trabajo comenzó",
+                "push.job_started.body": "Comenzó el trabajo {public_code}.",
+                "push.booking_not_completed.title": "Tu reserva no se completó",
+                "push.booking_not_completed.body": (
+                    "El pago de {public_code} no se completó. "
+                    "Puedes elegir un presupuesto de nuevo."
                 ),
             }
         ),

@@ -45,6 +45,10 @@ and is logged at debug level.
   goes back to quote_ready (SYSTEM); with no pending or accepted quote left it backs out to
   finding_pro (SYSTEM), as the expiry sweep (#51) would. Another quote can then be accepted.
 
+What people hear about (#65), `apply` returns for the handler to announce after the worker's
+commit: the job it booked (JobBooked: the customer and the pro get a push) or the booking a
+canceled payment reopened (BookingReopened: the customer gets one). Ids and the public code only.
+
 Statuses change only through the state machines (requests), conditional updates under the row
 locks (quotes, payments) and the job's insert in its default status (jobs). Logs carry ids, the
 event type, statuses and Stripe codes only: no amounts, no customer data, no PaymentIntent id.
@@ -62,6 +66,7 @@ from app.modules.jobs.service import SYSTEM, JobScheduler, NewJob
 from app.modules.payments.models import CURRENCY, Payment, PaymentStatus
 from app.modules.payments.repository import PaymentRepository
 from app.modules.payments.transitions import TERMINAL_STATES, allowed
+from app.modules.pros.service import ProService
 from app.modules.quotes.service import LockedQuote, QuoteReader, QuoteSettlement
 from app.modules.requests.state_machine import LockedRequest, RequestStateMachine, RequestStatus
 from app.modules.users.service import UserService
@@ -107,6 +112,31 @@ def _unknown_intent(event: IntentEvent, *, reason: str | None = None) -> None:
 
 
 @dataclass(frozen=True)
+class JobBooked:
+    """The event created this job (#65): announced to its customer and its pro."""
+
+    job_id: uuid.UUID
+    request_id: uuid.UUID
+    customer_id: uuid.UUID
+    pro_user_id: uuid.UUID
+    public_code: str
+
+
+@dataclass(frozen=True)
+class BookingReopened:
+    """The event canceled this payment and reopened its request's quotes (#65): announced to
+    the customer. A payment is canceled once, so its id names the event."""
+
+    payment_id: uuid.UUID
+    request_id: uuid.UUID
+    customer_id: uuid.UUID
+    public_code: str
+
+
+Reconciled = JobBooked | BookingReopened
+
+
+@dataclass(frozen=True)
 class _Locked:
     request: LockedRequest
     quote: LockedQuote
@@ -126,24 +156,29 @@ class PaymentReconciler:
         self._settlement = QuoteSettlement(session)
         self._jobs = JobScheduler(session)
         self._users = UserService(session)
+        self._pros = ProService(session)
 
-    async def apply(self, event: IntentEvent, to: PaymentStatus) -> None:
+    async def apply(self, event: IntentEvent, to: PaymentStatus) -> Reconciled | None:
         """Moves the event's payment to `to`, with what that move does to the request, its
-        quotes and the job (see the module doc)."""
+        quotes and the job (see the module doc). Returns what to announce once the caller
+        commits, if anything."""
         locked = await self._lock(event)
         if locked is None:
-            return
+            return None
         await self._check_integrity(event, locked)
         # Only a payment the metadata named can hold no intent here (see _lock).
         adopting = locked.payment.stripe_payment_intent_id is None
         if adopting and not await self._adopt(event, locked):
-            return
-        await self._move(event, locked, to)
+            return None
+        outcome = await self._move(event, locked, to)
         if adopting:
             # After the event's last write: a step that fails rolls the adoption back, unlogged.
             logger.warning("payment_intent_adopted_from_event", extra=locked.ids)
+        return outcome
 
-    async def _move(self, event: IntentEvent, locked: _Locked, to: PaymentStatus) -> None:
+    async def _move(
+        self, event: IntentEvent, locked: _Locked, to: PaymentStatus
+    ) -> Reconciled | None:
         """The payment's move to `to` and what it does (see the module doc)."""
         current = locked.payment.status
         if to is PaymentStatus.FAILED and current not in TERMINAL_STATES:
@@ -155,19 +190,21 @@ class PaymentReconciler:
             logger.debug(
                 "payment_event_ignored", extra={**locked.ids, "payment_status": str(current)}
             )
-            return
+            return None
         if not await self._payments.move_status(locked.payment.id, current, to):
             # The row is locked from the read to the commit.
             raise RuntimeError("payment status changed under its lock")  # pragma: no cover
+        outcome: Reconciled | None = None
         if to is PaymentStatus.SUCCEEDED:
-            await self._schedule(locked)
+            outcome = await self._schedule(locked)
         elif to is PaymentStatus.CANCELED:
-            await self._reopen(locked)
+            outcome = await self._reopen(locked)
         # After the last write: a step that fails above rolls the move back, unlogged.
         logger.info(
             "payment_status_changed",
             extra={**locked.ids, "from_status": str(current), "to_status": str(to)},
         )
+        return outcome
 
     async def _lock(self, event: IntentEvent) -> _Locked | None:
         """The request, the quote and the payment, locked in that order; None (logged) for an
@@ -249,7 +286,7 @@ class PaymentReconciler:
             )
             raise PaymentEventMismatchError
 
-    async def _schedule(self, locked: _Locked) -> None:
+    async def _schedule(self, locked: _Locked) -> JobBooked | None:
         """The payment succeeded: the job, when the request can still take one."""
         request, quote, payment = locked.request, locked.quote, locked.payment
         can_take = (
@@ -262,7 +299,7 @@ class PaymentReconciler:
                 "payment_succeeded_without_job",
                 extra={**locked.ids, "request_status": str(request.status)},
             )
-            return
+            return None
         job_id = await self._jobs.schedule(
             NewJob(
                 request_id=request.id,
@@ -276,12 +313,22 @@ class PaymentReconciler:
             )
         )
         rejected = await self._settlement.reject_others(request.id, quote.id)
+        pro_user_id = await self._pros.user_id_of(quote.pro_id)
+        if pro_user_id is None:  # pragma: no cover - quotes.pro_id is a foreign key
+            raise PaymentRowMissingError
         logger.info(
             "job_scheduled",
             extra={**locked.ids, "job_id": str(job_id), "rejected_quotes": len(rejected)},
         )
+        return JobBooked(
+            job_id=job_id,
+            request_id=request.id,
+            customer_id=request.customer_id,
+            pro_user_id=pro_user_id,
+            public_code=request.public_code,
+        )
 
-    async def _reopen(self, locked: _Locked) -> None:
+    async def _reopen(self, locked: _Locked) -> BookingReopened | None:
         """The payment was canceled: the quote and the request reopen, when the request still
         waits on this quote."""
         request, quote = locked.request, locked.quote
@@ -290,7 +337,7 @@ class PaymentReconciler:
                 "payment_canceled_nothing_to_reopen",
                 extra={**locked.ids, "request_status": str(request.status)},
             )
-            return
+            return None
         quote_status = await self._settlement.unaccept(quote.id, datetime.now(UTC))
         if quote_status is None:
             raise RuntimeError("quote changed under its lock")  # pragma: no cover
@@ -308,4 +355,10 @@ class PaymentReconciler:
                 "quote_status": str(quote_status),
                 "request_status": str(request_status),
             },
+        )
+        return BookingReopened(
+            payment_id=locked.payment.id,
+            request_id=request.id,
+            customer_id=request.customer_id,
+            public_code=request.public_code,
         )

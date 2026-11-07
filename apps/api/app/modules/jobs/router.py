@@ -11,6 +11,7 @@ from app.modules.auth.permissions import CustomerUser, ProUser
 from app.modules.jobs.errors import ATTEMPTS_REMAINING_HEADER
 from app.modules.jobs.execution import JobExecutionConfig, JobExecutionService
 from app.modules.jobs.schemas import CheckInIn, CustomerJob, OnTheWayIn, ProJob, ProJobPage
+from app.queue import JobQueue, get_job_queue
 
 # The customer's side: the job of their own request (#63).
 customer_router = APIRouter(prefix="/requests", tags=["jobs"])
@@ -27,8 +28,9 @@ def _error(description: str) -> dict[str, Any]:
 def get_job_execution_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[Settings, Depends(get_app_settings)],
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
 ) -> JobExecutionService:
-    return JobExecutionService(session, JobExecutionConfig.from_settings(settings))
+    return JobExecutionService(session, JobExecutionConfig.from_settings(settings), queue)
 
 
 Jobs = Annotated[JobExecutionService, Depends(get_job_execution_service)]

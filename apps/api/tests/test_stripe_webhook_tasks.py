@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.config import Settings
 from app.modules.webhooks import handlers
+from app.modules.webhooks.events import AfterCommit
 from app.modules.webhooks.handlers import StripeEvent
 from app.modules.webhooks.models import WebhookEvent, WebhookEventStatus
 from app.modules.webhooks.tasks import process_stripe_event
@@ -38,7 +39,9 @@ class RecordingHandler:
     transactions: list[int] = field(default_factory=list)
     failure: Exception | None = None
 
-    async def __call__(self, session: AsyncSession, event: StripeEvent) -> None:
+    async def __call__(
+        self, session: AsyncSession, event: StripeEvent, after_commit: AfterCommit
+    ) -> None:
         self.calls.append(event)
         txid = await session.scalar(text("SELECT txid_current()"))
         assert isinstance(txid, int)
