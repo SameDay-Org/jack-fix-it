@@ -44,8 +44,6 @@ EVASIONS: Final = [
     ("dotted_digits", "my number 3.0.5.5.5.5.0.1.9.9", "0.1.9.9"),
     ("dashed_digits", "3-0-5-5-5-5-0-1-9-9 call me", "0-1-9-9"),
     ("slashes", "305/555/0199", "0199"),
-    ("comma_groups", "305, 555, 0199", "0199"),
-    ("comma_groups_tight", "call 305,555,0199", "0199"),
     ("emoji_separator", "305\U0001f525555\U0001f5250199", "0199"),
     ("underscores", "305_555_0199", "0199"),
     ("plus_country", "+1 (305) 555-0199", "0199"),
@@ -87,6 +85,18 @@ EVASIONS: Final = [
 
 # Not caught yet: each would need a rule whose false positives were judged worse (#72).
 GAPS: Final = [
+    (
+        "comma_groups",
+        "305, 555, 0199",
+        "0199",
+        "commas between groups: lists of prices and times read the same ('250, 300, 1200')",
+    ),
+    (
+        "comma_groups_tight",
+        "call 305,555,0199",
+        "0199",
+        "as above, without spaces",
+    ),
     (
         "split_by_words",
         "call 305 then 555 then 0199",
@@ -133,6 +143,11 @@ ORDINARY: Final = [
     "room 101, 102, 1003 on the list",
     "I'll be there in five, two minutes at most",
     "oh one more thing: the gate sticks",
+    "I got quotes of 350, 400, 1200 from others",
+    "I can do 830, 930, 1030 tomorrow",
+    "the panels are 400, 600, 1200 watts",
+    "rooms are 210, 315, 1200 sq ft",
+    "about 300, 500, 1000 dollars",
 ]
 
 
@@ -205,8 +220,6 @@ ADVERSARIAL: Final = {
     "digit_words": "one " * 500,
     "oh_words": "oh " * 700,
     "mixed_parts": "three oh five 555 " * 200,
-    "comma_groups": "305, 555, " * 300,
-    "tight_comma_groups": "305,555," * 300,
     "area_codes": "(305) " * 400,
     "gaps_only": "one" + " ,.-" * 600,
 }
