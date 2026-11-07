@@ -454,7 +454,7 @@
     },
     "booked": {
       "title": "You're booked",
-      "body": "Your pro is scheduled for {{date}}.",
+      "body": "Your service with {{pro}} is set for {{date}}.",
       "announcement": "You're booked. Your payment is confirmed."
     },
     "failure": {

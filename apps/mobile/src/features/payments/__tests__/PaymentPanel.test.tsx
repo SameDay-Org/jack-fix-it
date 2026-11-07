@@ -172,7 +172,9 @@ describe("paying an accepted quote", () => {
     await act(async () => jest.advanceTimersByTime(2_000));
     const booked = await screen.findByTestId(`${payTestId(QUOTE)}-booked`);
     expect(within(booked).getByText("You're booked")).toBeTruthy();
-    expect(within(booked).getByText(/^Your pro is scheduled for [A-Z][a-z]{2}, /)).toBeTruthy();
+    expect(
+      within(booked).getByText(/^Your service with María P\. is set for [A-Z][a-z]{2}, /),
+    ).toBeTruthy();
     expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith(
       "You're booked. Your payment is confirmed.",
     );
@@ -322,23 +324,27 @@ describe("paying an accepted quote", () => {
       new ApiError(409, "pro_not_hireable"),
       "This pro can't take payments right now",
       true,
+      true,
     ],
     [
       "409 payment_needs_review",
       new ApiError(409, "payment_needs_review"),
       "We're checking your payment",
       false,
+      true,
     ],
     [
       "503 not_configured",
       new ApiError(503, "not_configured"),
       "Payments aren't available yet",
       false,
+      true,
     ],
     [
       "503 payments_unavailable",
       new ApiError(503, "payments_unavailable"),
       "We couldn't start the payment",
+      false,
       false,
     ],
     [
@@ -346,10 +352,11 @@ describe("paying an accepted quote", () => {
       new ApiError(502, "payments_error"),
       "We couldn't start the payment",
       false,
+      false,
     ],
-    ["no connection", new NetworkError(false), "No connection", false],
-    ["a timeout", new NetworkError(true), "No connection", false],
-  ])("%s opens no sheet and says so in the card", async (_, error, title, refetches) => {
+    ["no connection", new NetworkError(false), "No connection", false, false],
+    ["a timeout", new NetworkError(true), "No connection", false, false],
+  ])("%s opens no sheet and says so in the card", async (_, error, title, refetches, calm) => {
     api.payment = () => Promise.reject(error);
     await openUnpaid();
     const quoteFetches = callsTo(apiGet, "/v1/requests/{request_id}/quotes").length;
@@ -357,6 +364,8 @@ describe("paying an accepted quote", () => {
 
     const failure = await screen.findByTestId(`${payTestId(ACCEPTED)}-failure`);
     expect(within(failure).getByText(title)).toBeTruthy();
+    // Nothing for the customer to fix reads calm (info); a failure to connect is the danger tint.
+    expect(failure.props.className).toContain(calm ? "bg-navy-900/5" : "bg-danger/10");
     expect(initStripe).not.toHaveBeenCalled();
     expect(initPaymentSheet).not.toHaveBeenCalled();
     expect(presentPaymentSheet).not.toHaveBeenCalled();

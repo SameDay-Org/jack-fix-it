@@ -453,9 +453,9 @@
       "body": "Te avisaremos en cuanto esté listo."
     },
     "booked": {
-      "title": "Tu servicio está reservado",
-      "body": "Tu profesional está programado para el {{date}}.",
-      "announcement": "Tu servicio está reservado. Tu pago está confirmado."
+      "title": "Ya tienes tu reserva",
+      "body": "Tu servicio con {{pro}} está programado para el {{date}}.",
+      "announcement": "Ya tienes tu reserva. Tu pago está confirmado."
     },
     "failure": {
       "offline": {

@@ -14,14 +14,14 @@ import {
   type PaymentSummary,
 } from "./paymentStore";
 import { useJobConfirmation } from "./useJobConfirmation";
-import { usePayQuote } from "./usePayQuote";
+import { usePayQuote, type PayFailure } from "./usePayQuote";
 
 export type PaymentPanelProps = {
   requestId: string;
   quoteId: string;
   /** The quote's price, shown on Pay until the API sends the total for the sheet. */
   amountCents: number;
-  /** The pro's name as the card shows it, for Pay's spoken label. */
+  /** The pro's name as the card shows it: Pay's spoken label and the booked line. */
   pro: string;
   testID: string;
 };
@@ -34,6 +34,13 @@ const VISUAL_ONLY = {
 
 /** The kit's large pill (min-h-14): the placeholder Pay leaves while the job is first looked up. */
 const PAY_PLACEHOLDER_HEIGHT = 56;
+
+// Nothing for the customer to fix, so no alarm: the info tint. A failed payment is the danger one.
+const CALM_FAILURES: ReadonlySet<PayFailure> = new Set([
+  "notConfigured",
+  "needsReview",
+  "proNotHireable",
+]);
 
 /**
  * The accepted quote's payment, at the foot of its card: Pay while there is no job (a customer
@@ -70,7 +77,7 @@ export function PaymentPanel({ requestId, quoteId, amountCents, pro, testID }: P
           {t("payment.booked.title")}
         </Text>
         <Text className="text-callout text-navy-900">
-          {t("payment.booked.body", { date: formatDateTime(job.scheduled_start_at) })}
+          {t("payment.booked.body", { pro, date: formatDateTime(job.scheduled_start_at) })}
         </Text>
       </View>
     );
@@ -113,7 +120,7 @@ export function PaymentPanel({ requestId, quoteId, amountCents, pro, testID }: P
       {summary ? <PaymentTotal summary={summary} testID={`${testID}-total`} /> : null}
       {failure ? (
         <Notice
-          tone="danger"
+          tone={CALM_FAILURES.has(failure) ? "info" : "danger"}
           title={t(`payment.failure.${failure}.title`)}
           body={t(`payment.failure.${failure}.body`)}
           testID={`${testID}-failure`}
