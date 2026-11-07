@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Keyboard, Platform, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Button } from "@/components/ui";
+import { Button, useCounterAnnouncement, useFlag } from "@/components/ui";
 import { continuousCorners, tokens } from "@/theme";
 
 import { MESSAGE_COUNTER_FROM, MESSAGE_MAX_LENGTH } from "./config";
@@ -66,6 +66,7 @@ export function Composer({ name, sending, notice, onSend }: ComposerProps) {
   const { t } = useTranslation();
   const { fontScale } = useWindowDimensions();
   const [text, setText] = useState("");
+  const [focused, focus, blur] = useFlag();
   const paddingBottom = useBarBottom();
   const length = textLength(text);
   const left = MESSAGE_MAX_LENGTH - length;
@@ -76,6 +77,10 @@ export function Composer({ name, sending, notice, onSend }: ComposerProps) {
       : left <= MESSAGE_COUNTER_FROM
         ? t("chat.composer.left", { count: left })
         : null;
+
+  // iOS hears the counter when it first shows and when the text goes past the limit (Android's
+  // live region reads it).
+  useCounterAnnouncement(counter ?? undefined, left < 0, focused);
 
   const send = () => {
     if (!canSend) return;
@@ -103,6 +108,8 @@ export function Composer({ name, sending, notice, onSend }: ComposerProps) {
           <TextInput
             value={text}
             onChangeText={setText}
+            onFocus={focus}
+            onBlur={blur}
             multiline
             placeholder={t("chat.composer.placeholder", { name })}
             placeholderTextColor={tokens.colors["gray-500"]}

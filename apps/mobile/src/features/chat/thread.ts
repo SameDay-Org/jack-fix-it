@@ -12,6 +12,11 @@ export type Thread = {
   messages: ChatMessage[];
   olderCursor: string | null;
   unreadCount: number;
+  /**
+   * Messages of mine added from a send's answer that no page has shown yet: they never prove a
+   * page reaches what is held (the held list may stop short of them).
+   */
+  local?: readonly string[];
 };
 
 /** Newest first, as the API pages them: by time, then by id for messages of the same instant. */
@@ -43,14 +48,20 @@ export function mergeNewest(held: Thread | undefined, page: ChatPage): Thread {
     unreadCount: page.unread_count,
   };
   if (!held) return fresh;
-  const known = new Set(held.messages.map((message) => message.id));
+  const local = new Set(held.local ?? []);
+  const known = new Set(
+    held.messages.filter((message) => !local.has(message.id)).map((message) => message.id),
+  );
   const joins = page.next_cursor === null || page.items.some((message) => known.has(message.id));
   if (!joins) return fresh;
+  const shown = new Set(page.items.map((message) => message.id));
+  const stillLocal = [...local].filter((id) => !shown.has(id));
   return {
     messages: union(held.messages, page.items),
     // A page that holds the whole chat ends the older ones too.
     olderCursor: page.next_cursor === null ? null : held.olderCursor,
     unreadCount: page.unread_count,
+    ...(stillLocal.length > 0 ? { local: stillLocal } : {}),
   };
 }
 
@@ -65,7 +76,11 @@ export function appendOlder(held: Thread, page: ChatPage): Thread {
 
 /** A message the API just stored for the caller, shown at once without waiting for the next poll. */
 export function addSent(held: Thread, message: ChatMessage): Thread {
-  return { ...held, messages: union(held.messages, [message]) };
+  return {
+    ...held,
+    messages: union(held.messages, [message]),
+    local: [...(held.local ?? []), message.id],
+  };
 }
 
 /**
@@ -73,6 +88,19 @@ export function addSent(held: Thread, message: ChatMessage): Thread {
  * UTF-16 units `String.length` counts. Measured on the trimmed text, as the API stores it.
  */
 export const textLength = (text: string): number => Array.from(text.trim()).length;
+
+/** How far one of my stored messages got: stored, fetched by the other side, read by them. */
+export type Receipt = "sent" | "delivered" | "seen";
+
+/**
+ * A stored message's receipt (#331 adds `ChatMessageOut.receipt` on the caller's own messages).
+ * Until the field is in the contract every stored message reads as sent; an unknown value does
+ * too, so a later state the app does not know never shows as more than the server confirmed.
+ */
+export function receiptOf(message: ChatMessage): Receipt {
+  const { receipt } = message as ChatMessage & { receipt?: unknown };
+  return receipt === "delivered" || receipt === "seen" ? receipt : "sent";
+}
 
 /** The local calendar day of an instant, to start a new day's section. */
 const dayOf = (at: number): string => {
@@ -88,7 +116,7 @@ export type BubbleRow = {
   key: string;
   side: Side;
   at: number;
-  /** The newest of a run from one sender: it carries the tail and the time under it. */
+  /** The newest of a run from one sender: it carries the tail. */
   endsRun: boolean;
   /** The oldest of a run: the run's top gets the wider gap from the bubble above. */
   startsRun: boolean;
@@ -112,7 +140,7 @@ export type Row =
   | (BubbleRow & { message?: undefined; pending: Pending })
   | DayRow;
 
-/** Bubbles from one sender closer together than this read as one run (one tail, one time). */
+/** Bubbles from one sender closer together than this read as one run (one tail). */
 export const RUN_GAP_MS = 5 * 60_000;
 
 type Entry = { key: string; side: Side; at: number } & (
@@ -123,7 +151,7 @@ type Entry = { key: string; side: Side; at: number } & (
  * The rows of the inverted list, newest first: the messages the screen sends still on their way
  * (they are the newest), then the stored ones; a day's heading after the oldest message of each
  * day (drawn above it, the list being upside down). Runs of one sender within `RUN_GAP_MS` and
- * the same day share one tail and one time.
+ * the same day share one tail.
  */
 export function threadRows(messages: readonly ChatMessage[], pending: readonly Pending[]): Row[] {
   const entries: Entry[] = [

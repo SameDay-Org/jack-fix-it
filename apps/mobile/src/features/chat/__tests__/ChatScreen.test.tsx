@@ -20,6 +20,7 @@ import {
   useSessionGeneration,
 } from "@/api";
 import type { GetResponse } from "@/api";
+import { RECEIPT_SEEN } from "@/components/ui";
 import { formatTimeOfDay } from "@/features/opportunities/format";
 import { formatLocale } from "@/features/quotes/format";
 
@@ -88,6 +89,9 @@ const remember = (text: string): string => {
   BODIES.add(text);
   return text;
 };
+
+// The receipt ticks are decorative (hidden from accessibility); tests reach them anyway.
+const HIDDEN = { includeHiddenElements: true };
 
 const messageId = (n: number) => `7c000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
@@ -416,11 +420,39 @@ describe("the job chat screen (#74)", () => {
       expect(within(theirsBubble).getByText(theirs.body)).toBeTruthy();
       expect(within(mineBubble).getByText(mine.body)).toBeTruthy();
       expect(theirsBubble.props.accessibilityLabel).toBe(`Dan, ${timeOf(theirs)}: ${theirs.body}`);
-      expect(mineBubble.props.accessibilityLabel).toBe(`You, ${timeOf(mine)}: ${mine.body}`);
+      // Without a receipt from the API yet (#331), a stored message of mine reads as sent.
+      expect(mineBubble.props.accessibilityLabel).toBe(`You, ${timeOf(mine)}: ${mine.body}. Sent`);
+      expect(within(mineBubble).getAllByTestId("chat-receipt-tick", HIDDEN)).toHaveLength(1);
+      // Theirs carries its time, never a receipt.
+      expect(within(theirsBubble).getByTestId("chat-time").props.children).toBe(timeOf(theirs));
+      expect(within(theirsBubble).queryByTestId("chat-receipt", HIDDEN)).toBeNull();
       expect(screen.getByText("Today")).toBeTruthy();
       expect(screen.getByText("Yesterday")).toBeTruthy();
       expect(screen.getByText(START)).toBeTruthy();
     });
+
+    it.each([
+      ["sent", "Sent", 1, false],
+      ["delivered", "Delivered", 2, false],
+      ["seen", "Seen", 2, true],
+    ] as const)(
+      "marks my message %s: says %s, draws %i tick(s), light blue only when seen",
+      async (receipt, spoken, ticks, blue) => {
+        // The receipt field arrives with #331; the fixture carries it ahead of the contract.
+        const mine = { ...message(1, { sender: "me" }), receipt } as ChatMessage;
+        mockApi.messages = () => Promise.resolve(page([mine]));
+        await renderChat();
+        await screen.findByTestId("chat-list");
+
+        const bubble = screen.getByTestId(`chat-message-${mine.id}`);
+        expect(bubble.props.accessibilityLabel).toBe(
+          `You, ${timeOf(mine)}: ${mine.body}. ${spoken}`,
+        );
+        expect(within(bubble).getAllByTestId("chat-receipt-tick", HIDDEN)).toHaveLength(ticks);
+        const stroke = within(bubble).getByTestId("chat-receipt", HIDDEN).props.stroke as string;
+        expect(stroke === RECEIPT_SEEN).toBe(blue);
+      },
+    );
 
     it("notes the masking under my redacted message only", async () => {
       const mineRedacted = message(1, {
@@ -566,7 +598,11 @@ describe("the job chat screen (#74)", () => {
       const typed = "Call me at 555 123 4567";
       await typeAndSend(typed);
 
-      expect(screen.getByTestId("chat-pending-status").props.children).toBe("Sending…");
+      // On its way: the faded bubble with a small clock where its time and ticks will be.
+      const pendingBubble = screen.getByTestId(/^chat-pending-/);
+      expect(within(pendingBubble).getByTestId("chat-receipt-clock", HIDDEN)).toBeTruthy();
+      expect(pendingBubble.props.accessibilityLabel).toBe(`You, sending: ${typed}`);
+      expect(screen.queryByTestId("chat-pending-status")).toBeNull();
       expect(screen.getByText(typed)).toBeTruthy();
       expect(screen.getByTestId("chat-input").props.value).toBe("");
       // The next message waits for this one, even with text in the field.

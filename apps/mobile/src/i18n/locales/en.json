@@ -1007,7 +1007,9 @@
     "loading": "Loading messages",
     "empty": {
       "title": "Say hello to {{name}}",
-      "body": "Ask about the job, the time or anything you need to know. Your messages stay in Jack Fix It."
+      "body": "Ask about the job, the time or anything you need to know. Your messages stay in Jack Fix It.",
+      "closedTitle": "No messages here",
+      "closedBody": "Nothing was sent in this chat before it closed."
     },
     "start": "This is the start of your messages about this job.",
     "older": {
@@ -1035,13 +1037,17 @@
       "pendingLabel": "You, {{state}}: {{text}}",
       "stateSending": "sending",
       "stateNotSent": "not sent",
-      "sending": "Sending…",
       "failed": "Not sent. Tap to try again.",
       "failedShort": "Not sent",
       "retryHint": "Sends it again",
       "refused": "Not sent"
     },
     "redacted": "We hid contact details. Keep the conversation in Jack Fix It.",
+    "receipt": {
+      "sent": "Sent",
+      "delivered": "Delivered",
+      "seen": "Seen"
+    },
     "composer": {
       "label": "Message",
       "placeholder": "Message {{name}}",

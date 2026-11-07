@@ -11,7 +11,7 @@ const CHAT_CLOSED = "chat_closed";
 /** Why the last send did not go through, when the screen says it beside the composer. */
 export type SendNotice = "tooFast" | null;
 
-export type SendOutcome = "sent" | "failed" | "refused" | "closed" | "void";
+export type SendOutcome = "sent" | "failed" | "tooFast" | "refused" | "closed" | "void";
 
 /** How a failed send reads: worth another try, refused for good, or a closed chat. */
 function outcomeOf(error: unknown): Exclude<SendOutcome, "sent"> {
@@ -20,7 +20,8 @@ function outcomeOf(error: unknown): Exclude<SendOutcome, "sent"> {
   if (error instanceof ApiError) {
     if (error.status === 409 && error.code === CHAT_CLOSED) return "closed";
     // Too fast (429) or the server's own trouble: the same text can go later.
-    if (error.status === 429 || error.status >= 500) return "failed";
+    if (error.status === 429) return "tooFast";
+    if (error.status >= 500) return "failed";
     return "refused";
   }
   return "failed"; // no answer: offline or timed out
@@ -76,8 +77,9 @@ export function useSendQueue(
         } catch (error) {
           const outcome = outcomeOf(error);
           if (outcome === "void") return;
-          update(item.localId, outcome === "failed" ? "failed" : "refused");
-          setNotice(error instanceof ApiError && error.status === 429 ? "tooFast" : null);
+          const retryable = outcome === "failed" || outcome === "tooFast";
+          update(item.localId, retryable ? "failed" : "refused");
+          setNotice(outcome === "tooFast" ? "tooFast" : null);
           if (outcome === "closed") listeners.current.onClosed();
           listeners.current.onDone(outcome);
         }

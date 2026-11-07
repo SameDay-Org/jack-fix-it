@@ -11,25 +11,22 @@ import {
   Text,
   View,
 } from "react-native";
+import { useReducedMotion } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { ApiError } from "@/api";
 import { Avatar, Button, Screen, Skeleton } from "@/components/ui";
 import { backToPrevious } from "@/features/auth/components/BackButton";
 import { isUuid } from "@/features/quotes/navigation";
 import { useSettledError } from "@/features/quotes/useRequestQuotes";
 import { tokens } from "@/theme";
 
-import { useChat, useOlderMessages, type OlderState } from "./api";
+import { isChatGone, useChat, useOlderMessages, type OlderState } from "./api";
 import { ClosedBar, Composer } from "./Composer";
 import { MessageRow } from "./MessageRow";
 import { useChatPeer, type ChatPeer } from "./peer";
 import { threadRows, type Row } from "./thread";
 import { useReadMarker } from "./useReadMarker";
 import { useSendQueue, type SendOutcome } from "./useSendQueue";
-
-/** No chat for this caller and id: not a participant, or no such job (404, as for anyone else's). */
-const isGone = (error: unknown): boolean => error instanceof ApiError && error.status === 404;
 
 // The list keeps what is on screen in place when a message lands below it, unless the reader is
 // this close to the newest one: then it follows down to it.
@@ -63,11 +60,19 @@ export function ChatScreen() {
   const [closedBySend, setClosedBySend] = useState(false);
   const closed = peer.closed || closedBySend;
   const list = useRef<FlatList<Row>>(null);
+  const reduceMotion = useReducedMotion();
 
   const onDone = useCallback(
     (outcome: Exclude<SendOutcome, "void">) => {
+      // What happened, and why when the reason changes what to do next.
       AccessibilityInfo.announceForAccessibility(
-        outcome === "sent" ? t("chat.announce.sent") : t("chat.announce.failed"),
+        outcome === "sent"
+          ? t("chat.announce.sent")
+          : outcome === "closed"
+            ? t("chat.closed.title")
+            : outcome === "tooFast"
+              ? t("chat.tooFast")
+              : t("chat.announce.failed"),
       );
     },
     [t],
@@ -87,11 +92,12 @@ export function ChatScreen() {
 
   const send = (body: string) => {
     queue.send(body);
-    list.current?.scrollToOffset({ offset: 0, animated: true });
+    // Down to the newest message, without the glide under Reduce Motion.
+    list.current?.scrollToOffset({ offset: 0, animated: !reduceMotion });
   };
 
   let body;
-  if (!valid || isGone(shownError)) {
+  if (!valid || isChatGone(shownError)) {
     body = (
       <ChatState
         title={t("chat.notFound.title")}
@@ -104,7 +110,7 @@ export function ChatScreen() {
   } else if (thread) {
     body =
       rows.length === 0 ? (
-        <EmptyChat name={peer.fullName ?? names.lead} inline={names.inline} />
+        <EmptyChat name={peer.fullName} inline={names.inline} closed={closed} />
       ) : (
         <FlatList
           ref={list}
@@ -116,10 +122,15 @@ export function ChatScreen() {
               row={item}
               peerName={names.lead}
               now={dataUpdatedAt}
+              closed={closed}
               onRetry={queue.retry}
             />
           )}
-          onEndReached={() => void older.load()}
+          // Pages load on their own only from rest: after a failure the footer's button asks again,
+          // or the footer's changing height would ask again and again.
+          onEndReached={() => {
+            if (older.state === "idle") void older.load();
+          }}
           onEndReachedThreshold={0.5}
           maintainVisibleContentPosition={MAINTAIN_POSITION}
           keyboardShouldPersistTaps="handled"
@@ -226,7 +237,10 @@ function ChatTopBar({ peer, name, role }: { peer: ChatPeer; name: string; role: 
       />
       {peer.known ? (
         <>
-          <Avatar name={peer.fullName ?? name} size="md" />
+          {/* Decorative: the name beside it says who; with no name, a plain circle. */}
+          <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+            <Avatar name={peer.fullName ?? ""} size="md" />
+          </View>
           <View className="flex-1">
             <Text
               accessibilityRole="header"
@@ -310,8 +324,17 @@ function ThreadStart({
   );
 }
 
-/** No message yet: who to say hello to and what the chat is for. */
-function EmptyChat({ name, inline }: { name: string; inline: string }) {
+type EmptyChatProps = {
+  /** The other side's name for the initials; none for a plain circle. */
+  name: string | null;
+  /** Inside a sentence ("Dan", "your pro"). */
+  inline: string;
+  /** A read-only chat with nothing in it: no hello to offer. */
+  closed: boolean;
+};
+
+/** No message yet: who to say hello to and what the chat is for, or that nothing was sent. */
+function EmptyChat({ name, inline, closed }: EmptyChatProps) {
   const { t } = useTranslation();
   return (
     // Scrolls when the keyboard leaves it less room than it needs, rather than clipping its top.
@@ -321,11 +344,15 @@ function EmptyChat({ name, inline }: { name: string; inline: string }) {
       keyboardShouldPersistTaps="handled"
       testID="chat-empty"
     >
-      <Avatar name={name} size="lg" />
+      <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+        <Avatar name={name ?? ""} size="lg" />
+      </View>
       <Text accessibilityRole="header" className="text-center text-title-2 text-navy-900">
-        {t("chat.empty.title", { name: inline })}
+        {closed ? t("chat.empty.closedTitle") : t("chat.empty.title", { name: inline })}
       </Text>
-      <Text className="text-center text-callout text-gray-500">{t("chat.empty.body")}</Text>
+      <Text className="text-center text-callout text-gray-500">
+        {closed ? t("chat.empty.closedBody") : t("chat.empty.body")}
+      </Text>
     </ScrollView>
   );
 }

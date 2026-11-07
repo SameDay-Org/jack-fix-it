@@ -7,6 +7,7 @@ import {
   addSent,
   appendOlder,
   mergeNewest,
+  receiptOf,
   textLength,
   threadRows,
   type ChatMessage,
@@ -237,6 +238,22 @@ describe("addSent", () => {
     addSent(held, msg("b", "2026-11-07T10:01:00Z", "me"));
 
     expect(ids(held.messages)).toStrictEqual(["a"]);
+  });
+});
+
+describe("receiptOf", () => {
+  const mine = msg("m", 0, "me");
+
+  it("reads sent while the contract has no receipt yet (#331)", () => {
+    expect(receiptOf(mine)).toBe("sent");
+  });
+
+  it.each(["sent", "delivered", "seen"] as const)("passes %s through", (receipt) => {
+    expect(receiptOf({ ...mine, receipt } as ChatMessage)).toBe(receipt);
+  });
+
+  it.each([null, "read", 3])("never shows more than sent for %p", (receipt) => {
+    expect(receiptOf({ ...mine, receipt } as unknown as ChatMessage)).toBe("sent");
   });
 });
 

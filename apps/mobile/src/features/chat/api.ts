@@ -2,7 +2,14 @@ import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanst
 import { useIsFocused } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 
-import { apiGet, apiPost, isCurrentGeneration, useSession, useSessionGeneration } from "@/api";
+import {
+  ApiError,
+  apiGet,
+  apiPost,
+  isCurrentGeneration,
+  useSession,
+  useSessionGeneration,
+} from "@/api";
 import { useInForeground } from "@/features/jobs/api";
 import { useRefetchOnReturn } from "@/features/quotes/useRequestQuotes";
 
@@ -29,6 +36,10 @@ export const chatHref = (jobId: string, requestId?: string): ChatHref => ({
  */
 export const chatQueryKey = (jobId: string, generation: number) =>
   ["chat", jobId, generation] as const;
+
+/** No chat for this caller and id: not a participant, or no such job (404, as for anyone else's). */
+export const isChatGone = (error: unknown): boolean =>
+  error instanceof ApiError && error.status === 404;
 
 const held = (client: QueryClient, jobId: string, generation: number): Thread | undefined =>
   client.getQueryData<Thread>(chatQueryKey(jobId, generation));
@@ -57,7 +68,7 @@ export const chatQueryOptions = (client: QueryClient, jobId: string, generation:
  * the screen comes back into focus or the app to the foreground, and every `chatConfig.pollMs`
  * while the screen is focused and the app in the foreground. A blur, the background or a sign-out
  * stops the asking: the signed-out shell unmounts the screen, and a key from a signed-out session
- * is never enabled.
+ * is never enabled. A chat that answered 404 is gone for this caller: nothing asks again.
  */
 export function useChat(jobId: string, { enabled = true } = {}) {
   const client = useQueryClient();
@@ -69,15 +80,17 @@ export function useChat(jobId: string, { enabled = true } = {}) {
   const query = useQuery({
     ...chatQueryOptions(client, jobId, generation),
     enabled: live,
-    refetchInterval: live && focused && foreground ? chatConfig.pollMs : false,
+    refetchInterval: (current) =>
+      live && focused && foreground && !isChatGone(current.state.error) ? chatConfig.pollMs : false,
   });
   const { refetch: refetchQuery } = query;
+  const asking = live && !isChatGone(query.error);
   // `refetch` runs even on a disabled query: nothing is asked for a signed-out session.
   const refetch = useCallback(
-    () => (live ? refetchQuery() : Promise.resolve()),
-    [live, refetchQuery],
+    () => (asking ? refetchQuery() : Promise.resolve()),
+    [asking, refetchQuery],
   );
-  useRefetchOnReturn(refetch, live);
+  useRefetchOnReturn(refetch, asking);
   return { ...query, refetch, generation };
 }
 

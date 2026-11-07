@@ -1007,7 +1007,9 @@
     "loading": "Cargando mensajes",
     "empty": {
       "title": "Saluda a {{name}}",
-      "body": "Pregunta por el trabajo, el horario o lo que necesites saber. Tus mensajes se quedan en Jack Fix It."
+      "body": "Pregunta por el trabajo, el horario o lo que necesites saber. Tus mensajes se quedan en Jack Fix It.",
+      "closedTitle": "No hay mensajes aquí",
+      "closedBody": "No se envió ningún mensaje antes de que se cerrara este chat."
     },
     "start": "Aquí empiezan sus mensajes sobre este trabajo.",
     "older": {
@@ -1035,13 +1037,17 @@
       "pendingLabel": "Tú, {{state}}: {{text}}",
       "stateSending": "enviando",
       "stateNotSent": "no enviado",
-      "sending": "Enviando…",
       "failed": "No se envió. Toca para intentarlo de nuevo.",
       "failedShort": "No se envió",
       "retryHint": "Lo envía de nuevo",
       "refused": "No se envió"
     },
     "redacted": "Ocultamos datos de contacto. Mantén la conversación en Jack Fix It.",
+    "receipt": {
+      "sent": "Enviado",
+      "delivered": "Entregado",
+      "seen": "Visto"
+    },
     "composer": {
       "label": "Mensaje",
       "placeholder": "Escribe a {{name}}",

@@ -42,7 +42,13 @@ export function ChatBubble({ side, tail, faded = false, children, testID }: Chat
   const mine = side === "mine";
   const { fill, color } = SIDE[side];
   return (
-    <View style={faded ? { opacity: FADED_OPACITY } : undefined} testID={testID}>
+    // Faded as one layer (Android otherwise fades the bubble and its text separately, and the
+    // navy shows through the text).
+    <View
+      style={faded ? { opacity: FADED_OPACITY } : undefined}
+      needsOffscreenAlphaCompositing={faded}
+      testID={testID}
+    >
       <View
         className={cx("rounded-lg px-4 py-2.5", fill)}
         // The squared corner is a style: a class that changes after mount (the tail moving to a
