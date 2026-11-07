@@ -82,6 +82,8 @@ jest.setTimeout(30_000);
 
 const PAY_NAME = "Pay $180.50 for the quote from María P.";
 const payButton = () => screen.getByRole("button", { name: PAY_NAME });
+/** Pay's state under any label (busy, it reads differently). */
+const payState = () => screen.getByTestId(`${payTestId(ACCEPTED)}-pay`).props.accessibilityState;
 const CONFIRMING = "Confirming your payment…";
 const LOG_METHODS = ["log", "info", "warn", "error", "debug"] as const;
 
@@ -575,10 +577,10 @@ describe("the session pin", () => {
     }
   });
 
-  it("a reset that fails still signs out, logs only the error's class and blocks no payment", async () => {
+  it("a failed sign-out reset cannot be bypassed: Pay opens nothing until a reset succeeds", async () => {
     jest
       .mocked(resetPaymentSheetCustomer)
-      .mockRejectedValueOnce(new TypeError(`native detail ${SECRETS.join(" ")}`));
+      .mockRejectedValue(new TypeError(`native detail ${SECRETS.join(" ")}`));
     const spies = LOG_METHODS.map((method) =>
       jest.spyOn(console, method).mockImplementation(() => undefined),
     );
@@ -587,25 +589,140 @@ describe("the session pin", () => {
       await act(async () => fireEvent.press(payButton()));
       await screen.findByText(CONFIRMING);
 
+      // The sign-out goes on although Stripe's reset fails.
       await signOut(session, client);
       expect(paymentStore.getState()).toEqual({ autoPay: null, summaries: {}, confirming: {} });
       const warn = spies[LOG_METHODS.indexOf("warn")];
       await waitFor(() =>
         expect(warn).toHaveBeenCalledWith("Payment sheet reset failed: TypeError"),
       );
+      await waitFor(() => expect(resetPaymentSheetCustomer).toHaveBeenCalledTimes(1));
+
+      // The next session's Pay tries the reset again, twice, and opens nothing over it.
+      resetPayments();
+      await openUnpaid();
+      await act(async () => fireEvent.press(payButton()));
+      const failure = await screen.findByTestId(`${payTestId(ACCEPTED)}-failure`);
+      expect(within(failure).getByText("We couldn't open the payment")).toBeTruthy();
+      expect(resetPaymentSheetCustomer).toHaveBeenCalledTimes(3);
+      expect(initStripe).toHaveBeenCalledTimes(1); // the first session's sheet only
+      expect(initPaymentSheet).toHaveBeenCalledTimes(1);
+      expect(presentPaymentSheet).toHaveBeenCalledTimes(1);
+      expect(payButton().props.accessibilityState).toMatchObject({ busy: false });
+
       const logged = JSON.stringify(spies.flatMap((spy) => spy.mock.calls));
       expect(logged).not.toContain("native detail");
       for (const secret of SECRETS) expect(logged).not.toContain(secret);
+      expect(screen.queryByText(/native detail/)).toBeNull();
     } finally {
       spies.forEach((spy) => spy.mockRestore());
     }
 
-    // The next session pays as usual: the failed reset does not hold the sheet back.
-    resetPayments();
-    await openUnpaid();
+    // A later reset that succeeds lets the payment through.
+    jest.mocked(resetPaymentSheetCustomer).mockResolvedValue(null);
     await act(async () => fireEvent.press(payButton()));
     await waitFor(() => expect(presentPaymentSheet).toHaveBeenCalledTimes(2));
+    expect(resetPaymentSheetCustomer).toHaveBeenCalledTimes(4);
     session.generation = 1;
+  });
+
+  it("a rejected sign-out reset is tried again before the next account's sheet starts", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    jest.mocked(resetPaymentSheetCustomer).mockRejectedValueOnce(new TypeError("reset failed"));
+    try {
+      await signOut(session, newQueryClient());
+      await waitFor(() => expect(resetPaymentSheetCustomer).toHaveBeenCalledTimes(1));
+      await openUnpaid();
+      await act(async () => fireEvent.press(payButton()));
+      await waitFor(() => expect(presentPaymentSheet).toHaveBeenCalledTimes(1));
+
+      const retry = jest.mocked(resetPaymentSheetCustomer).mock.invocationCallOrder[1];
+      expect(retry).toBeLessThan(jest.mocked(initStripe).mock.invocationCallOrder[0]);
+    } finally {
+      warn.mockRestore();
+      session.generation = 1;
+    }
+  });
+
+  it("ends the Pay wait with a recoverable error if the reset never answers", async () => {
+    fakeClock();
+    const reset = deferred<null>();
+    jest.mocked(resetPaymentSheetCustomer).mockReturnValueOnce(reset.promise);
+    try {
+      await signOut(session, newQueryClient());
+      await openUnpaid();
+      await act(async () => fireEvent.press(payButton()));
+      await waitFor(() => expect(callsTo(apiPost, PAYMENT_PATH)).toHaveLength(1));
+      expect(payState()).toMatchObject({ busy: true });
+
+      await act(async () => jest.advanceTimersByTime(600_000));
+      expect(payState()).toMatchObject({ busy: false });
+      const failure = screen.getByTestId(`${payTestId(ACCEPTED)}-failure`);
+      expect(within(failure).getByText("We couldn't open the payment")).toBeTruthy();
+      expect(initStripe).not.toHaveBeenCalled(); // the timeout does not skip the cleanup
+
+      // It answers late: nothing opens for the payment that gave up, the next tap pays.
+      await act(async () => reset.resolve(null));
+      expect(initStripe).not.toHaveBeenCalled();
+      expect(resetPaymentSheetCustomer).toHaveBeenCalledTimes(1);
+      await act(async () => fireEvent.press(payButton()));
+      await waitFor(() => expect(presentPaymentSheet).toHaveBeenCalledTimes(1));
+      expect(initStripe).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => reset.resolve(null));
+      session.generation = 1;
+    }
+  });
+
+  it("leaving the screen while the reset runs frees Pay for the next screen", async () => {
+    fakeClock();
+    const reset = deferred<null>();
+    jest.mocked(resetPaymentSheetCustomer).mockReturnValueOnce(reset.promise);
+    try {
+      await signOut(session, newQueryClient());
+      const first = await openUnpaid();
+      await act(async () => fireEvent.press(payButton()));
+      await waitFor(() => expect(callsTo(apiPost, PAYMENT_PATH)).toHaveLength(1));
+      await first.unmount(); // no time passes: leaving alone frees Pay, before any timeout
+
+      await openUnpaid();
+      await act(async () => fireEvent.press(payButton()));
+      await waitFor(() => expect(callsTo(apiPost, PAYMENT_PATH)).toHaveLength(2));
+      expect(initStripe).not.toHaveBeenCalled(); // the reset still has not answered
+
+      await act(async () => reset.resolve(null));
+      await waitFor(() => expect(presentPaymentSheet).toHaveBeenCalledTimes(1));
+      expect(initStripe).toHaveBeenCalledTimes(1); // the screen that left opens nothing
+      expect(resetPaymentSheetCustomer).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => reset.resolve(null));
+      session.generation = 1;
+    }
+  });
+
+  it("a sign-out while Pay waits for the reset ends that wait and frees Pay", async () => {
+    const reset = deferred<null>();
+    jest.mocked(resetPaymentSheetCustomer).mockReturnValueOnce(reset.promise);
+    try {
+      await signOut(session, newQueryClient());
+      const { client } = await openUnpaid();
+      await act(async () => fireEvent.press(payButton()));
+      await waitFor(() => expect(callsTo(apiPost, PAYMENT_PATH)).toHaveLength(1));
+
+      await signOut(session, client); // its reset waits behind the one still running
+      await waitFor(() => expect(payState()).toMatchObject({ busy: false }));
+      await act(async () => fireEvent.press(payButton()));
+      await waitFor(() => expect(callsTo(apiPost, PAYMENT_PATH)).toHaveLength(2));
+      expect(initStripe).not.toHaveBeenCalled();
+
+      await act(async () => reset.resolve(null)); // then the queued reset runs and succeeds
+      await waitFor(() => expect(presentPaymentSheet).toHaveBeenCalledTimes(1));
+      expect(resetPaymentSheetCustomer).toHaveBeenCalledTimes(2);
+      expect(initStripe).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => reset.resolve(null));
+      session.generation = 1;
+    }
   });
 
   it("a sign-out while the sheet is open resets again once the sheet closes", async () => {

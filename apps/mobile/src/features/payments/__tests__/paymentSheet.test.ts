@@ -3,9 +3,12 @@ import {
   initStripe,
   PaymentSheetError,
   presentPaymentSheet,
+  resetPaymentSheetCustomer,
 } from "@stripe/stripe-react-native";
 
+import { deferred } from "../../../api/__tests__/helpers";
 import { openPaymentSheet } from "../paymentSheet";
+import { resetSheetCustomer } from "../sheetCustomer";
 import { SHEET } from "./helpers";
 
 jest.mock("@stripe/stripe-react-native");
@@ -14,6 +17,8 @@ jest.mock("../config", () => {
   const config = {
     pollIntervalMs: 2000,
     pollTimeoutMs: 60000,
+    resetTimeoutMs: 10000,
+    resetAttempts: 2,
     urlScheme: "jackfixit",
     appleMerchantId: "merchant.com.jackfixit.app" as string | undefined,
   };
@@ -32,7 +37,15 @@ beforeEach(() => {
   jest.mocked(initStripe).mockReset().mockResolvedValue(undefined);
   jest.mocked(initPaymentSheet).mockReset().mockResolvedValue({});
   jest.mocked(presentPaymentSheet).mockReset().mockResolvedValue({});
+  jest.mocked(resetPaymentSheetCustomer).mockReset().mockResolvedValue(null);
 });
+
+const sdkCalls = () => ({
+  stripe: jest.mocked(initStripe).mock.calls.length,
+  sheet: jest.mocked(initPaymentSheet).mock.calls.length,
+  present: jest.mocked(presentPaymentSheet).mock.calls.length,
+});
+const NONE = { stripe: 0, sheet: 0, present: 0 };
 
 describe("openPaymentSheet", () => {
   it("initializes Stripe with the API's key, the merchant id and the app scheme", async () => {
@@ -88,5 +101,38 @@ describe("openPaymentSheet", () => {
     });
     await expect(open(() => wanted)).resolves.toEqual({ kind: "superseded" });
     expect(presentPaymentSheet).not.toHaveBeenCalled();
+  });
+
+  it("opens nothing while an ended session's reset keeps failing, and opens once it succeeds", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      jest.mocked(resetPaymentSheetCustomer).mockRejectedValue(new TypeError("native detail"));
+      resetSheetCustomer(); // a sign-out whose reset fails
+      await expect(open()).resolves.toEqual({ kind: "failed", reason: "unavailable" });
+      expect(sdkCalls()).toEqual(NONE);
+      expect(JSON.stringify(warn.mock.calls)).not.toContain("native detail");
+
+      jest.mocked(resetPaymentSheetCustomer).mockResolvedValue(null);
+      await expect(open()).resolves.toEqual({ kind: "paid" });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a caller that leaves while the reset runs gets nothing opened", async () => {
+    const stuck = deferred<null>();
+    jest.mocked(resetPaymentSheetCustomer).mockReturnValueOnce(stuck.promise);
+    resetSheetCustomer();
+    const leaving = new AbortController();
+    const result = openPaymentSheet(SHEET, {
+      merchantName: "Jack Fix It",
+      stillWanted: () => true,
+      signal: leaving.signal,
+    });
+    leaving.abort();
+    await expect(result).resolves.toEqual({ kind: "superseded" });
+    stuck.resolve(null);
+    await expect(open()).resolves.toEqual({ kind: "paid" });
+    expect(sdkCalls()).toEqual({ stripe: 1, sheet: 1, present: 1 });
   });
 });

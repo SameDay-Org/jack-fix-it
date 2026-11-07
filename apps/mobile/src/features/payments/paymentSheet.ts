@@ -49,19 +49,26 @@ const APPEARANCE: AppearanceParams = {
 };
 
 /**
- * Opens Stripe's Payment Sheet for what the API prepared and waits for the customer. Card data
- * goes from the sheet to Stripe and never through this code, and neither secret is logged, kept
- * or returned. `stillWanted` is asked after every step that waits: once it says no (the session
- * ended, the screen went away) nothing more is opened. Stripe's error text is never passed on,
- * since it may describe the card: only the error's code decides the result. The sheet starts
- * only after the customer resets of earlier sessions (`sheetCustomer`); when its own session ends
- * while Stripe is working, the reset is asked for again once Stripe is done.
+ * Opens Stripe's Payment Sheet for what the API prepared and waits for the customer. Card data goes
+ * from the sheet to Stripe and never through this code, and neither secret is logged, kept or
+ * returned. `stillWanted` is asked after every step that waits: once it says no (the session ended,
+ * the screen went away) nothing more is opened; `signal` ends the wait for the reset early.
+ * Stripe's error text is never passed on, since it may describe the card: only the error's code
+ * decides the result. The sheet starts only after the customer resets of earlier sessions succeeded
+ * (`sheetCustomer`), and does not open when they could not (`unavailable`); when its own session
+ * ends while Stripe is working, the reset is asked for again once Stripe is done.
  */
 export async function openPaymentSheet(
   sheet: PaymentSheetOut,
-  { merchantName, stillWanted }: { merchantName: string; stillWanted: () => boolean },
+  {
+    merchantName,
+    stillWanted,
+    signal,
+  }: { merchantName: string; stillWanted: () => boolean; signal?: AbortSignal },
 ): Promise<SheetResult> {
-  const session = await sheetCustomerReady();
+  const session = await sheetCustomerReady(signal);
+  if (session.kind === "unavailable") return { kind: "failed", reason: "unavailable" };
+  if (session.kind === "ended") return { kind: "superseded" };
   const wanted = () => !session.ended() && stillWanted();
   if (!wanted()) return { kind: "superseded" };
   try {

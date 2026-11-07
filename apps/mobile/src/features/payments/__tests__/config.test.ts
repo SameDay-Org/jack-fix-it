@@ -1,8 +1,16 @@
-import { DEFAULT_POLL_INTERVAL_MS, DEFAULT_POLL_TIMEOUT_MS, readPaymentConfig } from "../config";
+import {
+  DEFAULT_POLL_INTERVAL_MS,
+  DEFAULT_POLL_TIMEOUT_MS,
+  DEFAULT_RESET_ATTEMPTS,
+  DEFAULT_RESET_TIMEOUT_MS,
+  readPaymentConfig,
+} from "../config";
 
 const raw = (overrides: Partial<Parameters<typeof readPaymentConfig>[0]> = {}) => ({
   pollIntervalMs: undefined,
   pollTimeoutMs: undefined,
+  resetTimeoutMs: undefined,
+  resetAttempts: undefined,
   appleMerchantId: "merchant.com.jackfixit.app",
   scheme: "jackfixit",
   ...overrides,
@@ -13,6 +21,8 @@ describe("readPaymentConfig", () => {
     expect(readPaymentConfig(raw())).toEqual({
       pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
       pollTimeoutMs: DEFAULT_POLL_TIMEOUT_MS,
+      resetTimeoutMs: DEFAULT_RESET_TIMEOUT_MS,
+      resetAttempts: DEFAULT_RESET_ATTEMPTS,
       appleMerchantId: "merchant.com.jackfixit.app",
       urlScheme: "jackfixit",
     });
@@ -31,6 +41,22 @@ describe("readPaymentConfig", () => {
     );
     expect(() => readPaymentConfig(raw({ pollTimeoutMs: value }))).toThrow(
       "EXPO_PUBLIC_PAYMENT_POLL_TIMEOUT_MS must be a positive whole number",
+    );
+  });
+
+  it("takes the environment's reset wait and tries", () => {
+    expect(readPaymentConfig(raw({ resetTimeoutMs: "4000", resetAttempts: "3" }))).toMatchObject({
+      resetTimeoutMs: 4000,
+      resetAttempts: 3,
+    });
+  });
+
+  it.each([["0"], ["-1"], ["1.5"], ["abc"]])("refuses %s as a reset value", (value) => {
+    expect(() => readPaymentConfig(raw({ resetTimeoutMs: value }))).toThrow(
+      "EXPO_PUBLIC_PAYMENT_RESET_TIMEOUT_MS must be a positive whole number",
+    );
+    expect(() => readPaymentConfig(raw({ resetAttempts: value }))).toThrow(
+      "EXPO_PUBLIC_PAYMENT_RESET_ATTEMPTS must be a positive whole number",
     );
   });
 

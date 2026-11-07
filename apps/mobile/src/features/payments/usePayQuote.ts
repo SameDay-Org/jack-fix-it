@@ -72,11 +72,14 @@ export function usePayQuote(requestId: string, quoteId: string) {
   const queryClient = useQueryClient();
   const [state, setState] = useState<PayState>(IDLE);
   const mounted = useRef(true);
+  // Ends a payment still waiting for Stripe's reset when the card goes away (`openPaymentSheet`).
+  const leaving = useRef<AbortController | null>(null);
 
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      leaving.current?.abort();
     };
   }, []);
 
@@ -119,6 +122,8 @@ export function usePayQuote(requestId: string, quoteId: string) {
       sheetInUse = true;
       show({ busy: true, failure: null });
       const current = () => isCurrentGeneration(generation);
+      const controller = new AbortController();
+      leaving.current = controller;
       try {
         let sheet;
         try {
@@ -140,6 +145,7 @@ export function usePayQuote(requestId: string, quoteId: string) {
         const result = await openPaymentSheet(sheet, {
           merchantName: t("brand.name"),
           stillWanted: () => mounted.current && current(),
+          signal: controller.signal,
         });
         // Paid for another account's session: nothing of it is shown to this one.
         if (!current()) return;
@@ -152,6 +158,7 @@ export function usePayQuote(requestId: string, quoteId: string) {
           show(IDLE); // canceled, or the card went away before the sheet opened
         }
       } finally {
+        if (leaving.current === controller) leaving.current = null;
         sheetInUse = false;
         if (!current()) show(IDLE);
       }
