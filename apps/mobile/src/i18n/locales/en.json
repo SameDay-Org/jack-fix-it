@@ -11,7 +11,8 @@
     "showPassword": "Show password",
     "hidePassword": "Hide password",
     "dismiss": "Dismiss",
-    "notSet": "Not set"
+    "notSet": "Not set",
+    "optionalLabel": "{{label}} (optional)"
   },
   "welcome": {
     "support": "Tell Jack. We'll take care of the rest.",
@@ -33,10 +34,33 @@
     "proDescription": "Receive requests near you and send your quotes."
   },
   "signUp": {
-    "title": "Create your account",
     "asCustomer": "As a customer",
     "asPro": "As a pro",
-    "submit": "Create account"
+    "submit": "Create account",
+    "progress": "Step {{step}} of {{total}}",
+    "account": {
+      "title": "Let's start with your email"
+    },
+    "name": {
+      "title": "Tell us your name!",
+      "support": "It goes on your card, just as you type it.",
+      "first": "First name",
+      "last": "Last name"
+    },
+    "home": {
+      "title": "Where do you live?",
+      "supportCustomer": "We save it as your Home address. Your card shows only the city and state.",
+      "supportPro": "Your card shows only the city and state.",
+      "label": "Home"
+    },
+    "next": "Continue",
+    "finish": "Done",
+    "errors": {
+      "nameInvalid": "Use letters, spaces, hyphens, apostrophes or periods.",
+      "nameSave": "We couldn't save your name. Try again.",
+      "homeInvalid": "We couldn't use this address. Check the fields and try again.",
+      "homeSave": "We couldn't save where you live. Try again."
+    }
   },
   "login": {
     "title": "Welcome back",
@@ -156,7 +180,6 @@
   "request": {
     "progress": "Step {{current}} of {{total}}",
     "cancel": "Cancel",
-    "optionalLabel": "{{label}} (optional)",
     "counter": "{{length}} / {{max}}",
     "discard": {
       "title": "Discard this request?",
@@ -200,17 +223,6 @@
       "savedNotServed": "{{address}}. Not in our area yet.",
       "another": "Use another address",
       "formTitle": "Another address",
-      "line1": "Street address",
-      "line2": "Apt, suite or unit",
-      "city": "City",
-      "state": "State",
-      "zip": "ZIP code",
-      "errors": {
-        "required": "Fill in this field.",
-        "state": "Use the two-letter code, like FL.",
-        "zip": "Enter a 5-digit ZIP code.",
-        "tooLong": "Keep it to {{max}} characters or fewer."
-      },
       "check": "Some address fields need a look.",
       "invalidTitle": "Check the address",
       "invalidBody": "We couldn't use this address. Fix the marked fields, then send it again.",
@@ -262,6 +274,19 @@
       "next": "Pros nearby will send you quotes. We'll notify you.",
       "see": "See my request",
       "home": "Back to Home"
+    }
+  },
+  "address": {
+    "line1": "Street address",
+    "line2": "Apt, suite or unit",
+    "city": "City",
+    "state": "State",
+    "zip": "ZIP code",
+    "errors": {
+      "required": "Fill in this field.",
+      "state": "Use the two-letter code, like FL.",
+      "zip": "Enter a 5-digit ZIP code.",
+      "tooLong": "Keep it to {{max}} characters or fewer."
     }
   },
   "phone": {

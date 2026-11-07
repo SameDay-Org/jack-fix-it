@@ -1,16 +1,15 @@
 import { useLocalSearchParams } from "expo-router";
 import { useRef, type ComponentRef } from "react";
-import { useTranslation } from "react-i18next";
 import { KeyboardAvoidingView, ScrollView, Text, View, type TextInputProps } from "react-native";
 import Animated, { useReducedMotion } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Button, Input, PasswordInput, Screen, type InputHandle } from "@/components/ui";
+import { Button, Screen } from "@/components/ui";
 
 import type { CredentialsForm as CredentialsFormState } from "../useCredentialsForm";
 import { useContentTransition } from "../useContentTransition";
 import { BackButton } from "./BackButton";
-import { FormError } from "./FormError";
+import { CredentialsFields } from "./CredentialsFields";
 
 type CredentialsFormProps = {
   title: string;
@@ -39,10 +38,8 @@ export function CredentialsForm({
   onLoginInstead,
   testID,
 }: CredentialsFormProps) {
-  const { t } = useTranslation();
   const { from } = useLocalSearchParams<{ from?: string }>();
   const { top } = useSafeAreaInsets();
-  const passwordRef = useRef<InputHandle>(null);
   const titleRef = useRef<ComponentRef<typeof Text>>(null);
   const fromWelcome = from === "welcome";
   const { rootStyle, contentStyle, enter, exit, statusBar, ownsStatusBar, busy } =
@@ -51,10 +48,7 @@ export function CredentialsForm({
       reduceMotion: useReducedMotion(),
       titleRef,
     });
-  const focusPassword = () => passwordRef.current?.focus();
   const submit = () => void form.submitForm();
-  const highlighted = (field: "email" | "password") =>
-    form.failure?.highlight.includes(field) ?? false;
 
   return (
     <Animated.View
@@ -97,48 +91,13 @@ export function CredentialsForm({
                 </Text>
                 {subtitle ? <Text className="text-callout text-gray-500">{subtitle}</Text> : null}
               </View>
-              <FormError
-                failure={form.failure}
+              <CredentialsFields
+                form={form}
+                passwordAutofill={passwordAutofill}
+                passwordHint={passwordHint}
                 onLoginInstead={onLoginInstead}
-                testID={`${testID}-error`}
+                testID={testID}
               />
-              <View className="gap-4">
-                <Input
-                  label={t("fields.email")}
-                  value={form.email}
-                  onChangeText={form.setEmail}
-                  error={form.fieldErrors.email}
-                  invalid={highlighted("email")}
-                  disabled={form.submitting}
-                  keyboardType="email-address"
-                  inputMode="email"
-                  autoComplete="email"
-                  textContentType="emailAddress"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  importantForAutofill="yes"
-                  returnKeyType="next"
-                  submitBehavior="submit"
-                  onSubmitEditing={focusPassword}
-                  testID={`${testID}-email`}
-                />
-                <PasswordInput
-                  ref={passwordRef}
-                  label={t("fields.password")}
-                  value={form.password}
-                  onChangeText={form.setPassword}
-                  error={form.fieldErrors.password}
-                  invalid={highlighted("password")}
-                  hint={passwordHint}
-                  disabled={form.submitting}
-                  {...passwordAutofill}
-                  importantForAutofill="yes"
-                  returnKeyType="done"
-                  submitBehavior="blurAndSubmit"
-                  onSubmitEditing={submit}
-                  testID={`${testID}-password`}
-                />
-              </View>
               <View className="flex-1" />
               <Button
                 label={submitLabel}

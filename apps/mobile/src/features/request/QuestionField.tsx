@@ -45,7 +45,7 @@ export function QuestionField({
     return (
       <View onLayout={onLayout}>
         <Input
-          label={question.required ? label : t("request.optionalLabel", { label })}
+          label={question.required ? label : t("common.optionalLabel", { label })}
           value={text}
           onChangeText={(next) => onAnswer(next === "" ? undefined : next)}
           hint={help}
@@ -63,7 +63,7 @@ export function QuestionField({
     return (
       <View onLayout={onLayout}>
         <NumberField
-          label={question.required ? label : t("request.optionalLabel", { label })}
+          label={question.required ? label : t("common.optionalLabel", { label })}
           hint={help}
           error={message}
           value={typeof answer === "number" ? answer : null}
@@ -255,7 +255,7 @@ function QuestionBlock({
     <View onLayout={onLayout} className="gap-3" testID={testID}>
       <View className="gap-1">
         <Text className="text-headline text-navy-900">
-          {optional ? t("request.optionalLabel", { label }) : label}
+          {optional ? t("common.optionalLabel", { label }) : label}
         </Text>
         {help ? <Text className="text-callout text-gray-500">{help}</Text> : null}
       </View>

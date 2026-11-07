@@ -54,10 +54,11 @@ TEST_EMAIL_SETTINGS: dict[str, object] = {
     "resend_api_key": "re_test_key_not_real",
     "email_from": "Jack Fix It <no-reply@example.invalid>",
 }
-# Fixture values only: a test-mode-shaped key that is not a key (tests never call Stripe), and
+# Fixture values only: test-mode-shaped keys that are not keys (tests never call Stripe), and
 # a public URL that never resolves.
 TEST_STRIPE_SETTINGS: dict[str, object] = {
     "stripe_secret_key": "sk_test_fixture-not-a-real-key",
+    "stripe_publishable_key": "pk_test_fixtureNotARealKey",
     "public_api_url": "https://api.example.invalid",
 }
 

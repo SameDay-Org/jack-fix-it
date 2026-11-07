@@ -5,6 +5,10 @@ import {
   type GetParams,
   type GetPath,
   type GetResponse,
+  type PatchBody,
+  type PatchParams,
+  type PatchPath,
+  type PatchResponse,
   type PostBody,
   type PostParams,
   type PostPath,
@@ -19,6 +23,13 @@ export type RequestOptions = {
   signal?: AbortSignal;
   /** Query-string values, e.g. `{ limit: 20, cursor }` on a paged list; `undefined` ones are left out. */
   query?: QueryParams;
+  /**
+   * Pins the call to the session generation a longer operation started in (`sessionGeneration()`
+   * taken when it started). After a sign-out or another sign-in nothing is sent: the call rejects
+   * with `SessionExpiredError("superseded")`, so a later step of the operation never carries the
+   * next session's token. Without it the call belongs to the generation current when it starts.
+   */
+  generation?: number;
 };
 
 /**
@@ -67,6 +78,24 @@ export function apiPost<P extends PostPath>(
   );
 }
 
+/** Typed PATCH with a JSON body: the fields to change (a profile update). */
+export function apiPatch<P extends PatchPath>(
+  path: P,
+  body: PatchBody<P>,
+  ...[options]: OptionsFor<PatchParams<P>>
+): Promise<PatchResponse<P>> {
+  const { params, query, ...session }: SentOptions = options ?? {};
+  return withSession(session, (accessToken) =>
+    sendRequest<PatchResponse<P>>("PATCH", path, {
+      body,
+      accessToken,
+      signal: session.signal,
+      params,
+      query,
+    }),
+  );
+}
+
 const isExpiredAccess = (error: unknown): boolean =>
   error instanceof ApiError && error.status === 401 && error.code === INVALID_TOKEN;
 
@@ -84,8 +113,9 @@ async function withSession<T>(
   options: RequestOptions,
   send: (accessToken?: string) => Promise<T>,
 ): Promise<T> {
+  if (options.generation !== undefined) ensureCurrent(options.generation);
   if (!options.auth) return send();
-  const startedIn = sessionGeneration();
+  const startedIn = options.generation ?? sessionGeneration();
   const accessToken = await getAccessToken();
   ensureCurrent(startedIn);
   throwIfAborted(options.signal);

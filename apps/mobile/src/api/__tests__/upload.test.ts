@@ -1,8 +1,8 @@
 import type { ApiSchema } from "@jack/shared";
 import { File } from "expo-file-system";
 
-import { UploadFailedError, UploadRejectedError } from "../errors";
-import { sessionStore } from "../session";
+import { SessionExpiredError, UploadFailedError, UploadRejectedError } from "../errors";
+import { logout, sessionGeneration, sessionStore } from "../session";
 import { localFileSize, uploadMedia, type UploadMediaOptions } from "../upload";
 import {
   callBody,
@@ -702,6 +702,111 @@ describe("uploadMedia", () => {
 
     retried.respond(200);
     await expect(upload).resolves.toEqual({ key: ticket(2).key });
+  });
+
+  describe("#292 Vault B1: the whole upload belongs to the session it started in", () => {
+    /** Signs the session out mid-upload; only the URL requests take a ticket. */
+    function routeLogout() {
+      fetchMock.mockImplementation(async (url) => {
+        if (!url.endsWith("/v1/uploads")) return jsonResponse(204);
+        const next = tickets.shift();
+        if (!next) throw new Error("no more tickets");
+        return jsonResponse(201, next);
+      });
+    }
+
+    it("a generation already replaced asks for no URL", async () => {
+      routeLogout();
+      const pinned = sessionGeneration();
+      await logout();
+
+      const refused = await start({ generation: pinned }).catch((error: unknown) => error);
+      expect(refused).toBeInstanceOf(SessionExpiredError);
+      expect(callsTo(fetchMock, "/v1/uploads")).toHaveLength(0);
+      expect(requests).toHaveLength(0);
+    });
+
+    it("a failed PUT after the session changed asks for no fresh URL and sends no second PUT", async () => {
+      routeLogout();
+      tickets = [ticket(1, -1), ticket(2)];
+      const upload = start().catch((error: unknown) => error);
+      const first = await reachRequest();
+      await logout();
+
+      first.fail();
+      await reachRequest();
+      expect(await upload).toMatchObject({ name: "SessionExpiredError", reason: "superseded" });
+      expect(callsTo(fetchMock, "/v1/uploads")).toHaveLength(1);
+      expect(requests).toHaveLength(1);
+    });
+
+    it("a PUT that completes after the session changed yields no key", async () => {
+      routeLogout();
+      const upload = start().catch((error: unknown) => error);
+      const first = await reachRequest();
+      await logout();
+
+      first.respond(200);
+      expect(await upload).toMatchObject({ name: "SessionExpiredError", reason: "superseded" });
+    });
+
+    // #292 Gatekeeper round 2, B2: the generation is checked again after the native queue barrier,
+    // in the tick that would start the task.
+    it.each(["first", "retry"] as const)(
+      "a sign-out while the %s PUT waits at the native queue barrier starts no PUT",
+      async (which) => {
+        jest.useFakeTimers();
+        try {
+          routeLogout();
+          tickets = [ticket(1, -1), ticket(2)];
+          const upload = start({ generation: sessionGeneration() }).catch(
+            (error: unknown) => error,
+          );
+          await untilNativeCall();
+          expect(nativeQueue).toHaveLength(1);
+          expect(requests).toHaveLength(0);
+          if (which === "retry") {
+            await runNativeQueue();
+            expect(requests).toHaveLength(1);
+            requests[0].fail();
+            await untilNativeCall();
+            expect(nativeQueue).toHaveLength(1);
+          }
+          const startedBefore = requests.length;
+          const startsBefore = nativeLog.filter((call) => call === "start").length;
+          await logout();
+          // A PUT that did start would send the whole file and be kept.
+          network = "completes";
+          await runNativeQueue();
+
+          expect(await upload).toMatchObject({ name: "SessionExpiredError", reason: "superseded" });
+          expect(requests.slice(startedBefore)).toEqual([]);
+          expect(nativeLog.filter((call) => call === "start")).toHaveLength(startsBefore);
+          expect(callsTo(fetchMock, "/v1/uploads")).toHaveLength(which === "first" ? 1 : 2);
+        } finally {
+          jest.useRealTimers();
+        }
+      },
+    );
+
+    it("a sign-out from inside the first progress callback starts no PUT", async () => {
+      routeLogout();
+      let signedOut: Promise<void> | null = null;
+      const upload = start({
+        onProgress: () => {
+          signedOut ??= logout();
+        },
+      }).catch((error: unknown) => error);
+      // A PUT that did start would send the whole file and be kept.
+      network = "completes";
+      await flush();
+      await runNativeQueue();
+
+      expect(await upload).toMatchObject({ name: "SessionExpiredError", reason: "superseded" });
+      await signedOut;
+      expect(requests).toEqual([]);
+      expect(nativeLog).not.toContain("start");
+    });
   });
 
   it("aborting while the URL is requested sends no PUT", async () => {
