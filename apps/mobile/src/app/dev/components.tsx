@@ -3,6 +3,7 @@ import { Redirect, router } from "expo-router";
 import { useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { ScrollView, Text, View } from "react-native";
 
+import { ChatBubbleSample } from "@/components/dev/ChatBubbleSample";
 import { FloatingBar } from "@/components/dev/FloatingBar";
 import { FlowKitSample } from "@/components/dev/FlowKitSample";
 import { HeroSample } from "@/components/dev/HeroSample";
@@ -117,6 +118,10 @@ function Gallery() {
             <Avatar name="With image" imageUri={SAMPLE_IMAGE} />
             <Avatar name="Broken image" imageUri={BROKEN_IMAGE} />
           </View>
+        </Section>
+
+        <Section title="Chat bubbles">
+          <ChatBubbleSample />
         </Section>
 
         <Section title="StatusBadge">
