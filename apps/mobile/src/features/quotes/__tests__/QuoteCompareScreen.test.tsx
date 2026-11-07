@@ -39,6 +39,8 @@ jest.mock("@/api", () => ({
   apiPost: jest.fn(),
 }));
 jest.mock("expo-router", () => jest.requireActual("./helpers").routerMock);
+// The job notice over the list (#64) has its own tests (features/jobs); here the list is alone.
+jest.mock("@/features/jobs/JobBookedNotice", () => ({ JobBookedNotice: () => null }));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
   "react-native-safe-area-context",

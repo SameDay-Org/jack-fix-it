@@ -10,7 +10,7 @@ import AppLayout, { unstable_settings as appSettings } from "../../../app/(app)/
 import AuthLayout, { unstable_settings } from "../../../app/(auth)/_layout";
 import { TabsLayout } from "../../tabs/TabsLayout";
 import { SessionGate } from "../SessionGate";
-import { METRICS, SIGNED_OUT } from "./helpers";
+import { METRICS, SIGNED_OUT, WithQuery } from "./helpers";
 
 // A session that changes under the mounted router, as a sign-in and a sign-out do.
 const { accessToken: _a, accessTokenExpiresAt: _b, ...SESSION_SIGNED_OUT } = SIGNED_OUT;
@@ -40,6 +40,8 @@ jest.mock("@/api", () => {
     restoreSession: jest.fn(async () => undefined),
     // The phone flow registers its sign-out cleanup on import.
     onSignOut: jest.fn(() => () => undefined),
+    // The tabs' job banner (#64) pins its reads to the session generation.
+    useSessionGeneration: () => 1,
   };
 });
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
@@ -90,7 +92,7 @@ const routes = {
           id: "gate",
           onRender: () => commits.push([...mounted, ...(shellShown() ? ["shell"] : [])].sort()),
         },
-        createElement(SessionGate),
+        createElement(WithQuery, null, createElement(SessionGate)),
       ),
     ),
   "(auth)/_layout": { default: AuthLayout, unstable_settings },

@@ -679,5 +679,112 @@
     "title": "Legal",
     "lead": "Aquí publicaremos nuestros Términos de servicio y nuestra Política de privacidad.",
     "body": "Los estamos terminando. Cuando estén listos, podrás leerlos completos en esta página."
+  },
+  "jobs": {
+    "loading": "Cargando tu trabajo",
+    "refreshFailed": "No pudimos actualizar tu trabajo. Revisa tu conexión.",
+    "backToJob": "Volver a tu trabajo",
+    "pro": {
+      "fallback": "Tu profesional",
+      "fallbackInline": "tu profesional",
+      "title": "Tu profesional",
+      "verified": "verificado",
+      "rating": "★ {{rating}}",
+      "rated": "calificación {{rating}}",
+      "jobs_one": "{{count}} trabajo",
+      "jobs_other": "{{count}} trabajos",
+      "hint": "Abre su perfil"
+    },
+    "headline": {
+      "scheduled": "Reservaste a {{inline}}",
+      "onTheWay": "{{name}} va en camino",
+      "arrived": "{{name}} llegó",
+      "working": "{{name}} está trabajando",
+      "done": "Trabajo terminado",
+      "attention": "Este trabajo necesita atención",
+      "cancelled": "Este trabajo se canceló"
+    },
+    "support": {
+      "scheduled": "Programado para el {{date}}",
+      "arrived": "Se registró a las {{time}}",
+      "arrivedNow": "Se registró con tu código",
+      "working": "Empezó a las {{time}}",
+      "workingNow": "El trabajo está en marcha",
+      "finished": "{{name}} marcó el trabajo como terminado. Revisa cómo quedó.",
+      "done": "Gracias por reservar con Jack Fix It.",
+      "attention": "Se reportó un problema en este trabajo.",
+      "cancelled": "No necesitas hacer nada más."
+    },
+    "eta": {
+      "close": "Llega alrededor de las {{time}} · en {{span}}",
+      "later": "Llega alrededor de las {{time}}",
+      "due": "Está por llegar",
+      "none": "Va en camino hacia ti"
+    },
+    "code": {
+      "title": "Tu código de llegada",
+      "label": "Código de llegada: {{digits}}",
+      "hint": "Dale este código a {{name}} en la puerta."
+    },
+    "milestones": {
+      "label": "Avance del trabajo",
+      "onTheWay": "En camino",
+      "arrived": "Llegó",
+      "working": "Trabajando",
+      "done": "Terminado",
+      "value": "Paso {{current}} de {{total}}, {{step}}",
+      "none": "Aún no empieza"
+    },
+    "map": {
+      "estimate": "Estimado según la hora de llegada"
+    },
+    "paid": {
+      "title": "Pagado",
+      "tax": "Incluye {{tax}} de impuestos",
+      "label": "Pagado {{total}}",
+      "labelWithTax": "Pagado {{total}}, con {{tax}} de impuestos"
+    },
+    "timeline": {
+      "title": "Lo que ha pasado",
+      "row": "{{event}}, {{time}}",
+      "created": "Reservado y pagado",
+      "onTheWay": "En camino",
+      "etaUpdated": "Nueva hora de llegada",
+      "checkedIn": "Llegó",
+      "started": "Empezó a trabajar",
+      "completed": "Marcado como terminado",
+      "confirmed": "Confirmado",
+      "disputed": "Problema reportado",
+      "cancelled": "Cancelado"
+    },
+    "banner": {
+      "scheduled": "Reservaste a {{inline}} · {{date}}",
+      "onTheWay": "{{name}} va en camino",
+      "onTheWayIn": "{{name}} va en camino · {{span}}",
+      "onTheWayAt": "{{name}} va en camino · {{time}}",
+      "almostThere": "{{name}} está por llegar",
+      "arrived": "{{name}} llegó",
+      "working": "{{name}} está trabajando",
+      "finished": "{{name}} terminó el trabajo",
+      "hint": "Abre tu trabajo"
+    },
+    "booked": {
+      "title": "Tu trabajo está reservado",
+      "follow": "Sigue tu trabajo"
+    },
+    "booking": {
+      "title": "Tu trabajo aún no está listo",
+      "body": "Cuando se confirme tu pago, aquí verás a tu profesional y su avance. Esta página se actualiza sola."
+    },
+    "notFound": {
+      "title": "No encontramos este trabajo",
+      "body": "Puede ser de otra cuenta, o el enlace no funciona.",
+      "home": "Ir al inicio"
+    },
+    "error": {
+      "title": "No pudimos cargar tu trabajo",
+      "body": "Revisa tu conexión e inténtalo de nuevo.",
+      "retry": "Intentar de nuevo"
+    }
   }
 }
