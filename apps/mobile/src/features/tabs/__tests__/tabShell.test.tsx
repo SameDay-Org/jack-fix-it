@@ -5,6 +5,7 @@ import { router, Slot, useNavigationContainerRef } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import { createElement, useLayoutEffect } from "react";
 import { BackHandler, ScrollView, Text } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { apiGet, useSession } from "@/api";
@@ -20,7 +21,11 @@ import { TabsLayout } from "../TabsLayout";
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../../api/errors"),
   onSignOut: jest.fn(),
+  apiConfig: { timeoutMs: 15_000 },
   apiGet: jest.fn(),
+  isCurrentGeneration: jest.fn(() => true),
+  sessionGeneration: jest.fn(() => 1),
+  setSessionUser: jest.fn(),
   useSession: jest.fn(),
   logout: jest.fn(),
 }));
@@ -38,10 +43,15 @@ function Root() {
   useLayoutEffect(() => {
     navigation = container;
   }, [container]);
+  // As the app's root: the Account tab's ID card needs the gesture root.
   return createElement(
-    SafeAreaProvider,
-    { initialMetrics: METRICS },
-    createElement(QueryClientProvider, { client }, createElement(Slot)),
+    GestureHandlerRootView,
+    { style: { flex: 1 } },
+    createElement(
+      SafeAreaProvider,
+      { initialMetrics: METRICS },
+      createElement(QueryClientProvider, { client }, createElement(Slot)),
+    ),
   );
 }
 

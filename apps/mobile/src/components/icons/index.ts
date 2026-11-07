@@ -10,3 +10,5 @@ export { VERIFIED_SEAL_PATH, VERIFIED_SEAL_VIEW_BOX } from "./verifiedSeal";
 export { ControlIcon } from "./ControlIcon";
 export type { ControlGlyphName, ControlIconProps } from "./ControlIcon";
 export { SILHOUETTE_PATH, SILHOUETTE_VIEW_BOX } from "./idCardGlyphs";
+export { ACCOUNT_GLYPHS } from "./accountGlyphs";
+export type { AccountGlyphName } from "./accountGlyphs";

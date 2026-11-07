@@ -132,7 +132,38 @@
     "retry": "Reintentar"
   },
   "account": {
-    "title": "Cuenta"
+    "title": "Cuenta",
+    "card": {
+      "label": "Tu tarjeta de identificación",
+      "hint": "Trae la tarjeta al frente para inclinarla y darle la vuelta.",
+      "hintStill": "Trae la tarjeta al frente para darle la vuelta.",
+      "focused": "Tu tarjeta de identificación está al frente. Toca dos veces la tarjeta para darle la vuelta.",
+      "gesture": "Arrástrala para inclinarla. Tócala para darle la vuelta.",
+      "gestureStill": "Tócala para darle la vuelta.",
+      "back": "Volver a tu cuenta"
+    },
+    "memberSince": "Miembro desde",
+    "rating": "Calificación",
+    "noRatings": "Aún sin calificaciones",
+    "share": {
+      "label": "Compartir",
+      "a11y": "Compartir tu tarjeta de identificación como imagen",
+      "dialogTitle": "Compartir tu tarjeta de identificación",
+      "failed": "No pudimos compartir tu tarjeta de identificación. Inténtalo de nuevo en un momento."
+    },
+    "menu": {
+      "settings": "Configuración",
+      "help": "Ayuda",
+      "legal": "Legal",
+      "logOut": "Cerrar sesión"
+    },
+    "logOut": {
+      "title": "¿Cerrar sesión?",
+      "body": "Puedes volver a iniciar sesión cuando quieras con tu correo y contraseña.",
+      "cancel": "Cancelar",
+      "confirm": "Cerrar sesión",
+      "hint": "Pregunta antes de cerrar tu sesión."
+    }
   },
   "tabs": {
     "home": "Inicio",
@@ -630,5 +661,23 @@
       "flip": "Voltear la tarjeta",
       "hint": "Da la vuelta a la tarjeta."
     }
+  },
+  "settings": {
+    "title": "Configuración",
+    "sections": {
+      "account": "Tu cuenta"
+    },
+    "email": "Correo",
+    "phone": "Teléfono",
+    "phoneNotVerified": "Aún no verificado"
+  },
+  "help": {
+    "title": "Apoyo cuando lo necesites",
+    "body": "Aquí encontrarás respuestas a preguntas comunes y una forma de contactar al equipo de Jack Fix It. Todavía las estamos preparando."
+  },
+  "legal": {
+    "title": "Legal",
+    "lead": "Aquí publicaremos nuestros Términos de servicio y nuestra Política de privacidad.",
+    "body": "Los estamos terminando. Cuando estén listos, podrás leerlos completos en esta página."
   }
 }

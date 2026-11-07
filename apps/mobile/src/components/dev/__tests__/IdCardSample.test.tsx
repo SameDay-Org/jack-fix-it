@@ -78,8 +78,9 @@ describe("IdCardSample", () => {
     await waitFor(() =>
       expect(screen.getByTestId("id-card-share-size")).toHaveTextContent("960 x 606 px"),
     );
+    // The preview shows the PNG the share render wrote into the app's private cache.
     expect(screen.getByTestId("id-card-share-preview").props.source).toEqual({
-      uri: viewShot.MOCK_CAPTURE_URI,
+      uri: expect.stringMatching(/\/id-card-share\/card-.+\.png$/),
     });
   });
 });

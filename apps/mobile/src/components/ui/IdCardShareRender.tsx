@@ -7,17 +7,24 @@ import {
   useState,
   type Ref,
 } from "react";
+import { Directory, File, Paths } from "expo-file-system";
 import { Image, PixelRatio, View } from "react-native";
 import ViewShot, { type CaptureOptions, type ViewShotRef } from "react-native-view-shot";
 
 import { IdCard, type IdCardProps } from "./IdCard";
 
 export type IdCardShareCapture = {
-  /** A PNG in a temporary file, for the share sheet. */
+  /** The PNG, a file in the app's private cache (`ID_CARD_SHARE_DIR`), for the share sheet. */
   uri: string;
   /** Its pixel size: at least 3x the design width. */
   width: number;
   height: number;
+  /**
+   * Deletes the PNG. The capture belongs to its caller: call this once the share sheet is done
+   * with it, and whenever the capture goes unused (cancelled, failed, superseded, too late).
+   * Calling it again does nothing.
+   */
+  discard: () => void;
 };
 
 export type IdCardShareHandle = {
@@ -46,13 +53,48 @@ export const ID_CARD_SHARE_MIN_RATIO = 3;
 /** Clears the card from the screen's left edge whatever its parent's inset. */
 const OFFSCREEN_GAP = 64;
 
-const CAPTURE: CaptureOptions = { format: "png", quality: 1, result: "tmpfile" };
+/**
+ * The PNG comes back as base64 and never as a view-shot temporary file: on Android view-shot puts
+ * its files in the external cache when that has more room, and before Android 10 other apps with
+ * storage access can read it (#293). The card holds a name, a portrait and a place, so the app
+ * writes the PNG itself, into its private cache.
+ */
+const CAPTURE: CaptureOptions = { format: "png", quality: 1, result: "base64" };
+/** The folder in the app's private cache (`Paths.cache`) that holds the shared PNGs. */
+export const ID_CARD_SHARE_DIR = "id-card-share";
 const NOT_MOUNTED = "IdCardShareRender is not mounted";
 const PHOTO_TIMED_OUT = "IdCardShareRender: the photo did not load in time";
 
 type Waiter = { resolve: () => void; reject: (error: Error) => void };
 /** One photo load: a new URI, or the same one put back after a removal, is a new load. */
 type PhotoLoad = { uri: string | undefined; id: number };
+
+/** Names each PNG apart, so one capture's discard never deletes another's file. */
+let sequence = 0;
+
+/** Deletes a PNG that may already be gone; a failed delete leaves it to the OS cache eviction. */
+function deleteQuietly(file: File) {
+  try {
+    if (file.exists) file.delete();
+  } catch {
+    // Nothing to tell the person: the file sits in the app's private cache either way.
+  }
+}
+
+/** Writes the base64 PNG into the app's private cache and returns the file. */
+async function writePrivatePng(base64: string): Promise<File> {
+  const dir = new Directory(Paths.cache, ID_CARD_SHARE_DIR);
+  dir.create({ intermediates: true, idempotent: true });
+  sequence += 1;
+  const file = new File(dir, `card-${Date.now()}-${sequence}.png`);
+  try {
+    await file.write(base64, { encoding: "base64" });
+  } catch (error) {
+    deleteQuietly(file);
+    throw error;
+  }
+  return file;
+}
 
 /**
  * The width to lay the card out at, in dp, so that the native capture comes out at
@@ -90,6 +132,7 @@ export function IdCardShareRender({
   const activeLoad = useRef(load.id);
   const readyLoad = useRef<number | undefined>(undefined);
   const waiting = useRef<Waiter[]>([]);
+  const mounted = useRef(true);
 
   const loadId = load.id;
   // Before the commit hands the card this load's callback, so no event can reach it early.
@@ -111,8 +154,10 @@ export function IdCardShareRender({
     for (const waiter of waiting.current.splice(0)) waiter.resolve();
   }, [photoUri]);
   useEffect(() => {
+    mounted.current = true;
     const pending = waiting.current;
     return () => {
+      mounted.current = false;
       for (const waiter of pending.splice(0)) waiter.reject(new Error(NOT_MOUNTED));
     };
   }, []);
@@ -143,9 +188,19 @@ export function IdCardShareRender({
         }
         const target = shot.current;
         if (!target) throw new Error(NOT_MOUNTED);
-        const uri = await target.capture();
-        const size = await Image.getSize(uri);
-        return { uri, width: size.width, height: size.height };
+        const base64 = await target.capture();
+        // A capture that ends after the unmount writes nothing: no one is left to share or delete it.
+        if (!mounted.current) throw new Error(NOT_MOUNTED);
+        const file = await writePrivatePng(base64);
+        const discard = () => deleteQuietly(file);
+        try {
+          const size = await Image.getSize(file.uri);
+          if (!mounted.current) throw new Error(NOT_MOUNTED);
+          return { uri: file.uri, width: size.width, height: size.height, discard };
+        } catch (error) {
+          discard();
+          throw error;
+        }
       },
     }),
     [photoUri, photoTimeoutMs],
