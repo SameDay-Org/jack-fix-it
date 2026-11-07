@@ -25,6 +25,7 @@ export type MilestonesProps = {
 };
 
 const { stepSlideMs } = tokens.motion;
+const MIN_LABEL_SCALE = 0.6;
 
 /**
  * Milestones on one track: a rounded segment per milestone that fills green as it is reached,
@@ -63,6 +64,10 @@ export function Milestones({ labels, reached, label, valueText, testID }: Milest
         {labels.map((text, index) => (
           <Text
             key={index}
+            // A long word ("Trabajando" at font scale 2) shrinks to its column rather than split.
+            numberOfLines={2}
+            adjustsFontSizeToFit
+            minimumFontScale={MIN_LABEL_SCALE}
             className={cx(
               "flex-1 text-footnote",
               index < reached ? "font-semibold text-navy-900" : "text-gray-500",

@@ -4,7 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { router, Slot, useLocalSearchParams } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
 import { createElement } from "react";
-import { Text } from "react-native";
+import { AppState, Text, type AppStateStatus } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -156,6 +156,14 @@ const bannerReads = () =>
     .length;
 const jobReads = () => calls().filter(([path]) => path === JOB_PATH).length;
 
+/** Tells every AppState listener subscribed so far that the app moved to `state`. */
+async function moveApp(state: AppStateStatus): Promise<void> {
+  const listeners = jest
+    .mocked(AppState.addEventListener)
+    .mock.calls.map(([, listener]) => listener as (next: AppStateStatus) => void);
+  await act(async () => listeners.forEach((listener) => listener(state)));
+}
+
 /** The banner's chain answered (or refused): what it shows now is what it will show. */
 const settled = () =>
   waitFor(() => expect(client.getQueryState(activeJobQueryKey(1))?.status).toBe("success"));
@@ -170,13 +178,20 @@ const bannerTexts = () =>
 async function expectBanner(line: string) {
   const banner = await screen.findByTestId("job-banner");
   expect(banner.props.accessibilityLabel).toBe(line);
-  expect(within(banner).getByText(line)).toBeTruthy();
+  // Drawn in two parts (the sentence, then the time it ends with), read together as the line.
+  const drawn = within(banner)
+    .getAllByText(/./)
+    .map((part) => [part.props.children as string | string[]].flat().join(""))
+    .join("");
+  expect(drawn).toBe(line);
   expect(screen.getByTestId("tab-bar-accessory")).toBeTruthy();
 }
 
 beforeEach(() => {
   freezeClock();
   client = newQueryClient();
+  // RN's AppState mock keeps every listener ever added: only this test's trees are told.
+  jest.mocked(AppState.addEventListener).mockClear();
   mockApi.requests = [];
   mockApi.jobs = {};
   jest.mocked(useSession).mockReturnValue(signedIn({ role: "customer" }));
@@ -278,6 +293,15 @@ describe("the tabs' job banner (#64)", () => {
     expect(screen.queryByTestId("tab-bar-accessory")).toBeNull();
     expect(calls().some(([path]) => path === REQUESTS_PATH)).toBe(false);
     expect(jobReads()).toBe(0);
+
+    // A refresh of a disabled query would still go out (TanStack's refetch ignores `enabled`).
+    await act(async () => fireEvent.press(screen.getByTestId("tab-account")));
+    await act(async () => fireEvent.press(screen.getByTestId("tab-home")));
+    await moveApp("active");
+    await act(async () => {
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    });
+    expect(calls().some(([path]) => path === REQUESTS_PATH)).toBe(false);
   });
 
   it("a tap opens the job screen for that request, and Back returns to the tab", async () => {
@@ -293,9 +317,12 @@ describe("the tabs' job banner (#64)", () => {
     expect((await screen.findByTestId("job-stub")).props.children).toBe(`job ${requestId(1)}`);
     expect(view.getPathname()).toBe(`/requests/${requestId(1)}/job`);
 
+    const before = bannerReads();
     await act(() => router.back());
 
     expect(view.getPathname()).toBe("/history");
+    // Back on the tabs, the banner asks again: the job may have moved while it was open.
+    await waitFor(() => expect(bannerReads()).toBe(before + 1));
     expect(screen.queryByTestId("job-stub")).toBeNull();
     expect(screen.getByRole("header", { name: "Your requests" })).toBeTruthy();
     await expectBanner(`Dan is on the way · 12${NBSP}min`);
@@ -349,6 +376,20 @@ describe("the tabs' job banner (#64)", () => {
 
     await act(async () => fireEvent.press(screen.getByTestId("tab-home")));
     await waitFor(() => expect(bannerReads()).toBe(4));
+  });
+
+  it("is asked for again when the app returns to the foreground on the tabs", async () => {
+    mockApi.requests = [request(1, "accepted")];
+    mockApi.jobs = { [requestId(1)]: ON_THE_WAY };
+    await renderRouter(routes, { initialUrl: "/" });
+    await screen.findByTestId("job-banner");
+    await settled();
+    const before = bannerReads();
+
+    await moveApp("background");
+    expect(bannerReads()).toBe(before);
+    await moveApp("active");
+    await waitFor(() => expect(bannerReads()).toBeGreaterThan(before));
   });
 
   it("a fresh answer moves the banner: the job the pro moved on shows on the next tab", async () => {

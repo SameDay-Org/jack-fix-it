@@ -1,7 +1,8 @@
 import { useTranslation } from "react-i18next";
-import { Text, View } from "react-native";
+import { Text, useWindowDimensions, View } from "react-native";
 
 import { cx } from "@/components/ui/cx";
+import { tokens } from "@/theme";
 
 import type { TimelineItem } from "./phase";
 
@@ -10,9 +11,9 @@ export type JobTimelineProps = {
   items: readonly TimelineItem[];
 };
 
-// The dot sits on the first line's center: (callout line height - dot) / 2.
+// The dot sits on the first line's center: (callout line height at the font scale - dot) / 2.
 const DOT = 10;
-const DOT_TOP = 5;
+const LINE = tokens.fontSize.callout.lineHeight;
 
 /**
  * What happened so far, newest first: a dot per event on a thin line, the event and its local
@@ -20,6 +21,8 @@ const DOT_TOP = 5;
  */
 export function JobTimeline({ items }: JobTimelineProps) {
   const { t } = useTranslation();
+  const { fontScale } = useWindowDimensions();
+  const dotTop = (Math.ceil(LINE * fontScale) - DOT) / 2;
   if (items.length === 0) return null;
 
   return (
@@ -41,7 +44,7 @@ export function JobTimeline({ items }: JobTimelineProps) {
               <View className="items-center" style={{ width: DOT }}>
                 <View
                   className={cx("rounded-pill", index === 0 ? "bg-green-700" : "bg-gray-500/40")}
-                  style={{ width: DOT, height: DOT, marginTop: DOT_TOP }}
+                  style={{ width: DOT, height: DOT, marginTop: dotTop }}
                 />
                 {last ? null : <View className="mt-1 w-0.5 flex-1 rounded-pill bg-gray-500/20" />}
               </View>

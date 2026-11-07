@@ -296,7 +296,7 @@ describe("jobText", () => {
     await i18n.changeLanguage("es");
     const onTheWay = jobText(t, JOBS.onTheWay, NOW, CLOSE, "es");
     expect(onTheWay.headline).toBe("Dan va en camino");
-    expect(plain(onTheWay.support)).toBe("Llega alrededor de las 14:30 · en 30 min");
+    expect(plain(onTheWay.support)).toBe("Llegada estimada: 14:30 · en 30 min");
 
     const scheduled = jobText(t, job({ proName: null }), NOW, CLOSE, "es");
     expect(scheduled.headline).toBe("Reservaste a tu profesional");

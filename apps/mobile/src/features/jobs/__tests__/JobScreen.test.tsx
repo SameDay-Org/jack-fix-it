@@ -28,7 +28,7 @@ import {
 import type { CustomerQuoteList } from "../../quotes/useRequestQuotes";
 import { jobsConfig } from "../config";
 import { JobScreen } from "../JobScreen";
-import type { CustomerJob, JobStatus, JobTimelineEntry } from "../phase";
+import { formatMoment, type CustomerJob, type JobStatus, type JobTimelineEntry } from "../phase";
 
 type MockStatus = "signedIn" | "signedOut";
 /** The session the mocked `@/api` hooks read; a test signs out by changing it and notifying. */
@@ -170,9 +170,9 @@ const CANCELLED = job({
 const ACCEPTED = quote(2, { status: "accepted" });
 const QUOTE_LIST: CustomerQuoteList = { items: [quote(1), ACCEPTED] };
 
-// Expected local times, with the same Intl calls the screen makes (the device's time zone).
-const clock = (iso: string) =>
-  new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(iso));
+// Expected local times, with the screen's own call (the device's time zone; a moment on
+// another local day than NOW carries its weekday, whatever zone the run is in).
+const clock = (iso: string) => formatMoment(Date.parse(iso), NOW, "en-US");
 const dateTime = (iso: string) =>
   new Intl.DateTimeFormat("en-US", {
     weekday: "short",
@@ -532,6 +532,74 @@ describe("JobScreen", () => {
       pathname: "/requests/[id]/quotes/[quoteId]/pro",
       params: { id: REQUEST_ID, quoteId: ACCEPTED.id, from: "job" },
     });
+  });
+
+  it("a sign-out stops the polling", async () => {
+    // The signed-out screen falls back to the skeleton: its endless pulse would never let fake
+    // timers drain, and motion is not what this case is about.
+    jest.mocked(useReducedMotion).mockReturnValue(true);
+    fakeClock();
+    await renderWithQuery(<JobScreen />);
+    await loaded("Dan is on the way");
+    expect(jobCalls()).toBe(1);
+
+    await signOut();
+    await advance(jobsConfig.pollMs * 3);
+    expect(jobCalls()).toBe(1);
+  });
+
+  it("says the map is an estimate while the pro is on the way, and only then", async () => {
+    await renderWithQuery(<JobScreen />);
+    await loaded("Dan is on the way");
+    expect(screen.getByTestId("job-map-note").props.children).toBe(
+      "The map is an estimate from the arrival time, not a live location.",
+    );
+
+    await screen.unmount();
+    answerJob(WORKING);
+    await renderWithQuery(<JobScreen />);
+    await loaded("Dan is working");
+    expect(screen.queryByTestId("job-map-note")).toBeNull();
+  });
+
+  it("the way back stays reachable to screen readers while the job loads", async () => {
+    holdJob();
+    await renderWithQuery(<JobScreen />);
+
+    expect(screen.getByTestId("job-loading")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Back" })).toBeTruthy();
+  });
+
+  it("a failed look-up of the accepted quote is asked again with the next answer", async () => {
+    fakeClock();
+    let quotesOk = false;
+    api.quotes = () =>
+      quotesOk ? Promise.resolve(QUOTE_LIST) : Promise.reject(new Error("offline"));
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan is on the way");
+    await waitFor(() =>
+      expect(get.mock.calls.filter(([path]) => path === QUOTES_PATH)).toHaveLength(1),
+    );
+    expect(screen.queryByRole("button", { name: /^Dan K\./ })).toBeNull();
+
+    quotesOk = true;
+    await advance(jobsConfig.pollMs);
+    expect(await screen.findByRole("button", { name: /^Dan K\./ })).toBeTruthy();
+  });
+
+  it("the countdown turns with the ETA, not a minute late", async () => {
+    fakeClock();
+    // 90 s away: "in 2 min"; 30 s later "in 1 min"; at the ETA "any minute now".
+    answerJob(job({ ...ON_THE_WAY, eta_at: new Date(NOW + 90_000).toISOString() }));
+    await renderWithQuery(<JobScreen />);
+    await loaded("Dan is on the way");
+    const support = () => screen.getByTestId("job-support").props.children as string;
+    expect(support()).toContain(`in 2${NBSP}min`);
+
+    await advance(30_000);
+    await waitFor(() => expect(support()).toContain(`in 1${NBSP}min`));
+    await advance(60_000);
+    await waitFor(() => expect(support()).toBe("Arriving any minute now"));
   });
 
   it("the pro row is not a button while the accepted quote is unknown", async () => {

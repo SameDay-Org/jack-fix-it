@@ -129,6 +129,29 @@ describe("JobBookedNotice (#64)", () => {
     });
   });
 
+  it.each([
+    ["cancelled", "This job was cancelled", "Nothing more is needed from you."],
+    ["disputed", "This job needs attention", "A problem was reported on this job."],
+    ["confirmed", "Job's done", "Thanks for booking with Jack Fix It."],
+  ] as const)(
+    "a %s job is not 'booked': the notice says where it ended",
+    async (status, title, line) => {
+      freezeClock();
+      const past: CustomerJob = { ...ON_THE_WAY, status, eta_at: null, arrival_code: null };
+      jest.mocked(apiGet).mockResolvedValue(past as Awaited<ReturnType<typeof apiGet>>);
+      await renderNotice(true);
+
+      expect(await screen.findByRole("header", { name: title })).toBeTruthy();
+      expect(screen.queryByText("Your job is booked")).toBeNull();
+      expect(screen.getByText(line)).toBeTruthy();
+      await act(async () => fireEvent.press(screen.getByRole("button", { name: "See your job" })));
+      expect(router.push).toHaveBeenCalledWith({
+        pathname: "/requests/[id]/job",
+        params: { id: REQUEST_ID },
+      });
+    },
+  );
+
   it("before the payment created the job (404) it renders nothing", async () => {
     freezeClock();
     const answer = deferred<CustomerJob>();

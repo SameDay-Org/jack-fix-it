@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
-import { Text, useWindowDimensions, View } from "react-native";
+import { useWindowDimensions, View } from "react-native";
 import Animated, {
   cancelAnimation,
   Easing,
@@ -15,7 +14,7 @@ import Animated, {
 import Svg, { Path, Rect } from "react-native-svg";
 
 import { ControlIcon } from "@/components/icons";
-import { tokens, withOpacity } from "@/theme";
+import { tokens } from "@/theme";
 
 import type { JobPhase } from "./phase";
 
@@ -99,8 +98,6 @@ export type JobMapProps = {
   phase: JobPhase;
   /** How far along the route the pro's marker is, 0 to 1 (see `travelOf`). */
   travel: number;
-  /** How much of the map's bottom edge something covers (the sheet over it): the chip sits above. */
-  covered?: number;
   testID?: string;
 };
 
@@ -108,12 +105,11 @@ export type JobMapProps = {
  * A drawn map, not a real one (#103 brings that): navy blocks and streets, the route to the
  * customer's door in lime, the part still ahead dashed, and the pro's marker on it. The marker's
  * place comes from time alone (the share of the On my way span that passed), never a location,
- * and a chip says so while it moves. It pulses while the pro is on the way, the door pulses while
+ * and the screen says so in words under the arrival time. It pulses while the pro is on the way, the door pulses while
  * they work, and a check sits on it once done. Reduce Motion: no pulse, no glide. Decorative to
  * screen readers: the headline and the progress say the same in words.
  */
-export function JobMap({ phase, travel, covered = 0, testID = "job-map" }: JobMapProps) {
-  const { t } = useTranslation();
+export function JobMap({ phase, travel, testID = "job-map" }: JobMapProps) {
   const reduceMotion = useReducedMotion();
   const { width } = useWindowDimensions();
   const height = Math.min(MAX_HEIGHT, (width * VIEW_H) / VIEW_W);
@@ -251,26 +247,9 @@ export function JobMap({ phase, travel, covered = 0, testID = "job-map" }: JobMa
           </View>
         </Animated.View>
       ) : null}
-
-      {moving ? (
-        <View
-          // Bottom right, the one corner the route, the door and the way back leave free.
-          className="absolute right-4 max-w-[60%] rounded-pill px-3 py-1"
-          style={{
-            bottom: covered + CHIP_GAP,
-            backgroundColor: withOpacity("navy-900", CHIP_OPACITY),
-          }}
-          testID={`${testID}-estimate`}
-        >
-          <Text className="text-caption text-white">{t("jobs.map.estimate")}</Text>
-        </View>
-      ) : null}
     </View>
   );
 }
-
-const CHIP_OPACITY = 0.8;
-const CHIP_GAP = 8;
 
 /** A soft ring growing out of a pin and fading, over and over; nothing under Reduce Motion. */
 function Pulse({ size, color, active }: { size: number; color: string; active: boolean }) {

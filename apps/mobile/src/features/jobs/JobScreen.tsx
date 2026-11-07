@@ -78,7 +78,9 @@ export function JobScreen() {
   const { t } = useTranslation();
   const { id } = useLocalSearchParams<{ id: string }>();
   const valid = isUuid(id);
-  const { data, error, refetch, isFetching } = useCustomerJob(id, { enabled: valid });
+  const { data, error, refetch, isFetching, dataUpdatedAt } = useCustomerJob(id, {
+    enabled: valid,
+  });
   const shownError = useSettledError(data, error);
   const [pulling, setPulling] = useState(false);
 
@@ -111,7 +113,7 @@ export function JobScreen() {
         testID="job-scroll"
       >
         {data ? (
-          <JobContent job={data} requestId={id} />
+          <JobContent job={data} requestId={id} updatedAt={dataUpdatedAt} />
         ) : !valid ? (
           <JobState
             map="bare"
@@ -165,6 +167,7 @@ function MapBack() {
 /** The white sheet over the map's bottom edge, padded down to the home indicator. */
 function Sheet({ children, testID }: { children: ReactNode; testID?: string }) {
   const { bottom } = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
   return (
     <View
       className="flex-grow gap-8 rounded-t-xl bg-white px-4 pt-6"
@@ -172,19 +175,44 @@ function Sheet({ children, testID }: { children: ReactNode; testID?: string }) {
       testID={testID}
     >
       {children}
+      {/* White below the end too, so an iOS bounce past the bottom never shows the navy page. */}
+      <View className="absolute inset-x-0 bg-white" style={{ top: "100%", height: height }} />
     </View>
   );
 }
 
-function JobContent({ job, requestId }: { job: CustomerJob; requestId: string }) {
+type JobContentProps = {
+  job: CustomerJob;
+  requestId: string;
+  /** When the job's last answer arrived: the words are never drawn against an older clock. */
+  updatedAt: number;
+};
+
+function JobContent({ job, requestId, updatedAt }: JobContentProps) {
   const { t } = useTranslation();
-  const now = useMinuteClock();
+  const now = useMinuteClock(updatedAt, job.eta_at === null ? null : Date.parse(job.eta_at));
   const phase = jobPhase(job);
   const { headline, support } = jobText(t, job, now, jobsConfig.etaCloseMinutes);
   const reached = milestoneOf(phase);
   const names = proNames(t, job);
   const generation = useSessionGeneration();
-  const accepted = useQuery(acceptedQuoteQueryOptions(requestId, generation)).data;
+  const acceptedQuote = useQuery(acceptedQuoteQueryOptions(requestId, generation));
+  const accepted = acceptedQuote.data;
+  // A failed look-up is asked again with each new answer for the job (a poll, a pull), so the
+  // way to the pro's profile comes back with the connection.
+  const { isError: acceptedFailed, refetch: refetchAccepted } = acceptedQuote;
+  // The job answer a failure was seen with: only a later one asks again (no burst on the failure).
+  const failedWith = useRef<number | null>(null);
+  useEffect(() => {
+    if (!acceptedFailed) {
+      failedWith.current = null;
+    } else if (failedWith.current === null) {
+      failedWith.current = updatedAt;
+    } else if (failedWith.current !== updatedAt) {
+      failedWith.current = updatedAt;
+      void refetchAccepted();
+    }
+  }, [acceptedFailed, refetchAccepted, updatedAt]);
   const push = useGuardedPush();
   useAnnounceChange(phase, headline);
 
@@ -196,7 +224,7 @@ function JobContent({ job, requestId }: { job: CustomerJob; requestId: string })
 
   return (
     <View className="flex-grow">
-      <JobMap phase={phase} travel={travelOf(job, now)} covered={SHEET_OVERLAP} />
+      <JobMap phase={phase} travel={travelOf(job, now)} />
       <MapBack />
       <Sheet testID="job-sheet">
         <View className="gap-2">
@@ -206,6 +234,11 @@ function JobContent({ job, requestId }: { job: CustomerJob; requestId: string })
           <Text className="text-callout text-gray-500" testID="job-support">
             {support}
           </Text>
+          {phase === "onTheWay" ? (
+            <Text className="text-footnote text-gray-500" testID="job-map-note">
+              {t("jobs.map.estimate")}
+            </Text>
+          ) : null}
         </View>
         {reached === null ? null : (
           <Milestones
@@ -303,38 +336,41 @@ function JobSkeleton() {
   const { t } = useTranslation();
   const { width } = useWindowDimensions();
   return (
-    <View
-      accessible
-      accessibilityRole="progressbar"
-      accessibilityLabel={t("jobs.loading")}
-      className="flex-grow"
-      testID="job-loading"
-    >
+    <View className="flex-grow">
       <View
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
+        accessible
+        accessibilityRole="progressbar"
+        accessibilityLabel={t("jobs.loading")}
         className="flex-grow"
+        testID="job-loading"
       >
-        <JobMap phase="attention" travel={0} testID="job-loading-map" />
-        <MapBack />
-        <Sheet>
-          <View className="gap-2" style={{ maxWidth: width }}>
-            <TextSkeleton type="title-1" width={HEADLINE_WIDTH} />
-            <TextSkeleton type="callout" width={SUPPORT_WIDTH} />
-          </View>
-          <View className="gap-2">
-            <Skeleton height={TRACK} radius="pill" />
-            <TextSkeleton type="footnote" width={SUPPORT_WIDTH} />
-          </View>
-          <View className="flex-row items-center gap-3">
-            <Skeleton circle height={AVATAR} />
-            <View className="flex-1 gap-1">
-              <TextSkeleton type="headline" width={NAME_WIDTH} />
+        <View
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          className="flex-grow"
+        >
+          <JobMap phase="attention" travel={0} testID="job-loading-map" />
+          <Sheet>
+            <View className="gap-2" style={{ maxWidth: width }}>
+              <TextSkeleton type="title-1" width={HEADLINE_WIDTH} />
+              <TextSkeleton type="callout" width={SUPPORT_WIDTH} />
+            </View>
+            <View className="gap-2">
+              <Skeleton height={TRACK} radius="pill" />
               <TextSkeleton type="footnote" width={SUPPORT_WIDTH} />
             </View>
-          </View>
-        </Sheet>
+            <View className="flex-row items-center gap-3">
+              <Skeleton circle height={AVATAR} />
+              <View className="flex-1 gap-1">
+                <TextSkeleton type="headline" width={NAME_WIDTH} />
+                <TextSkeleton type="footnote" width={SUPPORT_WIDTH} />
+              </View>
+            </View>
+          </Sheet>
+        </View>
       </View>
+      {/* Outside the hidden shapes: the way back stays reachable while the job loads. */}
+      <MapBack />
     </View>
   );
 }

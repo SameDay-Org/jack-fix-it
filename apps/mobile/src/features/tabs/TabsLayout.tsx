@@ -26,7 +26,7 @@ function RouterTabBar({ state, emitter, navigateToTab }: BottomTabBarProps) {
   const { progress } = usePanelHandoffContext();
   const { phase } = usePanelHandoff();
   const onHome = tabFor(state.routes[state.index]?.name ?? "")?.route === "index";
-  const { active, refetch } = useActiveJob();
+  const { active, updatedAt, refetch } = useActiveJob();
   useRefetchOnTabChange(state.routes[state.index]?.key, refetch);
   const slideOut = useDerivedValue(
     () => (onHome ? Math.min(1, progress.value / CONTENT_FROM) : 0),
@@ -64,7 +64,7 @@ function RouterTabBar({ state, emitter, navigateToTab }: BottomTabBarProps) {
       items={items}
       slideOut={slideOut}
       hidden={onHome && phase !== "idle"}
-      accessory={active ? <JobBanner active={active} /> : undefined}
+      accessory={active ? <JobBanner active={active} updatedAt={updatedAt} /> : undefined}
       testID="tab-bar"
     />
   );

@@ -1,6 +1,6 @@
 import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useIsFocused } from "expo-router";
-import { useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { AppState } from "react-native";
 
 import { apiGet, ApiError, useSession, useSessionGeneration } from "@/api";
@@ -135,18 +135,31 @@ export const activeJobQueryOptions = (client: QueryClient, generation: number) =
  * The job is read back from its own query, so a screen that polled it since (the pro moved on,
  * the customer confirmed) shows in the banner at once. Nothing is asked for while signed out.
  */
-export function useActiveJob(): { active: ActiveJob | null; refetch: () => Promise<unknown> } {
+export type ActiveJobState = {
+  active: ActiveJob | null;
+  /** When the job on show was last answered: its words are never drawn against an older clock. */
+  updatedAt: number;
+  refetch: () => Promise<unknown>;
+};
+
+export function useActiveJob(): ActiveJobState {
   const client = useQueryClient();
   const generation = useSessionGeneration();
   const { status, user } = useSession();
   const enabled = status === "signedIn" && user?.role === "customer";
-  const { data, refetch } = useQuery({ ...activeJobQueryOptions(client, generation), enabled });
+  const {
+    data,
+    refetch,
+    dataUpdatedAt: listedAt,
+  } = useQuery({ ...activeJobQueryOptions(client, generation), enabled });
   const found = enabled ? (data ?? null) : null;
-  const latest = useQuery({
+  const { data: latest, dataUpdatedAt: jobAt } = useQuery({
     ...customerJobQueryOptions(found?.requestId ?? "", generation),
     enabled: false,
-  }).data;
+  });
   const job = found && latest ? latest : found?.job;
   const active = found && job && isActive(job) ? { requestId: found.requestId, job } : null;
-  return { active, refetch };
+  // `refetch` runs even on a disabled query: a pro (no requests) would be refused each time.
+  const refresh = useCallback(() => (enabled ? refetch() : Promise.resolve()), [enabled, refetch]);
+  return { active, updatedAt: Math.max(listedAt, jobAt), refetch: refresh };
 }

@@ -706,9 +706,9 @@
     },
     "support": {
       "scheduled": "Programado para el {{date}}",
-      "arrived": "Se registró a las {{time}}",
+      "arrived": "Hora de llegada: {{time}}",
       "arrivedNow": "Se registró con tu código",
-      "working": "Empezó a las {{time}}",
+      "working": "Empezó: {{time}}",
       "workingNow": "El trabajo está en marcha",
       "finished": "{{name}} marcó el trabajo como terminado. Revisa cómo quedó.",
       "done": "Gracias por reservar con Jack Fix It.",
@@ -716,8 +716,8 @@
       "cancelled": "No necesitas hacer nada más."
     },
     "eta": {
-      "close": "Llega alrededor de las {{time}} · en {{span}}",
-      "later": "Llega alrededor de las {{time}}",
+      "close": "Llegada estimada: {{time}} · en {{span}}",
+      "later": "Llegada estimada: {{time}}",
       "due": "Está por llegar",
       "none": "Va en camino hacia ti"
     },
@@ -736,7 +736,7 @@
       "none": "Aún no empieza"
     },
     "map": {
-      "estimate": "Estimado según la hora de llegada"
+      "estimate": "El mapa es una estimación según la hora de llegada, no una ubicación en vivo."
     },
     "paid": {
       "title": "Pagado",
@@ -770,7 +770,8 @@
     },
     "booked": {
       "title": "Tu trabajo está reservado",
-      "follow": "Sigue tu trabajo"
+      "follow": "Sigue tu trabajo",
+      "see": "Ver tu trabajo"
     },
     "booking": {
       "title": "Tu trabajo aún no está listo",

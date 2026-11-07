@@ -262,6 +262,47 @@ export function bannerText(
 }
 
 /**
+ * The banner's line in two parts for drawing it: the sentence, which may be cut short, and the
+ * time it ends with ("12 min", "Tue 9 AM"), which never is. Read together they are `bannerText`.
+ */
+export function bannerParts(
+  t: TFunction,
+  job: CustomerJob,
+  now: number,
+  closeMinutes: number,
+  locale: string = formatLocale(),
+): { main: string; tail: string | null } | null {
+  const { lead, inline } = proNames(t, job);
+  switch (jobPhase(job)) {
+    case "scheduled":
+      return {
+        main: t("jobs.headline.scheduled", { name: lead, inline }),
+        tail: formatShortStart(job.scheduled_start_at, locale),
+      };
+    case "onTheWay": {
+      const eta = etaOf(job.eta_at, now, closeMinutes);
+      if (eta?.kind === "close") {
+        return {
+          main: t("jobs.banner.onTheWay", { name: lead }),
+          tail: formatMinutes(t, eta.minutes),
+        };
+      }
+      if (eta?.kind === "later") {
+        return {
+          main: t("jobs.banner.onTheWay", { name: lead }),
+          tail: formatMoment(eta.at, now, locale),
+        };
+      }
+      break;
+    }
+    default:
+      break;
+  }
+  const text = bannerText(t, job, now, closeMinutes, locale);
+  return text === null ? null : { main: text, tail: null };
+}
+
+/**
  * How far along the drawn route the pro's marker sits, 0 to 1: the share of the On my way span
  * that has passed at `now` (time, never location: the API has no position), held short of the
  * door until the check-in. At the door once arrived or later; at the start before.

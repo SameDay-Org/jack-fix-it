@@ -736,7 +736,7 @@
       "none": "Not started yet"
     },
     "map": {
-      "estimate": "Estimated from the arrival time"
+      "estimate": "The map is an estimate from the arrival time, not a live location."
     },
     "paid": {
       "title": "Paid",
@@ -770,7 +770,8 @@
     },
     "booked": {
       "title": "Your job is booked",
-      "follow": "Follow your job"
+      "follow": "Follow your job",
+      "see": "See your job"
     },
     "booking": {
       "title": "Your job isn't ready yet",
