@@ -50,7 +50,8 @@ Stripe, in three calls:
   count), the time kept. An empty search proves nothing (Search is eventually consistent, and
   a delayed create can still land), so the payment waits for staff:
   scripts/resolve_payment_intent.py adopts an intent or allows a new create (adopt_intent,
-  allow_new_intent here).
+  allow_new_intent here). A payment_intent.* event for the lost intent adopts it first, from
+  its metadata (#296, reconciliation.py).
   Stripe showing it succeeded or canceled: 409 payment_not_available, the row left to #61;
 - an ephemeral key for the customer, new on every call.
 The response is what the Payment Sheet needs plus what the customer sees: the amount, the tax

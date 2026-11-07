@@ -7,6 +7,7 @@ PaymentIntent) and deletes it afterwards. Signatures are HMAC-SHA256 with a fixt
 network.
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -20,30 +21,32 @@ import httpx
 import pytest
 from arq import Retry
 from fastapi import FastAPI
-from sqlalchemy import URL, delete, select, update
+from sqlalchemy import URL, delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from starlette.requests import Request
 
 from app.config import Settings
-from app.integrations.stripe_payments import get_stripe_payments
+from app.integrations.stripe_payments import PaymentIntentFacts, get_stripe_payments
 from app.modules.addresses.models import Address
 from app.modules.categories.models import Category
 from app.modules.jobs.models import Job, JobEvent, JobStatus
+from app.modules.jobs.service import JobScheduler, NewJob
 from app.modules.payments.models import Payment, PaymentStatus
+from app.modules.payments.service import PaymentService, payment_intent_idempotency_key
 from app.modules.pros.models import ProProfile, ProVerificationStatus
 from app.modules.quotes.models import Quote, QuoteStatus
 from app.modules.requests.models import RequestOrigin, RequestStatus, ServiceRequest
 from app.modules.users.models import User
-from app.modules.users.types import UserRole
+from app.modules.users.types import UserAccount, UserRole
 from app.modules.webhooks.models import WebhookEvent, WebhookEventStatus
 from app.modules.webhooks.service import process_job_id
 from app.modules.webhooks.tasks import process_stripe_event
 from app.money import split_amount
 from app.observability import JsonFormatter
 from app.queue import JobQueue, get_job_queue
-from tests.conftest import make_settings
+from tests.conftest import LOCK_WAIT_DEADLINE_SECONDS, backend_pid, make_settings
 from tests.helpers import as_status_writer
-from tests.test_payments_api import PUBLISHABLE_KEY, FakeStripePayments, _fake_stripe
+from tests.test_payments_api import CONFIG, PUBLISHABLE_KEY, FakeStripePayments, _fake_stripe
 from tests.test_quote_list_api import headers_for
 from tests.test_stripe_webhooks_api import sign
 
@@ -60,6 +63,9 @@ CANCELED = "payment_intent.canceled"
 DECLINE_MESSAGE = "Your card was declined."
 # body(customer=...) default: the customer's stored Stripe Customer.
 STORED_CUSTOMER = "<stored>"
+# body(metadata=...): NAMED, the ids the payment call sends (#58); OMITTED, no metadata key.
+NAMED = object()
+OMITTED = object()
 
 
 @dataclass
@@ -112,8 +118,9 @@ class Market:
         customer: str | None = STORED_CUSTOMER,
         intent_id: str | None = None,
         failure_code: str | None = None,
+        metadata: object = NAMED,
     ) -> bytes:
-        intent = {
+        intent: dict[str, object] = {
             "id": intent_id or self.intent_id,
             "object": "payment_intent",
             "amount": amount,
@@ -131,6 +138,10 @@ class Market:
                 else {"code": failure_code, "message": DECLINE_MESSAGE, "type": "card_error"}
             ),
         }
+        if metadata is OMITTED:
+            del intent["metadata"]
+        elif metadata is not NAMED:
+            intent["metadata"] = metadata
         event = {
             "id": event_id,
             "object": "event",
@@ -792,3 +803,440 @@ async def test_customer_without_stored_stripe_customer_fails_the_event(
     assert await market.state() == before
     [mismatch] = records(caplog, "payment_event_mismatch")
     assert mismatch.__dict__["fields"] == "customer"
+
+
+# Adoption of a PaymentIntent whose create answer was lost (#296): the payment holds no intent,
+# and the event's metadata payment_id names it.
+
+ADOPTED = "payment_intent_adopted_from_event"
+UNKNOWN = "payment_event_unknown_intent"
+
+
+async def lose_the_create(market: Market) -> None:
+    """The payment as a lost create answer leaves it: its create time, no PaymentIntent id."""
+    async with market.sessions() as session:
+        await session.execute(
+            update(Payment)
+            .where(Payment.id == market.payment_id)
+            .values(
+                stripe_payment_intent_id=None,
+                payment_intent_requested_at=datetime.now(UTC) - timedelta(minutes=1),
+            )
+        )
+        await session.commit()
+
+
+async def stored_intent(market: Market) -> str | None:
+    async with market.sessions() as session:
+        return await session.scalar(
+            select(Payment.stripe_payment_intent_id).where(Payment.id == market.payment_id)
+        )
+
+
+async def wait_until_any_waits_on(sessions: async_sessionmaker[AsyncSession], holder: int) -> None:
+    """Returns once Postgres reports some backend waiting on a lock backend `holder` holds (the
+    worker's connection is not the test's to name)."""
+    query = text(
+        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+        "WHERE CAST(:holder AS integer) = ANY(pg_blocking_pids(pid)))"
+    )
+    async with sessions() as monitor:
+        try:
+            async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+                while not await monitor.scalar(query, {"holder": holder}):
+                    pass
+        except TimeoutError:
+            pytest.fail(f"nothing waited on backend {holder} within {LOCK_WAIT_DEADLINE_SECONDS} s")
+
+
+async def test_succeeded_for_a_lost_create_adopts_and_schedules_the_job(
+    market: Market, caplog: pytest.LogCaptureFixture
+) -> None:
+    await lose_the_create(market)
+    event_id = market.new_event_id()
+
+    assert await market.deliver(SUCCEEDED, event_id=event_id) == "processed"
+
+    assert await stored_intent(market) == market.intent_id
+    state = await market.state()
+    assert state.payment is PaymentStatus.SUCCEEDED
+    assert state.request is RequestStatus.ACCEPTED
+    assert state.quotes == [QuoteStatus.ACCEPTED, QuoteStatus.REJECTED, QuoteStatus.REJECTED]
+    [job] = state.jobs
+    assert (job.status, job.quote_id, job.pro_id) == (
+        JobStatus.SCHEDULED,
+        market.accepted_quote,
+        market.pro_ids[0],
+    )
+    [adopted] = records(caplog, ADOPTED)
+    assert adopted.levelno == logging.WARNING
+    assert {
+        key: adopted.__dict__[key]
+        for key in ("payment_id", "quote_id", "service_request_id", "stripe_event_id", "event_type")
+    } == {
+        "payment_id": str(market.payment_id),
+        "quote_id": str(market.accepted_quote),
+        "service_request_id": str(market.request_id),
+        "stripe_event_id": event_id,
+        "event_type": SUCCEEDED,
+    }
+    assert market.intent_id not in json.dumps(adopted.__dict__, default=str)
+    assert records(caplog, UNKNOWN) == []
+
+
+async def test_canceled_for_a_lost_create_adopts_and_reopens_the_quote(
+    market: Market, caplog: pytest.LogCaptureFixture
+) -> None:
+    await lose_the_create(market)
+
+    assert await market.deliver(CANCELED) == "processed"
+
+    assert await stored_intent(market) == market.intent_id
+    state = await market.state()
+    assert state.payment is PaymentStatus.CANCELED
+    assert state.request is RequestStatus.QUOTE_READY
+    assert state.quotes == [QuoteStatus.PENDING, QuoteStatus.PENDING, QuoteStatus.PENDING]
+    assert state.jobs == []
+    assert len(records(caplog, ADOPTED)) == 1
+
+
+async def test_failed_for_a_lost_create_adopts_and_keeps_the_quote_accepted(
+    market: Market, caplog: pytest.LogCaptureFixture
+) -> None:
+    await lose_the_create(market)
+
+    assert await market.deliver(FAILED, failure_code="card_declined") == "processed"
+
+    assert await stored_intent(market) == market.intent_id
+    state = await market.state()
+    assert state.payment is PaymentStatus.FAILED
+    assert state.request is RequestStatus.ACCEPTED
+    assert state.quotes == [QuoteStatus.ACCEPTED, QuoteStatus.PENDING, QuoteStatus.PENDING]
+    assert state.jobs == []
+    assert len(records(caplog, ADOPTED)) == 1
+    [attempt] = records(caplog, "payment_attempt_failed")
+    assert attempt.__dict__["stripe_code"] == "card_declined"
+
+
+@pytest.mark.parametrize(
+    ("override", "field_name"),
+    [
+        ({"amount": AMOUNT_CENTS - 1}, "amount"),
+        ({"currency": "eur"}, "currency"),
+        ({"customer": "cus_someone_else"}, "customer"),
+        ({"customer": None}, "customer"),
+    ],
+    ids=["amount", "currency", "customer", "no_customer"],
+)
+async def test_adoption_refused_on_amount_currency_or_customer_mismatch(
+    market: Market,
+    override: dict[str, Any],
+    field_name: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    await lose_the_create(market)
+    before = await market.state()
+    event_id = market.new_event_id()
+    await market.post(market.body(event_id, SUCCEEDED, **override))
+
+    with pytest.raises(Retry):
+        await market.process(event_id)
+    assert await market.process(event_id, job_try=MAX_ATTEMPTS) == "failed"
+
+    assert await stored_intent(market) is None
+    assert await market.state() == before
+    row = await market.event_row(event_id)
+    assert (row.status, row.last_error) == (WebhookEventStatus.FAILED, "PaymentEventMismatchError")
+    mismatches = records(caplog, "payment_event_mismatch")
+    assert [record.__dict__["fields"] for record in mismatches] == [field_name, field_name]
+    assert records(caplog, ADOPTED) == []
+
+
+async def test_metadata_naming_a_payment_with_another_intent_changes_nothing(
+    market: Market, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The payment holds its own intent; an event of another intent names it in its metadata,
+    even with a mismatching amount: no change, no raise, the unknown-intent warning."""
+    before = await market.state()
+    event_id = market.new_event_id()
+
+    assert (
+        await market.deliver(
+            SUCCEEDED, event_id=event_id, intent_id="pi_test_other", amount=AMOUNT_CENTS + 1
+        )
+        == "processed"
+    )
+
+    assert await stored_intent(market) == market.intent_id
+    assert await market.state() == before
+    [warning] = records(caplog, UNKNOWN)
+    assert warning.levelno == logging.WARNING
+    assert (
+        warning.__dict__["stripe_event_id"],
+        warning.__dict__["event_type"],
+        warning.__dict__["reason"],
+    ) == (event_id, SUCCEEDED, "payment_holds_another_intent")
+    assert records(caplog, "payment_event_mismatch") == []
+    assert records(caplog, ADOPTED) == []
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        OMITTED,
+        None,
+        ["payment_id"],
+        "payment_id",
+        {},
+        {"payment_id": None},
+        {"payment_id": 7},
+        {"payment_id": "not-a-uuid"},
+        {"payment_id": "<unknown uuid>"},
+    ],
+    ids=[
+        "absent",
+        "null",
+        "list",
+        "string",
+        "empty",
+        "null_id",
+        "int_id",
+        "non_uuid",
+        "unknown_uuid",
+    ],
+)
+async def test_missing_or_bad_metadata_keeps_the_unknown_intent_warning(
+    market: Market, metadata: object, caplog: pytest.LogCaptureFixture
+) -> None:
+    await lose_the_create(market)
+    if metadata == {"payment_id": "<unknown uuid>"}:
+        metadata = {"payment_id": str(uuid.uuid4())}
+    before = await market.state()
+    event_id = market.new_event_id()
+
+    assert await market.deliver(SUCCEEDED, event_id=event_id, metadata=metadata) == "processed"
+
+    assert await stored_intent(market) is None
+    assert await market.state() == before
+    assert (await market.event_row(event_id)).status is WebhookEventStatus.PROCESSED
+    [warning] = records(caplog, UNKNOWN)
+    assert (warning.__dict__["stripe_event_id"], warning.__dict__["event_type"]) == (
+        event_id,
+        SUCCEEDED,
+    )
+    assert "reason" not in warning.__dict__
+    assert "payment_id" not in warning.__dict__
+    assert records(caplog, ADOPTED) == []
+
+
+async def test_intent_held_by_another_payment_is_a_clean_no_op(
+    market: Market, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Another payment stores the event's intent while the event runs (after its lookup by id):
+    the unique column refuses the adoption, the savepoint rolls back alone, and the worker's
+    transaction still commits the event row as processed."""
+    await lose_the_create(market)
+    before = await market.state()
+    event_id = market.new_event_id()
+    await market.post(market.body(event_id, SUCCEEDED))
+    async with market.sessions() as holder:
+        # Pro B's quote gets a payment holding the intent, uncommitted until the event waits.
+        split = split_amount(AMOUNT_CENTS, TAKE_RATE_BPS)
+        holder.add(
+            Payment(
+                request_id=market.request_id,
+                quote_id=market.quote_ids[1],
+                customer_id=market.customer_id,
+                amount_cents=AMOUNT_CENTS,
+                tax_cents=0,
+                customer_total_cents=AMOUNT_CENTS,
+                platform_fee_cents=split.platform_fee_cents,
+                pro_payout_cents=split.pro_payout_cents,
+                take_rate_bps=TAKE_RATE_BPS,
+                currency="usd",
+                status=PaymentStatus.REQUIRES_PAYMENT,
+                stripe_payment_intent_id=market.intent_id,
+            )
+        )
+        await holder.flush()
+        pid = await backend_pid(holder)
+        task = asyncio.create_task(market.process(event_id))
+        await wait_until_any_waits_on(market.sessions, pid)
+        await holder.commit()
+    async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+        assert await task == "processed"
+
+    assert await stored_intent(market) is None
+    after = await market.state()
+    assert (after.payment, after.request, after.quotes, after.jobs) == (
+        before.payment,
+        before.request,
+        before.quotes,
+        [],
+    )
+    row = await market.event_row(event_id)
+    assert (row.status, row.attempts, row.last_error) == (WebhookEventStatus.PROCESSED, 1, None)
+    [warning] = records(caplog, UNKNOWN)
+    assert warning.__dict__["reason"] == "intent_held_by_another_payment"
+    assert records(caplog, ADOPTED) == []
+
+
+async def test_failure_after_adoption_rolls_the_adoption_back(
+    market: Market, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def broken_schedule(self: JobScheduler, job: NewJob) -> uuid.UUID:
+        raise RuntimeError("job insert failed")
+
+    monkeypatch.setattr(JobScheduler, "schedule", broken_schedule)
+    await lose_the_create(market)
+    before = await market.state()
+    event_id = market.new_event_id()
+    await market.post(market.body(event_id, SUCCEEDED))
+
+    assert await market.process(event_id, job_try=MAX_ATTEMPTS) == "failed"
+
+    assert await stored_intent(market) is None
+    assert await market.state() == before
+    row = await market.event_row(event_id)
+    assert (row.status, row.last_error) == (WebhookEventStatus.FAILED, "RuntimeError")
+    assert records(caplog, ADOPTED) == []
+    assert records(caplog, "payment_status_changed") == []
+
+
+async def test_replay_and_next_event_after_adoption_take_the_known_path(
+    market: Market, caplog: pytest.LogCaptureFixture
+) -> None:
+    await lose_the_create(market)
+    event_id = market.new_event_id()
+    body = market.body(event_id, PROCESSING)
+    await market.post(body)
+    assert await market.process(event_id) == "processed"
+    assert len(records(caplog, ADOPTED)) == 1
+
+    # The same event again: deduplicated (#40), nothing queued or run.
+    queued = dict(market.queue.jobs)
+    await market.post(body)
+    assert market.queue.jobs == queued
+    assert await market.process(event_id) == "skipped"
+    # The next event of the intent finds it by id, even without metadata.
+    assert await market.deliver(SUCCEEDED, metadata=OMITTED) == "processed"
+
+    state = await market.state()
+    assert state.payment is PaymentStatus.SUCCEEDED
+    assert len(state.jobs) == 1
+    assert len(records(caplog, ADOPTED)) == 1
+    assert records(caplog, UNKNOWN) == []
+
+
+async def test_concurrent_create_and_event_store_one_intent(
+    market: Market, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The payment call creates the PaymentIntent under the payment row's lock while its
+    succeeded event arrives: the event looks the intent up (not stored yet), finds the payment
+    through its metadata and waits on the row's lock; the create stores the id and commits; the
+    event then finds its intent stored and applies as a known intent would, without adopting."""
+    async with market.sessions() as session:
+        await session.execute(
+            update(Payment)
+            .where(Payment.id == market.payment_id)
+            .values(stripe_payment_intent_id=None, payment_intent_requested_at=None)
+        )
+        await session.commit()
+        user = await session.get(User, market.customer_id)
+    assert user is not None
+    account = UserAccount(
+        id=user.id,
+        email=user.email,
+        role=user.role,
+        locale=user.locale,
+        status=user.status,
+        public_code=user.public_code,
+        created_at=user.created_at,
+    )
+    stripe = FakeStripePayments()
+    stripe.add_intent(
+        PaymentIntentFacts(
+            payment_intent_id=market.intent_id,
+            amount_cents=AMOUNT_CENTS,
+            currency="usd",
+            customer_id=market.stripe_customer_id,
+            payment_id=str(market.payment_id),
+        )
+    )
+    # Stripe answers the payment's key with the intent the event is about.
+    stripe.intents_by_key[payment_intent_idempotency_key(market.payment_id)] = market.intent_id
+    event_id = market.new_event_id()
+    await market.post(market.body(event_id, SUCCEEDED))
+    tasks: list[asyncio.Task[str]] = []
+
+    async with market.sessions() as creating:
+        pid = await backend_pid(creating)
+
+        async def deliver_while_the_row_is_locked() -> None:
+            tasks.append(asyncio.create_task(market.process(event_id)))
+            await wait_until_any_waits_on(market.sessions, pid)
+
+        stripe.on_create_intent = deliver_while_the_row_is_locked
+        async with asyncio.timeout(2 * LOCK_WAIT_DEADLINE_SECONDS):
+            sheet = await PaymentService(creating, stripe, CONFIG).payment_sheet(
+                account, market.request_id, market.accepted_quote
+            )
+            [task] = tasks
+            assert await task == "processed"
+
+    assert sheet.payment_intent_client_secret.startswith(market.intent_id)
+    assert len(stripe.intent_calls) == 1
+    assert await stored_intent(market) == market.intent_id
+    state = await market.state()
+    assert state.payment is PaymentStatus.SUCCEEDED
+    assert len(state.jobs) == 1
+    assert records(caplog, ADOPTED) == []
+    assert records(caplog, UNKNOWN) == []
+
+
+async def test_adoption_logs_carry_no_intent_id_or_amounts(
+    market: Market, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    await lose_the_create(market)
+    bad_id = "not-a-uuid-but-a-value-from-stripe"
+
+    # Unknown (bad metadata), refused (mismatch), adopted, applied, then another intent.
+    await market.deliver(PROCESSING, metadata={"payment_id": bad_id})
+    event_id = market.new_event_id()
+    await market.post(market.body(event_id, SUCCEEDED, amount=AMOUNT_CENTS + 7))
+    await market.process(event_id, job_try=MAX_ATTEMPTS)
+    await market.deliver(PROCESSING)
+    await market.deliver(SUCCEEDED)
+    await market.deliver(SUCCEEDED, intent_id="pi_test_other_intent")
+
+    formatter = JsonFormatter()
+    lines = [
+        formatter.format(record)
+        for record in caplog.records
+        if record.name.startswith("app.modules.payments")
+    ]
+    messages = {json.loads(line)["message"] for line in lines}
+    assert {
+        ADOPTED,
+        UNKNOWN,
+        "payment_event_mismatch",
+        "payment_status_changed",
+        "job_scheduled",
+    } <= messages
+    text_ = "\n".join(lines)
+    for secret in (
+        market.intent_id,
+        "pi_test_other_intent",
+        market.stripe_customer_id,
+        market.customer_email,
+        bad_id,
+    ):
+        assert secret not in text_
+    amounts = {AMOUNT_CENTS, AMOUNT_CENTS + 7}
+    for line in lines:
+        values = list(json.loads(line).values())
+        assert not amounts & {value for value in values if isinstance(value, int)}
+        assert not {str(amount) for amount in amounts} & {
+            value for value in values if isinstance(value, str)
+        }

@@ -2,14 +2,32 @@
 request, its quotes and the job. The worker runs it through the Stripe webhook base (#40):
 once per event, in the worker's transaction, which it never commits.
 
-Every event finds the payment by its PaymentIntent id; an unknown intent is a warning (the event
-id and type only) and changes nothing. Then the locks, in the order the payment call (#58) and
-the acceptance (#189) take them, so the three take turns and never deadlock: the request, the
-payment's quote, the payment (each FOR UPDATE, read as last committed). Then, before anything
-else, the event must match the row: its amount the payment's customer_total_cents, its currency
-usd, its customer the customer's Stripe Customer. A mismatch changes nothing, logs
-`payment_event_mismatch` (ids and the names of the fields that differ) and raises, so the event
-is retried and then ends failed for staff.
+Every event finds the payment by its PaymentIntent id. Then the locks, in the order the payment
+call (#58) and the acceptance (#189) take them, so the three take turns and never deadlock: the
+request, the payment's quote, the payment (each FOR UPDATE, read as last committed). Then,
+before anything else, the event must match the row: its amount the payment's
+customer_total_cents, its currency usd, its customer the customer's Stripe Customer. A mismatch
+changes nothing, logs `payment_event_mismatch` (ids and the names of the fields that differ) and
+raises, so the event is retried and then ends failed for staff.
+
+An intent no payment holds (#296) can be one whose create answer was lost (#58): the row has its
+payment_intent_requested_at and no PaymentIntent id, and no payment call has adopted the intent
+yet. The event's `metadata.payment_id` then names the payment: when it is a UUID of an existing
+payment, that payment's request, quote and payment are locked in the same order, and on the
+locked row:
+- no PaymentIntent stored: the integrity check above, then the event's intent is stored (a
+  conditional UPDATE in a savepoint) and the event applied as for a known intent, all in the
+  worker's transaction, so a step that fails after the adoption rolls it back too. Once the
+  event's effects are written, a WARNING `payment_intent_adopted_from_event` (ids). A system
+  action, like the payment call's own adoption: no audit_log row, and no Stripe call (the
+  event is the source);
+- the event's intent stored (a create or an adoption stored it while the event waited on the
+  lock): the event is applied as for a known intent;
+- another intent stored, or this intent held by another payment (the unique column refuses it;
+  the savepoint rolls back, the transaction stays usable): nothing changes.
+An unknown intent (no metadata payment_id, not a UUID, no such payment, or the last two cases
+above) is a warning `payment_event_unknown_intent` (the event id and type, plus a `reason` when
+the payment the metadata names was not adopted) and changes nothing.
 
 The payment's status then moves along PAYMENT_TRANSITIONS (transitions.py); a move that is not
 there (an out-of-order event, a repeat, anything after succeeded or canceled) changes nothing
@@ -33,9 +51,11 @@ event type, statuses and Stripe codes only: no amounts, no customer data, no Pay
 """
 
 import logging
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.jobs.service import SYSTEM, JobScheduler, NewJob
@@ -72,6 +92,18 @@ class IntentEvent:
     customer: str | None
     # `last_payment_error.code` (payment_failed); never the message.
     failure_code: str | None
+    # `metadata.payment_id` when it is a string: read only for an intent no payment holds, to
+    # adopt it (#296). Never logged.
+    metadata_payment_id: str | None
+
+
+def _unknown_intent(event: IntentEvent, *, reason: str | None = None) -> None:
+    """An intent the reconciliation does not apply: the event id and type, and why the payment
+    the metadata names was not adopted; never a metadata value."""
+    extra = {"stripe_event_id": event.stripe_event_id, "event_type": event.event_type}
+    if reason is not None:
+        extra["reason"] = reason
+    logger.warning("payment_event_unknown_intent", extra=extra)
 
 
 @dataclass(frozen=True)
@@ -87,6 +119,7 @@ class PaymentReconciler:
     it flushes and never commits."""
 
     def __init__(self, session: AsyncSession) -> None:
+        self._session = session
         self._payments = PaymentRepository(session)
         self._requests = RequestStateMachine(session)
         self._quotes = QuoteReader(session)
@@ -101,6 +134,17 @@ class PaymentReconciler:
         if locked is None:
             return
         await self._check_integrity(event, locked)
+        # Only a payment the metadata named can hold no intent here (see _lock).
+        adopting = locked.payment.stripe_payment_intent_id is None
+        if adopting and not await self._adopt(event, locked):
+            return
+        await self._move(event, locked, to)
+        if adopting:
+            # After the event's last write: a step that fails rolls the adoption back, unlogged.
+            logger.warning("payment_intent_adopted_from_event", extra=locked.ids)
+
+    async def _move(self, event: IntentEvent, locked: _Locked, to: PaymentStatus) -> None:
+        """The payment's move to `to` and what it does (see the module doc)."""
         current = locked.payment.status
         if to is PaymentStatus.FAILED and current not in TERMINAL_STATES:
             # Every failed attempt, even a repeat of the status: the code helps support.
@@ -127,14 +171,14 @@ class PaymentReconciler:
 
     async def _lock(self, event: IntentEvent) -> _Locked | None:
         """The request, the quote and the payment, locked in that order; None (logged) for an
-        unknown PaymentIntent."""
+        unknown PaymentIntent. The payment holds the event's intent, or, found through the
+        metadata, none yet."""
         found = await self._payments.find_by_intent(event.intent_id)
         if found is None:
-            logger.warning(
-                "payment_event_unknown_intent",
-                extra={"stripe_event_id": event.stripe_event_id, "event_type": event.event_type},
-            )
-            return None
+            found = await self._named_payment(event)
+            if found is None:
+                _unknown_intent(event)
+                return None
         payment_id, request_id, quote_id = found
         request = await self._requests.lock(request_id)
         quote = await self._quotes.lock_of_request(quote_id, request_id)
@@ -148,7 +192,41 @@ class PaymentReconciler:
             "stripe_event_id": event.stripe_event_id,
             "event_type": event.event_type,
         }
+        held = payment.stripe_payment_intent_id
+        if held is not None and held != event.intent_id:
+            # Found through the metadata: not this payment's to adopt.
+            _unknown_intent(event, reason="payment_holds_another_intent")
+            return None
         return _Locked(request, quote, payment, ids)
+
+    async def _named_payment(
+        self, event: IntentEvent
+    ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID] | None:
+        """The ids of the payment the event's metadata names, its request and its quote, read
+        without a lock; None when the metadata names no payment that exists."""
+        if event.metadata_payment_id is None:
+            return None
+        try:
+            payment_id = uuid.UUID(event.metadata_payment_id)
+        except ValueError:
+            return None
+        return await self._payments.find_ids(payment_id)
+
+    async def _adopt(self, event: IntentEvent, locked: _Locked) -> bool:
+        """Stores the event's PaymentIntent on the locked payment, which holds none (a lost
+        create answer, see the module doc); False (logged) when another payment holds it. A
+        savepoint: the unique column's refusal leaves the worker's transaction usable."""
+        try:
+            async with self._session.begin_nested():
+                stored = await self._payments.set_payment_intent_if_missing(
+                    locked.payment.id, event.intent_id
+                )
+        except IntegrityError:
+            _unknown_intent(event, reason="intent_held_by_another_payment")
+            return False
+        if not stored:  # pragma: no cover - the row is locked from the read to the commit
+            raise RuntimeError("payment intent stored under its lock")
+        return True
 
     async def _check_integrity(self, event: IntentEvent, locked: _Locked) -> None:
         payment = locked.payment
