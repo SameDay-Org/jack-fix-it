@@ -35,8 +35,12 @@ export function permission(
   };
 }
 
-export const getPermissionsAsync = jest.fn(async (): Promise<Permission> => permission("undetermined"));
-export const requestPermissionsAsync = jest.fn(async (): Promise<Permission> => permission("granted"));
+export const getPermissionsAsync = jest.fn(async (): Promise<Permission> =>
+  permission("undetermined"),
+);
+export const requestPermissionsAsync = jest.fn(async (): Promise<Permission> =>
+  permission("granted"),
+);
 export const setNotificationChannelAsync = jest.fn(async () => null);
 export const getExpoPushTokenAsync = jest.fn(
   async (_options?: NotificationsModule.ExpoPushTokenOptions) => ({
@@ -59,9 +63,9 @@ export function emitPushToken(data = "device-token-2"): void {
   for (const listener of [...pushTokenListeners]) listener({ type: "android", data });
 }
 
-export const addNotificationResponseReceivedListener = jest.fn(
-  (): Subscription => ({ remove: jest.fn() }),
-);
+export const addNotificationResponseReceivedListener = jest.fn((): Subscription => ({
+  remove: jest.fn(),
+}));
 export const getLastNotificationResponse = jest.fn(() => null);
 export const clearLastNotificationResponse = jest.fn();
 
