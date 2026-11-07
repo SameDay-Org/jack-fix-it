@@ -1,15 +1,13 @@
-import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 
-import { apiGet, isCurrentGeneration, useSession, useSessionGeneration } from "@/api";
+import { isCurrentGeneration, useSession, useSessionGeneration } from "@/api";
 import { customerJobQueryKey, useCustomerJob } from "@/features/jobs/api";
 import { firstName, type CustomerJob, type JobStatus } from "@/features/jobs/phase";
 import { isUuid } from "@/features/quotes/navigation";
+import { proJobQueryOptions, proJobsQueryKey } from "@/features/pro-jobs/api";
+import type { ProJob } from "@/features/pro-jobs/phase";
 import { useRefetchOnReturn } from "@/features/quotes/useRequestQuotes";
-
-import type { GetResponse } from "@/api";
-
-type ProJob = GetResponse<"/v1/pros/me/jobs/{job_id}">;
 
 /**
  * The job statuses whose chat is read-only (`chat_closed`, #71): confirmed, paid out, refunded or
@@ -17,20 +15,6 @@ type ProJob = GetResponse<"/v1/pros/me/jobs/{job_id}">;
  */
 const CLOSED: ReadonlySet<JobStatus> = new Set(["confirmed", "paid_out", "refunded", "cancelled"]);
 export const isChatClosed = (status: JobStatus): boolean => CLOSED.has(status);
-
-// The same key and call as the pro's job screen (#63), so the two share one answer.
-const proJobQueryOptions = (jobId: string, generation: number) =>
-  queryOptions({
-    queryKey: ["pro-jobs", "job", jobId, generation] as const,
-    queryFn: ({ signal }) =>
-      apiGet("/v1/pros/me/jobs/{job_id}", {
-        auth: true,
-        signal,
-        generation,
-        params: { job_id: jobId },
-      }),
-    retry: false,
-  });
 
 export type ChatPeer = {
   /** Who is on the other side: a customer's chat is with the pro, a pro's with the customer. */
@@ -77,7 +61,11 @@ export function useChatPeer(jobId: string, requestId: string | undefined): ChatP
       const patch = <T extends { id: string; unread_messages: number }>(job: T | undefined) =>
         job && job.id === jobId ? { ...job, unread_messages: count } : job;
       if (isPro) {
+        // The job screen's answer and the job's row in "Your jobs" on the pro's home.
         client.setQueryData<ProJob>(proJobQueryOptions(jobId, generation).queryKey, patch);
+        client.setQueryData<ProJob[]>(proJobsQueryKey(generation), (jobs) =>
+          jobs?.map((job) => (job.id === jobId ? { ...job, unread_messages: count } : job)),
+        );
       } else if (customerRequest !== "") {
         client.setQueryData<CustomerJob>(customerJobQueryKey(customerRequest, generation), patch);
       }
