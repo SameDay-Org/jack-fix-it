@@ -539,11 +539,18 @@ def _sessions(session: AsyncSession) -> Any:
     return factory
 
 
+def _id(message: JobMessage) -> str:
+    """The row's id without loading it: a rolled-back batch expired the object."""
+    identity = inspect(message).identity
+    assert identity is not None
+    return str(identity[0])
+
+
 async def _kept(session: AsyncSession, messages: list[JobMessage]) -> list[bool]:
     result = []
     for message in messages:
         # By identity: a rolled-back batch expired the objects, and a lazy load cannot run here.
-        row = await stored(session, str(inspect(message).identity[0]))
+        row = await stored(session, _id(message))
         cleared = (row.original_ciphertext, row.original_key_id, row.original_expires_at)
         assert cleared.count(None) in (0, 3)  # the three columns go together
         result.append(row.original_ciphertext is not None)
@@ -570,7 +577,7 @@ async def test_the_purge_clears_originals_due_at_or_before_now(
     rows = await _kept(db_session, messages)
     assert rows == [False, False, True]
     # The messages stay: only their originals go.
-    bodies = [(await stored(db_session, str(inspect(m).identity[0]))).body for m in messages]
+    bodies = [(await stored(db_session, _id(m))).body for m in messages]
     assert bodies == [MASK] * 3
     [summary, *_] = [r for r in caplog.records if r.getMessage() == "chat_originals_purged"]
     assert (summary.__dict__["purged"], summary.__dict__["failed"]) == (2, False)
