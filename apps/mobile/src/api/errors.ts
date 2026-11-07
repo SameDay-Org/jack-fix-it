@@ -1,11 +1,23 @@
+/** The headers of an error answer, read by name (case-insensitive), as `Headers` reads them. */
+export type ErrorHeaders = Pick<Headers, "get">;
+
 /** The API answered with a non-2xx status; `code` is the contract's `error.code` when the body had one. */
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly code: string | undefined,
+    private readonly headers?: ErrorHeaders,
   ) {
     super(`API request failed with status ${status}${code ? ` (${code})` : ""}`);
     this.name = "ApiError";
+  }
+
+  /**
+   * One header of the error answer, null when it has none: what the contract puts beside the
+   * code, such as the tries left after a wrong arrival code (#63).
+   */
+  header(name: string): string | null {
+    return this.headers?.get(name) ?? null;
   }
 }
 

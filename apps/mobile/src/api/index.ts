@@ -10,7 +10,7 @@ export {
   UploadFailedError,
   UploadRejectedError,
 } from "./errors";
-export type { UploadFailure } from "./errors";
+export type { ErrorHeaders, UploadFailure } from "./errors";
 export type {
   GetPath,
   GetResponse,
