@@ -12,7 +12,7 @@ import AppLayout from "../../../app/(app)/_layout";
 import AuthLayout, { unstable_settings } from "../../../app/(auth)/_layout";
 import { SessionGate } from "../SessionGate";
 import { WelcomeScreen } from "../WelcomeScreen";
-import { METRICS, SIGNED_OUT } from "./helpers";
+import { METRICS, SIGNED_OUT, WithQuery } from "./helpers";
 
 // A session that changes under the mounted router, as a sign-in and a sign-out do.
 const { accessToken: _a, accessTokenExpiresAt: _b, ...SESSION_SIGNED_OUT } = SIGNED_OUT;
@@ -55,8 +55,13 @@ jest.mock(
 
 const { panelRiseMs } = tokens.motion;
 const routes = {
+  // The app's root provides a Query cache; the signed-in shell opens tapped pushes with it (#323).
   _layout: () =>
-    createElement(SafeAreaProvider, { initialMetrics: METRICS }, createElement(SessionGate)),
+    createElement(
+      SafeAreaProvider,
+      { initialMetrics: METRICS },
+      createElement(WithQuery, null, createElement(SessionGate)),
+    ),
   "(auth)/_layout": { default: AuthLayout, unstable_settings },
   "(auth)/welcome": WelcomeScreen,
   "(auth)/login": () => <Text>login stub</Text>,
