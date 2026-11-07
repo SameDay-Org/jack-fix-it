@@ -32,7 +32,7 @@ import { phoneFlowStore, startCodeStep } from "../../phone/phoneFlow";
 import { TabsLayout } from "../../tabs/TabsLayout";
 import { HomePlaceholderScreen } from "../HomePlaceholderScreen";
 import { SessionGate } from "../SessionGate";
-import { METRICS, SIGNED_OUT } from "./helpers";
+import { METRICS, SIGNED_OUT, WithQuery } from "./helpers";
 
 jest.mock(
   "../../../api/config",
@@ -154,7 +154,8 @@ function Root() {
             if (capture && sessionStore.getState().status === "signedOut") commits.push(inspect());
           },
         },
-        createElement(SessionGate),
+        // The app's root provides a Query cache: the tabs ask for an ongoing job (#64).
+        createElement(WithQuery, null, createElement(SessionGate)),
       ),
     ),
   );

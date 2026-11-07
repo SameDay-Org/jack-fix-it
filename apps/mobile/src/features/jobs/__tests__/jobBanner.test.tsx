@@ -91,6 +91,8 @@ const job = (status: JobStatus, overrides: Partial<CustomerJob> = {}): CustomerJ
   amount_cents: 18_000,
   tax_cents: 0,
   customer_total_cents: 18_000,
+  // The pro's photos (#298): none here; the screen does not show them yet.
+  photos: { before: [], after: [], pending: 0 },
   ...overrides,
 });
 

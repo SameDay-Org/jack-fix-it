@@ -130,6 +130,8 @@ const job = (overrides: Partial<CustomerJob> = {}): CustomerJob => ({
   amount_cents: 18_000,
   tax_cents: 1_485,
   customer_total_cents: 19_485,
+  // The pro's photos (#298): none here; the screen does not show them yet.
+  photos: { before: [], after: [], pending: 0 },
   ...overrides,
 });
 

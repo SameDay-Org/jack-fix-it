@@ -75,6 +75,8 @@ const ON_THE_WAY: CustomerJob = {
   amount_cents: 18_000,
   tax_cents: 0,
   customer_total_cents: 18_000,
+  // The pro's photos (#298): none here; the screen does not show them yet.
+  photos: { before: [], after: [], pending: 0 },
 };
 
 const jobCalls = () => jest.mocked(apiGet).mock.calls.filter(([path]) => path === JOB_PATH);
