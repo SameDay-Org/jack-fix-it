@@ -30,6 +30,7 @@ import {
   JOB_ID,
   minutesFromNow,
   navigation,
+  NO_PHOTO_COUNTS,
   onTheWay,
   proJob,
   renderWithQuery,
@@ -93,7 +94,7 @@ const photos = (from: number, count: number): JobPhoto[] =>
 
 /** The job working, with these after photos on it. */
 const workingWith = (after: JobPhoto[], before: JobPhoto[] = []): ProJob =>
-  working({ photos: { before, after } });
+  working({ photos: { before, after, ...NO_PHOTO_COUNTS } });
 
 const asset = (n: number): ImagePicker.ImagePickerAsset => ({
   uri: `file:///picked/${n}.jpg`,
@@ -251,7 +252,7 @@ describe("JobPhotoSection on the pro's job screen", () => {
         working({
           status: "completed",
           completed_at: minutesFromNow(-1),
-          photos: { before: [photo(1)], after: photos(2, 3) },
+          photos: { before: [photo(1)], after: photos(2, 3), ...NO_PHOTO_COUNTS },
         }),
       );
 
@@ -431,7 +432,9 @@ describe("JobPhotoSection on the pro's job screen", () => {
     it("before photos save as before", async () => {
       jest
         .mocked(apiPost)
-        .mockResolvedValueOnce(onTheWay({ photos: { before: [photo(1)], after: [] } }));
+        .mockResolvedValueOnce(
+          onTheWay({ photos: { before: [photo(1)], after: [], ...NO_PHOTO_COUNTS } }),
+        );
       await open(onTheWay());
       await addUploaded("before", 1);
 
