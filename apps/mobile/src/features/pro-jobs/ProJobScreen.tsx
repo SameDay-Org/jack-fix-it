@@ -21,6 +21,7 @@ import {
 } from "@/components/ui";
 import { announce } from "@/components/ui/focus";
 import { BackButton } from "@/features/auth/components/BackButton";
+import { useInForeground } from "@/features/jobs/api";
 import { categoryLabel, categoryTileProps, formatTimeOfDay } from "@/features/opportunities/format";
 import { RetryNotice } from "@/features/opportunities/RetryNotice";
 import { StateCard } from "@/features/opportunities/StateCard";
@@ -82,20 +83,23 @@ const ANNOUNCED: Partial<Record<JobStep, "onTheWay" | "arrived" | "working" | "d
 function useAnnounceStep(job: ProJob | undefined): void {
   const { t } = useTranslation();
   const focused = useIsFocused();
+  const foreground = useInForeground();
+  const front = focused && foreground;
   const announced = useRef<JobStep | null>(null);
   const step = job ? jobStep(job) : null;
   const name = job ? nameOf(t, job) : "";
 
-  // A step reached under a sheet is said once the screen is in front again, after the sheet.
+  // A step reached under a sheet, or while the app was in the background (a Job's done answer
+  // landing there), is said once the screen is in front again: once, after the sheet.
   useEffect(() => {
-    if (step === null || !focused) return;
+    if (step === null || !front) return;
     const previous = announced.current;
     announced.current = step;
     const key = ANNOUNCED[step];
     if (previous !== null && previous !== step && key) {
       announce(t(`proJobs.announce.${key}`, { name }));
     }
-  }, [focused, name, step, t]);
+  }, [front, name, step, t]);
 }
 
 /**

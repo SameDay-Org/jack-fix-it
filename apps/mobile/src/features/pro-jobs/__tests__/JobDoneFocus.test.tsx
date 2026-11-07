@@ -46,6 +46,7 @@ const PROCESSING = "Finishing your photos…";
 const SLOW = "Your photos are taking longer than usual. Try again in a moment.";
 const PHOTOS_FAILED = "We couldn't prepare your after photos. Add another one.";
 const INTERVAL = proJobsConfig.doneRetryIntervalMs;
+const WAITING = "Job's done. Waiting for Maria to confirm.";
 
 const photo = (n: number): JobPhoto => ({
   id: `00000000-0000-4000-8000-0000000007${String(n).padStart(2, "0")}`,
@@ -200,6 +201,57 @@ describe("Job's done belongs to the screen in front (#63 B round 1, B2)", () => 
     await setFocused(false);
     await setFocused(true);
     await act(async () => undefined);
+    expect(completeCalls()).toBe(1);
+  });
+});
+
+describe("Job's done answered away from the screen (#63 B round 2, B2)", () => {
+  it("a success landing in the background is silent there and said once on return", async () => {
+    fakeClock();
+    const held = deferred<ProJob>();
+    jest.mocked(apiPost).mockReturnValueOnce(held.promise as ReturnType<typeof apiPost>);
+    await open(withAfter(1));
+    await tapDone();
+
+    await moveApp("background");
+    const before = announced();
+    // The server finished the job: the cache follows the answer (the refetch on return agrees).
+    jest.mocked(apiGet).mockResolvedValue(completed());
+    await act(async () => held.resolve(completed()));
+    await advance(INTERVAL * 3);
+    expect(announced()).toEqual(before);
+    expect(Haptics.notificationAsync).not.toHaveBeenCalled();
+    expect(completeCalls()).toBe(1);
+
+    await moveApp("active");
+    await advance(0);
+    expect(announced().filter((m) => m === WAITING)).toHaveLength(1);
+    await moveApp("background");
+    await moveApp("active");
+    await advance(0);
+    expect(announced().filter((m) => m === WAITING)).toHaveLength(1);
+    expect(completeCalls()).toBe(1);
+  });
+
+  it("a success landing while blurred is silent there and said once back in front", async () => {
+    fakeClock();
+    const held = deferred<ProJob>();
+    jest.mocked(apiPost).mockReturnValueOnce(held.promise as ReturnType<typeof apiPost>);
+    await open(withAfter(1));
+    await tapDone();
+
+    await setFocused(false);
+    const before = announced();
+    jest.mocked(apiGet).mockResolvedValue(completed());
+    await act(async () => held.resolve(completed()));
+    await advance(0);
+    expect(announced()).toEqual(before);
+    expect(Haptics.notificationAsync).not.toHaveBeenCalled();
+    expect(completeCalls()).toBe(1);
+
+    await setFocused(true);
+    await advance(0);
+    expect(announced().filter((m) => m === WAITING)).toHaveLength(1);
     expect(completeCalls()).toBe(1);
   });
 });
