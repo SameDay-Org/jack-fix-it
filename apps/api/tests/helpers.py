@@ -1,6 +1,7 @@
 """Shared test helpers."""
 
 import gc
+import re
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
@@ -19,6 +20,14 @@ _IN_FAILED_TRANSACTION: Final = "25P02"
 # Hex digits as letters: a fixture slug stays unique with no digit in it that a leak check
 # could read as part of the number it looks for (#283).
 _DIGITS_AS_LETTERS: Final = str.maketrans("0123456789", "ghijklmnop")
+
+
+def mentions_number(text: str, number: int) -> bool:
+    """Whether `text` (a log line, a response body) carries `number` as a number of its own: signed
+    or with a fraction (98765, -98765, 98765.5), never a digit run inside a uuid, a hex id, a
+    longer number or a timestamp's fraction, which random ids and clocks produce by chance."""
+    pattern = rf"(?<![\w.-])-?{number}(?:\.\d+)?(?![\w-])(?!\.\d)"
+    return re.search(pattern, text) is not None
 
 
 # Timed runs per measurement: a busy test machine can stall one run; backtracking would make
