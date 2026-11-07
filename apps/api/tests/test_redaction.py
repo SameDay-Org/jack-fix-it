@@ -7,8 +7,10 @@ come back unchanged (and not flagged). The module docstring lists the known gaps
 import random
 import re
 import sys
+import time
 import unicodedata
-from typing import Literal
+from collections.abc import Callable
+from typing import Final, Literal, NamedTuple
 
 import pytest
 
@@ -28,6 +30,7 @@ from app.redaction import (
     _Replace,
     _replacements,
     _Search,
+    redact_address_contacts,
     redact_contacts,
     redact_known,
     redact_text,
@@ -42,7 +45,7 @@ from tests.contact_overlaps import (
     PHONE_EMAIL_OVERLAPS,
 )
 from tests.glue_variants import all_glue_cases
-from tests.helpers import best_seconds_without_gc
+from tests.helpers import TIMED_RUNS, best_seconds_without_gc, seconds_without_gc
 
 POSITIVE: list[tuple[str, list[str]]] = [
     # Emails: plain, spaced, spelled out (EN and ES), bracketed.
@@ -1689,15 +1692,61 @@ def test_many_unicode_letters_with_marks_are_fast(text: str) -> None:
     assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25
 
 
+# #300: a full parallel run stretched one 10,000-character call to 3.56 s, past develop's time
+# plus 0.25 s measured seconds before. The floor budget is now read on this thread's CPU time,
+# which leaves out the time other processes hold the core but still grows when they share it
+# (cache, clock speed), so it is counted in units of a reference timed in the same round: the
+# regex engine backtracking a word chain without a possessive quantifier (quadratic), about
+# 0.16 s on the dev machine. Standard library only, so no change to app code moves it; long
+# enough for Windows, which reads CPU time in 15.6 ms ticks.
+_REFERENCE_PATTERN: Final = re.compile(r"(?:\w+\s+)+at\b")
+_REFERENCE_TEXT: Final = "dot " * 1100
+# The 0.25 s budget of #240 in references: 0.25 s / 0.16 s.
+_BUDGET_IN_REFERENCES: Final = 1.6
+
+
+def _cpu_seconds(work: Callable[[], object]) -> float:
+    return seconds_without_gc(work, clock=time.thread_time)
+
+
+class _FloorRound(NamedTuple):
+    """One round, timed back to back so that the load is the same for all four calls."""
+
+    reference: float
+    capped: float
+    develop: float
+    whole: float
+
+    def fits(self, budget: float) -> bool:
+        return self.capped < budget and self.whole < self.develop + budget
+
+
+def _floor_round(text: str) -> _FloorRound:
+    return _FloorRound(
+        reference=_cpu_seconds(lambda: _REFERENCE_PATTERN.search(_REFERENCE_TEXT)),
+        capped=_cpu_seconds(lambda: redact_text(text[:2000], KNOWN)),
+        develop=_cpu_seconds(lambda: redaction_legacy.redact_text(text, LEGACY_KNOWN)),
+        whole=_cpu_seconds(lambda: redact_text(text, KNOWN)),
+    )
+
+
 def assert_within_the_floor_budget(text: str) -> None:
-    """0.25 s at the field cap (2,000 characters: the description, the quote scope and the
-    approach). The whole text may take what develop's filter takes on it, plus that budget: the
-    safety floor runs develop's filter (app.redaction_legacy), which is quadratic on
-    spelled-dot chains (0.3 to 0.5 s at 5,000 characters). Cesar's decision on #240 fix round
-    5; #267 removes the floor."""
-    assert best_seconds_without_gc(lambda: redact_text(text[:2000], KNOWN)) < 0.25
-    develop = best_seconds_without_gc(lambda: redaction_legacy.redact_text(text, LEGACY_KNOWN))
-    assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < develop + 0.25
+    """The budget (0.25 s on the dev machine, as a multiple of the reference) at the field cap
+    (2,000 characters: the description, the quote scope and the approach). The whole text may
+    take what develop's filter takes on it, plus that budget: the safety floor runs develop's
+    filter (app.redaction_legacy), which is quadratic on spelled-dot chains (0.3 to 0.5 s at
+    5,000 characters). Cesar's decision on #240 fix round 5; #267 removes the floor.
+
+    The first round that fits passes: one stalled round cannot fail the budget, and a
+    regression that slows redact_text fails every round (#300)."""
+    rounds: list[_FloorRound] = []
+    while len(rounds) < TIMED_RUNS:
+        rounds.append(_floor_round(text))
+        # The smallest reference so far: a round that read it high cannot loosen its budget.
+        budget = _BUDGET_IN_REFERENCES * min(done.reference for done in rounds)
+        if rounds[-1].fits(budget):
+            return
+    pytest.fail(f"over the floor budget in all {TIMED_RUNS} rounds: {rounds}")
 
 
 @pytest.mark.parametrize(
@@ -2068,7 +2117,8 @@ def test_the_floor_keeps_the_prose_both_filters_keep(text: str, expected: str) -
 @pytest.mark.parametrize("text", ["dot " * 2500], ids=["dot_words_x10000"])
 def test_a_dot_chain_past_the_field_cap_takes_develops_time(text: str) -> None:
     """Develop's filter takes about 1.9 s on 10,000 characters of spelled dots; the floor runs
-    it, so the budget is its time plus 0.25 s (Cesar's decision on #240 fix round 5)."""
+    it, so the budget is its time plus 0.25 s on the dev machine (Cesar's decision on #240 fix
+    round 5), measured in the same round and scaled by the reference (#300)."""
     assert_within_the_floor_budget(text)
 
 
@@ -2182,3 +2232,62 @@ def test_the_floor_reads_develops_text_in_the_same_coordinates() -> None:
         develop = redaction_legacy.KnownValues(known.emails, known.phones, known.streets)
         ours, theirs = redact_known(text, known), redaction_legacy.redact_known(text, develop)
         assert (ours.text, ours.redacted) == (theirs.text, theirs.redacted), ascii(text)
+
+
+# Address fields shown to the pro of a paid job (#63, Gatekeeper round 1): contacts masked, the
+# address itself kept.
+
+_CUSTOMER = KnownValues(emails=("probe-customer-63@example.com",), phones=("+13055550163",))
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        "742 Evergreen Terrace",
+        "Apt 63",
+        "Unit 4B, gate code 1234",
+        "PO Box 1234",
+        "1200 NW 7th St",
+        "15500 SW 117th Ave",
+        "Calle 8 #1500",
+    ],
+)
+def test_address_contacts_keep_the_address_the_contact_filter_masks(address: str) -> None:
+    assert redact_contacts(address).redacted  # an address is a contact in free text
+    assert redact_address_contacts(address, _CUSTOMER) == RedactionResult(address, False)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Apt 63; contact jane@example.com", f"Apt 63; contact {MASK}"),
+        ("742 Evergreen Terrace; call +13055550963", f"742 Evergreen Terrace; call {MASK}"),
+        ("Apt 2 call 305 555 0100", f"Apt 2 call {MASK}"),
+        ("Apt 5 www.jdoe.com", f"Apt 5 {MASK}"),
+        ("Apt 5 @jdoe", f"Apt 5 {MASK}"),
+        ("Apt 5 ig jdoe_1", f"Apt 5 {MASK}"),
+        ("jdoe1 insta dot com", MASK),  # a reverse handle the URL mask cut, joined back
+        ("3055550100 Main St", f"{MASK} Main St"),
+    ],
+)
+def test_address_contacts_mask_the_contacts(text: str, expected: str) -> None:
+    assert redact_address_contacts(text, KnownValues()) == RedactionResult(expected, True)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Apt 63 probe-customer-63", f"Apt 63 {MASK}"),
+        ("Orlando 3055 550 163", f"Orlando {MASK}"),
+    ],
+)
+def test_address_contacts_known_values_first(text: str, expected: str) -> None:
+    """Forms only the known-value pass reads: without the customer's values they stay."""
+    assert redact_address_contacts(text, KnownValues()) == RedactionResult(text, False)
+    assert redact_address_contacts(text, _CUSTOMER) == RedactionResult(expected, True)
+
+
+def test_address_contacts_do_not_mask_the_known_street() -> None:
+    known = KnownValues(streets=("742 Evergreen Terrace", "Apt 63"))
+    text = "742 Evergreen Terrace, Apt 63"
+    assert redact_address_contacts(text, known) == RedactionResult(text, False)

@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.errors import NotFoundError
 from app.integrations.storage import Storage
-from app.modules.addresses.schemas import AddressArea
+from app.modules.addresses.schemas import AddressArea, AddressOut
 from app.modules.addresses.service import AddressService
 from app.modules.auth.permissions import ensure_owner
 from app.modules.categories.intake import InvalidAnswersError, validate_answers
@@ -76,9 +76,9 @@ from app.modules.service_areas.service import ServiceAreaService
 from app.modules.uploads.keys import owned_upload
 from app.modules.uploads.schemas import UploadPurpose
 from app.modules.users.service import UserService
-from app.modules.users.types import UserAccount
+from app.modules.users.types import ContactPoints, UserAccount
 from app.queue import JobQueue
-from app.redaction import KnownValues, redact_text
+from app.redaction import KnownValues, redact_address_contacts, redact_text
 
 logger = logging.getLogger(__name__)
 
@@ -409,6 +409,16 @@ class RequestForPro:
 
 
 @dataclass(frozen=True)
+class RequestForJob:
+    """A request as the pro of its paid job sees it (#63): the opportunity's view (RequestForPro:
+    the free text still redacted, no customer or contact) plus the whole address, which they need
+    to get there, with the contacts typed into it masked (_address_for_pro). No coordinates."""
+
+    view: RequestForPro
+    address: AddressOut
+
+
+@dataclass(frozen=True)
 class SafeMedia:
     """A photo or video's privacy-safe copy (#173), as a pro may be shown it. It has no
     original key (file_key), so nothing built on it can sign the customer's file. The key is
@@ -429,6 +439,28 @@ class ProMedia:
     pending: int
 
 
+def _address_for_pro(address: AddressOut, contact: ContactPoints | None) -> AddressOut:
+    """The address as the pro of the paid job sees it (#63): every field with the contacts a
+    customer typed into it masked (the customer's own email and phone first, then the contact
+    patterns), the address itself kept: they need it to get there. The customer's own views
+    show it as typed."""
+    known = KnownValues(
+        emails=(contact.email,) if contact else (),
+        phones=(contact.phone,) if contact and contact.phone else (),
+    )
+
+    def masked(value: str) -> str:
+        return redact_address_contacts(value, known).text
+
+    return AddressOut(
+        line1=masked(address.line1),
+        line2=masked(address.line2) if address.line2 is not None else None,
+        city=masked(address.city),
+        state=masked(address.state),
+        zip_code=masked(address.zip_code),
+    )
+
+
 def media_keys_among(keys: Collection[str]) -> Select[str]:
     """The upload keys among `keys` that a request's media hold, as a statement: the uploads
     module's sweep of unreferenced uploads (#191) runs it with the other referencing columns."""
@@ -436,7 +468,8 @@ def media_keys_among(keys: Collection[str]) -> Select[str]:
 
 
 class ProRequestReader:
-    """Read-only access for the pro opportunities (#49), through this module (ADR 0003)."""
+    """Read-only access for the pro opportunities (#49) and the pro's jobs (#63), through this
+    module (ADR 0003)."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._requests = ServiceRequestRepository(session)
@@ -457,11 +490,35 @@ class ProRequestReader:
         rows = [
             r for r in await self._requests.get_many(request_ids) if r.status in OPEN_FOR_QUOTES
         ]
+        return await self._views(rows)
+
+    async def job_views(self, request_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, RequestForJob]:
+        """The requests among `request_ids`, whatever their status, as the pro of their paid job
+        sees them (#63): the opportunity's view and the full address. Call it for the caller's
+        own jobs only: it does not check that."""
+        rows = await self._requests.get_many(request_ids)
+        contacts = await self._users.contact_points([r.customer_id for r in rows])
+        views = await self._views(rows, contacts)
+        addresses = await self._addresses.full_many([r.address_id for r in rows])
+        return {
+            row.id: RequestForJob(
+                view=views[row.id],
+                address=_address_for_pro(addresses[row.address_id], contacts.get(row.customer_id)),
+            )
+            for row in rows
+        }
+
+    async def _views(
+        self,
+        rows: list[ServiceRequest],
+        contacts: Mapping[uuid.UUID, ContactPoints] | None = None,
+    ) -> dict[uuid.UUID, RequestForPro]:
         zip_codes = await self._addresses.zip_codes([r.address_id for r in rows])
         cities = await self._service_areas.canonical_cities(zip_codes.values())
         # What each customer's own details are, read once per page, for the known-value pass.
         streets = await self._addresses.street_lines([r.address_id for r in rows])
-        contacts = await self._users.contact_points([r.customer_id for r in rows])
+        if contacts is None:
+            contacts = await self._users.contact_points([r.customer_id for r in rows])
         views: dict[uuid.UUID, RequestForPro] = {}
         for row in rows:
             contact = contacts.get(row.customer_id)

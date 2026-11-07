@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import func, select, update
+from sqlalchemy import ColumnElement, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.payments.models import Payment, PaymentStatus
@@ -27,9 +27,19 @@ class PaymentRepository:
         """The ids of the payment, its request and its quote for a PaymentIntent id, read
         without a lock (the caller locks the request, the quote, then the payment); None for an
         unknown intent."""
-        statement = select(Payment.id, Payment.request_id, Payment.quote_id).where(
-            Payment.stripe_payment_intent_id == intent_id
-        )
+        return await self._ids(Payment.stripe_payment_intent_id == intent_id)
+
+    async def find_ids(
+        self, payment_id: uuid.UUID
+    ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID] | None:
+        """The ids of the payment, its request and its quote, read without a lock (the caller
+        locks the request, the quote, then the payment); None when no such payment exists."""
+        return await self._ids(Payment.id == payment_id)
+
+    async def _ids(
+        self, where: ColumnElement[bool]
+    ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID] | None:
+        statement = select(Payment.id, Payment.request_id, Payment.quote_id).where(where)
         row = (await self._session.execute(statement)).one_or_none()
         return None if row is None else (row.id, row.request_id, row.quote_id)
 

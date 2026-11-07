@@ -2531,6 +2531,568 @@
         }
       }
     },
+    "/v1/requests/{request_id}/job": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Follow the job of one of my service requests",
+        "description": "The job once paid: its status, the scheduled start, the pro's public card, the ETA once\nthe pro is on the way, the arrival code to give the pro (only while they are on the way and\nhave not checked in), the history and what the customer paid.",
+        "operationId": "get_request_job_v1_requests__request_id__job_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerJob"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers have service requests.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no request of the caller with this id, or no job on it yet (the job starts once the payment succeeds).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pros/me/jobs": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "List my jobs",
+        "description": "The caller's jobs, newest scheduled start first.",
+        "operationId": "list_my_jobs_v1_pros_me_jobs_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "active",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Only jobs still to do: scheduled, on the way or working.",
+              "default": false,
+              "title": "Active"
+            },
+            "description": "Only jobs still to do: scheduled, on the way or working."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size; capped.",
+              "title": "Limit"
+            },
+            "description": "Page size; capped."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProJobPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a bad cursor or limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros have jobs to work on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pros/me/jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "See one of my jobs",
+        "description": "The job with the whole address and the customer's first name. Never the arrival code or\na contact.",
+        "operationId": "get_my_job_v1_pros_me_jobs__job_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProJob"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros have jobs to work on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job of the caller with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pros/me/jobs/{job_id}/on-the-way": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Tell the customer I am on my way",
+        "description": "Scheduled -> on the way, with an ETA the customer sees; the customer gets an arrival\ncode to give the pro on arrival. Again while on the way: only the ETA changes (the code\nstays).",
+        "operationId": "mark_on_the_way_v1_pros_me_jobs__job_id__on_the_way_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnTheWayIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProJob"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: eta_minutes not an integer from 5 to 240.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros have jobs to work on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job of the caller with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "invalid_transition: the job is not scheduled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pros/me/jobs/{job_id}/check-in": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Check in at the job with the customer's arrival code",
+        "description": "Arrived: the code the customer gives the pro, and where the pro is (recorded only). Once\nchecked in, calling it again answers the job unchanged.",
+        "operationId": "check_in_v1_pros_me_jobs__job_id__check_in_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckInIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProJob"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "arrival_code_invalid: the code is not right; the Arrival-Code-Attempts-Remaining header has the tries left. validation_error: the code is not 4 digits, or lat/lng out of range.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros have jobs to work on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job of the caller with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "not_on_the_way: the job is not on the way.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "arrival_code_locked: too many wrong codes; support resolves it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pros/me/jobs/{job_id}/start": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Start working on the job",
+        "description": "On the way -> working, after the check-in.",
+        "operationId": "start_job_v1_pros_me_jobs__job_id__start_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProJob"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros have jobs to work on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job of the caller with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "check_in_required: no check-in yet; invalid_transition: the job is past on the way.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/devices": {
       "put": {
         "tags": [
@@ -3597,6 +4159,38 @@
         ],
         "title": "ChannelPreference"
       },
+      "CheckInIn": {
+        "properties": {
+          "arrival_code": {
+            "type": "string",
+            "pattern": "^[0-9]{4}$",
+            "title": "Arrival Code",
+            "description": "The 4 digits the customer gives the pro."
+          },
+          "lat": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Lat",
+            "description": "The pro's latitude."
+          },
+          "lng": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Lng",
+            "description": "The pro's longitude."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "arrival_code",
+          "lat",
+          "lng"
+        ],
+        "title": "CheckInIn"
+      },
       "CheckStatus": {
         "type": "string",
         "enum": [
@@ -3683,6 +4277,103 @@
           "zips"
         ],
         "title": "CityOut"
+      },
+      "CustomerJob": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus"
+          },
+          "customer_status": {
+            "type": "string",
+            "title": "Customer Status",
+            "description": "The i18n key of the status the customer sees (docs/glossary.md).",
+            "examples": [
+              "customerStatus.professionalOnTheWay"
+            ]
+          },
+          "scheduled_start_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Scheduled Start At",
+            "description": "The accepted quote's proposed start."
+          },
+          "pro": {
+            "$ref": "#/components/schemas/QuotePro",
+            "description": "The pro's public card, as the quote list shows it."
+          },
+          "eta_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eta At",
+            "description": "When the pro expects to arrive: set by On my way; null before."
+          },
+          "arrival_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arrival Code",
+            "description": "The 4 digits the customer gives the pro on arrival: only while the job is on the way and the pro has not checked in; null before and after.",
+            "examples": [
+              "0427"
+            ]
+          },
+          "timeline": {
+            "items": {
+              "$ref": "#/components/schemas/JobTimelineEntry"
+            },
+            "type": "array",
+            "title": "Timeline",
+            "description": "The job's history, oldest first."
+          },
+          "amount_cents": {
+            "type": "integer",
+            "title": "Amount Cents",
+            "description": "The price paid for the service."
+          },
+          "tax_cents": {
+            "type": "integer",
+            "title": "Tax Cents"
+          },
+          "customer_total_cents": {
+            "type": "integer",
+            "title": "Customer Total Cents",
+            "description": "What the customer paid: amount plus tax."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "customer_status",
+          "scheduled_start_at",
+          "pro",
+          "eta_at",
+          "arrival_code",
+          "timeline",
+          "amount_cents",
+          "tax_cents",
+          "customer_total_cents"
+        ],
+        "title": "CustomerJob",
+        "description": "The customer's job on their request, once paid."
       },
       "CustomerQuote": {
         "properties": {
@@ -4119,6 +4810,130 @@
         ],
         "title": "IntegerQuestion"
       },
+      "JobAddress": {
+        "properties": {
+          "line1": {
+            "type": "string",
+            "title": "Line1"
+          },
+          "line2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line2"
+          },
+          "city": {
+            "type": "string",
+            "title": "City"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "zip_code": {
+            "type": "string",
+            "title": "Zip Code"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "line1",
+          "line2",
+          "city",
+          "state",
+          "zip_code"
+        ],
+        "title": "JobAddress",
+        "description": "Where the job is: the pro of a paid job sees the whole address, to get there."
+      },
+      "JobCategory": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Names",
+            "description": "Display name per locale, e.g. en and es."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "slug",
+          "names"
+        ],
+        "title": "JobCategory"
+      },
+      "JobStatus": {
+        "type": "string",
+        "enum": [
+          "scheduled",
+          "on_the_way",
+          "in_progress",
+          "completed",
+          "confirmed",
+          "paid_out",
+          "disputed",
+          "refunded",
+          "cancelled"
+        ],
+        "title": "JobStatus",
+        "description": "Internal states (docs/glossary.md). Transitions belong to the state machine (#60).\n\nA job is created when the payment succeeds, so there is no unpaid state."
+      },
+      "JobTimelineEntry": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "description": "created, status_changed, eta_updated or checked_in; more come with later steps.",
+            "examples": [
+              "status_changed"
+            ]
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The status the job moved to, for created and status_changed; null otherwise."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "status",
+          "at"
+        ],
+        "title": "JobTimelineEntry",
+        "description": "One event of the job's history: what happened and when. No actor, no location."
+      },
       "JsonValue": {},
       "LivenessResponse": {
         "properties": {
@@ -4371,6 +5186,23 @@
         ],
         "title": "NotificationPreferencesPatch",
         "description": "1 to MAX_CHANGES changes, each pair once and only a channel its group has."
+      },
+      "OnTheWayIn": {
+        "properties": {
+          "eta_minutes": {
+            "type": "integer",
+            "maximum": 240.0,
+            "minimum": 5.0,
+            "title": "Eta Minutes",
+            "description": "Minutes until the pro expects to arrive."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "eta_minutes"
+        ],
+        "title": "OnTheWayIn"
       },
       "OnboardingLinkOut": {
         "properties": {
@@ -5011,6 +5843,159 @@
           "insurance"
         ],
         "title": "ProDocumentType"
+      },
+      "ProJob": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus"
+          },
+          "scheduled_start_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Scheduled Start At",
+            "description": "The accepted quote's proposed start."
+          },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobCategory"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "The customer's description, contact details masked as in the opportunity."
+          },
+          "address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobAddress"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The request's whole address; null once the job is cancelled or refunded."
+          },
+          "customer_first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer First Name",
+            "description": "The customer's first name only; null when it is not set or shows a contact detail."
+          },
+          "eta_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eta At",
+            "description": "The ETA the pro gave at On my way."
+          },
+          "checked_in_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked In At",
+            "description": "When the pro checked in with the customer's arrival code (Arrived)."
+          },
+          "arrival_code_locked": {
+            "type": "boolean",
+            "title": "Arrival Code Locked",
+            "description": "True after too many wrong arrival codes: check-in is refused until support resolves it."
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At",
+            "description": "When the work started (Working)."
+          },
+          "pro_payout_cents": {
+            "type": "integer",
+            "title": "Pro Payout Cents",
+            "description": "What the pro receives for the job."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "scheduled_start_at",
+          "category",
+          "description",
+          "address",
+          "customer_first_name",
+          "eta_at",
+          "checked_in_at",
+          "arrival_code_locked",
+          "started_at",
+          "pro_payout_cents"
+        ],
+        "title": "ProJob",
+        "description": "The pro's own job. Never the arrival code, the customer's last name or contacts."
+      },
+      "ProJobPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProJob"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Pass as `cursor` for the next page."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "ProJobPage"
       },
       "ProProfileOut": {
         "properties": {
