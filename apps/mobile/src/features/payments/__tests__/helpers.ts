@@ -43,6 +43,8 @@ export const JOB: CustomerJob = {
   eta_at: null,
   arrival_code: null,
   timeline: [{ type: "created", status: "scheduled", at: new Date(NOW).toISOString() }],
+  // The pro's photos (#298): none on a job that has not started.
+  photos: { before: [], after: [], pending: 0 },
   amount_cents: 18_050,
   tax_cents: 0,
   customer_total_cents: 18_050,

@@ -64,6 +64,8 @@ jest.mock("@/api", () => {
     apiPost: jest.fn(),
     useSession: () => mockSignedIn,
     sessionGeneration: () => mockGeneration.current,
+    // The tabs' job banner (#64) pins its reads to the session generation.
+    useSessionGeneration: () => mockGeneration.current,
     isCurrentGeneration: (startedIn: number) => startedIn === mockGeneration.current,
   };
 });
