@@ -84,10 +84,32 @@ environment as **shared variables** referenced from both services, so the two ne
 | `PUBLIC_API_URL`                   | required; https, e.g. `https://${{api.RAILWAY_PUBLIC_DOMAIN}}`              | no              | D7.1 (#39) |
 | `ORPHAN_UPLOAD_MIN_AGE_HOURS`      | optional; `24` by default; a shared variable (see below)                    | no              | #191, #298 |
 | `JOB_PHOTO_ATTACH_MAX_AGE_MINUTES` | optional; `720` by default, at most half the hours above; a shared variable | no              | #298       |
+| `CHAT_ORIGINAL_KEYS`               | JSON `{"<key id>": "<base64 32-byte key>"}`; see "Chat originals" below     | yes             | #72        |
+| `CHAT_ORIGINAL_ACTIVE_KEY_ID`      | the key id of `CHAT_ORIGINAL_KEYS` new originals are sealed with            | no              | #72        |
+| `CHAT_ORIGINAL_RETENTION_DAYS`     | optional; `90` by default                                                   | no              | #72        |
 
 "Required" means the API refuses to start in staging and production without it (the settings
 validators in `apps/api/app/config.py`). Every other setting has a working default; the
 non-secret ones are listed in `apps/api/.env.example`.
+
+#### Chat originals (#72)
+
+When the redactor masks a contact in a chat message, the API keeps what the sender typed,
+encrypted (AES-256-GCM), for staff only (`GET /v1/admin/jobs/{id}/messages`, each read audited),
+and the worker deletes it after `CHAT_ORIGINAL_RETENTION_DAYS`. Without `CHAT_ORIGINAL_KEYS`
+the API still starts, logs `chat_original_key_missing` (WARNING) in staging and production, and
+keeps **no** original (never plaintext). A malformed value stops startup; the error never shows
+the key.
+
+- Make a key (one per environment, never reused): `python -c "import base64, os;
+print(base64.b64encode(os.urandom(32)).decode())"`. Set `CHAT_ORIGINAL_KEYS` to
+  `{"2026-11": "<that value>"}` and `CHAT_ORIGINAL_ACTIVE_KEY_ID` to `2026-11`. Key ids are 1
+  to 32 of `A-Z a-z 0-9 _ . -`.
+- Rotate: add the new key to the JSON and point `CHAT_ORIGINAL_ACTIVE_KEY_ID` at it. Keep the
+  old key until `CHAT_ORIGINAL_RETENTION_DAYS` have passed since the switch (the purge has then
+  removed what it sealed); a key removed early makes those originals unreadable (`original:
+null`, ERROR `chat_original_unreadable`).
+- Only the api needs these; the worker's purge clears rows without decrypting.
 
 Leave `HOST` unset: the default `::` listens on IPv6 (private network) and IPv4 (public proxy
 and healthcheck) on one socket.

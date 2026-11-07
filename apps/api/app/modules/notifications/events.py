@@ -1,9 +1,11 @@
 """The transactional pushes a feature sends after its commit (D10.4, #55): one function each.
 
 Each one queues the push (enqueue_push) and never fails the action it announces: the action
-is already committed, so a Redis error or a timeout is logged with ids only and dropped. The
-message id is the event's own id, so announcing the same event twice sends it once. Whether
-the user is active, and in which language, the worker decides at send time (push_tasks).
+is already committed, so a Redis error or a timeout is logged with ids only and dropped. So is
+an invalid message (#328: a bad message id or an unknown catalog key), a bug in the caller that
+must not turn a done action into an error. The message id is the event's own id, so announcing
+the same event twice sends it once. Whether the user is active, and in which language, the
+worker decides at send time (push_tasks).
 """
 
 import logging
@@ -12,7 +14,7 @@ from collections.abc import Mapping
 
 from redis.exceptions import RedisError
 
-from app.modules.notifications.service import enqueue_push
+from app.modules.notifications.service import InvalidPushError, enqueue_push
 from app.queue import JobQueue
 
 logger = logging.getLogger(__name__)
@@ -271,4 +273,11 @@ async def _push(
         # The message id is the event's kind and id: ids only.
         logger.error(
             "push_enqueue_failed", extra={"user_id": str(user_id), "message_id": message_id}
+        )
+    except InvalidPushError as error:
+        # Raised before anything is queued. Its text is a fixed reason ("message_id", "unknown
+        # catalog key", ...); the params and the deep link stay out of the log.
+        logger.error(
+            "push_invalid",
+            extra={"user_id": str(user_id), "message_id": message_id, "reason": str(error)},
         )

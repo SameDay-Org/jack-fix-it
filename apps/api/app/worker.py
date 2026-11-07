@@ -16,6 +16,7 @@ from app.db import create_engine, create_session_factory
 from app.integrations.expo_push import ExpoPushSender
 from app.integrations.storage import S3Storage, StorageNotConfiguredError
 from app.integrations.stripe_payments import StripePaymentsClient
+from app.modules.chat.tasks import purge_chat_originals
 from app.modules.dispatch.tasks import dispatch_request
 from app.modules.jobs.tasks import auto_confirm_jobs, photo_sanitize_task
 from app.modules.notifications.push_tasks import check_push_receipts, send_push
@@ -118,6 +119,13 @@ class WorkerSettings:
             expire_quotes,
             minute=every(get_settings().quote_expiry_sweep_minutes),
             timeout=get_settings().quote_expiry_timeout_seconds,
+            keep_result=0,
+            keep_result_forever=False,
+        ),
+        cron(
+            purge_chat_originals,
+            minute=every(get_settings().chat_original_purge_minutes),
+            timeout=get_settings().chat_original_purge_timeout_seconds,
             keep_result=0,
             keep_result_forever=False,
         ),

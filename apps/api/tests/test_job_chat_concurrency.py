@@ -29,7 +29,14 @@ from tests.conftest import backend_pid, wait_until_blocked
 from tests.helpers import as_status_writer
 
 NOW = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
-CONFIG = ChatConfig(list_default_limit=20, list_max_limit=50)
+CONFIG = ChatConfig(
+    list_default_limit=20,
+    list_max_limit=50,
+    original_cipher=None,
+    original_retention=timedelta(days=90),
+    offender_threshold=3,
+    offender_window_seconds=7 * 24 * 60 * 60,
+)
 
 
 @dataclass(frozen=True)

@@ -10,10 +10,11 @@ from app.errors import ErrorResponse
 from app.modules.auth.permissions import AppUser, PanelUser
 from app.modules.chat.schemas import (
     ChatMessageIn,
-    ChatMessageOut,
+    ChatOffenderFlagPage,
     ChatPage,
     ChatReadIn,
     ChatReadOut,
+    SentMessageOut,
     StaffChatPage,
 )
 from app.modules.chat.service import ChatConfig, ChatService
@@ -23,6 +24,8 @@ from app.rate_limit import RateLimiter, enforce_limit, get_rate_limiter
 router = APIRouter(prefix="/jobs/{job_id}/messages", tags=["chat"])
 # The BDC and admins: read-only (#71).
 staff_router = APIRouter(prefix="/admin/jobs/{job_id}/messages", tags=["chat"])
+# The BDC and admins: repeat-offender flags (#72).
+flags_router = APIRouter(prefix="/admin/chat/flags", tags=["chat"])
 
 
 def _error(description: str) -> dict[str, Any]:
@@ -87,7 +90,7 @@ async def list_messages(
 
 @router.post(
     "",
-    response_model=ChatMessageOut,
+    response_model=SentMessageOut,
     status_code=status.HTTP_201_CREATED,
     summary="Send a message in my job's chat",
     dependencies=[Depends(limit_messages)],
@@ -113,9 +116,11 @@ async def list_messages(
 )
 async def send_message(
     job_id: uuid.UUID, data: ChatMessageIn, user: AppUser, chat: Chat
-) -> ChatMessageOut:
-    """Stores the message with contact details masked (phones, emails, links, addresses): the
-    original is never kept. Answers what was stored."""
+) -> SentMessageOut:
+    """Stores the message with contact details masked (phones, emails, links, addresses).
+    Answers what was stored, with `warning: contact_details_hidden` when something was masked.
+    The other side only ever reads the masked text; the original is kept encrypted for staff,
+    for a limited time."""
     return await chat.send(user, job_id, data.body)
 
 
@@ -150,6 +155,31 @@ async def mark_read(job_id: uuid.UUID, data: ChatReadIn, user: AppUser, chat: Ch
 async def staff_list_messages(
     job_id: uuid.UUID, user: PanelUser, chat: Chat, limit: Limit = None, cursor: Cursor = None
 ) -> StaffChatPage:
-    """Any job's messages, newest first, for the BDC and admins. Read-only: no read marker
-    moves, and the parties' unread counts do not change."""
+    """Any job's messages, newest first, for the BDC and admins, with the original of each
+    redacted message while it is kept. Read-only: no read marker moves, and the parties' unread
+    counts do not change. A response that carries an original is recorded in the audit log."""
     return await chat.staff_messages(user, job_id, limit=limit, cursor=cursor)
+
+
+@flags_router.get(
+    "",
+    response_model=ChatOffenderFlagPage,
+    summary="List repeat-offender flags (staff)",
+    responses={
+        status.HTTP_401_UNAUTHORIZED: _error("invalid_token: missing or expired."),
+        status.HTTP_403_FORBIDDEN: _error("forbidden: only agents and admins."),
+        status.HTTP_422_UNPROCESSABLE_CONTENT: _error("validation_error: a bad cursor or limit."),
+    },
+)
+async def list_offender_flags(
+    user: PanelUser,
+    chat: Chat,
+    open: Annotated[
+        bool, Query(description="true: flags not resolved yet; false: resolved ones.")
+    ] = True,
+    limit: Limit = None,
+    cursor: Cursor = None,
+) -> ChatOffenderFlagPage:
+    """Senders whose chat messages were redacted CHAT_OFFENDER_THRESHOLD times within
+    CHAT_OFFENDER_WINDOW_DAYS, newest first: ids, counts and timestamps, never message text."""
+    return await chat.offender_flags(open_only=open, limit=limit, cursor=cursor)
