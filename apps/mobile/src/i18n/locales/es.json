@@ -619,6 +619,148 @@
       "retry": "Intentar de nuevo"
     }
   },
+  "proJobs": {
+    "yourJobs": {
+      "title": "Tus trabajos",
+      "loading": "Cargando tus trabajos",
+      "empty": {
+        "title": "No tienes trabajos en tu agenda",
+        "body": "Cuando un cliente te contrate y pague, el trabajo aparecerá aquí con la dirección y todo lo que necesitas."
+      },
+      "error": "No pudimos cargar tus trabajos.",
+      "retry": "Intentar de nuevo",
+      "row": "{{status}}. {{when}}. {{what}}.",
+      "for": "{{category}} para {{name}}"
+    },
+    "day": {
+      "today": "Hoy",
+      "tomorrow": "Mañana"
+    },
+    "when": "{{day}}, {{time}}",
+    "status": {
+      "scheduled": "Programado",
+      "onTheWay": "En camino",
+      "locked": "Llegada bloqueada",
+      "arrived": "Llegaste",
+      "working": "Trabajando",
+      "done": "Terminado",
+      "closed": "Cancelado"
+    },
+    "customerFallback": "el cliente",
+    "screen": {
+      "loading": "Cargando tu trabajo",
+      "refreshFailed": "No pudimos actualizar este trabajo.",
+      "retry": "Intentar de nuevo",
+      "gone": {
+        "title": "No encontramos este trabajo",
+        "body": "Puede que se haya cancelado o que pertenezca a otra cuenta.",
+        "home": "Ir al inicio"
+      },
+      "error": {
+        "title": "No pudimos cargar este trabajo",
+        "body": "Revisa tu conexión e inténtalo de nuevo.",
+        "retry": "Intentar de nuevo"
+      },
+      "time": {
+        "scheduled": "Empieza",
+        "onTheWay": "Llegarás a las",
+        "arrived": "Llegada registrada a las",
+        "working": "Empezaste a las",
+        "done": "Terminado a las",
+        "closed": "Estaba programado para"
+      },
+      "scheduledFor": "Programado para {{when}}",
+      "receive": "Recibirás",
+      "customer": "Cliente",
+      "where": "Dónde",
+      "openMaps": "Abrir en Mapas",
+      "openMapsLabel": "Abrir {{address}} en Mapas",
+      "mapsFailed": "No pudimos abrir tu app de mapas.",
+      "copyHint": "Mantén presionada la dirección para copiarla.",
+      "noAddress": "La dirección ya no se muestra para este trabajo.",
+      "theJob": "El trabajo",
+      "guide": {
+        "scheduled": "Cuando salgas, toca Voy en camino. {{name}} verá a qué hora llegarás.",
+        "onTheWay": "Cuando llegues, pídele a {{name}} el código de llegada de 4 dígitos que ve en su app.",
+        "arrived": "Ya registraste tu llegada. Empieza el trabajo cuando comiences.",
+        "done": "Marcaste este trabajo como terminado.",
+        "closed": "Este trabajo se canceló."
+      },
+      "next": {
+        "title": "Siguiente: fotos y Trabajo terminado",
+        "body": "Pronto podrás agregar fotos de antes y después y marcar el trabajo como terminado en la app."
+      },
+      "locked": {
+        "title": "El registro de llegada está bloqueado",
+        "body": "Demasiados códigos no coincidieron. Avisamos a nuestro equipo de soporte y te ayudará a registrar tu llegada."
+      },
+      "onMyWay": "Voy en camino",
+      "arrived": "Ya llegué",
+      "updateEta": "Cambiar hora de llegada",
+      "start": "Empezar trabajo"
+    },
+    "announce": {
+      "onTheWay": "Vas en camino. {{name}} puede ver a qué hora llegarás.",
+      "etaUpdated": "Hora de llegada actualizada.",
+      "arrived": "Llegada registrada. Puedes empezar el trabajo.",
+      "working": "Trabajo empezado.",
+      "locked": "El registro de llegada está bloqueado."
+    },
+    "failure": {
+      "changed": "Este trabajo cambió. Así está ahora.",
+      "gone": "Este trabajo ya no está disponible.",
+      "offline": "No pudimos conectar con Jack Fix It. Revisa tu conexión e inténtalo de nuevo.",
+      "failed": "Algo salió mal. Inténtalo de nuevo."
+    },
+    "eta": {
+      "title": "¿Cuándo llegarás?",
+      "titleUpdate": "Cambia tu hora de llegada",
+      "body": "{{name}} verá la hora a la que esperas llegar.",
+      "current": "Dijiste que llegarías a las {{time}}.",
+      "choices": "Hora de llegada",
+      "other": "Otra",
+      "custom": "Llego en",
+      "earlier": "Antes",
+      "later": "Después",
+      "around": "Llegarás alrededor de las {{time}}.",
+      "send": "Voy en camino",
+      "sendUpdate": "Cambiar hora de llegada",
+      "notNow": "Ahora no"
+    },
+    "checkIn": {
+      "title": "Registrar llegada",
+      "body": "Pídele a {{name}} el código de llegada de 4 dígitos que ve en su app.",
+      "code": "Código de llegada",
+      "locationNote": "También revisaremos tu ubicación, solo para este registro.",
+      "submit": "Registrar llegada",
+      "locating": "Buscando tu ubicación…",
+      "wrong_one": "El código no coincide. Te queda {{count}} intento.",
+      "wrong_other": "El código no coincide. Te quedan {{count}} intentos.",
+      "wrongUnknown": "El código no coincide. Revísalo con {{name}} e inténtalo de nuevo.",
+      "close": "Cerrar",
+      "notNow": "Ahora no",
+      "ask": {
+        "title": "Comparte tu ubicación para registrar tu llegada",
+        "body": "Jack Fix It revisa tu ubicación una vez, al registrar tu llegada, para que {{name}} sepa que llegaste. Solo se usa para este registro.",
+        "continue": "Continuar"
+      },
+      "blocked": {
+        "title": "La ubicación está desactivada para Jack Fix It",
+        "body": "Para registrar tu llegada necesitamos tu ubicación, así {{name}} sabe que llegaste. Actívala en Configuración y vuelve aquí.",
+        "settings": "Abrir Configuración"
+      },
+      "off": {
+        "title": "La ubicación de tu teléfono está desactivada",
+        "body": "Activa la ubicación en la configuración de tu teléfono e inténtalo de nuevo.",
+        "retry": "Intentar de nuevo"
+      },
+      "timeout": {
+        "title": "Aún no encontramos tu ubicación",
+        "body": "Puede tardar un poco bajo techo. Inténtalo de nuevo en unos segundos.",
+        "retry": "Intentar de nuevo"
+      }
+    }
+  },
   "quoteForm": {
     "title": "Tu cotización",
     "subtitle": "Un precio fijo por todo el trabajo. El cliente compara cotizaciones y elige una.",

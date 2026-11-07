@@ -38,6 +38,13 @@ jest.mock(
   "expo-router",
   () => jest.requireActual("../../opportunities/__tests__/helpers").routerMock,
 );
+// "Your jobs" over the opportunities (#63) has its own suite (features/pro-jobs); here the
+// opportunities are alone, and a pull refreshes the (stubbed) jobs with them.
+const mockRefetchJobs = jest.fn(() => Promise.resolve());
+jest.mock("@/features/pro-jobs", () => ({
+  YourJobs: () => null,
+  useProJobs: () => ({ refetch: mockRefetchJobs }),
+}));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
   "react-native-safe-area-context",
@@ -131,8 +138,11 @@ describe("ProHomeScreen", () => {
     jest
       .mocked(apiGet)
       .mockResolvedValueOnce(page([sentLater, { ...FRESH, viewed: true }, OPENED]));
+    mockRefetchJobs.mockClear();
     await act(async () => pullToRefresh());
     await findCard(sentLater.dispatch_id);
+    // The pull refreshes the pro's jobs with the opportunities (#63).
+    expect(mockRefetchJobs).toHaveBeenCalledTimes(1);
     expect(card(sentLater.dispatch_id).getByText("New", HIDDEN)).toBeTruthy();
     expect(card(FRESH.dispatch_id).queryByText("New", HIDDEN)).toBeNull();
 
