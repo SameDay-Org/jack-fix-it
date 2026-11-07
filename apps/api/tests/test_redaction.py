@@ -30,6 +30,7 @@ from app.redaction import (
     _Replace,
     _replacements,
     _Search,
+    redact_address_contacts,
     redact_contacts,
     redact_known,
     redact_text,
@@ -2231,3 +2232,62 @@ def test_the_floor_reads_develops_text_in_the_same_coordinates() -> None:
         develop = redaction_legacy.KnownValues(known.emails, known.phones, known.streets)
         ours, theirs = redact_known(text, known), redaction_legacy.redact_known(text, develop)
         assert (ours.text, ours.redacted) == (theirs.text, theirs.redacted), ascii(text)
+
+
+# Address fields shown to the pro of a paid job (#63, Gatekeeper round 1): contacts masked, the
+# address itself kept.
+
+_CUSTOMER = KnownValues(emails=("probe-customer-63@example.com",), phones=("+13055550163",))
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        "742 Evergreen Terrace",
+        "Apt 63",
+        "Unit 4B, gate code 1234",
+        "PO Box 1234",
+        "1200 NW 7th St",
+        "15500 SW 117th Ave",
+        "Calle 8 #1500",
+    ],
+)
+def test_address_contacts_keep_the_address_the_contact_filter_masks(address: str) -> None:
+    assert redact_contacts(address).redacted  # an address is a contact in free text
+    assert redact_address_contacts(address, _CUSTOMER) == RedactionResult(address, False)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Apt 63; contact jane@example.com", f"Apt 63; contact {MASK}"),
+        ("742 Evergreen Terrace; call +13055550963", f"742 Evergreen Terrace; call {MASK}"),
+        ("Apt 2 call 305 555 0100", f"Apt 2 call {MASK}"),
+        ("Apt 5 www.jdoe.com", f"Apt 5 {MASK}"),
+        ("Apt 5 @jdoe", f"Apt 5 {MASK}"),
+        ("Apt 5 ig jdoe_1", f"Apt 5 {MASK}"),
+        ("jdoe1 insta dot com", MASK),  # a reverse handle the URL mask cut, joined back
+        ("3055550100 Main St", f"{MASK} Main St"),
+    ],
+)
+def test_address_contacts_mask_the_contacts(text: str, expected: str) -> None:
+    assert redact_address_contacts(text, KnownValues()) == RedactionResult(expected, True)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Apt 63 probe-customer-63", f"Apt 63 {MASK}"),
+        ("Orlando 3055 550 163", f"Orlando {MASK}"),
+    ],
+)
+def test_address_contacts_known_values_first(text: str, expected: str) -> None:
+    """Forms only the known-value pass reads: without the customer's values they stay."""
+    assert redact_address_contacts(text, KnownValues()) == RedactionResult(text, False)
+    assert redact_address_contacts(text, _CUSTOMER) == RedactionResult(expected, True)
+
+
+def test_address_contacts_do_not_mask_the_known_street() -> None:
+    known = KnownValues(streets=("742 Evergreen Terrace", "Apt 63"))
+    text = "742 Evergreen Terrace, Apt 63"
+    assert redact_address_contacts(text, known) == RedactionResult(text, False)

@@ -85,3 +85,12 @@ def safe_public_name(
     if name is None or redact_text(name, known).redacted:
         return None
     return name
+
+
+def safe_first_name(first_name: str | None, known: KnownValues) -> str | None:
+    """The first name alone (what the pro of a paid job sees of the customer, #63), or None
+    when it is missing or shows a contact detail, checked like safe_public_name: contacts are
+    never exchanged off the app."""
+    if not first_name or redact_text(first_name, known).redacted:
+        return None
+    return first_name

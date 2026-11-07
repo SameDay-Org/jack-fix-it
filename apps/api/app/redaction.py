@@ -681,27 +681,30 @@ def redact_contacts(text: str) -> RedactionResult:
     return RedactionResult(result, count > 0)
 
 
-def _hidden(text: str) -> list[tuple[int, int]]:
+def _hidden(text: str, *, addresses: bool = True) -> list[tuple[int, int]]:
     """Where redact_contacts masks `text` (cleaned): the rules in order with the contacts they
-    cut, and the floor."""
-    masked, cutting = _masks_in_order(text)
+    cut, and the floor. Without `addresses`, no address rule runs (redact_address_contacts)."""
+    masked, cutting = _masks_in_order(text, _STEPS if addresses else _CONTACT_STEPS)
     if masked:
         found = [span for search, rule in _PHONE_STEPS for span in _spans(search, rule, text)]
         if cutting:
-            found += _cut_spans(text, _Apart.of(cutting), _Apart.of(masked))
+            cut_steps = _CUT_STEPS if addresses else (_REVERSE_HANDLE_STEP,)
+            found += _cut_spans(text, _Apart.of(cutting), _Apart.of(masked), cut_steps)
         masked = _joined(masked, found)
-    return masked + _floor_masks(text)
+    return masked + _floor_masks(text, addresses=addresses)
 
 
-def _floor_masks(text: str) -> list[tuple[int, int]]:
+def _floor_masks(text: str, *, addresses: bool = True) -> list[tuple[int, int]]:
     """Where the safety floor masks `text` (cleaned; its _clean is the same code): the rules
     of app.redaction_legacy, the filter before #240, run as its redact_contacts runs them, each
     on the text the ones before it masked. redact_contacts masks all of it too, so its output
-    never shows a character that filter hid (#240, until #267)."""
+    never shows a character that filter hid (#240, until #267). Without `addresses`, the floor's
+    address rules are left out too; they run last, so the masks before them are the same."""
     current = text
     origin = [(index, index + 1) for index in range(len(text))]  # each character's span in text
     masked: list[tuple[int, int]] = []
-    for pattern, replace in redaction_legacy._STEPS:
+    steps = redaction_legacy._STEPS if addresses else _FLOOR_CONTACT_STEPS
+    for pattern, replace in steps:
         spans = list(_floor_spans(pattern, replace, current))
         if spans:
             current, origin = _masked_with_origin(current, origin, spans, masked)
@@ -733,10 +736,16 @@ def _floor_spans(
         search_from = max(match.end(), match.start() + 1)
 
 
-def _cut_spans(text: str, cutting: "_Apart", masked: "_Apart") -> list[tuple[int, int]]:
-    """The reverse handles and addresses in `text` that a mask in `cutting` cut (_cut)."""
+def _cut_spans(
+    text: str,
+    cutting: "_Apart",
+    masked: "_Apart",
+    steps: tuple[tuple["_Search", "_Rule"], ...],
+) -> list[tuple[int, int]]:
+    """The reverse handles and addresses (`steps`) in `text` that a mask in `cutting` cut
+    (_cut)."""
     found: list[tuple[int, int]] = []
-    for search, rule in _CUT_STEPS:
+    for search, rule in steps:
         cue = _CUES[search]
 
         def cut_rule(
@@ -798,15 +807,18 @@ def _last_word(match: re.Match[str]) -> int:
     return end
 
 
-def _masks_in_order(text: str) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
-    """Each rule on the text the rules before it masked (a mask is no word, so "unit 5B
-    youtu.be/abc123" reads as a unit once the URL is masked): where the masks are in `text`,
-    and which of them the email and URL rules made."""
+def _masks_in_order(
+    text: str, steps: tuple[tuple["_Search", "_Rule"], ...]
+) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+    """Each rule of `steps` (they start with the email and URL rules) on the text the rules
+    before it masked (a mask is no word, so "unit 5B youtu.be/abc123" reads as a unit once the
+    URL is masked): where the masks are in `text`, and which of them the email and URL rules
+    made."""
     current = text
     origin = [(index, index + 1) for index in range(len(text))]  # each character's span in text
     masked: list[tuple[int, int]] = []
     by_emails_and_urls = 0
-    for step, (search, rule) in enumerate(_STEPS):
+    for step, (search, rule) in enumerate(steps):
         runs = [_unmarked_spans, _spans] if search in _UNMARKED_FIRST else [_spans]
         for run in runs:
             spans = list(run(search, rule, current))
@@ -1259,15 +1271,33 @@ _EMAIL_AND_URL_STEPS: Final[tuple[tuple[_Search, _Rule], ...]] = (
     (_SPELLED_URLS, _whole(_mask)),
     (URL, _whole(_mask_url)),
 )
-_STEPS: Final[tuple[tuple[_Search, _Rule], ...]] = (
+# Every rule but the address ones, which come last: an address field shown to the pro of a
+# paid job runs these only (redact_address_contacts).
+_CONTACT_STEPS: Final[tuple[tuple[_Search, _Rule], ...]] = (
     *_EMAIL_AND_URL_STEPS,
     *_PHONE_STEPS,
     (PLATFORM_HANDLE, _whole(_mask_handle)),
     _REVERSE_HANDLE_STEP,
     (AT_HANDLE, _whole(_mask)),
     (CASHTAG, _whole(_mask)),
+)
+_STEPS: Final[tuple[tuple[_Search, _Rule], ...]] = (
+    *_CONTACT_STEPS,
     *_ADDRESS_STEPS,
     (UNIT_OR_BOX, _whole(_mask)),
+)
+# The floor's rules but its address ones, which run last there too.
+_FLOOR_ADDRESS_PATTERNS: Final = frozenset(
+    {
+        redaction_legacy.STREET,
+        redaction_legacy.REVERSED_STREET,
+        redaction_legacy.GRID_OR_HIGHWAY,
+        redaction_legacy.SPANISH_STREET,
+        redaction_legacy.UNIT_OR_BOX,
+    }
+)
+_FLOOR_CONTACT_STEPS: Final = tuple(
+    step for step in redaction_legacy._STEPS if step[0] not in _FLOOR_ADDRESS_PATTERNS
 )
 # The rules with a literal TLD or provider list run first on the text without its marks: a
 # mark glued inside "gmail" or "com" splits the literal ("gmail.c" + U+0483 + "om", "jose at
@@ -1392,6 +1422,18 @@ def redact_text(text: str, known: KnownValues) -> RedactionResult:
     first = redact_known(text, known)
     second = redact_contacts(first.text)
     return RedactionResult(second.text, first.redacted or second.redacted)
+
+
+def redact_address_contacts(text: str, known: KnownValues) -> RedactionResult:
+    """An address field as the pro of a paid job sees it (#63): the contacts typed into it
+    masked, the address itself kept, since they need it to get there. The known email and phone
+    first (not the known street: it is the value shown), then redact_contacts without its
+    address rules (streets, units, PO boxes), on both passes: the rules in order and the floor.
+    "Apt 63; contact jane@example.com" keeps "Apt 63; contact"."""
+    first = redact_known(text, KnownValues(emails=known.emails, phones=known.phones))
+    cleaned = _clean(first.text)
+    result, count = _mask_spans(cleaned, _hidden(cleaned, addresses=False))
+    return RedactionResult(result, first.redacted or count > 0)
 
 
 def _known_patterns(known: KnownValues) -> list[re.Pattern[str]]:
