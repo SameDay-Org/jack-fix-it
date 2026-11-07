@@ -28,6 +28,21 @@ class JobRepository:
         )
         return (await self._session.scalars(statement)).one_or_none()
 
+    async def get_for_no_key_update(self, job_id: uuid.UUID) -> Job | None:
+        """The job, locked FOR NO KEY UPDATE until the transaction ends: it waits for, and
+        holds off, get_for_update (every status change), and two such locks on the job wait for
+        each other, while inserts referencing the job (events, photos) never wait on it.
+
+        populate_existing: a waiter gets the row as the transaction that held the lock left it.
+        """
+        statement = (
+            select(Job)
+            .where(Job.id == job_id)
+            .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
     async def get_of_request(self, request_id: uuid.UUID) -> Job | None:
         """The request's job (one per request), unlocked: for reads."""
         return (

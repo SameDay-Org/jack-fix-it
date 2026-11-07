@@ -48,6 +48,14 @@ TERMINAL_STATES: Final = frozenset(
     status for status in JobStatus if not any(source is status for source, _ in TRANSITIONS)
 )
 
+# While the customer and the pro may still write in the job's chat (#71): from the payment to
+# the job's end. A disputed job stays open, so both sides can still talk while an admin decides.
+# Once confirmed, paid out, refunded or cancelled the chat is read-only (Builder decision, to be
+# confirmed by Cesar).
+CHAT_OPEN: Final = frozenset(
+    {_S.SCHEDULED, _S.ON_THE_WAY, _S.IN_PROGRESS, _S.COMPLETED, _S.DISPUTED}
+)
+
 # What the customer sees: the i18n keys of docs/glossary.md "Customer-visible statuses".
 CUSTOMER_STATUS: Final[Mapping[JobStatus, str]] = MappingProxyType(
     {

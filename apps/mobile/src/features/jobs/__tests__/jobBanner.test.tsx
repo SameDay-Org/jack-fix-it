@@ -93,6 +93,8 @@ const job = (status: JobStatus, overrides: Partial<CustomerJob> = {}): CustomerJ
   customer_total_cents: 18_000,
   // The pro's photos (#298): none here; the screen does not show them yet.
   photos: { before: [], after: [], pending: 0 },
+  // Chat messages not read yet (#71): none; the screen does not show them yet.
+  unread_messages: 0,
   ...overrides,
 });
 
