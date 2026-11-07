@@ -37,6 +37,12 @@ class AddressRepository:
         )
         return [(row[0], row[1], row[2]) for row in (await self._session.execute(statement)).all()]
 
+    async def get_many(self, address_ids: Collection[uuid.UUID]) -> list[Address]:
+        if not address_ids:
+            return []
+        statement = select(Address).where(Address.id.in_(address_ids))
+        return list((await self._session.scalars(statement)).all())
+
 
 class SavedAddressRepository:
     """The customer's address book (#214). Every row read for a change is read as last
