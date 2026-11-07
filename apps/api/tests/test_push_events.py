@@ -47,7 +47,7 @@ CALLERS = (
         "push_quote_accepted",
         "pro_user_id",
         "quote_accepted:{quote_id}",
-        "/opportunities/{dispatch_id}",
+        "/",  # home: the opportunity 404s once quoted and the job does not exist yet (#338)
     ),
     Caller("push_job_booked", "customer_id", "job_booked:{job_id}", "/requests/{request_id}/job"),
     Caller("push_job_scheduled", "pro_user_id", "job_scheduled:{job_id}", "/jobs/{job_id}"),
