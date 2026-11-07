@@ -511,8 +511,14 @@ def test_customer_quote_has_no_payout_fields(app: FastAPI) -> None:
 
     schema = app.openapi()
     components = schema["components"]["schemas"]
-    # Only the pro's own quote and opportunity show any of them.
+    # Only the pro's own quote, opportunity and jobs (#63: what they receive) show any of them.
+    pro_job = {"pro_payout_cents"}
     allowed = {
+        ("get", "/v1/pros/me/jobs"): pro_job,
+        ("get", "/v1/pros/me/jobs/{job_id}"): pro_job,
+        ("post", "/v1/pros/me/jobs/{job_id}/on-the-way"): pro_job,
+        ("post", "/v1/pros/me/jobs/{job_id}/check-in"): pro_job,
+        ("post", "/v1/pros/me/jobs/{job_id}/start"): pro_job,
         ("post", "/v1/pros/me/opportunities/{dispatch_id}/quote"): {
             "pro_payout_cents",
             "platform_fee_cents",
