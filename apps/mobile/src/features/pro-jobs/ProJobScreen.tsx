@@ -43,6 +43,8 @@ import { jobStep, STEP_TONE, type JobStep, type ProJob } from "./phase";
 
 /** The icon tile's side (`IconTile` md), for the skeleton. */
 const TILE_SIDE = 56;
+/** The steps with an action, held in the dock under the page. */
+const DOCKED_STEPS: readonly JobStep[] = ["scheduled", "onTheWay", "arrived"];
 /** The dock's padding under its last control, above the bottom safe area (Tailwind 4, 16 dp). */
 const DOCK_PADDING = 16;
 
@@ -127,7 +129,8 @@ export function ProJobScreen() {
   const shownError = useSettledError(data, error);
   const gone = !valid || (data === undefined && isJobGone(shownError));
   const refreshFailed = data !== undefined && error !== null;
-  const docked = data !== undefined && !gone;
+  // Locked, working, done and cancelled have nothing to act on: no dock.
+  const docked = data !== undefined && !gone && DOCKED_STEPS.includes(jobStep(data));
   useAnnounceStep(data);
 
   return (
@@ -174,7 +177,7 @@ export function ProJobScreen() {
           </View>
         )}
       </ScrollView>
-      {docked ? <JobActions job={data} /> : null}
+      {docked && data ? <JobActions job={data} /> : null}
     </Screen>
   );
 }
@@ -218,6 +221,28 @@ function JobHero({ job, now }: { job: ProJob; now: number }) {
       >
         {name ? t("proJobs.yourJobs.for", { category, name }) : category}
       </Text>
+      {/* What to do next, in the page: the dock holds the actions only, so it stays short at any
+          text size. A locked check-in and the work under way have no action: their notice says
+          what happens next. */}
+      {step === "locked" ? (
+        <Notice
+          tone="danger"
+          title={t("proJobs.screen.locked.title")}
+          body={t("proJobs.screen.locked.body")}
+          testID="pro-job-locked"
+        />
+      ) : step === "working" ? (
+        <Notice
+          tone="info"
+          title={t("proJobs.screen.next.title")}
+          body={t("proJobs.screen.next.body")}
+          testID="pro-job-next"
+        />
+      ) : (
+        <Text className="text-callout text-navy-900" testID="pro-job-guide">
+          {t(`proJobs.screen.guide.${step}`, { name: nameOf(t, job) })}
+        </Text>
+      )}
     </View>
   );
 }
@@ -349,14 +374,13 @@ function useStartJob(jobId: string) {
 }
 
 /**
- * The step's one primary action, with a line on what it does, under the page. Locked and working
- * have no action: the locked check-in waits for support, and the photos and Job's done are the
- * next part (#63 part B), so nothing here leads nowhere.
+ * The step's one primary action, in a dock under the page (only the steps that have one). Locked
+ * and working have none: a locked check-in waits for the team, and the photos and Job's done are
+ * the next part (#63 part B), so nothing here leads nowhere; their notices sit in the page.
  */
 function JobActions({ job }: { job: ProJob }) {
   const { t } = useTranslation();
   const step = jobStep(job);
-  const name = nameOf(t, job);
   const push = useGuardedPush();
   const { start, busy } = useStartJob(job.id);
   const { bottom } = useSafeAreaInsets();
@@ -371,25 +395,6 @@ function JobActions({ job }: { job: ProJob }) {
       className="gap-3 rounded-t-xl bg-white px-4 pt-4"
       testID="pro-job-actions"
     >
-      {step === "locked" ? (
-        <Notice
-          tone="danger"
-          title={t("proJobs.screen.locked.title")}
-          body={t("proJobs.screen.locked.body")}
-          testID="pro-job-locked"
-        />
-      ) : step === "working" ? (
-        <Notice
-          tone="info"
-          title={t("proJobs.screen.next.title")}
-          body={t("proJobs.screen.next.body")}
-          testID="pro-job-next"
-        />
-      ) : (
-        <Text className="text-callout text-gray-500" testID="pro-job-guide">
-          {t(`proJobs.screen.guide.${step}`, { name })}
-        </Text>
-      )}
       {step === "scheduled" ? (
         <Button
           label={t("proJobs.screen.onMyWay")}

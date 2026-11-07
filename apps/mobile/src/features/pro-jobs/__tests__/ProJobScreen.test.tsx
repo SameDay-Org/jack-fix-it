@@ -62,8 +62,9 @@ const ADDRESS_QUERY = encodeURIComponent(`${STREET}, ${CITY}`);
 const time = (iso: string) => formatTimeOfDay(Date.parse(iso), formatLocale());
 const toast = () => toastStore.getState().current;
 const actions = () => within(screen.getByTestId("pro-job-actions"));
+/** The dock's buttons; a step with no action has no dock at all, so none. */
 const actionButtons = () =>
-  screen.queryByTestId("pro-job-actions") && actions().queryAllByRole("button");
+  screen.queryByTestId("pro-job-actions") ? actions().queryAllByRole("button") : [];
 const announced = () =>
   jest.mocked(AccessibilityInfo.announceForAccessibilityWithOptions).mock.calls.map(([m]) => m);
 const LOCKED_NOTICE =
