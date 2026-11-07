@@ -312,15 +312,16 @@ describe("JobScreen", () => {
     ],
     ["arrived", ARRIVED, "Dan has arrived", `Checked in at ${clock(CHECKED_IN.at)}`, 2, false],
     ["in_progress", WORKING, "Dan is working", `Started at ${clock(STARTED.at)}`, 2, false],
+    // Finished and confirmed are whole screens of their own (#66): no steps, no code.
     [
       "completed",
       COMPLETED,
-      "Job's done",
-      "Dan marked the job as done. Take a look at the work.",
-      3,
+      "Dan marked the job done",
+      "Take a look at the work, then confirm it's done.",
+      null,
       false,
     ],
-    ["confirmed", CONFIRMED, "Job's done", "Thanks for booking with Jack Fix It.", 3, false],
+    ["confirmed", CONFIRMED, "Job confirmed", "Payment is released to Dan.", null, false],
     [
       "disputed",
       DISPUTED,
@@ -443,13 +444,13 @@ describe("JobScreen", () => {
   });
 
   it.each([
-    ["completed", COMPLETED],
-    ["confirmed", CONFIRMED],
-  ] as const)("a %s job is not polled", async (_name, item) => {
+    ["completed", COMPLETED, "Dan marked the job done"],
+    ["confirmed", CONFIRMED, "Job confirmed"],
+  ] as const)("a %s job is not polled", async (_name, item, title) => {
     fakeClock();
     answerJob(item);
     await renderWithQuery(<JobScreen />);
-    await loaded("Job's done");
+    await loaded(title);
 
     await advance(jobsConfig.pollMs * 4);
     expect(jobCalls()).toBe(1);
