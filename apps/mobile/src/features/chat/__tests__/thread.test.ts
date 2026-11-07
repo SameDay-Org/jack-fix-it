@@ -173,6 +173,17 @@ describe("mergeNewest", () => {
 });
 
 describe("appendOlder", () => {
+  it("keeps my sent messages unconfirmed, so a later page still cannot join through them", () => {
+    const sent = msg("mine", "2026-11-07T10:05:00Z", "me");
+    const held = addSent(thread([msg("h1", "2026-11-07T10:00:00Z")], "c0", 0), sent);
+    const afterOlder = appendOlder(held, page([msg("h0", "2026-11-07T09:59:00Z")], "c1", 0));
+
+    expect(afterOlder.local).toEqual(["mine"]);
+    // A newest page reaching only my sent message (more than a page arrived meanwhile) starts over.
+    const newest = page([sent, msg("p30", "2026-11-07T10:04:00Z")], "next", 0);
+    expect(mergeNewest(afterOlder, newest).messages.map((m) => m.id)).toEqual(["mine", "p30"]);
+  });
+
   it("adds the older page behind, moves the cursor on and keeps the unread count", () => {
     const held = thread(
       [msg("d", "2026-11-07T10:03:00Z"), msg("c", "2026-11-07T10:02:00Z")],
@@ -219,7 +230,18 @@ describe("addSent", () => {
       messages: [msg("mine", "2026-11-07T10:05:00Z", "me"), msg("a", "2026-11-07T10:00:00Z")],
       olderCursor: "c0",
       unreadCount: 2,
+      local: ["mine"],
     });
+  });
+
+  it("adds each sent id to the local ones, after those already held", () => {
+    const first = addSent(
+      thread([msg("a", "2026-11-07T10:00:00Z")]),
+      msg("m1", local(7, 11), "me"),
+    );
+
+    expect(addSent(first, msg("m2", local(7, 12), "me")).local).toStrictEqual(["m1", "m2"]);
+    expect(first.local).toStrictEqual(["m1"]);
   });
 
   it("keeps a message the poll already brought once, as the sent copy", () => {
@@ -238,6 +260,79 @@ describe("addSent", () => {
     addSent(held, msg("b", "2026-11-07T10:01:00Z", "me"));
 
     expect(ids(held.messages)).toStrictEqual(["a"]);
+  });
+});
+
+describe("the local ids of sent messages", () => {
+  // H1 is the last message the screen saw from a page; M is mine, sent after 30 more arrived unseen.
+  const h1 = msg("h1", "2026-11-07T10:00:00Z", "pro");
+  const mine = msg("mine", "2026-11-07T11:00:00Z", "me");
+  /** P<n> arrived n minutes after H1: P1..P30 all sit between H1 and M. */
+  const p = (n: number): ChatMessage =>
+    msg(`p${String(n).padStart(2, "0")}`, Date.parse(h1.created_at) + n * MIN);
+  const range = (from: number, to: number): ChatMessage[] =>
+    Array.from({ length: to - from + 1 }, (_, index) => p(to - index));
+
+  const sentAfterHeld = (): Thread => addSent(thread([h1], "older-than-h1", 0), mine);
+
+  it("starts over from a page that reaches only my sent message, not joining through it", () => {
+    const held = sentAfterHeld();
+    const newest = page([mine, ...range(12, 30)], "older-than-p12", 19);
+
+    const result = mergeNewest(held, newest);
+
+    // Joined, the list would read H1 then P12 with P1..P11 silently missing between them.
+    expect(result).toStrictEqual({
+      messages: [mine, ...range(12, 30)],
+      olderCursor: "older-than-p12",
+      unreadCount: 19,
+    });
+    expect(ids(result.messages)).not.toContain("h1");
+  });
+
+  it("joins a page that shows my sent message and a server message held, and forgets it as local", () => {
+    const held = sentAfterHeld();
+    const newest = page([mine, ...range(1, 5), h1], "older-than-h1-page", 5);
+
+    const result = mergeNewest(held, newest);
+
+    expect(ids(result.messages)).toStrictEqual(ids([mine, ...range(1, 5), h1]));
+    expect(result.olderCursor).toBe("older-than-h1");
+    expect(result.unreadCount).toBe(5);
+    expect(result).not.toHaveProperty("local");
+  });
+
+  it("joins on a server message and keeps the local ids the page did not show", () => {
+    const later = msg("mine-2", "2026-11-07T11:01:00Z", "me");
+    const held = addSent(sentAfterHeld(), later);
+    // The page was cut before my second message was stored: it shows the first one only.
+    const newest = page([mine, p(1), h1], "older-than-h1-page", 1);
+
+    const result = mergeNewest(held, newest);
+
+    expect(ids(result.messages)).toStrictEqual(["mine-2", "mine", "p01", "h1"]);
+    expect(result.local).toStrictEqual(["mine-2"]);
+    expect(held.local).toStrictEqual(["mine", "mine-2"]);
+  });
+
+  it("joins a page that holds the whole chat even through local ids alone, and forgets them", () => {
+    const held = addSent(thread([], null, 0), mine);
+
+    const result = mergeNewest(held, page([mine, p(1)], null, 1));
+
+    expect(ids(result.messages)).toStrictEqual(["mine", "p01"]);
+    expect(result.olderCursor).toBeNull();
+    expect(result).not.toHaveProperty("local");
+  });
+
+  it("starts over, without local ids, when a page shows neither a held nor a local message", () => {
+    const result = mergeNewest(sentAfterHeld(), page(range(20, 30), "older-than-p20", 11));
+
+    expect(result).toStrictEqual({
+      messages: range(20, 30),
+      olderCursor: "older-than-p20",
+      unreadCount: 11,
+    });
   });
 });
 

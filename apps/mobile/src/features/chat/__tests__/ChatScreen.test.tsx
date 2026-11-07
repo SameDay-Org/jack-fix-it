@@ -15,6 +15,7 @@ import {
   apiPost,
   isCurrentGeneration,
   NetworkError,
+  SessionExpiredError,
   sessionGeneration,
   useSession,
   useSessionGeneration,
@@ -81,6 +82,7 @@ const iso = (offsetMs: number) => new Date(NOW + offsetMs).toISOString();
 const START = "This is the start of your messages about this job.";
 const FAILED = "Not sent. Tap to try again.";
 const TOO_FAST = "You're sending messages too fast. Wait a moment, then try again.";
+const CLOSED = "This chat is closed";
 const REDACTED_NOTE = "We hid contact details. Keep the conversation in Jack Fix It.";
 
 // Every message body and typed text of this file: none may ever reach the console.
@@ -252,8 +254,32 @@ async function typeAndSend(text: string): Promise<void> {
   await act(async () => fireEvent.press(sendButton()));
 }
 
+type EndReached = (info: { distanceFromEnd: number }) => void;
+
+/** What the list does when it is scrolled near its top (its end, the list being upside down). */
+const reachTop = () =>
+  act(async () => {
+    const onEndReached = screen.getByTestId("chat-list").props.onEndReached as
+      EndReached | undefined;
+    if (!onEndReached) throw new Error("the chat list has no onEndReached");
+    onEndReached({ distanceFromEnd: 0 });
+  });
+
+const olderCalls = () => getCalls(MESSAGES_PATH).filter(([, options]) => options?.query);
+
 const announcements = () =>
   jest.mocked(AccessibilityInfo.announceForAccessibility).mock.calls.map(([said]) => said);
+
+/** Everything a console call could print: objects as JSON too, errors with message and stack. */
+function stringify(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value instanceof Error) return `${value.name} ${value.message} ${value.stack ?? ""}`;
+  try {
+    return `${JSON.stringify(value)} ${String(value)}`;
+  } catch {
+    return String(value);
+  }
+}
 
 const CONSOLE_METHODS = ["log", "info", "warn", "error", "debug"] as const;
 const consoleSpies = CONSOLE_METHODS.map((method) => jest.spyOn(console, method));
@@ -313,7 +339,7 @@ afterEach(async () => {
   // No message body, stored or typed, is ever written to the console.
   for (const spy of consoleSpies) {
     for (const args of spy.mock.calls) {
-      const written = args.map((arg) => String(arg)).join(" ");
+      const written = args.map(stringify).join(" ");
       for (const body of BODIES) expect(written).not.toContain(body);
     }
   }
@@ -333,8 +359,10 @@ describe("the job chat screen (#74)", () => {
         expect(within(bar).getByTestId("chat-peer-name").props.children).toBe("Dan"),
       );
       expect(within(bar).getByText("Your pro on this job")).toBeTruthy();
-      expect(within(bar).getByText("DR")).toBeTruthy();
-      expect(within(bar).getByLabelText("Dan R.")).toBeTruthy();
+      // The avatar is decorative (the name beside it says who): hidden, but drawn with initials.
+      expect(within(bar).getByText("DR", HIDDEN)).toBeTruthy();
+      expect(within(bar).getByLabelText("Dan R.", HIDDEN)).toBeTruthy();
+      expect(within(bar).queryByLabelText("Dan R.")).toBeNull();
       expect(getCalls(CUSTOMER_JOB_PATH)[0]?.[1]?.params).toEqual({ request_id: REQUEST_ID });
       expect(getCalls(PRO_JOB_PATH)).toHaveLength(0);
     });
@@ -350,7 +378,7 @@ describe("the job chat screen (#74)", () => {
         expect(within(bar).getByTestId("chat-peer-name").props.children).toBe("Jamie"),
       );
       expect(within(bar).getByText("Your customer on this job")).toBeTruthy();
-      expect(within(bar).getByText("J")).toBeTruthy();
+      expect(within(bar).getByText("J", HIDDEN)).toBeTruthy();
       expect(getCalls(PRO_JOB_PATH)[0]?.[1]?.params).toEqual({ job_id: JOB_ID });
       expect(getCalls(CUSTOMER_JOB_PATH)).toHaveLength(0);
     });
@@ -365,6 +393,32 @@ describe("the job chat screen (#74)", () => {
         expect(screen.getByTestId("chat-peer-name").props.children).toBe("Your pro"),
       );
       expect(screen.getByText("Your pro on this job")).toBeTruthy();
+    });
+
+    it("draws no initials for a withheld name, never the fallback's", async () => {
+      mockApi.customerJob = customerJob({ pro: { ...customerJob().pro, name: null } });
+      mockApi.messages = () => Promise.resolve(page([message(1)]));
+      await renderChat();
+      await screen.findByTestId("chat-list");
+      await waitFor(() =>
+        expect(screen.getByTestId("chat-peer-name").props.children).toBe("Your pro"),
+      );
+
+      const bar = screen.getByTestId("chat-top-bar");
+      expect(within(bar).queryByText("YP", HIDDEN)).toBeNull();
+      expect(within(bar).queryByText("Y", HIDDEN)).toBeNull();
+      expect(within(bar).queryByLabelText("Your pro", HIDDEN)).toBeNull();
+    });
+
+    it("the empty state draws no initials for a withheld name either", async () => {
+      mockApi.customerJob = customerJob({ pro: { ...customerJob().pro, name: null } });
+      await renderChat();
+      const empty = await screen.findByTestId("chat-empty");
+      await waitFor(() => expect(within(empty).getByText("Say hello to your pro")).toBeTruthy());
+
+      expect(within(empty).queryByText("YP", HIDDEN)).toBeNull();
+      expect(within(empty).queryByText("Y", HIDDEN)).toBeNull();
+      expect(screen.getByTestId("chat-peer-name").props.children).toBe("Your pro");
     });
   });
 
@@ -395,6 +449,20 @@ describe("the job chat screen (#74)", () => {
       await waitFor(() => expect(within(empty).getByText("Say hello to Dan")).toBeTruthy());
       expect(screen.queryByTestId("chat-list")).toBeNull();
       expect(screen.getByTestId("chat-input")).toBeTruthy();
+    });
+
+    it("an empty thread on a closed job says nothing was sent, with no hello", async () => {
+      mockApi.customerJob = customerJob({ status: "confirmed" });
+      await renderChat();
+
+      expect(await screen.findByTestId("chat-closed")).toBeTruthy();
+      const empty = screen.getByTestId("chat-empty");
+      expect(within(empty).getByText("No messages here")).toBeTruthy();
+      expect(
+        within(empty).getByText("Nothing was sent in this chat before it closed."),
+      ).toBeTruthy();
+      expect(screen.queryByText("Say hello to Dan")).toBeNull();
+      expect(screen.queryByTestId("chat-input")).toBeNull();
     });
   });
 
@@ -454,6 +522,47 @@ describe("the job chat screen (#74)", () => {
       },
     );
 
+    it("every bubble carries its own time, each bubble of one run too", async () => {
+      const newerTheirs = message(1, { sender: "pro" });
+      const olderTheirs = message(2, { sender: "pro" });
+      const mine = message(7, { sender: "me" });
+      mockApi.messages = () => Promise.resolve(page([newerTheirs, olderTheirs, mine]));
+      await renderChat();
+      await screen.findByTestId("chat-list");
+
+      expect(screen.getAllByTestId("chat-time")).toHaveLength(3);
+      for (const stored of [newerTheirs, olderTheirs, mine]) {
+        const bubble = screen.getByTestId(`chat-message-${stored.id}`);
+        expect(within(bubble).getAllByTestId("chat-time")).toHaveLength(1);
+        expect(within(bubble).getByTestId("chat-time").props.children).toBe(timeOf(stored));
+      }
+      // One run (a minute apart): two different times, one per bubble.
+      expect(timeOf(newerTheirs)).not.toBe(timeOf(olderTheirs));
+    });
+
+    it("theirs never shows a receipt, even when the answer carries one", async () => {
+      const theirs = { ...message(1, { sender: "pro" }), receipt: "seen" } as ChatMessage;
+      mockApi.messages = () => Promise.resolve(page([theirs]));
+      await renderChat();
+      await screen.findByTestId("chat-list");
+      await waitFor(() => expect(screen.getByTestId("chat-peer-name")).toBeTruthy());
+
+      const bubble = screen.getByTestId(`chat-message-${theirs.id}`);
+      expect(within(bubble).queryByTestId("chat-receipt", HIDDEN)).toBeNull();
+      expect(bubble.props.accessibilityLabel).toBe(`Dan, ${timeOf(theirs)}: ${theirs.body}`);
+    });
+
+    it("an unknown receipt reads as sent", async () => {
+      const mine = { ...message(1, { sender: "me" }), receipt: "read" } as ChatMessage;
+      mockApi.messages = () => Promise.resolve(page([mine]));
+      await renderChat();
+      await screen.findByTestId("chat-list");
+
+      const bubble = screen.getByTestId(`chat-message-${mine.id}`);
+      expect(bubble.props.accessibilityLabel).toBe(`You, ${timeOf(mine)}: ${mine.body}. Sent`);
+      expect(within(bubble).getAllByTestId("chat-receipt-tick", HIDDEN)).toHaveLength(1);
+    });
+
     it("notes the masking under my redacted message only", async () => {
       const mineRedacted = message(1, {
         sender: "me",
@@ -512,6 +621,66 @@ describe("the job chat screen (#74)", () => {
       expect(screen.getByTestId(`chat-message-${newest.id}`)).toBeTruthy();
       expect(screen.getByText(START)).toBeTruthy();
       expect(screen.queryByTestId("chat-older-load")).toBeNull();
+    });
+
+    it("reaching the top at rest asks for the older page once", async () => {
+      const newest = message(1);
+      const older = message(91, { body: remember("An older message about the shutoff valve.") });
+      mockApi.messages = (options) =>
+        Promise.resolve(
+          options.query?.cursor === "cursor-1"
+            ? page([older])
+            : page([newest], { next_cursor: "cursor-1" }),
+        );
+      await renderChat();
+      await screen.findByTestId("chat-list");
+      expect(olderCalls()).toHaveLength(0);
+
+      await reachTop();
+      await flush();
+
+      expect(olderCalls()).toHaveLength(1);
+      expect(olderCalls()[0]?.[1]?.query).toEqual({ cursor: "cursor-1" });
+      expect(await screen.findByTestId(`chat-message-${older.id}`)).toBeTruthy();
+    });
+
+    it("after a failed page only the button asks again: reaching the top asks nothing", async () => {
+      const newest = message(1);
+      const older = message(92, { body: remember("An older message about the water heater.") });
+      let olderAsks = 0;
+      mockApi.messages = (options) => {
+        if (options.query?.cursor !== "cursor-1") {
+          return Promise.resolve(page([newest], { next_cursor: "cursor-1" }));
+        }
+        olderAsks += 1;
+        return olderAsks === 1
+          ? Promise.reject(new NetworkError(false))
+          : Promise.resolve(page([older]));
+      };
+      await renderChat();
+      await screen.findByTestId("chat-list");
+
+      await reachTop();
+      await flush();
+
+      expect(olderCalls()).toHaveLength(1);
+      const footer = screen.getByTestId("chat-older");
+      expect(within(footer).getByText("We couldn't load older messages.")).toBeTruthy();
+      expect(screen.getByTestId("chat-older-load").props.accessibilityLabel).toBe("Try again");
+
+      await reachTop();
+      await flush();
+      expect(olderCalls()).toHaveLength(1);
+      expect(screen.getByTestId("chat-older-load").props.accessibilityLabel).toBe("Try again");
+
+      await act(async () => fireEvent.press(screen.getByTestId("chat-older-load")));
+      await flush();
+
+      expect(olderCalls()).toHaveLength(2);
+      expect(olderCalls()[1]?.[1]?.query).toEqual({ cursor: "cursor-1" });
+      expect(await screen.findByTestId(`chat-message-${older.id}`)).toBeTruthy();
+      expect(screen.queryByText("We couldn't load older messages.")).toBeNull();
+      expect(screen.getByText(START)).toBeTruthy();
     });
 
     it("says where the conversation starts when there is no cursor", async () => {
@@ -668,7 +837,163 @@ describe("the job chat screen (#74)", () => {
       expect(screen.getByTestId("chat-pending-status").props.children).toBe(FAILED);
       expect(screen.getByTestId("chat-too-fast").props.children).toBe(TOO_FAST);
       expect(screen.getByText(TOO_FAST)).toBeTruthy();
+      expect(announcements()).toEqual([TOO_FAST]);
+    });
+
+    it("a bubble on its way shows the clock and no tick", async () => {
+      const held = deferred<ChatMessage>();
+      mockApi.send = () => held.promise;
+      await renderChat();
+      await screen.findByTestId("chat-input");
+
+      await typeAndSend("Leaving the shop now");
+
+      const pendingBubble = screen.getByTestId(/^chat-pending-/);
+      expect(within(pendingBubble).getAllByTestId("chat-receipt-clock", HIDDEN)).toHaveLength(1);
+      expect(within(pendingBubble).queryAllByTestId("chat-receipt-tick", HIDDEN)).toHaveLength(0);
+      expect(within(pendingBubble).queryByTestId("chat-time")).toBeNull();
+      expect(screen.queryByText("Sending…")).toBeNull();
+
+      await act(async () => held.reject(new NetworkError(false)));
+      await flush();
+    });
+
+    it("server trouble (500): the bubble says not sent, and a tap sends it again", async () => {
+      const typed = "Is the part in stock";
+      const stored = message(903, { sender: "me", body: typed, created_at: iso(0) });
+      let attempts = 0;
+      mockApi.send = () => {
+        attempts += 1;
+        return attempts === 1
+          ? Promise.reject(new ApiError(500, "internal"))
+          : Promise.resolve(stored);
+      };
+      await renderChat();
+      await screen.findByTestId("chat-input");
+
+      await typeAndSend(typed);
+      await flush();
+
+      expect(screen.getByTestId("chat-pending-status").props.children).toBe(FAILED);
+      expect(screen.queryByTestId("chat-too-fast")).toBeNull();
       expect(announcements()).toEqual(["Message not sent"]);
+
+      const failed = screen.getByRole("button", { name: `You, not sent: ${typed}` });
+      await act(async () => fireEvent.press(failed));
+      await flush();
+
+      expect(postCalls(MESSAGES_PATH)).toHaveLength(2);
+      expect(postCalls(MESSAGES_PATH)[1]?.[1]).toEqual({ body: typed });
+      expect(await screen.findByTestId(`chat-message-${stored.id}`)).toBeTruthy();
+      expect(screen.queryByTestId("chat-pending-status")).toBeNull();
+      expect(announcements()).toEqual(["Message not sent", "Message sent"]);
+    });
+
+    it("too fast, then a tap that goes through: the notice leaves", async () => {
+      const typed = "Can you come earlier";
+      const stored = message(904, { sender: "me", body: typed, created_at: iso(0) });
+      let attempts = 0;
+      mockApi.send = () => {
+        attempts += 1;
+        return attempts === 1
+          ? Promise.reject(new ApiError(429, "rate_limited"))
+          : Promise.resolve(stored);
+      };
+      await renderChat();
+      await screen.findByTestId("chat-input");
+
+      await typeAndSend(typed);
+      await flush();
+      expect(screen.getByTestId("chat-too-fast")).toBeTruthy();
+
+      await act(async () =>
+        fireEvent.press(screen.getByRole("button", { name: `You, not sent: ${typed}` })),
+      );
+      await flush();
+
+      expect(screen.queryByTestId("chat-too-fast")).toBeNull();
+      expect(await screen.findByTestId(`chat-message-${stored.id}`)).toBeTruthy();
+      expect(screen.queryByTestId("chat-pending-status")).toBeNull();
+      expect(announcements()).toEqual([TOO_FAST, "Message sent"]);
+    });
+
+    it("too fast, then offline on the retry: the notice leaves, the retry stays", async () => {
+      const typed = "Should I turn off the water";
+      let attempts = 0;
+      mockApi.send = () => {
+        attempts += 1;
+        return Promise.reject(
+          attempts === 1 ? new ApiError(429, "rate_limited") : new NetworkError(false),
+        );
+      };
+      await renderChat();
+      await screen.findByTestId("chat-input");
+
+      await typeAndSend(typed);
+      await flush();
+      expect(screen.getByTestId("chat-too-fast")).toBeTruthy();
+
+      await act(async () =>
+        fireEvent.press(screen.getByRole("button", { name: `You, not sent: ${typed}` })),
+      );
+      await flush();
+
+      expect(postCalls(MESSAGES_PATH)).toHaveLength(2);
+      expect(screen.queryByTestId("chat-too-fast")).toBeNull();
+      expect(screen.getByTestId("chat-pending-status").props.children).toBe(FAILED);
+      expect(screen.getByRole("button", { name: `You, not sent: ${typed}` })).toBeTruthy();
+      expect(announcements()).toEqual([TOO_FAST, "Message not sent"]);
+    });
+
+    it("a failed bubble stops offering a retry once a later send finds the chat closed", async () => {
+      const first = "Do you need the gate code";
+      let attempts = 0;
+      mockApi.send = () => {
+        attempts += 1;
+        return Promise.reject(
+          attempts === 1 ? new NetworkError(false) : new ApiError(409, "chat_closed"),
+        );
+      };
+      await renderChat();
+      await screen.findByTestId("chat-input");
+
+      await typeAndSend(first);
+      await flush();
+      expect(screen.getByRole("button", { name: `You, not sent: ${first}` })).toBeTruthy();
+
+      await typeAndSend("One more question");
+      await flush();
+
+      expect(await screen.findByTestId("chat-closed")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: `You, not sent: ${first}` })).toBeNull();
+      expect(
+        screen.getAllByTestId("chat-pending-status").map((status) => status.props.children),
+      ).toEqual(["Not sent", "Not sent"]);
+      // Pressing where the retry was sends nothing.
+      await act(async () => fireEvent.press(screen.getByLabelText(`You, not sent: ${first}`)));
+      await flush();
+      expect(postCalls(MESSAGES_PATH)).toHaveLength(2);
+      expect(announcements()).toEqual(["Message not sent", CLOSED]);
+    });
+
+    it("a send answered after sign-out draws and says nothing", async () => {
+      const held = deferred<ChatMessage>();
+      mockApi.send = () => held.promise;
+      await renderChat();
+      await screen.findByTestId("chat-input");
+
+      await typeAndSend("See you at nine");
+      expect(screen.getByTestId(/^chat-pending-/)).toBeTruthy();
+
+      await act(async () => setSession(SIGNED_OUT_SESSION, 2));
+      await act(async () => held.reject(new SessionExpiredError("superseded")));
+      await flush();
+
+      expect(announcements()).toEqual([]);
+      expect(screen.queryByTestId("chat-pending-status", HIDDEN)).toBeNull();
+      expect(screen.queryByTestId("chat-too-fast", HIDDEN)).toBeNull();
+      expect(screen.getByTestId("chat-screen")).toBeTruthy();
+      expect(client.getQueryData(["chat", JOB_ID, 2])).toBeUndefined();
     });
 
     it("refused (422): the bubble says not sent and a tap does not send it again", async () => {
@@ -703,7 +1028,7 @@ describe("the job chat screen (#74)", () => {
       expect(screen.queryByTestId("chat-input")).toBeNull();
       expect(screen.queryByTestId("chat-send")).toBeNull();
       expect(screen.getByTestId("chat-pending-status").props.children).toBe("Not sent");
-      expect(announcements()).toEqual(["Message not sent"]);
+      expect(announcements()).toEqual([CLOSED]);
     });
   });
 
@@ -730,6 +1055,28 @@ describe("the job chat screen (#74)", () => {
 
       expect(await screen.findByTestId("chat-closed")).toBeTruthy();
       expect(screen.queryByTestId("chat-input")).toBeNull();
+    });
+
+    it("a failed bubble stops offering a retry once the job view says the chat closed", async () => {
+      mockApi.messages = () => Promise.resolve(page([message(1)]));
+      mockApi.send = () => Promise.reject(new NetworkError(false));
+      await renderChat();
+      await screen.findByTestId("chat-input");
+      await waitFor(() => expect(screen.getByTestId("chat-peer-name")).toBeTruthy());
+
+      const typed = "I left the side door open";
+      await typeAndSend(typed);
+      await flush();
+      expect(screen.getByRole("button", { name: `You, not sent: ${typed}` })).toBeTruthy();
+
+      mockApi.customerJob = customerJob({ status: "confirmed" });
+      await act(async () => client.invalidateQueries({ queryKey: ["job", REQUEST_ID, 1] }));
+      await flush();
+
+      expect(await screen.findByTestId("chat-closed")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: `You, not sent: ${typed}` })).toBeNull();
+      expect(screen.getByTestId("chat-pending-status").props.children).toBe("Not sent");
+      expect(screen.getByLabelText(`You, not sent: ${typed}`)).toBeTruthy();
     });
 
     it("a job still in progress keeps the composer", async () => {
@@ -765,6 +1112,30 @@ describe("the job chat screen (#74)", () => {
       expect(postCalls(READ_PATH)).toHaveLength(1);
     });
 
+    it("a pro's mark updates the job screen's answer and the job's row in Your jobs", async () => {
+      setSession(signedIn({ role: "pro" }), 1);
+      mockApi.proJob = proJob({ unread_messages: 2 });
+      client.setQueryData(["pro-jobs", "active", 1], [proJob({ unread_messages: 2 })]);
+      const newest = message(1, { sender: "customer" });
+      mockApi.messages = () =>
+        Promise.resolve(page([newest, message(2, { sender: "customer" })], { unread_count: 2 }));
+      mockApi.read = () => Promise.resolve({ unread_count: 0 });
+      await renderChat(PRO_URL);
+      await screen.findByTestId("chat-list");
+      await waitFor(() =>
+        expect(screen.getByTestId("chat-peer-name").props.children).toBe("Jamie"),
+      );
+
+      await waitFor(() => expect(postCalls(READ_PATH)).toHaveLength(1));
+      await flush();
+
+      expect(postCalls(READ_PATH)[0]?.[1]).toEqual({ up_to: newest.id });
+      expect(client.getQueryData<ProJob>(["pro-jobs", "job", JOB_ID, 1])?.unread_messages).toBe(0);
+      expect(
+        client.getQueryData<ProJob[]>(["pro-jobs", "active", 1])?.map((job) => job.unread_messages),
+      ).toEqual([0]);
+    });
+
     it("does not mark a chat with nothing unread", async () => {
       mockApi.messages = () => Promise.resolve(page([message(1)], { unread_count: 0 }));
       await renderChat();
@@ -783,7 +1154,34 @@ describe("the job chat screen (#74)", () => {
       expect(screen.getByTestId("chat-not-found")).toBeTruthy();
       expect(screen.getByText("This conversation isn't available")).toBeTruthy();
       expect(getCalls(MESSAGES_PATH)).toHaveLength(0);
+      expect(getCalls(CUSTOMER_JOB_PATH)).toHaveLength(0);
+      expect(getCalls(PRO_JOB_PATH)).toHaveLength(0);
       expect(screen.queryByTestId("chat-input")).toBeNull();
+    });
+
+    it("a pro's malformed id is not found, and nothing is asked", async () => {
+      setSession(signedIn({ role: "pro" }), 1);
+      await renderChat("/jobs/not-a-uuid/chat");
+      await flush();
+
+      expect(screen.getByTestId("chat-not-found")).toBeTruthy();
+      expect(getCalls(MESSAGES_PATH)).toHaveLength(0);
+      expect(getCalls(PRO_JOB_PATH)).toHaveLength(0);
+      expect(getCalls(CUSTOMER_JOB_PATH)).toHaveLength(0);
+      expect(screen.queryByTestId("chat-input")).toBeNull();
+    });
+
+    it("a malformed request asks for no job, and the header says 'Your pro'", async () => {
+      mockApi.messages = () => Promise.resolve(page([message(1)]));
+      await renderChat(`/jobs/${JOB_ID}/chat?request=garbage`);
+      await screen.findByTestId("chat-list");
+      await flush();
+
+      expect(screen.getByTestId("chat-peer-name").props.children).toBe("Your pro");
+      expect(getCalls(CUSTOMER_JOB_PATH)).toHaveLength(0);
+      expect(getCalls(PRO_JOB_PATH)).toHaveLength(0);
+      expect(getCalls(MESSAGES_PATH)).toHaveLength(1);
+      expect(screen.getByTestId("chat-input")).toBeTruthy();
     });
 
     it("a 404 on the messages is not found", async () => {

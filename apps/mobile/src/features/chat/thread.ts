@@ -71,6 +71,8 @@ export function appendOlder(held: Thread, page: ChatPage): Thread {
     messages: union(held.messages, page.items),
     olderCursor: page.next_cursor,
     unreadCount: held.unreadCount,
+    // My sent messages still unconfirmed by a newest page stay so (an older page never shows them).
+    ...(held.local ? { local: held.local } : {}),
   };
 }
 

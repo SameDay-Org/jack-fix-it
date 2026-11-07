@@ -11,6 +11,7 @@ import {
   chatHref,
   chatQueryKey,
   chatQueryOptions,
+  isChatGone,
   markRead,
   sendMessage,
   useChat,
@@ -448,6 +449,106 @@ describe("useChat", () => {
     expect(result.current.generation).toBe(2);
     expect(result.current.data).toBeUndefined();
     expect(client.getQueryData(chatQueryKey(JOB, 2))).toBeUndefined();
+  });
+});
+
+describe("isChatGone", () => {
+  it.each([
+    ["a 404", new ApiError(404, "not_found"), true],
+    ["a 403", new ApiError(403, "forbidden"), false],
+    ["a 500", new ApiError(500, "internal_error"), false],
+    ["no network", new NetworkError(false), false],
+    ["a timeout", new NetworkError(true), false],
+    ["no error", undefined, false],
+    ["a plain error", new Error("not_found"), false],
+  ])("reads %s as %p", (_name, error, gone) => {
+    expect(isChatGone(error)).toBe(gone);
+  });
+});
+
+describe("useChat after the chat is gone", () => {
+  const renderChat = (client: QueryClient) =>
+    renderHook(() => useChat(JOB), { wrapper: wrapper(client) });
+
+  it("a 404 stops the polling: nothing more on poll intervals, refocus or the foreground", async () => {
+    fakeClock();
+    const gone = new ApiError(404, "not_found");
+    get.mockReset().mockRejectedValue(gone);
+    const { result } = await renderChat(newQueryClient());
+    await waitFor(() => expect(result.current.error).toBe(gone));
+    expect(messageGets()).toBe(1);
+
+    await advance(chatConfig.pollMs);
+    await advance(chatConfig.pollMs);
+    await advance(chatConfig.pollMs);
+    await flush();
+    expect(messageGets()).toBe(1);
+
+    await setFocused(false);
+    await setFocused(true);
+    await flush();
+    await advance(chatConfig.pollMs);
+    expect(messageGets()).toBe(1);
+
+    await moveApp("background");
+    await moveApp("active");
+    await flush();
+    await advance(chatConfig.pollMs);
+    expect(messageGets()).toBe(1);
+
+    // The screen's own refetch asks nothing either.
+    await act(async () => {
+      await result.current.refetch();
+    });
+    expect(messageGets()).toBe(1);
+    expect(isChatGone(result.current.error)).toBe(true);
+  });
+
+  it("a 404 after a first answer stops the polling too", async () => {
+    fakeClock();
+    const { result } = await renderChat(newQueryClient());
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    get.mockRejectedValue(new ApiError(404, "not_found"));
+    await advance(chatConfig.pollMs);
+    await waitFor(() => expect(isChatGone(result.current.error)).toBe(true));
+    expect(messageGets()).toBe(2);
+
+    await advance(chatConfig.pollMs);
+    await advance(chatConfig.pollMs);
+    await setFocused(false);
+    await setFocused(true);
+    await moveApp("background");
+    await moveApp("active");
+    await flush();
+    expect(messageGets()).toBe(2);
+  });
+
+  it.each([
+    ["a 500", new ApiError(500, "internal_error")],
+    ["a 403", new ApiError(403, "forbidden")],
+    ["no network", new NetworkError(false)],
+  ])("%s keeps polling and asks again on return", async (_name, error) => {
+    fakeClock();
+    get.mockReset().mockRejectedValue(error);
+    const { result } = await renderChat(newQueryClient());
+    await waitFor(() => expect(result.current.error).toBe(error));
+    expect(messageGets()).toBe(1);
+
+    await advance(chatConfig.pollMs);
+    await waitFor(() => expect(messageGets()).toBe(2));
+    await advance(chatConfig.pollMs);
+    await waitFor(() => expect(messageGets()).toBe(3));
+
+    await moveApp("background");
+    await moveApp("active");
+    await waitFor(() => expect(messageGets()).toBe(4));
+
+    // It answers again: the thread shows and polling goes on.
+    get.mockResolvedValue(page([m(9), m(8)], "cursor-8", 1));
+    await advance(chatConfig.pollMs);
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(ids(result.current.data)).toEqual([m(9).id, m(8).id]);
   });
 });
 
