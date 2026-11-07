@@ -53,13 +53,33 @@
       "supportPro": "Your card shows only the city and state.",
       "label": "Home"
     },
+    "photo": {
+      "title": "Let's see that face!",
+      "support": "Your photo goes on your card. Face the camera in good light.",
+      "take": "Take photo",
+      "use": "Use photo",
+      "retry": "Try again",
+      "retake": "Retake",
+      "allow": "Turn on camera",
+      "openSettings": "Open settings",
+      "library": "Choose a photo",
+      "preview": "Camera preview",
+      "yours": "Your photo",
+      "uploading": "Uploading your photo",
+      "blockedTitle": "Camera access is off",
+      "blockedBody": "Turn it on for Jack in Settings, or choose a photo from this phone.",
+      "unavailableTitle": "The camera couldn't start",
+      "unavailableBody": "Choose a photo from this phone instead."
+    },
     "next": "Continue",
-    "finish": "Done",
     "errors": {
       "nameInvalid": "Use letters, spaces, hyphens, apostrophes or periods.",
       "nameSave": "We couldn't save your name. Try again.",
       "homeInvalid": "We couldn't use this address. Check the fields and try again.",
-      "homeSave": "We couldn't save where you live. Try again."
+      "homeSave": "We couldn't save where you live. Try again.",
+      "photoSave": "We couldn't save your photo. Try again.",
+      "photoRejected": "We couldn't use this photo. Take another one.",
+      "photoPick": "We couldn't get the photo. Try again."
     }
   },
   "login": {

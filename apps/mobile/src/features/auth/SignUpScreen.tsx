@@ -1,5 +1,11 @@
 import * as Haptics from "expo-haptics";
-import { Redirect, router, useLocalSearchParams, usePreventRemove } from "expo-router";
+import {
+  Redirect,
+  router,
+  useIsFocused,
+  useLocalSearchParams,
+  usePreventRemove,
+} from "expo-router";
 import { useCallback, useEffect, useRef, useState, type ComponentRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -30,6 +36,7 @@ import { offerPhoneStepAfterSignUp } from "@/features/phone/phoneFlow";
 import { BackButton } from "./components/BackButton";
 import { CredentialsFields } from "./components/CredentialsFields";
 import { FormError } from "./components/FormError";
+import { SelfieFrame } from "./components/SelfieFrame";
 import { deviceLocale } from "./locale";
 import type { SignUpRole } from "./roles";
 import {
@@ -41,6 +48,7 @@ import {
 } from "./signUpSteps";
 import { useCredentialsForm, type Credentials } from "./useCredentialsForm";
 import { useFocusedFieldInView } from "./useFocusedFieldInView";
+import { usePhotoStep } from "./usePhotoStep";
 import { useHomeStep, useNameStep } from "./useSignUpSteps";
 
 /** The page's side margin: the card is as wide as the content, up to its design width. */
@@ -129,8 +137,21 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
     role,
     useCallback(() => advanceFrom("home"), [advanceFrom]),
   );
-  const submit = { account: account.submitForm, name: name.submit, home: home.submit }[step];
-  const busy = { account: account.submitting, name: name.submitting, home: home.submitting }[step];
+  const photo = usePhotoStep(useCallback(() => advanceFrom("photo"), [advanceFrom]));
+  // The camera runs only while this screen is in front: a route pushed over sign-up releases it.
+  const focused = useIsFocused();
+  const submit = {
+    account: account.submitForm,
+    name: name.submit,
+    home: home.submit,
+    photo: photo.action.run,
+  }[step];
+  const busy = {
+    account: account.submitting,
+    name: name.submitting,
+    home: home.submitting,
+    photo: photo.submitting || photo.capturing,
+  }[step];
 
   // Past the account step the session belongs to the flow; a session that ends meanwhile (expired,
   // refused) sends the person back to Welcome, signed out.
@@ -282,6 +303,19 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
             />
           </View>
         );
+      case "photo":
+        return (
+          <View className="gap-6">
+            {heading(key, t("signUp.photo.title"), t("signUp.photo.support"))}
+            <FormError failure={failureOf(photo.failure)} testID="sign-up-photo-error" />
+            <SelfieFrame
+              photo={photo}
+              camera={photo.camera}
+              active={step === "photo" && focused}
+              testID="sign-up-photo"
+            />
+          </View>
+        );
     }
   };
 
@@ -297,8 +331,8 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
   const actionLabel =
     step === "account"
       ? t("signUp.submit")
-      : index === SIGN_UP_STEPS.length - 1
-        ? t("signUp.finish")
+      : step === "photo"
+        ? photo.action.label
         : t("signUp.next");
 
   return (
@@ -349,6 +383,7 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
               name={cardName}
               city={home.fields.city.trim()}
               state={home.fields.state.trim()}
+              photoUri={photo.photoUri}
               publicCode={user?.public_code}
               interactive
               testID="sign-up-card"
@@ -367,6 +402,7 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
             label={actionLabel}
             size="lg"
             loading={busy}
+            disabled={step === "photo" && photo.action.disabled}
             onPress={() => {
               if (!moving) void submit();
             }}
