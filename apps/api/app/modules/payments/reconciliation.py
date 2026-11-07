@@ -45,9 +45,26 @@ and is logged at debug level.
   goes back to quote_ready (SYSTEM); with no pending or accepted quote left it backs out to
   finding_pro (SYSTEM), as the expiry sweep (#51) would. Another quote can then be accepted.
 
-What people hear about (#65), `apply` returns for the handler to announce after the worker's
-commit: the job it booked (JobBooked: the customer and the pro get a push) or the booking a
-canceled payment reopened (BookingReopened: the customer gets one). Ids and the public code only.
+A payment left unpaid (#297) is closed by the worker's sweep (payments/tasks.py) through
+`close_unpaid`, under the same locks, request -> quote -> payment, on a payment still unpaid
+(requires_payment or failed, never processing), created before the sweep's cutoff, whose
+request is still accepted with the payment's quote as its accepted one; anything else is
+`not_due` and changes nothing. Then:
+- a PaymentIntent stored: `cancel_in_stripe`, nothing changes here. The sweep cancels the intent
+  in Stripe once this transaction ends (no lock held over the call), and Stripe's
+  payment_intent.canceled event reopens the quote above: one path for a canceled intent;
+- no PaymentIntent and no create ever attempted (payment_intent_requested_at NULL): no intent
+  exists in Stripe, so the payment is canceled here, along PAYMENT_TRANSITIONS, and the quote
+  and the request reopen as for the canceled event (`canceled_locally`). A payment call that
+  comes after finds the payment canceled (or the request reopened): 409, as for any closed one;
+- a create attempted and no intent stored (a lost answer): `unresolved`, nothing changes. The
+  intent may exist in Stripe: its own event (#296), the payment call's search or staff resolve
+  it; the sweep never creates or searches.
+
+What people hear about (#65) is returned for the caller to announce after its commit: `apply`
+returns the job it booked (JobBooked: the customer and the pro get a push) or the booking a
+canceled payment reopened (BookingReopened: the customer gets one), and `close_unpaid` carries
+the BookingReopened of a payment it canceled locally. Ids and the public code only.
 
 Statuses change only through the state machines (requests), conditional updates under the row
 locks (quotes, payments) and the job's insert in its default status (jobs). Logs carry ids, the
@@ -56,14 +73,15 @@ event type, statuses and Stripe codes only: no amounts, no customer data, no Pay
 
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import StrEnum
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.jobs.service import SYSTEM, JobScheduler, NewJob
-from app.modules.payments.models import CURRENCY, Payment, PaymentStatus
+from app.modules.payments.models import CURRENCY, UNPAID_STATUSES, Payment, PaymentStatus
 from app.modules.payments.repository import PaymentRepository
 from app.modules.payments.transitions import TERMINAL_STATES, allowed
 from app.modules.pros.service import ProService
@@ -124,8 +142,8 @@ class JobBooked:
 
 @dataclass(frozen=True)
 class BookingReopened:
-    """The event canceled this payment and reopened its request's quotes (#65): announced to
-    the customer. A payment is canceled once, so its id names the event."""
+    """This payment was canceled and its request's quotes reopened (#65): announced to the
+    customer. A payment is canceled once, so its id names the event."""
 
     payment_id: uuid.UUID
     request_id: uuid.UUID
@@ -134,6 +152,28 @@ class BookingReopened:
 
 
 Reconciled = JobBooked | BookingReopened
+
+
+class UnpaidOutcome(StrEnum):
+    """What `PaymentReconciler.close_unpaid` found (see the module doc)."""
+
+    CANCEL_IN_STRIPE = "cancel_in_stripe"
+    CANCELED_LOCALLY = "canceled_locally"
+    UNRESOLVED = "unresolved"
+    NOT_DUE = "not_due"
+
+
+@dataclass(frozen=True)
+class UnpaidCheck:
+    outcome: UnpaidOutcome
+    # The payment's, its quote's and its request's ids, for the sweep's logs.
+    ids: dict[str, str] = field(default_factory=dict)
+    # The PaymentIntent to cancel (cancel_in_stripe only). Never logged.
+    intent_id: str | None = None
+    # The payment's updated_at under the lock (cancel_in_stripe only): versions the cancel key.
+    version: datetime | None = None
+    # The quotes it reopened (canceled_locally only), to announce after the commit (#65).
+    reopened: BookingReopened | None = None
 
 
 @dataclass(frozen=True)
@@ -170,21 +210,53 @@ class PaymentReconciler:
         adopting = locked.payment.stripe_payment_intent_id is None
         if adopting and not await self._adopt(event, locked):
             return None
-        outcome = await self._move(event, locked, to)
+        outcome = await self._move(locked, to, failure_code=event.failure_code)
         if adopting:
             # After the event's last write: a step that fails rolls the adoption back, unlogged.
             logger.warning("payment_intent_adopted_from_event", extra=locked.ids)
         return outcome
 
+    async def close_unpaid(self, payment_id: uuid.UUID, created_before: datetime) -> UnpaidCheck:
+        """Closes a payment left unpaid since before `created_before`, or says how the sweep
+        closes it (see the module doc). The caller owns the transaction and commits it."""
+        found = await self._payments.find_ids(payment_id)
+        if found is None:  # pragma: no cover - payments are never deleted
+            return UnpaidCheck(UnpaidOutcome.NOT_DUE)
+        locked = await self._lock_rows(*found, extra={})
+        payment, request, quote = locked.payment, locked.request, locked.quote
+        if (
+            payment.status not in UNPAID_STATUSES
+            or payment.created_at >= created_before
+            or request.status is not RequestStatus.ACCEPTED
+            or not quote.accepted
+        ):
+            # Paid, processing or canceled meanwhile, or the request moved on.
+            return UnpaidCheck(UnpaidOutcome.NOT_DUE, locked.ids)
+        if payment.stripe_payment_intent_id is not None:
+            return UnpaidCheck(
+                UnpaidOutcome.CANCEL_IN_STRIPE,
+                locked.ids,
+                payment.stripe_payment_intent_id,
+                payment.updated_at,
+            )
+        if payment.payment_intent_requested_at is not None:
+            return UnpaidCheck(UnpaidOutcome.UNRESOLVED, locked.ids)
+        outcome = await self._move(locked, PaymentStatus.CANCELED)
+        return UnpaidCheck(
+            UnpaidOutcome.CANCELED_LOCALLY,
+            locked.ids,
+            reopened=outcome if isinstance(outcome, BookingReopened) else None,
+        )
+
     async def _move(
-        self, event: IntentEvent, locked: _Locked, to: PaymentStatus
+        self, locked: _Locked, to: PaymentStatus, *, failure_code: str | None = None
     ) -> Reconciled | None:
         """The payment's move to `to` and what it does (see the module doc)."""
         current = locked.payment.status
         if to is PaymentStatus.FAILED and current not in TERMINAL_STATES:
             # Every failed attempt, even a repeat of the status: the code helps support.
             logger.warning(
-                "payment_attempt_failed", extra={**locked.ids, "stripe_code": event.failure_code}
+                "payment_attempt_failed", extra={**locked.ids, "stripe_code": failure_code}
             )
         if not allowed(current, to):
             logger.debug(
@@ -216,7 +288,27 @@ class PaymentReconciler:
             if found is None:
                 _unknown_intent(event)
                 return None
-        payment_id, request_id, quote_id = found
+        locked = await self._lock_rows(
+            *found,
+            extra={"stripe_event_id": event.stripe_event_id, "event_type": event.event_type},
+        )
+        held = locked.payment.stripe_payment_intent_id
+        if held is not None and held != event.intent_id:
+            # Found through the metadata: not this payment's to adopt.
+            _unknown_intent(event, reason="payment_holds_another_intent")
+            return None
+        return locked
+
+    async def _lock_rows(
+        self,
+        payment_id: uuid.UUID,
+        request_id: uuid.UUID,
+        quote_id: uuid.UUID,
+        *,
+        extra: dict[str, str],
+    ) -> _Locked:
+        """The request, the quote and the payment, locked in that order and read as last
+        committed; `extra` joins their ids in the logs."""
         request = await self._requests.lock(request_id)
         quote = await self._quotes.lock_of_request(quote_id, request_id)
         payment = await self._payments.get_for_update(payment_id)
@@ -226,14 +318,8 @@ class PaymentReconciler:
             "payment_id": str(payment.id),
             "quote_id": str(quote.id),
             "service_request_id": str(request.id),
-            "stripe_event_id": event.stripe_event_id,
-            "event_type": event.event_type,
+            **extra,
         }
-        held = payment.stripe_payment_intent_id
-        if held is not None and held != event.intent_id:
-            # Found through the metadata: not this payment's to adopt.
-            _unknown_intent(event, reason="payment_holds_another_intent")
-            return None
         return _Locked(request, quote, payment, ids)
 
     async def _named_payment(

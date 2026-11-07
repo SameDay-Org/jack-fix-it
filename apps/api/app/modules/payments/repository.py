@@ -1,9 +1,10 @@
 import uuid
+from datetime import datetime
 
 from sqlalchemy import ColumnElement, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.payments.models import Payment, PaymentStatus
+from app.modules.payments.models import UNPAID_STATUSES, Payment, PaymentStatus
 
 
 class PaymentRepository:
@@ -42,6 +43,25 @@ class PaymentRepository:
         statement = select(Payment.id, Payment.request_id, Payment.quote_id).where(where)
         row = (await self._session.execute(statement)).one_or_none()
         return None if row is None else (row.id, row.request_id, row.quote_id)
+
+    async def unpaid_due(
+        self, created_before: datetime, after: uuid.UUID | None, limit: int
+    ) -> list[uuid.UUID]:
+        """Up to `limit` ids, in id order after `after`, of the payments still waiting to be
+        paid (requires_payment or failed; never processing) created before `created_before`
+        (#297). Read without a lock: the caller locks each one and checks it again."""
+        statement = (
+            select(Payment.id)
+            .where(
+                Payment.status.in_(UNPAID_STATUSES),
+                Payment.created_at < created_before,
+            )
+            .order_by(Payment.id)
+            .limit(limit)
+        )
+        if after is not None:
+            statement = statement.where(Payment.id > after)
+        return list((await self._session.scalars(statement)).all())
 
     async def move_status(
         self, payment_id: uuid.UUID, from_status: PaymentStatus, to: PaymentStatus

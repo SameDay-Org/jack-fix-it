@@ -48,6 +48,7 @@ CUSTOMER_KEYS = {
     "eta_at",
     "arrival_code",
     "timeline",
+    "photos",
     "amount_cents",
     "tax_cents",
     "customer_total_cents",
@@ -64,6 +65,8 @@ PRO_KEYS = {
     "checked_in_at",
     "arrival_code_locked",
     "started_at",
+    "completed_at",
+    "photos",
     "pro_payout_cents",
 }
 BASE = "/v1/pros/me/jobs"
@@ -71,7 +74,7 @@ BASE = "/v1/pros/me/jobs"
 
 @pytest.fixture(autouse=True)
 def queue(app: FastAPI) -> RecordingQueue:
-    """The job pushes (#65) are queued here, never on Redis."""
+    """On my way, which some reads go through, pushes the customer (#65): recorded here."""
     return record_pushes(app)
 
 

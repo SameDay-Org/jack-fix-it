@@ -19,6 +19,7 @@ from sqlalchemy import URL, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.errors import AppError
+from app.integrations.storage import Storage
 from app.modules.addresses.models import Address
 from app.modules.jobs.errors import ArrivalCodeInvalidError, ArrivalCodeLockedError
 from app.modules.jobs.execution import JobExecutionConfig, JobExecutionService
@@ -39,8 +40,20 @@ __all__ = ["sentry_transport"]  # a fixture, used by name
 
 CODE = "0427"
 CONFIG = JobExecutionConfig(
-    max_attempts=5, list_default_limit=20, list_max_limit=50, enqueue_timeout_seconds=0.05
+    max_attempts=5,
+    list_default_limit=20,
+    list_max_limit=50,
+    photo_max_per_kind=10,
+    photo_attach_max_age=timedelta(minutes=720),
+    photo_url_ttl_seconds=300,
+    enqueue_timeout_seconds=1.0,
 )
+
+
+def no_storage() -> Storage:
+    raise AssertionError("these jobs have no photo to sign")
+
+
 UUID = re.compile(
     r"[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}"
 )
@@ -140,9 +153,11 @@ async def test_concurrent_wrong_codes_cannot_exceed_five(committed_job: Committe
 
     async def wrong_try() -> AppError:
         async with committed_job.sessions() as session:
-            service = JobExecutionService(session, CONFIG, RecordingQueue())
+            service = JobExecutionService(session, CONFIG, no_storage)
             try:
-                await service.check_in(committed_job.pro, committed_job.job_id, "9999", 0.0, 0.0)
+                await service.check_in(
+                    committed_job.pro, committed_job.job_id, "9999", 0.0, 0.0, RecordingQueue()
+                )
             except (ArrivalCodeInvalidError, ArrivalCodeLockedError) as error:
                 return error
             raise AssertionError("a wrong code was accepted")
@@ -179,11 +194,11 @@ async def test_the_code_is_compared_in_constant_time(
         return real(a, b)
 
     monkeypatch.setattr("app.modules.jobs.execution.hmac.compare_digest", compare_digest)
-    service = JobExecutionService(db_session, CONFIG, RecordingQueue())
+    service = JobExecutionService(db_session, CONFIG, no_storage)
 
     with pytest.raises(ArrivalCodeInvalidError):
-        await service.check_in(pro, job.id, "9999", 0.0, 0.0)
-    await service.check_in(pro, job.id, CODE, 0.0, 0.0)
+        await service.check_in(pro, job.id, "9999", 0.0, 0.0, RecordingQueue())
+    await service.check_in(pro, job.id, CODE, 0.0, 0.0, RecordingQueue())
 
     assert calls == [(CODE.encode(), b"9999"), (CODE.encode(), CODE.encode())]
 

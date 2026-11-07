@@ -41,6 +41,7 @@ QUOTE_ID = "1a2b3c4d-bbbb-4ccc-8ddd-eeefff000111"
 SERVICE_REQUEST_ID = "2b3c4d5e-cccc-4ddd-8eee-fff000111222"
 CUSTOMER_KEY = f"customer:{USER_ID}"
 INTENT_KEY = f"payment_intent:{PAYMENT_ID}"
+CANCEL_KEY = f"payment_intent_cancel:{PAYMENT_ID}"
 TRANSFER_GROUP = f"request:{SERVICE_REQUEST_ID}"
 METADATA = {"payment_id": PAYMENT_ID, "quote_id": QUOTE_ID, "request_id": SERVICE_REQUEST_ID}
 # What a PaymentIntent create must never carry: a capture to confirm later (ADR 0006), a
@@ -158,6 +159,64 @@ async def test_retrieve_payment_intent_reads_the_status() -> None:
     [(method, url, _, form)] = http.sent
     assert (method, url) == ("get", f"https://api.stripe.com/v1/payment_intents/{INTENT}")
     assert form == {}
+
+
+async def test_cancel_payment_intent_sends_one_idempotent_abandoned_cancel() -> None:
+    wrapper, http = client((200, intent_body(status="canceled")))
+
+    canceled = await wrapper.cancel_payment_intent(INTENT, idempotency_key=CANCEL_KEY)
+
+    assert canceled is True
+    [(method, url, headers, form)] = http.sent
+    assert (method, url) == ("post", f"https://api.stripe.com/v1/payment_intents/{INTENT}/cancel")
+    assert headers["Idempotency-Key"] == CANCEL_KEY
+    assert form == {"cancellation_reason": ["abandoned"]}
+
+
+async def test_cancel_of_an_intent_stripe_cannot_cancel_is_false() -> None:
+    """Processing, succeeded or canceled already: Stripe's unexpected_state is an answer."""
+    wrapper, _ = client(
+        (
+            400,
+            error_body(
+                "payment_intent_unexpected_state",
+                f"You cannot cancel this PaymentIntent ({INTENT}) because it has a status of "
+                "succeeded.",
+            ),
+        )
+    )
+
+    assert await wrapper.cancel_payment_intent(INTENT, idempotency_key=CANCEL_KEY) is False
+
+
+@pytest.mark.parametrize(
+    ("answer", "kind", "code"),
+    [
+        (NETWORK_ERROR, StripeUnavailableError, None),
+        ((503, {"error": {"type": "api_error", "message": "down"}}), StripeUnavailableError, None),
+        (
+            (404, error_body("resource_missing", f"No such payment_intent: '{INTENT}'")),
+            StripeRejectedError,
+            "resource_missing",
+        ),
+        # The code alone makes it an answer: another status with it is still an error.
+        (
+            (409, error_body("payment_intent_unexpected_state", "a concurrent request")),
+            StripeUnavailableError,
+            "payment_intent_unexpected_state",
+        ),
+    ],
+)
+async def test_cancel_errors_are_typed(
+    answer: Answer, kind: type[Exception], code: str | None
+) -> None:
+    wrapper, _ = client(answer)
+
+    with pytest.raises(kind) as caught:
+        await wrapper.cancel_payment_intent(INTENT, idempotency_key=CANCEL_KEY)
+
+    assert caught.value.code == code  # type: ignore[attr-defined]  # a StripeCallError
+    assert INTENT not in repr(caught.value)
 
 
 def search_body(*intents: dict[str, Any], has_more: bool = False) -> dict[str, Any]:

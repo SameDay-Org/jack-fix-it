@@ -7,10 +7,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_app_settings
 from app.db import get_session
 from app.errors import ErrorResponse
+from app.integrations.storage import StorageProvider, get_storage_provider
 from app.modules.auth.permissions import CustomerUser, ProUser
 from app.modules.jobs.errors import ATTEMPTS_REMAINING_HEADER
 from app.modules.jobs.execution import JobExecutionConfig, JobExecutionService
-from app.modules.jobs.schemas import CheckInIn, CustomerJob, OnTheWayIn, ProJob, ProJobPage
+from app.modules.jobs.schemas import (
+    CheckInIn,
+    CustomerJob,
+    JobPhotosIn,
+    OnTheWayIn,
+    ProJob,
+    ProJobPage,
+)
 from app.queue import JobQueue, get_job_queue
 
 # The customer's side: the job of their own request (#63).
@@ -28,9 +36,10 @@ def _error(description: str) -> dict[str, Any]:
 def get_job_execution_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[Settings, Depends(get_app_settings)],
-    queue: Annotated[JobQueue, Depends(get_job_queue)],
+    storage: Annotated[StorageProvider, Depends(get_storage_provider)],
 ) -> JobExecutionService:
-    return JobExecutionService(session, JobExecutionConfig.from_settings(settings), queue)
+    # The storage is reached only when a job has photos to sign.
+    return JobExecutionService(session, JobExecutionConfig.from_settings(settings), storage)
 
 
 Jobs = Annotated[JobExecutionService, Depends(get_job_execution_service)]
@@ -58,7 +67,8 @@ _PRO_JOB_ERRORS: dict[int | str, dict[str, Any]] = {
 async def get_request_job(request_id: uuid.UUID, user: CustomerUser, jobs: Jobs) -> CustomerJob:
     """The job once paid: its status, the scheduled start, the pro's public card, the ETA once
     the pro is on the way, the arrival code to give the pro (only while they are on the way and
-    have not checked in), the history and what the customer paid."""
+    have not checked in), the history, the pro's before and after photos (their privacy-safe
+    copies) and what the customer paid."""
     return await jobs.customer_job(user, request_id)
 
 
@@ -106,11 +116,17 @@ async def get_my_job(job_id: uuid.UUID, user: ProUser, jobs: Jobs) -> ProJob:
         ),
     },
 )
-async def mark_on_the_way(job_id: uuid.UUID, data: OnTheWayIn, user: ProUser, jobs: Jobs) -> ProJob:
+async def mark_on_the_way(
+    job_id: uuid.UUID,
+    data: OnTheWayIn,
+    user: ProUser,
+    jobs: Jobs,
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
+) -> ProJob:
     """Scheduled -> on the way, with an ETA the customer sees; the customer gets an arrival
     code to give the pro on arrival. Again while on the way: only the ETA changes (the code
     stays)."""
-    return await jobs.on_the_way(user, job_id, data.eta_minutes)
+    return await jobs.on_the_way(user, job_id, data.eta_minutes, queue)
 
 
 @router.post(
@@ -130,10 +146,16 @@ async def mark_on_the_way(job_id: uuid.UUID, data: OnTheWayIn, user: ProUser, jo
         ),
     },
 )
-async def check_in(job_id: uuid.UUID, data: CheckInIn, user: ProUser, jobs: Jobs) -> ProJob:
+async def check_in(
+    job_id: uuid.UUID,
+    data: CheckInIn,
+    user: ProUser,
+    jobs: Jobs,
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
+) -> ProJob:
     """Arrived: the code the customer gives the pro, and where the pro is (recorded only). Once
     checked in, calling it again answers the job unchanged."""
-    return await jobs.check_in(user, job_id, data.arrival_code, data.lat, data.lng)
+    return await jobs.check_in(user, job_id, data.arrival_code, data.lat, data.lng, queue)
 
 
 @router.post(
@@ -147,6 +169,68 @@ async def check_in(job_id: uuid.UUID, data: CheckInIn, user: ProUser, jobs: Jobs
         ),
     },
 )
-async def start_job(job_id: uuid.UUID, user: ProUser, jobs: Jobs) -> ProJob:
+async def start_job(
+    job_id: uuid.UUID,
+    user: ProUser,
+    jobs: Jobs,
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
+) -> ProJob:
     """On the way -> working, after the check-in."""
-    return await jobs.start(user, job_id)
+    return await jobs.start(user, job_id, queue)
+
+
+@router.post(
+    "/{job_id}/photos",
+    response_model=ProJob,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add before or after photos of the work",
+    responses={
+        **_PRO_JOB_ERRORS,
+        status.HTTP_409_CONFLICT: _error(
+            "job_photo_not_allowed: before photos need the job on the way or working, after "
+            "photos working; duplicate_photo: a key given twice or already attached; "
+            "job_photo_limit: more photos of the kind than a job holds (a photo whose "
+            "privacy-safe copy failed frees its place, a bounded number of times)."
+        ),
+        status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
+            "invalid_photo: a key that is not one of the caller's own job_photo uploads "
+            "(nothing is stored); upload_expired: an upload issued too long ago, upload it "
+            "again (nothing is stored); validation_error: a bad kind or no keys."
+        ),
+    },
+)
+async def add_job_photos(
+    job_id: uuid.UUID,
+    data: JobPhotosIn,
+    user: ProUser,
+    jobs: Jobs,
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
+) -> ProJob:
+    """Attaches photos the pro uploaded (POST /v1/uploads, purpose job_photo), in the order
+    given. The customer sees each once its privacy-safe copy is made."""
+    return await jobs.add_photos(user, job_id, data.kind, data.upload_keys, queue)
+
+
+@router.post(
+    "/{job_id}/complete",
+    response_model=ProJob,
+    summary="Mark the job done",
+    responses={
+        **_PRO_JOB_ERRORS,
+        status.HTTP_409_CONFLICT: _error(
+            "after_photos_processing: the after photos' privacy-safe copies are still being "
+            "made, try again shortly; after_photos_required: no after photo the customer can "
+            "see (none, or all failed: add another); invalid_transition: the job is not working."
+        ),
+    },
+)
+async def complete_job(
+    job_id: uuid.UUID,
+    user: ProUser,
+    jobs: Jobs,
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
+) -> ProJob:
+    """Working -> completed (Job's done), with at least one after photo whose privacy-safe
+    copy is ready. The customer then has a window to confirm. Again once completed: the job
+    unchanged."""
+    return await jobs.complete(user, job_id, queue)

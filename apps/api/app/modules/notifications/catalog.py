@@ -44,6 +44,8 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "push.job_checked_in.body": "Your pro checked in for job {public_code}.",
                 "push.job_started.title": "Your job has started",
                 "push.job_started.body": "Work on job {public_code} has started.",
+                "push.job_done.title": "Your pro marked the job done",
+                "push.job_done.body": "Please take a look at job {public_code} in the app.",
                 "push.booking_not_completed.title": "Your booking was not completed",
                 "push.booking_not_completed.body": (
                     "The payment for {public_code} did not go through. "
@@ -83,6 +85,8 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 ),
                 "push.job_started.title": "Tu trabajo comenzó",
                 "push.job_started.body": "Comenzó el trabajo {public_code}.",
+                "push.job_done.title": "Tu profesional marcó el trabajo como terminado",
+                "push.job_done.body": "Revisa el trabajo {public_code} en la app.",
                 "push.booking_not_completed.title": "Tu reserva no se completó",
                 "push.booking_not_completed.body": (
                     "El pago de {public_code} no se completó. "

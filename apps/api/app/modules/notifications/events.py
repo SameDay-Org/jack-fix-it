@@ -165,6 +165,22 @@ async def push_job_started(
     )
 
 
+async def push_job_done(
+    queue: JobQueue,
+    *,
+    customer_id: uuid.UUID,
+    job_id: uuid.UUID,
+    request_id: uuid.UUID,
+    public_code: str,
+    timeout_seconds: float,
+) -> None:
+    """To the customer, when the pro marks the job done (#298): asks them to take a look. The
+    confirmation itself is #66."""
+    await _job_push(
+        queue, customer_id, "job_done", job_id, request_id, public_code, timeout_seconds
+    )
+
+
 async def push_booking_not_completed(
     queue: JobQueue,
     *,

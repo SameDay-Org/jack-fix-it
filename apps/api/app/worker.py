@@ -15,8 +15,11 @@ from app.config import get_settings
 from app.db import create_engine, create_session_factory
 from app.integrations.expo_push import ExpoPushSender
 from app.integrations.storage import S3Storage, StorageNotConfiguredError
+from app.integrations.stripe_payments import StripePaymentsClient
 from app.modules.dispatch.tasks import dispatch_request
+from app.modules.jobs.tasks import photo_sanitize_task
 from app.modules.notifications.push_tasks import check_push_receipts, send_push
+from app.modules.payments.tasks import cancel_unpaid_payments
 from app.modules.quotes.tasks import expire_quotes
 from app.modules.requests.tasks import sanitize_task
 from app.modules.uploads.tasks import sweep_orphan_uploads
@@ -48,6 +51,11 @@ async def startup(ctx: dict[str, Any]) -> None:
         # Development without storage: media copies wait (sanitize_request_media logs it), and
         # the orphan upload sweep has nothing to sweep.
         ctx["storage"] = None
+    # Without STRIPE_SECRET_KEY (allowed outside staging and production) the unpaid payment
+    # sweep cancels no PaymentIntent in Stripe (cancel_unpaid_payments logs it).
+    ctx["stripe_payments"] = (
+        None if settings.stripe_secret_key is None else StripePaymentsClient.from_settings(settings)
+    )
     # Sentinel looks for this line to confirm a worker deploy is healthy.
     logger.info("worker_started", extra={"app_env": settings.app_env})
 
@@ -85,6 +93,7 @@ class WorkerSettings:
         # again once the first run is over; the tries match the sends per device.
         discarding_result(send_push, max_tries=get_settings().push_max_attempts),
         sanitize_task(get_settings()),
+        photo_sanitize_task(get_settings()),
         # A run per handler attempt: a failing event is failed on its last one.
         discarding_result(
             process_stripe_event, max_tries=get_settings().stripe_webhook_max_attempts
@@ -109,6 +118,13 @@ class WorkerSettings:
             expire_quotes,
             minute=every(get_settings().quote_expiry_sweep_minutes),
             timeout=get_settings().quote_expiry_timeout_seconds,
+            keep_result=0,
+            keep_result_forever=False,
+        ),
+        cron(
+            cancel_unpaid_payments,
+            minute=every(get_settings().payment_unpaid_sweep_minutes),
+            timeout=get_settings().payment_unpaid_sweep_timeout_seconds,
             keep_result=0,
             keep_result_forever=False,
         ),

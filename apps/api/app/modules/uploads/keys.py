@@ -7,8 +7,10 @@ constants, no HTTP or storage: safe to import from any module.
 """
 
 import re
+import secrets
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Final
 
@@ -70,7 +72,8 @@ PURPOSES: Final[dict[UploadPurpose, PurposeRule]] = {
 KEY_PATTERN: Final = re.compile(
     r"u/(?P<user_id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
     rf"/(?P<purpose>{'|'.join(re.escape(p.value) for p in UploadPurpose)})"
-    rf"/[0-9a-f]{{32}}(?:{'|'.join(re.escape(e) for e in sorted(set(EXTENSIONS.values())))})"
+    r"/(?P<token>[0-9a-f]{32})"
+    rf"(?:{'|'.join(re.escape(e) for e in sorted(set(EXTENSIONS.values())))})"
 )
 
 
@@ -127,4 +130,46 @@ def upload_content_type(key: str) -> str | None:
 
 
 def make_key(user_id: uuid.UUID, purpose: UploadPurpose, content_type: str) -> str:
-    return f"u/{user_id}/{purpose.value}/{uuid.uuid4().hex}{EXTENSIONS[content_type]}"
+    token = time_ordered_token(datetime.now(UTC))
+    return f"u/{user_id}/{purpose.value}/{token}{EXTENSIONS[content_type]}"
+
+
+# A key's token is a UUIDv7 (RFC 9562) as 32 hex digits: its first 48 bits are the Unix time in
+# milliseconds when the API issued the key, then the version 7, then random bits. So a feature
+# knows how old an upload is without a storage call (job photos, #298: upload_issued_at). Keys
+# issued before #298 hold a random UUIDv4 token: no time.
+_MS_BITS: Final = 48
+_RANDOM_BITS: Final = 80
+_VERSION_7: Final = 0x7 << 76
+_VERSION_MASK: Final = 0xF << 76
+_VARIANT_RFC: Final = 0x2 << 62
+_VARIANT_MASK: Final = 0x3 << 62
+# The latest issue time read back from a key: 2999-12-31, within every platform's datetime.
+_LATEST_MS: Final = int(datetime(2999, 12, 31, tzinfo=UTC).timestamp() * 1_000)
+
+
+def time_ordered_token(at: datetime) -> str:
+    """A UUIDv7 for the time `at` (timezone-aware), as 32 hex digits."""
+    milliseconds = int(at.timestamp() * 1_000) & ((1 << _MS_BITS) - 1)
+    value = milliseconds << _RANDOM_BITS | secrets.randbits(_RANDOM_BITS)
+    value = (value & ~_VERSION_MASK) | _VERSION_7
+    value = (value & ~_VARIANT_MASK) | _VARIANT_RFC
+    return f"{value:032x}"
+
+
+def upload_issued_at(key: str) -> datetime | None:
+    """When the API issued a well-formed upload key (its UUIDv7 token); None for any other key,
+    including a key issued before #298 (UUIDv4 token). The client cannot choose a key: one it
+    makes up has no file behind it."""
+    match = KEY_PATTERN.fullmatch(key)
+    if match is None:
+        return None
+    token = uuid.UUID(match["token"])
+    if token.version != 7 or token.variant != uuid.RFC_4122:
+        return None
+    milliseconds = token.int >> _RANDOM_BITS
+    # A made-up token can say any time up to the year 10889; datetime ends with 9999 (and
+    # Windows' clock functions sooner): such a key has no time the API could have issued.
+    if milliseconds > _LATEST_MS:
+        return None
+    return datetime.fromtimestamp(milliseconds / 1_000, UTC)

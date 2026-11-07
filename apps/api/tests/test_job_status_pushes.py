@@ -1,10 +1,11 @@
 """Pushes on every job status change (D12, #65).
 
-The pro's steps through the API (On my way, check-in, start) and what the Stripe webhook worker
-does (the job booked, a canceled payment that reopened the quotes): each push is queued after
-the commit, once, to the right user with the right kind, params and deep link; never for a
-refused or rolled-back action; a queue failure never fails the action and is logged with ids;
-and the arrival code is in no payload.
+The pro's steps through the API (On my way, check-in, start, Job's done), what the Stripe
+webhook worker does (the job booked, a canceled payment that reopened the quotes) and the
+unpaid sweep's local cancel (#297): each push is queued after the commit, once, to the right
+user with the right kind, params and deep link; never for a refused or rolled-back action; a
+queue failure never fails the action and is logged with ids; and the arrival code is in no
+payload.
 """
 
 import asyncio
@@ -25,10 +26,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.integrations.storage import Storage
 from app.modules.jobs.execution import JobExecutionConfig, JobExecutionService
-from app.modules.jobs.models import Job, JobStatus
+from app.modules.jobs.models import Job, JobPhotoKind, JobStatus
+from app.modules.media.safe_status import MediaSafeStatus
 from app.modules.notifications import catalog, deep_links
 from app.modules.notifications.preferences import KIND_GROUP, PreferenceGroup
+from app.modules.payments.models import Payment, PaymentStatus
+from app.modules.payments.tasks import cancel_unpaid_payments
 from app.modules.pros.models import ProProfile
 from app.modules.quotes.service import QuoteSettlement
 from app.modules.requests.models import RequestStatus, ServiceRequest
@@ -42,6 +47,7 @@ from app.queue import get_job_queue
 from tests.conftest import make_settings
 from tests.helpers import as_status_writer
 from tests.job_world import JobWorld, build_world, make_job, record_pushes
+from tests.test_job_photos_api import FakeStorage, photo_row, safe_key
 from tests.test_payment_webhooks import (
     CANCELED,
     MAX_ATTEMPTS,
@@ -50,8 +56,9 @@ from tests.test_payment_webhooks import (
     Market,
     market,
 )
-from tests.test_payments_api import PUBLISHABLE_KEY
+from tests.test_payments_api import PUBLISHABLE_KEY, FakeStripePayments
 from tests.test_requests_api import ENQUEUE_TIMEOUT, EVENTS, RecordingQueue
+from tests.test_unpaid_payments import WINDOW, aged, set_payment
 
 __all__ = ["market"]  # a fixture, used by name
 
@@ -63,6 +70,7 @@ JOB_KINDS = (
     "job_on_the_way",
     "job_checked_in",
     "job_started",
+    "job_done",
     "booking_not_completed",
 )
 LOG_FIELDS = {"timestamp", "level", "logger", "message", "request_id"}
@@ -76,6 +84,7 @@ def settings() -> Settings:
         stripe_webhook_max_attempts=MAX_ATTEMPTS,
         stripe_publishable_key=PUBLISHABLE_KEY,
         job_enqueue_timeout_seconds=ENQUEUE_TIMEOUT,
+        payment_unpaid_cancel_after_seconds=int(WINDOW.total_seconds()),
     )
 
 
@@ -144,16 +153,22 @@ STEPS = [
     ),
     # Again once started: 409, no push.
     Step("job_started", "start", JobStatus.ON_THE_WAY, {"checked_in": True}, None, 409),
+    # Again once completed: 200, unchanged, no push.
+    Step("job_done", "complete", JobStatus.IN_PROGRESS, {"after_photo": True}, None, 200),
 ]
 
 
 async def job_for(session: AsyncSession, world: JobWorld, step: Step) -> Job:
     fields = dict(step.fields)
+    after_photo = fields.pop("after_photo", False)
     if fields.pop("checked_in", False):
         fields["checked_in_at"] = datetime.now(UTC)
     if step.status is JobStatus.ON_THE_WAY:
         fields.setdefault("eta_at", _soon())
-    return await make_job(session, world, step.status, **fields)
+    job = await make_job(session, world, step.status, **fields)
+    if after_photo:  # Job's done needs an after photo whose safe copy is ready (#298)
+        await photo_row(session, world, job, JobPhotoKind.AFTER, MediaSafeStatus.READY, safe_key())
+    return job
 
 
 def post(client: httpx.AsyncClient, job_id: uuid.UUID, step: Step, headers: dict[str, str]) -> Any:
@@ -163,6 +178,14 @@ def post(client: httpx.AsyncClient, job_id: uuid.UUID, step: Step, headers: dict
 @pytest.fixture
 async def world(db_session: AsyncSession) -> JobWorld:
     return await build_world(db_session)
+
+
+@pytest.fixture(autouse=True)
+def storage(app: FastAPI) -> FakeStorage:
+    """Signs the photos of a completed job's view (#298)."""
+    fake = FakeStorage()
+    app.state.storage = fake
+    return fake
 
 
 @pytest.fixture
@@ -218,11 +241,12 @@ async def test_refused_steps_push_nothing(
         db_session, world, JobStatus.ON_THE_WAY, arrival_code=CODE, eta_at=_soon()
     )
     working = await make_job(db_session, world, JobStatus.IN_PROGRESS)
-    on_my_way, check_in, start = STEPS
+    on_my_way, check_in, start, done = STEPS
     pro = world.pro.headers
 
     refused = [
         (await post(db_client, scheduled.id, start, pro), 409),  # check-in required
+        (await post(db_client, working.id, done, pro), 409),  # no after photo
         (await post(db_client, working.id, on_my_way, pro), 409),  # not from in progress
         (await post(db_client, scheduled.id, check_in, pro), 409),  # not on the way
         (
@@ -256,24 +280,31 @@ async def _pro_account(session: AsyncSession, world: JobWorld) -> UserAccount:
     )
 
 
+def no_storage() -> Storage:
+    raise AssertionError("the commit fails before any photo is signed")
+
+
 @pytest.mark.parametrize("step", STEPS, ids=[step.kind for step in STEPS])
 async def test_no_push_when_the_commit_fails(
-    db_session: AsyncSession, world: JobWorld, monkeypatch: pytest.MonkeyPatch, step: Step
+    db_session: AsyncSession,
+    world: JobWorld,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    step: Step,
 ) -> None:
     job = await job_for(db_session, world, step)
     pro = await _pro_account(db_session, world)
     recorder = RecordingQueue()
-    config = JobExecutionConfig(
-        max_attempts=5,
-        list_default_limit=20,
-        list_max_limit=50,
-        enqueue_timeout_seconds=ENQUEUE_TIMEOUT,
+    service = JobExecutionService(
+        db_session, JobExecutionConfig.from_settings(settings), no_storage
     )
-    service = JobExecutionService(db_session, config, recorder)
     actions = {
-        "job_on_the_way": lambda: service.on_the_way(pro, job.id, 15),
-        "job_checked_in": lambda: service.check_in(pro, job.id, CODE, HERE["lat"], HERE["lng"]),
-        "job_started": lambda: service.start(pro, job.id),
+        "job_on_the_way": lambda: service.on_the_way(pro, job.id, 15, recorder),
+        "job_checked_in": lambda: service.check_in(
+            pro, job.id, CODE, HERE["lat"], HERE["lng"], recorder
+        ),
+        "job_started": lambda: service.start(pro, job.id, recorder),
+        "job_done": lambda: service.complete(pro, job.id, recorder),
     }
 
     async def fail(self: AsyncSession) -> None:
@@ -316,7 +347,12 @@ async def test_a_failed_push_enqueue_never_fails_the_step(
     assert len(broken.before) == 1  # tried once
     assert (await db_client.get(f"/v1/pros/me/jobs/{job.id}", headers=world.pro.headers)).json()[
         "status"
-    ] == (JobStatus.IN_PROGRESS if step.kind == "job_started" else JobStatus.ON_THE_WAY)
+    ] == {
+        "job_on_the_way": JobStatus.ON_THE_WAY,
+        "job_checked_in": JobStatus.ON_THE_WAY,
+        "job_started": JobStatus.IN_PROGRESS,
+        "job_done": JobStatus.COMPLETED,
+    }[step.kind]
     [record] = records(caplog, "push_enqueue_failed")
     assert record.levelno == logging.ERROR
     assert ids_only(record) == {
@@ -344,11 +380,14 @@ async def test_the_arrival_code_and_eta_are_in_no_job_push(
         f"{base}/check-in", json={"arrival_code": issued, **HERE}, headers=pro
     )
     started = await db_client.post(f"{base}/start", headers=pro)
+    await photo_row(db_session, world, job, JobPhotoKind.AFTER, MediaSafeStatus.READY, safe_key())
+    done = await db_client.post(f"{base}/complete", headers=pro)
 
-    assert [moved.status_code, checked.status_code, started.status_code] == [200, 200, 200]
+    assert [s.status_code for s in (moved, checked, started, done)] == [200, 200, 200, 200]
     assert issued == "7391"
     assert sorted(queue.jobs) == sorted(
-        f"push:{kind}:{job.id}" for kind in ("job_on_the_way", "job_checked_in", "job_started")
+        f"push:{kind}:{job.id}"
+        for kind in ("job_on_the_way", "job_checked_in", "job_started", "job_done")
     )
     eta = moved.json()["eta_at"]
     for _, args in queue.jobs.values():
@@ -368,11 +407,14 @@ async def test_the_arrival_code_and_eta_are_in_no_job_push(
 
 @dataclass
 class CheckingQueue(RecordingQueue):
-    """Records, at each enqueue, the market's job count and the event row's status as another
-    connection sees them: a push queued before the worker's commit would see neither."""
+    """Records, at each enqueue, the market's job count, the last event row's status (None
+    without one) and the payment's status as another connection sees them: a push queued before
+    the worker's commit would see none of its writes."""
 
     market: Market | None = None
-    seen: list[tuple[int, WebhookEventStatus | None]] = field(default_factory=list)
+    seen: list[tuple[int, WebhookEventStatus | None, PaymentStatus | None]] = field(
+        default_factory=list
+    )
 
     async def enqueue_job(self, function: str, *args: object, _job_id: str | None = None) -> object:
         assert self.market is not None
@@ -382,12 +424,19 @@ class CheckingQueue(RecordingQueue):
                 .select_from(Job)
                 .where(Job.request_id == self.market.request_id)
             )
-            status = await session.scalar(
-                select(WebhookEvent.status).where(
-                    WebhookEvent.stripe_event_id == self.market.event_ids[-1]
+            status = (
+                await session.scalar(
+                    select(WebhookEvent.status).where(
+                        WebhookEvent.stripe_event_id == self.market.event_ids[-1]
+                    )
                 )
+                if self.market.event_ids
+                else None
             )
-        self.seen.append((int(jobs or 0), status))
+            payment = await session.scalar(
+                select(Payment.status).where(Payment.id == self.market.payment_id)
+            )
+        self.seen.append((int(jobs or 0), status, payment))
         return await super().enqueue_job(function, *args, _job_id=_job_id)
 
 
@@ -440,7 +489,7 @@ async def test_a_booked_job_pushes_the_customer_and_the_pro_after_the_commit(
         ),
     }
     # Both queued once the job and the processed row were committed.
-    assert queue.seen == [(1, WebhookEventStatus.PROCESSED)] * 2
+    assert queue.seen == [(1, WebhookEventStatus.PROCESSED, PaymentStatus.SUCCEEDED)] * 2
 
 
 async def test_a_repeated_or_late_event_pushes_nothing_more(market: Market) -> None:
@@ -553,7 +602,7 @@ async def test_a_canceled_payment_that_reopens_the_quotes_pushes_the_customer(
             f"/requests/{market.request_id}",
         )
     }
-    assert queue.seen == [(0, WebhookEventStatus.PROCESSED)]
+    assert queue.seen == [(0, WebhookEventStatus.PROCESSED, PaymentStatus.CANCELED)]
 
 
 async def test_a_canceled_payment_that_reopens_nothing_pushes_nothing(market: Market) -> None:
@@ -568,6 +617,72 @@ async def test_a_canceled_payment_that_reopens_nothing_pushes_nothing(market: Ma
     queue = CheckingQueue(market=market)
 
     assert await run(market, await posted(market, CANCELED), queue) == "processed"
+
+    assert queue.before == []
+
+
+async def sweep(market: Market, queue: object) -> None:
+    """The unpaid sweep (#297), with `queue` as the worker's own pool."""
+    await cancel_unpaid_payments(
+        {
+            "session_factory": market.sessions,
+            "settings": market.settings,
+            "stripe_payments": FakeStripePayments(),
+            "redis": queue,
+        }
+    )
+
+
+async def test_a_local_cancel_by_the_unpaid_sweep_pushes_the_customer_once(
+    market: Market,
+) -> None:
+    """No PaymentIntent was ever created: the sweep cancels the payment itself and reopens the
+    quotes (no Stripe event follows), then pushes once its transaction is committed."""
+    await set_payment(market, stripe_payment_intent_id=None, created_at=aged())
+    queue = CheckingQueue(market=market)
+
+    await sweep(market, queue)
+    await sweep(market, queue)  # the payment is canceled now: nothing more
+
+    async with market.sessions() as session:
+        code = await public_code_of(session, market.request_id)
+    assert queue.jobs == {
+        f"push:booking_not_completed:{market.payment_id}": push(
+            market.customer_id,
+            "booking_not_completed",
+            market.payment_id,
+            code,
+            f"/requests/{market.request_id}",
+        )
+    }
+    assert queue.seen == [(0, None, PaymentStatus.CANCELED)]
+
+
+async def test_a_failed_push_enqueue_never_fails_the_sweep(
+    market: Market, caplog: pytest.LogCaptureFixture
+) -> None:
+    await set_payment(market, stripe_payment_intent_id=None, created_at=aged())
+    broken = RecordingQueue(failure=RedisError("down"))
+
+    with caplog.at_level(logging.INFO):
+        await sweep(market, broken)
+
+    assert (await market.state()).payment is PaymentStatus.CANCELED
+    [record] = records(caplog, "push_enqueue_failed")
+    assert ids_only(record) == {
+        "user_id": str(market.customer_id),
+        "message_id": f"booking_not_completed:{market.payment_id}",
+    }
+    assert len(records(caplog, "unpaid_payments_swept")) == 1
+
+
+async def test_a_sweep_that_cancels_in_stripe_pushes_nothing_itself(market: Market) -> None:
+    """With a PaymentIntent the sweep asks Stripe to cancel it; the canceled event's worker
+    run pushes (tested above), so the sweep never pushes twice."""
+    await set_payment(market, created_at=aged())
+    queue = CheckingQueue(market=market)
+
+    await sweep(market, queue)
 
     assert queue.before == []
 

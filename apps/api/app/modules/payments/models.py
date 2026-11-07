@@ -26,6 +26,9 @@ class PaymentStatus(StrEnum):
 
 # Statuses no new sheet may be issued for: the PaymentIntent cannot be confirmed again.
 CLOSED_STATUSES: Final = frozenset({PaymentStatus.SUCCEEDED, PaymentStatus.CANCELED})
+# Statuses of a payment still waiting for the customer to pay: the unpaid sweep (#297) cancels
+# them past PAYMENT_UNPAID_CANCEL_AFTER_SECONDS. Never processing: Stripe may still take the money.
+UNPAID_STATUSES: Final = frozenset({PaymentStatus.REQUIRES_PAYMENT, PaymentStatus.FAILED})
 # Integer cents (USD): AGENTS.md "Money". The code is Stripe's lower-case currency code.
 CURRENCY: Final = "usd"
 # Not charged in the MVP (Cesar, 2026-11-06); to confirm with the accountant before launch.

@@ -292,7 +292,7 @@ async def test_the_deadline_cuts_a_running_step(
     clock = JumpClock(reads=2, before=0.0, after=1.45)
 
     async with asyncio.timeout(BOUND):
-        outcome = await fast_copier(db_session, storage, settings).copy_request_media(
+        outcome = await fast_copier(db_session, storage, settings).copy_pending(
             media.request_id, attempt=1, final=final, clock=clock
         )
 
@@ -311,7 +311,7 @@ async def test_a_final_try_settles_after_its_work_deadline(
     settings = make_settings(**FAST)
 
     async with asyncio.timeout(BOUND):
-        outcome = await fast_copier(db_session, storage, settings).copy_request_media(
+        outcome = await fast_copier(db_session, storage, settings).copy_pending(
             media.request_id, attempt=1, final=True, clock=Ticks(0.0, 0.0, 1.45, 1.6)
         )
 
@@ -331,7 +331,7 @@ async def test_the_accepted_minimum_budget_copies_a_file(db_session: AsyncSessio
     )
     assert settings.media_sanitize_min_job_seconds == 840
 
-    outcome = await fast_copier(db_session, storage, settings).copy_request_media(
+    outcome = await fast_copier(db_session, storage, settings).copy_pending(
         media.request_id, attempt=1, clock=JumpClock(reads=1, before=0.0, after=0.001)
     )
 
@@ -353,7 +353,7 @@ async def test_a_file_starts_on_the_terms_the_settings_check(db_session: AsyncSe
         media_sanitize_job_timeout_seconds=840,
     )
 
-    outcome = await fast_copier(db_session, storage, settings).copy_request_media(
+    outcome = await fast_copier(db_session, storage, settings).copy_pending(
         media.request_id, attempt=1, clock=JumpClock(reads=2, before=0.0, after=30.0)
     )
 
@@ -374,7 +374,7 @@ async def test_the_first_file_starts_even_when_the_query_ran_long(
         media_sanitize_job_timeout_seconds=840,
     )
 
-    outcome = await fast_copier(db_session, storage, settings).copy_request_media(
+    outcome = await fast_copier(db_session, storage, settings).copy_pending(
         media.request_id, attempt=1, clock=JumpClock(reads=2, before=0.0, after=30.001)
     )
 
@@ -411,7 +411,7 @@ async def test_a_stalled_transfer_keeps_its_files_until_its_thread_ends(
     jobs = MediaCopier(sessions_of(db_session), storage, MediaCopyConfig(3, sanitize))
 
     async with asyncio.timeout(BOUND):
-        outcome = await jobs.copy_request_media(media.request_id, attempt=1)
+        outcome = await jobs.copy_pending(media.request_id, attempt=1)
 
     assert outcome.waiting == 1  # the step timed out; the row waits for the next try
     [path] = storage.files
@@ -448,7 +448,7 @@ async def test_a_slow_image_transform_times_out_and_keeps_its_files(
     try:
         with caplog.at_level(logging.WARNING):
             async with asyncio.timeout(BOUND):
-                outcome = await jobs.copy_request_media(media.request_id, attempt=1)
+                outcome = await jobs.copy_pending(media.request_id, attempt=1)
         [workdir] = workdirs
         assert workdir.is_dir()
     finally:

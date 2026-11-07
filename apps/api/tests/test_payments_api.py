@@ -122,7 +122,10 @@ class FakeStripePayments:
     would; `intent_status` is what Stripe reports for every PaymentIntent. `facts` is what Stripe
     shows of each intent (amount, currency, customer, metadata payment_id), which the search by
     payment id reads: clearing `intents_by_key` is Stripe forgetting the keys, the intents kept.
-    `search_complete` False: the search has another page."""
+    `search_complete` False: the search has another page. `cancels` records every cancel Stripe
+    accepted or refused (the PaymentIntent and the idempotency key); `cancel_refused` makes Stripe
+    refuse them as payment_intent_unexpected_state (the intent is processing, succeeded or
+    canceled); `on_cancel_intent` runs inside a cancel, before it answers."""
 
     customers: dict[str, str] = field(default_factory=dict)  # idempotency key -> customer id
     customer_calls: list[dict[str, str]] = field(default_factory=list)
@@ -139,6 +142,9 @@ class FakeStripePayments:
     facts: dict[str, PaymentIntentFacts] = field(default_factory=dict)  # by PaymentIntent id
     searches: list[uuid.UUID] = field(default_factory=list)
     search_complete: bool = True
+    cancels: list[tuple[str, str]] = field(default_factory=list)
+    cancel_refused: bool = False
+    on_cancel_intent: Callable[[], Awaitable[None]] | None = None
 
     def add_intent(self, facts: PaymentIntentFacts) -> None:
         """An intent Stripe holds that no create of this run answered with."""
@@ -240,6 +246,14 @@ class FakeStripePayments:
             raise self.errors["create_ephemeral_key"]
         self.ephemeral_keys.append(customer_id)
         return f"ek_test_fake{len(self.ephemeral_keys)}_{uuid.uuid4().hex[:8]}"
+
+    async def cancel_payment_intent(self, payment_intent_id: str, *, idempotency_key: str) -> bool:
+        if "cancel_payment_intent" in self.errors:
+            raise self.errors["cancel_payment_intent"]
+        if self.on_cancel_intent is not None:
+            await self.on_cancel_intent()
+        self.cancels.append((payment_intent_id, idempotency_key))
+        return not self.cancel_refused
 
 
 def _fake_stripe(request: Request) -> StripePayments:

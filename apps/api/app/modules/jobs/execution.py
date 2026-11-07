@@ -31,12 +31,42 @@ service commits; every status change goes through JobStateMachine, which writes 
   `check_in_required` without one. The table's direct scheduled -> in_progress edge is not
   offered here: a scheduled job answers check_in_required too.
 
-Pushes (#65): once an action commits, the customer hears about it: On my way, the check-in
-and the start, each once per job (notifications.events, the job's id names the event). An ETA
-update, a repeated check-in and a refused action push nothing. A push that cannot be queued is
-logged with ids and never fails the action. No push carries the arrival code or the ETA.
+Job photos and Job's done (part 2, #298), also on the job's row lock:
+- Add photos (kind, upload_keys): the caller's own job_photo uploads only (else 422
+  invalid_photo, nothing stored), issued at most JOB_PHOTO_ATTACH_MAX_AGE_MINUTES ago (else 422
+  upload_expired: the pro uploads again). That window is at most half of the orphan sweep's
+  minimum age (config.py), so the sweep never deletes a key this call accepted: the sweep
+  reads the references of an upload at least ORPHAN_UPLOAD_MIN_AGE_HOURS old, and any
+  attach of that key had committed half that time before (orphans.py). Before photos while on
+  the way or working, after photos while working (else 409 job_photo_not_allowed). A key given
+  twice, or one a job photo already holds: 409 duplicate_photo. More than
+  JOB_PHOTO_MAX_PER_KIND of a kind whose safe copy has not failed, or more than twice that
+  counting the failed ones: 409 job_photo_limit (checked before the keys are looked up). So a
+  pro replaces failed photos, never without bound: a job with twice the cap of a kind, none of
+  its after photos ready, is the BDC's to resolve. They keep the order given. After the commit
+  their privacy-safe copies are queued, one run per batch (photos.py); a failed enqueue never
+  fails the call (the photos stay pending).
+- Job's done: in_progress -> completed only with at least one after photo whose safe copy is
+  ready, the copy that proves to the customer a real image was taken. With none ready: 409
+  after_photos_processing while one is still being made (the app waits and tries again; each
+  try queues the pending ones' copies again, so a lost enqueue or a run that ended unsettled
+  recovers, and a run still going for them makes it a no-op: photos.py; the answer and the
+  batch come from one read, so a copy settled just after it still answers this 409 and the
+  next try decides), else
+  409 after_photos_required (none, or all failed: the pro adds another). Nothing changes on a
+  409. The state machine sets completed_at, which opens the customer's confirmation window
+  (#66, #67). Again once completed: 200, unchanged, no second event.
+- Both views list the photos by kind, oldest first, signed for DOWNLOAD_URL_TTL_SECONDS: the
+  customer only their safe copies (photos.py says why).
 
-The arrival code is never logged, never in an error, never in a pro response. Logs carry ids.
+Pushes (#65): once On my way, the check-in or the start commits, the customer hears about it,
+once per job (notifications.events: the job's id and the step name the event); Job's done too,
+once its move to completed commits. An ETA update, a repeated check-in or Job's done, and a
+refused action push nothing. A push that cannot be queued is logged with ids and never fails
+the action. No push carries the arrival code or the ETA.
+
+The arrival code is never logged, never in an error, never in a pro response. Logs carry ids:
+never an upload key.
 """
 
 import base64
@@ -51,19 +81,30 @@ from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Final
 
+from redis.exceptions import RedisError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.errors import NotFoundError
+from app.integrations.storage import StorageProvider
 from app.modules.categories.service import CategoryService
 from app.modules.jobs.errors import (
+    AfterPhotosProcessingError,
+    AfterPhotosRequiredError,
     ArrivalCodeInvalidError,
     ArrivalCodeLockedError,
     CheckInRequiredError,
+    DuplicateJobPhotoError,
+    InvalidJobPhotoError,
+    JobPhotoLimitError,
+    JobPhotoNotAllowedError,
+    JobPhotoUploadExpiredError,
     NotOnTheWayError,
 )
-from app.modules.jobs.models import Job, JobEvent, JobStatus
-from app.modules.jobs.repository import JobRepository
+from app.modules.jobs.models import Job, JobEvent, JobPhoto, JobPhotoKind, JobStatus
+from app.modules.jobs.photos import JobPhotoSigner, enqueue_photo_sanitize
+from app.modules.jobs.repository import JobPhotoRepository, JobRepository
 from app.modules.jobs.schemas import (
     CustomerJob,
     JobAddress,
@@ -74,8 +115,10 @@ from app.modules.jobs.schemas import (
 )
 from app.modules.jobs.service import JobStateMachine
 from app.modules.jobs.transitions import CUSTOMER_STATUS
+from app.modules.media.safe_status import MediaSafeStatus
 from app.modules.notifications.events import (
     push_job_checked_in,
+    push_job_done,
     push_job_on_the_way,
     push_job_started,
 )
@@ -84,6 +127,8 @@ from app.modules.quotes.schemas import QuotePro
 from app.modules.quotes.service import QuoteReader
 from app.modules.requests.errors import InvalidRequestError
 from app.modules.requests.service import CustomerRequestReader, ProRequestReader
+from app.modules.uploads.keys import owned_upload, upload_issued_at
+from app.modules.uploads.schemas import UploadPurpose
 from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount
 from app.queue import JobQueue
@@ -95,6 +140,15 @@ CHECKED_IN: Final = "checked_in"
 ACTIVE: Final = frozenset({JobStatus.SCHEDULED, JobStatus.ON_THE_WAY, JobStatus.IN_PROGRESS})
 # The pro no longer goes there: the address is withheld again.
 _ADDRESS_WITHHELD: Final = frozenset({JobStatus.CANCELLED, JobStatus.REFUNDED})
+# When the pro may add photos of each kind (#298).
+_PHOTO_STATUSES: Final = {
+    JobPhotoKind.BEFORE: frozenset({JobStatus.ON_THE_WAY, JobStatus.IN_PROGRESS}),
+    JobPhotoKind.AFTER: frozenset({JobStatus.IN_PROGRESS}),
+}
+# Every photo row of a kind, failed copies included, counts against this many times
+# JOB_PHOTO_MAX_PER_KIND: a failed copy frees its slot for a replacement, a bounded number of
+# times.
+_ROWS_PER_SLOT: Final = 2
 # jobs_events.lat/lng are Numeric(9, 6).
 _COORDINATE: Final = Decimal("0.000001")
 
@@ -104,7 +158,10 @@ class JobExecutionConfig:
     max_attempts: int
     list_default_limit: int
     list_max_limit: int
-    enqueue_timeout_seconds: float  # how long a push may wait on Redis (#65)
+    photo_max_per_kind: int
+    photo_attach_max_age: timedelta
+    photo_url_ttl_seconds: int
+    enqueue_timeout_seconds: float
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "JobExecutionConfig":
@@ -112,6 +169,9 @@ class JobExecutionConfig:
             max_attempts=settings.arrival_code_max_attempts,
             list_default_limit=settings.request_list_default_limit,
             list_max_limit=settings.request_list_max_limit,
+            photo_max_per_kind=settings.job_photo_max_per_kind,
+            photo_attach_max_age=timedelta(minutes=settings.job_photo_attach_max_age_minutes),
+            photo_url_ttl_seconds=settings.download_url_ttl_seconds,
             enqueue_timeout_seconds=settings.job_enqueue_timeout_seconds,
         )
 
@@ -122,11 +182,14 @@ def new_arrival_code() -> str:
 
 
 class JobExecutionService:
-    def __init__(self, session: AsyncSession, config: JobExecutionConfig, queue: JobQueue) -> None:
+    def __init__(
+        self, session: AsyncSession, config: JobExecutionConfig, storage: StorageProvider
+    ) -> None:
         self._session = session
         self._config = config
-        self._queue = queue
         self._jobs = JobRepository(session)
+        self._photos = JobPhotoRepository(session)
+        self._signer = JobPhotoSigner(storage, config.photo_url_ttl_seconds)
         self._pros = ProService(session)
         self._machine = JobStateMachine(session, self._pros)
         self._customer_requests = CustomerRequestReader(session)
@@ -147,6 +210,7 @@ class JobExecutionService:
         if card is None:  # pragma: no cover - jobs.pro_id is a foreign key
             raise NotFoundError
         events = await self._jobs.events_of(job.id)
+        photos = await self._photos.of_jobs([job.id])
         shows_code = job.status is JobStatus.ON_THE_WAY and job.checked_in_at is None
         return CustomerJob(
             id=job.id,
@@ -167,6 +231,7 @@ class JobExecutionService:
                 JobTimelineEntry(type=event.type, status=event.to_status, at=event.created_at)
                 for event in events
             ],
+            photos=self._signer.for_customer(photos),
             amount_cents=job.customer_price_cents,
             tax_cents=job.tax_cents,
             customer_total_cents=job.customer_price_cents + job.tax_cents,
@@ -201,7 +266,9 @@ class JobExecutionService:
 
     # Actions
 
-    async def on_the_way(self, user: UserAccount, job_id: uuid.UUID, eta_minutes: int) -> ProJob:
+    async def on_the_way(
+        self, user: UserAccount, job_id: uuid.UUID, eta_minutes: int, queue: JobQueue
+    ) -> ProJob:
         job = await self._own_locked(user, job_id)
         eta_at = datetime.now(UTC) + timedelta(minutes=eta_minutes)
         if job.status is JobStatus.ON_THE_WAY:
@@ -223,7 +290,7 @@ class JobExecutionService:
         logger.info(event, extra={"job_id": str(job.id), "pro_id": str(job.pro_id)})
         if public_code is not None:
             await push_job_on_the_way(
-                self._queue,
+                queue,
                 customer_id=job.customer_id,
                 job_id=job.id,
                 request_id=job.request_id,
@@ -233,7 +300,13 @@ class JobExecutionService:
         return await self.pro_job(user, job.id)
 
     async def check_in(
-        self, user: UserAccount, job_id: uuid.UUID, arrival_code: str, lat: float, lng: float
+        self,
+        user: UserAccount,
+        job_id: uuid.UUID,
+        arrival_code: str,
+        lat: float,
+        lng: float,
+        queue: JobQueue,
     ) -> ProJob:
         job = await self._own_locked(user, job_id)
         ids = {"job_id": str(job.id), "pro_id": str(job.pro_id)}
@@ -260,7 +333,7 @@ class JobExecutionService:
             await self._session.commit()
             logger.info("job_checked_in", extra=ids)
             await push_job_checked_in(
-                self._queue,
+                queue,
                 customer_id=job.customer_id,
                 job_id=job.id,
                 request_id=job.request_id,
@@ -282,7 +355,7 @@ class JobExecutionService:
         logger.info("arrival_code_rejected", extra={**ids, "attempts_remaining": remaining})
         raise ArrivalCodeInvalidError(remaining)
 
-    async def start(self, user: UserAccount, job_id: uuid.UUID) -> ProJob:
+    async def start(self, user: UserAccount, job_id: uuid.UUID, queue: JobQueue) -> ProJob:
         job = await self._own_locked(user, job_id)
         if job.status in (JobStatus.SCHEDULED, JobStatus.ON_THE_WAY) and job.checked_in_at is None:
             raise CheckInRequiredError
@@ -292,7 +365,96 @@ class JobExecutionService:
         await self._session.commit()
         logger.info("job_started", extra={"job_id": str(job.id), "pro_id": str(job.pro_id)})
         await push_job_started(
-            self._queue,
+            queue,
+            customer_id=job.customer_id,
+            job_id=job.id,
+            request_id=job.request_id,
+            public_code=public_code,
+            timeout_seconds=self._config.enqueue_timeout_seconds,
+        )
+        return await self.pro_job(user, job.id)
+
+    async def add_photos(
+        self,
+        user: UserAccount,
+        job_id: uuid.UUID,
+        kind: JobPhotoKind,
+        keys: Sequence[str],
+        queue: JobQueue,
+    ) -> ProJob:
+        job = await self._own_locked(user, job_id)
+        if job.status not in _PHOTO_STATUSES[kind]:
+            raise JobPhotoNotAllowedError
+        if any(owned_upload(key, user.id, UploadPurpose.JOB_PHOTO) is None for key in keys):
+            raise InvalidJobPhotoError
+        oldest = datetime.now(UTC) - self._config.photo_attach_max_age
+        if any((issued_at := upload_issued_at(key)) is None or issued_at < oldest for key in keys):
+            raise JobPhotoUploadExpiredError
+        # The cap before any query on the keys: a huge body never reaches the database.
+        counts = await self._photos.count_by_status(job.id, kind)
+        cap = self._config.photo_max_per_kind
+        live = counts[MediaSafeStatus.PENDING] + counts[MediaSafeStatus.READY]
+        if live + len(keys) > cap or sum(counts.values()) + len(keys) > _ROWS_PER_SLOT * cap:
+            raise JobPhotoLimitError
+        if len(set(keys)) != len(keys) or await self._photos.held_keys(keys):
+            raise DuplicateJobPhotoError
+        # One transaction shares now(): a microsecond apart, they keep the order given.
+        now = datetime.now(UTC)
+        photos = [
+            JobPhoto(
+                job_id=job.id,
+                kind=kind,
+                file_key=key,
+                uploaded_by=user.id,
+                created_at=now + timedelta(microseconds=index),
+            )
+            for index, key in enumerate(keys)
+        ]
+        try:
+            await self._photos.add_all(photos)
+        except IntegrityError:
+            # Another job's photo took one of the keys after the check above.
+            await self._session.rollback()
+            raise DuplicateJobPhotoError from None
+        await self._session.commit()
+        logger.info(
+            "job_photos_added",
+            extra={
+                "job_id": str(job.id),
+                "pro_id": str(job.pro_id),
+                "kind": kind.value,
+                "count": len(photos),
+            },
+        )
+        await self._queue_copies(job, [photo.id for photo in photos], queue)
+        return await self.pro_job(user, job.id)
+
+    async def complete(self, user: UserAccount, job_id: uuid.UUID, queue: JobQueue) -> ProJob:
+        job = await self._own_locked(user, job_id)
+        if job.status is JobStatus.COMPLETED:
+            await self._session.commit()  # nothing changed: ends the transaction and its lock
+            return await self.pro_job(user, job.id)
+        if job.status is JobStatus.IN_PROGRESS:
+            # Under the job's lock a photo added meanwhile waits, but the worker settles copies
+            # without it: the decision and the batch come from one read, so a copy settled
+            # after it answers 409 processing and the pro's next try sees it (#298 R2-B1).
+            after = await self._photos.statuses(job.id, JobPhotoKind.AFTER)
+            if all(status is not MediaSafeStatus.READY for _, status in after):
+                pending = [
+                    photo_id for photo_id, status in after if status is MediaSafeStatus.PENDING
+                ]
+                if not pending:
+                    raise AfterPhotosRequiredError
+                await self._session.commit()  # nothing changed: ends the transaction and its lock
+                await self._queue_copies(job, pending, queue)
+                raise AfterPhotosProcessingError
+        # 409 for anything but working; the state machine sets completed_at.
+        await self._machine.transition(job.id, JobStatus.COMPLETED, user)
+        public_code = await self._customer_requests.public_code(job.request_id)
+        await self._session.commit()
+        logger.info("job_completed", extra={"job_id": str(job.id), "pro_id": str(job.pro_id)})
+        await push_job_done(
+            queue,
             customer_id=job.customer_id,
             job_id=job.id,
             request_id=job.request_id,
@@ -302,6 +464,19 @@ class JobExecutionService:
         return await self.pro_job(user, job.id)
 
     # Helpers
+
+    async def _queue_copies(self, job: Job, photo_ids: list[uuid.UUID], queue: JobQueue) -> None:
+        """Queues the photos' safe copies, after the commit; a failure is logged, never raised
+        (the photos stay pending, and Job's done queues them again)."""
+        try:
+            await enqueue_photo_sanitize(
+                queue, job.id, photo_ids, self._config.enqueue_timeout_seconds
+            )
+        except (RedisError, OSError):  # TimeoutError is an OSError
+            logger.error(
+                "job_photo_sanitize_enqueue_failed",
+                extra={"job_id": str(job.id), "pro_id": str(job.pro_id)},
+            )
 
     async def _own_locked(self, user: UserAccount, job_id: uuid.UUID) -> Job:
         """The caller's job, locked until the transaction ends; 404 for anyone else's."""
@@ -317,6 +492,9 @@ class JobExecutionService:
         starts = await self._quotes.proposed_starts([job.quote_id for job in jobs])
         requests = await self._requests.job_views([job.request_id for job in jobs])
         names = await self._users.first_names([job.customer_id for job in jobs])
+        photos: dict[uuid.UUID, list[JobPhoto]] = {job.id: [] for job in jobs}
+        for photo in await self._photos.of_jobs(list(photos)):
+            photos[photo.job_id].append(photo)
         category_ids = {
             request.view.category_id
             for request in requests.values()
@@ -352,6 +530,8 @@ class JobExecutionService:
                     checked_in_at=job.checked_in_at,
                     arrival_code_locked=job.arrival_code_locked_at is not None,
                     started_at=job.started_at,
+                    completed_at=job.completed_at,
+                    photos=self._signer.for_pro(photos[job.id]),
                     pro_payout_cents=job.pro_payout_cents,
                 )
             )
