@@ -1,7 +1,11 @@
-import type { GetResponse, PostResponse } from "@/api";
+import type { GetResponse } from "@/api";
 
 export type ChatPage = GetResponse<"/v1/jobs/{job_id}/messages">;
-export type ChatMessage = PostResponse<"/v1/jobs/{job_id}/messages">;
+/**
+ * A stored message as a page lists it. The answer to a send is one too, with the sender's warning
+ * (#72) on top, which the thread does not draw.
+ */
+export type ChatMessage = ChatPage["items"][number];
 
 /**
  * One job's conversation as the screen holds it: every message seen so far, newest first and each
