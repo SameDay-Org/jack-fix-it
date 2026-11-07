@@ -4,6 +4,8 @@ export { Button } from "./Button";
 export type { ButtonProps, ButtonSize, ButtonVariant } from "./Button";
 export { Card } from "./Card";
 export type { CardProps } from "./Card";
+export { ChatBubble } from "./ChatBubble";
+export type { ChatBubbleProps, ChatBubbleSide } from "./ChatBubble";
 export { Chip, ChipSkeleton } from "./Chip";
 export type { ChipProps, ChipSkeletonProps } from "./Chip";
 export { ChoiceCard } from "./ChoiceCard";
