@@ -45,6 +45,7 @@ CUSTOMER_KEYS = {
     "eta_at",
     "arrival_code",
     "timeline",
+    "photos",
     "amount_cents",
     "tax_cents",
     "customer_total_cents",
@@ -61,6 +62,8 @@ PRO_KEYS = {
     "checked_in_at",
     "arrival_code_locked",
     "started_at",
+    "completed_at",
+    "photos",
     "pro_payout_cents",
 }
 BASE = "/v1/pros/me/jobs"

@@ -47,3 +47,58 @@ class ArrivalCodeLockedError(AppError):
     status_code = 423
     code = "arrival_code_locked"
     message = "Too many wrong arrival codes. Support has been alerted."
+
+
+class JobPhotoNotAllowedError(ConflictError):
+    """Before photos while the pro is on the way or working; after photos while working (#298)."""
+
+    code = "job_photo_not_allowed"
+    message = "Photos of this kind cannot be added to the job in its current status."
+
+
+class JobPhotoLimitError(ConflictError):
+    """The job would hold more photos of the kind than JOB_PHOTO_MAX_PER_KIND (#298)."""
+
+    code = "job_photo_limit"
+    message = "The job cannot hold more photos of this kind."
+
+
+class DuplicateJobPhotoError(ConflictError):
+    """A key given twice, or one a job photo already holds (#298)."""
+
+    code = "duplicate_photo"
+    message = "This photo is already attached."
+
+
+class InvalidJobPhotoError(AppError):
+    """A key that is not one of the caller's own job_photo uploads (#298). Which check failed is
+    not said."""
+
+    status_code = 422
+    code = "invalid_photo"
+    message = "One or more photos are not valid uploads."
+
+
+class JobPhotoUploadExpiredError(AppError):
+    """A job_photo upload issued more than JOB_PHOTO_ATTACH_MAX_AGE_MINUTES ago, or before #298
+    (no issue time in its key): the orphan sweep may be about to delete it (#298)."""
+
+    status_code = 422
+    code = "upload_expired"
+    message = "One or more photos were uploaded too long ago. Upload them again."
+
+
+class AfterPhotosRequiredError(ConflictError):
+    """Job's done needs at least one after photo the customer can see: none yet, or all of
+    them failed their privacy-safe copy (#298, epic #272)."""
+
+    code = "after_photos_required"
+    message = "Add at least one photo of the finished work before marking the job done."
+
+
+class AfterPhotosProcessingError(ConflictError):
+    """Job's done while the after photos' privacy-safe copies are still being made, none ready
+    yet (#298): try again shortly."""
+
+    code = "after_photos_processing"
+    message = "The photos of the finished work are still processing. Try again in a moment."

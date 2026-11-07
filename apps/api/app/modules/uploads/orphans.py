@@ -11,8 +11,8 @@ What is never deleted:
 - an object last modified less than ORPHAN_UPLOAD_MIN_AGE_HOURS ago: its row may still be on
   its way (`too_young`);
 - a key the uploads parser does not accept (`unparsed`);
-- a purpose with no referencing table (SKIPPED), and a profile photo of anyone but a pro, since
-  only pro profiles hold one (`skipped_purpose`);
+- a purpose with no referencing table (SKIPPED; none today) and the files of an owner whose
+  role has no column for the purpose (`skipped_purpose`);
 - a key that any referencing column holds, whatever its purpose (`referenced`).
 
 Each page of the listing is checked against the database when it arrives, in one query across
@@ -20,6 +20,15 @@ every referencing column, never against a snapshot taken before the listing: a k
 while the listing ran is kept. The residual: a row that attaches a key after its page's check
 (or commits after it) points at a deleted file. Only an object older than the minimum age is
 ever in that window; a fresh upload never is.
+
+Job photos (#298) close that window by disjoint ages, with no lock shared with the sweep: a
+job accepts a job_photo key issued at most JOB_PHOTO_ATTACH_MAX_AGE_MINUTES ago (the issue time
+is in the key, uploads/keys.py), at most half of ORPHAN_UPLOAD_MIN_AGE_HOURS (config.py). An
+object is last modified after its key was issued, so one this sweep deletes had its key issued
+over the minimum age before the run started, and any attach of it committed over half that
+age before this page's check: the check sees it. The assumption: an attach commits within
+minutes of its age check (one request), far under the margin, and the storage's and the
+API's clocks agree within it.
 
 Modes (ORPHAN_UPLOAD_MODE): `off` does nothing, not even a storage call; `dry_run` (the
 default) counts and logs what it would delete; `delete` deletes. The logs are one
@@ -52,6 +61,7 @@ from app.integrations.storage import (
     Storage,
     StorageUnavailableError,
 )
+from app.modules.jobs.photos import job_photo_keys_among
 from app.modules.pros.service import ProService
 from app.modules.requests.service import media_keys_among
 from app.modules.uploads.keys import UploadKey, parse_upload_key
@@ -71,6 +81,7 @@ class ReferencingColumn(StrEnum):
     PRO_DOCUMENTS_FILE_KEY = "pro_documents.file_key"
     PRO_PROFILES_PHOTO_KEY = "pro_profiles.photo_key"
     USERS_PHOTO_KEY = "users.photo_key"
+    JOB_PHOTOS_FILE_KEY = "job_photos.file_key"
 
 
 @dataclass(frozen=True)
@@ -93,9 +104,10 @@ REFERENCED_BY: Final[Mapping[UploadPurpose, References]] = {
     UploadPurpose.PROFILE_PHOTO: References(
         frozenset({ReferencingColumn.PRO_PROFILES_PHOTO_KEY, ReferencingColumn.USERS_PHOTO_KEY})
     ),
+    UploadPurpose.JOB_PHOTO: References(frozenset({ReferencingColumn.JOB_PHOTOS_FILE_KEY})),
 }
-# No table references these yet: job photos wait for #63.
-SKIPPED: Final[frozenset[UploadPurpose]] = frozenset({UploadPurpose.JOB_PHOTO})
+# Purposes no table references yet: none since job photos (#298).
+SKIPPED: Final[frozenset[UploadPurpose]] = frozenset()
 
 KeyStatement = Callable[[Collection[str]], Select[str] | Select[str | None]]
 # Each column's query, from the module that owns its table (ADR 0003).
@@ -104,6 +116,7 @@ KEY_STATEMENTS: Final[Mapping[ReferencingColumn, KeyStatement]] = {
     ReferencingColumn.PRO_DOCUMENTS_FILE_KEY: ProService.document_keys_among,
     ReferencingColumn.PRO_PROFILES_PHOTO_KEY: ProService.photo_keys_among,
     ReferencingColumn.USERS_PHOTO_KEY: UserService.photo_keys_among,
+    ReferencingColumn.JOB_PHOTOS_FILE_KEY: job_photo_keys_among,
 }
 
 SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]

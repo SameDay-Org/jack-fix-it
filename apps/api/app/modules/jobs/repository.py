@@ -2,10 +2,11 @@ import uuid
 from collections.abc import Collection
 from datetime import datetime
 
-from sqlalchemy import Subquery, exists, select, tuple_
+from sqlalchemy import Select, Subquery, exists, func, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.jobs.models import Job, JobEvent, JobStatus
+from app.modules.jobs.models import Job, JobEvent, JobPhoto, JobPhotoKind, JobStatus
+from app.modules.media.safe_status import MediaSafeStatus
 
 
 class JobRepository:
@@ -86,3 +87,97 @@ class JobRepository:
         self._session.add(event)
         await self._session.flush()
         return event
+
+
+class JobPhotoRepository:
+    """The pro's before and after photos of a job (#298)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def of_jobs(self, job_ids: Collection[uuid.UUID]) -> list[JobPhoto]:
+        """The jobs' photos, oldest first (created_at, then id)."""
+        if not job_ids:
+            return []
+        statement = (
+            select(JobPhoto)
+            .where(JobPhoto.job_id.in_(job_ids))
+            .order_by(JobPhoto.created_at, JobPhoto.id)
+        )
+        return list((await self._session.scalars(statement)).all())
+
+    async def count_by_status(
+        self, job_id: uuid.UUID, kind: JobPhotoKind
+    ) -> dict[MediaSafeStatus, int]:
+        """How many of the job's photos of the kind are in each safe-copy status (every status
+        present, zero when none)."""
+        statement = (
+            select(JobPhoto.safe_status, func.count())
+            .where(JobPhoto.job_id == job_id, JobPhoto.kind == kind)
+            .group_by(JobPhoto.safe_status)
+        )
+        counts = dict.fromkeys(MediaSafeStatus, 0)
+        for status, count in (await self._session.execute(statement)).tuples():
+            counts[status] = count
+        return counts
+
+    async def statuses(
+        self, job_id: uuid.UUID, kind: JobPhotoKind
+    ) -> list[tuple[uuid.UUID, MediaSafeStatus]]:
+        """Each of the job's photos of the kind with its safe-copy status, oldest first, in one
+        query: one snapshot, so a copy the worker settles meanwhile cannot split the answer."""
+        statement = (
+            select(JobPhoto.id, JobPhoto.safe_status)
+            .where(JobPhoto.job_id == job_id, JobPhoto.kind == kind)
+            .order_by(JobPhoto.created_at, JobPhoto.id)
+        )
+        return [(photo_id, status) for photo_id, status in await self._session.execute(statement)]
+
+    async def held_keys(self, keys: Collection[str]) -> set[str]:
+        """The keys among `keys` that any job photo already holds."""
+        return set((await self._session.scalars(self.keys_among(keys))).all())
+
+    async def add_all(self, photos: Collection[JobPhoto]) -> None:
+        """Inserts now (flush): a key another job's photo took meanwhile fails here, on its
+        unique index."""
+        self._session.add_all(photos)
+        await self._session.flush()
+
+    async def pending(self, job_id: uuid.UUID, photo_ids: Collection[uuid.UUID]) -> list[JobPhoto]:
+        """Those of the job's photos `photo_ids` still without a safe copy, oldest first."""
+        statement = (
+            select(JobPhoto)
+            .where(
+                JobPhoto.job_id == job_id,
+                JobPhoto.id.in_(photo_ids),
+                JobPhoto.safe_status == MediaSafeStatus.PENDING,
+            )
+            .order_by(JobPhoto.created_at, JobPhoto.id)
+        )
+        return list((await self._session.scalars(statement)).all())
+
+    async def get_for_update(self, photo_id: uuid.UUID) -> JobPhoto | None:
+        """One photo, locked until the transaction ends, as the last writer left it."""
+        statement = (
+            select(JobPhoto)
+            .where(JobPhoto.id == photo_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def fail_pending(self, photo_ids: Collection[uuid.UUID]) -> list[uuid.UUID]:
+        """Marks those of the photos still pending failed; the ids it changed."""
+        statement = (
+            update(JobPhoto)
+            .where(JobPhoto.id.in_(photo_ids), JobPhoto.safe_status == MediaSafeStatus.PENDING)
+            .values(safe_status=MediaSafeStatus.FAILED)
+            .returning(JobPhoto.id)
+            .execution_options(synchronize_session=False)
+        )
+        return list((await self._session.scalars(statement)).all())
+
+    @staticmethod
+    def keys_among(keys: Collection[str]) -> Select[str]:
+        """The file keys among `keys` that job photos hold, for another module's query."""
+        return select(JobPhoto.file_key).where(JobPhoto.file_key.in_(keys))

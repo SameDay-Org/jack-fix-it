@@ -170,7 +170,7 @@ async def test_a_pending_photo_gets_a_safe_copy(
 ) -> None:
     media = await make_media(db_session, storage, gps_jpeg())
 
-    outcome = await copier(db_session, storage).copy_request_media(media.request_id, attempt=1)
+    outcome = await copier(db_session, storage).copy_pending(media.request_id, attempt=1)
 
     assert (outcome.ready, outcome.failed, outcome.waiting) == (1, 0, 0)
     saved = await row(db_session, media.media_id)
@@ -187,7 +187,7 @@ async def test_a_pending_photo_gets_a_safe_copy(
 async def test_safe_key_is_opaque(db_session: AsyncSession, storage: MemoryStorage) -> None:
     media = await make_media(db_session, storage, gps_jpeg())
 
-    await copier(db_session, storage).copy_request_media(media.request_id, attempt=1)
+    await copier(db_session, storage).copy_pending(media.request_id, attempt=1)
 
     safe_key = (await row(db_session, media.media_id)).safe_key
     assert safe_key is not None
@@ -206,9 +206,9 @@ async def test_rerun_skips_ready_rows_no_second_copy(
     media = await make_media(db_session, storage, gps_jpeg())
     jobs = copier(db_session, storage)
 
-    await jobs.copy_request_media(media.request_id, attempt=1)
+    await jobs.copy_pending(media.request_id, attempt=1)
     first = (await row(db_session, media.media_id)).safe_key
-    again = await jobs.copy_request_media(media.request_id, attempt=1)
+    again = await jobs.copy_pending(media.request_id, attempt=1)
 
     assert (again.ready, again.failed, again.waiting) == (0, 0, 0)
     assert len(storage.uploads) == 1
@@ -222,10 +222,10 @@ async def test_missing_object_retries_then_fails(
     jobs = copier(db_session, storage)
 
     for attempt in range(1, MAX_TRIES):
-        outcome = await jobs.copy_request_media(media.request_id, attempt=attempt)
+        outcome = await jobs.copy_pending(media.request_id, attempt=attempt)
         assert (outcome.waiting, outcome.failed) == (1, 0)
         assert (await row(db_session, media.media_id)).safe_status == MediaSafeStatus.PENDING
-    last = await jobs.copy_request_media(media.request_id, attempt=MAX_TRIES)
+    last = await jobs.copy_pending(media.request_id, attempt=MAX_TRIES)
 
     assert (last.waiting, last.failed) == (0, 1)
     saved = await row(db_session, media.media_id)
@@ -239,7 +239,7 @@ async def test_an_unavailable_storage_retries(
     media = await make_media(db_session, storage, gps_jpeg())
     storage.unavailable = True
 
-    outcome = await copier(db_session, storage).copy_request_media(media.request_id, attempt=1)
+    outcome = await copier(db_session, storage).copy_pending(media.request_id, attempt=1)
 
     assert outcome.waiting == 1
     assert (await row(db_session, media.media_id)).safe_status == MediaSafeStatus.PENDING
@@ -251,8 +251,8 @@ async def test_decompression_bomb_fails_and_is_never_ready(
     media = await make_media(db_session, storage, gps_jpeg(size=(200, 100)))
     jobs = copier(db_session, storage, max_image_pixels=1_000)  # 20 000 pixels is too many
 
-    outcome = await jobs.copy_request_media(media.request_id, attempt=1)
-    again = await jobs.copy_request_media(media.request_id, attempt=1)
+    outcome = await jobs.copy_pending(media.request_id, attempt=1)
+    again = await jobs.copy_pending(media.request_id, attempt=1)
 
     assert (outcome.failed, again.failed, again.ready) == (1, 0, 0)  # settled: never retried
     saved = await row(db_session, media.media_id)
@@ -263,7 +263,7 @@ async def test_decompression_bomb_fails_and_is_never_ready(
 async def test_wrong_type_bytes_fail(db_session: AsyncSession, storage: MemoryStorage) -> None:
     media = await make_media(db_session, storage, b"this is text, not a JPEG")
 
-    outcome = await copier(db_session, storage).copy_request_media(media.request_id, attempt=1)
+    outcome = await copier(db_session, storage).copy_pending(media.request_id, attempt=1)
 
     assert outcome.failed == 1
     assert (await row(db_session, media.media_id)).safe_status == MediaSafeStatus.FAILED
@@ -278,7 +278,7 @@ async def test_logs_have_no_keys_or_paths(
 
     with caplog.at_level(logging.DEBUG):
         for media in (ready, broken, missing):
-            await copier(db_session, storage).copy_request_media(media.request_id, attempt=1)
+            await copier(db_session, storage).copy_pending(media.request_id, attempt=1)
 
     messages = {record.getMessage() for record in caplog.records}
     assert {"media_sanitized", "media_sanitize_failed", "media_sanitize_retry"} <= messages
@@ -315,8 +315,8 @@ async def test_an_unexpected_error_on_one_row_never_stops_the_others(
     jobs = copier(db_session, storage)
 
     with caplog.at_level(logging.WARNING):
-        first = await jobs.copy_request_media(broken.request_id, attempt=1)
-    last = await jobs.copy_request_media(broken.request_id, attempt=MAX_TRIES)
+        first = await jobs.copy_pending(broken.request_id, attempt=1)
+    last = await jobs.copy_pending(broken.request_id, attempt=MAX_TRIES)
 
     assert (first.ready, first.waiting) == (1, 1)
     assert (await row(db_session, second.id)).safe_status == MediaSafeStatus.READY
@@ -435,8 +435,8 @@ async def test_a_try_out_of_time_defers_the_rest_to_the_next(
     jobs = short_copier(db_session, slow_storage)
     clock = slow_storage.clock
 
-    first = await jobs.copy_request_media(media.request_id, attempt=1, clock=clock)
-    then = await jobs.copy_request_media(media.request_id, attempt=2, clock=clock)
+    first = await jobs.copy_pending(media.request_id, attempt=1, clock=clock)
+    then = await jobs.copy_pending(media.request_id, attempt=2, clock=clock)
 
     assert (first.ready, first.deferred) == (1, 1)
     assert (then.ready, then.deferred) == (1, 0)
@@ -448,7 +448,7 @@ async def test_the_final_try_fails_what_it_has_no_time_for(
 ) -> None:
     media, second = await make_two_photos(db_session, slow_storage)
 
-    outcome = await short_copier(db_session, slow_storage).copy_request_media(
+    outcome = await short_copier(db_session, slow_storage).copy_pending(
         media.request_id, attempt=MAX_TRIES + 2, final=True, clock=slow_storage.clock
     )
 
@@ -469,7 +469,7 @@ async def test_a_failure_while_failing_a_row_leaves_it_waiting(
 
     monkeypatch.setattr(jobs, "_fail", database_down)
 
-    outcome = await jobs.copy_request_media(media.request_id, attempt=MAX_TRIES)
+    outcome = await jobs.copy_pending(media.request_id, attempt=MAX_TRIES)
 
     assert (outcome.waiting, outcome.failed) == (1, 0)
     assert (await row(db_session, media.media_id)).safe_status == MediaSafeStatus.PENDING
@@ -491,7 +491,7 @@ async def test_a_final_try_settles_a_row_whose_failing_write_failed(
     monkeypatch.setattr(jobs, "_fail", slow_database)
 
     with caplog.at_level(logging.ERROR):
-        outcome = await jobs.copy_request_media(media.request_id, attempt=MAX_TRIES + 2, final=True)
+        outcome = await jobs.copy_pending(media.request_id, attempt=MAX_TRIES + 2, final=True)
 
     # Both of the row's own failing writes failed; the settlement's write fails it.
     assert (outcome.waiting, outcome.failed) == (0, 1)
@@ -512,7 +512,7 @@ async def test_the_last_two_tries_settle_every_row(
         finals[attempt] = final
         return MediaCopyOutcome()
 
-    monkeypatch.setattr(MediaCopier, "copy_request_media", recording)
+    monkeypatch.setattr(MediaCopier, "copy_pending", recording)
 
     last = MAX_TRIES + SANITIZE_SPARE_TRIES
     for attempt in range(1, last + 1):
@@ -538,7 +538,7 @@ async def test_the_last_try_never_asks_for_a_retry(
             return MediaCopyOutcome(waiting=1)
         raise OperationalError("UPDATE", {}, Exception("down"))
 
-    monkeypatch.setattr(MediaCopier, "copy_request_media", unsettled)
+    monkeypatch.setattr(MediaCopier, "copy_pending", unsettled)
 
     with caplog.at_level(logging.ERROR):
         outcome = await sanitize_request_media(
@@ -566,7 +566,7 @@ async def test_the_task_retries_a_database_or_network_failure(
     async def failing(*args: object, **kwargs: object) -> None:
         raise error
 
-    monkeypatch.setattr(MediaCopier, "copy_request_media", failing)
+    monkeypatch.setattr(MediaCopier, "copy_pending", failing)
 
     with caplog.at_level(logging.WARNING), pytest.raises(Retry):
         await sanitize_request_media(ctx(db_session, storage, 1), str(media.request_id))
@@ -583,7 +583,7 @@ async def test_the_task_asks_for_a_retry_while_files_are_deferred(
     async def deferring(*args: object, **kwargs: object) -> MediaCopyOutcome:
         return MediaCopyOutcome(deferred=1)
 
-    monkeypatch.setattr(MediaCopier, "copy_request_media", deferring)
+    monkeypatch.setattr(MediaCopier, "copy_pending", deferring)
 
     with pytest.raises(Retry):
         await sanitize_request_media(ctx(db_session, storage, 1), str(media.request_id))

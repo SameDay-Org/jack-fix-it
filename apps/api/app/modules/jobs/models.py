@@ -8,6 +8,7 @@ from sqlalchemy import CHAR, CheckConstraint, DateTime, ForeignKey, Numeric, Str
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, IdTimestampsMixin, str_enum
+from app.modules.media.safe_status import MediaSafeStatus
 
 
 class JobStatus(StrEnum):
@@ -93,3 +94,28 @@ class JobEvent(IdTimestampsMixin, Base):
     actor_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), index=True)
     lat: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
     lng: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
+
+
+class JobPhotoKind(StrEnum):
+    BEFORE = "before"
+    AFTER = "after"
+
+
+class JobPhoto(IdTimestampsMixin, Base):
+    """A photo the pro took of the work (#298): before it, and after it (Job's done needs one)."""
+
+    __tablename__ = "job_photos"
+
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id"), index=True)
+    kind: Mapped[JobPhotoKind] = mapped_column(str_enum(JobPhotoKind, "job_photo_kind"))
+    # The pro's job_photo upload (u/<user_id>/job_photo/...); one file belongs to one job.
+    file_key: Mapped[str] = mapped_column(String(256), unique=True)
+    uploaded_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    # The privacy-safe copy the worker makes, as for request media (#173): metadata stripped,
+    # under an opaque key (m/<32 hex><ext>). Only it is ever shown to the customer.
+    safe_key: Mapped[str | None] = mapped_column(String(256), unique=True)
+    safe_status: Mapped[MediaSafeStatus] = mapped_column(
+        str_enum(MediaSafeStatus, "media_safe_status"),
+        server_default=MediaSafeStatus.PENDING.value,
+    )
+    safe_content_type: Mapped[str | None] = mapped_column(String(64))
