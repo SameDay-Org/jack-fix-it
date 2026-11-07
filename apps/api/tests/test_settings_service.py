@@ -17,6 +17,7 @@ from app.modules.settings.service import (
     SettingsService,
 )
 from app.observability import JsonFormatter
+from tests.helpers import mentions_number
 
 
 async def store(session: AsyncSession, value: JsonValue) -> None:
@@ -139,8 +140,9 @@ async def test_a_malformed_optional_setting_raises_and_logs_the_key_only(
     assert record.__dict__["key"] == OPTIONAL_KEY
     output = JsonFormatter().format(record)
     assert "value" not in output
-    assert "98765" not in output
-    assert str(INT4_MAX + 1) not in output
+    # The record's timestamp has random-looking digits, so not a substring check.
+    assert not mentions_number(output, 98765)
+    assert not mentions_number(output, INT4_MAX + 1)
 
 
 # The platform's take rate (#246): absent is the default 1500, malformed is refused.
@@ -201,4 +203,4 @@ async def test_a_malformed_take_rate_raises_and_logs_the_key_only(
     assert record.__dict__["key"] == PLATFORM_TAKE_RATE_BPS
     output = JsonFormatter().format(record)
     assert "value" not in output
-    assert "10001" not in output
+    assert not mentions_number(output, 10001)
