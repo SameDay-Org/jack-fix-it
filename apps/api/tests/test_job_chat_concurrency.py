@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.modules.addresses.models import Address
 from app.modules.chat.errors import ChatClosedError
 from app.modules.chat.models import JobChatRead, JobMessage
+from app.modules.chat.repository import ChatRepository
 from app.modules.chat.service import ChatConfig, ChatService
 from app.modules.jobs.models import Job, JobEvent, JobStatus
 from app.modules.jobs.service import JobPartiesReader, JobStateMachine
@@ -229,3 +230,63 @@ async def test_concurrent_messages_commit_in_created_at_order(
     assert [m.body for m in stored] == ["first", "second"]
     assert stored[1].id == out.id
     assert stored[0].created_at < stored[1].created_at
+
+
+async def _marker(world: CommittedJob) -> tuple[uuid.UUID | None, uuid.UUID | None]:
+    """The customer's (delivered, read) message ids."""
+    async with world.sessions() as session:
+        row = (
+            await session.execute(
+                select(JobChatRead.last_delivered_message_id, JobChatRead.last_read_message_id)
+                .where(JobChatRead.job_id == world.job_id)
+                .where(JobChatRead.user_id == world.customer.id)
+            )
+        ).one()
+        return row[0], row[1]
+
+
+@pytest.mark.parametrize("holder_moves", ["delivered", "read"])
+async def test_racing_markers_never_move_back(
+    committed_job: CommittedJob, holder_moves: str
+) -> None:
+    # #331: one transaction moves a marker to the newer message and holds the row; another,
+    # moving a marker to the older message, waits for it and then changes nothing it should
+    # not: delivered stays on the newer, and only a read marker that was NULL moves.
+    world = committed_job
+    async with world.sessions() as session:
+        older, newer = (
+            JobMessage(
+                job_id=world.job_id,
+                sender_id=world.pro.id,
+                body=body,
+                redacted=False,
+                created_at=at,
+            )
+            for body, at in (("older", NOW), ("newer", NOW + timedelta(seconds=1)))
+        )
+        session.add_all([older, newer])
+        await session.commit()
+
+    async def late(session: AsyncSession) -> None:
+        repository = ChatRepository(session)
+        if holder_moves == "delivered":
+            await repository.move_read(world.job_id, world.customer.id, older)
+        else:
+            await repository.move_delivered(world.job_id, world.customer.id, older)
+        await session.commit()
+
+    async with world.sessions() as first, world.sessions() as second:
+        repository = ChatRepository(first)
+        if holder_moves == "delivered":
+            await repository.move_delivered(world.job_id, world.customer.id, newer)
+        else:
+            await repository.move_read(world.job_id, world.customer.id, newer)
+        holder = await backend_pid(first)
+        waiter = await backend_pid(second)
+        task = asyncio.create_task(late(second))
+        await wait_until_blocked(world.sessions, waiter=waiter, holder=holder)
+        await first.commit()
+        await task
+
+    expected = (newer.id, older.id) if holder_moves == "delivered" else (newer.id, newer.id)
+    assert await _marker(world) == expected

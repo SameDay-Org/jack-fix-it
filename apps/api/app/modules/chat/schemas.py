@@ -2,7 +2,9 @@
 
 A sender is named by their side only ("me", "customer", "pro"): never a user id, a name, an
 email or a phone. Bodies are as stored: already redacted when written. Only staff see the
-original of a redacted message (#72), and only while it is kept.
+original of a redacted message (#72), and only while it is kept. A receipt (#331) says how far
+a message got with the other side: it tells the sender only that the other side's app fetched
+or read the thread, never when or on which device.
 """
 
 import uuid
@@ -13,7 +15,7 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from app.modules.addresses.schemas import NO_NUL
-from app.modules.chat.models import MESSAGE_MAX_LENGTH
+from app.modules.chat.models import MESSAGE_MAX_LENGTH, Receipt
 
 
 class Sender(StrEnum):
@@ -43,6 +45,11 @@ class ChatMessageOut(_Out):
     )
     redacted: bool = Field(description="True when something in the text was masked.")
     created_at: datetime
+    receipt: Receipt | None = Field(
+        description="On the caller's own messages (sender me): seen once the other side marked "
+        "it read, delivered once their app fetched it (listed the chat), sent before that. Null "
+        "on the other side's messages. A push notification does not count as delivered."
+    )
 
 
 class SentMessageOut(ChatMessageOut):
@@ -73,6 +80,10 @@ class StaffChatMessageOut(_Out):
         "read. Every response that carries one is audited."
     )
     created_at: datetime
+    receipt: Receipt = Field(
+        description="How far the message got with the other side (the one who did not send "
+        "it): seen, delivered or sent, as its sender sees it."
+    )
 
 
 class StaffChatPage(_Out):

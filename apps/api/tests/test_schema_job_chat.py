@@ -121,6 +121,8 @@ async def test_read_marker_constraints(db_session: AsyncSession, bad: str) -> No
             user_id=world.customer.id,
             last_read_message_id=message.id,
             last_read_message_at=message.created_at,
+            last_delivered_message_id=message.id,
+            last_delivered_message_at=message.created_at,
         )
     )
     await db_session.flush()
@@ -140,7 +142,8 @@ async def test_read_marker_constraints(db_session: AsyncSession, bad: str) -> No
             await db_session.execute(
                 text(
                     "INSERT INTO job_chat_reads (job_id, user_id, last_read_message_id, "
-                    "last_read_message_at) VALUES (:job_id, :user_id, :message_id, :at)"
+                    "last_read_message_at, last_delivered_message_id, last_delivered_message_at) "
+                    "VALUES (:job_id, :user_id, :message_id, :at, :message_id, :at)"
                 ),
                 values,
             )

@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from enum import StrEnum
 from typing import Final
 
 from sqlalchemy import (
@@ -20,6 +21,16 @@ from app.db import Base, IdTimestampsMixin
 
 # The longest message body, in characters, as stored (after cleaning and redaction).
 MESSAGE_MAX_LENGTH: Final = 2000
+
+
+class Receipt(StrEnum):
+    """How far a message got with its recipient, the participant who did not send it: sent,
+    delivered (their app fetched it) or seen (they marked it read). From the recipient's
+    markers (#331)."""
+
+    SENT = "sent"  # stored; the recipient's app has not fetched it yet
+    DELIVERED = "delivered"  # the recipient's app fetched it (their delivered marker)
+    SEEN = "seen"  # the recipient marked it read (their read marker)
 
 
 class JobMessage(IdTimestampsMixin, Base):
@@ -76,20 +87,43 @@ class JobMessage(IdTimestampsMixin, Base):
 
 
 class JobChatRead(IdTimestampsMixin, Base):
-    """How far one participant has read a job's chat: their read marker, moved forward only.
+    """How far one participant has received and read a job's chat: two markers, each moved
+    forward only (#71, #331).
 
-    `last_read_message_at` is the marked message's created_at, copied so the marker compares
-    with messages by (created_at, id) without a join (messages are never edited)."""
+    - Delivered: the newest message of the other side that the participant's app has fetched
+      (listing the thread moves it). Set on every row: the row is created by the first listing
+      that moves it or by the first read.
+    - Read: the newest message the participant marked read (POST .../read), NULL until then.
+      Reading moves the delivered marker too, so delivered is never behind read.
+
+    Each `*_at` is the marked message's created_at, copied so a marker compares with messages by
+    (created_at, id) without a join (messages are never edited)."""
 
     __tablename__ = "job_chat_reads"
-    __table_args__ = (UniqueConstraint("job_id", "user_id"),)
+    __table_args__ = (
+        UniqueConstraint("job_id", "user_id"),
+        CheckConstraint(
+            "(last_read_message_id IS NULL) = (last_read_message_at IS NULL)",
+            name="read_complete",
+        ),
+        CheckConstraint(
+            "last_read_message_at IS NULL "
+            "OR (last_delivered_message_at, last_delivered_message_id) "
+            ">= (last_read_message_at, last_read_message_id)",
+            name="delivered_covers_read",
+        ),
+    )
 
     job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id"))
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
-    last_read_message_id: Mapped[uuid.UUID] = mapped_column(
+    last_read_message_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("job_messages.id"), index=True
     )
-    last_read_message_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_read_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_delivered_message_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("job_messages.id"), index=True
+    )
+    last_delivered_message_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class ChatOffenderFlag(IdTimestampsMixin, Base):

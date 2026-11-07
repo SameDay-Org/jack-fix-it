@@ -894,8 +894,11 @@ export interface paths {
         };
         /**
          * Read my job's chat
-         * @description The job's messages, newest first, with the caller's unread count. Reading does not move
-         *     the read marker: POST .../read does. Readable in every job status.
+         * @description The job's messages, newest first, with the caller's unread count and a receipt on each
+         *     of the caller's own messages (sent, delivered, seen). Listing moves the caller's delivered
+         *     marker forward to the newest message of the other side in the page (the other side's
+         *     receipt turns delivered), never the read marker: POST .../read does. Readable in every job
+         *     status.
          */
         get: operations["list_messages_v1_jobs__job_id__messages_get"];
         put?: never;
@@ -925,7 +928,8 @@ export interface paths {
         /**
          * Mark my job's chat read up to a message
          * @description Moves the caller's read marker to the message, only forward: an older one, or the same
-         *     again, changes nothing. Allowed in every job status.
+         *     again, changes nothing. Reading implies delivered: the delivered marker moves there too
+         *     unless it is further already. Allowed in every job status.
          */
         post: operations["mark_read_v1_jobs__job_id__messages_read_post"];
         delete?: never;
@@ -944,8 +948,9 @@ export interface paths {
         /**
          * Read a job's chat (staff)
          * @description Any job's messages, newest first, for the BDC and admins, with the original of each
-         *     redacted message while it is kept. Read-only: no read marker moves, and the parties' unread
-         *     counts do not change. A response that carries an original is recorded in the audit log.
+         *     redacted message while it is kept, and every message's receipt. Read-only: no marker moves,
+         *     and the parties' unread counts and receipts do not change. A response that carries an
+         *     original is recorded in the audit log.
          */
         get: operations["staff_list_messages_v1_admin_jobs__job_id__messages_get"];
         put?: never;
@@ -1308,6 +1313,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** @description On the caller's own messages (sender me): seen once the other side marked it read, delivered once their app fetched it (listed the chat), sent before that. Null on the other side's messages. A push notification does not count as delivered. */
+            receipt: components["schemas"]["Receipt"] | null;
         };
         /** ChatOffenderFlagOut */
         ChatOffenderFlagOut: {
@@ -2655,6 +2662,14 @@ export interface components {
             status: "ok" | "unavailable";
             checks: components["schemas"]["DependencyChecks"];
         };
+        /**
+         * Receipt
+         * @description How far a message got with its recipient, the participant who did not send it: sent,
+         *     delivered (their app fetched it) or seen (they marked it read). From the recipient's
+         *     markers (#331).
+         * @enum {string}
+         */
+        Receipt: "sent" | "delivered" | "seen";
         /** RefreshTokenRequest */
         RefreshTokenRequest: {
             /**
@@ -2990,6 +3005,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** @description On the caller's own messages (sender me): seen once the other side marked it read, delivered once their app fetched it (listed the chat), sent before that. Null on the other side's messages. A push notification does not count as delivered. */
+            receipt: components["schemas"]["Receipt"] | null;
             /** @description contact_details_hidden when something in the text was masked (redacted is true): the app tells the sender that contact details are not shared in the chat. Null otherwise. */
             warning: components["schemas"]["ChatWarning"] | null;
         };
@@ -3073,6 +3090,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** @description How far the message got with the other side (the one who did not send it): seen, delivered or sent, as its sender sees it. */
+            receipt: components["schemas"]["Receipt"];
         };
         /** StaffChatPage */
         StaffChatPage: {
