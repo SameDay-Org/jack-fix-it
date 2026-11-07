@@ -3,21 +3,26 @@ import importlib
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Iterator
 from types import ModuleType
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from arq import func
 from arq.connections import ArqRedis
 from arq.worker import Function, Worker, create_worker
+from pydantic import ValidationError
 from sqlalchemy.exc import ProgrammingError
 
+import app.worker as app_worker
 from app.config import Settings, get_settings
+from app.integrations.stripe_payments import StripePaymentsClient
 from app.modules.dispatch.tasks import dispatch_request
 from app.modules.notifications.push_tasks import check_push_receipts
+from app.modules.payments.tasks import cancel_unpaid_payments
 from app.modules.quotes.tasks import expire_quotes
 from app.modules.requests.tasks import SANITIZE_SPARE_TRIES
 from app.modules.uploads.tasks import sweep_orphan_uploads
 from app.worker import WorkerSettings, every
+from tests.conftest import make_settings
 
 
 @pytest.fixture
@@ -102,6 +107,12 @@ def test_cron_jobs_keep_names_cadences_and_timeouts() -> None:
             get_settings().quote_expiry_timeout_seconds,
             1,
         ),
+        "cron:cancel_unpaid_payments": (
+            cancel_unpaid_payments,
+            every(get_settings().payment_unpaid_sweep_minutes),
+            get_settings().payment_unpaid_sweep_timeout_seconds,
+            1,
+        ),
     }
 
 
@@ -119,6 +130,49 @@ def test_worker_registers_expire_quotes_without_results(
     assert (job.keep_result_s, job.keep_result_forever) == (0, False)
     assert job.minute == {0, 20, 40}
     assert job.timeout_s == 111
+
+
+def test_worker_registers_cancel_unpaid_payments_without_results(
+    worker_module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The cadence and the timeout come from the settings, read when the worker starts.
+    monkeypatch.setenv("PAYMENT_UNPAID_SWEEP_MINUTES", "15")
+    monkeypatch.setenv("PAYMENT_UNPAID_SWEEP_TIMEOUT_SECONDS", "222")
+    get_settings.cache_clear()
+    module = importlib.reload(worker_module)
+
+    [job] = [j for j in module.WorkerSettings.cron_jobs if j.coroutine is cancel_unpaid_payments]
+    assert job.name == "cron:cancel_unpaid_payments"
+    assert (job.keep_result_s, job.keep_result_forever) == (0, False)
+    assert job.minute == {0, 15, 30, 45}
+    assert job.timeout_s == 222
+
+
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_unpaid_cancel_window_must_be_positive(value: str) -> None:
+    with pytest.raises(ValidationError):
+        make_settings(payment_unpaid_cancel_after_seconds=int(value))
+
+
+async def test_startup_gives_the_sweep_a_stripe_client_only_with_a_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The unpaid payment sweep reads ctx["stripe_payments"]: a client with the secret key,
+    None without it."""
+    monkeypatch.setattr(app_worker, "configure_logging", lambda level: None)
+    monkeypatch.setattr(app_worker, "init_sentry", lambda settings: None)
+    contexts: list[dict[str, Any]] = []
+    for key in (None, "sk_test_fixture-not-a-real-key"):
+        settings = make_settings(stripe_secret_key=key)
+        monkeypatch.setattr(app_worker, "get_settings", lambda settings=settings: settings)
+        ctx: dict[str, Any] = {}
+        await app_worker.startup(ctx)
+        await app_worker.shutdown(ctx)
+        contexts.append(ctx)
+
+    without_key, with_key = contexts
+    assert without_key["stripe_payments"] is None
+    assert isinstance(with_key["stripe_payments"], StripePaymentsClient)
 
 
 @pytest.fixture

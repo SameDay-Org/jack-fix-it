@@ -9,6 +9,11 @@ Customer, which the sheet reaches through an ephemeral key created with the SDK'
 version. Calls go through the official SDK's async client on httpx (timeout and retries from
 settings): no synchronous call blocks the event loop.
 
+A PaymentIntent left unpaid past PAYMENT_UNPAID_CANCEL_AFTER_SECONDS is canceled (#297,
+`cancellation_reason` abandoned). Stripe refuses to cancel an intent that is processing,
+succeeded or canceled already (`payment_intent_unexpected_state`): that answer is False, not an
+error, since it only means the intent is not ours to cancel now.
+
 A payment whose create answer was lost for longer than Stripe keeps idempotency keys finds
 its PaymentIntent again with Stripe Search on the metadata payment_id (one page of at most
 PAYMENT_INTENT_SEARCH_LIMIT); Search is eventually consistent, so an empty answer proves nothing.
@@ -32,6 +37,7 @@ from starlette.requests import Request
 from stripe.params import (
     CustomerCreateParams,
     EphemeralKeyCreateParams,
+    PaymentIntentCancelParams,
     PaymentIntentCreateParams,
     PaymentIntentSearchParams,
 )
@@ -42,6 +48,8 @@ from app.integrations.stripe_errors import StripeRejectedError, raise_typed
 # Stripe's statuses of a PaymentIntent that no sheet can confirm again (the payment's own status
 # follows them through the webhooks, #61).
 PAYMENT_INTENT_CLOSED_STATUSES: frozenset[str] = frozenset({"succeeded", "canceled"})
+# Stripe's error code for a cancel of an intent that is processing, succeeded or canceled.
+PAYMENT_INTENT_UNEXPECTED_STATE = "payment_intent_unexpected_state"
 # One search page: more than one match is already an answer (ambiguous), so a single page
 # of this size counts them for the log.
 PAYMENT_INTENT_SEARCH_LIMIT = 10
@@ -116,6 +124,11 @@ class StripePayments(Protocol):
 
     async def create_ephemeral_key(self, customer_id: str) -> str:
         """A new ephemeral key's secret for the customer, for the Payment Sheet."""
+        ...
+
+    async def cancel_payment_intent(self, payment_intent_id: str, *, idempotency_key: str) -> bool:
+        """Cancels an unpaid PaymentIntent (abandoned); False when Stripe refuses because it is
+        processing, succeeded or canceled already (see the module doc)."""
         ...
 
 
@@ -231,6 +244,19 @@ class StripePaymentsClient:
         if secret is None:
             raise StripeRejectedError(request_id=_request_id(key), code="ephemeral_key_no_secret")
         return secret
+
+    async def cancel_payment_intent(self, payment_intent_id: str, *, idempotency_key: str) -> bool:
+        params: PaymentIntentCancelParams = {"cancellation_reason": "abandoned"}
+        try:
+            await self._client.v1.payment_intents.cancel_async(
+                payment_intent_id, params=params, options={"idempotency_key": idempotency_key}
+            )
+        except stripe.StripeError as error:
+            code = error.code or (error.error.code if error.error else None)
+            if error.http_status == 400 and code == PAYMENT_INTENT_UNEXPECTED_STATE:
+                return False
+            raise_typed(error)
+        return True
 
 
 def _state(intent: stripe.PaymentIntent) -> PaymentIntentState:
