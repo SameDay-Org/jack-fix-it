@@ -806,7 +806,9 @@
       "again_one": "Add it again.",
       "again_other": "Add them again.",
       "add": "Add photos",
-      "upTo": "Up to {{max}} photos"
+      "upTo": "Up to {{max}} photos",
+      "failed_one": "{{count}} photo couldn't be processed. Add another one.",
+      "failed_other": "{{count}} photos couldn't be processed. Add another one."
     },
     "done": {
       "action": "Job's done",

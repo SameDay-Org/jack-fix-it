@@ -17,6 +17,8 @@ export type MediaItemRowProps = {
   name?: string;
   onRetry: () => void;
   onRemove: () => void;
+  /** It can no longer be taken back (its attachment is being sent): Remove is off. */
+  locked?: boolean;
 };
 
 const BYTES_PER_MB = 1024 * 1024;
@@ -46,7 +48,14 @@ function statusText(t: TFunction, item: MediaItem): string {
  * never moves the layout. Assistive technology hears the outcome once (uploaded, or what went
  * wrong), not every percent.
  */
-export function MediaItemRow({ item, index, name: given, onRetry, onRemove }: MediaItemRowProps) {
+export function MediaItemRow({
+  item,
+  index,
+  name: given,
+  onRetry,
+  onRemove,
+  locked = false,
+}: MediaItemRowProps) {
   const { t } = useTranslation();
   const name =
     given ?? t(item.kind === "video" ? "media.video" : "media.photo", { number: index + 1 });
@@ -120,6 +129,7 @@ export function MediaItemRow({ item, index, name: given, onRetry, onRemove }: Me
               label={t("media.remove")}
               accessibilityLabel={t("media.itemRemove", { name })}
               variant="ghost"
+              disabled={locked}
               onPress={onRemove}
             />
           </View>

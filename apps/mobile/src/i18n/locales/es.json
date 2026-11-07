@@ -806,7 +806,9 @@
       "again_one": "Agrégala de nuevo.",
       "again_other": "Agrégalas de nuevo.",
       "add": "Agregar fotos",
-      "upTo": "Hasta {{max}} fotos"
+      "upTo": "Hasta {{max}} fotos",
+      "failed_one": "No pudimos procesar {{count}} foto. Agrega otra.",
+      "failed_other": "No pudimos procesar {{count}} fotos. Agrega otra."
     },
     "done": {
       "action": "Trabajo terminado",

@@ -70,13 +70,15 @@ type EditablePhotosProps = Omit<JobPhotoSectionProps, "editable">;
 
 function EditablePhotos({ job, photos, now, held }: EditablePhotosProps) {
   const { t } = useTranslation();
-  const { kind, saved, upload, max, ready, uploading, saving, turnedAway } = photos;
+  const { kind, saved, upload, max, failed, room, attaching, ready, uploading, saving } = photos;
+  const { turnedAway } = photos;
   const { adding, add } = useMediaAdd(upload, {
     pathname: "/jobs/[id]/media-source",
     params: { id: job.id },
   });
-  const count = saved.length + upload.items.length;
-  const full = count >= max;
+  // Failed copies are set aside (`useJobPhotos`): the count is what the job holds for the customer.
+  const count = saved.length - failed + upload.items.length;
+  const full = upload.items.length >= room;
   const testID = `pro-job-photos-${kind}`;
 
   const addAgain = () => {
@@ -104,6 +106,11 @@ function EditablePhotos({ job, photos, now, held }: EditablePhotosProps) {
           testID={`${testID}-tiles`}
         />
       ) : null}
+      {failed > 0 ? (
+        <Text className="text-footnote text-danger" testID={`${testID}-failed`}>
+          {t("proJobs.photos.failed", { count: failed })}
+        </Text>
+      ) : null}
       {upload.items.map((item, index) => (
         <MediaItemRow
           key={item.id}
@@ -111,7 +118,9 @@ function EditablePhotos({ job, photos, now, held }: EditablePhotosProps) {
           index={index}
           name={t(`proJobs.photos.${kind}.item`, { number: saved.length + index + 1 })}
           onRetry={() => upload.retry(item.id)}
-          onRemove={() => upload.remove(item.id)}
+          onRemove={() => photos.remove(item.id)}
+          // Its attachment is on its way: the job will hold it, and there is no undoing that.
+          locked={item.id === attaching}
         />
       ))}
       <TurnedAwayNotice turnedAway={turnedAway} testID={`${testID}-turned-away`} />
@@ -119,7 +128,7 @@ function EditablePhotos({ job, photos, now, held }: EditablePhotosProps) {
         <MediaPermissionNotice onDismiss={upload.dismissPermissionNotice} />
       ) : null}
       <Text className="text-footnote text-gray-500" testID={`${testID}-count`}>
-        {full
+        {full && room === 0
           ? t("proJobs.photos.full", { max })
           : count > 0
             ? t("proJobs.photos.count", { count, max })

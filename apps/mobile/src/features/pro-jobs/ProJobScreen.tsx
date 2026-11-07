@@ -116,9 +116,15 @@ export function ProJobScreen() {
   // The photos' signed URLs are asked for again when one expires on screen.
   const now = useRefreshExpiredMedia(photos, dataUpdatedAt, refetch);
   // Held here, not in the sections: picked photos outlive a step change, and Job's done sees them.
-  const before = useJobPhotos(data, "before");
-  const after = useJobPhotos(data, "after");
   const jobDone = useJobDone(data);
+  const before = useJobPhotos(data, "before");
+  // Job's done found none of the after photos on the job usable: their copies failed (#298), so
+  // they are set aside from the cap and a replacement fits.
+  const after = useJobPhotos(
+    data,
+    "after",
+    jobDone.state === "photosRequired" ? (data?.photos.after.length ?? 0) : 0,
+  );
   const shownError = useSettledError(data, error);
   const gone = !valid || (data === undefined && isJobGone(shownError));
   const refreshFailed = data !== undefined && error !== null;
