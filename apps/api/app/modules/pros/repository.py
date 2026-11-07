@@ -54,6 +54,9 @@ class ProProfileRepository:
             select(ProProfile.id).where(ProProfile.user_id == user_id)
         )
 
+    async def get_user_id(self, pro_id: uuid.UUID) -> uuid.UUID | None:
+        return await self._session.scalar(select(ProProfile.user_id).where(ProProfile.id == pro_id))
+
     async def public_fields(
         self, pro_ids: Collection[uuid.UUID], *, hireable_only: bool
     ) -> list[tuple[uuid.UUID, uuid.UUID, Decimal | None, int, int | None, ProVerificationStatus]]:

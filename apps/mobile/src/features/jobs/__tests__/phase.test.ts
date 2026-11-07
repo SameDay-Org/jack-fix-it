@@ -78,6 +78,8 @@ const job = ({ proName = "Dan Smith", ...overrides }: JobOverrides = {}): Custom
   customer_total_cents: 19_485,
   // The pro's photos (#298): none here; the screen does not show them yet.
   photos: { before: [], after: [], pending: 0 },
+  // Chat messages not read yet (#71): none; the screen does not show them yet.
+  unread_messages: 0,
   ...overrides,
 });
 

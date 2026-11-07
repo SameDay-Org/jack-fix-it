@@ -32,7 +32,7 @@ from app.errors import ForbiddenError, NotFoundError
 from app.modules.jobs.errors import InvalidTransitionError
 from app.modules.jobs.models import Job, JobEvent, JobStatus
 from app.modules.jobs.repository import JobRepository
-from app.modules.jobs.transitions import TRANSITIONS, ActorKind
+from app.modules.jobs.transitions import CHAT_OPEN, TRANSITIONS, ActorKind
 from app.modules.pros.service import ProService
 from app.modules.users.types import UserAccount, UserRole
 
@@ -220,3 +220,43 @@ class JobScheduler:
             )
         )
         return job.id
+
+
+@dataclass(frozen=True)
+class JobParties:
+    """Who takes part in a job, for the chat (#71): the customer's and the pro's user ids, and
+    whether the job still accepts messages (CHAT_OPEN)."""
+
+    job_id: uuid.UUID
+    customer_id: uuid.UUID
+    pro_user_id: uuid.UUID
+    chat_open: bool
+
+    def includes(self, user_id: uuid.UUID) -> bool:
+        return user_id in (self.customer_id, self.pro_user_id)
+
+
+class JobPartiesReader:
+    """The parties of a job, for another module (the chat). Reads only."""
+
+    def __init__(self, session: AsyncSession, pros: ProService) -> None:
+        self._jobs = JobRepository(session)
+        self._pros = pros
+
+    async def parties(self, job_id: uuid.UUID, *, lock: bool = False) -> JobParties | None:
+        """The job's parties, or None for an unknown job. With `lock`, the job row is held FOR
+        NO KEY UPDATE until the caller's transaction ends: no status change can commit in
+        between, so what `chat_open` says stays true until then (a status change waiting on
+        the lock sees the caller's writes; one that committed first is what this reads)."""
+        job = await (self._jobs.get_for_no_key_update(job_id) if lock else self._jobs.get(job_id))
+        if job is None:
+            return None
+        pro_user_id = await self._pros.get_user_id_for_profile(job.pro_id)
+        if pro_user_id is None:  # pragma: no cover - jobs.pro_id is a foreign key
+            return None
+        return JobParties(
+            job_id=job.id,
+            customer_id=job.customer_id,
+            pro_user_id=pro_user_id,
+            chat_open=job.status in CHAT_OPEN,
+        )

@@ -336,6 +336,9 @@ class Settings(BaseSettings):
     job_auto_confirm_after_hours: int = Field(default=48, gt=0)
     job_auto_confirm_sweep_minutes: int = Field(default=15, ge=1, le=60)
     job_auto_confirm_sweep_timeout_seconds: int = Field(default=840, gt=0)
+    # Job chat (D14.1, #71): messages one user may send in one job's chat per window.
+    chat_message_rate_limit: int = Field(default=20, gt=0)
+    chat_message_rate_window_seconds: int = Field(default=60, gt=0)
     # The API's public base URL, such as https://api.example.com: Stripe sends the pro's browser
     # back to its onboarding pages there. Required with Stripe in staging and production (https).
     public_api_url: str | None = None

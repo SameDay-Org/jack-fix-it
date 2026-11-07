@@ -3370,6 +3370,440 @@
         }
       }
     },
+    "/v1/jobs/{job_id}/messages": {
+      "get": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Read my job's chat",
+        "description": "The job's messages, newest first, with the caller's unread count. Reading does not move\nthe read marker: POST .../read does. Readable in every job status.",
+        "operationId": "list_messages_v1_jobs__job_id__messages_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size; capped.",
+              "title": "Limit"
+            },
+            "description": "Page size; capped."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a bad cursor or limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers and pros have job chats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job with this id of which the caller is the customer or the pro.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Send a message in my job's chat",
+        "description": "Stores the message with contact details masked (phones, emails, links, addresses): the\noriginal is never kept. Answers what was stored.",
+        "operationId": "send_message_v1_jobs__job_id__messages_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatMessageIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatMessageOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: an empty or blank body, or longer than 2000 characters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers and pros have job chats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job with this id of which the caller is the customer or the pro.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "chat_closed: the job is confirmed, paid out, refunded or cancelled; the chat is read-only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many messages in this chat; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jobs/{job_id}/messages/read": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Mark my job's chat read up to a message",
+        "description": "Moves the caller's read marker to the message, only forward: an older one, or the same\nagain, changes nothing. Allowed in every job status.",
+        "operationId": "mark_read_v1_jobs__job_id__messages_read_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatReadIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatReadOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_message: up_to is not a message of this chat; validation_error: a bad body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers and pros have job chats.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job with this id of which the caller is the customer or the pro.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/jobs/{job_id}/messages": {
+      "get": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Read a job's chat (staff)",
+        "description": "Any job's messages, newest first, for the BDC and admins. Read-only: no read marker\nmoves, and the parties' unread counts do not change.",
+        "operationId": "staff_list_messages_v1_admin_jobs__job_id__messages_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size; capped.",
+              "title": "Limit"
+            },
+            "description": "Page size; capped."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffChatPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a bad cursor or limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/devices": {
       "put": {
         "tags": [
@@ -4436,6 +4870,130 @@
         ],
         "title": "ChannelPreference"
       },
+      "ChatMessageIn": {
+        "properties": {
+          "body": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "pattern": "^[^\\x00]*$",
+            "title": "Body",
+            "description": "The text, trimmed. Contact details in it are masked before it is stored; only the masked text is kept."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "body"
+        ],
+        "title": "ChatMessageIn"
+      },
+      "ChatMessageOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "sender": {
+            "$ref": "#/components/schemas/Sender",
+            "description": "me for the caller's own messages, else the other side: customer or pro."
+          },
+          "body": {
+            "type": "string",
+            "title": "Body",
+            "description": "The text as stored: contact details (phones, emails, links, addresses) were replaced by \u2022\u2022\u2022 when it was sent."
+          },
+          "redacted": {
+            "type": "boolean",
+            "title": "Redacted",
+            "description": "True when something in the text was masked."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "sender",
+          "body",
+          "redacted",
+          "created_at"
+        ],
+        "title": "ChatMessageOut"
+      },
+      "ChatPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessageOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Newest first."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Pass as `cursor` for older messages."
+          },
+          "unread_count": {
+            "type": "integer",
+            "title": "Unread Count",
+            "description": "The other side's messages after the caller's read marker (all of the chat, not only this page)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor",
+          "unread_count"
+        ],
+        "title": "ChatPage"
+      },
+      "ChatReadIn": {
+        "properties": {
+          "up_to": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Up To",
+            "description": "The newest message the caller has seen. The marker only moves forward: an older message changes nothing."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "up_to"
+        ],
+        "title": "ChatReadIn"
+      },
+      "ChatReadOut": {
+        "properties": {
+          "unread_count": {
+            "type": "integer",
+            "title": "Unread Count",
+            "description": "The caller's unread count once the marker moved."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "unread_count"
+        ],
+        "title": "ChatReadOut"
+      },
       "CheckInIn": {
         "properties": {
           "arrival_code": {
@@ -4648,6 +5206,11 @@
             "type": "integer",
             "title": "Customer Total Cents",
             "description": "What the customer paid: amount plus tax."
+          },
+          "unread_messages": {
+            "type": "integer",
+            "title": "Unread Messages",
+            "description": "The pro's chat messages the customer has not marked read (#71)."
           }
         },
         "additionalProperties": false,
@@ -4665,7 +5228,8 @@
           "photos",
           "amount_cents",
           "tax_cents",
-          "customer_total_cents"
+          "customer_total_cents",
+          "unread_messages"
         ],
         "title": "CustomerJob",
         "description": "The customer's job on their request, once paid."
@@ -6359,6 +6923,11 @@
             "type": "integer",
             "title": "Pro Payout Cents",
             "description": "What the pro receives for the job."
+          },
+          "unread_messages": {
+            "type": "integer",
+            "title": "Unread Messages",
+            "description": "The customer's chat messages the pro has not marked read (#71)."
           }
         },
         "additionalProperties": false,
@@ -6377,7 +6946,8 @@
           "started_at",
           "completed_at",
           "photos",
-          "pro_payout_cents"
+          "pro_payout_cents",
+          "unread_messages"
         ],
         "title": "ProJob",
         "description": "The pro's own job. Never the arrival code, the customer's last name or contacts."
@@ -7697,6 +8267,15 @@
         "title": "SavedAddressPatch",
         "description": "Any subset of the fields. A field left out stays as it is. `line2` sent as null is\ncleared; so are `lat` and `lng`, sent as null together. `is_default` can only be true here:\nthe default moves by making another address the default, never by unsetting one."
       },
+      "Sender": {
+        "type": "string",
+        "enum": [
+          "me",
+          "customer",
+          "pro"
+        ],
+        "title": "Sender"
+      },
       "ServedCheckOut": {
         "properties": {
           "zip_code": {
@@ -7810,6 +8389,73 @@
           "type"
         ],
         "title": "SingleChoiceQuestion"
+      },
+      "StaffChatMessageOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "sender": {
+            "$ref": "#/components/schemas/Sender",
+            "description": "customer or pro."
+          },
+          "body": {
+            "type": "string",
+            "title": "Body"
+          },
+          "redacted": {
+            "type": "boolean",
+            "title": "Redacted"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "sender",
+          "body",
+          "redacted",
+          "created_at"
+        ],
+        "title": "StaffChatMessageOut"
+      },
+      "StaffChatPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StaffChatMessageOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Newest first."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Pass as `cursor` for older messages."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "StaffChatPage"
       },
       "TextQuestion": {
         "properties": {

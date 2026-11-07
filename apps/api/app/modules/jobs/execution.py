@@ -99,6 +99,7 @@ from app.config import Settings
 from app.errors import NotFoundError
 from app.integrations.storage import StorageProvider
 from app.modules.categories.service import CategoryService
+from app.modules.chat.service import ChatUnreadReader
 from app.modules.jobs.confirmation import confirm_by
 from app.modules.jobs.errors import (
     AfterPhotosProcessingError,
@@ -212,6 +213,7 @@ class JobExecutionService:
         self._quotes = QuoteReader(session)
         self._users = UserService(session)
         self._categories = CategoryService(session)
+        self._chat = ChatUnreadReader(session)
 
     # Reads
 
@@ -226,6 +228,7 @@ class JobExecutionService:
             raise NotFoundError
         events = await self._jobs.events_of(job.id)
         photos = await self._photos.of_jobs([job.id])
+        unread = await self._chat.unread_counts([job.id], user.id)
         shows_code = job.status is JobStatus.ON_THE_WAY and job.checked_in_at is None
         return CustomerJob(
             id=job.id,
@@ -251,6 +254,7 @@ class JobExecutionService:
             amount_cents=job.customer_price_cents,
             tax_cents=job.tax_cents,
             customer_total_cents=job.customer_price_cents + job.tax_cents,
+            unread_messages=unread[job.id],
         )
 
     async def pro_jobs(
@@ -268,7 +272,7 @@ class JobExecutionService:
         )
         page, more = rows[:size], len(rows) > size
         return ProJobPage(
-            items=await self._pro_views([job for job, _ in page]),
+            items=await self._pro_views(user, [job for job, _ in page]),
             next_cursor=_encode_cursor(*page[-1]) if more and page else None,
         )
 
@@ -277,7 +281,7 @@ class JobExecutionService:
         job = await self._jobs.get(job_id)
         if job is None or pro_id is None or job.pro_id != pro_id:
             raise NotFoundError
-        [view] = await self._pro_views([job])
+        [view] = await self._pro_views(user, [job])
         return view
 
     # Actions
@@ -536,12 +540,14 @@ class JobExecutionService:
             raise NotFoundError
         return job
 
-    async def _pro_views(self, jobs: Sequence[Job]) -> list[ProJob]:
-        """The jobs as their pro sees them, in order. One query each for the quotes' starts,
-        the requests (with their addresses, names and contacts for masking) and categories."""
+    async def _pro_views(self, user: UserAccount, jobs: Sequence[Job]) -> list[ProJob]:
+        """The jobs as their pro (`user`) sees them, in order. One query each for the quotes'
+        starts, the requests (with their addresses, names and contacts for masking), categories
+        and the chat's unread counts."""
         starts = await self._quotes.proposed_starts([job.quote_id for job in jobs])
         requests = await self._requests.job_views([job.request_id for job in jobs])
         names = await self._users.first_names([job.customer_id for job in jobs])
+        unread = await self._chat.unread_counts([job.id for job in jobs], user.id)
         photos: dict[uuid.UUID, list[JobPhoto]] = {job.id: [] for job in jobs}
         for photo in await self._photos.of_jobs(list(photos)):
             photos[photo.job_id].append(photo)
@@ -583,6 +589,7 @@ class JobExecutionService:
                     completed_at=job.completed_at,
                     photos=self._signer.for_pro(photos[job.id]),
                     pro_payout_cents=job.pro_payout_cents,
+                    unread_messages=unread[job.id],
                 )
             )
         return items

@@ -94,6 +94,9 @@ class CustomerJob(_Out):
     amount_cents: int = Field(description="The price paid for the service.")
     tax_cents: int
     customer_total_cents: int = Field(description="What the customer paid: amount plus tax.")
+    unread_messages: int = Field(
+        description="The pro's chat messages the customer has not marked read (#71)."
+    )
 
 
 class JobCategory(_Out):
@@ -143,6 +146,9 @@ class ProJob(_Out):
     )
     photos: ProJobPhotos
     pro_payout_cents: int = Field(description="What the pro receives for the job.")
+    unread_messages: int = Field(
+        description="The customer's chat messages the pro has not marked read (#71)."
+    )
 
 
 class ProJobPage(_Out):

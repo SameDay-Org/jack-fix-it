@@ -46,6 +46,8 @@ export const JOB: CustomerJob = {
   timeline: [{ type: "created", status: "scheduled", at: new Date(NOW).toISOString() }],
   // The pro's photos (#298): none on a job that has not started.
   photos: { before: [], after: [], pending: 0 },
+  // Chat messages not read yet (#71): none; the screen does not show them yet.
+  unread_messages: 0,
   amount_cents: 18_050,
   tax_cents: 0,
   customer_total_cents: 18_050,
