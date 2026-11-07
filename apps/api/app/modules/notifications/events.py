@@ -66,18 +66,21 @@ async def push_quote_accepted(
     *,
     pro_user_id: uuid.UUID,
     quote_id: uuid.UUID,
-    dispatch_id: uuid.UUID,
     public_code: str,
     timeout_seconds: float,
 ) -> None:
-    """To a pro, for their quote the customer accepted (#189); opens their opportunity (#49)."""
+    """To a pro, for their quote the customer accepted (#189); opens their home (#338).
+
+    Not their opportunity: it answers 404 once quoted. Not their job: it is created when the
+    customer's payment succeeds (#61), and job_scheduled then opens it. Home lists that job
+    under the pro's jobs once it exists."""
     await _push(
         queue,
         pro_user_id,
         message_id=f"quote_accepted:{quote_id}",
         kind="quote_accepted",
         params={"public_code": public_code},
-        deep_link=f"/opportunities/{dispatch_id}",
+        deep_link="/",
         timeout_seconds=timeout_seconds,
     )
 

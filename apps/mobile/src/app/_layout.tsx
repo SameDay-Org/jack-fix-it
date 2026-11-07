@@ -12,6 +12,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { attachQueryClient, restoreSession } from "@/api";
 import { LaunchShell } from "@/features/launch";
+import { listenForPushTaps } from "@/features/notifications/listen";
 
 // The native splash (plain navy, app.config.ts) stays up until the launch intro's first frame is
 // final, so the handoff is one navy surface into the next; nothing flashes in between. LaunchShell
@@ -33,6 +34,10 @@ export default function RootLayout() {
     attachQueryClient(queryClient);
     void restoreSession();
   }, [queryClient]);
+
+  // From the first commit, before the session is known: the push that launched the app, then every
+  // tap while it runs. The signed-in app opens them (`useOpenPushTaps`).
+  useEffect(() => listenForPushTaps(), []);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

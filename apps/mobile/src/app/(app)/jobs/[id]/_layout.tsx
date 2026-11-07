@@ -3,6 +3,8 @@ import { Stack } from "expo-router";
 import { sheetOptions } from "@/components/ui";
 
 // The job is always under its sheets, even when a link opens one of them directly.
+// The anchor is built for whoever is signed in: its route hands anyone but a pro on
+// (`JobIndexRoute`, #323).
 export const unstable_settings = { anchor: "index" };
 
 export default function ProJobLayout() {
