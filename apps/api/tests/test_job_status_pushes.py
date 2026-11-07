@@ -35,6 +35,7 @@ from app.modules.notifications.preferences import KIND_GROUP, PreferenceGroup
 from app.modules.payments.models import Payment, PaymentStatus
 from app.modules.payments.tasks import cancel_unpaid_payments
 from app.modules.pros.models import ProProfile
+from app.modules.quotes.models import Quote, QuoteStatus
 from app.modules.quotes.service import QuoteSettlement
 from app.modules.requests.models import RequestStatus, ServiceRequest
 from app.modules.users.models import User
@@ -440,11 +441,27 @@ class CheckingQueue(RecordingQueue):
         return await super().enqueue_job(function, *args, _job_id=_job_id)
 
 
-async def run(market: Market, event_id: str, queue: object, *, job_try: int = 1) -> str:
+# The worker runs' push deadline: CheckingQueue reads the database inside it, which a loaded
+# test run can make slower than ENQUEUE_TIMEOUT. The broken-queue tests pass the short one.
+WORKER_ENQUEUE_TIMEOUT = 5.0
+
+
+def worker_settings(market: Market, enqueue_timeout: float) -> Settings:
+    return market.settings.model_copy(update={"job_enqueue_timeout_seconds": enqueue_timeout})
+
+
+async def run(
+    market: Market,
+    event_id: str,
+    queue: object,
+    *,
+    job_try: int = 1,
+    enqueue_timeout: float = WORKER_ENQUEUE_TIMEOUT,
+) -> str:
     """The task the receipt queued for the event, with `queue` as the worker's own pool."""
     _, args = market.queue.jobs[process_job_id(event_id)]
     context: dict[str, Any] = {
-        "settings": market.settings,
+        "settings": worker_settings(market, enqueue_timeout),
         "session_factory": market.sessions,
         "job_try": job_try,
         "redis": queue,
@@ -563,7 +580,9 @@ async def test_a_failed_push_enqueue_never_fails_the_event(
     event_id = await posted(market, SUCCEEDED)
 
     with caplog.at_level(logging.INFO):
-        outcome = await asyncio.wait_for(run(market, event_id, broken), 5)
+        outcome = await asyncio.wait_for(
+            run(market, event_id, broken, enqueue_timeout=ENQUEUE_TIMEOUT), 5
+        )
 
     assert outcome == "processed"
     assert len(broken.before) == 2  # each push tried once
@@ -605,6 +624,55 @@ async def test_a_canceled_payment_that_reopens_the_quotes_pushes_the_customer(
     assert queue.seen == [(0, WebhookEventStatus.PROCESSED, PaymentStatus.CANCELED)]
 
 
+async def test_a_canceled_payment_with_no_quote_left_pushes_the_same_true_copy(
+    market: Market,
+) -> None:
+    """The accepted quote expired and no other is live: the request backs out to finding_pro.
+    The push still goes, and its copy promises no quote to choose (true in both outcomes)."""
+    async with market.sessions() as session:
+        await session.execute(
+            update(Quote)
+            .where(Quote.id == market.accepted_quote)
+            .values(expires_at=datetime.now(UTC) - timedelta(minutes=1))
+        )
+        await session.execute(
+            update(Quote)
+            .where(Quote.id.in_(market.quote_ids[1:]))
+            .values(status=QuoteStatus.WITHDRAWN)
+        )
+        await session.commit()
+    queue = CheckingQueue(market=market)
+
+    assert await run(market, await posted(market, CANCELED), queue) == "processed"
+
+    assert (await market.state()).request is RequestStatus.FINDING_PRO
+    assert list(queue.jobs) == [f"push:booking_not_completed:{market.payment_id}"]
+    params = {"public_code": "JF-000124"}
+    for locale in ("en", "es"):
+        body = catalog.render(locale, "push.booking_not_completed.body", params)
+        assert "quote" not in body
+        assert "presupuesto" not in body
+
+
+async def test_a_succeeded_event_that_adopts_its_intent_still_pushes_both(market: Market) -> None:
+    """A lost create answer (#296): the payment holds no PaymentIntent and the event's metadata
+    names it. The adoption books the job, and both pushes still go after the commit."""
+    async with market.sessions() as session:
+        await session.execute(
+            update(Payment)
+            .where(Payment.id == market.payment_id)
+            .values(stripe_payment_intent_id=None)
+        )
+        await session.commit()
+    queue = CheckingQueue(market=market)
+
+    assert await run(market, await posted(market, SUCCEEDED), queue) == "processed"
+
+    job_id, _, _ = await booked(market)
+    assert sorted(queue.jobs) == [f"push:job_booked:{job_id}", f"push:job_scheduled:{job_id}"]
+    assert queue.seen == [(1, WebhookEventStatus.PROCESSED, PaymentStatus.SUCCEEDED)] * 2
+
+
 async def test_a_canceled_payment_that_reopens_nothing_pushes_nothing(market: Market) -> None:
     async with market.sessions() as session:
         async with as_status_writer(session):
@@ -621,12 +689,14 @@ async def test_a_canceled_payment_that_reopens_nothing_pushes_nothing(market: Ma
     assert queue.before == []
 
 
-async def sweep(market: Market, queue: object) -> None:
+async def sweep(
+    market: Market, queue: object, *, enqueue_timeout: float = WORKER_ENQUEUE_TIMEOUT
+) -> None:
     """The unpaid sweep (#297), with `queue` as the worker's own pool."""
     await cancel_unpaid_payments(
         {
             "session_factory": market.sessions,
-            "settings": market.settings,
+            "settings": worker_settings(market, enqueue_timeout),
             "stripe_payments": FakeStripePayments(),
             "redis": queue,
         }
@@ -665,7 +735,7 @@ async def test_a_failed_push_enqueue_never_fails_the_sweep(
     broken = RecordingQueue(failure=RedisError("down"))
 
     with caplog.at_level(logging.INFO):
-        await sweep(market, broken)
+        await sweep(market, broken, enqueue_timeout=ENQUEUE_TIMEOUT)
 
     assert (await market.state()).payment is PaymentStatus.CANCELED
     [record] = records(caplog, "push_enqueue_failed")
