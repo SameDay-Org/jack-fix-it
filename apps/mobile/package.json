@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@jack/shared": "workspace:*",
+    "@stripe/stripe-react-native": "0.81.0",
     "@tanstack/react-query": "^5.104.3",
     "expo": "~58.0.14",
     "expo-camera": "~58.0.14",
