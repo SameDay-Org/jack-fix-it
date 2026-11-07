@@ -178,6 +178,8 @@ describe("the customer's job screen opens the chat (#74)", () => {
     tax_cents: 0,
     customer_total_cents: 18_000,
     photos: { before: [], after: [], pending: 0 },
+    // The confirmation window (#66): not open on these jobs.
+    confirm_by: null,
     unread_messages: 2,
   };
 

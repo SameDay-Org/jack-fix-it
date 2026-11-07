@@ -1,3 +1,4 @@
+import { useWindowDimensions } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
 
 import { withOpacity } from "@/theme";
@@ -12,7 +13,8 @@ export type ReceiptTicksProps = {
   testID?: string;
 };
 
-// Drawn on the icon grid (24 units, round caps), on the navy bubble of my own messages.
+// Drawn on the icon grid (24 units, round caps), on the navy bubble of my own messages; 16 dp at
+// the default text size.
 const SIZE = 16;
 const MUTED_OPACITY = 0.7;
 // Muted marks on navy are white at reduced opacity (gray-500 is forbidden on navy).
@@ -38,12 +40,14 @@ const CENTER = GLYPH_VIEW_BOX / 2;
  * label says the state in words.
  */
 export function ReceiptTicks({ state, testID }: ReceiptTicksProps) {
+  // Grows with the text size, so the mark keeps its weight beside the time at any scale.
+  const size = Math.round(SIZE * useWindowDimensions().fontScale);
   const color = state === "seen" ? RECEIPT_SEEN : MUTED;
   const paths = state === "sent" ? ONE_TICK : TWO_TICKS;
   return (
     <Svg
-      width={SIZE}
-      height={SIZE}
+      width={size}
+      height={size}
       viewBox={`0 0 ${GLYPH_VIEW_BOX} ${GLYPH_VIEW_BOX}`}
       fill="none"
       stroke={color}
