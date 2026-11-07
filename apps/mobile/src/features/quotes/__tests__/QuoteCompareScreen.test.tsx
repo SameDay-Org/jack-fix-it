@@ -14,6 +14,7 @@ import {
 import { ApiError, apiGet, apiPost, NetworkError } from "@/api";
 import { dismissToast, toastStore } from "@/components/ui/toast";
 import { MY_REQUESTS_QUERY_KEY } from "@/features/history/useMyRequests";
+import { PaymentPanel, requestAutoPay } from "@/features/payments";
 
 import { deferred } from "../../../api/__tests__/helpers";
 import { AcceptQuoteSheet } from "../AcceptQuoteSheet";
@@ -37,8 +38,28 @@ jest.mock("@/api", () => ({
   ...jest.requireActual("../../../api/errors"),
   apiGet: jest.fn(),
   apiPost: jest.fn(),
+  onSignOut: jest.fn(),
+  sessionGeneration: () => 1,
+  isCurrentGeneration: (generation: number) => generation === 1,
 }));
 jest.mock("expo-router", () => jest.requireActual("./helpers").routerMock);
+// The accepted card's payment has its own suite (features/payments): here it is a stand-in that
+// shows the note and records what the list handed it.
+jest.mock("@/features/payments", () => {
+  const { Text } = jest.requireActual<typeof import("react-native")>("react-native");
+  return {
+    requestAutoPay: jest.fn(),
+    PaymentPanel: jest.fn(({ testID }: { testID: string }) => (
+      <Text
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        testID={testID}
+      >
+        Quote accepted. Payment comes next.
+      </Text>
+    )),
+  };
+});
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
   "react-native-safe-area-context",
@@ -78,6 +99,8 @@ beforeEach(() => {
   screenNavigation.setParams.mockClear();
   jest.mocked(router.dismissTo).mockClear();
   jest.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+  jest.mocked(requestAutoPay).mockClear();
+  jest.mocked(PaymentPanel).mockClear();
 });
 
 afterEach(async () => {
@@ -292,6 +315,9 @@ describe("QuoteCompareScreen", () => {
     expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith(
       "Quote accepted. Payment comes next.",
     );
+    // The card pays next, in the session the confirm started in (#59).
+    expect(requestAutoPay).toHaveBeenCalledTimes(1);
+    expect(requestAutoPay).toHaveBeenCalledWith(WITHHELD.id, 1);
     await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
     expect(cardIds()).toEqual([WITHHELD, MARIA, DAN].map((item) => `quote-${item.id}`));
     expect(card(WITHHELD).getByText("Accepted")).toBeTruthy();
@@ -300,6 +326,15 @@ describe("QuoteCompareScreen", () => {
         includeHiddenElements: true,
       }),
     ).toBeTruthy();
+    // Only the accepted card has a payment, with what Pay needs from the quote.
+    expect(jest.mocked(PaymentPanel).mock.lastCall?.[0]).toEqual({
+      requestId: REQUEST_ID,
+      quoteId: WITHHELD.id,
+      amountCents: WITHHELD.amount_cents,
+      pro: "Jack pro",
+      testID: `quote-${WITHHELD.id}-payment`,
+    });
+    expect(screen.getAllByTestId(/-payment$/, { includeHiddenElements: true })).toHaveLength(1);
     expect(acceptButtons()).toEqual([]);
   });
 
@@ -530,6 +565,8 @@ describe("QuoteCompareScreen", () => {
       "We couldn't accept the quote. Check your connection and try again.",
     );
     expect(toastStore.getState().current).toBeNull();
+    // Nothing to pay until an accept succeeds.
+    expect(requestAutoPay).not.toHaveBeenCalled();
 
     await fireEvent.press(screen.getByTestId("accept-quote-confirm"));
     await waitFor(() => expect(router.back).toHaveBeenCalledTimes(1));

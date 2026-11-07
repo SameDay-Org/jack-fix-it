@@ -437,6 +437,61 @@
       "acceptLabel": "Aceptar presupuesto de {{pro}} por {{price}}"
     }
   },
+  "payment": {
+    "pay": "Pagar {{price}}",
+    "payLabel": "Pagar {{price}} por el presupuesto de {{pro}}",
+    "total": "Total {{total}}",
+    "breakdown": "{{price}} más {{tax}} de impuestos",
+    "summaryAnnouncement": "Total {{total}}. Abriendo el pago seguro.",
+    "notAvailable": "Este presupuesto no se puede pagar ahora. Tus presupuestos están al día.",
+    "confirming": {
+      "title": "Confirmando tu pago…",
+      "body": "Suele tardar unos segundos."
+    },
+    "delayed": {
+      "title": "Estamos confirmando tu pago",
+      "body": "Te avisaremos en cuanto esté listo."
+    },
+    "booked": {
+      "title": "Tu servicio está reservado",
+      "body": "Tu profesional está programado para el {{date}}.",
+      "announcement": "Tu servicio está reservado. Tu pago está confirmado."
+    },
+    "failure": {
+      "offline": {
+        "title": "Sin conexión",
+        "body": "Revisa tu internet y vuelve a intentarlo."
+      },
+      "notConfigured": {
+        "title": "Los pagos aún no están disponibles",
+        "body": "No se hizo ningún cargo. Inténtalo más tarde."
+      },
+      "needsReview": {
+        "title": "Estamos revisando tu pago",
+        "body": "Inténtalo de nuevo en unos minutos."
+      },
+      "proNotHireable": {
+        "title": "Este profesional no puede recibir pagos ahora",
+        "body": "No se hizo ningún cargo. Inténtalo más tarde."
+      },
+      "generic": {
+        "title": "No pudimos iniciar el pago",
+        "body": "No se hizo ningún cargo. Inténtalo de nuevo."
+      },
+      "sheetFailed": {
+        "title": "Tu pago no se completó",
+        "body": "Inténtalo de nuevo o usa otra tarjeta u otro método de pago."
+      },
+      "sheetTimeout": {
+        "title": "El pago tardó demasiado",
+        "body": "Inténtalo de nuevo."
+      },
+      "sheetUnavailable": {
+        "title": "No pudimos abrir el pago",
+        "body": "Inténtalo de nuevo en un momento."
+      }
+    }
+  },
   "opportunities": {
     "greeting": "Hola, {{name}}",
     "greetingNoName": "Hola",

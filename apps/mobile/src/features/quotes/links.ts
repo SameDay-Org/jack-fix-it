@@ -2,6 +2,8 @@ import type { NavigationProp, ParamListBase } from "expo-router/react-navigation
 import { useLocalSearchParams, useNavigation } from "expo-router";
 import { useEffect } from "react";
 
+import { handleStripeReturn, isStripeReturn } from "@/features/payments/stripeReturn";
+
 import { isUuid, profileHref, useGuardedPush } from "./navigation";
 
 // The app's own scheme (`scheme` in app.config.ts): a native build hands the whole URL over, and
@@ -47,13 +49,19 @@ function profileLink(rest: string): { requestId: string; quoteId: string } | nul
  * whatever is on screen, with no comparison under it: Back would leave the request. The link
  * lands on the comparison with `profile=<quoteId>` instead, and the comparison opens the profile
  * over itself (`useProfileFromLink`), the same stack a card's tap builds. The initial URL keeps
- * the anchor and passes through, like every other input, exactly as it came. Never throws: a
- * throw here would drop the link.
+ * the anchor and passes through, like every other input, exactly as it came. A bank's 3-D Secure
+ * return (`stripe-redirect`, #59) goes to Stripe's sheet and nowhere in the router: a running app
+ * stays where it is (an empty path is ignored), a cold start opens the app's root. Never throws:
+ * a throw here would drop the link.
  */
 export function redirectSystemPath({ path, initial }: { path: string; initial: boolean }): string {
-  if (initial) return path;
   try {
     const split = splitPrefix(path);
+    if (split && isStripeReturn(split.rest)) {
+      handleStripeReturn(path);
+      return initial ? split.prefix : "";
+    }
+    if (initial) return path;
     const link = split && profileLink(split.rest);
     if (!split || !link) return path;
     const requestId = encodeURIComponent(link.requestId);

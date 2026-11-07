@@ -5,12 +5,13 @@ import { FlatList, RefreshControl, View } from "react-native";
 
 import { SessionExpiredError } from "@/api";
 import { showToast } from "@/components/ui";
+import { PaymentPanel } from "@/features/payments";
 import { tokens } from "@/theme";
 
 import { useExpiryClock } from "./expiry";
 import { acceptHref, profileHref, useGuardedPush } from "./navigation";
 import { QuoteCard, QuoteCardSkeleton } from "./QuoteCard";
-import { quoteStateOf } from "./quoteText";
+import { proName, quoteStateOf } from "./quoteText";
 import { StateCard } from "./StateCard";
 import {
   isNotFound,
@@ -81,6 +82,17 @@ export function QuoteList({ requestId, header, testID = "quote-list" }: QuoteLis
           now={now}
           onAccept={(quote) => push(acceptHref(requestId, quote.id))}
           onViewProfile={(quote) => push(profileHref(requestId, quote.id))}
+          payment={
+            item.status === "accepted" ? (
+              <PaymentPanel
+                requestId={requestId}
+                quoteId={item.id}
+                amountCents={item.amount_cents}
+                pro={proName(t, item)}
+                testID={`quote-${item.id}-payment`}
+              />
+            ) : undefined
+          }
         />
       )}
       // Rows depend on the clock too: a passing minute or an expiry redraws them.
