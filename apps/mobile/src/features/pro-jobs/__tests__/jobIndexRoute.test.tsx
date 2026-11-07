@@ -19,6 +19,7 @@ const mockSession = { state: SIGNED_OUT as MockSession };
 
 jest.mock("@/api", () => ({
   onSignOut: jest.fn(() => () => undefined),
+  beforeSignOut: jest.fn(() => () => undefined),
   useSession: () => mockSession.state,
   useSessionGeneration: () => 1,
   logout: jest.fn(async () => undefined),

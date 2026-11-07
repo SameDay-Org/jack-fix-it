@@ -17,7 +17,12 @@ import {
   type FetchMock,
 } from "../../../api/__tests__/helpers";
 import { resetPermissionForTests } from "../permission";
-import { removePushToken, resetPushTokenForTests, syncPushToken } from "../pushToken";
+import {
+  armPushTokenRemoval,
+  removePushToken,
+  resetPushTokenForTests,
+  syncPushToken,
+} from "../pushToken";
 
 jest.mock("expo-notifications");
 jest.mock(
@@ -142,7 +147,7 @@ describe("syncPushToken", () => {
     );
     await signInAs(userA);
 
-    await expect(syncPushToken()).resolves.toBeUndefined();
+    await expect(syncPushToken()).resolves.toBe(false);
 
     expect(deviceCalls()).toEqual([]);
     expect(warnings()).toEqual(["Push token registration failed: Error (E_REGISTRATION_FAILED)"]);
@@ -286,8 +291,8 @@ describe("logout", () => {
     expect(sessionStore.getState().status).toBe("signedOut");
   });
 
-  it("with no token on this device (never allowed, or no FCM) nothing is sent", async () => {
-    notifications.getPermissionsAsync.mockImplementation(async () => permission("denied"));
+  it("with no token to be had (no FCM in the build) nothing is sent, quietly", async () => {
+    notifications.getExpoPushTokenAsync.mockRejectedValue(new Error("no FCM"));
     await signInAs(userA);
     await syncPushToken();
 
@@ -295,6 +300,56 @@ describe("logout", () => {
 
     expect(deviceCalls()).toEqual([]);
     expect(fetchMock.mock.calls.map(callPath)).toEqual(["/v1/auth/login", "/v1/auth/logout"]);
+  });
+
+  it("a logout right after start, before this launch fetched the token, still removes it", async () => {
+    // Notifications turned off in the phone's settings meanwhile: no registration this launch.
+    notifications.getPermissionsAsync.mockImplementation(async () => permission("denied", false));
+    await signInAs(userA);
+    armPushTokenRemoval();
+
+    await logout();
+
+    expect(deviceCalls()).toEqual([
+      { method: "DELETE", auth: "Bearer access-1", body: { expo_push_token: MOCK_PUSH_TOKEN } },
+    ]);
+  });
+
+  it("the next account registers the known token even when Expo's service fails then", async () => {
+    await signInAs(userA);
+    await syncPushToken();
+    routes["/v1/devices"] = async () => {
+      throw new TypeError("Network request failed");
+    };
+    await logout(); // A's removal fails
+    routes["/v1/devices"] = async () => jsonResponse(204);
+    notifications.getExpoPushTokenAsync.mockRejectedValue(new Error("SERVICE_UNAVAILABLE"));
+    await signInAs(userB);
+
+    await expect(syncPushToken()).resolves.toBe(true);
+
+    expect(deviceCalls().at(-1)).toEqual({
+      method: "PUT",
+      auth: "Bearer access-2",
+      body: { expo_push_token: MOCK_PUSH_TOKEN, platform: Platform.OS },
+    });
+    expect(warnings()).toContain("Push token refresh failed: Error");
+  });
+
+  it("a session the server ended during the removal, then another sign-in: the new one stays", async () => {
+    await signInAs(userA);
+    await syncPushToken();
+    const removal = deferred<Response>();
+    routes["/v1/devices"] = () => removal.promise;
+
+    const done = logout();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    routes["/v1/devices"] = async () => jsonResponse(204);
+    await signInAs(userB); // as after A's session ended
+    removal.resolve(jsonResponse(204));
+    await done;
+
+    expect(sessionStore.getState()).toMatchObject({ status: "signedIn", user: { id: userB.id } });
   });
 
   it("a removal asked outside a session sends nothing", async () => {

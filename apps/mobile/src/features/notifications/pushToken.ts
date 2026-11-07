@@ -44,32 +44,49 @@ function devicePlatform(): "ios" | "android" | null {
 }
 
 /**
- * Expo's token for this build's project, bounded by the request timeout. On Android it fails
- * until the build carries Firebase's config (#335): that is reported, never retried in a loop.
+ * `work` bounded by the request timeout, so a native call that never settles cannot hold the
+ * queue (and every later registration and removal) forever.
  */
-async function fetchDeviceToken(): Promise<string> {
-  const { projectId } = notificationsConfig;
-  if (!projectId) throw new MissingProjectIdError();
+async function bounded<T>(work: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new PushTokenTimeoutError()), apiConfig.timeoutMs);
   });
   try {
-    const token = await Promise.race([Notifications.getExpoPushTokenAsync({ projectId }), timeout]);
-    return token.data;
+    return await Promise.race([work, timeout]);
   } finally {
     clearTimeout(timer);
   }
 }
 
+/**
+ * Expo's token for this build's project, remembered for the process. On Android it fails until
+ * the build carries Firebase's config (#335): that is reported, never retried in a loop.
+ */
+async function fetchDeviceToken(): Promise<string> {
+  const { projectId } = notificationsConfig;
+  if (!projectId) throw new MissingProjectIdError();
+  const token = await bounded(Notifications.getExpoPushTokenAsync({ projectId }));
+  return token.data;
+}
+
 async function register(startedIn: number): Promise<void> {
   const platform = devicePlatform();
   if (!platform || !isCurrentGeneration(startedIn)) return;
-  if ((await refreshPermission()) !== "granted") return;
-  await ensureNotificationChannel();
-  const token = await fetchDeviceToken();
-  if (!isCurrentGeneration(startedIn)) return;
+  if ((await bounded(refreshPermission())) !== "granted") return;
+  await bounded(ensureNotificationChannel());
   const previous = deviceToken;
+  let token: string;
+  try {
+    token = await fetchDeviceToken();
+  } catch (error) {
+    // The token this process already knows still belongs on this account: registering it moves
+    // it off a previous account whose removal failed.
+    if (previous === null) throw error;
+    reportFailure("Push token refresh failed", error);
+    token = previous;
+  }
+  if (!isCurrentGeneration(startedIn)) return;
   deviceToken = token;
   // A rotated token: the old one comes off the account first (best effort; the server also drops
   // a token Expo reports as gone).
@@ -91,13 +108,17 @@ async function register(startedIn: number): Promise<void> {
  * Registers this device's push token for the signed-in account, when notifications are allowed:
  * at each sign-in and app start, when the permission turns on, and when the token changes. Pinned
  * to the session it starts in: after a sign-out or another sign-in nothing is sent for it. Never
- * rejects; a failure is logged by its class and the next trigger tries again.
+ * rejects; resolves to false after a failure (logged by its class), for the caller to try again.
  */
-export function syncPushToken(): Promise<void> {
-  armRemoval();
+export function syncPushToken(): Promise<boolean> {
+  armPushTokenRemoval();
   const startedIn = sessionGeneration();
-  return serialized(() => register(startedIn)).catch((error: unknown) =>
-    reportFailure("Push token registration failed", error),
+  return serialized(() => register(startedIn)).then(
+    () => true,
+    (error: unknown) => {
+      reportFailure("Push token registration failed", error);
+      return false;
+    },
   );
 }
 
@@ -109,8 +130,13 @@ export function syncPushToken(): Promise<void> {
 export function removePushToken(): Promise<void> {
   const startedIn = sessionGeneration();
   return serialized(async () => {
-    const token = deviceToken;
+    if (!isCurrentGeneration(startedIn)) return;
+    // A token an earlier launch registered is still on the server when this one has not fetched
+    // it yet (a logout right after start, notifications turned off meanwhile): ask for it. The
+    // fetch needs no permission; the logout's own bound limits the wait.
+    const token = deviceToken ?? (await fetchDeviceToken().catch(() => null));
     if (!token || !isCurrentGeneration(startedIn)) return;
+    deviceToken = token;
     await apiDelete(
       "/v1/devices",
       { expo_push_token: token },
@@ -119,11 +145,12 @@ export function removePushToken(): Promise<void> {
   }).catch((error: unknown) => reportFailure("Push token removal failed", error));
 }
 
-// Armed by the first registration: until then the device holds no token to remove. Stays armed
-// for every later logout, since the token outlives the session.
+// Armed once the signed-in app is up (`usePushRegistration`) and by every registration; stays
+// armed for every later logout, since the token outlives the session.
 let disarm: (() => void) | null = null;
 
-function armRemoval(): void {
+/** Makes every logout take this device's token off the account first. Idempotent. */
+export function armPushTokenRemoval(): void {
   disarm ??= beforeSignOut(removePushToken, { timeoutMs: notificationsConfig.removalTimeoutMs });
 }
 

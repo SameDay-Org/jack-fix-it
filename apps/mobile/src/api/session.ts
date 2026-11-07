@@ -338,8 +338,12 @@ function runSignOutTasks(): Promise<void> | null {
  * case. A sign-in that completes meanwhile owns the session and is left alone.
  */
 export function logout(): Promise<void> {
+  const startedIn = generation;
   const tasks = runSignOutTasks();
-  return tasks ? tasks.then(endSession) : endSession();
+  if (!tasks) return endSession();
+  // The session may have ended meanwhile (the server rejected a refresh) and another signed in:
+  // that one is not this logout's to end.
+  return tasks.then(() => (isCurrent(startedIn) ? endSession() : undefined));
 }
 
 async function endSession(): Promise<void> {

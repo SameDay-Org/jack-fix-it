@@ -34,6 +34,7 @@ const setSession = (next: Partial<Session>) =>
 jest.mock("@/api", () => ({
   // The phone flow registers its sign-out cleanup on import.
   onSignOut: jest.fn(() => () => undefined),
+  beforeSignOut: jest.fn(() => () => undefined),
   useSession: () =>
     jest.requireActual<typeof import("react")>("react").useSyncExternalStore(
       (listen: () => void) => {

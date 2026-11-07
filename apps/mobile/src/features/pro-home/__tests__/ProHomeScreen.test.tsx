@@ -97,6 +97,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // The pre-prompt test's permission read stays with it: the other tests draw no card.
+  resetPermissionForTests();
+  resetPromptDismissalForTests();
   dismissToast(); // a shown toast arms its own dismiss timer
   jest.useRealTimers();
 });

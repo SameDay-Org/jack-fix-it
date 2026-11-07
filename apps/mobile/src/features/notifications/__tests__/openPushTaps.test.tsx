@@ -42,6 +42,7 @@ jest.mock("@/api", () => {
     ...errors,
     apiGet: (path: string) => mockApiGet(path),
     onSignOut: jest.fn(() => () => undefined),
+    beforeSignOut: jest.fn(() => () => undefined),
     useSession: () =>
       useSyncExternalStore(
         (listener: () => void) => {

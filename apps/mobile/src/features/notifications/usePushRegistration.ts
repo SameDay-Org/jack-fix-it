@@ -1,11 +1,11 @@
 import * as Notifications from "expo-notifications";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { AppState } from "react-native";
 
 import { useSession } from "@/api";
 
 import { refreshPermission, useNotificationPermission } from "./permission";
-import { syncPushToken } from "./pushToken";
+import { armPushTokenRemoval, syncPushToken } from "./pushToken";
 
 /**
  * Keeps this device's push token registered for the signed-in customer or pro (#334), from the
@@ -20,19 +20,41 @@ export function usePushRegistration(): void {
   // Only customers and pros receive pushes; the API refuses any other role.
   const eligible = user?.role === "customer" || user?.role === "pro";
   const granted = permission === "granted";
+  const active = eligible && granted && userId !== undefined;
+  // A registration that failed (offline, a server error) is tried again on the next return to the
+  // app: until it lands, a previous account whose removal failed would keep this device.
+  const retry = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    // Every logout removes the token first, even one before this launch fetched it.
+    if (eligible) armPushTokenRemoval();
+  }, [eligible]);
 
   useEffect(() => {
     void refreshPermission();
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") void refreshPermission();
+      if (state !== "active") return;
+      void refreshPermission();
+      retry.current?.();
     });
     return () => subscription.remove();
   }, []);
 
   useEffect(() => {
-    if (!eligible || !granted || !userId) return;
-    void syncPushToken();
-    const subscription = Notifications.addPushTokenListener(() => void syncPushToken());
-    return () => subscription.remove();
-  }, [eligible, granted, userId]);
+    if (!active) return;
+    let live = true;
+    const sync = () => {
+      retry.current = null;
+      void syncPushToken().then((ok) => {
+        if (live && !ok) retry.current = sync;
+      });
+    };
+    sync();
+    const subscription = Notifications.addPushTokenListener(sync);
+    return () => {
+      live = false;
+      retry.current = null;
+      subscription.remove();
+    };
+  }, [active, userId]);
 }

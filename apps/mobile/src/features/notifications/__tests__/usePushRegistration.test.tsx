@@ -19,11 +19,17 @@ const mockSession: { current: MockSession } = {
 
 jest.mock("expo-notifications");
 jest.mock("@/api", () => ({ useSession: () => mockSession.current }));
-jest.mock("../pushToken", () => ({ syncPushToken: jest.fn(async () => undefined) }));
+jest.mock("../pushToken", () => ({
+  armPushTokenRemoval: jest.fn(),
+  syncPushToken: jest.fn(async () => true),
+}));
 
 const notifications =
   jest.requireMock<typeof import("../../../../__mocks__/expo-notifications")>("expo-notifications");
-const { syncPushToken } = jest.requireMock<{ syncPushToken: jest.Mock }>("../pushToken");
+const { armPushTokenRemoval, syncPushToken } = jest.requireMock<{
+  armPushTokenRemoval: jest.Mock;
+  syncPushToken: jest.Mock;
+}>("../pushToken");
 const { permission } = notifications;
 const addAppStateListener = AppState.addEventListener as jest.Mock;
 
@@ -39,7 +45,8 @@ async function foreground(): Promise<void> {
 beforeEach(() => {
   notifications.resetNotificationsMock();
   resetPermissionForTests();
-  syncPushToken.mockClear();
+  syncPushToken.mockReset().mockResolvedValue(true);
+  armPushTokenRemoval.mockClear();
   addAppStateListener.mockClear();
   mockSession.current = { ...mockSession.current, user };
 });
@@ -100,6 +107,29 @@ describe("usePushRegistration", () => {
 
     expect(syncPushToken).not.toHaveBeenCalled();
     expect(notifications.addPushTokenListener).not.toHaveBeenCalled();
+    expect(armPushTokenRemoval).not.toHaveBeenCalled();
+  });
+
+  it("arms the removal at sign-in, before any token is fetched (a logout right after start)", async () => {
+    await renderHook(() => usePushRegistration());
+
+    expect(armPushTokenRemoval).toHaveBeenCalled();
+    expect(syncPushToken).not.toHaveBeenCalled();
+  });
+
+  it("a failed registration is tried again on the next return to the app, once", async () => {
+    notifications.getPermissionsAsync.mockResolvedValue(permission("granted"));
+    syncPushToken.mockResolvedValueOnce(false);
+    await renderHook(() => usePushRegistration());
+    await act(async () => undefined);
+    expect(syncPushToken).toHaveBeenCalledTimes(1);
+
+    await foreground();
+    expect(syncPushToken).toHaveBeenCalledTimes(2);
+
+    // That one landed: the next return asks nothing more.
+    await foreground();
+    expect(syncPushToken).toHaveBeenCalledTimes(2);
   });
 
   it("stops listening once the signed-in layout goes", async () => {
