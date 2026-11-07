@@ -181,6 +181,28 @@ async def push_job_done(
     )
 
 
+async def push_job_confirmed(
+    queue: JobQueue,
+    *,
+    pro_user_id: uuid.UUID,
+    job_id: uuid.UUID,
+    public_code: str,
+    timeout_seconds: float,
+) -> None:
+    """To the pro, once the job is confirmed: by its customer (#66) or by the system after the
+    confirmation window (#67). One edge into confirmed, so one message id for both: whichever
+    confirms, the pro hears once. Opens the job (#63)."""
+    await _push(
+        queue,
+        pro_user_id,
+        message_id=f"job_confirmed:{job_id}",
+        kind="job_confirmed",
+        params={"public_code": public_code},
+        deep_link=f"/jobs/{job_id}",
+        timeout_seconds=timeout_seconds,
+    )
+
+
 async def push_booking_not_completed(
     queue: JobQueue,
     *,

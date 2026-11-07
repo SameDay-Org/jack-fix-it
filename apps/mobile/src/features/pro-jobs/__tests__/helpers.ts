@@ -49,7 +49,6 @@ export const proJob = (overrides: Partial<ProJob> = {}): ProJob => ({
   completed_at: null,
   photos: { before: [], after: [] },
   pro_payout_cents: 15_300,
-  // The customer's chat messages not read yet (#71): none unless a test says so.
   unread_messages: 0,
   ...overrides,
 });

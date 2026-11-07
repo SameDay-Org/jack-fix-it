@@ -101,6 +101,15 @@ them idempotent: they can run twice.
   attempted: canceled locally, the quote reopened the same way. A lost create (attempted, no
   intent stored) is only logged (`payment_unpaid_unresolved`). One `unpaid_payments_swept`
   summary per run.
+- **Job auto-confirm (#67).** The cron `auto_confirm_jobs` (`jobs/tasks.py`) confirms, as the
+  system (event `actor_id` NULL), the jobs still `completed` `JOB_AUTO_CONFIRM_AFTER_HOURS`
+  (48) after `completed_at`, every `JOB_AUTO_CONFIRM_SWEEP_MINUTES`, a run bounded by
+  `JOB_AUTO_CONFIRM_SWEEP_TIMEOUT_SECONDS`. One cut-off per run; batches by id; each job in its
+  own transaction under its row lock, read again there (`JobAutoConfirmer.confirm_if_due`), so
+  a `disputed` job (a problem open), one the customer confirmed meanwhile
+  (`POST /v1/requests/{id}/job/confirm`, #66) or any other status is skipped. One
+  `jobs_auto_confirmed` summary per run (confirmed, skipped, failed). The customer's view shows
+  the deadline as `confirm_by` while the job is completed.
 
 ## Tests
 

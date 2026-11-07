@@ -61,9 +61,19 @@ Job photos and Job's done (part 2, #298), also on the job's row lock:
 
 Pushes (#65): once On my way, the check-in or the start commits, the customer hears about it,
 once per job (notifications.events: the job's id and the step name the event); Job's done too,
-once its move to completed commits. An ETA update, a repeated check-in or Job's done, and a
-refused action push nothing. A push that cannot be queued is logged with ids and never fails
-the action. No push carries the arrival code or the ETA.
+once its move to completed commits; the pro hears once the job is confirmed (#66, #67). An ETA
+update, a repeated check-in, Job's done or confirm, and a refused action push nothing. A push
+that cannot be queued is logged with ids and never fails the action. No push carries the
+arrival code or the ETA.
+
+Confirmation (#66), the customer's, on the job's row lock: completed -> confirmed through the
+state machine (it sets confirmed_at; the event's actor is the customer), then the pro's push.
+Again once confirmed: 200, unchanged, no second event or push. Any other status: 409
+job_not_completed. While completed, the customer's view carries confirm_by, when the system
+confirms the job on its own if neither the customer confirms nor a problem is open
+(completed_at + JOB_AUTO_CONFIRM_AFTER_HOURS; the cron is #67, confirmation.py). The customer
+and the cron take the same lock and read the job again under it, so racing they make one
+transition, one event and one push.
 
 The arrival code is never logged, never in an error, never in a pro response. Logs carry ids:
 never an upload key.
@@ -90,6 +100,7 @@ from app.errors import NotFoundError
 from app.integrations.storage import StorageProvider
 from app.modules.categories.service import CategoryService
 from app.modules.chat.service import ChatUnreadReader
+from app.modules.jobs.confirmation import confirm_by
 from app.modules.jobs.errors import (
     AfterPhotosProcessingError,
     AfterPhotosRequiredError,
@@ -98,6 +109,7 @@ from app.modules.jobs.errors import (
     CheckInRequiredError,
     DuplicateJobPhotoError,
     InvalidJobPhotoError,
+    JobNotCompletedError,
     JobPhotoLimitError,
     JobPhotoNotAllowedError,
     JobPhotoUploadExpiredError,
@@ -119,6 +131,7 @@ from app.modules.jobs.transitions import CUSTOMER_STATUS
 from app.modules.media.safe_status import MediaSafeStatus
 from app.modules.notifications.events import (
     push_job_checked_in,
+    push_job_confirmed,
     push_job_done,
     push_job_on_the_way,
     push_job_started,
@@ -163,6 +176,7 @@ class JobExecutionConfig:
     photo_attach_max_age: timedelta
     photo_url_ttl_seconds: int
     enqueue_timeout_seconds: float
+    auto_confirm_after: timedelta
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "JobExecutionConfig":
@@ -174,6 +188,7 @@ class JobExecutionConfig:
             photo_attach_max_age=timedelta(minutes=settings.job_photo_attach_max_age_minutes),
             photo_url_ttl_seconds=settings.download_url_ttl_seconds,
             enqueue_timeout_seconds=settings.job_enqueue_timeout_seconds,
+            auto_confirm_after=timedelta(hours=settings.job_auto_confirm_after_hours),
         )
 
 
@@ -230,6 +245,7 @@ class JobExecutionService:
             ),
             eta_at=job.eta_at,
             arrival_code=job.arrival_code if shows_code else None,
+            confirm_by=confirm_by(job, self._config.auto_confirm_after),
             timeline=[
                 JobTimelineEntry(type=event.type, status=event.to_status, at=event.created_at)
                 for event in events
@@ -467,6 +483,31 @@ class JobExecutionService:
         )
         return await self.pro_job(user, job.id)
 
+    async def confirm(
+        self, user: UserAccount, request_id: uuid.UUID, queue: JobQueue
+    ) -> CustomerJob:
+        job = await self._customer_locked(user, request_id)
+        if job.status is JobStatus.CONFIRMED:
+            await self._session.commit()  # nothing changed: ends the transaction and its lock
+            return await self.customer_job(user, request_id)
+        if job.status is not JobStatus.COMPLETED:
+            raise JobNotCompletedError
+        # The state machine sets confirmed_at and writes the event, the customer as its actor.
+        await self._machine.transition(job.id, JobStatus.CONFIRMED, user)
+        public_code = await self._customer_requests.public_code(job.request_id)
+        pro_user_id = await self._pros.user_id_of(job.pro_id)
+        await self._session.commit()
+        logger.info("job_confirmed", extra={"job_id": str(job.id), "pro_id": str(job.pro_id)})
+        if pro_user_id is not None:  # pragma: no branch - jobs.pro_id is a foreign key
+            await push_job_confirmed(
+                queue,
+                pro_user_id=pro_user_id,
+                job_id=job.id,
+                public_code=public_code,
+                timeout_seconds=self._config.enqueue_timeout_seconds,
+            )
+        return await self.customer_job(user, request_id)
+
     # Helpers
 
     async def _queue_copies(self, job: Job, photo_ids: list[uuid.UUID], queue: JobQueue) -> None:
@@ -481,6 +522,15 @@ class JobExecutionService:
                 "job_photo_sanitize_enqueue_failed",
                 extra={"job_id": str(job.id), "pro_id": str(job.pro_id)},
             )
+
+    async def _customer_locked(self, user: UserAccount, request_id: uuid.UUID) -> Job:
+        """The job of the caller's own request, locked until the transaction ends; 404 for
+        anyone else's request, and while it has no job (as customer_job)."""
+        await self._customer_requests.own_status(user, request_id)
+        job = await self._jobs.get_of_request_for_update(request_id)
+        if job is None or job.customer_id != user.id:
+            raise NotFoundError
+        return job
 
     async def _own_locked(self, user: UserAccount, job_id: uuid.UUID) -> Job:
         """The caller's job, locked until the transaction ends; 404 for anyone else's."""

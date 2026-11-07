@@ -71,6 +71,7 @@ const ON_THE_WAY: CustomerJob = {
   },
   eta_at: at(12),
   arrival_code: "4821",
+  confirm_by: null,
   timeline: [entry("created", "scheduled", -120), entry("status_changed", "on_the_way", -5)],
   amount_cents: 18_000,
   tax_cents: 0,
