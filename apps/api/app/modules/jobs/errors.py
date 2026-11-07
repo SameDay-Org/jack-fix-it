@@ -15,7 +15,7 @@ class JobNotCompletedError(ConflictError):
     completed (or confirmed, which answers the job unchanged)."""
 
     code = "job_not_completed"
-    message = "The job can be confirmed only once the professional has marked it done."
+    message = "Only a job marked done and waiting for your confirmation can be confirmed."
 
 
 class NotOnTheWayError(ConflictError):

@@ -35,7 +35,7 @@ FORBIDDEN = {"error": {"code": "forbidden", "message": "You do not have access t
 NOT_COMPLETED = {
     "error": {
         "code": "job_not_completed",
-        "message": "The job can be confirmed only once the professional has marked it done.",
+        "message": "Only a job marked done and waiting for your confirmation can be confirmed.",
     }
 }
 # The settings' default (tests/conftest.py builds them without overrides).

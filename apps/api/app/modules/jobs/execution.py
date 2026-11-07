@@ -62,9 +62,9 @@ Job photos and Job's done (part 2, #298), also on the job's row lock:
 Pushes (#65): once On my way, the check-in or the start commits, the customer hears about it,
 once per job (notifications.events: the job's id and the step name the event); Job's done too,
 once its move to completed commits; the pro hears once the job is confirmed (#66, #67). An ETA
-update, a repeated check-in or Job's done, and a
-refused action push nothing. A push that cannot be queued is logged with ids and never fails
-the action. No push carries the arrival code or the ETA.
+update, a repeated check-in, Job's done or confirm, and a refused action push nothing. A push
+that cannot be queued is logged with ids and never fails the action. No push carries the
+arrival code or the ETA.
 
 Confirmation (#66), the customer's, on the job's row lock: completed -> confirmed through the
 state machine (it sets confirmed_at; the event's actor is the customer), then the pro's push.

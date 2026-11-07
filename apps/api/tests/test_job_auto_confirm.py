@@ -4,7 +4,9 @@ own confirm (#66).
 
 Real commits on separate connections; each test creates its own jobs and deletes them after.
 The cron's clock is frozen in 2001 and the jobs completed around then, so no job another test
-left in the database is ever due in these runs, and the summary's counts are exact.
+left in the database is ever due in these runs, and the summary's counts are exact. That holds
+while one run of this file uses the test database at a time: two at once, or the rows of a run
+killed before its cleanup, can make one summary count another's jobs.
 """
 
 import asyncio
@@ -18,7 +20,7 @@ from typing import Any
 
 import pytest
 from redis.exceptions import RedisError
-from sqlalchemy import URL, delete, select
+from sqlalchemy import URL, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import Settings
@@ -37,7 +39,7 @@ from app.modules.requests.models import RequestOrigin, RequestStatus, ServiceReq
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole
 from app.observability import JsonFormatter
-from tests.conftest import backend_pid, make_settings
+from tests.conftest import LOCK_WAIT_DEADLINE_SECONDS, backend_pid, make_settings
 from tests.helpers import as_status_writer
 from tests.test_arrival_code import CONFIG
 from tests.test_payment_webhooks import wait_until_any_waits_on
@@ -556,23 +558,42 @@ async def test_cron_waiting_on_the_customer_skips_the_job(
     assert world.queue.before == []  # the skipped run pushes nothing
 
 
-async def test_customer_confirms_while_the_cron_waits_on_a_second_customer_confirm(
-    world: World,
+async def lock_waiters(sessions: async_sessionmaker[AsyncSession], count: int) -> None:
+    """Returns once `count` backends of the test database wait on a lock. A second waiter on a
+    row queues behind the first one's tuple lock, so Postgres may name the first waiter, not the
+    holder, as what blocks it: count every blocked backend."""
+    query = text(
+        "SELECT count(*) FROM pg_stat_activity "
+        "WHERE datname = current_database() AND cardinality(pg_blocking_pids(pid)) > 0"
+    )
+    async with sessions() as monitor:
+        try:
+            async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+                while await monitor.scalar(query) < count:
+                    pass
+        except TimeoutError:
+            pytest.fail(f"{count} backends never waited on a lock")
+
+
+async def test_customer_and_a_cron_run_both_waiting_on_another_run(
+    world: World, logs: pytest.LogCaptureFixture
 ) -> None:
-    # Both the customer's devices and the cron at once: still one transition.
+    # A cron confirm holds the lock while the customer and a second run wait: one transition.
     job = await world.add_job(JobStatus.COMPLETED, CUT_OFF)
 
     async with world.sessions() as holder:
         holder_pid = await backend_pid(holder)
-        await JobAutoConfirmer(holder).confirm_if_due(job.id, CUT_OFF)
+        assert await JobAutoConfirmer(holder).confirm_if_due(job.id, CUT_OFF) is not None
         waiters: list[asyncio.Task[Any]] = [
             asyncio.create_task(customer_confirm(world, job.request_id)),
             asyncio.create_task(auto_confirm_jobs(world.context())),
         ]
         await wait_until_any_waits_on(world.sessions, holder_pid)
+        await lock_waiters(world.sessions, 2)  # both blocked on the job's lock
         await holder.commit()
 
     results = await wait_for(asyncio.gather(*waiters))
     assert results[0] is JobStatus.CONFIRMED
     assert_system_confirmed(await world.state(job.id))
+    assert summaries(logs) == [counts(skipped=1)]
     assert world.queue.before == []
