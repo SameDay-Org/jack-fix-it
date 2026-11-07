@@ -72,6 +72,7 @@ JOB_KINDS = (
     "job_checked_in",
     "job_started",
     "job_done",
+    "job_confirmed",  # to the pro (#66, #67): test_job_confirm_api.py, test_job_auto_confirm.py
     "booking_not_completed",
 )
 LOG_FIELDS = {"timestamp", "level", "logger", "message", "request_id"}

@@ -10,6 +10,14 @@ class InvalidTransitionError(ConflictError):
     message = "The job cannot move to that status from its current one."
 
 
+class JobNotCompletedError(ConflictError):
+    """The customer confirms a job only once the pro marked it done (#66): any status but
+    completed (or confirmed, which answers the job unchanged)."""
+
+    code = "job_not_completed"
+    message = "Only a job marked done and waiting for your confirmation can be confirmed."
+
+
 class NotOnTheWayError(ConflictError):
     """A check-in on a job that is not on the way (#63)."""
 
