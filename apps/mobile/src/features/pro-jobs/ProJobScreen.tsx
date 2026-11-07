@@ -191,7 +191,7 @@ function JobHero({ job, now }: { job: ProJob; now: number }) {
   const day =
     time.label === "onTheWay"
       ? t("proJobs.screen.scheduledFor", {
-          when: whenLabel(t, job.scheduled_start_at, now, locale),
+          when: whenLabel(t, job.scheduled_start_at, now, locale, "inline"),
         })
       : dayLabel(t, at, now, locale);
 

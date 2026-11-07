@@ -635,7 +635,9 @@
     },
     "day": {
       "today": "Hoy",
-      "tomorrow": "Mañana"
+      "tomorrow": "Mañana",
+      "todayInline": "hoy",
+      "tomorrowInline": "mañana"
     },
     "when": "{{day}}, {{time}}",
     "status": {

@@ -17,21 +17,38 @@ function startOfDay(at: number): number {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }
 
+/** Where the day stands: alone or opening a sentence ("Today"), or inside one ("today"). */
+export type DayPlacement = "start" | "inline";
+
 /**
  * The day of an instant as the pro reads it: "Today", "Tomorrow", or "Thu, Nov 7", against the
- * time the job was answered (`now`), in the device's time zone.
+ * time the job was answered (`now`), in the device's time zone; lowercase inside a sentence
+ * ("Scheduled for today, 8:00 AM").
  */
-export function dayLabel(t: TFunction, at: number, now: number, locale = formatLocale()): string {
+export function dayLabel(
+  t: TFunction,
+  at: number,
+  now: number,
+  locale = formatLocale(),
+  placement: DayPlacement = "start",
+): string {
   const days = Math.round((startOfDay(at) - startOfDay(now)) / DAY_MS);
-  if (days === 0) return t("proJobs.day.today");
-  if (days === 1) return t("proJobs.day.tomorrow");
+  const inline = placement === "inline";
+  if (days === 0) return inline ? t("proJobs.day.todayInline") : t("proJobs.day.today");
+  if (days === 1) return inline ? t("proJobs.day.tomorrowInline") : t("proJobs.day.tomorrow");
   return formatInstantDay(at, locale);
 }
 
 /** "Today, 2:00 PM": when a job starts, for the list and for screen readers. */
-export const whenLabel = (t: TFunction, iso: string, now: number, locale = formatLocale()) =>
+export const whenLabel = (
+  t: TFunction,
+  iso: string,
+  now: number,
+  locale = formatLocale(),
+  placement: DayPlacement = "start",
+) =>
   t("proJobs.when", {
-    day: dayLabel(t, Date.parse(iso), now, locale),
+    day: dayLabel(t, Date.parse(iso), now, locale, placement),
     time: formatTimeOfDay(Date.parse(iso), locale),
   });
 

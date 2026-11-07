@@ -213,7 +213,7 @@ describe("ProJobScreen", () => {
       const hero = within(screen.getByTestId("pro-job-time"));
       expect(hero.getByText("You'll arrive by")).toBeTruthy();
       expect(hero.getByText(time(job.eta_at ?? ""))).toBeTruthy();
-      expect(hero.getByText(`Scheduled for Today, ${time(job.scheduled_start_at)}`)).toBeTruthy();
+      expect(hero.getByText(`Scheduled for today, ${time(job.scheduled_start_at)}`)).toBeTruthy();
       expect(within(screen.getByTestId("pro-job-status")).getByText("On the way")).toBeTruthy();
       expect(
         screen.getByText(

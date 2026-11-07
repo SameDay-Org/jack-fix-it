@@ -51,11 +51,22 @@ describe("dayLabel", () => {
     expect(dayLabel(t, local(11, 1, 23, 30), local(11, 1, 0, 30), EN)).toBe("Today");
   });
 
+  it("is lowercase inside a sentence; a date stays as it is", () => {
+    expect(dayLabel(t, local(11, 7, 9), now, EN, "inline")).toBe("today");
+    expect(dayLabel(t, local(11, 8, 9), now, EN, "inline")).toBe("tomorrow");
+    expect(dayLabel(t, local(11, 9, 9), now, EN, "inline")).toBe("Mon, Nov 9");
+    expect(whenLabel(t, new Date(local(11, 7, 14)).toISOString(), now, EN, "inline")).toMatch(
+      /^today, 2:00\sPM$/,
+    );
+  });
+
   it("speaks the app's language", async () => {
     await i18n.changeLanguage("es");
     try {
       expect(dayLabel(t, local(11, 7, 9), now, "es")).toBe("Hoy");
       expect(dayLabel(t, local(11, 8, 9), now, "es")).toBe("Mañana");
+      expect(dayLabel(t, local(11, 7, 9), now, "es", "inline")).toBe("hoy");
+      expect(dayLabel(t, local(11, 8, 9), now, "es", "inline")).toBe("mañana");
     } finally {
       await i18n.changeLanguage("en");
     }
