@@ -87,39 +87,39 @@ class JobMessage(IdTimestampsMixin, Base):
 
 
 class JobChatRead(IdTimestampsMixin, Base):
-    """How far one participant has received and read a job's chat: two markers, each moved
-    forward only (#71, #331).
+    """How far one participant has read a job's chat: their read marker, moved forward only.
 
-    - Delivered: the newest message of the other side that the participant's app has fetched
-      (listing the thread moves it). Set on every row: the row is created by the first listing
-      that moves it or by the first read.
-    - Read: the newest message the participant marked read (POST .../read), NULL until then.
-      Reading moves the delivered marker too, so delivered is never behind read.
-
-    Each `*_at` is the marked message's created_at, copied so a marker compares with messages by
-    (created_at, id) without a join (messages are never edited)."""
+    `last_read_message_at` is the marked message's created_at, copied so the marker compares
+    with messages by (created_at, id) without a join (messages are never edited)."""
 
     __tablename__ = "job_chat_reads"
-    __table_args__ = (
-        UniqueConstraint("job_id", "user_id"),
-        CheckConstraint(
-            "(last_read_message_id IS NULL) = (last_read_message_at IS NULL)",
-            name="read_complete",
-        ),
-        CheckConstraint(
-            "last_read_message_at IS NULL "
-            "OR (last_delivered_message_at, last_delivered_message_id) "
-            ">= (last_read_message_at, last_read_message_id)",
-            name="delivered_covers_read",
-        ),
-    )
+    __table_args__ = (UniqueConstraint("job_id", "user_id"),)
 
     job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id"))
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
-    last_read_message_id: Mapped[uuid.UUID | None] = mapped_column(
+    last_read_message_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("job_messages.id"), index=True
     )
-    last_read_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_read_message_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class JobChatDelivery(IdTimestampsMixin, Base):
+    """How far one participant's app has fetched a job's chat: their delivered marker, the
+    newest message of the other side a listing returned to them, moved forward only (#331).
+
+    A table of its own, not columns on job_chat_reads, so the API version still serving while
+    the migration runs (which knows only job_chat_reads) keeps working: a participant can be
+    delivered to before they read anything, and a job_chat_reads row always has a read marker.
+    Reading implies delivered without writing here: a message is delivered when either this
+    marker or the read marker is at or past it.
+
+    `last_delivered_message_at` is the marked message's created_at, as in JobChatRead."""
+
+    __tablename__ = "job_chat_deliveries"
+    __table_args__ = (UniqueConstraint("job_id", "user_id"),)
+
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
     last_delivered_message_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("job_messages.id"), index=True
     )

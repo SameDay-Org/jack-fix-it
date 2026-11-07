@@ -8,7 +8,13 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.modules.chat.models import ChatOffenderFlag, JobChatRead, JobMessage, Receipt
+from app.modules.chat.models import (
+    ChatOffenderFlag,
+    JobChatDelivery,
+    JobChatRead,
+    JobMessage,
+    Receipt,
+)
 
 
 @dataclass(frozen=True)
@@ -24,7 +30,8 @@ class FlagUpsert:
 
 
 class ChatRepository:
-    """Queries only: job_messages and job_chat_reads (#71), chat_offender_flags (#72)."""
+    """Queries only: job_messages and job_chat_reads (#71), chat_offender_flags (#72),
+    job_chat_deliveries (#331)."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -49,23 +56,25 @@ class ChatRepository:
     ) -> list[MessageRow]:
         """The job's messages newest first (created_at, then id), after the cursor `before`,
         each with its receipt: how far it got with its recipient, the one of the two `parties`
-        (customer, pro user) who did not send it. One query: a join on the recipient's marker
-        row (at most one: (job_id, user_id) is unique)."""
+        (customer, pro user) who did not send it. One query: a join on each of the recipient's
+        marker rows (at most one each: (job_id, user_id) is unique)."""
         customer_id, pro_user_id = parties
-        recipient = aliased(JobChatRead)
+        read = aliased(JobChatRead)
+        delivery = aliased(JobChatDelivery)
         recipient_id = case(
             (JobMessage.sender_id == customer_id, literal(pro_user_id, Uuid)),
             else_=literal(customer_id, Uuid),
         )
         position = tuple_(JobMessage.created_at, JobMessage.id)
-        # A missing marker (no row, or read still NULL) compares as NULL: the case moves on.
+        # Read first: reading implies delivered, whatever the delivered marker says. A missing
+        # marker row compares as NULL: the case moves on.
         receipt = case(
             (
-                tuple_(recipient.last_read_message_at, recipient.last_read_message_id) >= position,
+                tuple_(read.last_read_message_at, read.last_read_message_id) >= position,
                 literal(Receipt.SEEN.value),
             ),
             (
-                tuple_(recipient.last_delivered_message_at, recipient.last_delivered_message_id)
+                tuple_(delivery.last_delivered_message_at, delivery.last_delivered_message_id)
                 >= position,
                 literal(Receipt.DELIVERED.value),
             ),
@@ -73,9 +82,10 @@ class ChatRepository:
         )
         statement = (
             select(JobMessage, receipt)
+            .outerjoin(read, and_(read.job_id == JobMessage.job_id, read.user_id == recipient_id))
             .outerjoin(
-                recipient,
-                and_(recipient.job_id == JobMessage.job_id, recipient.user_id == recipient_id),
+                delivery,
+                and_(delivery.job_id == JobMessage.job_id, delivery.user_id == recipient_id),
             )
             .where(JobMessage.job_id == job_id)
         )
@@ -93,43 +103,25 @@ class ChatRepository:
         return (await self._session.scalars(statement)).one_or_none()
 
     async def move_read(self, job_id: uuid.UUID, user_id: uuid.UUID, message: JobMessage) -> None:
-        """Sets the user's read marker on the job to `message`, only forward, and their
-        delivered marker to it too unless that one is further already (reading implies
-        delivered). One statement, so two concurrent calls cannot move either back (the later
-        message wins)."""
+        """Sets the user's read marker on the job to `message`, only forward: one statement, so
+        two concurrent calls cannot move it back (the later message wins). The delivered marker
+        is left as it is: a read message counts as delivered from this marker (`page`)."""
         statement = insert(JobChatRead).values(
             job_id=job_id,
             user_id=user_id,
             last_read_message_id=message.id,
             last_read_message_at=message.created_at,
-            last_delivered_message_id=message.id,
-            last_delivered_message_at=message.created_at,
         )
-        new = statement.excluded
-        read = tuple_(JobChatRead.last_read_message_at, JobChatRead.last_read_message_id)
-        delivered_ahead = tuple_(
-            JobChatRead.last_delivered_message_at, JobChatRead.last_delivered_message_id
-        ) > tuple_(new.last_delivered_message_at, new.last_delivered_message_id)
         statement = statement.on_conflict_do_update(
             index_elements=[JobChatRead.job_id, JobChatRead.user_id],
             set_={
-                "last_read_message_id": new.last_read_message_id,
-                "last_read_message_at": new.last_read_message_at,
-                # Both from the row as it was: they move together or not at all.
-                "last_delivered_message_id": case(
-                    (delivered_ahead, JobChatRead.last_delivered_message_id),
-                    else_=new.last_delivered_message_id,
-                ),
-                "last_delivered_message_at": case(
-                    (delivered_ahead, JobChatRead.last_delivered_message_at),
-                    else_=new.last_delivered_message_at,
-                ),
+                "last_read_message_id": statement.excluded.last_read_message_id,
+                "last_read_message_at": statement.excluded.last_read_message_at,
                 "updated_at": func.now(),
             },
-            # No read marker yet (a row made by listing), or an older one.
-            where=or_(
-                JobChatRead.last_read_message_at.is_(None),
-                read < tuple_(new.last_read_message_at, new.last_read_message_id),
+            where=tuple_(JobChatRead.last_read_message_at, JobChatRead.last_read_message_id)
+            < tuple_(
+                statement.excluded.last_read_message_at, statement.excluded.last_read_message_id
             ),
         )
         await self._session.execute(statement)
@@ -139,7 +131,7 @@ class ChatRepository:
     ) -> None:
         """Sets the user's delivered marker on the job to `message`, only forward (the read
         marker is left as it is). One statement, like move_read."""
-        statement = insert(JobChatRead).values(
+        statement = insert(JobChatDelivery).values(
             job_id=job_id,
             user_id=user_id,
             last_delivered_message_id=message.id,
@@ -147,14 +139,15 @@ class ChatRepository:
         )
         new = statement.excluded
         statement = statement.on_conflict_do_update(
-            index_elements=[JobChatRead.job_id, JobChatRead.user_id],
+            index_elements=[JobChatDelivery.job_id, JobChatDelivery.user_id],
             set_={
                 "last_delivered_message_id": new.last_delivered_message_id,
                 "last_delivered_message_at": new.last_delivered_message_at,
                 "updated_at": func.now(),
             },
             where=tuple_(
-                JobChatRead.last_delivered_message_at, JobChatRead.last_delivered_message_id
+                JobChatDelivery.last_delivered_message_at,
+                JobChatDelivery.last_delivered_message_id,
             )
             < tuple_(new.last_delivered_message_at, new.last_delivered_message_id),
         )
@@ -164,8 +157,7 @@ class ChatRepository:
         self, job_ids: Collection[uuid.UUID], user_id: uuid.UUID
     ) -> dict[uuid.UUID, int]:
         """Per job: the messages others sent after the user's read marker (all of them without
-        one: no row, or a row with a delivered marker only). Jobs with none are absent. One
-        query."""
+        one). Jobs with none are absent. One query."""
         if not job_ids:
             return {}
         marker = JobChatRead
@@ -177,7 +169,7 @@ class ChatRepository:
                 JobMessage.job_id.in_(job_ids),
                 JobMessage.sender_id != user_id,
                 or_(
-                    marker.last_read_message_at.is_(None),
+                    marker.id.is_(None),
                     tuple_(JobMessage.created_at, JobMessage.id)
                     > tuple_(marker.last_read_message_at, marker.last_read_message_id),
                 ),

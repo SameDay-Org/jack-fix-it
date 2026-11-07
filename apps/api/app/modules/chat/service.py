@@ -36,10 +36,12 @@ any exchange (Cesar, 2026-10-28). Text only here; photos are part 2.
 - Receipts (#331, Cesar 2026-11-07: one tick sent, two received, blue seen): each participant
   also has a delivered marker, moved forward when their app lists the thread: to the newest
   message of the other side in the page, written only when that message was not delivered to
-  them yet (any page: forward-only makes older pages no-ops). Reading moves it too. The
-  caller's own messages carry `receipt` from the other side's markers (seen, delivered, sent),
-  the other side's carry null; staff see every message's. A push reaching a device does not
-  count as delivered here: only a listing does.
+  them yet (any page: forward-only makes older pages no-ops). Reading implies delivered
+  without moving it: a message at or behind the read marker is seen. The caller's own
+  messages carry `receipt` from the other side's markers (seen, delivered, sent), the other
+  side's carry null; staff see every message's. A push reaching a device does not count as
+  delivered here: only a listing does. The delivered markers have a table of their own
+  (job_chat_deliveries) so the API version before them keeps working during a deploy.
 - Unread: the other side's messages after the caller's marker, all of them without one. The
   job views (customer and pro) show it per job (ChatUnreadReader).
 

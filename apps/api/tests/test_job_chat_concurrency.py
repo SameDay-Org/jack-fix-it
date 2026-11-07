@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.modules.addresses.models import Address
 from app.modules.chat.errors import ChatClosedError
-from app.modules.chat.models import JobChatRead, JobMessage
+from app.modules.chat.models import JobChatDelivery, JobChatRead, JobMessage
 from app.modules.chat.repository import ChatRepository
 from app.modules.chat.service import ChatConfig, ChatService
 from app.modules.jobs.models import Job, JobEvent, JobStatus
@@ -119,6 +119,7 @@ async def committed_job(test_database_url: URL) -> AsyncIterator[CommittedJob]:
         customer_id, pro_user_id, profile_id, address_id, request_id, quote_id, job_id = ids
         async with sessions() as session:
             await session.execute(delete(JobChatRead).where(JobChatRead.job_id == job_id))
+            await session.execute(delete(JobChatDelivery).where(JobChatDelivery.job_id == job_id))
             await session.execute(delete(JobMessage).where(JobMessage.job_id == job_id))
             await session.execute(delete(JobEvent).where(JobEvent.job_id == job_id))
             await session.execute(delete(Job).where(Job.id == job_id))
@@ -232,26 +233,12 @@ async def test_concurrent_messages_commit_in_created_at_order(
     assert stored[0].created_at < stored[1].created_at
 
 
-async def _marker(world: CommittedJob) -> tuple[uuid.UUID | None, uuid.UUID | None]:
-    """The customer's (delivered, read) message ids."""
-    async with world.sessions() as session:
-        row = (
-            await session.execute(
-                select(JobChatRead.last_delivered_message_id, JobChatRead.last_read_message_id)
-                .where(JobChatRead.job_id == world.job_id)
-                .where(JobChatRead.user_id == world.customer.id)
-            )
-        ).one()
-        return row[0], row[1]
-
-
-@pytest.mark.parametrize("holder_moves", ["delivered", "read"])
-async def test_racing_markers_never_move_back(
-    committed_job: CommittedJob, holder_moves: str
+@pytest.mark.parametrize("newer_first", [True, False], ids=["newer_first", "older_first"])
+async def test_racing_delivered_markers_never_move_back(
+    committed_job: CommittedJob, newer_first: bool
 ) -> None:
-    # #331: one transaction moves a marker to the newer message and holds the row; another,
-    # moving a marker to the older message, waits for it and then changes nothing it should
-    # not: delivered stays on the newer, and only a read marker that was NULL moves.
+    # #331: two listings move the customer's delivered marker at once. One transaction writes
+    # it and holds the row; the other waits for it, and the newer message wins in either order.
     world = committed_job
     async with world.sessions() as session:
         older, newer = (
@@ -266,21 +253,16 @@ async def test_racing_markers_never_move_back(
         )
         session.add_all([older, newer])
         await session.commit()
+    first_message, second_message = (newer, older) if newer_first else (older, newer)
 
     async def late(session: AsyncSession) -> None:
-        repository = ChatRepository(session)
-        if holder_moves == "delivered":
-            await repository.move_read(world.job_id, world.customer.id, older)
-        else:
-            await repository.move_delivered(world.job_id, world.customer.id, older)
+        await ChatRepository(session).move_delivered(
+            world.job_id, world.customer.id, second_message
+        )
         await session.commit()
 
     async with world.sessions() as first, world.sessions() as second:
-        repository = ChatRepository(first)
-        if holder_moves == "delivered":
-            await repository.move_delivered(world.job_id, world.customer.id, newer)
-        else:
-            await repository.move_read(world.job_id, world.customer.id, newer)
+        await ChatRepository(first).move_delivered(world.job_id, world.customer.id, first_message)
         holder = await backend_pid(first)
         waiter = await backend_pid(second)
         task = asyncio.create_task(late(second))
@@ -288,5 +270,10 @@ async def test_racing_markers_never_move_back(
         await first.commit()
         await task
 
-    expected = (newer.id, older.id) if holder_moves == "delivered" else (newer.id, newer.id)
-    assert await _marker(world) == expected
+    async with world.sessions() as session:
+        delivered = await session.scalar(
+            select(JobChatDelivery.last_delivered_message_id)
+            .where(JobChatDelivery.job_id == world.job_id)
+            .where(JobChatDelivery.user_id == world.customer.id)
+        )
+    assert delivered == newer.id
