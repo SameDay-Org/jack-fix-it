@@ -71,8 +71,17 @@ const card = (props: IdCardProps) => (
 );
 const renderCard = (props: IdCardProps) => render(card(props));
 
-/** Lets the gyroscope's availability answer land. */
-const settle = () => act(async () => undefined);
+/**
+ * Lets the gyroscope's availability answer land, then one UI frame pass. Under Jest, Reanimated
+ * starts each animated style on the first frame after mount (the worklets UI queue runs on
+ * `requestAnimationFrame`), so a drag driven before that frame moves shared values no style is
+ * listening to yet, and the lean reads 0° (CI job 128243933434). On a phone that frame has long
+ * passed before a finger lands. Frames run in order, so this one comes after the mount's.
+ */
+const settle = () =>
+  act(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  });
 
 beforeEach(() => {
   jest.mocked(useReducedMotion).mockReturnValue(false);

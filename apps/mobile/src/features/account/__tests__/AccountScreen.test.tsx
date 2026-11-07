@@ -16,6 +16,7 @@ import { createStore, useStore } from "zustand";
 
 import {
   apiGet,
+  isCurrentGeneration,
   LocalCleanupError,
   logout,
   setSessionUser,
@@ -144,6 +145,7 @@ beforeEach(() => {
   jest.mocked(logout).mockReset();
   jest.mocked(apiGet).mockReset();
   jest.mocked(setSessionUser).mockClear();
+  jest.mocked(isCurrentGeneration).mockReturnValue(true);
   jest.mocked(router.push).mockClear();
   jest.mocked(moveAccessibilityFocus).mockClear();
   jest.mocked(shareAsync).mockReset().mockResolvedValue(undefined);
@@ -156,6 +158,9 @@ beforeEach(() => {
     .mockImplementation((() =>
       Promise.resolve({ width: 960, height: 606 })) as typeof Image.getSize);
   jest.spyOn(Image, "prefetch").mockResolvedValue(true);
+  // React Native's Image statics are Jest mocks already: spying again keeps their calls.
+  jest.mocked(Image.getSize).mockClear();
+  jest.mocked(Image.prefetch).mockClear();
   toastStore.setState({ current: null });
 });
 
@@ -478,6 +483,109 @@ describe("AccountScreen", () => {
       }),
     );
     await waitFor(() => expect(busyOf(SHARE)).toMatchObject({ busy: false }));
+  });
+
+  describe("a share belongs to the signed-in screen that started it", () => {
+    /** Share pressed with the photo loaded; native capture done, its size read held open. */
+    const shareHeldAtCapture = async () => {
+      const size = deferred<{ width: number; height: number }>();
+      jest
+        .mocked(Image.getSize)
+        .mockImplementationOnce((() => size.promise) as typeof Image.getSize);
+      const view = await renderAccount();
+      await sharePhotoLoaded();
+      await fireEvent.press(screen.getByRole("button", { name: SHARE }));
+      await waitFor(() => expect(Image.getSize).toHaveBeenCalled());
+      expect(shareAsync).not.toHaveBeenCalled();
+      return { view, size };
+    };
+
+    it("never opens the previous account's sheet when the capture finishes after log out", async () => {
+      const { view, size } = await shareHeldAtCapture();
+      // Log out: the session generation moves on and SessionGate unmounts Account.
+      jest.mocked(isCurrentGeneration).mockReturnValue(false);
+      await view.unmount();
+      await act(async () => size.resolve({ width: 960, height: 606 }));
+
+      expect(shareAsync).not.toHaveBeenCalled();
+      expect(toastStore.getState().current).toBeNull();
+    });
+
+    it.each([
+      [
+        "finishes",
+        (size: ReturnType<typeof deferred<{ width: number; height: number }>>) =>
+          size.resolve({ width: 960, height: 606 }),
+      ],
+      [
+        "fails",
+        (size: ReturnType<typeof deferred<{ width: number; height: number }>>) =>
+          size.reject(new Error("capture failed")),
+      ],
+    ])("a capture that %s after the session changed ends silently", async (_, settle) => {
+      const { size } = await shareHeldAtCapture();
+      jest.mocked(isCurrentGeneration).mockReturnValue(false);
+      await act(async () => settle(size));
+
+      expect(shareAsync).not.toHaveBeenCalled();
+      expect(toastStore.getState().current).toBeNull();
+      await waitFor(() => expect(busyOf(SHARE)).toMatchObject({ busy: false }));
+    });
+
+    it("opens no sheet when the capture finishes after the screen went away", async () => {
+      const { view, size } = await shareHeldAtCapture();
+      await view.unmount();
+      await act(async () => size.resolve({ width: 960, height: 606 }));
+
+      expect(shareAsync).not.toHaveBeenCalled();
+      expect(toastStore.getState().current).toBeNull();
+    });
+
+    it("shows no toast when log out cancels a share still waiting for the photo", async () => {
+      const view = await renderAccount();
+      await fireEvent.press(screen.getByRole("button", { name: SHARE }));
+      await act(async () => undefined);
+      jest.mocked(isCurrentGeneration).mockReturnValue(false);
+      // Unmounting the share render rejects its photo waiter.
+      await view.unmount();
+      await act(async () => undefined);
+
+      expect(shareAsync).not.toHaveBeenCalled();
+      expect(toastStore.getState().current).toBeNull();
+    });
+
+    it("keeps a photo refresh that finishes after the session changed out of the session", async () => {
+      const prefetch = deferred<boolean>();
+      jest.mocked(Image.prefetch).mockReturnValue(prefetch.promise);
+      const fresh = { ...signedIn(ALEX).user, photo: { url: FRESH_PHOTO, expires_at: FUTURE } };
+      jest.mocked(apiGet).mockResolvedValue(fresh as never);
+      jest
+        .mocked(useSession)
+        .mockReturnValue(signedIn({ ...ALEX, photo: { url: PHOTO, expires_at: PAST } }));
+      await renderAccount();
+      await waitFor(() => expect(Image.prefetch).toHaveBeenCalledWith(FRESH_PHOTO));
+      jest.mocked(isCurrentGeneration).mockReturnValue(false);
+      await act(async () => prefetch.resolve(true));
+
+      expect(setSessionUser).not.toHaveBeenCalled();
+    });
+
+    it("keeps a photo refresh that answers after unmount out of the session", async () => {
+      const response = deferred<SessionUser>();
+      jest.mocked(apiGet).mockReturnValue(response.promise as never);
+      jest
+        .mocked(useSession)
+        .mockReturnValue(signedIn({ ...ALEX, photo: { url: PHOTO, expires_at: PAST } }));
+      const view = await renderAccount();
+      await waitFor(() => expect(apiGet).toHaveBeenCalled());
+      // A transport that ignores the abort still answers.
+      await view.unmount();
+      await act(async () =>
+        response.resolve({ ...signedIn(ALEX).user, photo: null } as SessionUser),
+      );
+
+      expect(setSessionUser).not.toHaveBeenCalled();
+    });
   });
 
   it("asks for a fresh photo URL when the one it has expired, and swaps it in once cached", async () => {
