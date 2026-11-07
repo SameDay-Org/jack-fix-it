@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react-native";
+import { act, fireEvent, render, screen } from "@testing-library/react-native";
 import { router } from "expo-router";
 import type { ReactElement } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -9,6 +9,7 @@ import i18n from "@/i18n";
 import { METRICS } from "../../auth/__tests__/helpers";
 import { signedIn } from "../../home/__tests__/helpers";
 import { HelpScreen, LegalScreen } from "../InfoScreens";
+import { refreshPermission, resetPermissionForTests } from "../../notifications/permission";
 import { SettingsScreen } from "../SettingsScreen";
 
 jest.mock("@/api", () => ({ useSession: jest.fn() }));
@@ -16,6 +17,7 @@ jest.mock("expo-router", () => ({
   router: { push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true), replace: jest.fn() },
 }));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
+jest.mock("expo-notifications");
 jest.mock(
   "react-native-safe-area-context",
   () => jest.requireActual("react-native-safe-area-context/jest/mock").default,
@@ -49,6 +51,20 @@ describe("SettingsScreen", () => {
       "Phone+1 (415) 555-0123Verified",
     );
     expect(screen.queryByRole("button", { name: /Verify your phone/ })).toBeNull();
+  });
+
+  it("says whether notifications are on, under its own heading (#334)", async () => {
+    resetPermissionForTests();
+    jest.mocked(useSession).mockReturnValue(signedIn());
+    await act(async () => {
+      await refreshPermission();
+    });
+
+    await renderScreen(<SettingsScreen />);
+
+    // The section's heading, then the row's label.
+    expect(screen.getAllByText("Notifications", { exact: true })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Notifications, Off" })).toBeOnTheScreen();
   });
 
   it("offers to verify an unverified phone", async () => {

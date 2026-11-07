@@ -13,6 +13,14 @@ import {
   type PostParams,
   type PostPath,
   type PostResponse,
+  type PutBody,
+  type PutParams,
+  type PutPath,
+  type PutResponse,
+  type DeleteBody,
+  type DeleteParams,
+  type DeletePath,
+  type DeleteResponse,
   type QueryParams,
 } from "./http";
 import { getAccessToken, isCurrentGeneration, refreshSession, sessionGeneration } from "./session";
@@ -87,6 +95,45 @@ export function apiPatch<P extends PatchPath>(
   const { params, query, ...session }: SentOptions = options ?? {};
   return withSession(session, (accessToken) =>
     sendRequest<PatchResponse<P>>("PATCH", path, {
+      body,
+      accessToken,
+      signal: session.signal,
+      params,
+      query,
+    }),
+  );
+}
+
+/** Typed PUT with a JSON body: the whole resource, an idempotent upsert (a device registration). */
+export function apiPut<P extends PutPath>(
+  path: P,
+  body: PutBody<P>,
+  ...[options]: OptionsFor<PutParams<P>>
+): Promise<PutResponse<P>> {
+  const { params, query, ...session }: SentOptions = options ?? {};
+  return withSession(session, (accessToken) =>
+    sendRequest<PutResponse<P>>("PUT", path, {
+      body,
+      accessToken,
+      signal: session.signal,
+      params,
+      query,
+    }),
+  );
+}
+
+/**
+ * Typed DELETE, with the JSON body the path takes (`undefined` for none): a value that must stay
+ * out of the logged path, like a push token, travels in the body.
+ */
+export function apiDelete<P extends DeletePath>(
+  path: P,
+  body: DeleteBody<P>,
+  ...[options]: OptionsFor<DeleteParams<P>>
+): Promise<DeleteResponse<P>> {
+  const { params, query, ...session }: SentOptions = options ?? {};
+  return withSession(session, (accessToken) =>
+    sendRequest<DeleteResponse<P>>("DELETE", path, {
       body,
       accessToken,
       signal: session.signal,

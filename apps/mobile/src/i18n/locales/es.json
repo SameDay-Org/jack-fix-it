@@ -865,11 +865,30 @@
   "settings": {
     "title": "Configuración",
     "sections": {
-      "account": "Tu cuenta"
+      "account": "Tu cuenta",
+      "notifications": "Notificaciones"
     },
     "email": "Correo",
     "phone": "Teléfono",
     "phoneNotVerified": "Aún no verificado"
+  },
+  "notifications": {
+    "channel": "Novedades",
+    "prompt": {
+      "title": "Activa las notificaciones",
+      "customer": "Recibe avisos cuando tu profesional vaya en camino.",
+      "pro": "Entérate de trabajos nuevos cerca de ti y de cuando un cliente te contrata.",
+      "turnOn": "Activar",
+      "notNow": "Ahora no"
+    },
+    "settings": {
+      "label": "Notificaciones",
+      "on": "Activadas",
+      "off": "Desactivadas",
+      "blocked": "Desactivadas en los ajustes del teléfono",
+      "askHint": "Le pide a tu teléfono activar las notificaciones",
+      "openHint": "Abre los ajustes del teléfono"
+    }
   },
   "help": {
     "title": "Apoyo cuando lo necesites",

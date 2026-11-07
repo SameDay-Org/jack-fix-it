@@ -865,11 +865,30 @@
   "settings": {
     "title": "Settings",
     "sections": {
-      "account": "Your account"
+      "account": "Your account",
+      "notifications": "Notifications"
     },
     "email": "Email",
     "phone": "Phone",
     "phoneNotVerified": "Not verified yet"
+  },
+  "notifications": {
+    "channel": "Updates",
+    "prompt": {
+      "title": "Turn on notifications",
+      "customer": "Get updates when your pro is on the way.",
+      "pro": "Hear about new jobs near you, and when a customer hires you.",
+      "turnOn": "Turn on",
+      "notNow": "Not now"
+    },
+    "settings": {
+      "label": "Notifications",
+      "on": "On",
+      "off": "Off",
+      "blocked": "Off in your phone's settings",
+      "askHint": "Asks your phone to turn on notifications",
+      "openHint": "Opens your phone's settings"
+    }
   },
   "help": {
     "title": "Support when you need it",

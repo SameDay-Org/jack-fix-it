@@ -59,6 +59,7 @@ jest.mock("@/api", () => {
   return {
     ...jest.requireActual("../../../api/errors"),
     onSignOut: (forget: () => void) => forgetters.add(forget),
+    beforeSignOut: jest.fn(() => () => undefined),
     mockSignOut: () => forgetters.forEach((forget) => forget()),
     apiGet: jest.fn(),
     apiPost: jest.fn(),
