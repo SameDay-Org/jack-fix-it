@@ -12,15 +12,18 @@ import {
 
 import { customerName } from "./format";
 import type { JobPhotoKind, ProJob } from "./phase";
-import { useJobPhotos, type TurnedAway } from "./useJobPhotos";
+import type { JobPhotos, TurnedAway } from "./useJobPhotos";
 
 export type JobPhotoSectionProps = {
   job: ProJob;
-  kind: JobPhotoKind;
+  /** The kind's photos and their uploads, held by the screen (`useJobPhotos`). */
+  photos: JobPhotos;
   /** The time the tiles are drawn at (`useRefreshExpiredMedia`). */
   now: number;
   /** While the job takes photos of the kind: add, upload, save. Otherwise the saved ones only. */
   editable: boolean;
+  /** Job's done is under way: adding and saving wait for its answer. */
+  held: boolean;
 };
 
 /**
@@ -29,11 +32,11 @@ export type JobPhotoSectionProps = {
  * how many fit, and Add. Otherwise the saved photos alone, as the job's record (nothing when
  * there are none).
  */
-export function JobPhotoSection({ job, kind, now, editable }: JobPhotoSectionProps) {
+export function JobPhotoSection({ job, photos, now, editable, held }: JobPhotoSectionProps) {
   return editable ? (
-    <EditablePhotos job={job} kind={kind} now={now} />
+    <EditablePhotos job={job} photos={photos} now={now} held={held} />
   ) : (
-    <SavedPhotos photos={job.photos[kind]} kind={kind} now={now} />
+    <SavedPhotos photos={photos.saved} kind={photos.kind} now={now} />
   );
 }
 
@@ -63,10 +66,11 @@ function SavedPhotos({
   );
 }
 
-function EditablePhotos({ job, kind, now }: { job: ProJob; kind: JobPhotoKind; now: number }) {
+type EditablePhotosProps = Omit<JobPhotoSectionProps, "editable">;
+
+function EditablePhotos({ job, photos, now, held }: EditablePhotosProps) {
   const { t } = useTranslation();
-  const photos = useJobPhotos(job, kind);
-  const { saved, upload, max, ready, uploading, saving, turnedAway, dismissTurnedAway } = photos;
+  const { kind, saved, upload, max, ready, uploading, saving, turnedAway } = photos;
   const { adding, add } = useMediaAdd(upload, {
     pathname: "/jobs/[id]/media-source",
     params: { id: job.id },
@@ -76,7 +80,7 @@ function EditablePhotos({ job, kind, now }: { job: ProJob; kind: JobPhotoKind; n
   const testID = `pro-job-photos-${kind}`;
 
   const addAgain = () => {
-    dismissTurnedAway();
+    photos.dismissTurnedAway();
     void add();
   };
 
@@ -114,32 +118,40 @@ function EditablePhotos({ job, kind, now }: { job: ProJob; kind: JobPhotoKind; n
       {upload.permissionDenied ? (
         <MediaPermissionNotice onDismiss={upload.dismissPermissionNotice} />
       ) : null}
-      {count > 0 ? (
-        <Text className="text-footnote text-gray-500" testID={`${testID}-count`}>
-          {full ? t("proJobs.photos.full", { max }) : t("proJobs.photos.count", { count, max })}
-        </Text>
-      ) : null}
+      <Text className="text-footnote text-gray-500" testID={`${testID}-count`}>
+        {full
+          ? t("proJobs.photos.full", { max })
+          : count > 0
+            ? t("proJobs.photos.count", { count, max })
+            : t("proJobs.photos.upTo", { max })}
+      </Text>
       {ready > 0 ? (
         <Text className="text-footnote text-gray-500" testID={`${testID}-final`}>
           {t("proJobs.photos.final")}
         </Text>
       ) : null}
+      {/* Both sections are open while working: the visible words stay short (the header names
+          the kind), and assistive technology hears which photos each button is for. */}
       <View className="items-start gap-2">
         {ready > 0 ? (
           <Button
             label={t("proJobs.photos.save", { count: ready })}
+            accessibilityLabel={t(`proJobs.photos.${kind}.saveLabel`, { count: ready })}
             accessibilityHint={t("proJobs.photos.saveHint")}
             variant="secondary"
-            disabled={uploading || adding}
+            disabled={uploading || adding || held}
             loading={saving}
             onPress={photos.save}
             testID={`${testID}-save`}
           />
         ) : null}
         <Button
-          label={t(count > 0 ? "proJobs.photos.addMore" : `proJobs.photos.${kind}.add`)}
+          label={t(count > 0 ? "proJobs.photos.addMore" : "proJobs.photos.add")}
+          accessibilityLabel={t(
+            count > 0 ? `proJobs.photos.${kind}.addMoreLabel` : `proJobs.photos.${kind}.addLabel`,
+          )}
           variant={ready > 0 ? "ghost" : "secondary"}
-          disabled={full || saving}
+          disabled={full || saving || held}
           loading={adding}
           onPress={addAgain}
           testID={`${testID}-add`}

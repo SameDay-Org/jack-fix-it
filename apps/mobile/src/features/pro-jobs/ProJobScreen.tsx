@@ -36,6 +36,7 @@ import { addressLines, addressText, customerName, dayLabel, mapsUrl, whenLabel }
 import { JobPhotoSection } from "./JobPhotoSection";
 import { jobStep, STEP_TONE, type JobStep, type ProJob } from "./phase";
 import { useJobDone, type DoneState } from "./useJobDone";
+import { useJobPhotos, type JobPhotos as KindPhotos } from "./useJobPhotos";
 
 /** The icon tile's side (`IconTile` md), for the skeleton. */
 const TILE_SIDE = 56;
@@ -114,6 +115,10 @@ export function ProJobScreen() {
   );
   // The photos' signed URLs are asked for again when one expires on screen.
   const now = useRefreshExpiredMedia(photos, dataUpdatedAt, refetch);
+  // Held here, not in the sections: picked photos outlive a step change, and Job's done sees them.
+  const before = useJobPhotos(data, "before");
+  const after = useJobPhotos(data, "after");
+  const jobDone = useJobDone(data);
   const shownError = useSettledError(data, error);
   const gone = !valid || (data === undefined && isJobGone(shownError));
   const refreshFailed = data !== undefined && error !== null;
@@ -160,14 +165,18 @@ export function ProJobScreen() {
             ) : null}
             <JobHero job={data} now={dataUpdatedAt} />
             <JobFacts job={data} />
-            {photosFirst(data) ? <JobPhotos job={data} now={now} /> : null}
-            <JobAddress job={data} />
-            <JobAbout job={data} />
-            {photosFirst(data) ? null : <JobPhotos job={data} now={now} />}
+            {photosFirst(data) ? null : <JobAddress job={data} />}
+            {photosFirst(data) ? null : <JobAbout job={data} />}
+            {/* One place in the tree at every step, so nothing in it starts over on Start job. */}
+            <JobPhotos job={data} before={before} after={after} now={now} held={jobDone.busy} />
+            {photosFirst(data) ? <JobAddress job={data} /> : null}
+            {photosFirst(data) ? <JobAbout job={data} /> : null}
           </View>
         )}
       </ScrollView>
-      {docked && data ? <JobActions job={data} /> : null}
+      {docked && data ? (
+        <JobActions job={data} jobDone={jobDone} photosPending={before.pending || after.pending} />
+      ) : null}
     </Screen>
   );
 }
@@ -181,31 +190,40 @@ const photosFirst = (job: ProJob): boolean => {
   return step !== "onTheWay" && step !== "arrived";
 };
 
+type JobPhotosProps = {
+  job: ProJob;
+  before: KindPhotos;
+  after: KindPhotos;
+  now: number;
+  /** Job's done is under way. */
+  held: boolean;
+};
+
 /** Before, then after: each editable while the job takes it, else its saved photos (if any). */
-function JobPhotos({ job, now }: { job: ProJob; now: number }) {
+function JobPhotos({ job, before, after, now, held }: JobPhotosProps) {
   const step = jobStep(job);
   return (
-    <>
+    <View className="gap-8">
       <JobPhotoSection
         job={job}
-        kind="before"
+        photos={before}
         now={now}
         editable={BEFORE_PHOTO_STEPS.includes(step)}
+        held={held}
       />
-      <JobPhotoSection job={job} kind="after" now={now} editable={step === "working"} />
-    </>
+      <JobPhotoSection
+        job={job}
+        photos={after}
+        now={now}
+        editable={step === "working"}
+        held={held}
+      />
+    </View>
   );
 }
 
 /** The line under the title: what to do next, or what happens now. */
 function guideText(t: TFunction, job: ProJob, step: Exclude<JobStep, "locked">): string {
-  if (step === "working") {
-    return t(
-      job.photos.after.length > 0
-        ? "proJobs.screen.guide.working"
-        : "proJobs.screen.guide.workingNoPhoto",
-    );
-  }
   const name = nameOf(t, job);
   if (step === "done" && job.status === "completed") {
     return t("proJobs.screen.guide.waiting", { name });
@@ -397,13 +415,21 @@ function useStartJob(jobId: string) {
 }
 
 /** What the dock says above Job's done, by where it stands; nothing when there is nothing to say. */
-function doneMessage(t: TFunction, job: ProJob, state: DoneState): string | null {
+function doneMessage(
+  t: TFunction,
+  job: ProJob,
+  state: DoneState,
+  photosPending: boolean,
+): string | null {
+  const hasAfter = job.photos.after.length > 0;
   if (state === "processing") return t("proJobs.done.processing");
   if (state === "slow") return t("proJobs.done.slow");
-  if (state === "photosRequired" || job.photos.after.length === 0) {
-    return t("proJobs.done.photosRequired");
+  // The API saw no after photo it can show: with tiles on screen, their copies failed.
+  if (state === "photosRequired") {
+    return t(hasAfter ? "proJobs.done.photosFailed" : "proJobs.done.photosRequired");
   }
-  return null;
+  if (photosPending) return t("proJobs.done.savePending");
+  return hasAfter ? null : t("proJobs.done.photosRequired");
 }
 
 /**
@@ -411,19 +437,29 @@ function doneMessage(t: TFunction, job: ProJob, state: DoneState): string | null
  * photos' copies are made it says so calmly and keeps asking on its own; past the window it
  * offers Try again.
  */
-function DoneAction({ job }: { job: ProJob }) {
+type JobDone = ReturnType<typeof useJobDone>;
+
+function DoneAction({
+  job,
+  jobDone,
+  photosPending,
+}: {
+  job: ProJob;
+  jobDone: JobDone;
+  photosPending: boolean;
+}) {
   const { t } = useTranslation();
-  const { state, busy, done } = useJobDone(job);
-  const message = doneMessage(t, job, state);
+  const { state, busy, done } = jobDone;
+  const message = doneMessage(t, job, state, photosPending);
 
   return (
     <>
+      {/* Spoken by the hook's announcements when it changes (one channel, no live region). */}
       {message ? (
         <Text
           className={
             state === "photosRequired" ? "text-callout text-danger" : "text-callout text-navy-900"
           }
-          accessibilityLiveRegion="polite"
           testID="pro-job-done-message"
         >
           {message}
@@ -432,7 +468,7 @@ function DoneAction({ job }: { job: ProJob }) {
       <Button
         label={t(state === "slow" ? "proJobs.done.tryAgain" : "proJobs.done.action")}
         size="lg"
-        disabled={job.photos.after.length === 0}
+        disabled={!busy && (job.photos.after.length === 0 || photosPending)}
         loading={busy}
         onPress={done}
         testID="pro-job-done"
@@ -445,7 +481,15 @@ function DoneAction({ job }: { job: ProJob }) {
  * The step's one primary action, in a dock under the page (only the steps that have one). A
  * locked check-in has none: it waits for the team, and its notice sits in the page.
  */
-function JobActions({ job }: { job: ProJob }) {
+function JobActions({
+  job,
+  jobDone,
+  photosPending,
+}: {
+  job: ProJob;
+  jobDone: JobDone;
+  photosPending: boolean;
+}) {
   const { t } = useTranslation();
   const step = jobStep(job);
   const push = useGuardedPush();
@@ -494,7 +538,7 @@ function JobActions({ job }: { job: ProJob }) {
           testID="pro-job-start"
         />
       ) : step === "working" ? (
-        <DoneAction job={job} />
+        <DoneAction job={job} jobDone={jobDone} photosPending={photosPending} />
       ) : null}
     </View>
   );

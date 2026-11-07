@@ -689,7 +689,6 @@
         "done": "You marked this job done.",
         "closed": "This job was cancelled.",
         "working": "When the work is finished, tap Job's done.",
-        "workingNoPhoto": "When the work is finished, add at least one after photo, then tap Job's done.",
         "waiting": "Job's done. Waiting for {{name}} to confirm."
       },
       "locked": {
@@ -766,22 +765,28 @@
       "before": {
         "title": "Before photos",
         "body": "Optional. Show how things look before you start; {{name}} can see them in the app.",
-        "add": "Add before photos",
         "tile": "Before photo {{number}} of {{total}}",
         "item": "Before photo {{number}}",
         "full": "This job already has {{max}} before photos.",
         "savedAnnounce_one": "Before photo saved.",
-        "savedAnnounce_other": "{{count}} before photos saved."
+        "savedAnnounce_other": "{{count}} before photos saved.",
+        "addLabel": "Add before photos",
+        "addMoreLabel": "Add more before photos",
+        "saveLabel_one": "Save {{count}} before photo",
+        "saveLabel_other": "Save {{count}} before photos"
       },
       "after": {
         "title": "After photos",
         "body": "Required. Show the finished work: Job's done needs at least one, and {{name}} can see them in the app.",
-        "add": "Add after photos",
         "tile": "After photo {{number}} of {{total}}",
         "item": "After photo {{number}}",
         "full": "This job already has {{max}} after photos.",
         "savedAnnounce_one": "After photo saved.",
-        "savedAnnounce_other": "{{count}} after photos saved."
+        "savedAnnounce_other": "{{count}} after photos saved.",
+        "addLabel": "Add after photos",
+        "addMoreLabel": "Add more after photos",
+        "saveLabel_one": "Save {{count}} after photo",
+        "saveLabel_other": "Save {{count}} after photos"
       },
       "count": "{{count}} of {{max}} photos",
       "full": "That's the most this job holds ({{max}}).",
@@ -799,14 +804,18 @@
         "title_other": "{{count}} photos couldn't be saved"
       },
       "again_one": "Add it again.",
-      "again_other": "Add them again."
+      "again_other": "Add them again.",
+      "add": "Add photos",
+      "upTo": "Up to {{max}} photos"
     },
     "done": {
       "action": "Job's done",
       "tryAgain": "Try again",
       "processing": "Finishing your photos…",
       "slow": "Your photos are taking longer than usual. Try again in a moment.",
-      "photosRequired": "Add at least one after photo first."
+      "photosRequired": "Add at least one after photo first.",
+      "photosFailed": "We couldn't prepare your after photos. Add another one.",
+      "savePending": "Save your photos first."
     }
   },
   "quoteForm": {
@@ -1041,7 +1050,9 @@
       "beforeTile": "Before photo {{number}} of {{total}}",
       "afterTile": "After photo {{number}} of {{total}}",
       "pending_one": "{{count}} more photo is being prepared.",
-      "pending_other": "{{count}} more photos are being prepared."
+      "pending_other": "{{count}} more photos are being prepared.",
+      "pendingOnly_one": "{{count}} photo is being prepared.",
+      "pendingOnly_other": "{{count}} photos are being prepared."
     }
   }
 }

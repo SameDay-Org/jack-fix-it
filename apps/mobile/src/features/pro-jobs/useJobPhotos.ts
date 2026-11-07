@@ -1,12 +1,12 @@
 import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { isCurrentGeneration, sessionGeneration } from "@/api";
 import { showToast } from "@/components/ui";
 import { announce } from "@/components/ui/focus";
-import { useMediaUpload, type MediaUpload } from "@/features/media";
+import { useMediaUpload, type MediaItem, type MediaUpload } from "@/features/media";
 
 import { attachPhoto, useSingleFlight } from "./api";
 import { proJobsConfig } from "./config";
@@ -17,8 +17,10 @@ import type { JobPhoto, JobPhotoKind, ProJob } from "./phase";
 export type TurnedAway = { expired: number; refused: number };
 
 const NONE_TURNED_AWAY: TurnedAway = { expired: 0, refused: 0 };
+const NO_PHOTOS: readonly JobPhoto[] = [];
 
 export type JobPhotos = {
+  kind: JobPhotoKind;
   /** The photos on the job, oldest first, as the API lists them. */
   saved: readonly JobPhoto[];
   /** The photos picked here and not on the job yet: their uploads, progress and failures. */
@@ -30,6 +32,8 @@ export type JobPhotos = {
   /** A photo still being prepared or uploaded: Save waits for it. */
   uploading: boolean;
   saving: boolean;
+  /** Picked here and not on the job yet, failed ones aside: Job's done waits for them. */
+  pending: boolean;
   /** Attaches every uploaded photo, in the order picked, one at a time. */
   save: () => void;
   turnedAway: TurnedAway;
@@ -37,37 +41,47 @@ export type JobPhotos = {
   dismissTurnedAway: () => void;
 };
 
+const isUploading = (item: MediaItem) =>
+  item.status === "compressing" || item.status === "uploading";
+
 /**
  * The before or after photos of one job: those on it, and those picked here (`useMediaUpload`,
- * purpose `job_photo`) until Save attaches them. A picked photo can be removed until it is saved;
- * once on the job it stays (there is no delete). Every save belongs to the session it started in:
- * a later answer for another one changes nothing and says nothing.
+ * purpose `job_photo`) until Save attaches them. Held by the job screen, so the list outlives a
+ * step change (Start job moves the sections) and Job's done can wait for it. A picked photo can be
+ * removed until it is saved, even while Save runs; once on the job it stays (there is no delete).
+ * Every save belongs to the session it started in: a later answer for another one changes nothing
+ * and says nothing. Until the job has loaded there is nothing to save.
  */
-export function useJobPhotos(job: ProJob, kind: JobPhotoKind): JobPhotos {
+export function useJobPhotos(job: ProJob | undefined, kind: JobPhotoKind): JobPhotos {
   const { t } = useTranslation();
   const client = useQueryClient();
-  const saved = job.photos[kind];
+  const saved = job?.photos[kind] ?? NO_PHOTOS;
   const max = proJobsConfig.photoMaxPerKind;
   const upload = useMediaUpload({ purpose: "job_photo", max: Math.max(0, max - saved.length) });
   const { busy: saving, run, mounted } = useSingleFlight();
   const [turnedAway, setTurnedAway] = useState<TurnedAway>(NONE_TURNED_AWAY);
   const { items, remove } = upload;
   const ready = items.filter((item) => item.status === "done" && item.key !== null);
-  const uploading = items.some(
-    (item) => item.status === "compressing" || item.status === "uploading",
-  );
+  const uploading = items.some(isUploading);
+
+  // The list as it stands now, for a save under way: a photo removed meanwhile is not attached.
+  const live = useRef(items);
+  useEffect(() => {
+    live.current = items;
+  }, [items]);
 
   const save = () =>
     void run(async () => {
+      if (!job) return;
       const generation = sessionGeneration();
-      const live = () => mounted.current && isCurrentGeneration(generation);
+      const current = () => mounted.current && isCurrentGeneration(generation);
       const away: TurnedAway = { expired: 0, refused: 0 };
       let attached = 0;
       setTurnedAway(NONE_TURNED_AWAY);
       for (const item of ready) {
-        if (item.key === null) continue;
+        if (item.key === null || !live.current.some((entry) => entry.id === item.id)) continue;
         const outcome = await attachPhoto(client, job.id, kind, item.key, generation);
-        if (!live()) return;
+        if (!current()) return;
         if (outcome.kind === "attached") {
           attached += 1;
           remove(item.id);
@@ -98,12 +112,14 @@ export function useJobPhotos(job: ProJob, kind: JobPhotoKind): JobPhotos {
   const dismissTurnedAway = useCallback(() => setTurnedAway(NONE_TURNED_AWAY), []);
 
   return {
+    kind,
     saved,
     upload,
     max,
     ready: ready.length,
     uploading,
     saving,
+    pending: saving || uploading || ready.length > 0,
     save,
     turnedAway,
     dismissTurnedAway,

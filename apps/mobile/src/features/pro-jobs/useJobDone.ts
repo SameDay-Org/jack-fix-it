@@ -27,13 +27,14 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
  * are made (`after_photos_processing`) it asks again every `doneRetryIntervalMs`, for at most
  * `doneRetryWindowMs`, then offers Try again. A state is about the after photos it was reached
  * with: a new photo saved since starts over from `idle`. Nothing lands after the screen leaves or
- * the session changes.
+ * the session changes. Held by the job screen, which also holds the photo controls while it runs;
+ * until the job has loaded there is nothing to post.
  */
-export function useJobDone(job: ProJob) {
+export function useJobDone(job: ProJob | undefined) {
   const { t } = useTranslation();
   const client = useQueryClient();
   const { busy, run, mounted } = useSingleFlight();
-  const afterCount = job.photos.after.length;
+  const afterCount = job?.photos.after.length ?? 0;
   const [reached, setReached] = useState<{ state: DoneState; afterCount: number }>({
     state: "idle",
     afterCount,
@@ -42,6 +43,7 @@ export function useJobDone(job: ProJob) {
 
   const done = () =>
     void run(async () => {
+      if (!job) return;
       const generation = sessionGeneration();
       const live = () => mounted.current && isCurrentGeneration(generation);
       const { doneRetryIntervalMs, doneRetryWindowMs } = proJobsConfig;
@@ -59,7 +61,7 @@ export function useJobDone(job: ProJob) {
         }
         if (outcome.kind === "photosRequired") {
           set("photosRequired");
-          announce(t("proJobs.done.photosRequired"));
+          announce(t(afterCount > 0 ? "proJobs.done.photosFailed" : "proJobs.done.photosRequired"));
           return;
         }
         if (outcome.kind === "failure") {

@@ -333,11 +333,7 @@ describe("ProJobScreen", () => {
         expect(within(screen.getByTestId("pro-job-status")).getByText("Working")).toBeTruthy(),
       );
       expect(screen.getByText("Started at")).toBeTruthy();
-      expect(
-        screen.getByText(
-          "When the work is finished, add at least one after photo, then tap Job's done.",
-        ),
-      ).toBeTruthy();
+      expect(screen.getByText("When the work is finished, tap Job's done.")).toBeTruthy();
       expect(actionButtons()).toEqual([screen.getByTestId("pro-job-done")]);
       expect(Haptics.notificationAsync).toHaveBeenCalledWith(
         Haptics.NotificationFeedbackType.Success,
@@ -421,11 +417,7 @@ describe("ProJobScreen", () => {
       await open(working());
 
       expect(within(screen.getByTestId("pro-job-status")).getByText("Working")).toBeTruthy();
-      expect(
-        screen.getByText(
-          "When the work is finished, add at least one after photo, then tap Job's done.",
-        ),
-      ).toBeTruthy();
+      expect(screen.getByText("When the work is finished, tap Job's done.")).toBeTruthy();
       expect(actionButtons()).toEqual([screen.getByTestId("pro-job-done")]);
       expect(screen.getByTestId("pro-job-done").props.accessibilityState).toMatchObject({
         disabled: true,

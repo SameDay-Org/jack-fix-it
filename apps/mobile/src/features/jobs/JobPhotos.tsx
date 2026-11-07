@@ -35,7 +35,9 @@ export function JobPhotos({ photos, updatedAt, refetch }: JobPhotosProps) {
       <PhotoRow kind="after" photos={after} now={now} />
       {pending > 0 ? (
         <Text className="text-footnote text-gray-500" testID="job-photos-pending">
-          {t("jobs.photos.pending", { count: pending })}
+          {t(all.length > 0 ? "jobs.photos.pending" : "jobs.photos.pendingOnly", {
+            count: pending,
+          })}
         </Text>
       ) : null}
     </View>
