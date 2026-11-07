@@ -6,6 +6,10 @@ const REFRESH_TOKEN_KEY = "jackfixit.session.refreshToken";
 // The id of the account whose sign-up flow this device has not finished (#292): next to the token
 // it belongs with, in the one store the app keeps between launches.
 const ONBOARDING_USER_KEY = "jackfixit.session.onboardingUserId";
+// The person closed the notifications pre-prompt on this device (#334). Not account data: it
+// stays across sign-outs, like the permission it is about.
+const NOTIFICATIONS_PROMPT_KEY = "jackfixit.notifications.promptDismissed";
+const DISMISSED = "1";
 const WRITE_OPTIONS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
 };
@@ -73,4 +77,21 @@ export const onboardingMarkerStorage = {
 
   clear: (): Promise<void> =>
     serialized(() => SecureStore.deleteItemAsync(ONBOARDING_USER_KEY).catch(() => undefined)),
+};
+
+/**
+ * Whether the notifications pre-prompt was closed on this device. A failed read counts as not
+ * closed (the card can be closed again); a failed write rejects, for the caller to log.
+ */
+export const notificationsPromptStorage = {
+  readDismissed: (): Promise<boolean> =>
+    serialized(() =>
+      SecureStore.getItemAsync(NOTIFICATIONS_PROMPT_KEY).then(
+        (value) => value === DISMISSED,
+        () => false,
+      ),
+    ),
+
+  writeDismissed: (): Promise<void> =>
+    serialized(() => SecureStore.setItemAsync(NOTIFICATIONS_PROMPT_KEY, DISMISSED, WRITE_OPTIONS)),
 };

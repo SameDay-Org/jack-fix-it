@@ -22,6 +22,8 @@ import {
   renderWithQuery,
   summary,
 } from "../../opportunities/__tests__/helpers";
+import { refreshPermission, resetPermissionForTests } from "../../notifications/permission";
+import { resetPromptDismissalForTests } from "../../notifications/promptDismissal";
 import { ProHomeScreen } from "../ProHomeScreen";
 import {
   markOpportunityViewed,
@@ -49,6 +51,7 @@ jest.mock("@/features/pro-jobs", () => ({
   useProJobs: (options?: { refetchOnReturn?: boolean }) => mockUseProJobs(options),
 }));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
+jest.mock("expo-notifications");
 jest.mock(
   "react-native-safe-area-context",
   () => jest.requireActual("react-native-safe-area-context/jest/mock").default,
@@ -99,6 +102,20 @@ afterEach(() => {
 });
 
 describe("ProHomeScreen", () => {
+  it("under the greeting, the notifications pre-prompt in the pro's words (#334)", async () => {
+    resetPermissionForTests();
+    resetPromptDismissalForTests();
+    await act(async () => {
+      await refreshPermission();
+    });
+    await renderWithQuery(<ProHomeScreen />);
+
+    const prompt = await screen.findByTestId("pro-home-notifications");
+    expect(
+      within(prompt).getByText("Hear about new jobs near you, and when a customer hires you."),
+    ).toBeTruthy();
+  });
+
   it("a pro sees the cards in the API's order, each with its lines; New follows viewed", async () => {
     await renderWithQuery(<ProHomeScreen />);
 

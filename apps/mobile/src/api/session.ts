@@ -277,14 +277,72 @@ export function login(body: PostBody<"/v1/auth/login">): Promise<void> {
   return signIn("/v1/auth/login", body);
 }
 
+// Work a feature must finish with the departing session's credentials, before a person's logout
+// clears them (the push token's removal, #334).
+type SignOutTask = { run: () => Promise<void>; timeoutMs: number };
+const signOutTasks = new Set<SignOutTask>();
+let tasksInFlight: { generation: number; promise: Promise<void> } | null = null;
+
 /**
- * Ends the session. Memory, the Query cache and what `onSignOut` registered are cleared before the
- * first await; the stored token is then deleted and revoked on the server (best effort), with the
- * barrier up until the revoke settles. Rejects with `LocalCleanupError` when the stored token
- * could not be deleted; `cleanupPending` is set in that case. A sign-in that completes meanwhile
- * owns the session and is left alone.
+ * Registers `run` for every logout of a signed-in session: it runs before anything is cleared,
+ * while the session can still call the API (each call pinned to it), and the logout waits for it
+ * at most `timeoutMs`. Best effort: a failure or a timeout never stops the sign-out, and a session
+ * the server ended (an expired refresh) has no credentials left to run it with. Returns the
+ * unregister.
  */
-export async function logout(): Promise<void> {
+export function beforeSignOut(
+  run: () => Promise<void>,
+  options: { timeoutMs: number },
+): () => void {
+  const task: SignOutTask = { run, timeoutMs: options.timeoutMs };
+  signOutTasks.add(task);
+  return () => {
+    signOutTasks.delete(task);
+  };
+}
+
+/** Settles when `task` does or after its `timeoutMs`, whichever comes first; never rejects. */
+function runBounded(task: SignOutTask): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, task.timeoutMs);
+    Promise.resolve()
+      .then(task.run)
+      .catch(() => undefined)
+      .finally(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+  });
+}
+
+/**
+ * The tasks of a logout, or null when there is nothing to wait for (no task, or no signed-in
+ * session to run them with). A second logout while they run waits for the same ones.
+ */
+function runSignOutTasks(): Promise<void> | null {
+  if (signOutTasks.size === 0 || sessionStore.getState().status !== "signedIn") return null;
+  if (tasksInFlight?.generation === generation) return tasksInFlight.promise;
+  const promise = Promise.all([...signOutTasks].map(runBounded)).then(() => {
+    if (tasksInFlight?.promise === promise) tasksInFlight = null;
+  });
+  tasksInFlight = { generation, promise };
+  return promise;
+}
+
+/**
+ * Ends the session. What `beforeSignOut` registered runs first, while the session is still signed
+ * in (each task bounded; with none, nothing is awaited). Then memory, the Query cache and what
+ * `onSignOut` registered are cleared before the next await; the stored token is deleted and
+ * revoked on the server (best effort), with the barrier up until the revoke settles. Rejects with
+ * `LocalCleanupError` when the stored token could not be deleted; `cleanupPending` is set in that
+ * case. A sign-in that completes meanwhile owns the session and is left alone.
+ */
+export function logout(): Promise<void> {
+  const tasks = runSignOutTasks();
+  return tasks ? tasks.then(endSession) : endSession();
+}
+
+async function endSession(): Promise<void> {
   const startedIn = beginSignOut();
   try {
     const { token, deleted } = await forgetStoredToken(startedIn);
