@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
@@ -24,7 +24,8 @@ from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailabl
 from app.modules.payments import tasks
 from app.modules.payments.errors import PaymentNotAvailableError
 from app.modules.payments.models import Payment, PaymentStatus
-from app.modules.payments.reconciliation import PaymentReconciler, UnpaidCheck
+from app.modules.payments.reconciliation import PaymentReconciler, UnpaidCheck, UnpaidOutcome
+from app.modules.payments.repository import PaymentRepository
 from app.modules.payments.schemas import PaymentSheetOut
 from app.modules.payments.service import PaymentService, payment_intent_cancel_idempotency_key
 from app.modules.payments.tasks import cancel_unpaid_payments
@@ -189,6 +190,48 @@ async def test_unpaid_payment_past_the_window_is_canceled_in_stripe(
     )
 
 
+async def test_no_lock_is_held_over_the_stripe_cancel(market: Market) -> None:
+    """When Stripe is called, the sweep's transaction is over: another connection locks the
+    request, the quote and the payment at once (NOWAIT)."""
+    await set_payment(market, created_at=aged())
+    stripe = FakeStripePayments()
+    seen: list[int] = []
+
+    async def lock_from_another_connection() -> None:
+        async with market.sessions() as other:
+            rows = (
+                await other.execute(
+                    text(
+                        "SELECT p.id FROM service_requests r "
+                        "JOIN quotes q ON q.request_id = r.id "
+                        "JOIN payments p ON p.quote_id = q.id "
+                        "WHERE p.id = :payment_id FOR UPDATE NOWAIT"
+                    ),
+                    {"payment_id": market.payment_id},
+                )
+            ).all()
+            await other.rollback()
+        seen.append(len(rows))
+
+    stripe.on_cancel_intent = lock_from_another_connection
+
+    await sweep(market, stripe)
+
+    assert seen == [1]
+    assert len(stripe.cancels) == 1
+
+
+async def test_close_unpaid_rechecks_the_age_under_the_lock(market: Market) -> None:
+    """A payment the cutoff does not cover is not due, whoever names it."""
+    await set_payment(market, stripe_payment_intent_id=None)
+    async with market.sessions() as session:
+        check = await PaymentReconciler(session).close_unpaid(market.payment_id, aged())
+        await session.commit()
+
+    assert check.outcome is UnpaidOutcome.NOT_DUE
+    assert (await market.state()).payment is PaymentStatus.REQUIRES_PAYMENT
+
+
 @pytest.mark.parametrize("quote_expired", [False, True])
 async def test_payment_without_an_intent_is_canceled_locally_and_the_quote_reopens(
     market: Market, quote_expired: bool, caplog: pytest.LogCaptureFixture
@@ -285,6 +328,40 @@ async def test_processing_succeeded_and_canceled_payments_are_untouched(
         len(before.jobs),
     )
     assert summary(caplog) == counts()
+
+
+@pytest.mark.parametrize("event_type", [PROCESSING, SUCCEEDED, CANCELED])
+async def test_a_payment_settled_after_the_read_is_left_alone(
+    market: Market,
+    event_type: str,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The batch read the payment unpaid, and its event moved it on before the lock: the status
+    read again under the lock leaves it alone."""
+    assert await market.deliver(event_type) == "processed"
+    await set_payment(market, created_at=aged())
+    before = await market.state()
+
+    async def stale_read(
+        self: PaymentRepository, created_before: datetime, after: uuid.UUID | None, limit: int
+    ) -> list[uuid.UUID]:
+        return [market.payment_id] if after is None else []
+
+    monkeypatch.setattr(PaymentRepository, "unpaid_due", stale_read)
+    stripe = FakeStripePayments()
+    caplog.set_level(logging.INFO)
+
+    await sweep(market, stripe)
+
+    assert stripe.cancels == []
+    after = await market.state()
+    assert (after.payment, after.request, after.quotes) == (
+        before.payment,
+        before.request,
+        before.quotes,
+    )
+    assert summary(caplog) == counts(skipped=1)
 
 
 @pytest.mark.parametrize("with_intent", [True, False])

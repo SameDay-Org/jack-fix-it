@@ -125,7 +125,7 @@ class FakeStripePayments:
     `search_complete` False: the search has another page. `cancels` records every cancel Stripe
     accepted or refused (the PaymentIntent and the idempotency key); `cancel_refused` makes Stripe
     refuse them as payment_intent_unexpected_state (the intent is processing, succeeded or
-    canceled)."""
+    canceled); `on_cancel_intent` runs inside a cancel, before it answers."""
 
     customers: dict[str, str] = field(default_factory=dict)  # idempotency key -> customer id
     customer_calls: list[dict[str, str]] = field(default_factory=list)
@@ -144,6 +144,7 @@ class FakeStripePayments:
     search_complete: bool = True
     cancels: list[tuple[str, str]] = field(default_factory=list)
     cancel_refused: bool = False
+    on_cancel_intent: Callable[[], Awaitable[None]] | None = None
 
     def add_intent(self, facts: PaymentIntentFacts) -> None:
         """An intent Stripe holds that no create of this run answered with."""
@@ -249,6 +250,8 @@ class FakeStripePayments:
     async def cancel_payment_intent(self, payment_intent_id: str, *, idempotency_key: str) -> bool:
         if "cancel_payment_intent" in self.errors:
             raise self.errors["cancel_payment_intent"]
+        if self.on_cancel_intent is not None:
+            await self.on_cancel_intent()
         self.cancels.append((payment_intent_id, idempotency_key))
         return not self.cancel_refused
 
