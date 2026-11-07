@@ -10,10 +10,11 @@ import {
   type NativeEventSubscription,
   type RefreshControlProps,
 } from "react-native";
-import { useReducedMotion } from "react-native-reanimated";
+import { useReducedMotion, withTiming } from "react-native-reanimated";
 
 import { ApiError, apiGet, NetworkError } from "@/api";
 import { dismissToast } from "@/components/ui/toast";
+import { tokens } from "@/theme";
 
 import { deferred, settle } from "../../../api/__tests__/helpers";
 import {
@@ -29,6 +30,8 @@ import type { CustomerQuoteList } from "../../quotes/useRequestQuotes";
 import { jobsConfig } from "../config";
 import { JobScreen } from "../JobScreen";
 import { formatMoment, type CustomerJob, type JobStatus, type JobTimelineEntry } from "../phase";
+
+import { afterPhoto } from "./helpers";
 
 type MockStatus = "signedIn" | "signedOut";
 /** The session the mocked `@/api` hooks read; a test signs out by changing it and notifying. */
@@ -76,7 +79,12 @@ jest.mock("expo-router", () => {
 jest.mock("react-native-reanimated", () => {
   const actual =
     jest.requireActual<typeof import("react-native-reanimated")>("react-native-reanimated");
-  return { __esModule: true, ...actual, useReducedMotion: jest.fn(() => false) };
+  return {
+    __esModule: true,
+    ...actual,
+    useReducedMotion: jest.fn(() => false),
+    withTiming: jest.fn(actual.withTiming),
+  };
 });
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
@@ -90,6 +98,7 @@ const MINUTE_MS = 60_000;
 const HIDDEN = { includeHiddenElements: true };
 const NBSP = " ";
 const CODE = "0427";
+const { stepSlideMs } = tokens.motion;
 
 const at = (minutes: number) => new Date(NOW + minutes * MINUTE_MS).toISOString();
 const entry = (
@@ -312,16 +321,6 @@ describe("JobScreen", () => {
     ],
     ["arrived", ARRIVED, "Dan has arrived", `Checked in at ${clock(CHECKED_IN.at)}`, 2, false],
     ["in_progress", WORKING, "Dan is working", `Started at ${clock(STARTED.at)}`, 2, false],
-    // Finished and confirmed are whole screens of their own (#66): no steps, no code.
-    [
-      "completed",
-      COMPLETED,
-      "Dan marked the job done",
-      "Take a look at the work, then confirm it's done.",
-      null,
-      false,
-    ],
-    ["confirmed", CONFIRMED, "Job confirmed", "Payment is released to Dan.", null, false],
     [
       "disputed",
       DISPUTED,
@@ -450,7 +449,7 @@ describe("JobScreen", () => {
     fakeClock();
     answerJob(item);
     await renderWithQuery(<JobScreen />);
-    await loaded(title);
+    await headline(title);
 
     await advance(jobsConfig.pollMs * 4);
     expect(jobCalls()).toBe(1);
@@ -705,6 +704,189 @@ describe("JobScreen", () => {
 
     expect(screen.getByTestId("job-map-marker", HIDDEN)).toBeTruthy();
     expect(screen.queryByTestId("job-map-pulse", HIDDEN) !== null).toBe(pulses);
+  });
+});
+
+describe("JobScreen, the finished job (#66)", () => {
+  const FINISHED_JOB = job({
+    status: "completed",
+    confirm_by: at(20),
+    timeline: COMPLETED.timeline,
+    photos: { before: [], after: [afterPhoto(1), afterPhoto(2)], pending: 0 },
+  });
+  const CONFIRMED_JOB = job({
+    status: "confirmed",
+    timeline: CONFIRMED.timeline,
+    photos: FINISHED_JOB.photos,
+  });
+  const time = (iso: string) =>
+    new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(iso));
+  const photoNames = () =>
+    screen.getAllByRole("imagebutton").map((photo) => photo.props.accessibilityLabel as string);
+  const grows = () =>
+    jest
+      .mocked(withTiming)
+      .mock.calls.filter(([to, config]) => to === 1 && config?.duration === stepSlideMs);
+
+  beforeEach(() => jest.mocked(withTiming).mockClear());
+
+  it("leads with the pro's word and the after photos, and docks the confirmation with its deadline", async () => {
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+
+    expect(await headline("Dan marked the job done")).toBeTruthy();
+    expect(screen.getByTestId("job-support").props.children).toBe(
+      "Take a look at the work, then confirm it's done.",
+    );
+    expect(photoNames()).toEqual([
+      "Photo of the finished work, 1 of 2",
+      "Photo of the finished work, 2 of 2",
+    ]);
+    expect(screen.getByTestId("job-photo-hero-0").props.accessibilityHint).toBe(
+      "Opens it full screen",
+    );
+    expect(within(screen.getByTestId("job-photo-hero-count", HIDDEN)).getByText("1 of 2", HIDDEN));
+    expect(screen.getByTestId("job-paid")).toBeTruthy();
+    // A screen of its own: no steps, no code, no map behind the photos.
+    expect(screen.queryByTestId("job-milestones")).toBeNull();
+    expect(screen.queryByTestId("arrival-code")).toBeNull();
+    expect(screen.queryByTestId("job-map", HIDDEN)).toBeNull();
+    expect(screen.getByTestId("job-confirm-deadline").props.children).toBe(
+      `Confirms automatically today at ${time(at(20))} if you don't answer.`,
+    );
+
+    await act(async () =>
+      fireEvent.press(screen.getByRole("button", { name: "Confirm the job is done" })),
+    );
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/requests/[id]/confirm",
+      params: { id: REQUEST_ID },
+    });
+  });
+
+  it("a photo opens full screen at that photo", async () => {
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+
+    await act(async () => fireEvent.press(screen.getByTestId("job-photo-hero-1")));
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/requests/[id]/photos",
+      params: { id: REQUEST_ID, index: "1" },
+    });
+  });
+
+  it("with no photo listed yet, the drawn map stands in and the dock still confirms", async () => {
+    answerJob({ ...FINISHED_JOB, photos: { before: [], after: [], pending: 1 } });
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+
+    expect(screen.queryByTestId("job-photo-hero")).toBeNull();
+    expect(screen.getByTestId("job-map", HIDDEN)).toBeTruthy();
+    expect(screen.getByTestId("job-confirm")).toBeTruthy();
+  });
+
+  it("a photo whose link expires turns to a quiet frame, and the job is asked for again", async () => {
+    fakeClock();
+    const expiring = afterPhoto(1, { expires_at: at(5) });
+    answerJob({ ...FINISHED_JOB, photos: { ...FINISHED_JOB.photos, after: [expiring] } });
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+    expect(screen.getByTestId("job-photo-hero-0-image")).toBeTruthy();
+
+    const held = holdJob();
+    // The photos' clock moves a minute at a time (`useExpiryClock`).
+    for (let minute = 0; minute < 5; minute += 1) await advance(MINUTE_MS);
+
+    expect(screen.getByTestId("job-photo-hero-0-frame")).toBeTruthy();
+    expect(screen.queryByTestId("job-photo-hero-0-image")).toBeNull();
+    expect(jobCalls()).toBe(2);
+    await act(async () => held.resolve(FINISHED_JOB));
+    expect(await screen.findByTestId("job-photo-hero-0-image")).toBeTruthy();
+  });
+
+  it("an image that fails to load shows the frame, never a broken picture", async () => {
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+
+    await act(async () => screen.getByTestId("job-photo-hero-0-image").props.onError());
+    expect(screen.getByTestId("job-photo-hero-0-frame")).toBeTruthy();
+  });
+
+  it("confirmed while the screen is up: thanks, said aloud, the seal grows and the dock leaves", async () => {
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+
+    answerJob(CONFIRMED_JOB);
+    await act(async () => pullToRefresh());
+
+    expect(await headline("Thanks! Job confirmed")).toBeTruthy();
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith(
+      "Thanks! Job confirmed",
+    );
+    expect(screen.getByTestId("job-support").props.children).toBe("Payment is released to Dan.");
+    expect(screen.queryByTestId("job-confirm-dock")).toBeNull();
+    expect(grows()).toHaveLength(1);
+
+    // The work stays to look at: the photos as tiles under a title, each opening full screen.
+    expect(screen.getByRole("header", { name: "The finished work" })).toBeTruthy();
+    expect(photoNames()).toEqual([
+      "Photo of the finished work, 1 of 2",
+      "Photo of the finished work, 2 of 2",
+    ]);
+    await act(async () => fireEvent.press(screen.getByTestId("job-photo-thumb-0")));
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/requests/[id]/photos",
+      params: { id: REQUEST_ID, index: "0" },
+    });
+  });
+
+  it("under Reduce Motion the seal simply stands", async () => {
+    jest.mocked(useReducedMotion).mockReturnValue(true);
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+
+    answerJob(CONFIRMED_JOB);
+    await act(async () => pullToRefresh());
+
+    expect(await headline("Thanks! Job confirmed")).toBeTruthy();
+    expect(grows()).toHaveLength(0);
+  });
+
+  it("opened confirmed, it says Job confirmed, calmly: no thanks, no seal growing, no dock", async () => {
+    answerJob(CONFIRMED_JOB);
+    await renderWithQuery(<JobScreen />);
+
+    expect(await headline("Job confirmed")).toBeTruthy();
+    expect(screen.queryByText("Thanks! Job confirmed")).toBeNull();
+    expect(screen.queryByTestId("job-confirm-dock")).toBeNull();
+    expect(grows()).toHaveLength(0);
+  });
+
+  it("an answer after a sign-out never draws the finished job", async () => {
+    const held = holdJob();
+    await renderWithQuery(<JobScreen />);
+    await signOut();
+    await act(async () => held.resolve(FINISHED_JOB));
+
+    expect(screen.queryByTestId("job-finished")).toBeNull();
+    expect(screen.queryByTestId("job-confirm-dock")).toBeNull();
+  });
+
+  it("speaks Spanish", async () => {
+    await act(() => i18n.changeLanguage("es"));
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+
+    expect(await headline("Dan marcó el trabajo como terminado")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Confirmar que está terminado" })).toBeTruthy();
+    expect(screen.getByTestId("job-confirm-deadline").props.children).toMatch(
+      /^Se confirma automáticamente hoy a las? \d{1,2}:\d{2} si no respondes\.$/,
+    );
+    expect(photoNames()[0]).toBe("Foto del trabajo terminado, 1 de 2");
   });
 });
 

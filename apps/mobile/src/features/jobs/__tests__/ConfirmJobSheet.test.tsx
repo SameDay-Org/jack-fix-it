@@ -38,7 +38,8 @@ const OFFLINE = "We couldn't reach Jack Fix It. Check your connection and try ag
 const FINISHED = customerJob();
 const CONFIRMED = confirmedJob();
 
-const session = () => jest.requireMock<{ mockSession: { generation: number } }>("@/api").mockSession;
+const session = () =>
+  jest.requireMock<{ mockSession: { generation: number } }>("@/api").mockSession;
 const post = () => jest.mocked(apiPost);
 const posts = () => post().mock.calls.filter(([path]) => path === CONFIRM);
 const toast = () => toastStore.getState().current;
@@ -119,7 +120,11 @@ describe("ConfirmJobSheet (#66)", () => {
   });
 
   it.each([
-    ["moved on (409)", new ApiError(409, "job_not_completed"), "This job changed. Here's where it stands now."],
+    [
+      "moved on (409)",
+      new ApiError(409, "job_not_completed"),
+      "This job changed. Here's where it stands now.",
+    ],
     ["gone (404)", new ApiError(404, "not_found"), "This job is no longer available."],
   ])(
     "a job that %s: the sheet closes, says so, and the job is asked for again",
@@ -139,7 +144,7 @@ describe("ConfirmJobSheet (#66)", () => {
   );
 
   it("offline, the reason shows and is said aloud, the sheet stays, and Confirm again goes", async () => {
-    post().mockRejectedValueOnce(new NetworkError()).mockResolvedValueOnce(CONFIRMED);
+    post().mockRejectedValueOnce(new NetworkError(false)).mockResolvedValueOnce(CONFIRMED);
     const { client } = await open();
 
     await press("confirm-job-send");
@@ -230,7 +235,9 @@ describe("ConfirmJobSheet (#66)", () => {
     const { client } = await open();
 
     await act(async () => client.setQueryData(customerJobQueryKey(REQUEST_ID, 1), CONFIRMED));
-    await act(async () => client.setQueryData(customerJobQueryKey(REQUEST_ID, 1), { ...CONFIRMED }));
+    await act(async () =>
+      client.setQueryData(customerJobQueryKey(REQUEST_ID, 1), { ...CONFIRMED }),
+    );
 
     expect(router.back).toHaveBeenCalledTimes(1);
     expect(posts()).toHaveLength(0);

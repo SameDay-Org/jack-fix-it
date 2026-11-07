@@ -25,9 +25,7 @@ afterEach(async () => {
 
 describe("deadlineText (#66)", () => {
   it("says today, tomorrow or the weekday, with the time", () => {
-    expect(inEnglish(iso(3))).toBe(
-      "Confirms automatically today at 1:00 PM if you don't answer.",
-    );
+    expect(inEnglish(iso(3))).toBe("Confirms automatically today at 1:00 PM if you don't answer.");
     expect(inEnglish(iso(24))).toBe(
       "Confirms automatically tomorrow at 10:00 AM if you don't answer.",
     );
