@@ -13,8 +13,11 @@ endpoint.
 - --payment <payment id> --adopt <pi_...>: stores that PaymentIntent as the payment's. Refused
   when the payment already has one, or when Stripe does not show the intent with metadata
   payment_id naming this payment and the payment's amount, currency and customer (another
-  payment's, or not this platform's). With several intents, adopt one; support cancels the
-  others in the dashboard.
+  payment's, or not this platform's). With several intents, adopt one first, then support
+  cancels the others in the dashboard: a payment_intent.* event for an intent the payment does
+  not hold yet adopts it (#296), so a cancel sent before the adoption would cancel the payment
+  and reopen its quote. A refusal because the payment already has one can mean such an event
+  adopted it.
 - --payment <payment id> --allow-new: clears the unresolved create, so the customer's next
   payment call creates a PaymentIntent. Use it only after confirming in the Stripe dashboard
   that no PaymentIntent's metadata names this payment, and once Stripe's key retention (24
