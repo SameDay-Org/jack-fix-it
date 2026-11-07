@@ -769,3 +769,21 @@ async def test_a_failed_send_reaches_sentry_without_the_body(
     wire = "\n".join(payloads)
     for leak in (SECRET_PHRASE, "flowerpot", "jane.doe@gmail.com", MASK):
         assert leak not in wire
+
+
+async def test_a_stranger_gets_404_before_any_redaction(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    job = await make_job(db_session, world)
+    calls: list[str] = []
+    monkeypatch.setattr("app.modules.chat.service.redact_contacts", lambda text: calls.append(text))
+
+    for job_id in (job.id, uuid.uuid4()):
+        response = await db_client.post(
+            messages_path(job_id), json={"body": "x" * 2000}, headers=world.other_pro.headers
+        )
+        assert (response.status_code, response.json()) == (404, NOT_FOUND)
+    assert calls == []

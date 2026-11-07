@@ -112,7 +112,10 @@ class ChatService:
         )
 
     async def send(self, user: UserAccount, job_id: uuid.UUID, body: str) -> ChatMessageOut:
-        # Masked before the lock: the redactor is pure, and the lock stays short.
+        # A stranger gets 404 before any redactor work (the rate limit is per job, so a stranger
+        # trying new job ids is never limited). Masked before the lock: the redactor is pure,
+        # and the lock stays short. The lock reads the parties again.
+        await self._participant(user, job_id)
         result = redact_contacts(body)
         text = result.text.strip()
         parties = await self._jobs.parties(job_id, lock=True)
