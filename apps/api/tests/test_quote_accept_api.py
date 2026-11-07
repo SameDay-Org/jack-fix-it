@@ -781,6 +781,7 @@ async def test_a_quote_without_a_dispatch_still_pushes_its_pro_home(
     response = await accept(db_client, world, request_id, quote_id)
 
     assert response.status_code == 200
+    assert queue.before == ["commit"]  # queued after the acceptance's commit
     [(task, (user_id, message_id, *_, link))] = queue.jobs.values()
     assert (task, user_id, message_id, link) == (
         "send_push",
