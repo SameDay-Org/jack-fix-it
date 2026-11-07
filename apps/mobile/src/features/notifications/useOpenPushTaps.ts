@@ -14,17 +14,17 @@ let latest = 0;
 const isRefused = (error: unknown): boolean =>
   error instanceof ApiError && (error.status === 403 || error.status === 404);
 
-const goHome = (): void => router.dismissTo("/");
-
 /**
  * Opens one tapped push for the signed-in account of `role`. A path outside the allow-list, one
- * no screen opens yet, or one for the other role goes Home, silently. An allowed path is asked of
- * the API first, with this session: a refusal (another account's push) goes Home too; any other
- * failure (offline, a server error) still opens the screen, which shows its own error and retry,
- * and the API refuses it the data all the same. Nothing opens once the session the push was
- * tapped in is gone, or a newer tap came in meanwhile. A screen already on top for that path stays
- * as it is (the answer refreshed what it shows); any other opens over the current one, so Back
- * returns there.
+ * no screen opens yet, or one for the other role opens nothing, silently: the app stays where it
+ * is, which after a cold start is Home. Nothing goes back to Home from a screen that is already
+ * up: a request or a quote being written there would ask to be discarded for a push that opens
+ * nothing. An allowed path is asked of the API first, with this session: a refusal (another
+ * account's push) opens nothing either; any other failure (offline, a server error) still opens
+ * the screen, which shows its own error and retry, and the API refuses it the data all the same.
+ * Nothing opens once the session the push was tapped in is gone, or a newer tap came in
+ * meanwhile. A screen already on top for that path stays as it is (the answer refreshed what it
+ * shows); any other opens over the current one, so Back returns there.
  */
 export async function openPushTap(
   tap: PendingPushTap,
@@ -37,18 +37,11 @@ export async function openPushTap(
   if (!wanted()) return;
   const link = parsePushLink(tap.url);
   const route = pushRoute(link, role);
-  if (link === null || route === null) {
-    goHome();
-    return;
-  }
+  if (link === null || route === null) return;
   try {
     await route.probe(client, link.id, tap.generation);
   } catch (error) {
-    if (!wanted()) return;
-    if (isRefused(error)) {
-      goHome();
-      return;
-    }
+    if (isRefused(error)) return;
   }
   // An allowed path is the screen's own pathname: `/jobs/<id>` opens `/jobs/[id]`.
   if (wanted() && currentPath() !== tap.url) router.push(route.href(link.id));

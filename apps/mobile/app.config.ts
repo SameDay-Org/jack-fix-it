@@ -48,8 +48,7 @@ function appVariant(): AppVariant {
 }
 
 export default ({ config }: ConfigContext): ExpoConfig => {
-  const variantName = appVariant();
-  const variant = VARIANTS[variantName];
+  const variant = VARIANTS[appVariant()];
   const appId = `${BASE_APP_ID}${variant.idSuffix}`;
 
   return {
@@ -135,15 +134,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ],
       // Notifications (#323; a change here needs a new dev build): the app opens a tapped push on
       // its screen. The tray icon is tinted navy until the logo (#8) brings a monochrome icon.
-      // iOS's APNs environment follows the build: development for the dev client, production
-      // for preview and store builds. Registration and the credentials come in #334 and #335.
-      [
-        "expo-notifications",
-        {
-          color: colors["navy-900"],
-          mode: variantName === "development" ? "development" : "production",
-        },
-      ],
+      // iOS uses production APNs: every device build is ad hoc (internal distribution: the dev
+      // client, preview) or the store's; only a simulator would use development. Registration and
+      // the credentials come in #334 and #335.
+      ["expo-notifications", { color: colors["navy-900"], mode: "production" }],
     ],
     locales: {
       en: { ios: PERMISSION_PROMPTS.en },

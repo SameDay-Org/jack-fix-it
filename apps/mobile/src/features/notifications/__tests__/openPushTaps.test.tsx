@@ -1,7 +1,7 @@
 import "@/i18n";
 
 import { act, renderRouter, screen } from "expo-router/testing-library";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, usePreventRemove } from "expo-router";
 import { createElement } from "react";
 import { Text } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -66,6 +66,13 @@ jest.mock(
 const ID = "0b9e5f8e-6a3c-4c1e-9d2f-1a2b3c4d5e6f";
 const OTHER_ID = "7f3c2b1a-0e9d-4c8b-a7f6-5e4d3c2b1a09";
 
+// A screen holding a draft, like the request flow and the quote form: leaving it asks first.
+const mockLeaveAsked = jest.fn();
+function DraftStub() {
+  usePreventRemove(true, () => mockLeaveAsked());
+  return <Text>draft</Text>;
+}
+
 function stub(name: string) {
   return function Stub() {
     const { id } = useLocalSearchParams<{ id: string }>();
@@ -83,6 +90,7 @@ const routes = {
     ),
   "(auth)/_layout": { default: AuthLayout, unstable_settings: authSettings },
   "(auth)/welcome": () => <Text>welcome</Text>,
+  "(auth)/sign-up": () => <Text>sign-up</Text>,
   "(app)/_layout": { default: AppLayout, unstable_settings: appSettings },
   "(app)/(tabs)/index": () => <Text>home</Text>,
   "(app)/requests/[id]/_layout": { default: RequestLayout, unstable_settings: requestSettings },
@@ -91,6 +99,8 @@ const routes = {
   "(app)/jobs/[id]/_layout": { default: JobLayout, unstable_settings: jobSettings },
   "(app)/jobs/[id]/index": stub("pro job"),
   "(app)/opportunities/[id]": stub("opportunity"),
+  // A real route name (typed routes); the stub stands for any screen with a draft.
+  "(app)/help": DraftStub,
 };
 
 const CUSTOMER: MockSession = { ...SIGNED_OUT, status: "signedIn", user };
@@ -131,6 +141,7 @@ beforeEach(() => {
   mockSession.generation = 1;
   mockAnswers.clear();
   mockApiGet.mockClear();
+  mockLeaveAsked.mockClear();
 });
 
 describe("a tapped push while the app runs (warm)", () => {
@@ -185,7 +196,7 @@ describe("a tapped push while the app runs (warm)", () => {
   });
 });
 
-describe("a push that opens nothing goes Home, silently", () => {
+describe("a push that opens nothing leaves the app where it is, silently", () => {
   it.each([
     ["an unknown path", "/settings"],
     ["a path no screen opens yet", `/quotes/${ID}`],
@@ -203,9 +214,25 @@ describe("a push that opens nothing goes Home, silently", () => {
     expect(result.getPathname()).toBe(`/requests/${OTHER_ID}`);
 
     await tap(url);
-    expect(result.getPathname()).toBe("/");
-    expect(screen.getByText("home")).toBeTruthy();
+    expect(result.getPathname()).toBe(`/requests/${OTHER_ID}`);
     expect(mockApiGet).not.toHaveBeenCalledWith(QUOTES_PATH);
+
+    // Nothing was opened over it: Back returns Home.
+    await act(async () => router.back());
+    expect(screen.getByText("home")).toBeTruthy();
+  });
+
+  it.each([
+    ["an unknown path", "/settings", undefined],
+    ["the other role's path", `/jobs/${ID}`, undefined],
+    ["another account's request", `/requests/${ID}`, 404],
+  ])("never asks to discard a draft: %s", async (_, url, status) => {
+    if (status !== undefined) mockAnswers.set(QUOTES_PATH, refuse(status));
+    const result = await signedInAtHome(CUSTOMER);
+    await act(async () => router.push("/help"));
+    await tap(url);
+    expect(result.getPathname()).toBe("/help");
+    expect(mockLeaveAsked).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -227,8 +254,11 @@ describe("a push for another account never opens its screen", () => {
     ["a job's request (404 twice)", CUSTOMER, `/requests/${ID}/job`, QUOTES_PATH, 404],
     ["a pro job (404)", PRO, `/jobs/${ID}`, PRO_JOB_PATH, 404],
     ["an opportunity (404)", PRO, `/opportunities/${ID}`, OPPORTUNITY_PATH, 404],
+    // The quote-accepted push names a dispatch the pro already quoted: the API answers 404 for it
+    // too, so that tap opens nothing until the push names a screen that exists (follow-up).
+    ["a quoted dispatch (quote accepted, 404)", PRO, `/opportunities/${ID}`, OPPORTUNITY_PATH, 404],
     ["a request (403)", CUSTOMER, `/requests/${ID}`, QUOTES_PATH, 403],
-  ])("the API refuses %s: Home", async (_, session, url, path, status) => {
+  ])("the API refuses %s: nothing opens", async (_, session, url, path, status) => {
     mockAnswers.set(path, refuse(status));
     mockAnswers.set(JOB_PATH, refuse(404));
     const result = await signedInAtHome(session);
@@ -294,6 +324,29 @@ describe("a push that launched the app (cold)", () => {
     await act(async () => mockSession.set(PRO));
     expect(result.getPathname()).toBe(`/jobs/${ID}`);
     expect(screen.getByText(`pro job ${ID}`)).toBeTruthy();
+  });
+
+  it("lands on Home when the push opens nothing", async () => {
+    mockSession.state = { ...SIGNED_OUT, status: "restoring" };
+    const result = await renderRouter(routes, { initialUrl: "/" });
+    await tap(`/quotes/${ID}`);
+    await act(async () => mockSession.set(CUSTOMER));
+    expect(result.getPathname()).toBe("/");
+    expect(screen.getByText("home")).toBeTruthy();
+  });
+
+  it("waits through the account's sign-up flow, then opens", async () => {
+    mockSession.state = { ...SIGNED_OUT, status: "restoring" };
+    const result = await renderRouter(routes, { initialUrl: "/" });
+    await tap(`/requests/${ID}`);
+    await act(async () => mockSession.set({ ...CUSTOMER, onboardingUserId: user.id }));
+    expect(screen.getByText("sign-up")).toBeTruthy();
+    expect(mockApiGet).not.toHaveBeenCalled();
+
+    // Finishing the flow keeps the session (and its generation): the push opens now.
+    await act(async () => mockSession.set(CUSTOMER));
+    expect(result.getPathname()).toBe(`/requests/${ID}`);
+    expect(screen.getByText(`compare ${ID}`)).toBeTruthy();
   });
 
   it("opens nothing when the restore ends signed out, nor after the next sign-in", async () => {

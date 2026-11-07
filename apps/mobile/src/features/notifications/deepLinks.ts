@@ -64,7 +64,7 @@ type PushRoute = {
 const requestHref = (id: string): Href => ({ pathname: "/requests/[id]", params: { id } });
 const opportunityHref = (id: string): Href => ({ pathname: "/opportunities/[id]", params: { id } });
 
-/** Null where no screen opens that path yet: the push falls back to Home. */
+/** Null where no screen opens that path yet: the push opens nothing. */
 const ROUTES: Record<PushPath, PushRoute | null> = {
   // A new quote, a canceled booking: the request's comparison (#52).
   "/requests/{id}": {
@@ -94,7 +94,8 @@ const ROUTES: Record<PushPath, PushRoute | null> = {
   },
   // No screen opens one quote on its own yet.
   "/quotes/{id}": null,
-  // A new request near the pro: the opportunity (#49).
+  // A new request near the pro: the opportunity (#49). The quote-accepted push names it too, but
+  // the API answers 404 for a dispatch already quoted, so that tap opens nothing (a follow-up).
   "/opportunities/{id}": {
     role: "pro",
     href: opportunityHref,
@@ -102,7 +103,7 @@ const ROUTES: Record<PushPath, PushRoute | null> = {
   },
 };
 
-/** The screen a push opens for an account of `role`; null when it opens none (Home instead). */
+/** The screen a push opens for an account of `role`; null when it opens none. */
 export function pushRoute(link: PushLink | null, role: Role): PushRoute | null {
   const route = link ? ROUTES[link.path] : null;
   return route !== null && route.role === role ? route : null;
