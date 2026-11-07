@@ -887,7 +887,9 @@
     "you": "You",
     "bubble": {
       "label": "{{sender}}, {{time}}: {{text}}",
-      "pendingLabel": "You: {{text}}. {{state}}",
+      "pendingLabel": "You, {{state}}: {{text}}",
+      "stateSending": "sending",
+      "stateNotSent": "not sent",
       "sending": "Sending…",
       "failed": "Not sent. Tap to try again.",
       "failedShort": "Not sent",

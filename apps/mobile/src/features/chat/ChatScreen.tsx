@@ -1,4 +1,5 @@
 import { router, useLocalSearchParams } from "expo-router";
+import type { TFunction } from "i18next";
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -190,7 +191,7 @@ function ChatKeyboardView({ children }: { children: ReactNode }) {
 type PeerNames = { lead: string; inline: string; role: string };
 
 /** The other side as a sentence starts with them, inside one, and what they are on this job. */
-function peerNames(t: ReturnType<typeof useTranslation>["t"], peer: ChatPeer): PeerNames {
+function peerNames(t: TFunction, peer: ChatPeer): PeerNames {
   if (peer.role === "pro") {
     return {
       lead: peer.firstName ?? t("chat.peer.pro.fallback"),
@@ -235,7 +236,7 @@ function ChatTopBar({ peer, name, role }: { peer: ChatPeer; name: string; role: 
             >
               {name}
             </Text>
-            <Text numberOfLines={1} className="text-footnote text-white">
+            <Text numberOfLines={2} className="text-footnote text-white">
               {role}
             </Text>
           </View>

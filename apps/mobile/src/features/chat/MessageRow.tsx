@@ -10,8 +10,11 @@ import { formatLocale } from "@/features/quotes/format";
 import type { Row } from "./thread";
 
 const DAY_MS = 24 * 60 * 60_000;
-// The line under a bubble: its time, how its send is going, or the masking note.
-const META = "mt-1 px-1 text-caption text-gray-500";
+// The line under a bubble: its time, how its send is going, or the masking note. The color is
+// separate: two text colors on one element are resolved by stylesheet order, not class order.
+const META_BASE = "mt-1 px-1 text-caption";
+const META = `${META_BASE} text-gray-500`;
+const META_DANGER = `${META_BASE} text-danger`;
 
 /** The local midnight starting an instant's day. */
 const startOfDay = (at: number): number => {
@@ -80,14 +83,19 @@ export const MessageRow = memo(function MessageRow({
           <Text className="text-body text-white">{pending.body}</Text>
         </ChatBubble>
         <Text
-          className={pending.state === "sending" ? META : `${META} text-danger`}
+          className={pending.state === "sending" ? META : META_DANGER}
           testID="chat-pending-status"
         >
           {status}
         </Text>
       </>
     );
-    const label = t("chat.bubble.pendingLabel", { text: pending.body, state: status });
+    // Spoken as "You, not sent: <text>"; a failed bubble's hint says a tap sends it again.
+    const label = t("chat.bubble.pendingLabel", {
+      text: pending.body,
+      state:
+        pending.state === "sending" ? t("chat.bubble.stateSending") : t("chat.bubble.stateNotSent"),
+    });
     return failed ? (
       <Pressable
         accessibilityRole="button"
