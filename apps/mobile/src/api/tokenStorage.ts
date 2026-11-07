@@ -1,14 +1,18 @@
 import * as SecureStore from "expo-secure-store";
 
-// One namespaced key. The entry stays on this device: it is not restored to another one from a
-// backup, and it is readable after the first unlock so a background refresh can use it.
+// Namespaced keys. The entries stay on this device: they are not restored to another one from a
+// backup, and they are readable after the first unlock so a background refresh can use them.
 const REFRESH_TOKEN_KEY = "jackfixit.session.refreshToken";
+// The id of the account whose sign-up flow this device has not finished (#292): next to the token
+// it belongs with, in the one store the app keeps between launches.
+const ONBOARDING_USER_KEY = "jackfixit.session.onboardingUserId";
 const WRITE_OPTIONS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
 };
 
 // Every operation runs in order, so a write that is still pending when a sign-out deletes the
-// entry cannot land after the delete, and a guarded write decides at the moment it runs.
+// entry cannot land after the delete, and a guarded write decides at the moment it runs. The
+// onboarding marker shares the queue, so a read of it queued ahead of the token's resolves first.
 let queue: Promise<unknown> = Promise.resolve();
 
 function serialized<T>(operation: () => Promise<T>): Promise<T> {
@@ -47,4 +51,26 @@ export const refreshTokenStorage = {
       );
       return { token, deleted };
     }),
+};
+
+/**
+ * The account still in its sign-up flow on this device, by id. Read with the token on restore;
+ * written with a sign-up's tokens; cleared when the flow ends or the session does. Nothing here is
+ * logged. Neither a failed read nor a failed delete throws: a marker that cannot be read is no
+ * marker, and one that cannot be deleted is cleared again on the next restore of a finished flow.
+ */
+export const onboardingMarkerStorage = {
+  read: (): Promise<string | null> =>
+    serialized(() => SecureStore.getItemAsync(ONBOARDING_USER_KEY).catch(() => null)),
+
+  /** Writes when `stillWanted()` holds as the write runs; resolves to whether it wrote. */
+  write: (userId: string, stillWanted: () => boolean = () => true): Promise<boolean> =>
+    serialized(async () => {
+      if (!stillWanted()) return false;
+      await SecureStore.setItemAsync(ONBOARDING_USER_KEY, userId, WRITE_OPTIONS);
+      return true;
+    }),
+
+  clear: (): Promise<void> =>
+    serialized(() => SecureStore.deleteItemAsync(ONBOARDING_USER_KEY).catch(() => undefined)),
 };

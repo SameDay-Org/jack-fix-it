@@ -1,24 +1,14 @@
 import { router } from "expo-router";
 import { useRef, useState, type ComponentRef } from "react";
 import { useTranslation } from "react-i18next";
-import { AccessibilityInfo, ScrollView, Text, View } from "react-native";
+import { AccessibilityInfo, ScrollView, View } from "react-native";
 
-import { Button, ChoiceCard, Input, Notice, Skeleton, type InputHandle } from "@/components/ui";
+import { Button, ChoiceCard, Notice, Skeleton } from "@/components/ui";
 import { useSavedAddresses } from "@/features/addresses";
+import { AddressForm } from "@/features/addresses/AddressForm";
 
-import {
-  ADDRESS_MAX,
-  addressErrors,
-  addressLine,
-  resolveAddress,
-  type AddressError,
-} from "./address";
-import {
-  chooseAddress,
-  setTypedAddress,
-  useRequestDraft,
-  type AddressFields,
-} from "./requestDraft";
+import { addressErrors, addressLine, resolveAddress } from "./address";
+import { chooseAddress, setTypedAddress, useRequestDraft } from "./requestDraft";
 import { StepScreen } from "./StepScreen";
 import { nextStep, stepHref, type StepId } from "./steps";
 
@@ -169,113 +159,14 @@ export function WhereStep({ steps }: { steps: readonly StepId[] }) {
           <AddressForm
             fields={typed}
             errors={errors}
+            onChange={setTypedAddress}
             zipRefused={notServed}
-            titled={savedItems.length > 0}
+            // Under the saved addresses, the form gets its own heading.
+            title={savedItems.length > 0 ? t("request.where.formTitle") : undefined}
+            testID="where"
           />
         </View>
       ) : null}
     </StepScreen>
-  );
-}
-
-type AddressFormProps = {
-  fields: AddressFields;
-  errors: Partial<Record<keyof AddressFields, AddressError>>;
-  /** The server answered "not in this area" for this ZIP. */
-  zipRefused: boolean;
-  /** Under the saved addresses, the form gets its own heading. */
-  titled: boolean;
-};
-
-/** A US address: street, unit (optional), city, then state and ZIP side by side. */
-function AddressForm({ fields, errors, zipRefused, titled }: AddressFormProps) {
-  const { t } = useTranslation();
-  const line2 = useRef<InputHandle>(null);
-  const city = useRef<InputHandle>(null);
-  const state = useRef<InputHandle>(null);
-  const zip = useRef<InputHandle>(null);
-  const message = (error: AddressError | undefined, max?: number) =>
-    error ? t(`request.where.errors.${error}`, { max }) : undefined;
-
-  return (
-    <View className="gap-4" testID="where-form">
-      {titled ? (
-        <Text accessibilityRole="header" className="text-headline text-navy-900">
-          {t("request.where.formTitle")}
-        </Text>
-      ) : null}
-      <Input
-        label={t("request.where.line1")}
-        value={fields.line1}
-        onChangeText={(value) => setTypedAddress("line1", value)}
-        error={message(errors.line1, ADDRESS_MAX.line1)}
-        maxLength={ADDRESS_MAX.line1}
-        autoComplete="address-line1"
-        textContentType="streetAddressLine1"
-        returnKeyType="next"
-        submitBehavior="submit"
-        onSubmitEditing={() => line2.current?.focus()}
-        testID="where-line1"
-      />
-      <Input
-        ref={line2}
-        label={t("request.optionalLabel", { label: t("request.where.line2") })}
-        value={fields.line2}
-        onChangeText={(value) => setTypedAddress("line2", value)}
-        error={message(errors.line2, ADDRESS_MAX.line2)}
-        maxLength={ADDRESS_MAX.line2}
-        autoComplete="address-line2"
-        textContentType="streetAddressLine2"
-        returnKeyType="next"
-        submitBehavior="submit"
-        onSubmitEditing={() => city.current?.focus()}
-        testID="where-line2"
-      />
-      <Input
-        ref={city}
-        label={t("request.where.city")}
-        value={fields.city}
-        onChangeText={(value) => setTypedAddress("city", value)}
-        error={message(errors.city, ADDRESS_MAX.city)}
-        maxLength={ADDRESS_MAX.city}
-        textContentType="addressCity"
-        returnKeyType="next"
-        submitBehavior="submit"
-        onSubmitEditing={() => state.current?.focus()}
-        testID="where-city"
-      />
-      <View className="flex-row gap-3">
-        <Input
-          ref={state}
-          label={t("request.where.state")}
-          value={fields.state}
-          onChangeText={(value) => setTypedAddress("state", value.toUpperCase())}
-          error={message(errors.state)}
-          autoCapitalize="characters"
-          autoCorrect={false}
-          maxLength={2}
-          textContentType="addressState"
-          returnKeyType="next"
-          submitBehavior="submit"
-          onSubmitEditing={() => zip.current?.focus()}
-          className="flex-1"
-          testID="where-state"
-        />
-        <Input
-          ref={zip}
-          label={t("request.where.zip")}
-          value={fields.zipCode}
-          onChangeText={(value) => setTypedAddress("zipCode", value.replace(/[^0-9]/g, ""))}
-          error={message(errors.zipCode)}
-          invalid={zipRefused}
-          keyboardType="number-pad"
-          autoComplete="postal-code"
-          textContentType="postalCode"
-          maxLength={5}
-          className="flex-1"
-          testID="where-zip"
-        />
-      </View>
-    </View>
   );
 }

@@ -13,25 +13,26 @@ export const configMock = {
 };
 
 /**
- * Single-slot secure store, installed with
+ * A keyed secure store, installed with
  * `jest.mock("expo-secure-store", () => jest.requireActual("./helpers").secureStoreMock)`.
- * The real store holds exactly one entry (the refresh token), so the slot ignores the key; tests
- * assert the key only through the `setItemAsync` call.
+ * The real store holds the refresh token and the onboarding marker (#292) under their own keys.
  */
-let storedValue: string | null = null;
+export const REFRESH_TOKEN_KEY = "jackfixit.session.refreshToken";
+export const ONBOARDING_MARKER_KEY = "jackfixit.session.onboardingUserId";
+const stored = new Map<string, string>();
 export const secureStoreMock = {
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: "afterFirstUnlockThisDeviceOnly",
-  getItemAsync: jest.fn(async () => storedValue),
-  setItemAsync: jest.fn(async (_key: string, value: string) => {
-    storedValue = value;
+  getItemAsync: jest.fn(async (key: string) => stored.get(key) ?? null),
+  setItemAsync: jest.fn(async (key: string, value: string) => {
+    stored.set(key, value);
   }),
-  deleteItemAsync: jest.fn(async () => {
-    storedValue = null;
+  deleteItemAsync: jest.fn(async (key: string) => {
+    stored.delete(key);
   }),
 };
 
 export function resetSecureStore(): void {
-  storedValue = null;
+  stored.clear();
   secureStoreMock.getItemAsync.mockClear();
   secureStoreMock.setItemAsync.mockClear();
   secureStoreMock.deleteItemAsync.mockClear();
@@ -39,10 +40,22 @@ export function resetSecureStore(): void {
 
 /** Puts a refresh token on the device, as a previous session would have. */
 export function seedRefreshToken(token: string): void {
-  storedValue = token;
+  stored.set(REFRESH_TOKEN_KEY, token);
 }
 
-export const storedRefreshToken = (): string | null => storedValue;
+export const storedRefreshToken = (): string | null => stored.get(REFRESH_TOKEN_KEY) ?? null;
+
+/** Leaves an account in its sign-up flow on the device, as a sign-up that was not finished would. */
+export function seedOnboardingMarker(userId: string): void {
+  stored.set(ONBOARDING_MARKER_KEY, userId);
+}
+
+export const storedOnboardingMarker = (): string | null =>
+  stored.get(ONBOARDING_MARKER_KEY) ?? null;
+
+/** The calls of a store method that targeted the refresh token's key. */
+export const tokenCalls = (method: jest.Mock): unknown[][] =>
+  method.mock.calls.filter(([key]: unknown[]) => key === REFRESH_TOKEN_KEY);
 
 /** A Response stand-in with what the client reads: status, ok, json() and text(). */
 export function jsonResponse(status: number, body?: unknown): Response {
