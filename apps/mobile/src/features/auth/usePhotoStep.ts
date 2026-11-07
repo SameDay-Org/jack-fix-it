@@ -42,8 +42,8 @@ export type PhotoStep = {
   /** The preview to mount now; one mount per preview (its `id` is the view's key). */
   preview: CameraPreview;
   /**
-   * The step left the screen: its preview is released, and the next visit waits for a new one to
-   * be ready (or tries a camera that failed again).
+   * The step left the screen, or another screen covered it: its preview is released, and the next
+   * visit waits for a new one to be ready (or tries a camera that failed again).
    */
   onCameraStop: () => void;
   /** The share of the photo the storage has taken, 0 to 1, while it is saved; else `null`. */

@@ -1,5 +1,11 @@
 import * as Haptics from "expo-haptics";
-import { Redirect, router, useLocalSearchParams, usePreventRemove } from "expo-router";
+import {
+  Redirect,
+  router,
+  useIsFocused,
+  useLocalSearchParams,
+  usePreventRemove,
+} from "expo-router";
 import { useCallback, useEffect, useRef, useState, type ComponentRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -132,6 +138,8 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
     useCallback(() => advanceFrom("home"), [advanceFrom]),
   );
   const photo = usePhotoStep(useCallback(() => advanceFrom("photo"), [advanceFrom]));
+  // The camera runs only while this screen is in front: a route pushed over sign-up releases it.
+  const focused = useIsFocused();
   const submit = {
     account: account.submitForm,
     name: name.submit,
@@ -303,7 +311,7 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
             <SelfieFrame
               photo={photo}
               camera={photo.camera}
-              active={step === "photo"}
+              active={step === "photo" && focused}
               testID="sign-up-photo"
             />
           </View>
