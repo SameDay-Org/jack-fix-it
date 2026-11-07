@@ -119,7 +119,7 @@ async def test_the_last_pending_after_photo_settling_after_the_read_answers_409(
         monkeypatch.setattr(subject._photos, "statuses", read_then_the_worker_settles)
         with pytest.raises(AfterPhotosProcessingError):
             await subject.complete(job.pro, job.job_id, queue)
-    # The batch read is queued again; its run finds the photo settled and copies nothing.
+    # The batch from the read is queued again (a settled id in it is skipped: photos.py).
     assert list(queue.jobs.values()) == [(SANITIZE_PHOTOS_TASK, (str(job.job_id), [str(photo_id)]))]
 
     # The pro's next try decides from the settled photo.
