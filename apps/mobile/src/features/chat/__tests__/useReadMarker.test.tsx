@@ -111,7 +111,11 @@ const flush = () =>
     for (let i = 0; i < 10; i++) await Promise.resolve();
   });
 
-type Props = { thread: Thread | undefined; generation: number };
+/**
+ * `visible`: the newest message the list shows; left out, the newest of the thread (the reader at
+ * the bottom of the chat).
+ */
+type Props = { thread: Thread | undefined; generation: number; visible?: string | null };
 
 /** The hook under a Query cache, re-rendered with a new thread or generation through `rerender`. */
 async function renderMarker(
@@ -122,7 +126,14 @@ async function renderMarker(
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
   const rendered = await renderHook(
-    ({ thread: held, generation }: Props) => useReadMarker(JOB, generation, held, onUnread),
+    ({ thread: held, generation, visible }: Props) =>
+      useReadMarker(
+        JOB,
+        generation,
+        held,
+        visible === undefined ? held?.messages[0]?.id : (visible ?? undefined),
+        onUnread,
+      ),
     { initialProps: initial, wrapper: Wrapper },
   );
   return { ...rendered, client, onUnread };
@@ -334,5 +345,89 @@ describe("useReadMarker", () => {
     expect(client.getQueryData(chatQueryKey(JOB, 2))).toBeUndefined();
     // The count still reaches onUnread; the chat peer's own generation guard drops it there.
     expect(onUnread).toHaveBeenCalledWith(0);
+  });
+
+  describe("up to the newest message on screen (#74 round 1)", () => {
+    // thread(3, 1): m3 (theirs, unread), m2 (mine), m1 (theirs, read).
+
+    it("marks nothing while the list shows nothing yet", async () => {
+      await renderMarker({ thread: thread(3, 1), generation: 1, visible: null });
+      await flush();
+
+      expect(readPosts()).toHaveLength(0);
+    });
+
+    it("up in the history, a newer unread message below is not marked", async () => {
+      await renderMarker({ thread: thread(3, 1), generation: 1, visible: m(1).id });
+      await flush();
+
+      expect(readPosts()).toHaveLength(0);
+    });
+
+    it("scrolled down to it, the newer message is marked, once", async () => {
+      const { rerender } = await renderMarker({
+        thread: thread(3, 1),
+        generation: 1,
+        visible: m(1).id,
+      });
+      await flush();
+
+      await rerender({ thread: thread(3, 1), generation: 1, visible: m(3).id });
+      await flush();
+      await rerender({ thread: thread(3, 1), generation: 1, visible: m(3).id });
+      await flush();
+
+      expect(markedIds()).toEqual([m(3).id]);
+    });
+
+    it("marks up to an unread message on screen even when a newer one is still below", async () => {
+      // thread(4, 2): m4 (mine), m3 (theirs), m2 (mine), m1 (theirs): both of theirs unread.
+      await renderMarker({ thread: thread(4, 2), generation: 1, visible: m(2).id });
+      await flush();
+
+      expect(markedIds()).toEqual([m(2).id]);
+    });
+
+    it("never moves back: scrolling up after a mark asks nothing", async () => {
+      const { rerender } = await renderMarker({
+        thread: thread(3, 1),
+        generation: 1,
+        visible: m(3).id,
+      });
+      await flush();
+      expect(markedIds()).toEqual([m(3).id]);
+
+      // A poll still counts one unread (the answer has not landed in the thread yet).
+      await rerender({ thread: thread(3, 1), generation: 1, visible: m(1).id });
+      await flush();
+
+      expect(markedIds()).toEqual([m(3).id]);
+    });
+
+    it("another session's mark never holds back this one's", async () => {
+      // The customer marked m3; the pro takes the session over on the same job, with m3 unread
+      // for them and on their screen.
+      const { rerender } = await renderMarker({ thread: thread(3, 1), generation: 1 });
+      await flush();
+      expect(markedIds()).toEqual([m(3).id]);
+
+      mockSession.generation = 2;
+      await rerender({ thread: thread(3, 1), generation: 2 });
+      await flush();
+
+      expect(markedIds()).toEqual([m(3).id, m(3).id]);
+      expect(readPosts()[1]?.[2]).toEqual(expect.objectContaining({ generation: 2 }));
+    });
+
+    it("a message on screen that is not in this session's thread is never marked", async () => {
+      await renderMarker({
+        thread: thread(3, 1),
+        generation: 1,
+        visible: "c0000000-0000-4000-8000-000000000009",
+      });
+      await flush();
+
+      expect(readPosts()).toHaveLength(0);
+    });
   });
 });

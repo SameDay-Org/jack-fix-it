@@ -267,6 +267,30 @@ const reachTop = () =>
     onEndReached({ distanceFromEnd: 0 });
   });
 
+type SeenToken = { item: unknown; key: string; index: number; isViewable: boolean };
+type SeenPairs = {
+  onViewableItemsChanged: (info: { viewableItems: SeenToken[]; changed: SeenToken[] }) => void;
+}[];
+
+/**
+ * What the list reports once these stored messages are on screen, through every rule it was
+ * given (no layout runs under Jest, so the list never measures what it shows on its own).
+ */
+const see = (...shown: ChatMessage[]) =>
+  act(async () => {
+    const pairs = screen.getByTestId("chat-list").props.viewabilityConfigCallbackPairs as
+      SeenPairs | undefined;
+    if (!pairs) throw new Error("the chat list reports nothing it shows");
+    const tokens = shown.map((stored, index) => ({
+      item: { kind: "message", key: stored.id, message: stored },
+      key: stored.id,
+      index,
+      isViewable: true,
+    }));
+    for (const pair of pairs)
+      pair.onViewableItemsChanged({ viewableItems: tokens, changed: tokens });
+  });
+
 const olderCalls = () => getCalls(MESSAGES_PATH).filter(([, options]) => options?.query);
 
 const announcements = () =>
@@ -1102,6 +1126,7 @@ describe("the job chat screen (#74)", () => {
       await renderChat();
       await screen.findByTestId("chat-list");
       await waitFor(() => expect(screen.getByTestId("chat-peer-name")).toBeTruthy());
+      await see(newest, message(2));
 
       await waitFor(() => expect(postCalls(READ_PATH)).toHaveLength(1));
       await flush();
@@ -1127,6 +1152,7 @@ describe("the job chat screen (#74)", () => {
       await waitFor(() =>
         expect(screen.getByTestId("chat-peer-name").props.children).toBe("Jamie"),
       );
+      await see(newest);
 
       await waitFor(() => expect(postCalls(READ_PATH)).toHaveLength(1));
       await flush();
@@ -1139,9 +1165,11 @@ describe("the job chat screen (#74)", () => {
     });
 
     it("does not mark a chat with nothing unread", async () => {
-      mockApi.messages = () => Promise.resolve(page([message(1)], { unread_count: 0 }));
+      const only = message(1);
+      mockApi.messages = () => Promise.resolve(page([only], { unread_count: 0 }));
       await renderChat();
       await screen.findByTestId("chat-list");
+      await see(only);
       await flush();
 
       expect(postCalls(READ_PATH)).toHaveLength(0);
@@ -1238,6 +1266,271 @@ describe("the job chat screen (#74)", () => {
       expect(client.getQueryData(["chat", JOB_ID, 2])).toBeUndefined();
       // Nothing is asked or marked for the signed-out session.
       expect(getCalls(MESSAGES_PATH)).toHaveLength(1);
+      expect(postCalls(READ_PATH)).toHaveLength(0);
+    });
+  });
+});
+
+describe("round 1 (#74): the session and the viewport bound what the chat does", () => {
+  const PRO_USER = "00000000-0000-4000-8000-000000000909";
+
+  /** Another account takes the session over, as `applyAuth` allows from signed in. */
+  const switchToPro = () =>
+    act(async () => {
+      client.clear();
+      setSession(signedIn({ role: "pro", id: PRO_USER }), 2);
+    });
+
+  /** A failed send of `body` under the customer's session (generation 1). */
+  async function failOffline(body: string): Promise<void> {
+    mockApi.send = () => Promise.reject(new NetworkError(false));
+    await renderChat();
+    await screen.findByTestId("chat-input");
+    await typeAndSend(remember(body));
+    await screen.findByText(FAILED);
+  }
+
+  /** Nothing of `body` is drawn anywhere, hidden elements included, and nothing can retry it. */
+  function gone(body: string): void {
+    expect(screen.queryByText(body, HIDDEN)).toBeNull();
+    expect(screen.queryByTestId(/^chat-pending-/, HIDDEN)).toBeNull();
+    expect(screen.queryByText(FAILED, HIDDEN)).toBeNull();
+  }
+
+  const postsOf = (body: string) =>
+    postCalls(MESSAGES_PATH).filter(([, posted]) => posted.body === body);
+
+  describe("B1: pending messages belong to the session and the job they were typed in", () => {
+    it("clears a private composer draft when another signed-in account replaces the session", async () => {
+      await renderChat();
+      await screen.findByTestId("chat-input");
+      await type("Private draft belonging to the customer");
+      await switchToPro();
+      await screen.findByTestId("chat-input");
+
+      expect(screen.getByTestId("chat-input").props.value).toBe("");
+    });
+
+    it("another account: the old failed message is dropped and cannot be retried", async () => {
+      const privateBody = "Unsent customer message must stay private";
+      await failOffline(privateBody);
+      expect(postsOf(privateBody)).toHaveLength(1);
+
+      await switchToPro();
+      await screen.findByTestId("chat-input");
+      // Nothing left to press: the bubble and its retry are gone (a handler held from before the
+      // switch is useSendQueue.test's case).
+      gone(privateBody);
+      expect(screen.getByTestId("chat-input").props.value).toBe("");
+      await flush();
+      expect(postsOf(privateBody)).toHaveLength(1);
+      expect(postsOf(privateBody).some(([, , options]) => options?.generation === 2)).toBe(false);
+      gone(privateBody);
+    });
+
+    it("a session that expires while a send is on its way: nothing of it comes back", async () => {
+      const held = deferred<ChatMessage>();
+      mockApi.send = () => held.promise;
+      await renderChat();
+      await screen.findByTestId("chat-input");
+      const privateBody = remember("Sent from the porch before the token ran out");
+      await typeAndSend(privateBody);
+
+      await act(async () => setSession(SIGNED_OUT_SESSION, 2));
+      await act(async () => held.reject(new SessionExpiredError()));
+      await act(async () => setSession(signedIn({ role: "customer" }), 3));
+      // The new session's thread is empty: no bubble of the old one joins it.
+      await screen.findByTestId("chat-empty");
+
+      gone(privateBody);
+      expect(announcements()).toEqual([]);
+      expect(postsOf(privateBody)).toHaveLength(1);
+    });
+
+    it("a plain sign-out, then signing in again: the failed message and its retry are gone", async () => {
+      const privateBody = "Gate code is in the notes, see you soon";
+      await failOffline(privateBody);
+
+      await act(async () => setSession(SIGNED_OUT_SESSION, 2));
+      await flush();
+      await act(async () => setSession(signedIn({ role: "customer" }), 3));
+      await screen.findByTestId("chat-empty");
+
+      gone(privateBody);
+      expect(screen.queryByTestId("chat-too-fast", HIDDEN)).toBeNull();
+      expect(postsOf(privateBody)).toHaveLength(1);
+    });
+
+    it("a send answered after another account took over draws and says nothing", async () => {
+      const held = deferred<ChatMessage>();
+      mockApi.send = () => held.promise;
+      await renderChat();
+      await screen.findByTestId("chat-input");
+      const privateBody = remember("On my way back with the part");
+      await typeAndSend(privateBody);
+
+      await switchToPro();
+      await act(async () =>
+        held.resolve(message(900, { sender: "me", body: privateBody, created_at: iso(0) })),
+      );
+      await flush();
+
+      expect(announcements()).toEqual([]);
+      gone(privateBody);
+      expect(postsOf(privateBody).map(([, , options]) => options?.generation)).toEqual([1]);
+    });
+
+    it("a send queued behind one on its way is never posted once another account took over", async () => {
+      const held = deferred<ChatMessage>();
+      mockApi.send = () => held.promise;
+      await renderChat();
+      await screen.findByTestId("chat-input");
+      const first = remember("First of two from the customer");
+      const second = remember("Second of two from the customer");
+      await typeAndSend(first);
+      await typeAndSend(second);
+      expect(postsOf(first)).toHaveLength(1);
+      expect(postsOf(second)).toHaveLength(0);
+
+      await switchToPro();
+      await act(async () => held.reject(new NetworkError(false)));
+      await flush();
+
+      expect(postsOf(second)).toHaveLength(0);
+      expect(announcements()).toEqual([]);
+      gone(first);
+      gone(second);
+    });
+
+    it("the new account's own send goes at once, not behind the old account's", async () => {
+      const held = deferred<ChatMessage>();
+      mockApi.send = () => held.promise;
+      await renderChat();
+      await screen.findByTestId("chat-input");
+      await typeAndSend(remember("Still on its way when the account changes"));
+
+      await switchToPro();
+      mockApi.send = (body) =>
+        Promise.resolve(message(901, { sender: "me", body, created_at: iso(0) }));
+      await screen.findByTestId("chat-input");
+      const mine = remember("Hello from the pro");
+      await typeAndSend(mine);
+      await flush();
+
+      expect(postsOf(mine).map(([, , options]) => options?.generation)).toEqual([2]);
+    });
+  });
+
+  describe("B2: the read marker follows the newest message on screen", () => {
+    const previous = () => Array.from({ length: 20 }, (_, index) => message(index + 1));
+
+    /** The chat open with 20 read messages and older ones behind the cursor. */
+    async function openHistory(): Promise<ChatMessage[]> {
+      const held = previous();
+      mockApi.messages = () => Promise.resolve(page(held, { next_cursor: "older" }));
+      await renderChat();
+      await screen.findByTestId("chat-list");
+      return held;
+    }
+
+    /** The reader scrolls the list `y` from the newest message (0 is the bottom). */
+    const scrollList = (y: number) =>
+      act(async () =>
+        fireEvent.scroll(screen.getByTestId("chat-list"), {
+          nativeEvent: {
+            contentOffset: { x: 0, y },
+            contentSize: { width: 320, height: 2400 },
+            layoutMeasurement: { width: 320, height: 400 },
+          },
+        }),
+      );
+
+    /** A poll's answer: `arrived` on top of `held`, the API counting it unread. */
+    async function poll(arrived: ChatMessage, held: ChatMessage[]): Promise<void> {
+      await act(async () =>
+        client.setQueryData(["chat", JOB_ID, 1], {
+          messages: [arrived, ...held],
+          olderCursor: "older",
+          unreadCount: 1,
+        }),
+      );
+      await screen.findByTestId(`chat-message-${arrived.id}`);
+      await flush();
+    }
+
+    const marksOf = (stored: ChatMessage) =>
+      postCalls(READ_PATH).filter(([, body]) => body.up_to === stored.id);
+
+    it("does not mark a newly polled message read while older history stays visible", async () => {
+      const held = await openHistory();
+      await scrollList(1200);
+      await see(...held.slice(10, 15));
+      const unread = message(901, { created_at: iso(MINUTE_MS) });
+      await poll(unread, held);
+
+      expect(marksOf(unread)).toHaveLength(0);
+      expect(postCalls(READ_PATH)).toHaveLength(0);
+    });
+
+    it("scrolled back down to it, the new message is marked, once", async () => {
+      const held = await openHistory();
+      await scrollList(1200);
+      await see(...held.slice(10, 15));
+      const unread = message(901, { created_at: iso(MINUTE_MS) });
+      await poll(unread, held);
+
+      await scrollList(600);
+      await see(...held.slice(4, 9));
+      await flush();
+      expect(postCalls(READ_PATH)).toHaveLength(0);
+
+      await scrollList(0);
+      await see(unread, ...held.slice(0, 4));
+      await flush();
+      await scrollList(0);
+      await flush();
+
+      expect(marksOf(unread)).toHaveLength(1);
+      expect(postCalls(READ_PATH)).toHaveLength(1);
+    });
+
+    it("at the bottom, a poll's new message is marked though the list reports nothing new", async () => {
+      // After a message lands at the bottom the list reports no visibility until the next
+      // scroll, and a short chat never scrolls: the bottom alone says the message is on screen.
+      const held = await openHistory();
+      await see(...held.slice(0, 5));
+      const unread = message(901, { created_at: iso(MINUTE_MS) });
+      await poll(unread, held);
+
+      expect(marksOf(unread)).toHaveLength(1);
+    });
+
+    it("a chat that fits on screen marks a new message at once", async () => {
+      const first = message(1);
+      mockApi.messages = () => Promise.resolve(page([first]));
+      await renderChat();
+      await screen.findByTestId("chat-list");
+      const unread = message(901, { created_at: iso(MINUTE_MS) });
+      await act(async () =>
+        client.setQueryData(["chat", JOB_ID, 1], {
+          messages: [unread, first],
+          olderCursor: null,
+          unreadCount: 1,
+        }),
+      );
+      await screen.findByTestId(`chat-message-${unread.id}`);
+      await flush();
+
+      expect(marksOf(unread)).toHaveLength(1);
+    });
+
+    it("at the top of the history, a poll marks nothing", async () => {
+      const held = await openHistory();
+      await scrollList(2000);
+      await see(...held.slice(15));
+      const unread = message(901, { created_at: iso(MINUTE_MS) });
+      await poll(unread, held);
+
       expect(postCalls(READ_PATH)).toHaveLength(0);
     });
   });

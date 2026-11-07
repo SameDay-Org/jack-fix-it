@@ -25,6 +25,7 @@ import { ClosedBar, Composer } from "./Composer";
 import { MessageRow } from "./MessageRow";
 import { useChatPeer, type ChatPeer } from "./peer";
 import { threadRows, type Row } from "./thread";
+import { useNewestVisible } from "./useNewestVisible";
 import { useReadMarker } from "./useReadMarker";
 import { useSendQueue, type SendOutcome } from "./useSendQueue";
 
@@ -39,8 +40,9 @@ const MAINTAIN_POSITION = { minIndexForVisible: 0, autoscrollToTopThreshold: FOL
  * right in navy, theirs on the left in white), newest at the bottom, with day headings and the time
  * under each run; older messages through the cursor; and the composer, or, once the job is closed,
  * a calm word that the chat is read-only. The chat asks for new messages while it is open
- * (`useChat`) and marks them read (`useReadMarker`). A customer's link carries the request too
- * (`request`), from which the pro's name and the job's state are read.
+ * (`useChat`) and marks them read up to the newest one on screen (`useNewestVisible`,
+ * `useReadMarker`). A customer's link carries the request too (`request`), from which the pro's
+ * name and the job's state are read.
  */
 export function ChatScreen() {
   const { t } = useTranslation();
@@ -81,7 +83,8 @@ export function ChatScreen() {
     onClosed: () => setClosedBySend(true),
     onDone,
   });
-  useReadMarker(id, generation, thread, peer.onUnread);
+  const visible = useNewestVisible(generation, thread?.messages[0]?.id);
+  useReadMarker(id, generation, thread, visible.newest, peer.onUnread);
 
   const names = peerNames(t, peer);
   const rows = useMemo(
@@ -133,6 +136,8 @@ export function ChatScreen() {
           }}
           onEndReachedThreshold={0.5}
           maintainVisibleContentPosition={MAINTAIN_POSITION}
+          viewabilityConfigCallbackPairs={visible.pairs}
+          onScroll={visible.onScroll}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
           contentContainerClassName="px-4 py-4"
