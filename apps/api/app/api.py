@@ -6,6 +6,7 @@ from app.errors import ErrorResponse
 from app.modules.addresses.router import router as addresses_router
 from app.modules.auth.router import router as auth_router
 from app.modules.categories.router import router as categories_router
+from app.modules.chat.router import flags_router as chat_flags_router
 from app.modules.chat.router import router as chat_router
 from app.modules.chat.router import staff_router as staff_chat_router
 from app.modules.devices.router import router as devices_router
@@ -48,6 +49,7 @@ v1_router.include_router(customer_jobs_router)
 v1_router.include_router(jobs_router)
 v1_router.include_router(chat_router)
 v1_router.include_router(staff_chat_router)
+v1_router.include_router(chat_flags_router)
 v1_router.include_router(devices_router)
 v1_router.include_router(waitlist_router)
 v1_router.include_router(webhooks_router)

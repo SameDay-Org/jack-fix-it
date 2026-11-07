@@ -1,4 +1,4 @@
-"""Masking contact details in free text (#172, quote scopes #188, chat #72 later): one redactor.
+"""Masking contact details in free text (#172, quote scopes #188, chat #71/#72): one redactor.
 
 Before payment, a pro sees the customer's request but never how to reach them (context doc:
 contacts stay hidden to prevent disintermediation; ZIP + city only until paid). Customers
@@ -7,10 +7,11 @@ first. It masks, with the language-neutral MASK:
 - emails: plain, spaced, spelled out in EN or ES ("name at gmail dot com", "luis arroba gmail
   punto com"), bracketed ("(at)", "[dot]"), letter by letter ("j a n e @ g m a i l"), and a
   known mail provider with no TLD ("jdoe@gmail", "jdoe at gmail", "jdoe en hotmail");
-- phone numbers: 10 digits, or 11 with a leading 1, grouped as people write them (dots,
-  dashes, slashes, spaces, parentheses, +1, an area code then any grouping, digits split by
-  spaces), ten or more digits spelled out in EN or ES words, a number after "+", "00" or "011"
-  (10 to 15 digits), and Venezuelan (04xx) and Cuban (53 5) mobile forms;
+- phone numbers: 10 digits, or 11 with a leading 1, grouped as people write them (dots, dashes,
+  slashes, spaces, parentheses, +1, an area code then any grouping, digits split by spaces), ten
+  or more digits spelled out in EN or ES words, a US phone mixing parts in words and in numerals
+  ("three oh five 555 0199", #72), a number after "+", "00" or "011" (10 to 15 digits), and
+  Venezuelan (04xx) and Cuban (53 5) mobile forms;
 - URLs and domains: http(s)://, www., a known TLD, any TLD followed by a path ("linktr.ee/x"),
   a spaced ". com" and a spelled "dot com";
 - social and payment handles: "@handle", "$cashtag", and a platform word (instagram, ig,
@@ -26,14 +27,15 @@ trade shorthand ("6 inch rd duct", "20 amp cir", "1800 sq ft", "unit 2 is not co
 alone.
 
 Known gaps, on purpose (each cheap evasion would cost more false positives than it stops):
-letters for digits ("305 555 O199"), commas between phone groups, digits that mix words and
-numerals, a phone grouping no one uses ("30 55 55 01 99"), a bare handle with no "@", cue or
-digit ("insta jdoe"), a plain word after a weak platform ("my venmo is jdoe"), a display name
-("find me on facebook as John Doe"), a street with no suffix ("1234 Flagler"), a reversed street
-with lowercase or function-word names, a non-ASCII letter inside a TLD or a mail provider's
-name ("gmail.cöm": those lists are literal; a mark glued inside one is handled, see
-_UNMARKED_FIRST), and text inside images (#173 handles media). A 10-digit order or serial
-number is masked like a phone: hiding a number is the safe side.
+letters for digits ("305 555 O199"), commas between phone groups (lists of prices and times read
+the same: "250, 300, 1200"), "double" or "triple" in a spelled number, phone groups split by
+ordinary words ("305 then 555 then 0199"), a phone grouping no one uses ("30 55 55 01 99"), a
+bare handle with no "@", cue or digit ("insta jdoe"), a plain word after a weak platform ("my
+venmo is jdoe"), a display name ("find me on facebook as John Doe"), a street with no suffix
+("1234 Flagler"), a reversed street with lowercase or function-word names, a non-ASCII letter
+inside a TLD or a mail provider's name ("gmail.cöm": those lists are literal; a mark glued
+inside one is handled, see _UNMARKED_FIRST), and text inside images (#173 handles media). A
+10-digit order or serial number is masked like a phone: hiding a number is the safe side.
 
 The patterns are data in this module; it does no I/O and keeps no state. Every pattern is
 anchored so a 2,000-character input (the description limit) is handled in milliseconds.
@@ -440,6 +442,28 @@ _DIGIT_WORD: Final = (
     r"cero|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|\d)"
 )
 SPELLED_PHONE: Final = re.compile(rf"\b{_DIGIT_WORD}(?:[\s,.-]+{_DIGIT_WORD}){{9,}}\b", _FLAGS)
+# A US phone whose parts mix digit words and numerals (#72): "three oh five 555 0199", "305 five
+# five five oh one nine nine". Each part is either all words (one per digit) or one numeral group
+# of its exact size: area 3, exchange 3, line 4 (or exchange and line as 7). _mask_mixed_phone
+# keeps a match with no word part (DIGIT_RUN reads those) or no numeral part (SPELLED_PHONE).
+_SPELLED_DIGIT: Final = (
+    r"(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|"
+    r"cero|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve)"
+)
+_PART_GAP: Final = r"[\s,.-]++"
+
+
+def _spelled(count: int) -> str:
+    return rf"{_SPELLED_DIGIT}(?:{_PART_GAP}{_SPELLED_DIGIT}){{{count - 1}}}"
+
+
+MIXED_PHONE: Final = re.compile(
+    rf"(?<![\w(])(?:(?:1|one|uno){_PART_GAP})?"
+    rf"(?P<area>{_spelled(3)}|\(\d{{3}}\)|\d{{3}}){_PART_GAP}"
+    rf"(?:(?P<exchange>{_spelled(3)}|\d{{3}}){_PART_GAP}(?P<line>{_spelled(4)}|\d{{4}})"
+    rf"|(?P<rest>\d{{3}}[.-]?\d{{4}}))(?![\w%])",
+    _FLAGS,
+)
 # Digit runs joined by phone separators, with an optional "+". Each run is searched for
 # phone-shaped windows of its digit groups (_phones), so a phone next to another number is
 # still found, and a longer number around a phone-shaped piece is left whole.
@@ -977,6 +1001,13 @@ def _mask(match: re.Match[str]) -> str | None:
     return MASK
 
 
+def _mask_mixed_phone(match: re.Match[str]) -> str | None:
+    """Only a phone with both a part in words and a part in numerals (MIXED_PHONE)."""
+    parts = [part for part in match.group("area", "exchange", "line", "rest") if part]
+    numerals = [part for part in parts if part[-1].isdigit() or part.endswith(")")]
+    return MASK if 0 < len(numerals) < len(parts) else None
+
+
 def _missing_space(match: re.Match[str], tld: str) -> bool:
     """ "cooling.Me and my wife": a word TLD, capitalized, right after a lowercase letter."""
     start = match.start("tld")
@@ -1233,6 +1264,7 @@ _SPELLED_EMAILS: Final = _RunSearch(
 _SPELLED_URLS: Final = _RunSearch(_DOMAIN_HEAD, _DOMAIN_STEP, SPELLED_URL)
 _PHONE_STEPS: Final[tuple[tuple[_Search, _Rule], ...]] = (
     (SPELLED_PHONE, _whole(_mask)),
+    (MIXED_PHONE, _whole(_mask_mixed_phone)),
     (DIGIT_RUN, _phones),
 )
 # The rules that read their cue after the contact: an email or a URL masked before them can
