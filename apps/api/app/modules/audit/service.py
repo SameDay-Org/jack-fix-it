@@ -7,6 +7,10 @@ flushes the row, and the caller commits both. An audit write that fails, or an o
 no longer an active admin, rolls the change back. A refusal or a dry run writes nothing. Rows
 are append-only (a trigger refuses UPDATE, DELETE and TRUNCATE).
 
+Staff reads of what only staff may see are audited too (#72: the originals of redacted chat
+messages): `record_read` writes the row of a read by an active agent or admin, and the caller
+commits it before answering, so nothing is shown unaudited.
+
 before and after carry ids, statuses, Stripe object ids and ISO timestamps only: never PII
 (names, emails, phones, addresses) or secrets.
 """
@@ -22,9 +26,18 @@ from app.modules.audit.types import (
     AuditState,
     Operator,
     OperatorNotAdminError,
+    ReaderNotStaffError,
 )
 from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount, UserRole, UserStatus
+
+
+def _active_staff(account: UserAccount | None) -> bool:
+    return (
+        account is not None
+        and account.role in (UserRole.AGENT, UserRole.ADMIN)
+        and account.status == UserStatus.ACTIVE
+    )
 
 
 def _active_admin(account: UserAccount | None) -> bool:
@@ -67,4 +80,22 @@ class AuditService:
             before=before,
             after=after,
             reason=operator.reason,
+        )
+
+    async def record_read(
+        self, reader_id: uuid.UUID, action: AuditAction, entity: AuditEntity, read: AuditState
+    ) -> None:
+        """Adds the row of a staff read to the caller's transaction and flushes it; `read`
+        says what was shown (ids and counts). ReaderNotStaffError when the reader is not an
+        active agent or admin."""
+        if not _active_staff(await self._users.get_by_id(reader_id)):
+            raise ReaderNotStaffError
+        await self._audit.add(
+            actor_user_id=reader_id,
+            action=action.value,
+            entity_type=entity.type.value,
+            entity_id=entity.id,
+            before={},
+            after=read,
+            reason=None,
         )

@@ -1,16 +1,23 @@
 import uuid
 from collections.abc import Collection
+from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import and_, func, or_, select, tuple_
+from sqlalchemy import and_, func, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.chat.models import JobChatRead, JobMessage
+from app.modules.chat.models import ChatOffenderFlag, JobChatRead, JobMessage
+
+
+@dataclass(frozen=True)
+class FlagUpsert:
+    flag_id: uuid.UUID
+    created: bool  # False when an open flag was there already (its count was raised)
 
 
 class ChatRepository:
-    """Queries only: job_messages and job_chat_reads (#71)."""
+    """Queries only: job_messages and job_chat_reads (#71), chat_offender_flags (#72)."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -92,3 +99,91 @@ class ChatRepository:
             .group_by(JobMessage.job_id)
         )
         return {job_id: count for job_id, count in await self._session.execute(statement)}
+
+    async def redacted_since(self, sender_id: uuid.UUID, window_seconds: int) -> int:
+        """The sender's redacted messages, in every job, created within the last
+        `window_seconds` by the database clock (strictly: one exactly that old is out)."""
+        since = func.clock_timestamp() - func.make_interval(0, 0, 0, 0, 0, 0, window_seconds)
+        statement = (
+            select(func.count())
+            .select_from(JobMessage)
+            .where(
+                JobMessage.sender_id == sender_id,
+                JobMessage.redacted.is_(True),
+                JobMessage.created_at > since,
+            )
+        )
+        return int(await self._session.scalar(statement) or 0)
+
+    async def raise_flag(self, user_id: uuid.UUID, job_id: uuid.UUID, count: int) -> FlagUpsert:
+        """Raises the user's open flag to `count` (never lowers it), or opens one. Safe under
+        concurrency: an insert that meets another's open flag (the partial unique index) does
+        nothing, having waited for it to commit, and the update after it raises that flag."""
+        open_flag = ChatOffenderFlag.user_id == user_id, ChatOffenderFlag.resolved_at.is_(None)
+        raise_count = (
+            update(ChatOffenderFlag)
+            .where(*open_flag)
+            .values(
+                window_count=func.greatest(ChatOffenderFlag.window_count, count),
+                updated_at=func.now(),
+            )
+            .returning(ChatOffenderFlag.id)
+        )
+        if (flag_id := await self._session.scalar(raise_count)) is not None:
+            return FlagUpsert(flag_id=flag_id, created=False)
+        opened = (
+            insert(ChatOffenderFlag)
+            .values(user_id=user_id, job_id=job_id, window_count=count)
+            .on_conflict_do_nothing(
+                index_elements=[ChatOffenderFlag.user_id],
+                index_where=ChatOffenderFlag.resolved_at.is_(None),
+            )
+            .returning(ChatOffenderFlag.id)
+        )
+        if (flag_id := await self._session.scalar(opened)) is not None:
+            return FlagUpsert(flag_id=flag_id, created=True)
+        flag_id = await self._session.scalar(raise_count)
+        if flag_id is None:  # opened by another transaction and resolved in between
+            raise RuntimeError("chat offender flag vanished")
+        return FlagUpsert(flag_id=flag_id, created=False)
+
+    async def flags(
+        self, *, open_only: bool, limit: int, before: tuple[datetime, uuid.UUID] | None
+    ) -> list[ChatOffenderFlag]:
+        """Open (or resolved) flags newest first by (created_at, id), after the cursor."""
+        resolved = ChatOffenderFlag.resolved_at
+        statement = select(ChatOffenderFlag).where(
+            resolved.is_(None) if open_only else resolved.is_not(None)
+        )
+        if before is not None:
+            statement = statement.where(
+                tuple_(ChatOffenderFlag.created_at, ChatOffenderFlag.id) < tuple_(*before)
+            )
+        statement = statement.order_by(
+            ChatOffenderFlag.created_at.desc(), ChatOffenderFlag.id.desc()
+        )
+        return list((await self._session.scalars(statement.limit(limit))).all())
+
+    async def clear_expired_originals(self, now: datetime, limit: int) -> int:
+        """Clears the originals of at most `limit` messages whose original_expires_at is at or
+        before `now`, skipping rows another transaction holds; how many it cleared."""
+        due = (
+            select(JobMessage.id)
+            .where(JobMessage.original_expires_at <= now)
+            .order_by(JobMessage.original_expires_at)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        statement = (
+            update(JobMessage)
+            .where(JobMessage.id.in_(due.scalar_subquery()))
+            .values(
+                original_ciphertext=None,
+                original_key_id=None,
+                original_expires_at=None,
+                updated_at=func.now(),
+            )
+            .execution_options(synchronize_session=False)
+        )
+        result = await self._session.execute(statement)
+        return int(result.rowcount)  # type: ignore[attr-defined]  # CursorResult of an UPDATE
