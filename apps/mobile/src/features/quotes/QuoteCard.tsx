@@ -16,6 +16,8 @@ type QuoteCardProps = {
   now: number;
   onAccept: (quote: CustomerQuote) => void;
   onViewProfile: (quote: CustomerQuote) => void;
+  /** What an accepted quote's footer shows instead of the plain note: its payment (#59). */
+  payment?: ReactNode;
 };
 
 // Shown to sighted users only: the card's summary label already says it.
@@ -31,7 +33,7 @@ const VISUAL_ONLY = {
  * since a list of them shares the screen and the confirmation carries the primary action, and
  * "View profile" is a ghost under the pro's name, in every state of the quote.
  */
-export function QuoteCard({ quote, state, now, onAccept, onViewProfile }: QuoteCardProps) {
+export function QuoteCard({ quote, state, now, onAccept, onViewProfile, payment }: QuoteCardProps) {
   const { t } = useTranslation();
   const text = useQuoteText(quote, state, now);
   const testID = `quote-${quote.id}`;
@@ -87,7 +89,7 @@ export function QuoteCard({ quote, state, now, onAccept, onViewProfile }: QuoteC
       {quote.approach ? (
         <ApproachText approach={quote.approach} testID={`${testID}-approach`} />
       ) : null}
-      <QuoteFooter state={state} expiry={text.expiry} testID={testID}>
+      <QuoteFooter state={state} expiry={text.expiry} payment={payment} testID={testID}>
         <Button
           label={t("quotes.accept")}
           accessibilityLabel={t("quotes.acceptLabel", { pro: text.pro, price: text.price })}
@@ -105,13 +107,16 @@ type QuoteFooterProps = {
   expiry: string;
   /** The Accept button, shown only while the quote is open. */
   children: ReactNode;
+  /** An accepted quote's payment, in place of the plain note. */
+  payment?: ReactNode;
   testID: string;
 };
 
 /** What the customer can do with the quote now: accept it before it expires, or nothing more. */
-function QuoteFooter({ state, expiry, children, testID }: QuoteFooterProps) {
+function QuoteFooter({ state, expiry, children, payment, testID }: QuoteFooterProps) {
   const { t } = useTranslation();
 
+  if (state === "accepted" && payment) return payment;
   if (state === "accepted") {
     return (
       <View {...VISUAL_ONLY} style={continuousCorners} className="rounded-md bg-green-500/10 p-3">

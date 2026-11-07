@@ -1,5 +1,7 @@
 import "../global.css";
 import "@/i18n";
+// Stripe's saved customer sign-in is reset at every sign-out, even before any payment screen loads.
+import "@/features/payments/sheetCustomer";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as SplashScreen from "expo-splash-screen";
