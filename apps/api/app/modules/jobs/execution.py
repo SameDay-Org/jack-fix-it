@@ -59,6 +59,14 @@ Job photos and Job's done (part 2, #298), also on the job's row lock:
 - Both views list the photos by kind, oldest first, signed for DOWNLOAD_URL_TTL_SECONDS: the
   customer only their safe copies (photos.py says why).
 
+Confirmation (#66), the customer's, on the job's row lock: completed -> confirmed through the
+state machine (it sets confirmed_at; the event's actor is the customer). Again once confirmed:
+200, unchanged, no second event. Any other status: 409 job_not_completed. While completed, the
+customer's view carries confirm_by, when the system confirms the job on its own if neither the
+customer confirms nor a problem is open (completed_at + JOB_AUTO_CONFIRM_AFTER_HOURS; the cron
+is #67, confirmation.py). The customer and the cron take the same lock and read the job again
+under it, so racing they make one transition and one event.
+
 The arrival code is never logged, never in an error, never in a pro response. Logs carry ids:
 never an upload key.
 """
@@ -83,6 +91,7 @@ from app.config import Settings
 from app.errors import NotFoundError
 from app.integrations.storage import StorageProvider
 from app.modules.categories.service import CategoryService
+from app.modules.jobs.confirmation import confirm_by
 from app.modules.jobs.errors import (
     AfterPhotosProcessingError,
     AfterPhotosRequiredError,
@@ -91,6 +100,7 @@ from app.modules.jobs.errors import (
     CheckInRequiredError,
     DuplicateJobPhotoError,
     InvalidJobPhotoError,
+    JobNotCompletedError,
     JobPhotoLimitError,
     JobPhotoNotAllowedError,
     JobPhotoUploadExpiredError,
@@ -150,6 +160,7 @@ class JobExecutionConfig:
     photo_attach_max_age: timedelta
     photo_url_ttl_seconds: int
     enqueue_timeout_seconds: float
+    auto_confirm_after: timedelta
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "JobExecutionConfig":
@@ -161,6 +172,7 @@ class JobExecutionConfig:
             photo_attach_max_age=timedelta(minutes=settings.job_photo_attach_max_age_minutes),
             photo_url_ttl_seconds=settings.download_url_ttl_seconds,
             enqueue_timeout_seconds=settings.job_enqueue_timeout_seconds,
+            auto_confirm_after=timedelta(hours=settings.job_auto_confirm_after_hours),
         )
 
 
@@ -215,6 +227,7 @@ class JobExecutionService:
             ),
             eta_at=job.eta_at,
             arrival_code=job.arrival_code if shows_code else None,
+            confirm_by=confirm_by(job, self._config.auto_confirm_after),
             timeline=[
                 JobTimelineEntry(type=event.type, status=event.to_status, at=event.created_at)
                 for event in events
@@ -405,6 +418,19 @@ class JobExecutionService:
         logger.info("job_completed", extra={"job_id": str(job.id), "pro_id": str(job.pro_id)})
         return await self.pro_job(user, job.id)
 
+    async def confirm(self, user: UserAccount, request_id: uuid.UUID) -> CustomerJob:
+        job = await self._customer_locked(user, request_id)
+        if job.status is JobStatus.CONFIRMED:
+            await self._session.commit()  # nothing changed: ends the transaction and its lock
+            return await self.customer_job(user, request_id)
+        if job.status is not JobStatus.COMPLETED:
+            raise JobNotCompletedError
+        # The state machine sets confirmed_at and writes the event, the customer as its actor.
+        await self._machine.transition(job.id, JobStatus.CONFIRMED, user)
+        await self._session.commit()
+        logger.info("job_confirmed", extra={"job_id": str(job.id), "pro_id": str(job.pro_id)})
+        return await self.customer_job(user, request_id)
+
     # Helpers
 
     async def _queue_copies(self, job: Job, photo_ids: list[uuid.UUID], queue: JobQueue) -> None:
@@ -419,6 +445,15 @@ class JobExecutionService:
                 "job_photo_sanitize_enqueue_failed",
                 extra={"job_id": str(job.id), "pro_id": str(job.pro_id)},
             )
+
+    async def _customer_locked(self, user: UserAccount, request_id: uuid.UUID) -> Job:
+        """The job of the caller's own request, locked until the transaction ends; 404 for
+        anyone else's request, and while it has no job (as customer_job)."""
+        await self._customer_requests.own_status(user, request_id)
+        job = await self._jobs.get_of_request_for_update(request_id)
+        if job is None or job.customer_id != user.id:
+            raise NotFoundError
+        return job
 
     async def _own_locked(self, user: UserAccount, job_id: uuid.UUID) -> Job:
         """The caller's job, locked until the transaction ends; 404 for anyone else's."""

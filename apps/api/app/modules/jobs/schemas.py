@@ -84,6 +84,11 @@ class CustomerJob(_Out):
         description="The 4 digits the customer gives the pro on arrival: only while the job is "
         "on the way and the pro has not checked in; null before and after.",
     )
+    confirm_by: datetime | None = Field(
+        description="While the job is completed: when it is confirmed automatically if the "
+        "customer neither confirms it nor reports a problem (the pro's Job's done plus "
+        "JOB_AUTO_CONFIRM_AFTER_HOURS). Null in every other status."
+    )
     timeline: list[JobTimelineEntry] = Field(description="The job's history, oldest first.")
     photos: CustomerJobPhotos
     amount_cents: int = Field(description="The price paid for the service.")

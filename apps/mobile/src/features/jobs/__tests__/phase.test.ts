@@ -71,6 +71,7 @@ const job = ({ proName = "Dan Smith", ...overrides }: JobOverrides = {}): Custom
   },
   eta_at: null,
   arrival_code: null,
+  confirm_by: null,
   timeline: BOOKED,
   amount_cents: 18_000,
   tax_cents: 1_485,

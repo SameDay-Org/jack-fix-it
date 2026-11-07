@@ -328,6 +328,14 @@ class Settings(BaseSettings):
     # values): the sweep only deletes older uploads, so a key attach accepted was referenced
     # long before the sweep can pick it (orphans.py).
     job_photo_attach_max_age_minutes: int = Field(default=720, gt=0)
+    # Job confirmation (#66, #67; Cesar 2026-10-29, epic #272): once the pro marks the job done,
+    # the customer has this many hours to confirm it (or report a problem); a job still completed
+    # after them is confirmed by the system. How often the worker sweeps (a cron, in minutes of
+    # the hour) and the longest one run may take; two runs that overlap are safe (each job is
+    # locked and checked again), so the timeout only bounds a stuck run.
+    job_auto_confirm_after_hours: int = Field(default=48, gt=0)
+    job_auto_confirm_sweep_minutes: int = Field(default=15, ge=1, le=60)
+    job_auto_confirm_sweep_timeout_seconds: int = Field(default=840, gt=0)
     # The API's public base URL, such as https://api.example.com: Stripe sends the pro's browser
     # back to its onboarding pages there. Required with Stripe in staging and production (https).
     public_api_url: str | None = None

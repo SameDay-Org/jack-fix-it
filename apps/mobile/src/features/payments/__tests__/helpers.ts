@@ -42,6 +42,7 @@ export const JOB: CustomerJob = {
   pro: ACCEPTED.pro,
   eta_at: null,
   arrival_code: null,
+  confirm_by: null,
   timeline: [{ type: "created", status: "scheduled", at: new Date(NOW).toISOString() }],
   // The pro's photos (#298): none on a job that has not started.
   photos: { before: [], after: [], pending: 0 },

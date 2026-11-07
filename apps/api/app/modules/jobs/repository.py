@@ -28,6 +28,30 @@ class JobRepository:
         )
         return (await self._session.scalars(statement)).one_or_none()
 
+    async def get_of_request_for_update(self, request_id: uuid.UUID) -> Job | None:
+        """The request's job, locked as get_for_update locks it."""
+        statement = (
+            select(Job)
+            .where(Job.request_id == request_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def completed_before(
+        self, completed_before: datetime, after: uuid.UUID | None, limit: int
+    ) -> list[uuid.UUID]:
+        """Up to `limit` ids of the jobs still completed whose completed_at is at or before
+        `completed_before`, by id, after the id `after`: the auto-confirm sweep's batches (#67).
+        Unlocked: each is checked again under its lock."""
+        statement = select(Job.id).where(
+            Job.status == JobStatus.COMPLETED, Job.completed_at <= completed_before
+        )
+        if after is not None:
+            statement = statement.where(Job.id > after)
+        statement = statement.order_by(Job.id).limit(limit)
+        return list((await self._session.scalars(statement)).all())
+
     async def get_of_request(self, request_id: uuid.UUID) -> Job | None:
         """The request's job (one per request), unlocked: for reads."""
         return (

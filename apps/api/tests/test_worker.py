@@ -16,6 +16,7 @@ import app.worker as app_worker
 from app.config import Settings, get_settings
 from app.integrations.stripe_payments import StripePaymentsClient
 from app.modules.dispatch.tasks import dispatch_request
+from app.modules.jobs.tasks import auto_confirm_jobs
 from app.modules.notifications.push_tasks import check_push_receipts
 from app.modules.payments.tasks import cancel_unpaid_payments
 from app.modules.quotes.tasks import expire_quotes
@@ -117,6 +118,12 @@ def test_cron_jobs_keep_names_cadences_and_timeouts() -> None:
             get_settings().payment_unpaid_sweep_timeout_seconds,
             1,
         ),
+        "cron:auto_confirm_jobs": (
+            auto_confirm_jobs,
+            every(get_settings().job_auto_confirm_sweep_minutes),
+            get_settings().job_auto_confirm_sweep_timeout_seconds,
+            1,
+        ),
     }
 
 
@@ -150,6 +157,48 @@ def test_worker_registers_cancel_unpaid_payments_without_results(
     assert (job.keep_result_s, job.keep_result_forever) == (0, False)
     assert job.minute == {0, 15, 30, 45}
     assert job.timeout_s == 222
+
+
+def test_worker_registers_auto_confirm_jobs_without_results(
+    worker_module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The cadence and the timeout come from the settings, read when the worker starts.
+    monkeypatch.setenv("JOB_AUTO_CONFIRM_SWEEP_MINUTES", "20")
+    monkeypatch.setenv("JOB_AUTO_CONFIRM_SWEEP_TIMEOUT_SECONDS", "333")
+    get_settings.cache_clear()
+    module = importlib.reload(worker_module)
+
+    [job] = [j for j in module.WorkerSettings.cron_jobs if j.coroutine is auto_confirm_jobs]
+    assert job.name == "cron:auto_confirm_jobs"
+    assert (job.keep_result_s, job.keep_result_forever) == (0, False)
+    assert job.minute == {0, 20, 40}
+    assert job.timeout_s == 333
+
+
+def test_auto_confirm_settings_defaults() -> None:
+    # Cesar 2026-10-29 (epic #272): keep the 48 h auto-confirm.
+    settings = make_settings()
+    assert settings.job_auto_confirm_after_hours == 48
+    assert settings.job_auto_confirm_sweep_minutes == 15
+    assert settings.job_auto_confirm_sweep_timeout_seconds == 840
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "job_auto_confirm_after_hours",
+        "job_auto_confirm_sweep_minutes",
+        "job_auto_confirm_sweep_timeout_seconds",
+    ],
+)
+def test_auto_confirm_settings_must_be_positive(field: str) -> None:
+    with pytest.raises(ValidationError):
+        make_settings(**{field: 0})
+
+
+def test_auto_confirm_sweep_runs_at_most_hourly() -> None:
+    with pytest.raises(ValidationError):
+        make_settings(job_auto_confirm_sweep_minutes=61)
 
 
 @pytest.mark.parametrize("value", ["0", "-1"])

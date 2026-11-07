@@ -45,6 +45,7 @@ CONFIG = JobExecutionConfig(
     photo_attach_max_age=timedelta(minutes=720),
     photo_url_ttl_seconds=300,
     enqueue_timeout_seconds=1.0,
+    auto_confirm_after=timedelta(hours=48),
 )
 
 

@@ -126,6 +126,7 @@ const job = (overrides: Partial<CustomerJob> = {}): CustomerJob => ({
   },
   eta_at: null,
   arrival_code: null,
+  confirm_by: null,
   timeline: [CREATED],
   amount_cents: 18_000,
   tax_cents: 1_485,

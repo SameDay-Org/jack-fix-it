@@ -716,6 +716,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/requests/{request_id}/job/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm the job of one of my service requests is done
+         * @description Completed -> confirmed: the customer agrees the work is done, before confirm_by (after it,
+         *     the system confirms on its own unless a problem is open). Again once confirmed: the job
+         *     unchanged.
+         */
+        post: operations["confirm_request_job_v1_requests__request_id__job_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pros/me/jobs": {
         parameters: {
             query?: never;
@@ -1254,6 +1276,11 @@ export interface components {
              * @example 0427
              */
             arrival_code: string | null;
+            /**
+             * Confirm By
+             * @description While the job is completed: when it is confirmed automatically if the customer neither confirms it nor reports a problem (the pro's Job's done plus JOB_AUTO_CONFIRM_AFTER_HOURS). Null in every other status.
+             */
+            confirm_by: string | null;
             /**
              * Timeline
              * @description The job's history, oldest first.
@@ -4899,6 +4926,73 @@ export interface operations {
             };
             /** @description not_found: no request of the caller with this id, or no job on it yet (the job starts once the payment succeeds). */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    confirm_request_job_v1_requests__request_id__job_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerJob"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers have service requests. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no request of the caller with this id, or no job on it yet. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description job_not_completed: the pro has not marked the job done, or it is past confirmation (a problem reported, paid out, refunded or cancelled). */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
