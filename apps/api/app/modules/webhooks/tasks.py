@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import Settings
 from app.modules.webhooks.service import ProcessConfig, ProcessOutcome, StripeEventProcessor
+from app.queue import JobQueue
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,9 @@ async def process_stripe_event(ctx: dict[str, Any], webhook_event_id: str) -> st
     """ARQ task: handles one stored event in its own transaction and returns the outcome. ARQ
     gives it STRIPE_WEBHOOK_MAX_ATTEMPTS runs (app/worker.py). A handler error asks for a later
     run until the row is failed; a database error outside the handler leaves the row pending and
-    asks for one too, except on the last run, which logs it and ends."""
+    asks for one too, except on the last run, which logs it and ends. Once the event's writes
+    are committed (and the session closed), what the handler announced runs: the job pushes
+    (#65). A push that cannot be queued is logged, never retried by this task."""
     settings: Settings = ctx["settings"]
     attempt: int = ctx["job_try"]
     last_try = attempt >= settings.stripe_webhook_max_attempts
@@ -36,4 +39,9 @@ async def process_stripe_event(ctx: dict[str, Any], webhook_event_id: str) -> st
         raise Retry(defer=settings.stripe_webhook_retry_backoff_seconds * attempt) from None
     if result.outcome is ProcessOutcome.RETRY:
         raise Retry(defer=result.retry_in_seconds)
+    if result.after_commit:
+        # ARQ's own pool (an ArqRedis) queues the pushes; tests pass a fake queue.
+        queue: JobQueue = ctx["redis"]
+        for action in result.after_commit:
+            await action(queue, settings.job_enqueue_timeout_seconds)
     return str(result.outcome)

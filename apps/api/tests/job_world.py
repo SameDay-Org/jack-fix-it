@@ -7,6 +7,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,8 +20,10 @@ from app.modules.quotes.models import Quote, QuoteStatus
 from app.modules.requests.models import RequestOrigin, RequestStatus, ServiceRequest
 from app.modules.users.models import User
 from app.modules.users.types import UserRole
+from app.queue import get_job_queue
 from tests.conftest import TEST_JWT_SECRET
 from tests.helpers import as_status_writer, letter_tag
+from tests.test_requests_api import RecordingQueue
 
 CUSTOMER_EMAIL = "probe-customer-63@example.com"
 CUSTOMER_PHONE = "+13055550163"
@@ -125,6 +128,13 @@ async def build_world(session: AsyncSession) -> JobWorld:
         category_id=category.id,
         address_id=address.id,
     )
+
+
+def record_pushes(app: FastAPI) -> RecordingQueue:
+    """The job routes' push queue (#65): recorded, never Redis."""
+    recorder = RecordingQueue()
+    app.dependency_overrides[get_job_queue] = lambda: recorder
+    return recorder
 
 
 async def make_accepted_request(

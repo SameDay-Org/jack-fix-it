@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
+from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.addresses.schemas import AddressIn
@@ -31,7 +32,9 @@ from tests.job_world import (
     build_world,
     make_accepted_request,
     make_job,
+    record_pushes,
 )
+from tests.test_requests_api import RecordingQueue
 
 NOT_FOUND = {"error": {"code": "not_found", "message": "Resource not found."}}
 FORBIDDEN = {"error": {"code": "forbidden", "message": "You do not have access to this resource."}}
@@ -67,6 +70,12 @@ PRO_KEYS = {
     "pro_payout_cents",
 }
 BASE = "/v1/pros/me/jobs"
+
+
+@pytest.fixture(autouse=True)
+def queue(app: FastAPI) -> RecordingQueue:
+    """On my way, which some reads go through, pushes the customer (#65): recorded here."""
+    return record_pushes(app)
 
 
 @pytest.fixture

@@ -15,7 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.jobs import execution
 from app.modules.jobs.errors import ATTEMPTS_REMAINING_HEADER
 from app.modules.jobs.models import Job, JobStatus
-from tests.job_world import JobWorld, build_world, events, job_row, make_job
+from tests.job_world import JobWorld, build_world, events, job_row, make_job, record_pushes
+from tests.test_requests_api import RecordingQueue
 
 BASE = "/v1/pros/me/jobs"
 NOT_FOUND = {"error": {"code": "not_found", "message": "Resource not found."}}
@@ -41,6 +42,12 @@ LOCKED = {
 CODE = "0427"
 WRONG = "9999"
 HERE = {"lat": 28.538336, "lng": -81.379234}
+
+
+@pytest.fixture(autouse=True)
+def queue(app: FastAPI) -> RecordingQueue:
+    """The job pushes (#65) are queued here, never on Redis."""
+    return record_pushes(app)
 
 
 @pytest.fixture

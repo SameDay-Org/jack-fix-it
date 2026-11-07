@@ -28,6 +28,7 @@ from starlette.requests import Request
 
 from app.config import Settings
 from app.modules.webhooks import handlers
+from app.modules.webhooks.events import AfterCommit
 from app.modules.webhooks.handlers import StripeEvent
 from app.modules.webhooks.models import WebhookEvent, WebhookEventStatus
 from app.modules.webhooks.repository import WebhookEventRepository
@@ -121,7 +122,9 @@ class Webhook:
             await session.commit()
 
 
-async def _noop_handler(session: AsyncSession, event: StripeEvent) -> None:
+async def _noop_handler(
+    session: AsyncSession, event: StripeEvent, after_commit: AfterCommit
+) -> None:
     pass
 
 
