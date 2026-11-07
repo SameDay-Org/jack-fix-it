@@ -89,7 +89,7 @@ async def test_marker_checks_refuse_bad_rows(db_session: AsyncSession, bad: str)
         "delivered_id": newer.id,
         "delivered_at": newer.created_at,
     }
-    values |= {
+    changes: dict[str, dict[str, object]] = {
         "no_delivered": {"delivered_id": None, "delivered_at": None},
         "delivered_half": {"delivered_at": None},
         "read_half": {"read_at": None},
@@ -100,7 +100,8 @@ async def test_marker_checks_refuse_bad_rows(db_session: AsyncSession, bad: str)
             "delivered_at": older.created_at,
         },
         "delivered_fk": {"delivered_id": uuid.uuid4()},
-    }[bad]
+    }
+    values |= changes[bad]
 
     with pytest.raises(IntegrityError):
         async with db_session.begin_nested():
