@@ -1,6 +1,7 @@
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react-native";
 import { createElement, type ReactNode } from "react";
+import { AppState, type AppStateStatus } from "react-native";
 
 import { ApiError, apiGet, apiPost, NetworkError, SessionExpiredError, useSession } from "@/api";
 
@@ -20,6 +21,7 @@ import {
   type StepFailure,
 } from "../api";
 import type { ProJob, ProJobPage } from "../phase";
+import { settle } from "../../../api/__tests__/helpers";
 import { SIGNED_OUT } from "../../auth/__tests__/helpers";
 import {
   ARRIVAL_CODE,
@@ -283,6 +285,33 @@ describe("useProJobs", () => {
     await act(async () => navigation.setFocused(true));
 
     await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+  });
+
+  it("with refetchOnReturn off, neither focus nor the foreground asks again, and its refetch still does", async () => {
+    jest.mocked(apiGet).mockResolvedValue(jobPage([proJob()]));
+    jest.mocked(AppState.addEventListener).mockClear();
+
+    const { result } = await renderHook(() => useProJobs({ refetchOnReturn: false }), {
+      wrapper: wrapperFor(newQueryClient()),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(apiGet).toHaveBeenCalledTimes(1);
+
+    await act(async () => navigation.setFocused(false));
+    await act(async () => navigation.setFocused(true));
+    const listeners = jest
+      .mocked(AppState.addEventListener)
+      .mock.calls.filter(([event]) => event === "change")
+      .map(([, listener]) => listener as (state: AppStateStatus) => void);
+    await act(async () => listeners.forEach((listener) => listener("active")));
+    await act(settle);
+    expect(apiGet).toHaveBeenCalledTimes(1);
+
+    // The caller's own refresh (the home's pull) still asks.
+    await act(async () => {
+      await result.current.refetch();
+    });
+    expect(apiGet).toHaveBeenCalledTimes(2);
   });
 
   it.each([

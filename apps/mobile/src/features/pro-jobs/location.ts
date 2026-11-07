@@ -1,6 +1,6 @@
 import * as Location from "expo-location";
 import { useCallback, useEffect, useState } from "react";
-import { AppState, Linking } from "react-native";
+import { AppState, Linking, Platform } from "react-native";
 
 /**
  * The location permission as check-in needs it (while the app is in use, never in the
@@ -19,8 +19,10 @@ const accessOf = ({ granted, canAskAgain }: Location.LocationPermissionResponse)
 /**
  * The foreground location permission, read on mount and again whenever the app comes back to the
  * foreground (a grant made in Settings reaches the open sheet; reading never prompts). `ask`
- * shows the system prompt and answers whether access was granted. Nothing about the place is read
- * here.
+ * shows the system prompt and answers whether access was granted. `refused` is for a position
+ * the system refused for want of permission: the permission is read again, and it never reads
+ * as granted until the next read (back from Settings), so the sheet shows the way to Settings
+ * rather than the code again. Nothing about the place is read here.
  */
 export function useLocationAccess() {
   const [access, setAccess] = useState<LocationAccess>("unknown");
@@ -53,9 +55,19 @@ export function useLocationAccess() {
     }
   }, []);
 
+  const refused = useCallback(async (): Promise<void> => {
+    let next: LocationAccess = "blocked";
+    try {
+      next = accessOf(await Location.getForegroundPermissionsAsync());
+    } catch {
+      // unreadable: blocked, as the refusal said
+    }
+    setAccess(next === "granted" ? "blocked" : next);
+  }, []);
+
   const openSettings = useCallback(() => void Linking.openSettings(), []);
 
-  return { access, ask, openSettings };
+  return { access, ask, refused, openSettings };
 }
 
 /** Where the pro is, for one check-in: sent with it, never kept on the device or logged. */
@@ -75,10 +87,17 @@ export class LocationUnavailableError extends Error {
   }
 }
 
-// expo-location's error codes for a device whose location is off (Android asks to turn it on
-// first; declining ends in the second).
-const LOCATION_OFF = new Set(["E_LOCATION_SERVICES_DISABLED", "E_LOCATION_SETTINGS_UNSATISFIED"]);
-const NO_PERMISSION = new Set(["E_LOCATION_UNAUTHORIZED", "E_NO_PERMISSIONS"]);
+// The codes expo-location 58's native errors carry (CodedException: "ERR_" and the exception's
+// name): the location switched off (iOS) or the Android settings check failed, and the
+// permission missing (Android) or refused (iOS).
+const LOCATION_OFF = new Set([
+  "ERR_LOCATION_SERVICES_DISABLED",
+  "ERR_LOCATION_SETTINGS_UNSATISFIED",
+]);
+const NO_PERMISSION = new Set([
+  "ERR_LOCATION_UNAUTHORIZED",
+  "ERR_DENIED_FOREGROUND_LOCATION_PERMISSION",
+]);
 
 function failureOf(error: unknown): LocationFailure {
   const code = (error as { code?: unknown } | null)?.code;
@@ -89,18 +108,46 @@ function failureOf(error: unknown): LocationFailure {
 }
 
 /**
- * The phone's position right now, once, at the accuracy a check-in needs (a street, not a room),
- * or a `LocationUnavailableError` after `timeoutMs`. A fix that comes after the deadline is
- * dropped. The caller holds the permission already.
+ * The phone's location switched on, or an `off` error. On Android a switched-off location gets the
+ * system's one-tap "turn on location" dialog first; declining it is `off` too. iOS has no such
+ * dialog: the pro turns it on in Settings.
  */
-export function currentPosition(timeoutMs: number): Promise<CheckInPosition> {
+async function ensureLocationOn(): Promise<void> {
+  let on: boolean;
+  try {
+    on = await Location.hasServicesEnabledAsync();
+  } catch {
+    return; // unknown: the position request reports it if it is off
+  }
+  if (on) return;
+  if (Platform.OS !== "android") throw new LocationUnavailableError("off");
+  try {
+    await Location.enableNetworkProviderAsync();
+  } catch {
+    throw new LocationUnavailableError("off");
+  }
+}
+
+/**
+ * The phone's position right now, once, from the GPS and the network together (High: a one-shot
+ * fix at the door, where Balanced would wait on a network fix alone),
+ * or a `LocationUnavailableError`. The location is switched on first (Android's dialog is not
+ * timed); the fix itself gets `timeoutMs`, and one that comes after it is dropped. The caller
+ * holds the permission already.
+ */
+export async function currentPosition(timeoutMs: number): Promise<CheckInPosition> {
+  await ensureLocationOn();
   return new Promise((resolve, reject) => {
     let settled = false;
     const timer = setTimeout(() => {
       settled = true;
       reject(new LocationUnavailableError("timeout"));
     }, timeoutMs);
-    Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).then(
+    // The location is on by now: no second settings dialog under a running timer.
+    Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.High,
+      mayShowUserSettingsDialog: false,
+    }).then(
       ({ coords }) => {
         if (settled) return;
         settled = true;

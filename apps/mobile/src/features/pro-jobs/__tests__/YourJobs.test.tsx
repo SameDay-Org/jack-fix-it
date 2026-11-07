@@ -246,6 +246,39 @@ describe("YourJobs", () => {
     expect(screen.queryByText("We couldn't load your jobs.")).toBeNull();
   });
 
+  it("a refresh that fails keeps the rows, says so above them, and Try again asks again", async () => {
+    const first = jobN(1, { scheduled_start_at: TODAY_LATE });
+    const added = jobN(2, { scheduled_start_at: TODAY_EARLY });
+    answer(jobPage([first]));
+    await renderWithQuery(<YourJobs />);
+    await findRow(first.id);
+
+    jest.mocked(apiGet).mockRejectedValueOnce(new NetworkError(false));
+    await act(async () => navigation.setFocused(false));
+    await act(async () => navigation.setFocused(true));
+
+    const notice = await screen.findByTestId("your-jobs-refresh-failed");
+    expect(within(notice).getByText("We couldn't refresh your jobs.")).toBeTruthy();
+    expect(rowIds()).toEqual([first.id]);
+    expect(screen.queryByText("We couldn't load your jobs.")).toBeNull();
+    // Above the rows: the notice comes first in the section.
+    const section = screen.getByTestId("your-jobs");
+    const order = section.children.map((child) =>
+      typeof child === "string" ? child : (child.props.testID as unknown),
+    );
+    expect(order.indexOf("your-jobs-refresh-failed")).toBeLessThan(
+      order.indexOf(`pro-job-${first.id}`),
+    );
+
+    answer(jobPage([first, added]));
+    await press(within(notice).getByRole("button", { name: "Try again" }));
+
+    await findRow(added.id);
+    expect(listCalls()).toHaveLength(3);
+    expect(rowIds()).toEqual([added.id, first.id]);
+    expect(screen.queryByTestId("your-jobs-refresh-failed")).toBeNull();
+  });
+
   it("a tap opens the job screen once, even when a second tap lands before the push", async () => {
     const job = proJob();
     answer(jobPage([job]));

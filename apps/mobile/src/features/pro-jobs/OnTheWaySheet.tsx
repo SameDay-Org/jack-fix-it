@@ -45,7 +45,8 @@ export function OnTheWaySheet() {
   const { leave, leaving, sameSession } = useSheetExit(generation);
   // As the sheet opened: its words stay put while the answer redraws the job under it.
   const [updating] = useState(() => job !== undefined && jobStep(job) === "onTheWay");
-  const [openedAt] = useState(Date.now);
+  // When the pro last picked: the preview is "now plus the pick", as the server will count it.
+  const [pickedAt, setPickedAt] = useState(Date.now);
 
   // Opened without its job on screen (a stale link), or the job moved past the arrival time
   // while the sheet was up: there is nothing to send.
@@ -58,7 +59,7 @@ export function OnTheWaySheet() {
 
   const name = customerName(job) ?? t("proJobs.customerFallback");
   const minutes = choice === null ? null : choice.kind === "preset" ? choice.minutes : custom;
-  const arrival = minutes === null ? null : formatTimeOfDay(openedAt + minutes * MINUTE_MS);
+  const arrival = minutes === null ? null : formatTimeOfDay(pickedAt + minutes * MINUTE_MS);
 
   const send = () => {
     if (minutes === null) return;
@@ -130,7 +131,10 @@ export function OnTheWaySheet() {
             selected={choice?.kind === "preset" && choice.minutes === preset}
             selectionRole="radio"
             disabled={busy}
-            onPress={() => setChoice({ kind: "preset", minutes: preset })}
+            onPress={() => {
+              setPickedAt(Date.now());
+              setChoice({ kind: "preset", minutes: preset });
+            }}
             testID={`on-the-way-preset-${preset}`}
           />
         ))}
@@ -142,6 +146,7 @@ export function OnTheWaySheet() {
           onPress={() => {
             // The custom time starts where the pro's last pick was, so "a bit more" is one tap.
             if (choice?.kind === "preset") setCustom(choice.minutes);
+            setPickedAt(Date.now());
             setChoice({ kind: "custom" });
           }}
           testID="on-the-way-other"
@@ -151,8 +156,14 @@ export function OnTheWaySheet() {
         <ValueStepper
           label={t("proJobs.eta.custom")}
           valueText={formatMinutes(t, custom)}
-          onDecrement={() => setCustom(previousEta)}
-          onIncrement={() => setCustom(nextEta)}
+          onDecrement={() => {
+            setPickedAt(Date.now());
+            setCustom(previousEta);
+          }}
+          onIncrement={() => {
+            setPickedAt(Date.now());
+            setCustom(nextEta);
+          }}
           canDecrement={!busy && custom > ETA_MIN_MINUTES}
           canIncrement={!busy && custom < ETA_MAX_MINUTES}
           decrementLabel={t("proJobs.eta.earlier")}

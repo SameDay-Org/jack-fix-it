@@ -19,8 +19,8 @@ import { useSheetExit } from "./useSheetExit";
  * 4-digit arrival code in large cells on the number pad, then "Check in", which sends it with
  * the phone's position. The location is asked for here only, after a line on why; refused for
  * good, the sheet says why it is needed and opens Settings (no check-in without it); a slow fix
- * gets a calm retry. A wrong code says how many tries are left; a locked check-in says support
- * was alerted, with nothing to retry.
+ * gets a calm retry. A wrong code says how many tries are left; a locked check-in says so and
+ * that the team knows, with nothing to retry.
  */
 export function CheckInSheet() {
   const { t } = useTranslation();

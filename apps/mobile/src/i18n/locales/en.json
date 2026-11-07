@@ -628,6 +628,7 @@
         "body": "When a customer hires you and pays, the job shows up here with the address and everything you need."
       },
       "error": "We couldn't load your jobs.",
+      "refreshFailed": "We couldn't refresh your jobs.",
       "retry": "Try again",
       "row": "{{status}}. {{when}}. {{what}}.",
       "for": "{{category}} for {{name}}"
@@ -680,7 +681,7 @@
       "noAddress": "The address is no longer shown for this job.",
       "theJob": "The job",
       "guide": {
-        "scheduled": "When you head out, tap On my way so {{name}} sees when you'll arrive.",
+        "scheduled": "When you head out, tap I'm on my way so {{name}} sees when you'll arrive.",
         "onTheWay": "When you get there, ask {{name}} for the 4-digit arrival code in their app.",
         "arrived": "You're checked in. Start the job when you begin the work.",
         "done": "You marked this job done.",
@@ -692,7 +693,7 @@
       },
       "locked": {
         "title": "Check-in is locked",
-        "body": "Too many codes didn't match. Our support team has been alerted and will help you check in."
+        "body": "Too many codes didn't match, so check-in is locked for this job. We've let our team know."
       },
       "onMyWay": "I'm on my way",
       "arrived": "I've arrived",
@@ -703,8 +704,7 @@
       "onTheWay": "You're on your way, and {{name}} can see when you'll arrive.",
       "etaUpdated": "Arrival time updated.",
       "arrived": "Checked in. You can start the job.",
-      "working": "Job started.",
-      "locked": "Check-in is locked."
+      "working": "Job started."
     },
     "failure": {
       "changed": "This job changed. Here's where it stands now.",

@@ -184,7 +184,21 @@ export function YourJobs({ testID = "your-jobs" }: { testID?: string }) {
           <Text className="text-callout text-navy-900">{t("proJobs.yourJobs.empty.body")}</Text>
         </View>
       ) : (
-        data.map((job) => <JobRow key={job.id} job={job} now={dataUpdatedAt} onPress={open} />)
+        <>
+          {/* A refresh that failed over rows on screen: they stay, and the pro can ask again. */}
+          {error ? (
+            <RetryNotice
+              message={t("proJobs.yourJobs.refreshFailed")}
+              action={t("proJobs.yourJobs.retry")}
+              onRetry={() => void refetch()}
+              busy={isFetching}
+              testID={`${testID}-refresh-failed`}
+            />
+          ) : null}
+          {data.map((job) => (
+            <JobRow key={job.id} job={job} now={dataUpdatedAt} onPress={open} />
+          ))}
+        </>
       )}
     </View>
   );

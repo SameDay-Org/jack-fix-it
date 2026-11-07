@@ -4,7 +4,7 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import * as Haptics from "expo-haptics";
 import * as Location from "expo-location";
 import { router } from "expo-router";
-import { AccessibilityInfo, AppState, Linking, type AppStateStatus } from "react-native";
+import { AccessibilityInfo, AppState, Linking, Platform, type AppStateStatus } from "react-native";
 
 import { ApiError, apiPost, NetworkError, type ErrorHeaders } from "@/api";
 import { dismissToast, toastStore } from "@/components/ui/toast";
@@ -34,7 +34,9 @@ jest.mock("expo-location", () => ({
   getForegroundPermissionsAsync: jest.fn(),
   requestForegroundPermissionsAsync: jest.fn(),
   getCurrentPositionAsync: jest.fn(),
-  Accuracy: { Balanced: 3 },
+  hasServicesEnabledAsync: jest.fn(),
+  enableNetworkProviderAsync: jest.fn(),
+  Accuracy: { Balanced: 3, High: 4 },
 }));
 jest.mock(
   "react-native-safe-area-context",
@@ -72,6 +74,9 @@ const POSITION = {
   },
   timestamp: 0,
 } as Position;
+
+/** The error expo-location 58 rejects with: a CodedException carrying `code`. */
+const locationError = (code: string) => Object.assign(new Error(code), { code });
 
 /** The headers of an error answer, read case-insensitively as `Headers` does. */
 const headers = (values: Record<string, string>): ErrorHeaders => ({
@@ -127,6 +132,12 @@ async function submit(code: string = ARRIVAL_CODE) {
 }
 
 let openSettings: jest.SpiedFunction<typeof Linking.openSettings>;
+let platform: jest.ReplaceProperty<typeof Platform.OS> | undefined;
+
+/** Runs the rest of the test on that platform (Jest's default is iOS); restored after it. */
+const onPlatform = (os: typeof Platform.OS) => {
+  platform = jest.replaceProperty(Platform, "OS", os);
+};
 
 beforeEach(() => {
   freezeClock();
@@ -143,6 +154,8 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue(permission("granted"));
   jest.mocked(Location.getCurrentPositionAsync).mockReset().mockResolvedValue(POSITION);
+  jest.mocked(Location.hasServicesEnabledAsync).mockReset().mockResolvedValue(true);
+  jest.mocked(Location.enableNetworkProviderAsync).mockReset().mockResolvedValue(undefined);
   jest.mocked(router.back).mockClear();
   jest.mocked(Haptics.notificationAsync).mockClear();
   jest.mocked(AppState.addEventListener).mockClear();
@@ -152,6 +165,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  platform?.restore();
+  platform = undefined;
   openSettings.mockRestore();
   dismissToast(); // a shown toast arms its own dismiss timer
   jest.useRealTimers();
@@ -195,7 +210,13 @@ describe("CheckInSheet", () => {
 
     await submit();
 
-    expect(Location.getCurrentPositionAsync).toHaveBeenCalledWith({ accuracy: 3 });
+    expect(Location.hasServicesEnabledAsync).toHaveBeenCalledTimes(1);
+    expect(Location.enableNetworkProviderAsync).not.toHaveBeenCalled();
+    // A street-level fix, with no settings dialog of its own under the running timer.
+    expect(Location.getCurrentPositionAsync).toHaveBeenCalledWith({
+      accuracy: Location.Accuracy.High,
+      mayShowUserSettingsDialog: false,
+    });
     expect(Location.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
     expect(apiPost).toHaveBeenCalledWith(CHECK_IN, SENT, PINNED);
@@ -238,7 +259,7 @@ describe("CheckInSheet", () => {
     expect(screen.queryByText(message)).toBeNull();
   });
 
-  it("a locked check-in (423) says support was alerted and offers only Close", async () => {
+  it("a locked check-in (423) says it is locked for this job, that the team knows, and offers only Close", async () => {
     await open();
     jest.mocked(apiPost).mockRejectedValueOnce(new ApiError(423, "arrival_code_locked"));
 
@@ -248,7 +269,7 @@ describe("CheckInSheet", () => {
     expect(screen.getByText("Check-in is locked")).toBeTruthy();
     expect(
       screen.getByText(
-        "Too many codes didn't match. Our support team has been alerted and will help you check in.",
+        "Too many codes didn't match, so check-in is locked for this job. We've let our team know.",
       ),
     ).toBeTruthy();
     expect(screen.queryByTestId("check-in-submit")).toBeNull();
@@ -281,6 +302,22 @@ describe("CheckInSheet", () => {
     expect(Location.requestForegroundPermissionsAsync).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(apiPost).toHaveBeenCalledWith(CHECK_IN, SENT, PINNED));
     await waitFor(() => expect(router.back).toHaveBeenCalledTimes(1));
+  });
+
+  it("the location explanation is said aloud as it shows, once", async () => {
+    jest.mocked(Location.getForegroundPermissionsAsync).mockResolvedValue(permission("askable"));
+    await open();
+
+    await submit();
+
+    const explanation =
+      "Share your location to check in. Jack Fix It checks your location once, when you check " +
+      "in, so Maria knows you've arrived. It's used only for this check-in.";
+    expect(announced()).toEqual([explanation]);
+    expect(AccessibilityInfo.announceForAccessibilityWithOptions).toHaveBeenCalledWith(
+      explanation,
+      { queue: true },
+    );
   });
 
   it("Not now on the explanation goes back to the code as it was typed", async () => {
@@ -377,7 +414,7 @@ describe("CheckInSheet", () => {
   it("the phone's location switched off says so, with no check-in", async () => {
     jest
       .mocked(Location.getCurrentPositionAsync)
-      .mockRejectedValue(Object.assign(new Error("off"), { code: "E_LOCATION_SERVICES_DISABLED" }));
+      .mockRejectedValue(locationError("ERR_LOCATION_SERVICES_DISABLED"));
     await open();
 
     await submit();
@@ -386,6 +423,101 @@ describe("CheckInSheet", () => {
     expect(screen.getByText("Your phone's location is off")).toBeTruthy();
     expect(screen.getByTestId("check-in-retry")).toBeTruthy();
     expect(apiPost).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["ERR_LOCATION_SERVICES_DISABLED", "check-in-off"],
+    ["ERR_LOCATION_SETTINGS_UNSATISFIED", "check-in-off"],
+    ["ERR_LOCATION_UNAUTHORIZED", "check-in-blocked"],
+    ["ERR_DENIED_FOREGROUND_LOCATION_PERMISSION", "check-in-blocked"],
+    ["ERR_CURRENT_LOCATION_IS_UNAVAILABLE", "check-in-timeout"],
+  ])("a position refused with %s shows %s, with no check-in", async (code, notice) => {
+    jest.mocked(Location.getCurrentPositionAsync).mockRejectedValue(locationError(code));
+    await open();
+
+    await submit();
+
+    expect(await screen.findByTestId(notice)).toBeTruthy();
+    expect(screen.queryByTestId("check-in-submit")).toBeNull();
+    expect(apiPost).not.toHaveBeenCalled();
+  });
+
+  it("on Android with the location switched off, the system's dialog turns it on and the check-in goes", async () => {
+    onPlatform("android");
+    jest.mocked(Location.hasServicesEnabledAsync).mockResolvedValue(false);
+    jest.mocked(apiPost).mockResolvedValueOnce(arrived());
+    await open();
+
+    await submit();
+
+    expect(Location.enableNetworkProviderAsync).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(apiPost).toHaveBeenCalledWith(CHECK_IN, SENT, PINNED));
+    await waitFor(() => expect(router.back).toHaveBeenCalledTimes(1));
+  });
+
+  it("on Android, declining the dialog shows the location-off notice and asks for no position", async () => {
+    onPlatform("android");
+    jest.mocked(Location.hasServicesEnabledAsync).mockResolvedValue(false);
+    jest
+      .mocked(Location.enableNetworkProviderAsync)
+      .mockRejectedValue(locationError("ERR_CANCELED"));
+    await open();
+
+    await submit();
+
+    expect(await screen.findByTestId("check-in-off")).toBeTruthy();
+    expect(Location.enableNetworkProviderAsync).toHaveBeenCalledTimes(1);
+    expect(Location.getCurrentPositionAsync).not.toHaveBeenCalled();
+    expect(apiPost).not.toHaveBeenCalled();
+  });
+
+  it("on iOS with the location switched off, it shows the location-off notice with no dialog", async () => {
+    onPlatform("ios");
+    jest.mocked(Location.hasServicesEnabledAsync).mockResolvedValue(false);
+    await open();
+
+    await submit();
+
+    expect(await screen.findByTestId("check-in-off")).toBeTruthy();
+    expect(Location.enableNetworkProviderAsync).not.toHaveBeenCalled();
+    expect(Location.getCurrentPositionAsync).not.toHaveBeenCalled();
+    expect(apiPost).not.toHaveBeenCalled();
+  });
+
+  it("when the location switch cannot be read, it asks for the position anyway and checks in", async () => {
+    jest.mocked(Location.hasServicesEnabledAsync).mockRejectedValue(new Error("unavailable"));
+    jest.mocked(apiPost).mockResolvedValueOnce(arrived());
+    await open();
+
+    await submit();
+
+    await waitFor(() => expect(apiPost).toHaveBeenCalledWith(CHECK_IN, SENT, PINNED));
+    expect(Location.enableNetworkProviderAsync).not.toHaveBeenCalled();
+  });
+
+  it("the time limit does not run while Android's turn-on-location dialog is open", async () => {
+    jest.useRealTimers();
+    fakeClock();
+    onPlatform("android");
+    jest.mocked(Location.hasServicesEnabledAsync).mockResolvedValue(false);
+    const dialog = deferred<void>();
+    jest.mocked(Location.enableNetworkProviderAsync).mockReturnValue(dialog.promise);
+    jest.mocked(apiPost).mockResolvedValueOnce(arrived());
+    await open();
+
+    await submit();
+    await act(async () => {
+      jest.advanceTimersByTime(proJobsConfig.locationTimeoutMs * 2);
+    });
+
+    expect(screen.queryByTestId("check-in-timeout")).toBeNull();
+    expect(Location.getCurrentPositionAsync).not.toHaveBeenCalled();
+
+    await act(async () => dialog.resolve());
+
+    await waitFor(() => expect(apiPost).toHaveBeenCalledWith(CHECK_IN, SENT, PINNED));
+    await waitFor(() => expect(router.back).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId("check-in-timeout")).toBeNull();
   });
 
   it("closing the sheet while the position is found sends nothing", async () => {

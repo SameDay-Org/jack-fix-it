@@ -193,6 +193,28 @@ describe("OnTheWaySheet", () => {
     expect(screen.getByTestId("on-the-way-arrival").props.children).toBe(arrivalAt(60));
   });
 
+  it("the arrival preview counts from the last pick, not from when the sheet opened", async () => {
+    await open();
+
+    // Seven minutes after the sheet opened, the pro picks 20 min.
+    jest.setSystemTime(NOW + 7 * MINUTE_MS);
+    await press("on-the-way-preset-20");
+    expect(screen.getByTestId("on-the-way-arrival").props.children).toBe(arrivalAt(27));
+
+    // Three minutes on, Other starts at that pick and counts from now.
+    jest.setSystemTime(NOW + 10 * MINUTE_MS);
+    await press("on-the-way-other");
+    expect(screen.getByTestId("on-the-way-arrival").props.children).toBe(arrivalAt(30));
+
+    // A step two minutes later counts from that step.
+    jest.setSystemTime(NOW + 12 * MINUTE_MS);
+    await press("on-the-way-custom-increment");
+    expect(screen.getByTestId("on-the-way-arrival").props.children).toBe(arrivalAt(37));
+    jest.setSystemTime(NOW + 13 * MINUTE_MS);
+    await press("on-the-way-custom-decrement");
+    expect(screen.getByTestId("on-the-way-arrival").props.children).toBe(arrivalAt(33));
+  });
+
   it("the custom time stops at 5 min and at 4 h", async () => {
     await open();
     await press("on-the-way-other");

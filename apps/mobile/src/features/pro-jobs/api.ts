@@ -78,10 +78,11 @@ export const proJobQueryOptions = (jobId: string, generation: number) =>
 
 /**
  * "Your jobs" on the pro's home: asked for while a pro is signed in, and again when the home
- * comes back into focus or the app to the foreground. `refetch` asks nothing for anyone else
- * (TanStack's `refetch` runs even on a disabled query).
+ * comes back into focus or the app to the foreground (once per screen: a second reader of the same
+ * list passes `refetchOnReturn: false`). `refetch` asks nothing for anyone else (TanStack's
+ * `refetch` runs even on a disabled query).
  */
-export function useProJobs() {
+export function useProJobs({ refetchOnReturn = true }: { refetchOnReturn?: boolean } = {}) {
   const generation = useSessionGeneration();
   const { status, user } = useSession();
   const enabled = status === "signedIn" && user?.role === "pro";
@@ -91,7 +92,7 @@ export function useProJobs() {
     () => (enabled ? refetchQuery() : Promise.resolve()),
     [enabled, refetchQuery],
   );
-  useRefetchOnReturn(refetch, enabled);
+  useRefetchOnReturn(refetch, enabled && refetchOnReturn);
   return { ...query, refetch };
 }
 

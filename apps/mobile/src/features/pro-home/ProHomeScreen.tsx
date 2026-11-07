@@ -19,7 +19,8 @@ export function ProHomeScreen() {
   // Tabs stay mounted while another one shows: only the focused tab owns the status bar.
   const focused = useIsFocused();
   const inset = useTabBarInset();
-  const { refetch: refetchJobs } = useProJobs();
+  // The pull's refresh only: "Your jobs" refreshes the list on focus and foreground itself.
+  const { refetch: refetchJobs } = useProJobs({ refetchOnReturn: false });
 
   if (!user) return null;
 

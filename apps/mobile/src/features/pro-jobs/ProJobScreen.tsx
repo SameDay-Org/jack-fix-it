@@ -4,7 +4,8 @@ import { router, useIsFocused, useLocalSearchParams } from "expo-router";
 import type { TFunction } from "i18next";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Linking, ScrollView, Text, View } from "react-native";
+import { Linking, ScrollView, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { sessionGeneration } from "@/api";
 import {
@@ -26,6 +27,7 @@ import { StateCard } from "@/features/opportunities/StateCard";
 import { formatLocale, formatMoneyExact } from "@/features/quotes/format";
 import { useGuardedPush } from "@/features/quotes/navigation";
 import { useSettledError } from "@/features/quotes/useRequestQuotes";
+import { bubbleShadow, continuousCorners } from "@/theme";
 
 import {
   isJobGone,
@@ -41,6 +43,8 @@ import { jobStep, STEP_TONE, type JobStep, type ProJob } from "./phase";
 
 /** The icon tile's side (`IconTile` md), for the skeleton. */
 const TILE_SIDE = 56;
+/** The dock's padding under its last control, above the bottom safe area (Tailwind 4, 16 dp). */
+const DOCK_PADDING = 16;
 
 /** The customer's first name, or "the customer" in the middle of a sentence. */
 const nameOf = (t: TFunction, job: ProJob): string =>
@@ -80,12 +84,14 @@ function heroTime(job: ProJob, step: JobStep): { label: Exclude<JobStep, "locked
   }
 }
 
-/** Screen readers hear where the job moved to; not on open, only on a change while it is up. */
-const ANNOUNCED: Partial<Record<JobStep, "onTheWay" | "arrived" | "working" | "locked">> = {
+/**
+ * Screen readers hear where the job moved to; not on open, only on a change while it is up. A
+ * lock is not in the list: its notice announces itself.
+ */
+const ANNOUNCED: Partial<Record<JobStep, "onTheWay" | "arrived" | "working">> = {
   onTheWay: "onTheWay",
   arrived: "arrived",
   working: "working",
-  locked: "locked",
 };
 
 function useAnnounceStep(job: ProJob | undefined): void {
@@ -121,10 +127,12 @@ export function ProJobScreen() {
   const shownError = useSettledError(data, error);
   const gone = !valid || (data === undefined && isJobGone(shownError));
   const refreshFailed = data !== undefined && error !== null;
+  const docked = data !== undefined && !gone;
   useAnnounceStep(data);
 
   return (
-    <Screen bar="light" testID="pro-job-screen">
+    // With the action dock, the dock pads the bottom safe area itself (its white runs to the edge).
+    <Screen bar="light" edges={docked ? [] : undefined} testID="pro-job-screen">
       <ScrollView contentContainerClassName="flex-grow px-4 pb-6">
         <View className="pb-4 pt-2">
           <BackButton fallbackHref="/" />
@@ -166,7 +174,7 @@ export function ProJobScreen() {
           </View>
         )}
       </ScrollView>
-      {data !== undefined && !gone ? <JobActions job={data} /> : null}
+      {docked ? <JobActions job={data} /> : null}
     </Screen>
   );
 }
@@ -217,18 +225,30 @@ function JobHero({ job, now }: { job: ProJob; now: number }) {
 /** What the pro receives and who the customer is, side by side with a divider between. */
 function JobFacts({ job }: { job: ProJob }) {
   const { t } = useTranslation();
+  const { fontScale } = useWindowDimensions();
   const name = customerName(job);
+  // Two half-width columns hold a title at the default text size; larger text stacks them, so a
+  // name or an amount never breaks mid-word.
+  const stacked = fontScale > 1;
 
   return (
-    <View className="flex-row items-stretch" testID="pro-job-facts">
-      <View accessible className="flex-1 gap-0.5 pr-4" testID="pro-job-payout">
+    <View className={stacked ? "gap-4" : "flex-row items-stretch"} testID="pro-job-facts">
+      <View
+        accessible
+        className={stacked ? "gap-0.5" : "flex-1 gap-0.5 pr-4"}
+        testID="pro-job-payout"
+      >
         <Text className="text-footnote text-gray-500">{t("proJobs.screen.receive")}</Text>
         <Text className="text-title-2 text-navy-900">{formatMoneyExact(job.pro_payout_cents)}</Text>
       </View>
       {name ? (
         <>
-          <View className="w-px bg-gray-500/20" />
-          <View accessible className="flex-1 gap-0.5 pl-4" testID="pro-job-customer">
+          {stacked ? null : <View className="w-px bg-gray-500/20" />}
+          <View
+            accessible
+            className={stacked ? "gap-0.5" : "flex-1 gap-0.5 pl-4"}
+            testID="pro-job-customer"
+          >
             <Text className="text-footnote text-gray-500">{t("proJobs.screen.customer")}</Text>
             <Text className="text-title-2 text-navy-900">{name}</Text>
           </View>
@@ -339,11 +359,18 @@ function JobActions({ job }: { job: ProJob }) {
   const name = nameOf(t, job);
   const push = useGuardedPush();
   const { start, busy } = useStartJob(job.id);
+  const { bottom } = useSafeAreaInsets();
   const sheet = (path: "/jobs/[id]/on-the-way" | "/jobs/[id]/check-in") => () =>
     push({ pathname: path, params: { id: job.id } });
 
   return (
-    <View className="gap-3 px-4 pb-4 pt-3" testID="pro-job-actions">
+    // A white dock with the bubble's shadow over the page's edge: the page scrolls under its
+    // rounded top, so a line cut by it reads as scrolling, not as clipped.
+    <View
+      style={[bubbleShadow, continuousCorners, { paddingBottom: bottom + DOCK_PADDING }]}
+      className="gap-3 rounded-t-xl bg-white px-4 pt-4"
+      testID="pro-job-actions"
+    >
       {step === "locked" ? (
         <Notice
           tone="danger"

@@ -628,6 +628,7 @@
         "body": "Cuando un cliente te contrate y pague, el trabajo aparecerá aquí con la dirección y todo lo que necesitas."
       },
       "error": "No pudimos cargar tus trabajos.",
+      "refreshFailed": "No pudimos actualizar tus trabajos.",
       "retry": "Intentar de nuevo",
       "row": "{{status}}. {{when}}. {{what}}.",
       "for": "{{category}} para {{name}}"
@@ -663,10 +664,10 @@
       },
       "time": {
         "scheduled": "Empieza",
-        "onTheWay": "Llegarás a las",
-        "arrived": "Llegada registrada a las",
-        "working": "Empezaste a las",
-        "done": "Terminado a las",
+        "onTheWay": "Llegada prevista",
+        "arrived": "Registraste tu llegada",
+        "working": "Empezaste",
+        "done": "Terminado",
         "closed": "Estaba programado para"
       },
       "scheduledFor": "Programado para {{when}}",
@@ -692,19 +693,18 @@
       },
       "locked": {
         "title": "El registro de llegada está bloqueado",
-        "body": "Demasiados códigos no coincidieron. Avisamos a nuestro equipo de soporte y te ayudará a registrar tu llegada."
+        "body": "Demasiados códigos no coincidieron, así que el registro de llegada está bloqueado para este trabajo. Ya avisamos a nuestro equipo."
       },
       "onMyWay": "Voy en camino",
       "arrived": "Ya llegué",
-      "updateEta": "Cambiar hora de llegada",
+      "updateEta": "Cambiar llegada",
       "start": "Empezar trabajo"
     },
     "announce": {
       "onTheWay": "Vas en camino y {{name}} puede ver a qué hora llegarás.",
       "etaUpdated": "Hora de llegada actualizada.",
       "arrived": "Llegada registrada. Puedes empezar el trabajo.",
-      "working": "Trabajo empezado.",
-      "locked": "El registro de llegada está bloqueado."
+      "working": "Trabajo empezado."
     },
     "failure": {
       "changed": "Este trabajo cambió. Así está ahora.",
@@ -716,15 +716,15 @@
       "title": "¿Cuándo llegarás?",
       "titleUpdate": "Cambia tu hora de llegada",
       "body": "Le mostraremos a {{name}} la hora a la que esperas llegar.",
-      "current": "Dijiste que llegarías a las {{time}}.",
+      "current": "Tu hora de llegada actual: {{time}}.",
       "choices": "Hora de llegada",
       "other": "Otra",
       "custom": "Llego en",
       "earlier": "Antes",
       "later": "Después",
-      "around": "Llegarás alrededor de las {{time}}.",
+      "around": "Llegada estimada: {{time}}.",
       "send": "Voy en camino",
-      "sendUpdate": "Cambiar hora de llegada",
+      "sendUpdate": "Cambiar llegada",
       "notNow": "Ahora no"
     },
     "checkIn": {

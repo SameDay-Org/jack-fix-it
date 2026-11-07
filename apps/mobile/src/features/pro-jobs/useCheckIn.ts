@@ -39,7 +39,7 @@ export type CheckInPhase =
 export function useCheckIn(jobId: string, customer: string, leave: () => void) {
   const { t } = useTranslation();
   const client = useQueryClient();
-  const { access, ask, openSettings } = useLocationAccess();
+  const { access, ask, refused, openSettings } = useLocationAccess();
   const { run, mounted } = useSingleFlight();
   const [code, setCode] = useState("");
   const [shownPhase, setPhase] = useState<CheckInPhase>("entry");
@@ -64,6 +64,10 @@ export function useCheckIn(jobId: string, customer: string, leave: () => void) {
       } catch (error) {
         if (!mounted.current) return;
         const reason = error instanceof LocationUnavailableError ? error.reason : "failed";
+        // Refused for want of permission while it read as granted: read it again first, or the
+        // "back from Settings" rule below would show the code again and loop.
+        if (reason === "denied") await refused();
+        if (!mounted.current) return;
         setPhase(reason === "off" ? "off" : reason === "denied" ? "blocked" : "timeout");
         return;
       }
@@ -110,7 +114,12 @@ export function useCheckIn(jobId: string, customer: string, leave: () => void) {
     const generation = sessionGeneration();
     if (access === "granted") void send(generation);
     else if (access === "blocked") setPhase("blocked");
-    else setPhase("ask");
+    else {
+      setPhase("ask");
+      announce(
+        `${t("proJobs.checkIn.ask.title")}. ${t("proJobs.checkIn.ask.body", { name: customer })}`,
+      );
+    }
   };
 
   /** "Continue" after the explanation: the system's prompt, then the check-in if allowed. */

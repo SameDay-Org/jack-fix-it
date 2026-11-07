@@ -41,9 +41,12 @@ jest.mock(
 // "Your jobs" over the opportunities (#63) has its own suite (features/pro-jobs); here the
 // opportunities are alone, and a pull refreshes the (stubbed) jobs with them.
 const mockRefetchJobs = jest.fn(() => Promise.resolve());
+const mockUseProJobs = jest.fn((_options?: { refetchOnReturn?: boolean }) => ({
+  refetch: mockRefetchJobs,
+}));
 jest.mock("@/features/pro-jobs", () => ({
   YourJobs: () => null,
-  useProJobs: () => ({ refetch: mockRefetchJobs }),
+  useProJobs: (options?: { refetchOnReturn?: boolean }) => mockUseProJobs(options),
 }));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
@@ -306,6 +309,9 @@ describe("ProHomeScreen", () => {
     await renderWithQuery(<ProHomeScreen />);
     await findCard(FRESH.dispatch_id);
     expect(apiGet).toHaveBeenCalledTimes(1);
+    // The jobs are read here for the pull only: "Your jobs" refreshes them on return itself.
+    expect(mockUseProJobs).toHaveBeenCalledWith({ refetchOnReturn: false });
+    expect(mockUseProJobs).not.toHaveBeenCalledWith(undefined);
 
     await act(async () => navigation.setFocused(false));
     await act(async () => navigation.setFocused(true));

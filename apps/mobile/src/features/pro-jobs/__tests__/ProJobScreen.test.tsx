@@ -3,7 +3,14 @@ import "@/i18n";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
-import { AccessibilityInfo, AppState, Linking, Platform, type AppStateStatus } from "react-native";
+import {
+  AccessibilityInfo,
+  AppState,
+  Dimensions,
+  Linking,
+  Platform,
+  type AppStateStatus,
+} from "react-native";
 
 import { ApiError, apiGet, apiPost, NetworkError, SessionExpiredError, useSession } from "@/api";
 import { dismissToast, toastStore } from "@/components/ui/toast";
@@ -59,6 +66,17 @@ const actionButtons = () =>
   screen.queryByTestId("pro-job-actions") && actions().queryAllByRole("button");
 const announced = () =>
   jest.mocked(AccessibilityInfo.announceForAccessibilityWithOptions).mock.calls.map(([m]) => m);
+const LOCKED_NOTICE =
+  "Check-in is locked. Too many codes didn't match, so check-in is locked for this job. " +
+  "We've let our team know.";
+
+let dimensions: jest.SpiedFunction<typeof Dimensions.get> | undefined;
+
+/** The text size the device reports from here on (the window keeps its other values). */
+function atFontScale(fontScale: number): void {
+  const window = Dimensions.get("window");
+  dimensions = jest.spyOn(Dimensions, "get").mockReturnValue({ ...window, fontScale });
+}
 
 /** Renders the screen and waits for the job's title (the API answered). */
 async function open(job: ProJob = proJob()) {
@@ -100,6 +118,8 @@ beforeEach(() => {
 
 afterEach(() => {
   announceSpy.mockRestore();
+  dimensions?.mockRestore();
+  dimensions = undefined;
   dismissToast();
   jest.useRealTimers();
 });
@@ -142,7 +162,7 @@ describe("ProJobScreen", () => {
       await open();
 
       expect(
-        screen.getByText("When you head out, tap On my way so Maria sees when you'll arrive."),
+        screen.getByText("When you head out, tap I'm on my way so Maria sees when you'll arrive."),
       ).toBeTruthy();
       expect(actionButtons()?.map((button) => button.props.accessibilityLabel)).toEqual([
         "I'm on my way",
@@ -152,6 +172,29 @@ describe("ProJobScreen", () => {
         pathname: "/jobs/[id]/on-the-way",
         params: { id: JOB_ID },
       });
+    });
+
+    it("at the default text size, what the pro receives and the customer sit side by side with a divider", async () => {
+      atFontScale(1);
+      await open();
+
+      const facts = screen.getByTestId("pro-job-facts");
+      expect(facts.props.className).toContain("flex-row");
+      // Payout, divider, customer.
+      expect(facts.children).toHaveLength(3);
+      expect(facts.children[0]).toBe(screen.getByTestId("pro-job-payout"));
+      expect(facts.children[2]).toBe(screen.getByTestId("pro-job-customer"));
+    });
+
+    it("at a larger text size, what the pro receives and the customer stack, with no divider", async () => {
+      atFontScale(2);
+      await open();
+
+      const facts = screen.getByTestId("pro-job-facts");
+      expect(facts.props.className).not.toContain("flex-row");
+      expect(facts.children).toHaveLength(2);
+      expect(facts.children[0]).toBe(screen.getByTestId("pro-job-payout"));
+      expect(facts.children[1]).toBe(screen.getByTestId("pro-job-customer"));
     });
 
     it("announces nothing when the screen opens", async () => {
@@ -211,11 +254,27 @@ describe("ProJobScreen", () => {
       expect(locked.getByText("Check-in is locked")).toBeTruthy();
       expect(
         locked.getByText(
-          "Too many codes didn't match. Our support team has been alerted and will help you check in.",
+          "Too many codes didn't match, so check-in is locked for this job. We've let our team know.",
         ),
       ).toBeTruthy();
       expect(actionButtons()).toEqual([]);
       expect(screen.queryByTestId("pro-job-guide")).toBeNull();
+    });
+
+    it("a lock that lands while the screen is up is said once, by its notice", async () => {
+      const client = newQueryClient();
+      jest.mocked(apiGet).mockResolvedValue(onTheWay());
+      await renderWithQuery(<ProJobScreen />, client);
+      await screen.findByRole("button", { name: "I've arrived" });
+      expect(announceSpy).not.toHaveBeenCalled();
+
+      await act(async () =>
+        client.setQueryData(proJobQueryKey(JOB_ID, 1), onTheWay({ arrival_code_locked: true })),
+      );
+      await screen.findByTestId("pro-job-locked");
+      await act(async () => undefined);
+
+      expect(announced()).toEqual([LOCKED_NOTICE]);
     });
 
     it("without a customer name says the customer and shows no Customer column", async () => {
@@ -237,7 +296,7 @@ describe("ProJobScreen", () => {
 
       expect(
         screen.getByText(
-          "When you head out, tap On my way so the customer sees when you'll arrive.",
+          "When you head out, tap I'm on my way so the customer sees when you'll arrive.",
         ),
       ).toBeTruthy();
     });
