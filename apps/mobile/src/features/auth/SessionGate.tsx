@@ -18,10 +18,14 @@ import { OfflineScreen } from "./OfflineScreen";
  * screen instead of asking for a login the device may not need. Signed in goes to `(app)`,
  * everyone else to `(auth)`, deep links included: a protected group redirects to the other
  * group's entry. A sign-in or a sign-out switches groups in one commit (see `GroupStack`).
+ *
+ * An account still in its sign-up flow (#292) stays in `(auth)`, on the flow: a sign-up signs in
+ * mid-flow without changing groups, so the screen it happens on stays put, and a relaunch lands
+ * back on the flow. Finishing the flow moves it to `(app)` like any other sign-in.
  */
 export function SessionGate() {
   const { t } = useTranslation();
-  const { status, restoreFailure } = useSession();
+  const { status, user, restoreFailure, onboardingUserId } = useSession();
 
   if (status === "restoring") {
     return (
@@ -37,7 +41,13 @@ export function SessionGate() {
   }
   if (restoreFailure === "offline") return <OfflineScreen />;
 
-  return <GroupStack group={status === "signedIn" ? "(app)" : "(auth)"} />;
+  const onboarding = status === "signedIn" && user !== null && user.id === onboardingUserId;
+  return (
+    <GroupStack
+      group={status === "signedIn" && !onboarding ? "(app)" : "(auth)"}
+      onboarding={onboarding}
+    />
+  );
 }
 
 type Group = "(app)" | "(auth)";
@@ -72,7 +82,7 @@ function focusedGroup(navigation: ContainerRef): Group | undefined {
  * start signed out on the launch URL) guards from the session at once, as before, and is
  * replaced the same way.
  */
-function GroupStack({ group }: { group: Group }) {
+function GroupStack({ group, onboarding }: { group: Group; onboarding: boolean }) {
   const navigation = useNavigationContainerRef();
   const [shown, setShown] = useState(group);
   // The group of the last replace. Right after it the container can still report the group that
@@ -88,12 +98,16 @@ function GroupStack({ group }: { group: Group }) {
       const focused = focusedGroup(navigation);
       if (focused === undefined || focused === group) return;
     }
-    // Synchronous: `dispatch` queues the action for a later render, as the redirect does.
-    navigation.dispatchSync({ type: "REPLACE", payload: { name: group } });
+    // Synchronous: `dispatch` queues the action for a later render, as the redirect does. Not for
+    // an account on its sign-up flow, restored while the launch frame covered the router: the
+    // signed-in group's guard sends it to the flow, where a replace would open the group's first
+    // screen (Welcome), as Expo Router's navigators ignore a nested screen param. That redirect
+    // takes a few renders, under the launch intro.
+    if (!onboarding) navigation.dispatchSync({ type: "REPLACE", payload: { name: group } });
     replaced.current = group;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the guards must change in the same commit as the navigation state dispatched above; an update from a layout effect is committed before paint.
     setShown(group);
-  }, [group, navigation, shown]);
+  }, [group, navigation, onboarding, shown]);
 
   return (
     <Stack
@@ -104,7 +118,11 @@ function GroupStack({ group }: { group: Group }) {
         contentStyle: { backgroundColor: tokens.colors["navy-900"] },
       }}
     >
-      <Stack.Protected guard={shown === "(app)"} redirectTo="/(auth)/welcome">
+      <Stack.Protected
+        guard={shown === "(app)"}
+        // An account in its sign-up flow is sent back to the flow, which resumes where it was.
+        redirectTo={onboarding ? "/(auth)/sign-up" : "/(auth)/welcome"}
+      >
         <Stack.Screen name="(app)" />
       </Stack.Protected>
       <Stack.Protected guard={shown === "(auth)"} redirectTo="/">

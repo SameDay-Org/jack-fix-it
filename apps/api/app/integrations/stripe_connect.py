@@ -7,42 +7,30 @@ client on httpx (timeout and retries from settings): no synchronous call blocks 
 What leaves this module is typed and minimal: an account's state as three booleans, a link's URL
 and expiry, the ids of the accounts a profile's metadata names. Stripe's errors become
 `StripeUnavailableError` (network, timeout, 409, 429, 5xx) or `StripeRejectedError` (any other
-4xx), each carrying only Stripe's request id and error code: an SDK error's text can name the
-account id, so it is never chained or logged. The `stripe`
+4xx), each carrying only Stripe's request id and error code (stripe_errors.py, shared with the
+payments wrapper): an SDK error's text can name the account id, so it is never chained or
+logged. The `stripe`
 logger, which names every request URL (account ids included) at INFO and request bodies (the
 email) at DEBUG, runs at WARNING (app/observability.py).
 """
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import NoReturn, Protocol
+from typing import Protocol
 
 import stripe
 from starlette.requests import Request
 from stripe.params import AccountListParams
 
 from app.config import Settings
+from app.integrations.stripe_errors import StripeCallError as StripeCallError
+from app.integrations.stripe_errors import StripeRejectedError as StripeRejectedError
+from app.integrations.stripe_errors import StripeUnavailableError as StripeUnavailableError
+from app.integrations.stripe_errors import raise_typed
 
 EXPRESS_COUNTRY = "US"
 # The most accounts one list page returns (Stripe's maximum).
 ACCOUNT_LIST_PAGE_SIZE = 100
-
-
-class StripeCallError(Exception):
-    """A Stripe call failed. Carries Stripe's request id and error code, never its message."""
-
-    def __init__(self, *, request_id: str | None = None, code: str | None = None) -> None:
-        super().__init__(type(self).__name__)
-        self.request_id = request_id
-        self.code = code
-
-
-class StripeUnavailableError(StripeCallError):
-    """Stripe could not be reached, timed out, rate-limited the call or answered a 5xx."""
-
-
-class StripeRejectedError(StripeCallError):
-    """Stripe answered a 4xx: a bad request, a deleted account, a key it refuses."""
 
 
 @dataclass(frozen=True)
@@ -142,7 +130,7 @@ class StripeExpressConnect:
                 options={"idempotency_key": idempotency_key},
             )
         except stripe.StripeError as error:
-            _raise_typed(error)
+            raise_typed(error)
         response = account.last_response
         return CreatedAccount(
             account_id=account.id, request_id=response.request_id if response else None
@@ -161,14 +149,14 @@ class StripeExpressConnect:
                 }
             )
         except stripe.StripeError as error:
-            _raise_typed(error)
+            raise_typed(error)
         return OnboardingLink(url=link.url, expires_at=datetime.fromtimestamp(link.expires_at, UTC))
 
     async def retrieve_account(self, account_id: str) -> AccountState:
         try:
             account = await self._client.v1.accounts.retrieve_async(account_id)
         except stripe.StripeError as error:
-            _raise_typed(error)
+            raise_typed(error)
         requirements = account.requirements
         return AccountState(
             details_submitted=bool(account.details_submitted),
@@ -186,7 +174,7 @@ class StripeExpressConnect:
             try:
                 page = await self._client.v1.accounts.list_async(params=params)
             except stripe.StripeError as error:
-                _raise_typed(error)
+                raise_typed(error)
             found += [
                 account.id
                 for account in page.data
@@ -206,27 +194,11 @@ class StripeExpressConnect:
         try:
             account = await self._client.v1.accounts.retrieve_async(account_id)
         except stripe.StripeError as error:
-            _raise_typed(error)
+            raise_typed(error)
         if account.metadata is None:
             return None
         profile_id = account.metadata.to_dict().get("pro_profile_id")
         return profile_id if isinstance(profile_id, str) else None
-
-
-def _raise_typed(error: stripe.StripeError) -> NoReturn:
-    """Stripe's error as ours, with its request id and code only; never chained, as its text
-    and body can name the account."""
-    status = error.http_status
-    # No status: the network or a timeout. 409 (a concurrent request, a lock timeout) and 429
-    # are Stripe's own "retry later".
-    kind = (
-        StripeUnavailableError
-        if status is None or status in (409, 429) or status >= 500
-        else StripeRejectedError
-    )
-    # The SDK sets `code` on some error classes only; the parsed error body has it on all.
-    code = error.code or (error.error.code if error.error else None)
-    raise kind(request_id=error.request_id, code=code) from None
 
 
 def get_stripe_connect(request: Request) -> StripeConnect | None:

@@ -115,7 +115,7 @@ export function DescribeStep({ steps }: DescribeStepProps) {
       />
       <View className="gap-3">
         <Text className="text-headline text-navy-900">
-          {t("request.optionalLabel", { label: t("request.describe.mediaTitle") })}
+          {t("common.optionalLabel", { label: t("request.describe.mediaTitle") })}
         </Text>
         {refused ? (
           <Notice

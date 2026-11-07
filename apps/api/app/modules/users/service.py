@@ -95,6 +95,11 @@ class UserService:
         user = await self._users.get_by_id(user_id)
         return _to_account(user) if user else None
 
+    async def get_by_email(self, email: str) -> UserAccount | None:
+        """Exact match: emails are stored lowercase, so pass a normalized email."""
+        user = await self._users.get_by_email(email)
+        return _to_account(user) if user else None
+
     async def get_credentials_by_email(
         self, email: str, *, lock: bool = False
     ) -> UserCredentials | None:
@@ -210,6 +215,15 @@ class UserService:
 
     async def update_password_hash(self, user_id: uuid.UUID, password_hash: str) -> None:
         await self._users.update_password_hash(user_id, password_hash)
+
+    async def stripe_customer_id(self, user_id: uuid.UUID) -> str | None:
+        """The user's Stripe Customer id (#58); None until a payment created one."""
+        return await self._users.get_stripe_customer_id(user_id)
+
+    async def set_stripe_customer_id_if_missing(self, user_id: uuid.UUID, customer_id: str) -> bool:
+        """Stores the user's Stripe Customer id unless one is stored already (another
+        payment's call got there first): False then, and the stored one is the user's."""
+        return await self._users.set_stripe_customer_id_if_missing(user_id, customer_id)
 
     async def phone_verified_by_other(self, phone: str, user_id: uuid.UUID) -> bool:
         """True when another account has verified this number."""
