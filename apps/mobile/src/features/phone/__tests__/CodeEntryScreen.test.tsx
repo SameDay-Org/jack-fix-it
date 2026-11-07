@@ -16,10 +16,10 @@ import {
   user,
   type FetchMock,
 } from "../../../api/__tests__/helpers";
-import { sessionStore } from "../../../api/session";
+import { sessionGeneration, sessionStore } from "../../../api/session";
 import { CodeEntryScreen } from "../CodeEntryScreen";
 import { phoneConfig } from "../config";
-import { phoneFlowStore } from "../phoneFlow";
+import { phoneFlowStore, startCodeStep } from "../phoneFlow";
 import { CODE, DIGITS, E164, renderScreen, signIn, watchConsoleForPii } from "./helpers";
 
 jest.mock(
@@ -68,7 +68,7 @@ beforeEach(() => {
   announce = jest
     .spyOn(AccessibilityInfo, "announceForAccessibility")
     .mockImplementation(() => undefined);
-  phoneFlowStore.setState({ pendingNumber: DIGITS });
+  startCodeStep(DIGITS, sessionGeneration());
   jest.mocked(router.back).mockClear();
   jest.mocked(router.dismissTo).mockClear();
   jest.mocked(Redirect).mockClear();

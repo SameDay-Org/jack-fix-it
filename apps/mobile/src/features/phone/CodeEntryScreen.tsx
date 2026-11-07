@@ -4,18 +4,33 @@ import { useTranslation } from "react-i18next";
 import { KeyboardAvoidingView, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useSessionGeneration } from "@/api";
 import { Button, CodeInput, Screen, showToast } from "@/components/ui";
 
 import { CODE_LENGTH, phoneConfig } from "./config";
-import { forgetPendingNumber, leavePhoneFlow, usePendingNumber } from "./phoneFlow";
+import {
+  forgetPendingNumber,
+  leavePhoneFlow,
+  usePendingGeneration,
+  usePendingNumber,
+} from "./phoneFlow";
 import { formatE164, toE164 } from "./phoneNumber";
 import { useCodeEntry } from "./useCodeEntry";
 
-/** The code step; with no number waiting for a code (a deep link) it goes to the phone step. */
+/**
+ * The code step; with no number waiting for a code (a deep link) it goes to the phone step. The
+ * code belongs to the session it was sent in (#295 Vault B2): the check and every resend are pinned
+ * to it, and once that session is gone (a sign-out or another account signing in forgets the
+ * number; the same account signing in again leaves it stale) the step goes to the phone step too.
+ */
 export function CodeEntryScreen() {
   const digits = usePendingNumber();
-  if (digits === null) return <Redirect href="/verify-phone" />;
-  return <CodeEntry digits={digits} />;
+  const generation = usePendingGeneration();
+  const current = useSessionGeneration();
+  if (digits === null || generation === null || generation !== current) {
+    return <Redirect href="/verify-phone" />;
+  }
+  return <CodeEntry digits={digits} generation={generation} />;
 }
 
 /** "Change number" goes back to the phone step, which still holds the number to edit. */
@@ -24,13 +39,17 @@ const changeNumber = () => {
   else router.replace("/verify-phone");
 };
 
-function CodeEntry({ digits }: { digits: string }) {
+function CodeEntry({ digits, generation }: { digits: string; generation: number }) {
   const { t } = useTranslation();
   const { top } = useSafeAreaInsets();
-  const entry = useCodeEntry(digits, () => {
-    showToast({ message: t("phone.verified"), tone: "success" });
-    leavePhoneFlow();
-  });
+  const entry = useCodeEntry(
+    digits,
+    () => {
+      showToast({ message: t("phone.verified"), tone: "success" });
+      leavePhoneFlow();
+    },
+    { generation },
+  );
   const { countryCode } = phoneConfig;
   // The number lives as long as this step does.
   useEffect(() => forgetPendingNumber, []);

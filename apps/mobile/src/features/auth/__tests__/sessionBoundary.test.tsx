@@ -16,13 +16,18 @@ import {
   user,
   type FetchMock,
 } from "../../../api/__tests__/helpers";
-import { getAccessToken, refreshSession, sessionStore } from "../../../api/session";
+import {
+  getAccessToken,
+  refreshSession,
+  sessionGeneration,
+  sessionStore,
+} from "../../../api/session";
 import AppLayout, { unstable_settings as appSettings } from "../../../app/(app)/_layout";
 import AuthLayout, { unstable_settings } from "../../../app/(auth)/_layout";
 import { AccountScreen } from "../../account/AccountScreen";
 import { CodeEntryScreen } from "../../phone/CodeEntryScreen";
 import { PhoneEntryScreen } from "../../phone/PhoneEntryScreen";
-import { phoneFlowStore } from "../../phone/phoneFlow";
+import { phoneFlowStore, startCodeStep } from "../../phone/phoneFlow";
 import { TabsLayout } from "../../tabs/TabsLayout";
 import { HomePlaceholderScreen } from "../HomePlaceholderScreen";
 import { SessionGate } from "../SessionGate";
@@ -232,7 +237,7 @@ describe("the first signed-out commit holds nothing private (#205, Vault round 1
   it("a refresh the server rejects removes the code step and the typed code at once", async () => {
     signIn();
     seedRefreshToken("refresh-boundary");
-    phoneFlowStore.setState({ pendingNumber: TYPED_PHONE });
+    startCodeStep(TYPED_PHONE, sessionGeneration());
     const view = await renderRouter(routes, { initialUrl: "/verify-phone/code" });
     await fireEvent.changeText(screen.getByTestId("phone-code"), TYPED_CODE);
     expect(screen.getByDisplayValue(TYPED_CODE)).toBeTruthy();
@@ -253,7 +258,7 @@ describe("the first signed-out commit holds nothing private (#205, Vault round 1
   it("an expired session that cannot refresh removes the code step and the typed code at once", async () => {
     signIn(-1); // the access token has already expired: the next request refreshes first
     seedRefreshToken("refresh-boundary");
-    phoneFlowStore.setState({ pendingNumber: TYPED_PHONE });
+    startCodeStep(TYPED_PHONE, sessionGeneration());
     const view = await renderRouter(routes, { initialUrl: "/verify-phone/code" });
     await fireEvent.changeText(screen.getByTestId("phone-code"), TYPED_CODE);
     fetchMock.mockResolvedValue(errorResponse(401, "invalid_token"));

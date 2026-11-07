@@ -62,7 +62,7 @@ export function usePhoneEntry(onSent: (generation: number) => void): PhoneEntry 
       await sendCode(toE164(countryCode, digits), signal, generation);
       if (signal.aborted) return; // the user left: this flow is over
       if (!isCurrentGeneration(generation)) return; // sent for a session that is gone
-      startCodeStep(digits);
+      startCodeStep(digits, generation);
       onSent(generation);
     } catch (failure) {
       if (signal.aborted) return;

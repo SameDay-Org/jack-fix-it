@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { KeyboardAvoidingView, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useSession } from "@/api";
 import { Button, Input, Screen } from "@/components/ui";
 import { BackButton } from "@/features/auth/components/BackButton";
 
@@ -16,6 +17,13 @@ import { usePhoneEntry } from "./usePhoneEntry";
  * fixed calling code, then "Send code". A sign-up verifies its phone inside its own flow (#295).
  */
 export function PhoneEntryScreen() {
+  // The number typed belongs to the account it was typed for: another account signing in while
+  // the step is open starts it empty (#295 Vault B2).
+  const userId = useSession().user?.id;
+  return <PhoneEntry key={userId} />;
+}
+
+function PhoneEntry() {
   const { t } = useTranslation();
   const { top } = useSafeAreaInsets();
   const entry = usePhoneEntry(() => router.push("/verify-phone/code"));
