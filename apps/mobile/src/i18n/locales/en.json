@@ -399,7 +399,8 @@
   "permissions": {
     "camera": "Jack uses the camera to take your profile photo and photos of what needs fixing.",
     "photos": "Jack uses the photos you choose to show what needs fixing.",
-    "motion": "Jack uses your phone's motion to tilt your ID card as you move it."
+    "motion": "Jack uses your phone's motion to tilt your ID card as you move it.",
+    "location": "Jack Fix It uses your location when you check in at a job, so the customer knows you arrived."
   },
   "quotes": {
     "title": "Your quotes",
@@ -616,6 +617,150 @@
       "title": "We couldn't load this request",
       "body": "Check your connection and try again.",
       "retry": "Try again"
+    }
+  },
+  "proJobs": {
+    "yourJobs": {
+      "title": "Your jobs",
+      "loading": "Loading your jobs",
+      "empty": {
+        "title": "No jobs on your calendar",
+        "body": "When a customer hires you and pays, the job shows up here with the address and everything you need."
+      },
+      "error": "We couldn't load your jobs.",
+      "refreshFailed": "We couldn't refresh your jobs.",
+      "retry": "Try again",
+      "row": "{{status}}. {{when}}. {{what}}.",
+      "for": "{{category}} for {{name}}"
+    },
+    "day": {
+      "today": "Today",
+      "tomorrow": "Tomorrow",
+      "todayInline": "today",
+      "tomorrowInline": "tomorrow"
+    },
+    "when": "{{day}}, {{time}}",
+    "status": {
+      "scheduled": "Scheduled",
+      "onTheWay": "On the way",
+      "locked": "Check-in locked",
+      "arrived": "Arrived",
+      "working": "Working",
+      "done": "Done",
+      "closed": "Cancelled"
+    },
+    "customerFallback": "the customer",
+    "screen": {
+      "loading": "Loading your job",
+      "refreshFailed": "We couldn't refresh this job.",
+      "retry": "Try again",
+      "gone": {
+        "title": "We couldn't find this job",
+        "body": "It may have been cancelled, or it belongs to another account.",
+        "home": "Go to home"
+      },
+      "error": {
+        "title": "We couldn't load this job",
+        "body": "Check your connection and try again.",
+        "retry": "Try again"
+      },
+      "time": {
+        "scheduled": "Starts",
+        "onTheWay": "You'll arrive by",
+        "arrived": "Checked in at",
+        "working": "Started at",
+        "done": "Marked done at",
+        "closed": "Was scheduled for"
+      },
+      "scheduledFor": "Scheduled for {{when}}",
+      "receive": "You'll receive",
+      "customer": "Customer",
+      "where": "Where",
+      "openMaps": "Open in Maps",
+      "openMapsLabel": "Open {{address}} in Maps",
+      "mapsFailed": "We couldn't open your maps app.",
+      "copyHint": "Press and hold the address to copy it.",
+      "noAddress": "The address is no longer shown for this job.",
+      "theJob": "The job",
+      "guide": {
+        "scheduled": "When you head out, tap I'm on my way so {{name}} sees when you'll arrive.",
+        "onTheWay": "When you get there, ask {{name}} for the 4-digit arrival code in their app.",
+        "arrived": "You're checked in. Start the job when you begin the work.",
+        "done": "You marked this job done.",
+        "closed": "This job was cancelled."
+      },
+      "next": {
+        "title": "Next: photos and Job's done",
+        "body": "Adding before and after photos and marking the job done are coming to the app soon."
+      },
+      "locked": {
+        "title": "Check-in is locked",
+        "body": "Too many codes didn't match, so check-in is locked for this job. We've let our team know."
+      },
+      "onMyWay": "I'm on my way",
+      "arrived": "I've arrived",
+      "updateEta": "Update arrival time",
+      "start": "Start job"
+    },
+    "announce": {
+      "onTheWay": "You're on your way, and {{name}} can see when you'll arrive.",
+      "etaUpdated": "Arrival time updated.",
+      "arrived": "Checked in. You can start the job.",
+      "working": "Job started."
+    },
+    "failure": {
+      "changed": "This job changed. Here's where it stands now.",
+      "gone": "This job is no longer available.",
+      "offline": "We couldn't reach Jack Fix It. Check your connection and try again.",
+      "failed": "Something went wrong. Please try again."
+    },
+    "eta": {
+      "title": "When will you get there?",
+      "titleUpdate": "Update your arrival time",
+      "body": "We'll show {{name}} the time you expect to arrive.",
+      "current": "You said you'd arrive by {{time}}.",
+      "choices": "Arrival time",
+      "other": "Other",
+      "custom": "Arrive in",
+      "earlier": "Earlier",
+      "later": "Later",
+      "around": "You'll arrive around {{time}}.",
+      "send": "I'm on my way",
+      "sendUpdate": "Update arrival time",
+      "notNow": "Not now"
+    },
+    "checkIn": {
+      "title": "Check in",
+      "body": "Ask {{name}} for the 4-digit arrival code in their app.",
+      "code": "Arrival code",
+      "locationNote": "We'll also check your location, only for this check-in.",
+      "submit": "Check in",
+      "locating": "Finding your location…",
+      "wrong_one": "Code didn't match. {{count}} try left.",
+      "wrong_other": "Code didn't match. {{count}} tries left.",
+      "wrongUnknown": "Code didn't match. Check it with {{name}} and try again.",
+      "close": "Close",
+      "notNow": "Not now",
+      "ask": {
+        "title": "Share your location to check in",
+        "body": "Jack Fix It checks your location once, when you check in, so {{name}} knows you've arrived. It's used only for this check-in.",
+        "continue": "Continue"
+      },
+      "blocked": {
+        "title": "Location is off for Jack Fix It",
+        "body": "Checking in needs your location so {{name}} knows you've arrived. Turn it on in Settings, then come back here.",
+        "settings": "Open Settings"
+      },
+      "off": {
+        "title": "Your phone's location is off",
+        "body": "Turn on location in your phone's settings, then try again.",
+        "retry": "Try again"
+      },
+      "timeout": {
+        "title": "We couldn't find your location yet",
+        "body": "This can take a moment indoors. Try again in a few seconds.",
+        "retry": "Try again"
+      }
     }
   },
   "quoteForm": {

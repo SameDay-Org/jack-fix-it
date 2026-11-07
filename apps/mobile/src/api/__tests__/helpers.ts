@@ -57,11 +57,16 @@ export const storedOnboardingMarker = (): string | null =>
 export const tokenCalls = (method: jest.Mock): unknown[][] =>
   method.mock.calls.filter(([key]: unknown[]) => key === REFRESH_TOKEN_KEY);
 
-/** A Response stand-in with what the client reads: status, ok, json() and text(). */
-export function jsonResponse(status: number, body?: unknown): Response {
+/** A Response stand-in with what the client reads: status, ok, headers, json() and text(). */
+export function jsonResponse(
+  status: number,
+  body?: unknown,
+  headers: Record<string, string> = {},
+): Response {
   return {
     status,
     ok: status >= 200 && status < 300,
+    headers: new Headers(headers),
     json: async () => {
       if (body === undefined) throw new Error("no body");
       return body;
@@ -70,8 +75,11 @@ export function jsonResponse(status: number, body?: unknown): Response {
   } as unknown as Response;
 }
 
-export const errorResponse = (status: number, code: string): Response =>
-  jsonResponse(status, { error: { code, message: code } });
+export const errorResponse = (
+  status: number,
+  code: string,
+  headers: Record<string, string> = {},
+): Response => jsonResponse(status, { error: { code, message: code } }, headers);
 
 export const user: ApiSchema<"UserOut"> = {
   id: "11111111-1111-4111-8111-111111111111",

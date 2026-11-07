@@ -172,7 +172,9 @@ export async function sendRequest<T>(
   }
 
   if (response.status === 204) return undefined as T;
-  if (!response.ok) throw new ApiError(response.status, await readErrorCode(response));
+  if (!response.ok) {
+    throw new ApiError(response.status, await readErrorCode(response), response.headers);
+  }
   // An accepted request answers 202 with an empty body (the contract types it `undefined`). A 202
   // that carries anything else must be JSON like any other answer: a malformed body is an error,
   // never a silent acceptance.

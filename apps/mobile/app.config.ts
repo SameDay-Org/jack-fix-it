@@ -31,11 +31,13 @@ const PERMISSION_PROMPTS = {
     NSCameraUsageDescription: en.permissions.camera,
     NSPhotoLibraryUsageDescription: en.permissions.photos,
     NSMotionUsageDescription: en.permissions.motion,
+    NSLocationWhenInUseUsageDescription: en.permissions.location,
   },
   es: {
     NSCameraUsageDescription: es.permissions.camera,
     NSPhotoLibraryUsageDescription: es.permissions.photos,
     NSMotionUsageDescription: es.permissions.motion,
+    NSLocationWhenInUseUsageDescription: es.permissions.location,
   },
 };
 
@@ -104,6 +106,24 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ["expo-sensors", { motionPermission: en.permissions.motion }],
       // The share sheet for the card's PNG. Without options the app receives no shares.
       "expo-sharing",
+      // The pro's check-in at a job (#63; a change here needs a new dev build): the location
+      // while the app is in use, read once when the pro checks in. No "always" or background
+      // location (no background mode on iOS, no ACCESS_BACKGROUND_LOCATION or foreground service
+      // on Android) and no temporary full-accuracy prompt. Motion activity stays off on Android;
+      // the iOS motion string is the ID card's, set above.
+      [
+        "expo-location",
+        {
+          locationWhenInUsePermission: en.permissions.location,
+          locationAlwaysAndWhenInUsePermission: false,
+          locationAlwaysPermission: false,
+          locationFullAccuracyPermission: false,
+          isIosBackgroundLocationEnabled: false,
+          isAndroidBackgroundLocationEnabled: false,
+          isAndroidForegroundServiceEnabled: false,
+          isAndroidMotionActivityEnabled: false,
+        },
+      ],
       // The Payment Sheet (#59; a change here needs a new dev build): Apple Pay's merchant id in
       // the iOS entitlements, Google Pay's wallet flag in the Android manifest. iOS resolves the
       // Stripe SDK through CocoaPods: Swift Package Manager would need dynamic frameworks for

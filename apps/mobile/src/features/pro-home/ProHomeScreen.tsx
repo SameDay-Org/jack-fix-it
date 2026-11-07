@@ -4,12 +4,14 @@ import { Text, View } from "react-native";
 
 import { useSession } from "@/api";
 import { Screen, useTabBarInset } from "@/components/ui";
+import { useProJobs, YourJobs } from "@/features/pro-jobs";
 
 import { OpportunityList } from "./OpportunityList";
 
 /**
- * The pro's home (#219), the Home tab: a greeting, then the new opportunities,
- * which scroll the header along. The wallet (#70) and the current job (#63) come later.
+ * The pro's home (#219), the Home tab: a greeting, the pro's active jobs (#63), then the new
+ * opportunities, which scroll the header along. A pull refreshes the jobs with the
+ * opportunities. The wallet (#70) comes later.
  */
 export function ProHomeScreen() {
   const { t } = useTranslation();
@@ -17,6 +19,8 @@ export function ProHomeScreen() {
   // Tabs stay mounted while another one shows: only the focused tab owns the status bar.
   const focused = useIsFocused();
   const inset = useTabBarInset();
+  // The pull's refresh only: "Your jobs" refreshes the list on focus and foreground itself.
+  const { refetch: refetchJobs } = useProJobs({ refetchOnReturn: false });
 
   if (!user) return null;
 
@@ -26,6 +30,7 @@ export function ProHomeScreen() {
     <Screen bar="light" edges={[]} ownsStatusBar={focused} testID="pro-home">
       <View className="flex-1" style={{ paddingBottom: inset }}>
         <OpportunityList
+          onRefresh={refetchJobs}
           header={
             <View className="gap-6 pb-4 pt-2">
               <Text
@@ -37,6 +42,7 @@ export function ProHomeScreen() {
                   ? t("opportunities.greeting", { name: firstName })
                   : t("opportunities.greetingNoName")}
               </Text>
+              <YourJobs />
               <Text accessibilityRole="header" className="text-headline text-navy-900">
                 {t("opportunities.title")}
               </Text>
