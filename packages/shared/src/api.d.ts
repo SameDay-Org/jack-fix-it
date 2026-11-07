@@ -667,6 +667,158 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/requests/{request_id}/quotes/{quote_id}/payment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pay for the quote I accepted
+         * @description What the Payment Sheet needs to charge the customer for the quote they accepted: the
+         *     PaymentIntent's client secret, the customer and an ephemeral key for it, the publishable
+         *     key, and the amount, the tax and the total shown before paying. The amounts are the
+         *     accepted quote's, computed on the server; the body takes no field. The first call creates
+         *     the PaymentIntent; later calls return the same one (a new ephemeral key each time), until
+         *     the payment succeeds (then the job exists: 409). The pro is checked again on every call:
+         *     one who can no longer be hired is a 409, and nothing is created.
+         */
+        post: operations["create_payment_v1_requests__request_id__quotes__quote_id__payment_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/requests/{request_id}/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Follow the job of one of my service requests
+         * @description The job once paid: its status, the scheduled start, the pro's public card, the ETA once
+         *     the pro is on the way, the arrival code to give the pro (only while they are on the way and
+         *     have not checked in), the history and what the customer paid.
+         */
+        get: operations["get_request_job_v1_requests__request_id__job_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pros/me/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List my jobs
+         * @description The caller's jobs, newest scheduled start first.
+         */
+        get: operations["list_my_jobs_v1_pros_me_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pros/me/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * See one of my jobs
+         * @description The job with the whole address and the customer's first name. Never the arrival code or
+         *     a contact.
+         */
+        get: operations["get_my_job_v1_pros_me_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pros/me/jobs/{job_id}/on-the-way": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Tell the customer I am on my way
+         * @description Scheduled -> on the way, with an ETA the customer sees; the customer gets an arrival
+         *     code to give the pro on arrival. Again while on the way: only the ETA changes (the code
+         *     stays).
+         */
+        post: operations["mark_on_the_way_v1_pros_me_jobs__job_id__on_the_way_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pros/me/jobs/{job_id}/check-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check in at the job with the customer's arrival code
+         * @description Arrived: the code the customer gives the pro, and where the pro is (recorded only). Once
+         *     checked in, calling it again answers the job unchanged.
+         */
+        post: operations["check_in_v1_pros_me_jobs__job_id__check_in_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pros/me/jobs/{job_id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start working on the job
+         * @description On the way -> working, after the check-in.
+         */
+        post: operations["start_job_v1_pros_me_jobs__job_id__start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/devices": {
         parameters: {
             query?: never;
@@ -966,6 +1118,24 @@ export interface components {
              */
             locked: boolean;
         };
+        /** CheckInIn */
+        CheckInIn: {
+            /**
+             * Arrival Code
+             * @description The 4 digits the customer gives the pro.
+             */
+            arrival_code: string;
+            /**
+             * Lat
+             * @description The pro's latitude.
+             */
+            lat: number;
+            /**
+             * Lng
+             * @description The pro's longitude.
+             */
+            lng: number;
+        };
         /**
          * CheckStatus
          * @enum {string}
@@ -1003,6 +1173,60 @@ export interface components {
             state: string;
             /** Zips */
             zips: components["schemas"]["ZipOut"][];
+        };
+        /**
+         * CustomerJob
+         * @description The customer's job on their request, once paid.
+         */
+        CustomerJob: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            status: components["schemas"]["JobStatus"];
+            /**
+             * Customer Status
+             * @description The i18n key of the status the customer sees (docs/glossary.md).
+             * @example customerStatus.professionalOnTheWay
+             */
+            customer_status: string;
+            /**
+             * Scheduled Start At
+             * Format: date-time
+             * @description The accepted quote's proposed start.
+             */
+            scheduled_start_at: string;
+            /** @description The pro's public card, as the quote list shows it. */
+            pro: components["schemas"]["QuotePro"];
+            /**
+             * Eta At
+             * @description When the pro expects to arrive: set by On my way; null before.
+             */
+            eta_at: string | null;
+            /**
+             * Arrival Code
+             * @description The 4 digits the customer gives the pro on arrival: only while the job is on the way and the pro has not checked in; null before and after.
+             * @example 0427
+             */
+            arrival_code: string | null;
+            /**
+             * Timeline
+             * @description The job's history, oldest first.
+             */
+            timeline: components["schemas"]["JobTimelineEntry"][];
+            /**
+             * Amount Cents
+             * @description The price paid for the service.
+             */
+            amount_cents: number;
+            /** Tax Cents */
+            tax_cents: number;
+            /**
+             * Customer Total Cents
+             * @description What the customer paid: amount plus tax.
+             */
+            customer_total_cents: number;
         };
         /**
          * CustomerQuote
@@ -1216,6 +1440,66 @@ export interface components {
             /** Max */
             max: number;
         };
+        /**
+         * JobAddress
+         * @description Where the job is: the pro of a paid job sees the whole address, to get there.
+         */
+        JobAddress: {
+            /** Line1 */
+            line1: string;
+            /** Line2 */
+            line2: string | null;
+            /** City */
+            city: string;
+            /** State */
+            state: string;
+            /** Zip Code */
+            zip_code: string;
+        };
+        /** JobCategory */
+        JobCategory: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Slug */
+            slug: string;
+            /**
+             * Names
+             * @description Display name per locale, e.g. en and es.
+             */
+            names: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * JobStatus
+         * @description Internal states (docs/glossary.md). Transitions belong to the state machine (#60).
+         *
+         *     A job is created when the payment succeeds, so there is no unpaid state.
+         * @enum {string}
+         */
+        JobStatus: "scheduled" | "on_the_way" | "in_progress" | "completed" | "confirmed" | "paid_out" | "disputed" | "refunded" | "cancelled";
+        /**
+         * JobTimelineEntry
+         * @description One event of the job's history: what happened and when. No actor, no location.
+         */
+        JobTimelineEntry: {
+            /**
+             * Type
+             * @description created, status_changed, eta_updated or checked_in; more come with later steps.
+             * @example status_changed
+             */
+            type: string;
+            /** @description The status the job moved to, for created and status_changed; null otherwise. */
+            status: components["schemas"]["JobStatus"] | null;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+        };
         JsonValue: unknown;
         /** LivenessResponse */
         LivenessResponse: {
@@ -1340,6 +1624,14 @@ export interface components {
         NotificationPreferencesPatch: {
             /** Changes */
             changes: components["schemas"]["PreferenceChange"][];
+        };
+        /** OnTheWayIn */
+        OnTheWayIn: {
+            /**
+             * Eta Minutes
+             * @description Minutes until the pro expects to arrive.
+             */
+            eta_minutes: number;
         };
         /** OnboardingLinkOut */
         OnboardingLinkOut: {
@@ -1555,6 +1847,61 @@ export interface components {
              */
             new_password: string;
         };
+        /**
+         * PaymentCreate
+         * @description No input: every amount comes from the accepted quote and the platform's take rate, read
+         *     from the database (AGENTS.md "Money"). A client sending any field, an amount above all,
+         *     gets a 422; an empty body or none at all is fine.
+         */
+        PaymentCreate: Record<string, never>;
+        /**
+         * PaymentSheetOut
+         * @description What the app's Payment Sheet (#59) needs, plus what the customer sees before paying.
+         *     Never the pro's payout or the platform's fee.
+         */
+        PaymentSheetOut: {
+            /**
+             * Payment Intent Client Secret
+             * @description The PaymentIntent's client secret: the sheet confirms the payment with it. Shown once per call, never logged; the same PaymentIntent on every call for the quote.
+             */
+            payment_intent_client_secret: string;
+            /**
+             * Customer Id
+             * @description The customer's Stripe Customer id, for the sheet.
+             */
+            customer_id: string;
+            /**
+             * Ephemeral Key Secret
+             * @description A short-lived key that lets the sheet act for the customer; new on each call.
+             */
+            ephemeral_key_secret: string;
+            /**
+             * Publishable Key
+             * @description The Stripe publishable key the sheet initializes with (pk_test_ until launch).
+             */
+            publishable_key: string;
+            /**
+             * Amount Cents
+             * @description The accepted quote's price, in integer cents.
+             */
+            amount_cents: number;
+            /**
+             * Tax Cents
+             * @description Tax on top of the price: 0, not charged in the MVP.
+             */
+            tax_cents: number;
+            /**
+             * Customer Total Cents
+             * @description What the sheet charges: the price plus the tax.
+             */
+            customer_total_cents: number;
+            /**
+             * Currency
+             * @description Stripe's lower-case currency code.
+             * @example usd
+             */
+            currency: string;
+        };
         /** PayoutsOut */
         PayoutsOut: {
             /** @description not_started: no payout account yet; incomplete: Stripe still needs information; in_review: everything is submitted and Stripe is checking it; enabled: payouts are on. */
@@ -1633,6 +1980,72 @@ export interface components {
          * @enum {string}
          */
         ProDocumentType: "id" | "license" | "insurance";
+        /**
+         * ProJob
+         * @description The pro's own job. Never the arrival code, the customer's last name or contacts.
+         */
+        ProJob: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            status: components["schemas"]["JobStatus"];
+            /**
+             * Scheduled Start At
+             * Format: date-time
+             * @description The accepted quote's proposed start.
+             */
+            scheduled_start_at: string;
+            category: components["schemas"]["JobCategory"] | null;
+            /**
+             * Description
+             * @description The customer's description, contact details masked as in the opportunity.
+             */
+            description: string;
+            /** @description The request's whole address; null once the job is cancelled or refunded. */
+            address: components["schemas"]["JobAddress"] | null;
+            /**
+             * Customer First Name
+             * @description The customer's first name only; null when it is not set or shows a contact detail.
+             */
+            customer_first_name: string | null;
+            /**
+             * Eta At
+             * @description The ETA the pro gave at On my way.
+             */
+            eta_at: string | null;
+            /**
+             * Checked In At
+             * @description When the pro checked in with the customer's arrival code (Arrived).
+             */
+            checked_in_at: string | null;
+            /**
+             * Arrival Code Locked
+             * @description True after too many wrong arrival codes: check-in is refused until support resolves it.
+             */
+            arrival_code_locked: boolean;
+            /**
+             * Started At
+             * @description When the work started (Working).
+             */
+            started_at: string | null;
+            /**
+             * Pro Payout Cents
+             * @description What the pro receives for the job.
+             */
+            pro_payout_cents: number;
+        };
+        /** ProJobPage */
+        ProJobPage: {
+            /** Items */
+            items: components["schemas"]["ProJob"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor` for the next page.
+             */
+            next_cursor: string | null;
+        };
         /** ProProfileOut */
         ProProfileOut: {
             /** Bio */
@@ -4218,6 +4631,483 @@ export interface operations {
                 };
             };
             /** @description quote_not_acceptable, for a new acceptance only: its pro can no longer be hired; the request already accepted another quote or is not Quote Ready; or the quote was rejected, withdrawn or expired, or is past its expires_at. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_payment_v1_requests__request_id__quotes__quote_id__payment_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PaymentCreate"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSheetOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers pay for quotes. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no request of the caller with this id, or no quote with this id on it. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description payment_not_available: the request is not accepted or this quote is not its accepted one, or the payment already succeeded (the job exists or is being created) or its PaymentIntent is closed; pro_not_hireable: the quote's pro can no longer be hired (not approved, or payouts disabled). Nothing was created. payment_needs_review: an earlier PaymentIntent create never answered and Stripe may have forgotten it; support resolves the payment before another is created. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a malformed id, or a field in the body: the amounts come from the accepted quote, never from the client. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description payments_error: Stripe refused the call; nothing changed, the payment can be asked for again. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_configured: payments are not configured; payments_unavailable: Stripe is not reachable or asked to retry later; nothing changed, retry later. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_request_job_v1_requests__request_id__job_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerJob"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers have service requests. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no request of the caller with this id, or no job on it yet (the job starts once the payment succeeds). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_my_jobs_v1_pros_me_jobs_get: {
+        parameters: {
+            query?: {
+                /** @description Only jobs still to do: scheduled, on the way or working. */
+                active?: boolean;
+                /** @description Page size; capped. */
+                limit?: number | null;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProJobPage"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have jobs to work on. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a bad cursor or limit. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_my_job_v1_pros_me_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProJob"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have jobs to work on. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job of the caller with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    mark_on_the_way_v1_pros_me_jobs__job_id__on_the_way_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OnTheWayIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProJob"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have jobs to work on. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job of the caller with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description invalid_transition: the job is not scheduled. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: eta_minutes not an integer from 5 to 240. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    check_in_v1_pros_me_jobs__job_id__check_in_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CheckInIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProJob"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have jobs to work on. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job of the caller with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_on_the_way: the job is not on the way. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description arrival_code_invalid: the code is not right; the Arrival-Code-Attempts-Remaining header has the tries left. validation_error: the code is not 4 digits, or lat/lng out of range. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description arrival_code_locked: too many wrong codes; support resolves it. */
+            423: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    start_job_v1_pros_me_jobs__job_id__start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProJob"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros have jobs to work on. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job of the caller with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description check_in_required: no check-in yet; invalid_transition: the job is past on the way. */
             409: {
                 headers: {
                     [name: string]: unknown;

@@ -56,6 +56,7 @@ jest.mock("expo-router", () => ({
     canGoBack: jest.fn(() => true),
   },
   useLocalSearchParams: jest.fn(() => ({ role: "pro" })),
+  useIsFocused: () => true,
   Redirect: jest.fn(() => null),
   usePreventRemove: jest.fn((on: boolean, onBlocked: () => void) => {
     mockGuard.on = on;

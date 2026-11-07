@@ -60,9 +60,27 @@ jest.mock("@/features/media/compress", () => ({ prepareMedia: jest.fn() }));
 jest.mock("expo-camera");
 jest.mock("expo-image-picker", () => ({ launchImageLibraryAsync: jest.fn() }));
 const mockGuard = { on: false, onBlocked: (): void => undefined };
+// Whether the sign-up screen is the one in front: a test covers it with another screen and
+// brings it back, as a pushed route and its Back do.
+const mockFocus = {
+  focused: true,
+  listeners: new Set<() => void>(),
+  set(focused: boolean) {
+    mockFocus.focused = focused;
+    mockFocus.listeners.forEach((listener) => listener());
+  },
+  subscribe(listener: () => void) {
+    mockFocus.listeners.add(listener);
+    return () => mockFocus.listeners.delete(listener);
+  },
+};
 jest.mock("expo-router", () => ({
   router: { push: jest.fn(), replace: jest.fn(), back: jest.fn(), dismissTo: jest.fn() },
   useLocalSearchParams: jest.fn(() => ({})),
+  useIsFocused: () =>
+    jest
+      .requireActual<typeof import("react")>("react")
+      .useSyncExternalStore(mockFocus.subscribe, () => mockFocus.focused),
   Redirect: jest.fn(() => null),
   usePreventRemove: jest.fn((on: boolean, onBlocked: () => void) => {
     mockGuard.on = on;
@@ -194,6 +212,8 @@ let announceQueued: jest.SpyInstance;
 
 beforeEach(() => {
   mockGuard.on = false;
+  mockFocus.focused = true;
+  mockFocus.listeners.clear();
   sessionStore.setState(SIGNED_OUT);
   phoneFlowStore.setState({ pendingNumber: null });
   jest.mocked(useLocalSearchParams).mockReturnValue({});
@@ -599,6 +619,69 @@ describe("SignUpScreen: the selfie step, saving the photo", () => {
     // Only the new preview's own report enables it.
     await act(async () => cameraMock.pendingReady[1]?.());
     expect(button("Take photo")).toBeEnabled();
+  });
+
+  it("another screen covering sign-up releases the camera; back in front, Take photo waits for a new preview (#294 Vault V1)", async () => {
+    cameraMock.holdReady = true;
+    onFlow();
+    await renderStep();
+    await waitFor(() => expect(cameraMock.pendingReady).toHaveLength(1));
+    const covered = cameraMock.pendingReady[0];
+    const coveredError = cameraMock.pendingError[0];
+    await act(async () => covered?.());
+    expect(button("Take photo")).toBeEnabled();
+
+    // A route pushed over sign-up: the step stays, its preview is unmounted at once.
+    await act(async () => mockFocus.set(false));
+    expect(
+      screen.queryByTestId("sign-up-photo-camera", { includeHiddenElements: true }),
+    ).toBeNull();
+    expect(screen.getByTestId("sign-up-photo", { includeHiddenElements: true })).toBeTruthy();
+    // The released preview reports late, a ready and then a mount error: neither counts.
+    await act(async () => covered?.());
+    await act(async () => coveredError?.("late"));
+
+    // Back in front: a new preview, and Take photo waits for its own ready.
+    await act(async () => mockFocus.set(true));
+    await waitFor(() => expect(cameraMock.pendingReady).toHaveLength(2));
+    expect(preview()).toBeTruthy();
+    expect(button("Take photo")).toBeDisabled();
+    await act(async () => covered?.());
+    await act(async () => coveredError?.("late"));
+    expect(button("Take photo")).toBeDisabled();
+    expect(screen.queryByText("Choose a photo")).toBeNull();
+
+    await act(async () => cameraMock.pendingReady[1]?.());
+    expect(button("Take photo")).toBeEnabled();
+  });
+
+  it("a photo the covered preview was still taking is dropped; back in front, the new preview takes one", async () => {
+    onFlow();
+    await renderStep();
+    await waitFor(() => expect(button("Take photo")).toBeEnabled());
+    // The released view's capture may never answer: nothing waits for it.
+    const late = deferred<Awaited<ReturnType<typeof takePictureAsync>>>();
+    takePictureAsync.mockReturnValueOnce(late.promise);
+    await press("Take photo");
+    expect(takePictureAsync).toHaveBeenCalledTimes(1);
+
+    await act(async () => mockFocus.set(false));
+    await act(async () => mockFocus.set(true));
+    await takePhoto();
+    expect(takePictureAsync).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("sign-up-photo-photo").props.source).toEqual({ uri: SHOT });
+
+    // The dropped capture answers late: the photo on screen stays the new preview's.
+    await act(async () =>
+      late.resolve({
+        uri: "file:///data/cache/Camera/late.jpg",
+        width: 1,
+        height: 1,
+        format: "jpg",
+      }),
+    );
+    expect(screen.getByTestId("sign-up-photo-photo").props.source).toEqual({ uri: SHOT });
+    expect(screen.queryByTestId("sign-up-photo-error")).toBeNull();
   });
 
   it("the photo taken is still there after Back and Continue", async () => {

@@ -47,6 +47,7 @@ const mockGuard = { on: false, onBlocked: (): void => undefined };
 jest.mock("expo-router", () => ({
   router: { push: jest.fn(), replace: jest.fn(), back: jest.fn(), dismissTo: jest.fn() },
   useLocalSearchParams: jest.fn(() => ({})),
+  useIsFocused: () => true,
   Redirect: jest.fn(() => null),
   usePreventRemove: jest.fn((on: boolean, onBlocked: () => void) => {
     mockGuard.on = on;

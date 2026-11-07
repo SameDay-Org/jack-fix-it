@@ -4,7 +4,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Final
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Numeric, String
+from sqlalchemy import CHAR, CheckConstraint, DateTime, ForeignKey, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, IdTimestampsMixin, str_enum
@@ -42,9 +42,13 @@ _MONEY_COLUMNS: Final = (
 
 class Job(IdTimestampsMixin, Base):
     __tablename__ = "jobs"
-    __table_args__ = tuple(
-        CheckConstraint(f"{column} >= 0", name=f"{column}_non_negative")
-        for column in _MONEY_COLUMNS
+    __table_args__ = (
+        *(
+            CheckConstraint(f"{column} >= 0", name=f"{column}_non_negative")
+            for column in _MONEY_COLUMNS
+        ),
+        CheckConstraint("arrival_code ~ '^[0-9]{4}$'", name="arrival_code_four_digits"),
+        CheckConstraint("arrival_code_attempts >= 0", name="arrival_code_attempts_non_negative"),
     )
 
     # One job per request and per quote; the unique indexes also serve the foreign keys.
@@ -62,6 +66,16 @@ class Job(IdTimestampsMixin, Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Job execution (D12.2, #63). Set by the pro's "On my way": when they expect to arrive.
+    eta_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The 4-digit code the customer reads to the pro at check-in: issued at "On my way" and
+    # cleared at check-in. Never logged, never shown to the pro.
+    arrival_code: Mapped[str | None] = mapped_column(CHAR(4))
+    # Wrong codes entered since the code was issued; the limit locks it (arrival_code_locked_at).
+    arrival_code_attempts: Mapped[int] = mapped_column(server_default="0")
+    arrival_code_locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The check-in (Arrived): the right code was entered. Its location is on the job event.
+    checked_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class JobEvent(IdTimestampsMixin, Base):

@@ -58,16 +58,21 @@ shows the job, so it is logged with ids and skipped. A push that cannot be queue
 never undone.
 
 Logs carry ids only: never the scope or approach text, or the amount.
+
+The payment (#58) reads the accepted quote through QuoteReader: its ids, price and status
+under its row lock, after the request's (ADR 0003: a module reaches a quote through this
+service, never the repository).
 """
 
 import logging
 import uuid
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Final
 
+from sqlalchemy import Subquery
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -398,6 +403,79 @@ def _known(contact: ContactPoints | None) -> KnownValues:
 def _rating(value: Decimal | None) -> str | None:
     """The average rating as a decimal string, never the raw Decimal."""
     return None if value is None else format(value, ".2f")
+
+
+@dataclass(frozen=True)
+class LockedQuote:
+    """A quote as the payment (#58) reads it under its row lock: ids, the price, the status.
+    Never the scope, the approach or the pro's payout."""
+
+    id: uuid.UUID
+    request_id: uuid.UUID
+    pro_id: uuid.UUID
+    amount_cents: int
+    accepted: bool  # the request's accepted quote (status accepted)
+
+
+class QuoteReader:
+    """A request's quote for other modules (ADR 0003): the payment (#58) reads the accepted
+    one, locked; a job (#63) reads its quote's proposed start, its scheduled start."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._quotes = QuoteRepository(session)
+
+    async def proposed_starts(self, quote_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, datetime]:
+        """Each quote's proposed start, in one query: nothing else of the quote."""
+        return dict(await self._quotes.proposed_starts(quote_ids))
+
+    @staticmethod
+    def starts() -> Subquery:
+        """Each quote's id (`quote_id`) and proposed start (`start_at`), as a subquery: the
+        pro's jobs are ordered and paged by their scheduled start (#63)."""
+        return QuoteRepository.starts()
+
+    async def lock_of_request(
+        self, quote_id: uuid.UUID, request_id: uuid.UUID
+    ) -> LockedQuote | None:
+        """The quote, locked until the transaction ends; None when it is not a quote of this
+        request. Take the request's lock first (RequestStateMachine.lock), as acceptance
+        does, so the two take turns."""
+        quote = await self._quotes.get_of_request_for_update(quote_id, request_id)
+        if quote is None:
+            return None
+        return LockedQuote(
+            id=quote.id,
+            request_id=quote.request_id,
+            pro_id=quote.pro_id,
+            amount_cents=quote.amount_cents,
+            accepted=quote.status is QuoteStatus.ACCEPTED,
+        )
+
+
+class QuoteSettlement:
+    """What a payment's outcome (#61) does to a request's quotes, under the request's lock (the
+    caller takes it first, through RequestStateMachine.lock). The caller owns the transaction:
+    every method flushes and never commits."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._quotes = QuoteRepository(session)
+
+    async def reject_others(
+        self, request_id: uuid.UUID, kept_quote_id: uuid.UUID
+    ) -> tuple[uuid.UUID, ...]:
+        """The payment succeeded: the request's other pending quotes are rejected (#189). The
+        ids it rejected, in id order."""
+        return tuple(await self._quotes.reject_pending_except(request_id, kept_quote_id))
+
+    async def unaccept(self, quote_id: uuid.UUID, now: datetime) -> QuoteStatus | None:
+        """The payment was canceled: the accepted quote goes back to pending while it is before
+        its expires_at, else to expired. The new status; None when it was not accepted."""
+        return await self._quotes.unaccept(quote_id, now)
+
+    async def has_live(self, request_id: uuid.UUID) -> bool:
+        """Whether the request still has a pending or an accepted quote, due or not: with none,
+        nothing (the #51 sweep included) moves a quote_ready request on."""
+        return await self._quotes.has_live(request_id)
 
 
 @dataclass(frozen=True)

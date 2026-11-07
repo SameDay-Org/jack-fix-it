@@ -42,8 +42,8 @@ export type PhotoStep = {
   /** The preview to mount now; one mount per preview (its `id` is the view's key). */
   preview: CameraPreview;
   /**
-   * The step left the screen: its preview is released, and the next visit waits for a new one to
-   * be ready (or tries a camera that failed again).
+   * The step left the screen, or another screen covered it: its preview is released, and the next
+   * visit waits for a new one to be ready (or tries a camera that failed again).
    */
   onCameraStop: () => void;
   /** The share of the photo the storage has taken, 0 to 1, while it is saved; else `null`. */
@@ -110,6 +110,10 @@ export function usePhotoStep(onSaved: () => void): PhotoStep {
   const saving = useRef<AbortController | null>(null);
   // A ref, so two taps in the same turn cannot both open the camera's shutter or the library.
   const handing = useRef(false);
+  // The hand-over in flight, by turn. A shutter's turn ends with its preview (`onCameraStop`):
+  // what that capture hands over late changes nothing, and the next preview can take a photo.
+  const turn = useRef(0);
+  const shutterOpen = useRef(false);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -159,19 +163,24 @@ export function usePhotoStep(onSaved: () => void): PhotoStep {
 
   /** Runs one hand-over (the shutter or the library) at a time; its failure shows on the step. */
   const handOver = useCallback(
-    async (take: () => Promise<string | null>) => {
+    async (take: () => Promise<string | null>, shutter = false) => {
       if (handing.current) return;
       handing.current = true;
+      shutterOpen.current = shutter;
+      const mine = ++turn.current;
       setCapturing(true);
       setFailure(null);
       try {
         const uri = await take();
-        if (uri && mounted.current) choose(uri);
+        if (uri && mounted.current && mine === turn.current) choose(uri);
       } catch {
-        if (mounted.current) fail(t("signUp.errors.photoPick"));
+        if (mounted.current && mine === turn.current) fail(t("signUp.errors.photoPick"));
       } finally {
-        handing.current = false;
-        if (mounted.current) setCapturing(false);
+        if (mine === turn.current) {
+          handing.current = false;
+          shutterOpen.current = false;
+          if (mounted.current) setCapturing(false);
+        }
       }
     },
     [choose, fail, t],
@@ -185,7 +194,7 @@ export function usePhotoStep(onSaved: () => void): PhotoStep {
         const picture = await view.takePictureAsync({ exif: false });
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
         return picture.uri;
-      }),
+      }, true),
     [handOver],
   );
 
@@ -204,7 +213,8 @@ export function usePhotoStep(onSaved: () => void): PhotoStep {
 
   // A preview's report counts only while it is the current one. A preview that failed is unmounted
   // and retired at once: its id moves on, so a ready it had already queued changes nothing, and
-  // the camera stays off (the library takes over) until the step leaves or access comes back.
+  // the camera stays off (the library takes over) until the step leaves, another screen covers
+  // this one, or access comes back.
   const report = useCallback(
     (id: number, state: CameraState) =>
       setPreview((current) =>
@@ -221,11 +231,17 @@ export function usePhotoStep(onSaved: () => void): PhotoStep {
     }),
     [previewId, report],
   );
-  // The next preview is a new one: it has to report ready itself.
-  const onCameraStop = useCallback(
-    () => setPreview((current) => ({ id: current.id + 1, state: "starting" })),
-    [],
-  );
+  // The next preview is a new one: it has to report ready itself. A capture the released preview
+  // had in flight is dropped (its view is gone; the native call may never answer).
+  const onCameraStop = useCallback(() => {
+    setPreview((current) => ({ id: current.id + 1, state: "starting" }));
+    if (shutterOpen.current) {
+      turn.current += 1;
+      handing.current = false;
+      shutterOpen.current = false;
+      setCapturing(false);
+    }
+  }, []);
 
   const retake = useCallback(() => {
     if (saving.current) return;

@@ -68,6 +68,20 @@ class AddressService:
             for address_id, line1, line2 in await self._addresses.street_lines(address_ids)
         }
 
+    async def full_many(self, address_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, AddressOut]:
+        """The whole address per id, in one query: only for the pro of a paid job, who has to
+        get there (#63). No coordinates."""
+        return {
+            row.id: AddressOut(
+                line1=row.line1,
+                line2=row.line2,
+                city=row.city,
+                state=row.state,
+                zip_code=row.zip_code,
+            )
+            for row in await self._addresses.get_many(address_ids)
+        }
+
     async def get(self, address_id: uuid.UUID) -> AddressOut | None:
         address = await self._addresses.get_by_id(address_id)
         if address is None:

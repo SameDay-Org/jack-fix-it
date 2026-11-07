@@ -1,7 +1,8 @@
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 
-from sqlalchemy import and_, exists, or_, select, update
+from sqlalchemy import Subquery, and_, case, exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.quotes.models import Quote, QuoteStatus
@@ -10,6 +11,23 @@ from app.modules.quotes.models import Quote, QuoteStatus
 class QuoteRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    @staticmethod
+    def starts() -> Subquery:
+        """Every quote's id (`quote_id`) and proposed start (`start_at`), as a subquery for
+        another module's query."""
+        return select(
+            Quote.id.label("quote_id"), Quote.proposed_start_at.label("start_at")
+        ).subquery()
+
+    async def proposed_starts(
+        self, quote_ids: Collection[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, datetime]]:
+        """(id, proposed_start_at) only."""
+        if not quote_ids:
+            return []
+        statement = select(Quote.id, Quote.proposed_start_at).where(Quote.id.in_(quote_ids))
+        return [(row[0], row[1]) for row in (await self._session.execute(statement)).all()]
 
     async def exists_for(self, request_id: uuid.UUID, pro_id: uuid.UUID) -> bool:
         statement = select(exists().where(Quote.request_id == request_id, Quote.pro_id == pro_id))
@@ -107,3 +125,38 @@ class QuoteRepository:
             )
         )
         return bool(await self._session.scalar(statement))
+
+    async def reject_pending_except(
+        self, request_id: uuid.UUID, kept_quote_id: uuid.UUID
+    ) -> list[uuid.UUID]:
+        """pending -> rejected for the request's quotes other than `kept_quote_id`; a
+        conditional UPDATE. Take the request's lock first. The ids it rejected, in id order."""
+        statement = (
+            update(Quote)
+            .where(
+                Quote.request_id == request_id,
+                Quote.id != kept_quote_id,
+                Quote.status == QuoteStatus.PENDING,
+            )
+            .values(status=QuoteStatus.REJECTED)
+            .returning(Quote.id)
+        )
+        return sorted((await self._session.scalars(statement)).all())
+
+    async def unaccept(self, quote_id: uuid.UUID, now: datetime) -> QuoteStatus | None:
+        """accepted -> pending when expires_at is after `now`, else expired; a conditional
+        UPDATE, so it happens once. Take the request's lock first. The new status, or None when
+        the quote was not accepted."""
+        statement = (
+            update(Quote)
+            .where(Quote.id == quote_id, Quote.status == QuoteStatus.ACCEPTED)
+            .values(
+                status=case(
+                    (Quote.expires_at > now, QuoteStatus.PENDING.value),
+                    else_=QuoteStatus.EXPIRED.value,
+                )
+            )
+            .returning(Quote.status)
+        )
+        status = await self._session.scalar(statement)
+        return None if status is None else QuoteStatus(status)

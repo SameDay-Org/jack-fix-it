@@ -25,7 +25,7 @@ from app.modules.users.errors import (
     PublicCodeExhaustedError,
 )
 from app.modules.users.models import User
-from app.modules.users.names import safe_public_name
+from app.modules.users.names import safe_first_name, safe_public_name
 from app.modules.users.repository import UserRepository
 from app.modules.users.types import (
     KEEP,
@@ -91,8 +91,24 @@ class UserService:
             for user_id, first, last, email, phone in await self._users.names(user_ids)
         }
 
+    async def first_names(self, user_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str | None]:
+        """Each user's first name alone, read in one query: what the pro of a paid job sees of
+        the customer (#63). None when it is missing or shows a contact detail, the user's own
+        email and phone included (names.safe_first_name). Never the last name or a contact."""
+        return {
+            user_id: safe_first_name(
+                first, KnownValues(emails=(email,), phones=(phone,) if phone else ())
+            )
+            for user_id, first, _, email, phone in await self._users.names(user_ids)
+        }
+
     async def get_by_id(self, user_id: uuid.UUID) -> UserAccount | None:
         user = await self._users.get_by_id(user_id)
+        return _to_account(user) if user else None
+
+    async def get_by_email(self, email: str) -> UserAccount | None:
+        """Exact match: emails are stored lowercase, so pass a normalized email."""
+        user = await self._users.get_by_email(email)
         return _to_account(user) if user else None
 
     async def get_credentials_by_email(
@@ -210,6 +226,15 @@ class UserService:
 
     async def update_password_hash(self, user_id: uuid.UUID, password_hash: str) -> None:
         await self._users.update_password_hash(user_id, password_hash)
+
+    async def stripe_customer_id(self, user_id: uuid.UUID) -> str | None:
+        """The user's Stripe Customer id (#58); None until a payment created one."""
+        return await self._users.get_stripe_customer_id(user_id)
+
+    async def set_stripe_customer_id_if_missing(self, user_id: uuid.UUID, customer_id: str) -> bool:
+        """Stores the user's Stripe Customer id unless one is stored already (another
+        payment's call got there first): False then, and the stored one is the user's."""
+        return await self._users.set_stripe_customer_id_if_missing(user_id, customer_id)
 
     async def phone_verified_by_other(self, phone: str, user_id: uuid.UUID) -> bool:
         """True when another account has verified this number."""

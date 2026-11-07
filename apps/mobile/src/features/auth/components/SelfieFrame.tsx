@@ -37,7 +37,10 @@ export type SelfieFrameProps = {
   photo: Omit<PhotoStep, "camera">;
   /** The live preview, for the capture (the hook's `camera`). */
   camera: RefObject<CameraView | null>;
-  /** The step is the one on screen: the preview is mounted only then. */
+  /**
+   * The step is the one on screen and its screen is in front (focused): the preview is mounted
+   * only then.
+   */
   active: boolean;
   testID?: string;
 };
@@ -52,10 +55,10 @@ export function SelfieFrame({ photo, camera, active, testID }: SelfieFrameProps)
   const { t } = useTranslation();
   const { mode, photoUri, progress, preview, onCameraStop } = photo;
 
-  // Leaving the step releases its preview at once, on both platforms (`active={false}` only
-  // pauses it on iOS): the pane slides out with the placeholder. A later visit mounts a new
-  // preview, which has to report ready itself. Not on the preview's own unmount, which a camera
-  // that failed to start goes through too.
+  // Leaving the step, or another screen covering this one, releases its preview at once, on
+  // both platforms (`active={false}` only pauses it on iOS): the pane shows the placeholder. A
+  // later visit mounts a new preview, which has to report ready itself. Not on the preview's own
+  // unmount, which a camera that failed to start goes through too.
   useEffect(() => {
     if (!active) onCameraStop();
   }, [active, onCameraStop]);
