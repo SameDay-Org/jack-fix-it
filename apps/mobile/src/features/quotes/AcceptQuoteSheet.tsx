@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AccessibilityInfo, Text, View } from "react-native";
 
+import { sessionGeneration } from "@/api";
 import { Button, SheetContent, VerifiedBadge } from "@/components/ui";
+import { requestAutoPay } from "@/features/payments";
 import { continuousCorners } from "@/theme";
 
 import { useAcceptQuote, type AcceptOutcome } from "./useAcceptQuote";
@@ -15,7 +17,8 @@ import { quoteText } from "./quoteText";
  * The confirmation before accepting a quote (`/requests/[id]/accept?quote=…`, a fit-to-contents
  * sheet over the list). It restates the price, the pro and the pro's approach as they were when
  * Accept was tapped, then posts once; the answer decides the rest:
- * - accepted: the sheet closes over the accepted card, and screen readers hear it;
+ * - accepted: the sheet closes over the accepted card, screen readers hear it, and the card opens
+ *   the payment sheet (#59) in the session the confirm started in;
  * - no longer acceptable (409, 404): the sheet closes, a toast says so, the list refetches;
  * - offline or a server error: the sheet stays with the reason, and confirming again is safe.
  */
@@ -41,7 +44,8 @@ export function AcceptQuoteSheet() {
 
   // The hook tells the customer how it went; the sheet only closes, or stays to show a failure,
   // said aloud on both platforms (a live region alone is Android-only).
-  const onDone = (outcome: AcceptOutcome) => {
+  const onDone = (outcome: AcceptOutcome, generation: number) => {
+    if (outcome === "accepted") requestAutoPay(quote.id, generation);
     if (outcome === "failed") {
       setFailed(true);
       AccessibilityInfo.announceForAccessibility(t("quotes.confirm.failed"));
@@ -52,7 +56,8 @@ export function AcceptQuoteSheet() {
 
   const confirm = () => {
     setFailed(false);
-    accept(quote.id, onDone);
+    const generation = sessionGeneration();
+    accept(quote.id, (outcome) => onDone(outcome, generation));
   };
 
   return (

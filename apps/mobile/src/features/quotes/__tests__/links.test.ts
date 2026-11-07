@@ -1,3 +1,5 @@
+import { handleURLCallback } from "@stripe/stripe-react-native";
+
 import { redirectSystemPath } from "../links";
 
 import { QUOTES, REQUEST_ID } from "./helpers";
@@ -10,7 +12,36 @@ const PROFILE = profile(REQUEST_ID, QUOTE_ID);
 const COMPARE = `/requests/${REQUEST_ID}?profile=${QUOTE_ID}`;
 const redirect = (path: string) => redirectSystemPath({ path, initial: false });
 
+jest.mock("@stripe/stripe-react-native");
+
+beforeEach(() => {
+  jest.mocked(handleURLCallback).mockClear();
+});
+
 describe("redirectSystemPath", () => {
+  it("hands a 3-D Secure return to Stripe and never routes it (#59)", () => {
+    const back = "jackfixit://stripe-redirect?payment_intent=pi_1&redirect_status=succeeded";
+    // The running app stays where it is: an empty path is ignored by the router.
+    expect(redirect(back)).toBe("");
+    expect(handleURLCallback).toHaveBeenCalledWith(back);
+    expect(redirect("jackfixit://stripe-redirect")).toBe("");
+    // A cold start through it opens the app's root.
+    expect(redirectSystemPath({ path: back, initial: true })).toBe("jackfixit://");
+    expect(handleURLCallback).toHaveBeenCalledTimes(3);
+    // Only that exact first segment: anything else is routed as before.
+    expect(redirect("jackfixit://stripe-redirectx")).toBe("jackfixit://stripe-redirectx");
+    expect(redirect("jackfixit://requests/stripe-redirect")).toBe(
+      "jackfixit://requests/stripe-redirect",
+    );
+    expect(handleURLCallback).toHaveBeenCalledTimes(3);
+  });
+
+  it("a Stripe callback that fails never throws out of the redirect", async () => {
+    jest.mocked(handleURLCallback).mockRejectedValueOnce(new Error("not handled"));
+    expect(redirect("jackfixit://stripe-redirect")).toBe("");
+    await Promise.resolve();
+  });
+
   it("sends a pro profile link that reaches the running app to its comparison", () => {
     expect(redirect(PROFILE)).toBe(COMPARE);
     expect(redirect(`${PROFILE}/`)).toBe(COMPARE);
