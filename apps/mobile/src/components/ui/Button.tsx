@@ -23,6 +23,11 @@ export type ButtonProps = {
    * the word. The label stays its accessible name.
    */
   glyph?: ControlGlyphName;
+  /**
+   * A count beside the label (unread messages): a small green pill, shown above zero. The visible
+   * count is not read out: `accessibilityLabel` says it in words.
+   */
+  badge?: number;
   onPress?: () => void;
   variant?: ButtonVariant;
   size?: ButtonSize;
@@ -84,6 +89,8 @@ const SIZE: Record<ButtonSize, string> = {
 // An icon button is a circle of the same touch target.
 const ROUND: Record<ButtonSize, string> = { md: "h-12 w-12", lg: "h-14 w-14" };
 const GLYPH_SIZE = 24;
+// Past this the badge reads "99+".
+const BADGE_MAX = 99;
 
 const forState = (classes: StateClasses, pressed: boolean) =>
   pressed ? classes.pressed : classes.rest;
@@ -93,6 +100,7 @@ export function Button({
   accessibilityLabel,
   accessibilityHint,
   glyph,
+  badge = 0,
   onPress,
   variant = "primary",
   size = "md",
@@ -156,11 +164,26 @@ export function Button({
             "text-center text-headline",
             forState(classes.label, pressed),
             loading && "opacity-0",
+            // Beside a badge, the label gives way first (cut short) so the count always shows.
+            badge > 0 && "shrink",
           )}
         >
           {label}
         </Text>
       )}
+      {badge > 0 && !glyph ? (
+        <View
+          className={cx(
+            "ml-2 min-h-6 min-w-6 items-center justify-center rounded-pill bg-green-500 px-1.5",
+            loading && "opacity-0",
+          )}
+          testID={testID && `${testID}-badge`}
+        >
+          <Text className="text-caption font-semibold text-navy-900">
+            {badge > BADGE_MAX ? `${BADGE_MAX}+` : badge}
+          </Text>
+        </View>
+      ) : null}
       {loading ? (
         <View className="pointer-events-none absolute inset-0 items-center justify-center">
           <ActivityIndicator className={classes.label.rest} />

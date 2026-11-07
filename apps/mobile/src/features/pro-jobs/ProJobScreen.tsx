@@ -21,6 +21,7 @@ import {
 } from "@/components/ui";
 import { announce } from "@/components/ui/focus";
 import { BackButton } from "@/features/auth/components/BackButton";
+import { ChatEntry } from "@/features/chat";
 import { useInForeground } from "@/features/jobs/api";
 import { categoryLabel, categoryTileProps, formatTimeOfDay } from "@/features/opportunities/format";
 import { RetryNotice } from "@/features/opportunities/RetryNotice";
@@ -175,6 +176,13 @@ export function ProJobScreen() {
             ) : null}
             <JobHero job={data} now={dataUpdatedAt} />
             <JobFacts job={data} />
+            <ChatEntry
+              jobId={data.id}
+              // The chat's own fallback reads inside "Message …" in both languages ("tu cliente").
+              name={customerName(data) ?? t("chat.peer.customer.inline")}
+              status={data.status}
+              unread={data.unread_messages}
+            />
             {photosFirst(data) ? null : <JobAddress job={data} />}
             {photosFirst(data) ? null : <JobAbout job={data} />}
             {/* One place in the tree at every step, so nothing in it starts over on Start job. */}

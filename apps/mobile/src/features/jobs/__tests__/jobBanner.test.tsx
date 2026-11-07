@@ -413,3 +413,58 @@ describe("the tabs' job banner (#64)", () => {
     );
   });
 });
+
+describe("the job banner's unread messages (#74)", () => {
+  const LINE = `Dan is on the way · 12${NBSP}min`;
+  const unreadText = () =>
+    within(screen.getByTestId("job-banner-unread"))
+      .getAllByText(/./)
+      .map((node) => [node.props.children as string | number].flat().join(""))
+      .join("");
+
+  it("shows the pro's unread count and says it at the end of the line", async () => {
+    mockApi.requests = [request(1, "accepted")];
+    mockApi.jobs = { [requestId(1)]: { ...ON_THE_WAY, unread_messages: 3 } };
+    await renderRouter(routes, { initialUrl: "/" });
+
+    const banner = await screen.findByTestId("job-banner");
+    await waitFor(() => expect(screen.getByTestId("job-banner-unread")).toBeTruthy());
+    expect(unreadText()).toBe("3");
+    expect(banner.props.accessibilityLabel).toBe(`${LINE}, 3 unread messages`);
+    expect(banner.props.accessibilityLabel.endsWith(", 3 unread messages")).toBe(true);
+  });
+
+  it("says a single unread message in the singular", async () => {
+    mockApi.requests = [request(1, "accepted")];
+    mockApi.jobs = { [requestId(1)]: { ...ON_THE_WAY, unread_messages: 1 } };
+    await renderRouter(routes, { initialUrl: "/" });
+
+    await waitFor(() => expect(screen.getByTestId("job-banner-unread")).toBeTruthy());
+    expect(unreadText()).toBe("1");
+    expect(screen.getByTestId("job-banner").props.accessibilityLabel).toBe(
+      `${LINE}, 1 unread message`,
+    );
+  });
+
+  it("caps a long count at 99+", async () => {
+    mockApi.requests = [request(1, "accepted")];
+    mockApi.jobs = { [requestId(1)]: { ...ON_THE_WAY, unread_messages: 150 } };
+    await renderRouter(routes, { initialUrl: "/" });
+
+    await waitFor(() => expect(screen.getByTestId("job-banner-unread")).toBeTruthy());
+    expect(unreadText()).toBe("99+");
+    expect(screen.getByTestId("job-banner").props.accessibilityLabel).toBe(
+      `${LINE}, 150 unread messages`,
+    );
+  });
+
+  it("with nothing unread, no count and the line alone", async () => {
+    mockApi.requests = [request(1, "accepted")];
+    mockApi.jobs = { [requestId(1)]: ON_THE_WAY };
+    await renderRouter(routes, { initialUrl: "/" });
+    await settled();
+
+    await expectBanner(LINE);
+    expect(screen.queryByTestId("job-banner-unread")).toBeNull();
+  });
+});

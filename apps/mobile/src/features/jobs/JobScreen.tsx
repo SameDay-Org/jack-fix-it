@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { apiGet, SessionExpiredError, useSessionGeneration } from "@/api";
 import { Button, Milestones, Screen, showToast, Skeleton, TextSkeleton } from "@/components/ui";
 import { backToPrevious } from "@/features/auth/components/BackButton";
+import { ChatEntry } from "@/features/chat";
 import { isUuid, useGuardedPush } from "@/features/quotes/navigation";
 import { useSettledError } from "@/features/quotes/useRequestQuotes";
 import { tokens } from "@/theme";
@@ -72,8 +73,8 @@ const SHEET_BOTTOM = 24;
  * the scheduled start), the three milestones, the arrival code while the pro is on the way, the
  * pro (to their profile), what was paid and what happened so far. It keeps itself fresh
  * (`useCustomerJob`) and pulls to refresh. A request with no job yet (the payment has not created
- * it) shows that and keeps asking; chat, problems and cancelling are not built yet, so nothing
- * here offers them.
+ * it) shows that and keeps asking. The chat with the pro opens from under the pro (#74);
+ * problems and cancelling are not built yet, so nothing here offers them.
  */
 export function JobScreen() {
   const { t } = useTranslation();
@@ -267,10 +268,19 @@ function JobContent({ job, requestId, updatedAt, refetch }: JobContentProps) {
           />
         )}
         {job.arrival_code ? <ArrivalCode code={job.arrival_code} proName={names.inline} /> : null}
-        <ProRow
-          pro={job.pro}
-          onPress={accepted ? () => push(jobProfileHref(requestId, accepted)) : undefined}
-        />
+        <View className="gap-4">
+          <ProRow
+            pro={job.pro}
+            onPress={accepted ? () => push(jobProfileHref(requestId, accepted)) : undefined}
+          />
+          <ChatEntry
+            jobId={job.id}
+            requestId={requestId}
+            name={names.inline}
+            status={job.status}
+            unread={job.unread_messages}
+          />
+        </View>
         <PaidRow job={job} />
         <JobPhotos photos={job.photos} updatedAt={updatedAt} refetch={refetch} />
         <JobTimeline items={timelineOf(t, job, now)} />
