@@ -4,6 +4,10 @@ import type { StatusTone } from "@/components/ui";
 
 export type ProJob = ApiSchema<"ProJob">;
 export type ProJobPage = ApiSchema<"ProJobPage">;
+/** One photo of the job, signed for a short while (`expires_at`). */
+export type JobPhoto = ApiSchema<"JobPhotoOut">;
+/** Before the work (optional, from On my way) or after it (Job's done needs one). */
+export type JobPhotoKind = ApiSchema<"JobPhotoKind">;
 type JobStatus = ProJob["status"];
 
 /**
@@ -12,7 +16,7 @@ type JobStatus = ProJob["status"];
  * - `onTheWay`: on the way, not checked in (I've arrived);
  * - `locked`: on the way, and too many wrong arrival codes locked the check-in (support resolves it);
  * - `arrived`: checked in with the customer's code, not started (Start job);
- * - `working`: started (photos and Job's done come next, #63 part B);
+ * - `working`: started (before and after photos, then Job's done);
  * - `done`: the pro marked it done, whatever the customer and the payout did since;
  * - `closed`: cancelled or refunded.
  */

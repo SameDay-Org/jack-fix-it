@@ -81,14 +81,27 @@ export const jobPage = (items: ProJob[], next_cursor: string | null = null): Pro
  */
 export function apiMock() {
   const session = { generation: 1 };
+  const signOutListeners = new Set<() => void>();
   return {
     ...jest.requireActual("../../../api/errors"),
     apiGet: jest.fn(),
     apiPost: jest.fn(),
+    uploadMedia: jest.fn(),
     useSession: jest.fn(),
     mockSession: session,
     sessionGeneration: () => session.generation,
     useSessionGeneration: () => session.generation,
     isCurrentGeneration: (generation: number) => generation === session.generation,
+    onSignOut: (listener: () => void) => {
+      signOutListeners.add(listener);
+      return () => {
+        signOutListeners.delete(listener);
+      };
+    },
+    /** The account boundary: what `onSignOut` registered runs, and the generation moves on. */
+    mockSignOut: () => {
+      session.generation += 1;
+      signOutListeners.forEach((listener) => listener());
+    },
   };
 }
