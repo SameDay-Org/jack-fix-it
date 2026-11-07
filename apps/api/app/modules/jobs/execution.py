@@ -69,8 +69,8 @@ arrival code or the ETA.
 Confirmation (#66), the customer's, on the job's row lock: completed -> confirmed through the
 state machine (it sets confirmed_at; the event's actor is the customer), then the pro's push.
 Again once confirmed: 200, unchanged, no second event or push. Any other status: 409
-job_not_completed. While completed, the customer's view carries confirm_by, when the system
-confirms the job on its own if neither the customer confirms nor a problem is open
+job_not_completed. While completed, both views carry confirm_by (the pro's since #343), when
+the system confirms the job on its own if neither the customer confirms nor a problem is open
 (completed_at + JOB_AUTO_CONFIRM_AFTER_HOURS; the cron is #67, confirmation.py). The customer
 and the cron take the same lock and read the job again under it, so racing they make one
 transition, one event and one push.
@@ -587,6 +587,7 @@ class JobExecutionService:
                     arrival_code_locked=job.arrival_code_locked_at is not None,
                     started_at=job.started_at,
                     completed_at=job.completed_at,
+                    confirm_by=confirm_by(job, self._config.auto_confirm_after),
                     photos=self._signer.for_pro(photos[job.id]),
                     pro_payout_cents=job.pro_payout_cents,
                     unread_messages=unread[job.id],

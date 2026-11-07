@@ -8,7 +8,8 @@ metadata stripped (EXIF, GPS), under an opaque key (m/<32 hex><ext>) with no use
 - The customer is shown the ready safe copies only, signed here and nowhere else: a key outside
   the safe copies' prefix is refused (logged with the photo id). A photo still pending is
   counted, a failed one is neither listed nor counted.
-- The pro is shown each of their own photos as its safe copy once ready, else the original.
+- The pro is shown each of their own photos as its safe copy once ready, else the original,
+  with how many per kind are still pending and how many failed (#343).
 
 Logs carry ids only: never a key (an original's names its owner).
 """
@@ -25,7 +26,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.integrations.storage import StorageProvider
 from app.modules.jobs.models import JobPhoto, JobPhotoKind
 from app.modules.jobs.repository import JobPhotoRepository
-from app.modules.jobs.schemas import CustomerJobPhotos, JobPhotoOut, ProJobPhotos
+from app.modules.jobs.schemas import (
+    CustomerJobPhotos,
+    JobPhotoOut,
+    PhotoKindCounts,
+    ProJobPhotos,
+)
 from app.modules.media.safe_status import MediaSafeStatus
 from app.modules.requests.media_copies import SAFE_KEY_PREFIX
 from app.modules.uploads.keys import upload_content_type
@@ -103,7 +109,13 @@ class JobPhotoSigner:
     def for_pro(self, photos: Sequence[JobPhoto]) -> ProJobPhotos:
         expires_at = self._expires_at()
         signed: dict[JobPhotoKind, list[JobPhotoOut]] = {kind: [] for kind in JobPhotoKind}
+        pending: dict[JobPhotoKind, int] = dict.fromkeys(JobPhotoKind, 0)
+        failed: dict[JobPhotoKind, int] = dict.fromkeys(JobPhotoKind, 0)
         for photo in photos:
+            if photo.safe_status is MediaSafeStatus.PENDING:
+                pending[photo.kind] += 1
+            elif photo.safe_status is MediaSafeStatus.FAILED:
+                failed[photo.kind] += 1
             safe = _safe_copy(photo)
             if safe is not None:
                 key, content_type = safe
@@ -114,7 +126,12 @@ class JobPhotoSigner:
                     continue
                 content_type = original_type
             signed[photo.kind].append(self._sign(photo, key, content_type, expires_at))
-        return ProJobPhotos(before=signed[JobPhotoKind.BEFORE], after=signed[JobPhotoKind.AFTER])
+        return ProJobPhotos(
+            before=signed[JobPhotoKind.BEFORE],
+            after=signed[JobPhotoKind.AFTER],
+            pending=_counts(pending),
+            failed=_counts(failed),
+        )
 
     def for_customer(self, photos: Sequence[JobPhoto]) -> CustomerJobPhotos:
         expires_at = self._expires_at()
@@ -147,6 +164,10 @@ class JobPhotoSigner:
             url=self._storage().presign_get(key, self._ttl),
             expires_at=expires_at,
         )
+
+
+def _counts(per_kind: dict[JobPhotoKind, int]) -> PhotoKindCounts:
+    return PhotoKindCounts(before=per_kind[JobPhotoKind.BEFORE], after=per_kind[JobPhotoKind.AFTER])
 
 
 def _safe_copy(photo: JobPhoto) -> tuple[str, str] | None:
