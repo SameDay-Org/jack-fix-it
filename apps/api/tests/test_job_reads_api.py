@@ -47,6 +47,7 @@ CUSTOMER_KEYS = {
     "pro",
     "eta_at",
     "arrival_code",
+    "confirm_by",
     "timeline",
     "photos",
     "amount_cents",
