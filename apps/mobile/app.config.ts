@@ -20,6 +20,10 @@ const BASE_APP_ID = "com.jackfixit.app";
 const EAS_OWNER = "johngotitcom";
 const EAS_PROJECT_ID = "dc856055-5039-4f97-aeff-dc6aea84f8c0";
 
+// Apple Pay's merchant id (#59), registered in the Apple Developer account before an iOS build
+// with Apple Pay; `APPLE_MERCHANT_ID` overrides it. Public, not a secret.
+const APPLE_MERCHANT_ID = process.env.APPLE_MERCHANT_ID || `merchant.${BASE_APP_ID}`;
+
 // iOS permission prompts, from the app's catalogs so they read like the rest of the app. The
 // plugin sets the base strings; `locales` writes each language's InfoPlist.strings.
 const PERMISSION_PROMPTS = {
@@ -100,12 +104,21 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ["expo-sensors", { motionPermission: en.permissions.motion }],
       // The share sheet for the card's PNG. Without options the app receives no shares.
       "expo-sharing",
+      // The Payment Sheet (#59; a change here needs a new dev build): Apple Pay's merchant id in
+      // the iOS entitlements, Google Pay's wallet flag in the Android manifest. iOS resolves the
+      // Stripe SDK through CocoaPods: Swift Package Manager would need dynamic frameworks for
+      // every pod (expo-build-properties), a stack change of its own.
+      [
+        "@stripe/stripe-react-native",
+        { merchantIdentifier: APPLE_MERCHANT_ID, enableGooglePay: true, disableSPM: true },
+      ],
     ],
     locales: {
       en: { ios: PERMISSION_PROMPTS.en },
       es: { ios: PERMISSION_PROMPTS.es },
     },
     experiments: { typedRoutes: true },
-    extra: { eas: { projectId: EAS_PROJECT_ID } },
+    // `appleMerchantId` reaches the Payment Sheet through expo-constants (src/features/payments).
+    extra: { eas: { projectId: EAS_PROJECT_ID }, appleMerchantId: APPLE_MERCHANT_ID },
   };
 };

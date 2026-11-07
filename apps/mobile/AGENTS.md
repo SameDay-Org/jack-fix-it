@@ -119,6 +119,14 @@ options={sheetOptions([0.5, 0.95])} />`, or `"fitToContents"`), rendering `Sheet
   caller's stack; `ProgressRing` (kit) draws progress without SVG. Dev demo: `jackfixit://dev/media`
   (signed-in customer). Local uploads need an
   S3-compatible server on the host; docker-compose has none, see the commands below.
+- Payments (#59): `src/features/payments`. The accepted quote's card pays through Stripe's
+  Payment Sheet (`@stripe/stripe-react-native`, a native module: dev builds only, never Expo Go).
+  `POST /v1/requests/{id}/quotes/{quoteId}/payment` returns the sheet's secrets and the
+  publishable key (none in the bundle); `usePayQuote` pins every step to the session the tap or
+  the accept started in, and `useJobConfirmation` polls `GET /v1/requests/{id}/job` (404 = no job
+  yet) while the screen is focused. Card data, the client secret and the ephemeral key never
+  reach our code's logs, state or screens. Jest uses the root mock
+  `__mocks__/@stripe/stripe-react-native.ts`.
 - Strings: `src/i18n/locales/{en,es}.json` through `useTranslation()`; the device language
   picks the catalog, English is the fallback.
 - Config: `app.config.ts` reads `APP_VARIANT` (development, preview, production) to suffix the

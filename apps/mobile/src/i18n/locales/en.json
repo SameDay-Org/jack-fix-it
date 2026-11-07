@@ -499,6 +499,61 @@
       "acceptLabel": "Accept quote from {{pro}} for {{price}}"
     }
   },
+  "payment": {
+    "pay": "Pay {{price}}",
+    "payLabel": "Pay {{price}} for the quote from {{pro}}",
+    "total": "Total {{total}}",
+    "breakdown": "{{price}} plus {{tax}} tax",
+    "summaryAnnouncement": "Total {{total}}. Opening the secure payment.",
+    "notAvailable": "This quote can't be paid right now. Your quotes are up to date.",
+    "confirming": {
+      "title": "Confirming your payment…",
+      "body": "This usually takes a few seconds."
+    },
+    "delayed": {
+      "title": "We're confirming your payment",
+      "body": "This can take a little longer. Check back here soon."
+    },
+    "booked": {
+      "title": "You're booked",
+      "body": "Your service with {{pro}} is set for {{date}}.",
+      "announcement": "You're booked. Your payment is confirmed."
+    },
+    "failure": {
+      "offline": {
+        "title": "No connection",
+        "body": "Check your internet and try again."
+      },
+      "notConfigured": {
+        "title": "Payments aren't available yet",
+        "body": "No charge was made. Please try again later."
+      },
+      "needsReview": {
+        "title": "We're checking your payment",
+        "body": "Try again in a few minutes."
+      },
+      "proNotHireable": {
+        "title": "This pro can't take payments right now",
+        "body": "No charge was made. Please try again later."
+      },
+      "generic": {
+        "title": "We couldn't start the payment",
+        "body": "No charge was made. Please try again."
+      },
+      "sheetFailed": {
+        "title": "Your payment didn't go through",
+        "body": "Try again, or use another card or payment method."
+      },
+      "sheetTimeout": {
+        "title": "The payment took too long",
+        "body": "Please try again."
+      },
+      "sheetUnavailable": {
+        "title": "We couldn't open the payment",
+        "body": "Please try again in a moment."
+      }
+    }
+  },
   "opportunities": {
     "greeting": "Hi, {{name}}",
     "greetingNoName": "Hi there",
