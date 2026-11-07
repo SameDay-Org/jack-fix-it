@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.chat.models import MESSAGE_MAX_LENGTH, JobChatRead, JobMessage
 from app.modules.jobs.models import JobStatus
 from tests.job_world import build_world, make_job
+from tests.test_schema_chat_receipts import step as receipts_step
 
 MIGRATION = Path(__file__).parents[1] / "alembic" / "versions" / "20261107_e13246f3ed38_job_chat.py"
 TABLES = ("job_messages", "job_chat_reads")
@@ -160,6 +161,8 @@ async def test_downgrade_drops_the_tables_and_upgrade_restores_them(
 
     connection = await db_session.connection()
     assert module.down_revision == "1f4aa780a8d2"
+    # The delivered markers (#331) reference job_messages: their revision goes down first.
+    await receipts_step(db_session, "downgrade")
     assert await connection.run_sync(lambda c: after("downgrade", c)) == (False, False)
     assert await connection.run_sync(lambda c: after("upgrade", c)) == (True, True)
     assert await connection.run_sync(lambda c: after("downgrade", c)) == (False, False)

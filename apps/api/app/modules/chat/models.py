@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from enum import StrEnum
 from typing import Final
 
 from sqlalchemy import (
@@ -20,6 +21,16 @@ from app.db import Base, IdTimestampsMixin
 
 # The longest message body, in characters, as stored (after cleaning and redaction).
 MESSAGE_MAX_LENGTH: Final = 2000
+
+
+class Receipt(StrEnum):
+    """How far a message got with its recipient, the participant who did not send it: sent,
+    delivered (their app fetched it) or seen (they marked it read). From the recipient's
+    markers (#331)."""
+
+    SENT = "sent"  # stored; the recipient's app has not fetched it yet
+    DELIVERED = "delivered"  # the recipient's app fetched it (their delivered marker)
+    SEEN = "seen"  # the recipient marked it read (their read marker)
 
 
 class JobMessage(IdTimestampsMixin, Base):
@@ -90,6 +101,29 @@ class JobChatRead(IdTimestampsMixin, Base):
         ForeignKey("job_messages.id"), index=True
     )
     last_read_message_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class JobChatDelivery(IdTimestampsMixin, Base):
+    """How far one participant's app has fetched a job's chat: their delivered marker, the
+    newest message of the other side a listing returned to them, moved forward only (#331).
+
+    A table of its own, not columns on job_chat_reads, so the API version still serving while
+    the migration runs (which knows only job_chat_reads) keeps working: a participant can be
+    delivered to before they read anything, and a job_chat_reads row always has a read marker.
+    Reading implies delivered without writing here: a message is delivered when either this
+    marker or the read marker is at or past it.
+
+    `last_delivered_message_at` is the marked message's created_at, as in JobChatRead."""
+
+    __tablename__ = "job_chat_deliveries"
+    __table_args__ = (UniqueConstraint("job_id", "user_id"),)
+
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    last_delivered_message_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("job_messages.id"), index=True
+    )
+    last_delivered_message_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class ChatOffenderFlag(IdTimestampsMixin, Base):
