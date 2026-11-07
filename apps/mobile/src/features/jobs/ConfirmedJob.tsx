@@ -14,7 +14,7 @@ import { ControlIcon } from "@/components/icons";
 import { ChatEntry } from "@/features/chat";
 import { tokens } from "@/theme";
 
-import { PhotoThumbs } from "./AfterPhotos";
+import { BeforePhotos, PhotoThumbs } from "./AfterPhotos";
 import { jobPhotosHref } from "./api";
 import { MapBack, Sheet } from "./JobChrome";
 import { PaidRow } from "./JobDetails";
@@ -38,6 +38,10 @@ type ConfirmedJobProps = {
   justConfirmed: boolean;
   /** The time the words are drawn at (the timeline's days). */
   now: number;
+  /** When the job's last answer arrived, for the before photos' signed URLs. */
+  updatedAt: number;
+  /** Asks for the job again: an expired photo URL comes back fresh. */
+  refetch: () => Promise<unknown>;
   /** The time the photos are drawn at: an expired URL shows a frame. */
   photosNow: number;
   push: (href: Href) => void;
@@ -57,6 +61,8 @@ export function ConfirmedJob({
   justConfirmed,
   now,
   photosNow,
+  updatedAt,
+  refetch,
   push,
 }: ConfirmedJobProps) {
   const { t } = useTranslation();
@@ -96,6 +102,7 @@ export function ConfirmedJob({
           unread={job.unread_messages}
         />
         <PaidRow job={job} />
+        <BeforePhotos photos={job.photos} updatedAt={updatedAt} refetch={refetch} />
         <JobTimeline items={timelineOf(t, job, now)} />
       </Sheet>
     </View>

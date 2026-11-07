@@ -21,6 +21,7 @@ import { ConfirmedJob } from "./ConfirmedJob";
 import { ConfirmDock, FinishedJob } from "./FinishedJob";
 import { MapBack, Sheet } from "./JobChrome";
 import { JobMap } from "./JobMap";
+import { JobPhotos } from "./JobPhotos";
 import { PaidRow, ProRow } from "./JobDetails";
 import { JobTimeline } from "./JobTimeline";
 import {
@@ -182,7 +183,12 @@ function JobView({ job, requestId, updatedAt, refetch, push }: JobViewProps) {
   const ticking = useMinuteClock(updatedAt, job.eta_at === null ? null : Date.parse(job.eta_at));
   // The photos' URLs expire: they are drawn at this clock, which moves exactly when one does and
   // asks for the job again then. The words go on with the minute clock.
-  const photosNow = useRefreshExpiredMedia(job.photos.after, updatedAt, refetch);
+  // While the job is ongoing its photos section (`JobPhotos`) keeps its own URLs fresh.
+  const photosNow = useRefreshExpiredMedia(
+    phase === "finished" || phase === "done" ? job.photos.after : undefined,
+    updatedAt,
+    refetch,
+  );
   const now = Math.max(ticking, photosNow);
   // The thanks is for the customer's own confirmation; the automatic one is just "Job confirmed".
   const justConfirmed = useJustConfirmed(phase, () =>
@@ -200,6 +206,8 @@ function JobView({ job, requestId, updatedAt, refetch, push }: JobViewProps) {
         text={shown}
         now={now}
         photosNow={photosNow}
+        updatedAt={updatedAt}
+        refetch={refetch}
         push={push}
       />
     );
@@ -213,12 +221,21 @@ function JobView({ job, requestId, updatedAt, refetch, push }: JobViewProps) {
         justConfirmed={justConfirmed}
         now={now}
         photosNow={photosNow}
+        updatedAt={updatedAt}
+        refetch={refetch}
         push={push}
       />
     );
   }
   return (
-    <JobContent job={job} requestId={requestId} updatedAt={updatedAt} text={shown} now={ticking} />
+    <JobContent
+      job={job}
+      requestId={requestId}
+      updatedAt={updatedAt}
+      refetch={refetch}
+      text={shown}
+      now={ticking}
+    />
   );
 }
 
@@ -243,12 +260,14 @@ type JobContentProps = {
   job: CustomerJob;
   requestId: string;
   updatedAt: number;
+  /** Asks for the job again (the photos' expired URLs). */
+  refetch: () => Promise<unknown>;
   text: JobText;
   /** The time the words are drawn at (`useMinuteClock`). */
   now: number;
 };
 
-function JobContent({ job, requestId, updatedAt, text, now }: JobContentProps) {
+function JobContent({ job, requestId, updatedAt, refetch, text, now }: JobContentProps) {
   const { t } = useTranslation();
   const phase = jobPhase(job);
   const { headline, support } = text;
@@ -330,6 +349,7 @@ function JobContent({ job, requestId, updatedAt, text, now }: JobContentProps) {
           />
         </View>
         <PaidRow job={job} />
+        <JobPhotos photos={job.photos} updatedAt={updatedAt} refetch={refetch} />
         <JobTimeline items={timelineOf(t, job, now)} />
       </Sheet>
     </View>

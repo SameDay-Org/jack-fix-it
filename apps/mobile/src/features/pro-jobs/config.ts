@@ -17,10 +17,19 @@ export type ProJobsConfig = {
   readonly etaPresetsMinutes: readonly number[];
   /** How long check-in waits for the phone's location before it says so and offers a retry. */
   readonly locationTimeoutMs: number;
+  /** Most before (or after) photos a job holds; mirrors the API's JOB_PHOTO_MAX_PER_KIND. */
+  readonly photoMaxPerKind: number;
+  /** How often Job's done asks again while the after photos' privacy-safe copies are made. */
+  readonly doneRetryIntervalMs: number;
+  /** How long Job's done keeps asking again on its own before it offers Try again. */
+  readonly doneRetryWindowMs: number;
 };
 
 export const DEFAULT_ETA_PRESETS = "10,20,30,45,60";
 export const DEFAULT_LOCATION_TIMEOUT_SECONDS = 20;
+export const DEFAULT_PHOTO_MAX_PER_KIND = 10;
+export const DEFAULT_DONE_RETRY_SECONDS = 3;
+export const DEFAULT_DONE_RETRY_WINDOW_SECONDS = 30;
 const MS_PER_SECOND = 1000;
 
 function etaPresets(raw: string | undefined): number[] {
@@ -58,15 +67,40 @@ function positiveWhole(raw: string | undefined, fallback: number, name: string):
 export function readProJobsConfig(raw: {
   etaPresets: string | undefined;
   locationTimeoutSeconds: string | undefined;
+  photoMaxPerKind?: string | undefined;
+  doneRetrySeconds?: string | undefined;
+  doneRetryWindowSeconds?: string | undefined;
 }): ProJobsConfig {
   const seconds = positiveWhole(
     raw.locationTimeoutSeconds,
     DEFAULT_LOCATION_TIMEOUT_SECONDS,
     "EXPO_PUBLIC_CHECK_IN_LOCATION_TIMEOUT_SECONDS",
   );
+  const retrySeconds = positiveWhole(
+    raw.doneRetrySeconds,
+    DEFAULT_DONE_RETRY_SECONDS,
+    "EXPO_PUBLIC_JOB_DONE_RETRY_SECONDS",
+  );
+  const windowSeconds = positiveWhole(
+    raw.doneRetryWindowSeconds,
+    DEFAULT_DONE_RETRY_WINDOW_SECONDS,
+    "EXPO_PUBLIC_JOB_DONE_RETRY_WINDOW_SECONDS",
+  );
+  if (windowSeconds < retrySeconds) {
+    throw new Error(
+      "EXPO_PUBLIC_JOB_DONE_RETRY_WINDOW_SECONDS must be at least EXPO_PUBLIC_JOB_DONE_RETRY_SECONDS",
+    );
+  }
   return {
     etaPresetsMinutes: etaPresets(raw.etaPresets),
     locationTimeoutMs: seconds * MS_PER_SECOND,
+    photoMaxPerKind: positiveWhole(
+      raw.photoMaxPerKind,
+      DEFAULT_PHOTO_MAX_PER_KIND,
+      "EXPO_PUBLIC_JOB_PHOTO_MAX_PER_KIND",
+    ),
+    doneRetryIntervalMs: retrySeconds * MS_PER_SECOND,
+    doneRetryWindowMs: windowSeconds * MS_PER_SECOND,
   };
 }
 
@@ -74,6 +108,9 @@ export function readProJobsConfig(raw: {
 export const proJobsConfig: ProJobsConfig = readProJobsConfig({
   etaPresets: process.env.EXPO_PUBLIC_JOB_ETA_PRESETS,
   locationTimeoutSeconds: process.env.EXPO_PUBLIC_CHECK_IN_LOCATION_TIMEOUT_SECONDS,
+  photoMaxPerKind: process.env.EXPO_PUBLIC_JOB_PHOTO_MAX_PER_KIND,
+  doneRetrySeconds: process.env.EXPO_PUBLIC_JOB_DONE_RETRY_SECONDS,
+  doneRetryWindowSeconds: process.env.EXPO_PUBLIC_JOB_DONE_RETRY_WINDOW_SECONDS,
 });
 
 /** The custom arrival time one step later: 5 minutes at a time up to an hour, then 15. */

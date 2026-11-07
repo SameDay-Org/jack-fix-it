@@ -13,6 +13,7 @@ export default function ProJobLayout() {
       <Stack.Screen name="index" />
       <Stack.Screen name="on-the-way" options={sheetOptions("fitToContents")} />
       <Stack.Screen name="check-in" options={sheetOptions("fitToContents")} />
+      <Stack.Screen name="media-source" options={sheetOptions("fitToContents")} />
     </Stack>
   );
 }

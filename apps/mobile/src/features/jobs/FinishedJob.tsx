@@ -7,7 +7,7 @@ import { Button } from "@/components/ui";
 import { chatHref } from "@/features/chat";
 import { bubbleShadow, continuousCorners } from "@/theme";
 
-import { PhotoHero } from "./AfterPhotos";
+import { BeforePhotos, PhotoHero } from "./AfterPhotos";
 import { confirmJobHref, jobPhotosHref } from "./api";
 import { useMinuteClock } from "./clock";
 import { deadlineText } from "./deadline";
@@ -25,6 +25,10 @@ type FinishedJobProps = {
   text: JobText;
   /** The time the words are drawn at (the timeline's days). */
   now: number;
+  /** When the job's last answer arrived, for the before photos' signed URLs. */
+  updatedAt: number;
+  /** Asks for the job again: an expired photo URL comes back fresh. */
+  refetch: () => Promise<unknown>;
   /** The time the photos are drawn at: an expired URL shows a frame (`useRefreshExpiredMedia`). */
   photosNow: number;
   /** The screen's one guarded push, shared with the dock. */
@@ -39,7 +43,16 @@ type FinishedJobProps = {
  * dock under the page (`ConfirmDock`). Without a photo to show (none listed yet), the drawn map
  * with its check on the door stands in.
  */
-export function FinishedJob({ job, requestId, text, now, photosNow, push }: FinishedJobProps) {
+export function FinishedJob({
+  job,
+  requestId,
+  text,
+  now,
+  photosNow,
+  updatedAt,
+  refetch,
+  push,
+}: FinishedJobProps) {
   const { t } = useTranslation();
   const photos = job.photos.after;
 
@@ -66,6 +79,7 @@ export function FinishedJob({ job, requestId, text, now, photosNow, push }: Fini
           <ProblemsLine job={job} requestId={requestId} push={push} />
         </View>
         <PaidRow job={job} />
+        <BeforePhotos photos={job.photos} updatedAt={updatedAt} refetch={refetch} />
         <JobTimeline items={timelineOf(t, job, now)} />
       </Sheet>
     </View>

@@ -18,6 +18,7 @@ import { mediaExpired } from "@/features/opportunities/useOpportunity";
 import { continuousCorners, pressedTransform, tokens, withOpacity } from "@/theme";
 
 import { SHEET_OVERLAP } from "./JobChrome";
+import { JobPhotos } from "./JobPhotos";
 import type { CustomerJob } from "./phase";
 
 export type JobPhoto = CustomerJob["photos"]["after"][number];
@@ -34,6 +35,30 @@ const THUMB = 72;
 const RIPPLE_OPACITY = 0.15;
 const RIPPLE = { color: withOpacity("white", RIPPLE_OPACITY), foreground: true };
 const THUMB_RIPPLE = { color: withOpacity("navy-900", RIPPLE_OPACITY), foreground: true };
+
+// The after photos have their own place on these screens: none in the section below them.
+const NO_PHOTOS: JobPhoto[] = [];
+
+type BeforePhotosProps = {
+  photos: CustomerJob["photos"];
+  updatedAt: number;
+  /** Asks for the job again: an expired URL comes back fresh. */
+  refetch: () => Promise<unknown>;
+};
+
+/**
+ * The job's photos section (`JobPhotos`, #342) on the finished and confirmed screens, which show
+ * the after photos above it: the before ones, and how many are still being prepared.
+ */
+export function BeforePhotos({ photos, updatedAt, refetch }: BeforePhotosProps) {
+  return (
+    <JobPhotos
+      photos={{ before: photos.before, after: NO_PHOTOS, pending: photos.pending }}
+      updatedAt={updatedAt}
+      refetch={refetch}
+    />
+  );
+}
 
 /** The hero's size on this screen: the full width, 4:3, capped. */
 export function usePhotoHeroSize(): { width: number; height: number } {
