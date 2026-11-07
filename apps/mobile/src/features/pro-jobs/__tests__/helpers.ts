@@ -49,6 +49,7 @@ export const proJob = (overrides: Partial<ProJob> = {}): ProJob => ({
   completed_at: null,
   photos: { before: [], after: [] },
   pro_payout_cents: 15_300,
+  unread_messages: 0,
   ...overrides,
 });
 
