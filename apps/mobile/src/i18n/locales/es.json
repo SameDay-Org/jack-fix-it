@@ -399,7 +399,8 @@
   "permissions": {
     "camera": "Jack usa la cámara para tomar tu foto de perfil y fotos de lo que hay que arreglar.",
     "photos": "Jack usa las fotos que eliges para mostrar lo que hay que arreglar.",
-    "motion": "Jack usa el movimiento del teléfono para inclinar tu tarjeta de identificación al moverlo."
+    "motion": "Jack usa el movimiento del teléfono para inclinar tu tarjeta de identificación al moverlo.",
+    "location": "Jack Fix It usa tu ubicación cuando registras tu llegada a un trabajo, para que el cliente sepa que llegaste."
   },
   "quotes": {
     "title": "Tus presupuestos",
