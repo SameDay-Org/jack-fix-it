@@ -29,6 +29,7 @@ from app.modules.users.types import UserAccount, UserRole
 from app.observability import JsonFormatter
 from app.queue import get_job_queue
 from tests.conftest import make_settings
+from tests.helpers import mentions_number
 from tests.test_dispatch import record_commits
 from tests.test_opportunities_api import (
     NOT_FOUND,
@@ -469,8 +470,9 @@ async def test_an_invalid_cap_503_and_nothing_written(
     [refused] = [r for r in caplog.records if r.message == "quote_not_configured"]
     assert invalid.__dict__["key"] == refused.__dict__["key"] == key
     output = "\n".join(JsonFormatter().format(r) for r in caplog.records)
-    assert "98765" not in output
-    assert str(INT4_MAX + 1) not in output
+    # Never the stored value; the output also holds random uuids, so not a substring check.
+    assert not mentions_number(output, 98765)
+    assert not mentions_number(output, INT4_MAX + 1)
     assert '"value"' not in output
 
 
@@ -594,7 +596,7 @@ async def test_logs_never_carry_scope(
 
     output = "\n".join(JsonFormatter().format(r) for r in caplog.records)
     assert "probe-scope-text" not in output
-    assert str(AMOUNT) not in output
+    assert not mentions_number(output, AMOUNT)
     [submitted] = [r for r in caplog.records if r.message == "quote_submitted"]
     assert submitted.__dict__["quote_id"] == response.json()["id"]
     assert submitted.__dict__["dispatch_id"] == str(dispatch_id)

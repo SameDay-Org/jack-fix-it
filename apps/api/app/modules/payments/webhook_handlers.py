@@ -1,9 +1,10 @@
 """The payment_intent.* handlers (D11.3, #61), registered in app.modules.webhooks.handlers.
 
 Each reads the event's PaymentIntent and hands it to PaymentReconciler (reconciliation.py) with
-the payment status the event stands for. A handler never commits: the worker does (#40). An
-event whose object is not a PaymentIntent with an id, an integer amount and a currency is
-malformed: logged (the event id and type) and raised, so it ends failed for staff.
+the payment status the event stands for, and the metadata payment_id it may adopt the intent for
+(#296; anything but a string there is read as none). A handler never commits: the worker does
+(#40). An event whose object is not a PaymentIntent with an id, an integer amount and a currency
+is malformed: logged (the event id and type) and raised, so it ends failed for staff.
 """
 
 import logging
@@ -48,6 +49,8 @@ def intent_event(event: StripeEvent) -> IntentEvent:
         customer = customer.get("id")
     error = intent.get("last_payment_error")
     code = error.get("code") if isinstance(error, Mapping) else None
+    metadata = intent.get("metadata")
+    named = metadata.get("payment_id") if isinstance(metadata, Mapping) else None
     return IntentEvent(
         stripe_event_id=event.stripe_event_id,
         event_type=event.event_type,
@@ -56,6 +59,7 @@ def intent_event(event: StripeEvent) -> IntentEvent:
         currency=currency,
         customer=customer if isinstance(customer, str) else None,
         failure_code=code[:_CODE_LENGTH] if isinstance(code, str) else None,
+        metadata_payment_id=named if isinstance(named, str) else None,
     )
 
 

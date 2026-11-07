@@ -43,6 +43,7 @@ from app.modules.users.types import UserRole
 from app.money import split_amount
 from app.observability import JsonFormatter
 from tests.conftest import _rolled_back_session, make_app, make_settings
+from tests.helpers import mentions_number
 from tests.test_opportunities_api import EMAIL, NOT_FOUND, World, build_world, make_request
 from tests.test_quote_accept_api import statuses
 from tests.test_quote_list_api import (
@@ -962,8 +963,9 @@ async def test_response_never_shows_payout_or_fee(
     assert set(response.json()) == SHEET_KEYS
     text = response.text.lower()
     assert not any(word in text for word in SPLIT_WORDS)
-    assert "1501" not in text
-    assert "8504" not in text
+    # The fee and the payout; the body also holds random hex secrets, so not a substring check.
+    assert not mentions_number(text, 1501)
+    assert not mentions_number(text, 8504)
     schema = app.openapi()["components"]["schemas"]["PaymentSheetOut"]
     assert set(schema["properties"]) == SHEET_KEYS
     with pytest.raises(ValueError, match="Extra inputs are not permitted"):
