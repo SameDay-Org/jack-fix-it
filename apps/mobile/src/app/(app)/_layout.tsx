@@ -3,6 +3,7 @@ import { View } from "react-native";
 
 import { useSession } from "@/api";
 import { PanelHandoffProvider } from "@/features/auth";
+import { useOpenPushTaps } from "@/features/notifications";
 // The options alone: the request barrel registers its draft with the session at import.
 import { requestFlowOptions } from "@/features/request/rise";
 
@@ -22,17 +23,26 @@ export const unstable_settings = { anchor: "(tabs)" };
  *
  * A category card on Home opens the request flow with the panel rise (the categories panel rises
  * into the flow's first step); the hand-off lives as long as the group, like `(auth)`'s.
+ *
+ * A tapped push opens here, once the signed-in app is up (`PushTaps`).
  */
 export default function AppLayout() {
   const { status } = useSession();
   if (status !== "signedIn") return <SessionShell />;
   return (
     <PanelHandoffProvider>
+      <PushTaps />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="request/(flow)" options={requestFlowOptions} />
       </Stack>
     </PanelHandoffProvider>
   );
+}
+
+/** Opens tapped pushes for the signed-in account; draws nothing. */
+function PushTaps() {
+  useOpenPushTaps();
+  return null;
 }
 
 /** The brand surface alone: no user data, no controls, and nothing for accessibility to reach. */

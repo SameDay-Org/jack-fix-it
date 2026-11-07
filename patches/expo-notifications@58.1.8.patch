@@ -1,0 +1,118 @@
+diff --git a/android/src/main/java/expo/modules/notifications/notifications/debug/DebugLogging.kt b/android/src/main/java/expo/modules/notifications/notifications/debug/DebugLogging.kt
+index ea19b979bd20e53f668c8f9081c9d47ce50ed69d..0dbd308259e534ab28139872c30fedec63123d2c 100644
+--- a/android/src/main/java/expo/modules/notifications/notifications/debug/DebugLogging.kt
++++ b/android/src/main/java/expo/modules/notifications/notifications/debug/DebugLogging.kt
+@@ -1,14 +1,15 @@
+ package expo.modules.notifications.notifications.debug
+ 
+-import android.os.Build
+ import android.os.Bundle
+ import android.util.Log
+-import androidx.annotation.RequiresApi
+ import com.google.firebase.messaging.RemoteMessage
+ import expo.modules.notifications.BuildConfig
+ import expo.modules.notifications.notifications.model.Notification
+-import java.util.function.Consumer
+ 
++// Jack Fix It patch (PR #337, Vault B1): the debug dumps logged every notification's title, body,
++// subtext and data to logcat in debug builds (dev clients included), and the app's rule is no
++// personal data in logs, debug or not. They now log the caller and ids only. Remove this patch
++// once upstream stops logging notification content.
+ object DebugLogging {
+   @JvmStatic
+   fun logBundle(caller: String, bundleToLog: Bundle) {
+@@ -16,28 +17,7 @@ object DebugLogging {
+       // Do not log in release/production builds
+       return
+     }
+-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+-      return
+-    }
+-    Log.i("expo-notifications", "$caller:\n${bundleString(caller, bundleToLog, 0)}")
+-  }
+-
+-  @RequiresApi(Build.VERSION_CODES.N)
+-  private fun bundleString(ignoredCaller: String, bundleToLog: Bundle, indent: Int): String {
+-    return buildString {
+-      bundleToLog.keySet().forEach(
+-        Consumer { key: String ->
+-          val value = bundleToLog[key]
+-          if (value is Bundle) {
+-            append("${" ".repeat(indent)}${key}\n")
+-            append(bundleString(ignoredCaller, value, indent + 2))
+-          } else {
+-            val stringValue = value?.toString() ?: "(null)"
+-            append("${" ".repeat(indent)}$key: $stringValue\n")
+-          }
+-        }
+-      )
+-    }
++    Log.i("expo-notifications", "$caller: ${bundleToLog.size()} entries (content not logged)")
+   }
+ 
+   fun logRemoteMessage(caller: String, message: RemoteMessage) {
+@@ -45,20 +25,10 @@ object DebugLogging {
+       // Do not log for release/production builds
+       return
+     }
+-    val logMessage =
+-      """
+-      $caller:
+-        notification.channelId: ${message.notification?.channelId}
+-        notification.vibrateTimings: ${message.notification?.vibrateTimings?.contentToString()}
+-        notification.body: ${message.notification?.body}
+-        notification.color: ${message.notification?.color}
+-        notification.sound: ${message.notification?.sound}
+-        notification.title: ${message.notification?.title}
+-        notification.collapseKey: ${message.collapseKey}
+-        data: ${message.data}
+-      """.trimIndent()
+-
+-    Log.i("expo-notifications", logMessage)
++    Log.i(
++      "expo-notifications",
++      "$caller: messageId=${message.messageId} channelId=${message.notification?.channelId} (content not logged)"
++    )
+   }
+ 
+   fun logNotification(caller: String, notification: Notification) {
+@@ -66,20 +36,10 @@ object DebugLogging {
+       // Do not log for release/production builds
+       return
+     }
+-    val logMessage =
+-      """
+-      $caller:
+-        notification.notificationRequest.content.title: ${notification.notificationRequest.content.title}
+-        notification.notificationRequest.content.subText: ${notification.notificationRequest.content.subText}
+-        notification.notificationRequest.content.text: ${notification.notificationRequest.content.text}
+-        notification.notificationRequest.content.sound: ${notification.notificationRequest.content.soundName}
+-        notification.notificationRequest.content.channelID: ${notification.notificationRequest.trigger.getNotificationChannel()}
+-        notification.notificationRequest.content.body: ${notification.notificationRequest.content.body}
+-        notification.notificationRequest.content.color: ${notification.notificationRequest.content.color}
+-        notification.notificationRequest.content.vibrationPattern: ${notification.notificationRequest.content.vibrationPattern?.contentToString()}
+-        notification.notificationRequest.identifier: ${notification.notificationRequest.identifier}
+-      """.trimIndent()
+-
+-    Log.i("expo-notifications", logMessage)
++    val request = notification.notificationRequest
++    Log.i(
++      "expo-notifications",
++      "$caller: identifier=${request.identifier} channelId=${request.trigger.getNotificationChannel()} (content not logged)"
++    )
+   }
+ }
+diff --git a/android/src/main/java/expo/modules/notifications/service/delegates/ExpoPresentationDelegate.kt b/android/src/main/java/expo/modules/notifications/service/delegates/ExpoPresentationDelegate.kt
+index e365e8a989d313b9976926367bbcad7a385a6f68..5278aa1baee62253cdc3aa582e548f0e830a4e26 100644
+--- a/android/src/main/java/expo/modules/notifications/service/delegates/ExpoPresentationDelegate.kt
++++ b/android/src/main/java/expo/modules/notifications/service/delegates/ExpoPresentationDelegate.kt
+@@ -332,7 +332,8 @@ open class ExpoPresentationDelegate(
+           json.put(key, JSONObject.wrap(bundle[key]))
+         } catch (e: JSONException) {
+           // can't do anything about it apart from logging it
+-          Log.d("expo-notifications", "Error encountered while serializing Android notification extras: " + key + " -> " + bundle[key], e)
++          // Jack Fix It patch (PR #337, Vault B1): the key and the error class only, never the value.
++          Log.d("expo-notifications", "Error encountered while serializing Android notification extras: " + key + " (" + e.javaClass.simpleName + ")")
+         }
+       }
+     }
