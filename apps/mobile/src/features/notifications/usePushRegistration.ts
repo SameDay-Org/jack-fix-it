@@ -5,12 +5,13 @@ import { AppState } from "react-native";
 import { useSession } from "@/api";
 
 import { refreshPermission, useNotificationPermission } from "./permission";
-import { armPushTokenRemoval, syncPushToken } from "./pushToken";
+import { armPushTokenRemoval, settleOwedPushToken, syncPushToken } from "./pushToken";
 
 /**
  * Keeps this device's push token registered for the signed-in customer or pro (#334), from the
  * signed-in layout: at each sign-in and app start, when notifications turn on (from the pre-prompt,
- * Settings, or the phone's settings on return to the app) and when the token changes. Reads the
+ * Settings, or the phone's settings on return to the app) and when the token changes. With
+ * notifications off, it only settles a removal an account that signed out still owes. Reads the
  * permission, never asks for it.
  */
 export function usePushRegistration(): void {
@@ -21,6 +22,9 @@ export function usePushRegistration(): void {
   const eligible = user?.role === "customer" || user?.role === "pro";
   const granted = permission === "granted";
   const active = eligible && granted && userId !== undefined;
+  // Read, and not on: a token a previous account still holds must not stay with it.
+  const off =
+    eligible && userId !== undefined && (permission === "askable" || permission === "blocked");
   // A registration that failed (offline, a server error) is tried again on the next return to the
   // app: until it lands, a previous account whose removal failed would keep this device.
   const retry = useRef<(() => void) | null>(null);
@@ -57,4 +61,20 @@ export function usePushRegistration(): void {
       subscription.remove();
     };
   }, [active, userId]);
+
+  useEffect(() => {
+    if (!off) return;
+    let live = true;
+    const settle = () => {
+      retry.current = null;
+      void settleOwedPushToken().then((ok) => {
+        if (live && !ok) retry.current = settle;
+      });
+    };
+    settle();
+    return () => {
+      live = false;
+      retry.current = null;
+    };
+  }, [off, userId]);
 }

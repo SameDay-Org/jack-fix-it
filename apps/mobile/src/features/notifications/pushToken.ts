@@ -9,6 +9,7 @@ import {
   isCurrentGeneration,
   sessionGeneration,
 } from "@/api";
+import { pushTokenStorage, type StoredPushToken } from "@/api/tokenStorage";
 
 import { notificationsConfig } from "./config";
 import { ensureNotificationChannel, refreshPermission } from "./permission";
@@ -24,9 +25,12 @@ class MissingProjectIdError extends Error {
   override name = "MissingProjectIdError";
 }
 
-// This device's Expo push token, once fetched. It belongs to the device, not to an account, so it
-// outlives a sign-out: the next account registers the same token, which moves it on the server.
-let deviceToken: string | null = null;
+type DevicePlatform = "ios" | "android";
+
+// The token this device last sent the API, kept on the device (`pushTokenStorage`) so it outlives
+// the process as well as the session: the next account, even after a restart, registers it and so
+// moves it off an account whose removal failed. `undefined` until read in this process.
+let known: StoredPushToken | null | undefined;
 
 // Registration and removal run one at a time, in the order they were asked for: a removal at
 // logout waits for a registration still in flight, so the server never sees the account's PUT
@@ -39,7 +43,7 @@ function serialized(operation: () => Promise<void>): Promise<void> {
   return next;
 }
 
-function devicePlatform(): "ios" | "android" | null {
+function devicePlatform(): DevicePlatform | null {
   return Platform.OS === "ios" || Platform.OS === "android" ? Platform.OS : null;
 }
 
@@ -60,8 +64,8 @@ async function bounded<T>(work: Promise<T>): Promise<T> {
 }
 
 /**
- * Expo's token for this build's project, remembered for the process. On Android it fails until
- * the build carries Firebase's config (#335): that is reported, never retried in a loop.
+ * Expo's token for this build's project. On Android it fails until the build carries Firebase's
+ * config (#335): that is reported, never retried in a loop.
  */
 async function fetchDeviceToken(): Promise<string> {
   const { projectId } = notificationsConfig;
@@ -70,37 +74,80 @@ async function fetchDeviceToken(): Promise<string> {
   return token.data;
 }
 
+/** The last token sent, read from the device once per process (a failed read is no token). */
+async function lastSent(): Promise<StoredPushToken | null> {
+  if (known === undefined) {
+    const stored = await pushTokenStorage.read();
+    known ??= stored;
+  }
+  return known;
+}
+
+/** Remembers `next` for this process, then on the device (awaited: a kill right after keeps it). */
+async function remember(next: StoredPushToken): Promise<void> {
+  known = next;
+  await pushTokenStorage
+    .write(next)
+    .catch((error: unknown) => reportFailure("Push token state write failed", error));
+}
+
+const pinnedTo = (startedIn: number) => ({ auth: true, generation: startedIn }) as const;
+
+/**
+ * A token an account that signed out may still hold (its removal never completed: a logout
+ * offline, a restart since) moves to the signed-in account first, whatever Expo answers next: the
+ * API's upsert moves a token to whoever registers it. Resolves to the token moved, or null.
+ */
+async function moveOwedToken(startedIn: number, platform: DevicePlatform): Promise<string | null> {
+  const last = await lastSent();
+  if (!last?.owed || !isCurrentGeneration(startedIn)) return null;
+  await apiPut("/v1/devices", { expo_push_token: last.token, platform }, pinnedTo(startedIn));
+  await remember({ token: last.token, owed: false });
+  return last.token;
+}
+
 async function register(startedIn: number): Promise<void> {
   const platform = devicePlatform();
   if (!platform || !isCurrentGeneration(startedIn)) return;
   if ((await bounded(refreshPermission())) !== "granted") return;
   await bounded(ensureNotificationChannel());
-  const previous = deviceToken;
+  const moved = await moveOwedToken(startedIn, platform);
+  const previous = (await lastSent())?.token ?? null;
   let token: string;
   try {
     token = await fetchDeviceToken();
   } catch (error) {
-    // The token this process already knows still belongs on this account: registering it moves
-    // it off a previous account whose removal failed.
+    // The token this device last sent still belongs on this account: registering it moves it off
+    // a previous account whose removal failed, even when Expo cannot be reached now.
     if (previous === null) throw error;
     reportFailure("Push token refresh failed", error);
     token = previous;
   }
   if (!isCurrentGeneration(startedIn)) return;
-  deviceToken = token;
+  // Known before the PUT, so a logout removes it even when the PUT's answer is lost.
+  await remember({ token, owed: false });
   // A rotated token: the old one comes off the account first (best effort; the server also drops
   // a token Expo reports as gone).
   if (previous && previous !== token) {
-    await apiDelete(
-      "/v1/devices",
-      { expo_push_token: previous },
-      { auth: true, generation: startedIn },
-    ).catch((error: unknown) => reportFailure("Old push token removal failed", error));
+    await apiDelete("/v1/devices", { expo_push_token: previous }, pinnedTo(startedIn)).catch(
+      (error: unknown) => reportFailure("Old push token removal failed", error),
+    );
   }
-  await apiPut(
-    "/v1/devices",
-    { expo_push_token: token, platform },
-    { auth: true, generation: startedIn },
+  // The owed token just moved here is already registered.
+  if (moved !== token) {
+    await apiPut("/v1/devices", { expo_push_token: token, platform }, pinnedTo(startedIn));
+  }
+}
+
+/** Runs `operation` in the queue for the session current now; resolves to whether it succeeded. */
+function settled(what: string, operation: (startedIn: number) => Promise<void>): Promise<boolean> {
+  const startedIn = sessionGeneration();
+  return serialized(() => operation(startedIn)).then(
+    () => true,
+    (error: unknown) => {
+      reportFailure(what, error);
+      return false;
+    },
   );
 }
 
@@ -112,36 +159,48 @@ async function register(startedIn: number): Promise<void> {
  */
 export function syncPushToken(): Promise<boolean> {
   armPushTokenRemoval();
-  const startedIn = sessionGeneration();
-  return serialized(() => register(startedIn)).then(
-    () => true,
-    (error: unknown) => {
-      reportFailure("Push token registration failed", error);
-      return false;
-    },
-  );
+  return settled("Push token registration failed", register);
+}
+
+/**
+ * For a signed-in account with notifications off: a token an account that signed out may still
+ * hold moves to this one and then comes off it too, so no account keeps this device. Sends
+ * nothing when no removal is owed. Never rejects; resolves to false after a failure, to try again.
+ */
+export function settleOwedPushToken(): Promise<boolean> {
+  armPushTokenRemoval();
+  return settled("Owed push token removal failed", async (startedIn) => {
+    const platform = devicePlatform();
+    if (!platform) return;
+    const moved = await moveOwedToken(startedIn, platform);
+    if (moved === null) return;
+    // Turned on meanwhile: the registration that follows keeps the token on this account.
+    if ((await bounded(refreshPermission())) === "granted") return;
+    await apiDelete("/v1/devices", { expo_push_token: moved }, pinnedTo(startedIn));
+  });
 }
 
 /**
  * Takes this device's token off the signed-in account, after any registration still queued.
- * Runs at logout before the session is cleared (`beforeSignOut`, bounded). If it cannot reach the
- * server, the token stays on that account until the next sign-in on this device moves it.
+ * Runs at logout before the session is cleared (`beforeSignOut`, bounded). Until the server
+ * confirms, the token is marked owed on the device: if the removal cannot reach the server, the
+ * next sign-in on this device (any account, after a restart too) moves the token off this account.
  */
 export function removePushToken(): Promise<void> {
   const startedIn = sessionGeneration();
   return serialized(async () => {
     if (!isCurrentGeneration(startedIn)) return;
-    // A token an earlier launch registered is still on the server when this one has not fetched
-    // it yet (a logout right after start, notifications turned off meanwhile): ask for it. The
-    // fetch needs no permission; the logout's own bound limits the wait.
-    const token = deviceToken ?? (await fetchDeviceToken().catch(() => null));
+    // Still owed by an earlier account (notifications off since, the move failed): the DELETE
+    // only takes a token off its caller, so the token moves here first.
+    const platform = devicePlatform();
+    if (platform) await moveOwedToken(startedIn, platform);
+    // No token sent from this install yet (a logout right after the first start, notifications
+    // off): ask Expo for it. The fetch needs no permission; the logout's own bound limits the wait.
+    const token = (await lastSent())?.token ?? (await fetchDeviceToken().catch(() => null));
     if (!token || !isCurrentGeneration(startedIn)) return;
-    deviceToken = token;
-    await apiDelete(
-      "/v1/devices",
-      { expo_push_token: token },
-      { auth: true, generation: startedIn },
-    );
+    await remember({ token, owed: true });
+    await apiDelete("/v1/devices", { expo_push_token: token }, pinnedTo(startedIn));
+    await remember({ token, owed: false });
   }).catch((error: unknown) => reportFailure("Push token removal failed", error));
 }
 
@@ -154,9 +213,12 @@ export function armPushTokenRemoval(): void {
   disarm ??= beforeSignOut(removePushToken, { timeoutMs: notificationsConfig.removalTimeoutMs });
 }
 
-/** Forgets the device token, the queue and the logout hook. Tests only. */
+/**
+ * Forgets what this process holds (the token as read, the queue, the logout hook), as a restart
+ * does; the device's stored state stays. Tests only.
+ */
 export function resetPushTokenForTests(): void {
-  deviceToken = null;
+  known = undefined;
   queue = Promise.resolve();
   disarm?.();
   disarm = null;

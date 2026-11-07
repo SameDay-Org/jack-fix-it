@@ -68,18 +68,25 @@ export async function ensureNotificationChannel(): Promise<void> {
 }
 
 /**
- * Shows the system prompt. Only from a person's tap (the pre-prompt's "Turn on", the Settings
- * row), never at launch. Resolves to where the device stands afterwards.
+ * A permission request's outcome: where the device stands afterwards, and whether the system
+ * answered it (`decided`: the person chose, or the system already had their choice). A request
+ * that failed before any answer is not decided: nothing was asked of the person.
  */
-export async function requestPermission(): Promise<NotificationPermission> {
+export type PermissionRequest = { status: NotificationPermission; decided: boolean };
+
+/**
+ * Shows the system prompt. Only from a person's tap (the pre-prompt's "Turn on", the Settings
+ * row), never at launch. Never rejects: a failure is logged by its class.
+ */
+export async function requestPermission(): Promise<PermissionRequest> {
   await ensureNotificationChannel();
   try {
     const status = classify(await Notifications.requestPermissionsAsync());
     permissionStore.setState({ status });
-    return status;
+    return { status, decided: true };
   } catch (error) {
     reportFailure("Notification permission request failed", error);
-    return refreshPermission();
+    return { status: await refreshPermission(), decided: false };
   }
 }
 

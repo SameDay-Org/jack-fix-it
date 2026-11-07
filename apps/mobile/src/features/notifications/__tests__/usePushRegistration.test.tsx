@@ -21,13 +21,15 @@ jest.mock("expo-notifications");
 jest.mock("@/api", () => ({ useSession: () => mockSession.current }));
 jest.mock("../pushToken", () => ({
   armPushTokenRemoval: jest.fn(),
+  settleOwedPushToken: jest.fn(async () => true),
   syncPushToken: jest.fn(async () => true),
 }));
 
 const notifications =
   jest.requireMock<typeof import("../../../../__mocks__/expo-notifications")>("expo-notifications");
-const { armPushTokenRemoval, syncPushToken } = jest.requireMock<{
+const { armPushTokenRemoval, settleOwedPushToken, syncPushToken } = jest.requireMock<{
   armPushTokenRemoval: jest.Mock;
+  settleOwedPushToken: jest.Mock;
   syncPushToken: jest.Mock;
 }>("../pushToken");
 const { permission } = notifications;
@@ -46,6 +48,7 @@ beforeEach(() => {
   notifications.resetNotificationsMock();
   resetPermissionForTests();
   syncPushToken.mockReset().mockResolvedValue(true);
+  settleOwedPushToken.mockReset().mockResolvedValue(true);
   armPushTokenRemoval.mockClear();
   addAppStateListener.mockClear();
   mockSession.current = { ...mockSession.current, user };
@@ -106,6 +109,7 @@ describe("usePushRegistration", () => {
     await act(async () => undefined);
 
     expect(syncPushToken).not.toHaveBeenCalled();
+    expect(settleOwedPushToken).not.toHaveBeenCalled();
     expect(notifications.addPushTokenListener).not.toHaveBeenCalled();
     expect(armPushTokenRemoval).not.toHaveBeenCalled();
   });
@@ -141,5 +145,68 @@ describe("usePushRegistration", () => {
 
     expect(notifications.pushTokenListeners.size).toBe(0);
     expect(addAppStateListener.mock.results.at(-1)?.value.remove).toHaveBeenCalled();
+  });
+});
+
+describe("usePushRegistration with notifications off (#334 B1)", () => {
+  it.each([
+    ["never asked", permission("undetermined")],
+    ["blocked", permission("denied", false)],
+  ])("%s: settles a removal a previous account owes, registers nothing", async (_label, answer) => {
+    notifications.getPermissionsAsync.mockResolvedValue(answer);
+    const hook = await renderHook(() => usePushRegistration());
+    await act(async () => undefined);
+
+    expect(settleOwedPushToken).toHaveBeenCalledTimes(1);
+    expect(syncPushToken).not.toHaveBeenCalled();
+
+    // Each new account settles it too.
+    mockSession.current = {
+      ...mockSession.current,
+      user: { ...user, id: "22222222-2222-4222-8222-222222222222", role: "pro" },
+    };
+    await hook.rerender({});
+    await act(async () => undefined);
+    expect(settleOwedPushToken).toHaveBeenCalledTimes(2);
+  });
+
+  it("before the permission is read nothing is sent", async () => {
+    notifications.getPermissionsAsync.mockReturnValue(new Promise(() => undefined));
+    await renderHook(() => usePushRegistration());
+    await act(async () => undefined);
+
+    expect(settleOwedPushToken).not.toHaveBeenCalled();
+    expect(syncPushToken).not.toHaveBeenCalled();
+  });
+
+  it("a failed settle is tried again on the next return to the app, once", async () => {
+    notifications.getPermissionsAsync.mockResolvedValue(permission("denied", false));
+    settleOwedPushToken.mockResolvedValueOnce(false);
+    await renderHook(() => usePushRegistration());
+    await act(async () => undefined);
+    expect(settleOwedPushToken).toHaveBeenCalledTimes(1);
+
+    await foreground();
+    expect(settleOwedPushToken).toHaveBeenCalledTimes(2);
+
+    await foreground();
+    expect(settleOwedPushToken).toHaveBeenCalledTimes(2);
+  });
+
+  it("turned on later: registers, and settles no more", async () => {
+    notifications.getPermissionsAsync.mockResolvedValue(permission("denied", false));
+    settleOwedPushToken.mockResolvedValueOnce(false);
+    await renderHook(() => usePushRegistration());
+    await act(async () => undefined);
+
+    notifications.getPermissionsAsync.mockResolvedValue(permission("granted"));
+    await foreground();
+
+    expect(syncPushToken).toHaveBeenCalledTimes(1);
+    // That return still ran the failed settle's retry (it re-reads the permission, and keeps the
+    // token once they are on); nothing settles after that.
+    const settles = settleOwedPushToken.mock.calls.length;
+    await foreground();
+    expect(settleOwedPushToken).toHaveBeenCalledTimes(settles);
   });
 });

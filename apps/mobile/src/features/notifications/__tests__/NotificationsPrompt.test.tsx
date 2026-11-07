@@ -118,3 +118,59 @@ describe("NotificationsPrompt", () => {
     expect(notifications.requestPermissionsAsync).not.toHaveBeenCalled();
   });
 });
+
+describe("NotificationsPrompt after a relaunch (state read back from the device)", () => {
+  /** The app starts again: the card's state comes from the device's store alone. */
+  async function relaunch(): Promise<void> {
+    await screen.unmount();
+    resetPromptDismissalForTests();
+    await show();
+    await act(async () => undefined);
+  }
+
+  it("Turn on failed before the system answered: the card stays, and is back after a relaunch", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    notifications.requestPermissionsAsync.mockRejectedValue(new Error("temporary native failure"));
+    await show();
+    await screen.findByTestId("prompt");
+
+    await act(async () => fireEvent.press(screen.getByTestId("prompt-turn-on")));
+
+    expect(notifications.requestPermissionsAsync).toHaveBeenCalledTimes(1);
+    // Nothing was asked of the person: the card stays, ready to try again or close.
+    expect(screen.getByTestId("prompt-turn-on")).toBeEnabled();
+    expect(secureStoreMock.setItemAsync).not.toHaveBeenCalledWith(
+      DISMISSED_KEY,
+      expect.anything(),
+      expect.anything(),
+    );
+    // The class alone: the native message can carry anything.
+    expect(warn.mock.calls).toEqual([["Notification permission request failed: Error"]]);
+    warn.mockRestore();
+
+    await relaunch();
+    expect(screen.getByTestId("prompt")).toBeTruthy();
+  });
+
+  it("denied from the system prompt: still closed after a relaunch", async () => {
+    notifications.requestPermissionsAsync.mockResolvedValue(permission("denied", true));
+    notifications.getPermissionsAsync.mockResolvedValue(permission("denied", true));
+    await show();
+    await screen.findByTestId("prompt");
+    await act(async () => fireEvent.press(screen.getByTestId("prompt-turn-on")));
+
+    await relaunch();
+
+    expect(screen.queryByTestId("prompt")).toBeNull();
+  });
+
+  it("Not now: still closed after a relaunch", async () => {
+    await show();
+    await screen.findByTestId("prompt");
+    await act(async () => fireEvent.press(screen.getByTestId("prompt-not-now")));
+
+    await relaunch();
+
+    expect(screen.queryByTestId("prompt")).toBeNull();
+  });
+});

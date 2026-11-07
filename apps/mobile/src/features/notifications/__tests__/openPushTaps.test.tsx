@@ -362,3 +362,64 @@ describe("a push that launched the app (cold)", () => {
     expect(mockApiGet).not.toHaveBeenCalledWith(QUOTES_PATH);
   });
 });
+
+describe("a push for Home (`/`, #338)", () => {
+  it.each([
+    ["customer", CUSTOMER, `/requests/${ID}`, `compare ${ID}`],
+    ["pro", PRO, `/jobs/${ID}`, `pro job ${ID}`],
+  ])(
+    "a %s's tap goes back to their Home from %s, asking the API nothing",
+    async (_, session, url, text) => {
+      const result = await signedInAtHome(session);
+      await act(async () => router.push(url));
+      expect(screen.getByText(text)).toBeTruthy();
+
+      await tap("/");
+
+      expect(result.getPathname()).toBe("/");
+      expect(screen.getByText("home")).toBeTruthy();
+      expect(router.canGoBack()).toBe(false);
+      expect(mockApiGet).not.toHaveBeenCalled();
+    },
+  );
+
+  it("already Home: stays as it is", async () => {
+    const result = await signedInAtHome(PRO);
+
+    await tap("/");
+
+    expect(result.getPathname()).toBe("/");
+    expect(router.canGoBack()).toBe(false);
+  });
+
+  it("a screen holding a draft asks before leaving it", async () => {
+    const result = await signedInAtHome(PRO);
+    await act(async () => router.push("/help"));
+
+    await tap("/");
+
+    expect(mockLeaveAsked).toHaveBeenCalledTimes(1);
+    expect(result.getPathname()).toBe("/help");
+  });
+
+  it("signed out: nothing opens, then or after the next sign-in", async () => {
+    const result = await renderRouter(routes, { initialUrl: "/" });
+    await tap("/");
+    expect(screen.getByText("welcome")).toBeTruthy();
+
+    await act(async () => mockSession.set(PRO, { newGeneration: true }));
+    await act(async () => router.push(`/jobs/${ID}`));
+    expect(result.getPathname()).toBe(`/jobs/${ID}`);
+  });
+
+  it("a push that launched the app lands on Home once the session is restored", async () => {
+    mockSession.state = { ...SIGNED_OUT, status: "restoring" };
+    const result = await renderRouter(routes, { initialUrl: "/" });
+    await tap("/");
+
+    await act(async () => mockSession.set(PRO));
+
+    expect(result.getPathname()).toBe("/");
+    expect(screen.getByText("home")).toBeTruthy();
+  });
+});

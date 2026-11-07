@@ -12,6 +12,7 @@ import {
   installFetchMock,
   jsonResponse,
   resetSecureStore,
+  secureStoreMock,
   user as userA,
   watchConsole,
   type FetchMock,
@@ -21,6 +22,7 @@ import {
   armPushTokenRemoval,
   removePushToken,
   resetPushTokenForTests,
+  settleOwedPushToken,
   syncPushToken,
 } from "../pushToken";
 
@@ -355,5 +357,281 @@ describe("logout", () => {
   it("a removal asked outside a session sends nothing", async () => {
     await expect(removePushToken()).resolves.toBeUndefined();
     expect(deviceCalls()).toEqual([]);
+  });
+});
+
+describe("a removal that never reached the server, across a restart (#334 B1)", () => {
+  const PUSH_TOKEN_KEY = "jackfixit.notifications.pushToken";
+  const ROTATED = "ExponentPushToken[mock-device-2]";
+
+  /**
+   * The API's devices for this phone's tokens, by holder (the bearer that registered it): a PUT
+   * moves a token to its caller (the upsert), a DELETE takes it off its caller only.
+   */
+  function deviceServer() {
+    const holders = new Map<string, string>();
+    let offline = false;
+    routes["/v1/devices"] = async (init) => {
+      if (offline) throw new TypeError("Network request failed");
+      const auth = new Headers(init?.headers).get("Authorization") ?? "";
+      const { expo_push_token: token } = JSON.parse(String(init?.body)) as {
+        expo_push_token: string;
+      };
+      if (init?.method === "PUT") holders.set(token, auth);
+      if (init?.method === "DELETE" && holders.get(token) === auth) holders.delete(token);
+      return jsonResponse(204);
+    };
+    return {
+      holders,
+      setOffline: (value: boolean) => {
+        offline = value;
+      },
+    };
+  }
+
+  /** The app is killed and launched again: this process's state goes, the device's store stays. */
+  const restart = () => resetPushTokenForTests();
+
+  const stored = async () => {
+    const value = await secureStoreMock.getItemAsync(PUSH_TOKEN_KEY);
+    return value === null ? null : (JSON.parse(value) as unknown);
+  };
+
+  /** A registers the token, then logs out offline: the removal never reaches the server. */
+  async function offlineLogoutOfA(server: ReturnType<typeof deviceServer>) {
+    await signInAs(userA);
+    await syncPushToken();
+    expect(server.holders.get(MOCK_PUSH_TOKEN)).toBe("Bearer access-1");
+    server.setOffline(true);
+    await logout();
+    expect(sessionStore.getState().status).toBe("signedOut");
+    expect(server.holders.get(MOCK_PUSH_TOKEN)).toBe("Bearer access-1");
+    server.setOffline(false);
+  }
+
+  it.each([
+    ["without", false],
+    ["with", true],
+  ])(
+    "B signs in %s a restart while Expo's service fails: the token moves off A to B",
+    async (_label, relaunched) => {
+      const server = deviceServer();
+      await offlineLogoutOfA(server);
+      if (relaunched) restart();
+      notifications.getExpoPushTokenAsync.mockRejectedValue(new Error("SERVICE_UNAVAILABLE"));
+      await signInAs(userB);
+
+      await expect(syncPushToken()).resolves.toBe(true);
+
+      expect(server.holders.get(MOCK_PUSH_TOKEN)).toBe("Bearer access-2");
+      expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: false });
+    },
+  );
+
+  it("the device marks the removal owed until the server confirms it", async () => {
+    const server = deviceServer();
+    await offlineLogoutOfA(server);
+    expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: true });
+
+    restart();
+    await signInAs(userA);
+    await syncPushToken();
+    await logout(); // online this time
+
+    expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: false });
+    expect(server.holders.size).toBe(0);
+  });
+
+  it("after a restart, a rotated token: the old one moves to B and comes off it, then the new one registers", async () => {
+    const server = deviceServer();
+    await offlineLogoutOfA(server);
+    restart();
+    notifications.getExpoPushTokenAsync.mockResolvedValue({ type: "expo", data: ROTATED });
+    await signInAs(userB);
+    const before = deviceCalls().length;
+
+    await syncPushToken();
+
+    expect(deviceCalls().slice(before)).toEqual([
+      {
+        method: "PUT",
+        auth: "Bearer access-2",
+        body: { expo_push_token: MOCK_PUSH_TOKEN, platform: Platform.OS },
+      },
+      { method: "DELETE", auth: "Bearer access-2", body: { expo_push_token: MOCK_PUSH_TOKEN } },
+      {
+        method: "PUT",
+        auth: "Bearer access-2",
+        body: { expo_push_token: ROTATED, platform: Platform.OS },
+      },
+    ]);
+    expect([...server.holders]).toEqual([[ROTATED, "Bearer access-2"]]);
+  });
+
+  it("after a restart, A signs back in: the token is A's again, sent once", async () => {
+    const server = deviceServer();
+    await offlineLogoutOfA(server);
+    restart();
+    await signInAs(userA);
+    const before = deviceCalls().length;
+
+    await syncPushToken();
+
+    expect(deviceCalls().slice(before)).toEqual([
+      {
+        method: "PUT",
+        auth: "Bearer access-2",
+        body: { expo_push_token: MOCK_PUSH_TOKEN, platform: Platform.OS },
+      },
+    ]);
+    expect(server.holders.get(MOCK_PUSH_TOKEN)).toBe("Bearer access-2");
+  });
+
+  it("after a restart, B signs in with notifications off: the token moves to B and comes off it", async () => {
+    const server = deviceServer();
+    await offlineLogoutOfA(server);
+    restart();
+    notifications.getPermissionsAsync.mockImplementation(async () => permission("denied", false));
+    await signInAs(userB);
+    const before = deviceCalls().length;
+
+    await expect(settleOwedPushToken()).resolves.toBe(true);
+
+    expect(deviceCalls().slice(before)).toEqual([
+      {
+        method: "PUT",
+        auth: "Bearer access-2",
+        body: { expo_push_token: MOCK_PUSH_TOKEN, platform: Platform.OS },
+      },
+      { method: "DELETE", auth: "Bearer access-2", body: { expo_push_token: MOCK_PUSH_TOKEN } },
+    ]);
+    expect(server.holders.size).toBe(0);
+    expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: false });
+    expect(notifications.getExpoPushTokenAsync).toHaveBeenCalledTimes(1); // A's sign-in only
+  });
+
+  it("notifications turned on while the settle was queued: the token moves to B and stays", async () => {
+    const server = deviceServer();
+    await offlineLogoutOfA(server);
+    restart();
+    await signInAs(userB); // the hook saw them off; they are on by the time the settle runs
+
+    await expect(settleOwedPushToken()).resolves.toBe(true);
+
+    expect(server.holders.get(MOCK_PUSH_TOKEN)).toBe("Bearer access-2");
+    expect(deviceCalls().at(-1)?.method).toBe("PUT");
+  });
+
+  it("nothing owed (A's removal landed): the next account with notifications off sends nothing", async () => {
+    deviceServer();
+    await signInAs(userA);
+    await syncPushToken();
+    await logout();
+    restart();
+    notifications.getPermissionsAsync.mockImplementation(async () => permission("denied", false));
+    await signInAs(userB);
+    const before = deviceCalls().length;
+
+    await expect(settleOwedPushToken()).resolves.toBe(true);
+
+    expect(deviceCalls().slice(before)).toEqual([]);
+  });
+
+  it("offline again at B's sign-in: the move fails, stays owed, and lands on the next try", async () => {
+    const server = deviceServer();
+    await offlineLogoutOfA(server);
+    restart();
+    notifications.getPermissionsAsync.mockImplementation(async () => permission("denied", false));
+    await signInAs(userB);
+    server.setOffline(true);
+
+    await expect(settleOwedPushToken()).resolves.toBe(false);
+    expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: true });
+    expect(warnings()).toContain("Owed push token removal failed: NetworkError");
+
+    server.setOffline(false);
+    await expect(settleOwedPushToken()).resolves.toBe(true);
+    expect(server.holders.size).toBe(0);
+  });
+
+  it("B logs out while A's removal is still owed: the token moves to B first, then comes off", async () => {
+    const server = deviceServer();
+    await offlineLogoutOfA(server);
+    restart();
+    notifications.getPermissionsAsync.mockImplementation(async () => permission("denied", false));
+    await signInAs(userB);
+    server.setOffline(true);
+    await settleOwedPushToken(); // fails: still owed
+    server.setOffline(false);
+
+    await logout();
+
+    expect(server.holders.size).toBe(0);
+    expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: false });
+  });
+
+  it("a logout after a restart removes the token sent before it, without asking Expo", async () => {
+    const server = deviceServer();
+    await signInAs(userA);
+    await syncPushToken();
+    restart(); // the session itself is restored from the device
+    notifications.getExpoPushTokenAsync.mockClear().mockRejectedValue(new Error("no service"));
+    armPushTokenRemoval();
+
+    await logout();
+
+    expect(notifications.getExpoPushTokenAsync).not.toHaveBeenCalled();
+    expect(deviceCalls().at(-1)).toEqual({
+      method: "DELETE",
+      auth: "Bearer access-1",
+      body: { expo_push_token: MOCK_PUSH_TOKEN },
+    });
+    expect(server.holders.size).toBe(0);
+  });
+
+  it.each([
+    ["unreadable", "{not json"],
+    ["of another shape", '{"token":7,"owed":true}'],
+  ])(
+    "a stored state that is %s counts as none: the token comes from Expo",
+    async (_label, value) => {
+      await secureStoreMock.setItemAsync(PUSH_TOKEN_KEY, value);
+      await signInAs(userA);
+
+      await syncPushToken();
+
+      expect(notifications.getExpoPushTokenAsync).toHaveBeenCalled();
+      expect(deviceCalls()).toEqual([
+        {
+          method: "PUT",
+          auth: "Bearer access-1",
+          body: { expo_push_token: MOCK_PUSH_TOKEN, platform: Platform.OS },
+        },
+      ]);
+    },
+  );
+
+  it("a store that fails both ways: the registration lands, the write is logged by its class", async () => {
+    const read = secureStoreMock.getItemAsync.getMockImplementation();
+    const write = secureStoreMock.setItemAsync.getMockImplementation();
+    secureStoreMock.getItemAsync.mockImplementation(async (key: string) => {
+      if (key === PUSH_TOKEN_KEY) throw new Error(`keystore ${MOCK_PUSH_TOKEN}`);
+      return read ? read(key) : null;
+    });
+    secureStoreMock.setItemAsync.mockImplementation(async (key: string, value: string) => {
+      if (key === PUSH_TOKEN_KEY) throw new Error(`keystore ${value}`);
+      await write?.(key, value);
+    });
+    try {
+      await signInAs(userA);
+
+      await expect(syncPushToken()).resolves.toBe(true);
+
+      expect(deviceCalls()).toHaveLength(1);
+      expect(warnings()).toEqual(["Push token state write failed: Error"]);
+    } finally {
+      if (read) secureStoreMock.getItemAsync.mockImplementation(read);
+      if (write) secureStoreMock.setItemAsync.mockImplementation(write);
+    }
   });
 });

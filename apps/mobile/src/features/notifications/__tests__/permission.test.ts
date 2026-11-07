@@ -54,9 +54,22 @@ describe("permission", () => {
       return permission("granted");
     });
 
-    await expect(requestPermission()).resolves.toBe("granted");
+    await expect(requestPermission()).resolves.toEqual({ status: "granted", decided: true });
 
     expect(order).toEqual(Platform.OS === "android" ? ["channel", "request"] : ["request"]);
+  });
+
+  it("a denial is a decision, even Android's first one that still allows another ask", async () => {
+    notifications.requestPermissionsAsync.mockResolvedValue(permission("denied", true));
+
+    await expect(requestPermission()).resolves.toEqual({ status: "askable", decided: true });
+  });
+
+  it("a request that failed before any answer is no decision; logs the class only", async () => {
+    notifications.requestPermissionsAsync.mockRejectedValue(new TypeError("native gone"));
+
+    await expect(requestPermission()).resolves.toEqual({ status: "askable", decided: false });
+    expect(console.warn).toHaveBeenCalledWith("Notification permission request failed: TypeError");
   });
 });
 

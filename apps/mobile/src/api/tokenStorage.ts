@@ -10,6 +10,9 @@ const ONBOARDING_USER_KEY = "jackfixit.session.onboardingUserId";
 // stays across sign-outs, like the permission it is about.
 const NOTIFICATIONS_PROMPT_KEY = "jackfixit.notifications.promptDismissed";
 const DISMISSED = "1";
+// The push token this device last sent the API, and whether an account may still hold it after a
+// removal that never completed (#334). The device's, not an account's: it stays across sign-outs.
+const PUSH_TOKEN_KEY = "jackfixit.notifications.pushToken";
 const WRITE_OPTIONS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
 };
@@ -94,4 +97,44 @@ export const notificationsPromptStorage = {
 
   writeDismissed: (): Promise<void> =>
     serialized(() => SecureStore.setItemAsync(NOTIFICATIONS_PROMPT_KEY, DISMISSED, WRITE_OPTIONS)),
+};
+
+/**
+ * The push token this device last sent the API. `owed`: a logout's removal of it has not been
+ * confirmed, so the account that signed out may still receive this device's pushes until the next
+ * sign-in moves the token.
+ */
+export type StoredPushToken = { token: string; owed: boolean };
+
+function parsePushToken(value: string | null): StoredPushToken | null {
+  if (value === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const { token, owed } = parsed as Record<string, unknown>;
+    return typeof token === "string" && token !== "" && typeof owed === "boolean"
+      ? { token, owed }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The push token's state, in one entry so a token and its `owed` flag are written together.
+ * Nothing here is logged. A failed or unreadable read counts as no token (the app asks Expo
+ * again); a failed write rejects, for the caller to log.
+ */
+export const pushTokenStorage = {
+  read: (): Promise<StoredPushToken | null> =>
+    serialized(() => SecureStore.getItemAsync(PUSH_TOKEN_KEY).then(parsePushToken, () => null)),
+
+  write: (value: StoredPushToken): Promise<void> =>
+    serialized(() =>
+      SecureStore.setItemAsync(
+        PUSH_TOKEN_KEY,
+        JSON.stringify({ token: value.token, owed: value.owed }),
+        WRITE_OPTIONS,
+      ),
+    ),
 };

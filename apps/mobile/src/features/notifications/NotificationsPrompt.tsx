@@ -19,7 +19,8 @@ export type NotificationsPromptProps = {
  * Shown where they start to matter (a customer's booked job, the pro's home) only while the
  * system prompt can still appear and the person has not closed the card. "Turn on" shows the
  * system prompt once; whatever the answer, the card does not come back (Settings keeps the way to
- * turn them on). Never shown at launch.
+ * turn them on). A request that failed before the system answered asked the person nothing: the
+ * card stays, to try again or close. Never shown at launch.
  */
 export function NotificationsPrompt({ audience, testID }: NotificationsPromptProps) {
   const { t } = useTranslation();
@@ -32,9 +33,9 @@ export function NotificationsPrompt({ audience, testID }: NotificationsPromptPro
   const turnOn = async () => {
     setAsking(true);
     try {
-      await requestPermission();
+      const { decided } = await requestPermission();
+      if (decided) dismissPrompt();
     } finally {
-      dismissPrompt();
       setAsking(false);
     }
   };
