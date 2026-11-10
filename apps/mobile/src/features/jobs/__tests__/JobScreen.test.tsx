@@ -7,6 +7,7 @@ import {
   AccessibilityInfo,
   AppState,
   RefreshControl,
+  ScrollView,
   type AppStateStatus,
   type NativeEventSubscription,
   type RefreshControlProps,
@@ -818,6 +819,20 @@ describe("JobScreen, the finished job (#66)", () => {
     expect(screen.getByTestId("job-confirm")).toBeTruthy();
   });
 
+  it("when the full confirm words would wrap at this size, the button says Confirm and keeps them as its name", async () => {
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+    const button = () => screen.getByRole("button", { name: "Confirm the job is done" });
+    expect(within(button()).getByText("Confirm the job is done")).toBeTruthy();
+
+    const measure = screen.getByTestId("job-confirm-measure", HIDDEN);
+    await act(async () => measure.props.onTextLayout({ nativeEvent: { lines: [{}, {}] } }));
+
+    expect(within(button()).getByText("Confirm")).toBeTruthy();
+    expect(within(button()).queryByText("Confirm the job is done")).toBeNull();
+  });
+
   it("a photo whose link expires turns to a quiet frame, and the job is asked for again", async () => {
     fakeClock();
     const expiring = afterPhoto(1, { expires_at: at(5) });
@@ -856,6 +871,22 @@ describe("JobScreen, the finished job (#66)", () => {
       await confirmJob(client, REQUEST_ID, 1);
     });
   }
+
+  it("the confirmed job opens at its top, wherever the finished one was scrolled to", async () => {
+    answerJob(FINISHED_JOB);
+    const client = newQueryClient();
+    await renderWithQuery(<JobScreen />, client);
+    await headline("Dan marked the job done");
+    // The React Native mock's own function, which earlier screens called too.
+    const scrollTo = jest.spyOn(ScrollView.prototype, "scrollTo");
+    scrollTo.mockClear();
+
+    await confirmHere(client);
+    await headline("Thanks! Job confirmed");
+
+    expect(scrollTo.mock.calls).toEqual([[{ y: 0, animated: false }]]);
+    scrollTo.mockRestore();
+  });
 
   it("confirmed here: thanks, said once the screen is back in focus, the seal grows, the dock leaves", async () => {
     answerJob(FINISHED_JOB);

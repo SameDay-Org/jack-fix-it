@@ -1,6 +1,6 @@
 import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
 import { router, useIsFocused, useLocalSearchParams, type Href } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentRef } from "react";
 import { useTranslation } from "react-i18next";
 import { RefreshControl, ScrollView, Text, useWindowDimensions, View } from "react-native";
 
@@ -85,6 +85,13 @@ export function JobScreen() {
   const push = useGuardedPush();
   // A 404 over a finished job on screen (the confirmation found it gone): nothing to confirm.
   const confirmable = data !== undefined && jobPhase(data) === "finished" && !isNoJobYet(error);
+  // A new layout opens at its top: the offset the last one was read at means nothing in it, and
+  // the confirmed seal grows where the customer can see it.
+  const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
+  const layout = data === undefined ? null : layoutOf(jobPhase(data));
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [layout]);
 
   // A pull that fails over a job already on screen keeps it and says so.
   const refresh = async () => {
@@ -100,6 +107,7 @@ export function JobScreen() {
   return (
     <Screen bar="hero" edges={[]} testID="job-screen">
       <ScrollView
+        ref={scrollRef}
         className="flex-1"
         contentContainerClassName="flex-grow"
         refreshControl={
@@ -157,6 +165,11 @@ export function JobScreen() {
       ) : null}
     </Screen>
   );
+}
+
+/** The screen's layout for a job: the ongoing job's map and sheet, the finished job, the confirmed one. */
+function layoutOf(phase: JobPhase): "ongoing" | "finished" | "done" {
+  return phase === "finished" || phase === "done" ? phase : "ongoing";
 }
 
 type JobViewProps = {

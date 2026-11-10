@@ -1053,6 +1053,7 @@
     },
     "finished": {
       "confirm": "Confirmar que está terminado",
+      "confirmShort": "Confirmar",
       "problems": "¿Algún problema?",
       "deadline": {
         "today_one": "Se confirma automáticamente hoy a la {{time}} si no respondes.",
