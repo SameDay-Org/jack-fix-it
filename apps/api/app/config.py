@@ -341,6 +341,23 @@ class Settings(BaseSettings):
     job_auto_confirm_after_hours: int = Field(default=48, gt=0)
     job_auto_confirm_sweep_minutes: int = Field(default=15, ge=1, le=60)
     job_auto_confirm_sweep_timeout_seconds: int = Field(default=840, gt=0)
+    # The pro's live position while on the way (#350; Cesar 2026-11-10): only the latest one
+    # of a job is kept, in Redis only, for this many seconds after its write (it is deleted
+    # sooner, when the pro checks in or the job leaves on_the_way).
+    pro_location_ttl_seconds: int = Field(default=120, gt=0)
+    # A position arriving sooner than this after the job's stored one is answered and dropped
+    # (0 keeps every one); past the per-pro limit per window, positions get a 429.
+    pro_location_min_interval_seconds: float = Field(default=3.0, ge=0)
+    pro_location_rate_limit: int = Field(default=60, gt=0)
+    pro_location_rate_window_seconds: int = Field(default=60, gt=0)
+    # How far the device's time of a position may be ahead of, or behind, the server's.
+    pro_location_max_future_seconds: int = Field(default=300, ge=0)
+    pro_location_max_age_seconds: int = Field(default=600, gt=0)
+    # Longest wait on Redis for one position operation: past it the pro's position is refused
+    # (503), the customer reads none, and a check-in or status change goes on without the
+    # delete (the position expires on its own). A position is written under the job's row
+    # lock, so this also bounds how long one can hold a check-in off.
+    pro_location_timeout_seconds: float = Field(default=0.5, gt=0)
     # Job chat (D14.1, #71): messages one user may send in one job's chat per window.
     chat_message_rate_limit: int = Field(default=20, gt=0)
     chat_message_rate_window_seconds: int = Field(default=60, gt=0)

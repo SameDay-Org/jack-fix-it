@@ -13,6 +13,7 @@ from app.modules.devices.router import router as devices_router
 from app.modules.dispatch.router import router as opportunities_router
 from app.modules.geo.router import router as geo_router
 from app.modules.jobs.router import customer_router as customer_jobs_router
+from app.modules.jobs.router import location_router as job_location_router
 from app.modules.jobs.router import router as jobs_router
 from app.modules.notifications.router import router as notification_preferences_router
 from app.modules.payments.router import router as payments_router
@@ -47,6 +48,7 @@ v1_router.include_router(customer_quotes_router)
 v1_router.include_router(payments_router)
 v1_router.include_router(customer_jobs_router)
 v1_router.include_router(jobs_router)
+v1_router.include_router(job_location_router)
 v1_router.include_router(chat_router)
 v1_router.include_router(staff_chat_router)
 v1_router.include_router(chat_flags_router)

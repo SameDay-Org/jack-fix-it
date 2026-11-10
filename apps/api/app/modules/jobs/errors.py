@@ -19,10 +19,20 @@ class JobNotCompletedError(ConflictError):
 
 
 class NotOnTheWayError(ConflictError):
-    """A check-in on a job that is not on the way (#63)."""
+    """A check-in on a job that is not on the way (#63), or a position sent for a job whose pro
+    is not on the way any more: another status, or already checked in (#350)."""
 
     code = "not_on_the_way"
     message = "The job is not on the way."
+
+
+class ProLocationUnavailableError(AppError):
+    """The store of the pros' live positions (Redis) is down or too slow (#350): the position
+    is dropped, and the pro's app sends its next one."""
+
+    status_code = 503
+    code = "location_unavailable"
+    message = "Location sharing is unavailable right now. Try again later."
 
 
 class CheckInRequiredError(ConflictError):
