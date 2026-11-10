@@ -217,7 +217,7 @@ describe("Make default", () => {
 });
 
 describe("two writes in flight", () => {
-  it("a failure under a newer write leaves that write drawn; the last answer's refetch settles it", async () => {
+  it("a failure takes back only its own change: the newer write stays drawn", async () => {
     const deleted = deferred<undefined>();
     const madeDefault = deferred<SavedAddress>();
     jest.mocked(apiDelete).mockReturnValue(deleted.promise);
@@ -229,9 +229,9 @@ describe("two writes in flight", () => {
     expect(cached(client)).toEqual(["mom*", "home"]);
 
     await act(async () => deleted.reject(new ApiError(500, "internal_error")));
-    // Its snapshot would undo Make default too: it is not put back yet, only reported.
-    expect(cached(client)).toEqual(["mom*", "home"]);
+    expect(cached(client)).toEqual(["mom*", "work", "home"]);
     expect(toast()?.message).toBe("We couldn't delete Work. Try again in a moment.");
+    // Only the last write answered refetches.
     expect(apiGet).toHaveBeenCalledTimes(1);
 
     server = [{ ...MOM, is_default: true }, { ...HOME, is_default: false }, WORK];
@@ -239,6 +239,44 @@ describe("two writes in flight", () => {
 
     await waitFor(() => expect(cached(client)).toEqual(["mom*", "home", "work"]));
     expect(apiGet).toHaveBeenCalledTimes(2);
+  });
+
+  it("both failing offline leave the book as it was, though the refetch fails too", async () => {
+    const deleted = deferred<undefined>();
+    const madeDefault = deferred<SavedAddress>();
+    jest.mocked(apiDelete).mockReturnValue(deleted.promise);
+    jest.mocked(apiPatch).mockReturnValue(madeDefault.promise);
+    const { result, client } = await renderBook();
+    jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+
+    await act(async () => result.current.remove(WORK));
+    await act(async () => result.current.makeDefault(MOM));
+    await act(async () => deleted.reject(new NetworkError(false)));
+    await act(async () => madeDefault.reject(new NetworkError(false)));
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+    // Every address is back and Home is the default again. The order of the others is the
+    // server's to settle: the device has no creation dates.
+    expect(cached(client)?.[0]).toBe("home*");
+    expect([...(cached(client) ?? [])].sort()).toEqual(["home*", "mom", "work"]);
+  });
+
+  it("an earlier failure never undoes a later success", async () => {
+    const deleted = deferred<undefined>();
+    jest.mocked(apiDelete).mockReturnValue(deleted.promise);
+    jest.mocked(apiPatch).mockResolvedValue({ ...MOM, is_default: true });
+    const { result, client } = await renderBook();
+
+    // Deleting the default promotes Work; Mom is then made the default, and the server agrees.
+    await act(async () => result.current.remove(HOME));
+    await act(async () => result.current.makeDefault(MOM));
+    expect(cached(client)).toEqual(["mom*", "work"]);
+    server = [{ ...MOM, is_default: true }, { ...HOME, is_default: false }, WORK];
+    await act(async () => deleted.reject(new ApiError(500, "internal_error")));
+
+    // Home is back, under Mom's chip: not the default it was, since Mom took it since.
+    expect(cached(client)?.slice(0, 2)).toEqual(["mom*", "home"]);
+    await waitFor(() => expect(cached(client)).toEqual(["mom*", "home", "work"]));
   });
 });
 

@@ -1,15 +1,15 @@
-import { act, fireEvent, screen } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { Alert, type AlertButton, type AlertOptions } from "react-native";
 
-import { ApiError, apiDelete, apiGet, apiPatch, useSession } from "@/api";
+import { ApiError, apiDelete, apiGet, apiPatch, NetworkError, useSession } from "@/api";
 import { dismissToast, toastStore } from "@/components/ui/toast";
 import i18n from "@/i18n";
 
 import { deferred, settle } from "../../../api/__tests__/helpers";
 import { signedIn } from "../../home/__tests__/helpers";
 import { AddressActionsSheet } from "../AddressActionsSheet";
-import { bookClient, cachedBook, HOME, renderAddresses, WORK } from "./helpers";
+import { bookClient, cachedBook, HOME, newQueryClient, renderAddresses, WORK } from "./helpers";
 
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../../api/errors"),
@@ -169,6 +169,35 @@ describe("AddressActionsSheet", () => {
 
     expect(router.back).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId("address-actions-sheet")).toBeNull();
+  });
+
+  it("opened by a link before the book loaded, waits for it, then shows the address", async () => {
+    const answer = deferred<{ items: (typeof HOME)[] }>();
+    jest.mocked(apiGet).mockReturnValue(answer.promise);
+    const { view } = openFor("work", newQueryClient());
+    await view;
+
+    expect(screen.queryByTestId("address-actions-sheet")).toBeNull();
+    expect(router.back).not.toHaveBeenCalled();
+    await act(async () => answer.resolve({ items: [HOME, WORK] }));
+
+    expect(await screen.findByRole("button", { name: "Make default" })).toBeOnTheScreen();
+    expect(router.back).not.toHaveBeenCalled();
+  });
+
+  it("closes when the book it waited for could not load", async () => {
+    jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+    const { view } = openFor("work", newQueryClient());
+    await view;
+
+    await waitFor(() => expect(router.back).toHaveBeenCalledTimes(1));
+  });
+
+  it("asks nothing when the book is already on screen", async () => {
+    const { view } = openFor("work");
+    await view;
+
+    expect(apiGet).not.toHaveBeenCalled();
   });
 
   it("reads in Spanish", async () => {

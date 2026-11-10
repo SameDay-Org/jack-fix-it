@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -5,7 +6,12 @@ import { Alert, Text, View } from "react-native";
 
 import { Button, SheetContent } from "@/components/ui";
 
-import { useDeleteAddress, useMakeDefaultAddress, useSavedAddresses } from "./api";
+import {
+  SAVED_ADDRESSES_QUERY_KEY,
+  useDeleteAddress,
+  useMakeDefaultAddress,
+  useSavedAddresses,
+} from "./api";
 import { addressLine } from "./addressFields";
 import { withoutAddress } from "./book";
 
@@ -17,22 +23,27 @@ import { withoutAddress } from "./book";
 export function AddressActionsSheet() {
   const { t } = useTranslation();
   const { id } = useLocalSearchParams<{ id: string }>();
-  // Read from the book on screen, never fetched here; kept as first shown, so the sheet never
-  // changes under the customer's finger, nor as it closes over the change it asked for.
-  const { data } = useSavedAddresses({ enabled: false });
-  const [book] = useState(() => data?.items ?? []);
-  const address = book.find((item) => item.id === id);
+  // Read from the book on screen; fetched here only when a link opened the sheet before the book
+  // had loaded. Kept as first loaded, so the sheet never changes under the customer's finger, nor
+  // as it closes over the change it asked for.
+  const client = useQueryClient();
+  const [cachedAtOpen] = useState(() => !!client.getQueryData(SAVED_ADDRESSES_QUERY_KEY));
+  const saved = useSavedAddresses({ enabled: !cachedAtOpen });
+  const [book, setBook] = useState(saved.data?.items);
+  if (book === undefined && saved.data) setBook(saved.data.items);
+  const address = book?.find((item) => item.id === id);
+  const missing = book === undefined ? saved.isError : !address;
   const deleteAddress = useDeleteAddress();
   const makeDefault = useMakeDefaultAddress();
   // One question at a time: a second quick tap would stack a second dialog on Android.
   const asking = useRef(false);
 
-  // Opened without its address in the book (a stale link): there is nothing to act on.
+  // Its address is not in the book (a stale link), or the book could not load: nothing to act on.
   useEffect(() => {
-    if (!address) router.back();
-  }, [address]);
+    if (missing) router.back();
+  }, [missing]);
 
-  if (!address) return null;
+  if (!book || !address) return null;
   // Deleting the default moves it to the oldest other address, the next one listed.
   const nextDefault = address.is_default ? withoutAddress(book, address.id)[0] : undefined;
 

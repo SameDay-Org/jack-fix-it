@@ -4,6 +4,8 @@ import { savedAddress } from "../../request/__tests__/helpers";
 import {
   addressFailure,
   isLabelTaken,
+  planDefault,
+  planDelete,
   withAdded,
   withDefault,
   withoutAddress,
@@ -50,6 +52,41 @@ describe("the book's edits keep the API's order", () => {
     const edited = withUpdated(BOOK, { ...WORK, label: "Office", line1: "1 Bay St" });
     expect(order(edited)).toEqual(["home*", "work", "mom"]);
     expect(edited[1]).toMatchObject({ label: "Office", line1: "1 Bay St" });
+  });
+});
+
+describe("an optimistic change taken back from the book as it is later", () => {
+  it("a delete taken back at once leaves the book as it was", () => {
+    for (const id of ["home", "work", "mom"]) {
+      const { book, undo } = planDelete(BOOK, id);
+      expect(order(undo(book))).toEqual(["home*", "work", "mom"]);
+    }
+  });
+
+  it("a deleted default returns as the default only while the one it promoted still is", () => {
+    const { book, undo } = planDelete(BOOK, "home");
+    expect(order(book)).toEqual(["work*", "mom"]);
+    // Mom was made the default meanwhile: Home comes back under her chip, not over it.
+    expect(order(undo(withDefault(book, "mom")))).toEqual(["mom*", "home", "work"]);
+  });
+
+  it("a delete taken back after a refetch already brought the address back changes nothing", () => {
+    const { undo } = planDelete(BOOK, "work");
+    expect(order(undo(BOOK))).toEqual(["home*", "work", "mom"]);
+  });
+
+  it("a new default taken back returns the old default and the address to its place", () => {
+    const { book, undo } = planDefault(BOOK, "mom");
+    expect(order(book)).toEqual(["mom*", "home", "work"]);
+    expect(order(undo(book))).toEqual(["home*", "work", "mom"]);
+  });
+
+  it("a new default is not taken back once another write moved the default or removed the old one", () => {
+    const { book, undo } = planDefault(BOOK, "mom");
+    const movedOn = withDefault(book, "work");
+    expect(order(undo(movedOn))).toEqual(order(movedOn));
+    const oldGone = withoutAddress(book, "home");
+    expect(order(undo(oldGone))).toEqual(["mom*", "work"]);
   });
 });
 

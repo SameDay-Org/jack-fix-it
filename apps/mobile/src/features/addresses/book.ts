@@ -30,6 +30,64 @@ export function withoutAddress(book: Book, id: string): SavedAddress[] {
   return withDefault(rest, rest[0].id);
 }
 
+/**
+ * Takes one optimistic change back from the book as it is when the write fails: whatever other
+ * writes drew since then stays.
+ */
+export type BookUndo = (book: Book) => SavedAddress[];
+
+/** An optimistic change: the book with it, and how to take it back later. */
+export type PlannedChange = { book: SavedAddress[]; undo: BookUndo };
+
+/** Inserts an address as a non-default at `index`, never above the default listed first. */
+function insertAt(book: Book, address: SavedAddress, index: number): SavedAddress[] {
+  const at = Math.max(Math.min(index, book.length), book[0]?.is_default ? 1 : 0);
+  return [...book.slice(0, at), { ...address, is_default: false }, ...book.slice(at)];
+}
+
+/**
+ * Deleting `id`. Taken back, the address returns to its place; it is the default again only if
+ * the default is still the one its deletion promoted (another write may have moved it since).
+ */
+export function planDelete(book: Book, id: string): PlannedChange {
+  const index = book.findIndex((address) => address.id === id);
+  if (index < 0) return { book: [...book], undo: (current) => [...current] };
+  const removed = book[index];
+  const next = withoutAddress(book, id);
+  const promotedId = removed.is_default ? next[0]?.id : undefined;
+  return {
+    book: next,
+    undo: (current) => {
+      if (current.some((address) => address.id === id)) return [...current];
+      const restored = insertAt(current, removed, index);
+      const currentDefault = current.find((address) => address.is_default);
+      const stillPromoted = !currentDefault || currentDefault.id === promotedId;
+      return removed.is_default && stillPromoted ? withDefault(restored, id) : restored;
+    },
+  };
+}
+
+/**
+ * Making `id` the default. Taken back while it is still the default and the old one is still in
+ * the book, the old default returns to the top and this address to its place.
+ */
+export function planDefault(book: Book, id: string): PlannedChange {
+  const index = book.findIndex((address) => address.id === id);
+  const previousId = book.find((address) => address.is_default)?.id;
+  return {
+    book: withDefault(book, id),
+    undo: (current) => {
+      const target = current.find((address) => address.id === id);
+      const previousThere = current.some((address) => address.id === previousId);
+      if (index < 0 || !target?.is_default || !previousId || previousId === id || !previousThere) {
+        return [...current];
+      }
+      const reverted = withDefault(current, previousId).filter((address) => address.id !== id);
+      return insertAt(reverted, target, index);
+    },
+  };
+}
+
 /** The book with the server's copy of a new address: first when it is the default, else last. */
 export function withAdded(book: Book, address: SavedAddress): SavedAddress[] {
   const rest = book.filter((saved) => saved.id !== address.id);
