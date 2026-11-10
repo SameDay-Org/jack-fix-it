@@ -687,11 +687,9 @@
         "onTheWay": "Cuando llegues, pídele a {{name}} el código de llegada de 4 dígitos que ve en su app.",
         "arrived": "Ya registraste tu llegada. Empieza el trabajo cuando comiences.",
         "done": "Marcaste este trabajo como terminado.",
-        "closed": "Este trabajo se canceló."
-      },
-      "next": {
-        "title": "Siguiente: fotos y Trabajo terminado",
-        "body": "Pronto podrás agregar fotos de antes y después y marcar el trabajo como terminado en la app."
+        "closed": "Este trabajo se canceló.",
+        "working": "Cuando termines el trabajo, toca Trabajo terminado.",
+        "waiting": "Trabajo terminado. Esperando que {{name}} lo confirme."
       },
       "locked": {
         "title": "El registro de llegada está bloqueado",
@@ -706,7 +704,8 @@
       "onTheWay": "Vas en camino y {{name}} puede ver a qué hora llegarás.",
       "etaUpdated": "Hora de llegada actualizada.",
       "arrived": "Llegada registrada. Puedes empezar el trabajo.",
-      "working": "Trabajo empezado."
+      "working": "Trabajo empezado.",
+      "done": "Trabajo terminado. Esperando que {{name}} lo confirme."
     },
     "failure": {
       "changed": "Este trabajo cambió. Así está ahora.",
@@ -761,6 +760,64 @@
         "body": "Puede tardar un poco bajo techo. Inténtalo de nuevo en unos segundos.",
         "retry": "Intentar de nuevo"
       }
+    },
+    "photos": {
+      "before": {
+        "title": "Fotos de antes",
+        "body": "Opcional. Muestra cómo está todo antes de empezar; {{name}} puede verlas en la app.",
+        "tile": "Foto de antes {{number}} de {{total}}",
+        "item": "Foto de antes {{number}}",
+        "full": "Este trabajo ya tiene {{max}} fotos de antes.",
+        "savedAnnounce_one": "Foto de antes guardada.",
+        "savedAnnounce_other": "{{count}} fotos de antes guardadas.",
+        "addLabel": "Agregar fotos de antes",
+        "addMoreLabel": "Agregar más fotos de antes",
+        "saveLabel_one": "Guardar {{count}} foto de antes",
+        "saveLabel_other": "Guardar {{count}} fotos de antes"
+      },
+      "after": {
+        "title": "Fotos de después",
+        "body": "Obligatorias. Muestra el trabajo terminado: Trabajo terminado necesita al menos una, y {{name}} puede verlas en la app.",
+        "tile": "Foto de después {{number}} de {{total}}",
+        "item": "Foto de después {{number}}",
+        "full": "Este trabajo ya tiene {{max}} fotos de después.",
+        "savedAnnounce_one": "Foto de después guardada.",
+        "savedAnnounce_other": "{{count}} fotos de después guardadas.",
+        "addLabel": "Agregar fotos de después",
+        "addMoreLabel": "Agregar más fotos de después",
+        "saveLabel_one": "Guardar {{count}} foto de después",
+        "saveLabel_other": "Guardar {{count}} fotos de después"
+      },
+      "count": "{{count}} de {{max}} fotos",
+      "full": "Es lo máximo que admite este trabajo ({{max}}).",
+      "final": "Las fotos guardadas no se pueden quitar.",
+      "save_one": "Guardar {{count}} foto",
+      "save_other": "Guardar {{count}} fotos",
+      "saveHint": "Las agrega al trabajo. Las fotos guardadas no se pueden quitar.",
+      "addMore": "Agregar más",
+      "expired": {
+        "title_one": "Esta foto tardó demasiado",
+        "title_other": "{{count}} fotos tardaron demasiado"
+      },
+      "refused": {
+        "title_one": "No pudimos guardar esta foto",
+        "title_other": "No pudimos guardar {{count}} fotos"
+      },
+      "again_one": "Agrégala de nuevo.",
+      "again_other": "Agrégalas de nuevo.",
+      "add": "Agregar fotos",
+      "upTo": "Hasta {{max}} fotos",
+      "failed_one": "No pudimos procesar {{count}} foto. Agrega otra.",
+      "failed_other": "No pudimos procesar {{count}} fotos. Agrega otra."
+    },
+    "done": {
+      "action": "Trabajo terminado",
+      "tryAgain": "Intentar de nuevo",
+      "processing": "Terminando de preparar tus fotos…",
+      "slow": "Tus fotos están tardando más de lo normal. Inténtalo de nuevo en un momento.",
+      "photosRequired": "Primero agrega al menos una foto de después.",
+      "photosFailed": "No pudimos preparar tus fotos de después. Agrega otra.",
+      "savePending": "Primero guarda tus fotos."
     }
   },
   "quoteForm": {
@@ -967,7 +1024,9 @@
       "arrived": "{{name}} llegó",
       "working": "{{name}} está trabajando",
       "finished": "{{name}} terminó el trabajo",
-      "hint": "Abre tu trabajo"
+      "hint": "Abre tu trabajo",
+      "unread_one": "{{count}} mensaje sin leer",
+      "unread_other": "{{count}} mensajes sin leer"
     },
     "booked": {
       "title": "Tu trabajo está reservado",
@@ -987,6 +1046,100 @@
       "title": "No pudimos cargar tu trabajo",
       "body": "Revisa tu conexión e inténtalo de nuevo.",
       "retry": "Intentar de nuevo"
+    },
+    "photos": {
+      "title": "Fotos",
+      "before": "Antes",
+      "after": "Después",
+      "beforeTile": "Foto de antes {{number}} de {{total}}",
+      "afterTile": "Foto de después {{number}} de {{total}}",
+      "pending_one": "Estamos preparando {{count}} foto más.",
+      "pending_other": "Estamos preparando {{count}} fotos más.",
+      "pendingOnly_one": "Estamos preparando {{count}} foto.",
+      "pendingOnly_other": "Estamos preparando {{count}} fotos."
+    }
+  },
+  "chat": {
+    "peer": {
+      "pro": {
+        "fallback": "Tu profesional",
+        "inline": "tu profesional",
+        "role": "Tu profesional en este trabajo"
+      },
+      "customer": {
+        "fallback": "Tu cliente",
+        "inline": "tu cliente",
+        "role": "Tu cliente en este trabajo"
+      }
+    },
+    "loading": "Cargando mensajes",
+    "empty": {
+      "title": "Saluda a {{name}}",
+      "body": "Pregunta por el trabajo, el horario o lo que necesites saber. Tus mensajes se quedan en Jack Fix It.",
+      "closedTitle": "No hay mensajes aquí",
+      "closedBody": "No se envió ningún mensaje antes de que se cerrara este chat."
+    },
+    "start": "Aquí empiezan sus mensajes sobre este trabajo.",
+    "older": {
+      "load": "Ver mensajes anteriores",
+      "failed": "No pudimos cargar los mensajes anteriores.",
+      "retry": "Intentar de nuevo"
+    },
+    "error": {
+      "title": "No pudimos cargar tus mensajes",
+      "body": "Revisa tu conexión e inténtalo de nuevo.",
+      "retry": "Intentar de nuevo"
+    },
+    "notFound": {
+      "title": "Esta conversación no está disponible",
+      "body": "Puede ser de otra cuenta, o el enlace ya no es válido.",
+      "home": "Ir al inicio"
+    },
+    "day": {
+      "today": "Hoy",
+      "yesterday": "Ayer"
+    },
+    "you": "Tú",
+    "bubble": {
+      "label": "{{sender}}, {{time}}: {{text}}",
+      "pendingLabel": "Tú, {{state}}: {{text}}",
+      "stateSending": "enviando",
+      "stateNotSent": "no enviado",
+      "failed": "No se envió. Toca para intentarlo de nuevo.",
+      "failedShort": "No se envió",
+      "retryHint": "Lo envía de nuevo",
+      "refused": "No se envió"
+    },
+    "redacted": "Ocultamos datos de contacto. Mantén la conversación en Jack Fix It.",
+    "receipt": {
+      "sent": "Enviado",
+      "delivered": "Entregado",
+      "seen": "Visto"
+    },
+    "composer": {
+      "label": "Mensaje",
+      "placeholder": "Escribe a {{name}}",
+      "send": "Enviar",
+      "left_one": "Queda {{count}} carácter",
+      "left_other": "Quedan {{count}} caracteres",
+      "over_one": "{{count}} carácter de más",
+      "over_other": "{{count}} caracteres de más"
+    },
+    "tooFast": "Estás enviando mensajes muy rápido. Espera un momento y vuelve a intentarlo.",
+    "closed": {
+      "title": "Este chat está cerrado",
+      "body": "Todavía puedes leer tus mensajes aquí."
+    },
+    "announce": {
+      "sent": "Mensaje enviado",
+      "failed": "No se envió el mensaje"
+    },
+    "entry": {
+      "message": "Escribir a {{name}}",
+      "view": "Ver mensajes",
+      "unread_one": "{{count}} mensaje sin leer",
+      "unread_other": "{{count}} mensajes sin leer",
+      "label": "{{action}}, {{unread}}"
     }
   }
 }

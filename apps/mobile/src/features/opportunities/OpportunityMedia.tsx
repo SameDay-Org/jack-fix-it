@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Image, StyleSheet, Text, View } from "react-native";
-import Svg, { Circle, Path, Rect } from "react-native-svg";
+import Svg, { Circle, Path } from "react-native-svg";
 
+import { FrameGlyph, PHOTO_TILE } from "@/features/media/PhotoTiles";
 import { continuousCorners, tokens } from "@/theme";
 
 import { mediaExpired, type OpportunityMedia as MediaItem } from "./useOpportunity";
@@ -16,8 +17,6 @@ export type OpportunityMediaProps = {
   testID?: string;
 };
 
-/** Three tiles fit a 320 dp screen's content width with the kit's gap-2 between them. */
-const TILE = { width: 80, height: 80 } as const;
 const GLYPH_SIZE = 28;
 
 /**
@@ -92,7 +91,7 @@ function MediaTile({ item, expired, testID }: MediaTileProps) {
 
   return (
     <View
-      style={[continuousCorners, TILE]}
+      style={[continuousCorners, PHOTO_TILE]}
       className={`items-center justify-center overflow-hidden rounded-md ${
         video ? "bg-navy-900" : "bg-navy-900/10"
       }`}
@@ -119,29 +118,6 @@ function PlayGlyph() {
     <Svg width={GLYPH_SIZE} height={GLYPH_SIZE} viewBox="0 0 24 24" testID="media-play">
       <Circle cx={12} cy={12} r={11} fill={tokens.colors.white} />
       <Path d="M9.5 7.5v9l7.5-4.5z" fill={tokens.colors["navy-900"]} />
-    </Svg>
-  );
-}
-
-function FrameGlyph() {
-  const stroke = tokens.colors["gray-500"];
-  return (
-    <Svg
-      width={GLYPH_SIZE}
-      height={GLYPH_SIZE}
-      viewBox="0 0 24 24"
-      fill="none"
-      testID="media-frame"
-    >
-      <Rect x={3} y={5} width={18} height={14} rx={3} stroke={stroke} strokeWidth={1.5} />
-      <Circle cx={8.5} cy={10} r={1.5} fill={stroke} />
-      <Path
-        d="M5 17l4.5-4.5 3 3 2.5-2.5L19 17"
-        stroke={stroke}
-        strokeWidth={1.5}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
     </Svg>
   );
 }

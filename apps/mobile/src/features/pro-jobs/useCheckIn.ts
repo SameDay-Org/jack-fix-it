@@ -14,7 +14,7 @@ import {
   useLocationAccess,
   type CheckInPosition,
 } from "./location";
-import { reportStepFailure } from "./ProJobScreen";
+import { reportStepFailure } from "./failure";
 
 /**
  * Where the check-in sheet is:

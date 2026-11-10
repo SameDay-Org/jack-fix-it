@@ -15,7 +15,7 @@ import { markOnTheWay, proJobQueryOptions, stepFailure, useSingleFlight } from "
 import { ETA_MAX_MINUTES, ETA_MIN_MINUTES, nextEta, previousEta, proJobsConfig } from "./config";
 import { customerName } from "./format";
 import { jobStep } from "./phase";
-import { reportStepFailure } from "./ProJobScreen";
+import { reportStepFailure } from "./failure";
 import { useSheetExit } from "./useSheetExit";
 
 const MINUTE_MS = 60_000;

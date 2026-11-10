@@ -1,13 +1,12 @@
-import { router, type Href } from "expo-router";
-import { useRef, useState } from "react";
+import type { Href } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
 
-import { Button, Card, showToast } from "@/components/ui";
+import { Button, Card } from "@/components/ui";
 
 import { MediaItemRow } from "./MediaItemRow";
 import { MediaPermissionNotice } from "./MediaPermissionNotice";
-import { chooseMediaSource, closeMediaSourceSheet } from "./mediaSource";
+import { useMediaAdd } from "./useMediaAdd";
 import type { MediaUpload } from "./useMediaUpload";
 
 export type MediaPickerProps = {
@@ -28,29 +27,7 @@ export function MediaPicker({ upload, sourceSheet, testID }: MediaPickerProps) {
   const { t } = useTranslation();
   const { items, max, remaining, acceptsVideo } = upload;
   const full = remaining === 0;
-  // From the tap until the picker returns: a second tap opens nothing.
-  const [adding, setAdding] = useState(false);
-  const addingNow = useRef(false);
-
-  const add = async () => {
-    if (addingNow.current) return;
-    addingNow.current = true;
-    setAdding(true);
-    try {
-      const source = await chooseMediaSource(() => router.push(sourceSheet), { acceptsVideo });
-      if (!source) return;
-      try {
-        await upload.add(source);
-      } finally {
-        closeMediaSourceSheet();
-      }
-    } catch {
-      showToast({ message: t("media.pickFailed"), tone: "danger" });
-    } finally {
-      addingNow.current = false;
-      setAdding(false);
-    }
-  };
+  const { adding, add } = useMediaAdd(upload, sourceSheet);
 
   return (
     <View className="gap-3" testID={testID}>
@@ -90,7 +67,7 @@ export function MediaPicker({ upload, sourceSheet, testID }: MediaPickerProps) {
         )}
         variant={items.length === 0 ? "primary" : "secondary"}
         disabled={full}
-        loading={adding || upload.picking}
+        loading={adding}
         onPress={() => void add()}
         testID="media-add"
       />

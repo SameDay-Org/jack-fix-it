@@ -10,20 +10,43 @@ import {
 
 const read = (etaPresets?: string, locationTimeoutSeconds?: string) =>
   readProJobsConfig({ etaPresets, locationTimeoutSeconds });
+/** The photo and Job's done values, the others unset. */
+const readPhotos = (
+  photoMaxPerKind?: string,
+  doneRetrySeconds?: string,
+  doneRetryWindowSeconds?: string,
+) =>
+  readProJobsConfig({
+    etaPresets: undefined,
+    locationTimeoutSeconds: undefined,
+    photoMaxPerKind,
+    doneRetrySeconds,
+    doneRetryWindowSeconds,
+  });
 
 const PRESETS_ERROR = /EXPO_PUBLIC_JOB_ETA_PRESETS must list whole minutes from 5 to 240/;
 const TIMEOUT_ERROR = /EXPO_PUBLIC_CHECK_IN_LOCATION_TIMEOUT_SECONDS must be a positive whole/;
 
 describe("readProJobsConfig", () => {
   it("offers 10, 20, 30, 45 and 60 minutes and waits 20 s for a location when nothing is set", () => {
-    expect(read()).toEqual({ etaPresetsMinutes: [10, 20, 30, 45, 60], locationTimeoutMs: 20_000 });
+    expect(read()).toEqual({
+      etaPresetsMinutes: [10, 20, 30, 45, 60],
+      locationTimeoutMs: 20_000,
+      photoMaxPerKind: 10,
+      doneRetryIntervalMs: 3_000,
+      doneRetryWindowMs: 30_000,
+    });
     expect(DEFAULT_LOCATION_TIMEOUT_SECONDS).toBe(20);
   });
 
   it.each(["", "   "])("treats a blank value (%j) as unset", (blank) => {
+    expect(readPhotos(blank, blank, blank)).toEqual(read(blank, blank));
     expect(read(blank, blank)).toEqual({
       etaPresetsMinutes: [10, 20, 30, 45, 60],
       locationTimeoutMs: 20_000,
+      photoMaxPerKind: 10,
+      doneRetryIntervalMs: 3_000,
+      doneRetryWindowMs: 30_000,
     });
   });
 
@@ -66,16 +89,43 @@ describe("readProJobsConfig", () => {
     expect(() => read(undefined, raw)).toThrow(TIMEOUT_ERROR);
   });
 
+  it("reads the job photo cap and Job's done's retry interval and window", () => {
+    expect(readPhotos("4", "2", "20")).toMatchObject({
+      photoMaxPerKind: 4,
+      doneRetryIntervalMs: 2_000,
+      doneRetryWindowMs: 20_000,
+    });
+    expect(readPhotos(undefined, "5", "5").doneRetryWindowMs).toBe(5_000);
+  });
+
+  it.each([
+    ["a zero photo cap", ["0", undefined, undefined], /EXPO_PUBLIC_JOB_PHOTO_MAX_PER_KIND/],
+    ["a fractional retry", [undefined, "1.5", undefined], /EXPO_PUBLIC_JOB_DONE_RETRY_SECONDS/],
+    ["a word for the window", [undefined, undefined, "soon"], /EXPO_PUBLIC_JOB_DONE_RETRY_WINDOW/],
+    ["a window shorter than one retry", [undefined, "10", "5"], /must be at least/],
+  ] as const)("refuses %s", (_label, [max, retry, window], error) => {
+    expect(() => readPhotos(max, retry, window)).toThrow(error);
+  });
+
   it("reads the EXPO_PUBLIC values once, when the module loads", () => {
     const saved = { ...process.env };
     process.env.EXPO_PUBLIC_JOB_ETA_PRESETS = "15,30";
     process.env.EXPO_PUBLIC_CHECK_IN_LOCATION_TIMEOUT_SECONDS = "10";
+    process.env.EXPO_PUBLIC_JOB_PHOTO_MAX_PER_KIND = "6";
+    process.env.EXPO_PUBLIC_JOB_DONE_RETRY_SECONDS = "4";
+    process.env.EXPO_PUBLIC_JOB_DONE_RETRY_WINDOW_SECONDS = "40";
     try {
       let loaded: ProJobsConfig | undefined;
       jest.isolateModules(() => {
         loaded = (jest.requireActual("../config") as typeof import("../config")).proJobsConfig;
       });
-      expect(loaded).toEqual({ etaPresetsMinutes: [15, 30], locationTimeoutMs: 10_000 });
+      expect(loaded).toEqual({
+        etaPresetsMinutes: [15, 30],
+        locationTimeoutMs: 10_000,
+        photoMaxPerKind: 6,
+        doneRetryIntervalMs: 4_000,
+        doneRetryWindowMs: 40_000,
+      });
     } finally {
       process.env = saved;
     }

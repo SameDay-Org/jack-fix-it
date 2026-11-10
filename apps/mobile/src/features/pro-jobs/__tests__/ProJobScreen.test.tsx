@@ -304,7 +304,7 @@ describe("ProJobScreen", () => {
   });
 
   describe("arrived", () => {
-    it("Start job posts once however fast the taps, then shows Working with no button", async () => {
+    it("Start job posts once however fast the taps, then shows Working with Job's done", async () => {
       const answer = deferred<ProJob>();
       jest.mocked(apiPost).mockReturnValueOnce(answer.promise as ReturnType<typeof apiPost>);
       const job = arrived();
@@ -333,9 +333,8 @@ describe("ProJobScreen", () => {
         expect(within(screen.getByTestId("pro-job-status")).getByText("Working")).toBeTruthy(),
       );
       expect(screen.getByText("Started at")).toBeTruthy();
-      const next = within(screen.getByTestId("pro-job-next"));
-      expect(next.getByText("Next: photos and Job's done")).toBeTruthy();
-      expect(actionButtons()).toEqual([]);
+      expect(screen.getByText("When the work is finished, tap Job's done.")).toBeTruthy();
+      expect(actionButtons()).toEqual([screen.getByTestId("pro-job-done")]);
       expect(Haptics.notificationAsync).toHaveBeenCalledWith(
         Haptics.NotificationFeedbackType.Success,
       );
@@ -397,7 +396,7 @@ describe("ProJobScreen", () => {
 
       await act(async () => fireEvent.press(screen.getByTestId("pro-job-start")));
       expect(apiPost).toHaveBeenCalledTimes(2);
-      expect(await screen.findByTestId("pro-job-next")).toBeTruthy();
+      expect(await screen.findByTestId("pro-job-done")).toBeTruthy();
     });
 
     it("a start whose session ended shows nothing and asks for nothing", async () => {
@@ -414,25 +413,30 @@ describe("ProJobScreen", () => {
   });
 
   describe("working, done and closed", () => {
-    it("working shows the next-step notice and no button", async () => {
+    it("working asks for an after photo and holds Job's done closed until one is on the job", async () => {
       await open(working());
 
       expect(within(screen.getByTestId("pro-job-status")).getByText("Working")).toBeTruthy();
-      const next = within(screen.getByTestId("pro-job-next"));
-      expect(next.getByText("Next: photos and Job's done")).toBeTruthy();
-      expect(
-        next.getByText(
-          "Adding before and after photos and marking the job done are coming to the app soon.",
-        ),
-      ).toBeTruthy();
-      expect(actionButtons()).toEqual([]);
+      expect(screen.getByText("When the work is finished, tap Job's done.")).toBeTruthy();
+      expect(actionButtons()).toEqual([screen.getByTestId("pro-job-done")]);
+      expect(screen.getByTestId("pro-job-done").props.accessibilityState).toMatchObject({
+        disabled: true,
+      });
+      expect(actions().getByText("Add at least one after photo first.")).toBeTruthy();
     });
 
-    it("done says it was marked done, with no button", async () => {
+    it("done and waiting says who confirms it next, with no button", async () => {
       await open(working({ status: "completed", completed_at: minutesFromNow(-1) }));
 
       expect(within(screen.getByTestId("pro-job-status")).getByText("Done")).toBeTruthy();
       expect(screen.getByText("Marked done at")).toBeTruthy();
+      expect(screen.getByText("Job's done. Waiting for Maria to confirm.")).toBeTruthy();
+      expect(actionButtons()).toEqual([]);
+    });
+
+    it("done and confirmed says it was marked done, with no button", async () => {
+      await open(working({ status: "confirmed", completed_at: minutesFromNow(-1) }));
+
       expect(screen.getByText("You marked this job done.")).toBeTruthy();
       expect(actionButtons()).toEqual([]);
     });
@@ -647,5 +651,36 @@ describe("ProJobScreen", () => {
       expect(screen.queryByTestId("pro-job-title")).toBeNull();
       expect(screen.queryByTestId("pro-job-actions")).toBeNull();
     });
+  });
+});
+
+describe("the chat with the customer (#74)", () => {
+  it("offers a message to the customer by first name, with their unread count", async () => {
+    await open(proJob({ customer_first_name: "Jamie", unread_messages: 2 }));
+
+    const entry = screen.getByTestId("chat-entry");
+    expect(within(entry).getByText("Message Jamie")).toBeTruthy();
+    expect(within(entry).getByTestId("chat-entry-badge")).toBeTruthy();
+    expect(entry.props.accessibilityLabel).toBe("Message Jamie, 2 unread messages");
+
+    await act(async () => fireEvent.press(entry));
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/jobs/[id]/chat",
+      params: { id: JOB_ID },
+    });
+  });
+
+  it("says 'your customer' when the API withholds the name, and no badge with nothing unread", async () => {
+    await open(proJob({ customer_first_name: null, unread_messages: 0 }));
+
+    const entry = screen.getByTestId("chat-entry");
+    expect(entry.props.accessibilityLabel).toBe("Message your customer");
+    expect(screen.queryByTestId("chat-entry-badge")).toBeNull();
+  });
+
+  it("only offers to read the messages once the job is cancelled", async () => {
+    await open(proJob({ status: "cancelled", address: null }));
+
+    expect(screen.getByTestId("chat-entry").props.accessibilityLabel).toBe("View messages");
   });
 });

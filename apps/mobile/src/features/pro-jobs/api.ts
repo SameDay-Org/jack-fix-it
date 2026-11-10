@@ -15,7 +15,7 @@ import { isUuid } from "@/features/quotes/navigation";
 import { useRefetchOnReturn } from "@/features/quotes/useRequestQuotes";
 
 import type { CheckInPosition } from "./location";
-import { isActiveJob, soonestFirst, type ProJob } from "./phase";
+import { isActiveJob, soonestFirst, type JobPhotoKind, type ProJob } from "./phase";
 
 const PRO_JOBS = "pro-jobs";
 
@@ -192,6 +192,112 @@ export async function startJob(
   });
   applyJob(client, job, generation);
   return job;
+}
+
+/**
+ * How attaching one uploaded photo to the job ended:
+ * - `attached`: it is on the job (also when it already was: a retry after a lost answer);
+ * - `expired`: the upload is too old to attach (`upload_expired`); the photo is added again;
+ * - `refused`: not an upload of this pro the API takes (`invalid_photo`); added again too;
+ * - `full`: the job already holds the most photos of the kind (`job_photo_limit`);
+ * - `failure`: why it did not go through otherwise (`changed` covers a job no longer taking
+ *   photos of the kind, `job_photo_not_allowed`).
+ */
+export type AttachOutcome =
+  | { kind: "attached" }
+  | { kind: "expired" }
+  | { kind: "refused" }
+  | { kind: "full" }
+  | { kind: "failure"; failure: StepFailure };
+
+const DUPLICATE_PHOTO = "duplicate_photo";
+const UPLOAD_EXPIRED = "upload_expired";
+const INVALID_PHOTO = "invalid_photo";
+const PHOTO_LIMIT = "job_photo_limit";
+
+/**
+ * Attaches one of the pro's `job_photo` uploads to the job, as a before or an after photo. One key
+ * per call, so an upload the API refuses is known by name and the others still go in. The key goes
+ * into this request and nowhere else: never into a log.
+ */
+export async function attachPhoto(
+  client: QueryClient,
+  jobId: string,
+  kind: JobPhotoKind,
+  uploadKey: string,
+  generation: number,
+): Promise<AttachOutcome> {
+  try {
+    const job = await apiPost(
+      "/v1/pros/me/jobs/{job_id}/photos",
+      { kind, upload_keys: [uploadKey] },
+      { auth: true, generation, params: { job_id: jobId } },
+    );
+    applyJob(client, job, generation);
+    return { kind: "attached" };
+  } catch (error) {
+    const code = error instanceof ApiError ? error.code : undefined;
+    if (code === DUPLICATE_PHOTO) {
+      // Already on the job: an earlier try went through and its answer was lost.
+      refreshJob(client, jobId, generation);
+      return { kind: "attached" };
+    }
+    if (code === UPLOAD_EXPIRED) return { kind: "expired" };
+    if (code === INVALID_PHOTO) return { kind: "refused" };
+    if (code === PHOTO_LIMIT) {
+      refreshJob(client, jobId, generation);
+      return { kind: "full" };
+    }
+    const failure = stepFailure(error);
+    if (failure === "changed" || failure === "gone") refreshJob(client, jobId, generation);
+    return { kind: "failure", failure };
+  }
+}
+
+/**
+ * How Job's done ended:
+ * - `done`: the job is completed; the customer's window to confirm is open;
+ * - `processing`: the after photos' privacy-safe copies are still being made; asking again
+ *   shortly goes through (`after_photos_processing`);
+ * - `photosRequired`: no after photo the customer can see (`after_photos_required`: none, or every
+ *   copy failed); the pro adds another;
+ * - `failure`: why it did not go through otherwise.
+ */
+export type DoneOutcome =
+  | { kind: "done"; job: ProJob }
+  | { kind: "processing" }
+  | { kind: "photosRequired" }
+  | { kind: "failure"; failure: StepFailure };
+
+const AFTER_PHOTOS_PROCESSING = "after_photos_processing";
+const AFTER_PHOTOS_REQUIRED = "after_photos_required";
+
+/** Job's done: working to completed, once an after photo the customer can see is on the job. */
+export async function completeJob(
+  client: QueryClient,
+  jobId: string,
+  generation: number,
+): Promise<DoneOutcome> {
+  try {
+    const job = await apiPost("/v1/pros/me/jobs/{job_id}/complete", undefined, {
+      auth: true,
+      generation,
+      params: { job_id: jobId },
+    });
+    applyJob(client, job, generation);
+    return { kind: "done", job };
+  } catch (error) {
+    const code = error instanceof ApiError ? error.code : undefined;
+    if (code === AFTER_PHOTOS_PROCESSING) return { kind: "processing" };
+    if (code === AFTER_PHOTOS_REQUIRED) {
+      // The photos as they stand: a failed copy may have left the list.
+      refreshJob(client, jobId, generation);
+      return { kind: "photosRequired" };
+    }
+    const failure = stepFailure(error);
+    if (failure === "changed" || failure === "gone") refreshJob(client, jobId, generation);
+    return { kind: "failure", failure };
+  }
 }
 
 /**
