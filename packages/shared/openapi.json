@@ -3370,6 +3370,195 @@
         }
       }
     },
+    "/v1/jobs/{job_id}/pro-location": {
+      "put": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Share my position while I am on my way (never stored in the database)",
+        "description": "The pro's app sends this every few seconds from On my way to the check-in. Only the\nlatest position of a job is kept, in memory, for a short time; it is deleted when the pro\nchecks in or the job leaves on the way, and no position is ever written to the database.\nOne sent too soon after the last, or older than it, is answered 204 and dropped.",
+        "operationId": "share_pro_location_v1_jobs__job_id__pro_location_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProLocationIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "validation_error: a coordinate, accuracy or heading out of range or not a finite number, an unknown field, or recorded_at too far from the server's time.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros share their position.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job of the caller with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "not_on_the_way: the pro is not on the way to this job: not yet, already checked in, or the job moved on. Stop sending.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: far too many positions from this pro; Retry-After has the wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "location_unavailable: the position could not be kept; drop it and send the next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "See where my pro is while on the way (never stored in the database)",
+        "description": "The pro's latest position on the way to the customer's own job, to poll every few\nseconds. `position` is null whenever there is none to show: before the first one, once it\nis too old, and whenever the pro is not on the way (the job's own status says which).\nPositions are kept in memory for a short time only, never in the database.",
+        "operationId": "get_pro_location_v1_jobs__job_id__pro_location_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProLocationOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers follow their pro.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job of the caller with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/jobs/{job_id}/messages": {
       "get": {
         "tags": [
@@ -7257,6 +7446,141 @@
         ],
         "title": "ProJobPhotos",
         "description": "The pro's own photos of the job, oldest first: each as its privacy-safe copy once it is\nmade, else the pro's original."
+      },
+      "ProLocationIn": {
+        "properties": {
+          "lat": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Lat",
+            "description": "Latitude, in degrees."
+          },
+          "lng": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Lng",
+            "description": "Longitude, in degrees."
+          },
+          "accuracy_m": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy M",
+            "description": "The fix's accuracy radius in meters; null or left out when unknown."
+          },
+          "heading_deg": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 360.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading Deg",
+            "description": "Direction of travel, in degrees clockwise from north; null or left out when unknown."
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Recorded At",
+            "description": "When the device took the fix, with its UTC offset. Refused when too far from the server's time (ahead or behind)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "lat",
+          "lng",
+          "recorded_at"
+        ],
+        "title": "ProLocationIn",
+        "description": "One fix of the pro's device while on the way (#350). Numbers only: a string or a boolean\nis refused, not converted."
+      },
+      "ProLocationOut": {
+        "properties": {
+          "position": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProPosition"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The pro's latest position. null whenever there is none to show: the pro is not on the way (not yet, arrived, or the job moved on), has sent none yet, or the last one is too old."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "position"
+        ],
+        "title": "ProLocationOut"
+      },
+      "ProPosition": {
+        "properties": {
+          "lat": {
+            "type": "number",
+            "title": "Lat"
+          },
+          "lng": {
+            "type": "number",
+            "title": "Lng"
+          },
+          "accuracy_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy M",
+            "description": "Accuracy radius in meters, when known."
+          },
+          "heading_deg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading Deg",
+            "description": "Direction of travel, in degrees clockwise from north, when known."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "When the server received this position."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "lat",
+          "lng",
+          "accuracy_m",
+          "heading_deg",
+          "updated_at"
+        ],
+        "title": "ProPosition",
+        "description": "Where the pro was at `updated_at` (#350)."
       },
       "ProProfileOut": {
         "properties": {
