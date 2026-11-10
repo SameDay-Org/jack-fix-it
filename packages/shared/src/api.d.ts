@@ -2311,6 +2311,16 @@ export interface components {
             code: string;
         };
         /**
+         * PhotoKindCounts
+         * @description A count of the job's photos per kind.
+         */
+        PhotoKindCounts: {
+            /** Before */
+            before: number;
+            /** After */
+            after: number;
+        };
+        /**
          * PhotoOut
          * @description An image the caller may see: a pro's profile photo (#36), a user's ID photo (#250).
          */
@@ -2410,6 +2420,11 @@ export interface components {
              * @description When the pro marked the job done: the customer's confirmation window opens.
              */
             completed_at: string | null;
+            /**
+             * Confirm By
+             * @description While the job is completed: when it is confirmed automatically if the customer neither confirms it nor reports a problem (the pro's Job's done plus JOB_AUTO_CONFIRM_AFTER_HOURS). Null in every other status.
+             */
+            confirm_by: string | null;
             photos: components["schemas"]["ProJobPhotos"];
             /**
              * Pro Payout Cents
@@ -2442,6 +2457,10 @@ export interface components {
             before: components["schemas"]["JobPhotoOut"][];
             /** After */
             after: components["schemas"]["JobPhotoOut"][];
+            /** @description Listed photos whose privacy-safe copy is still being made: the customer does not see them yet. */
+            pending: components["schemas"]["PhotoKindCounts"];
+            /** @description Listed photos whose privacy-safe copy could not be made: the customer never sees them. */
+            failed: components["schemas"]["PhotoKindCounts"];
         };
         /** ProProfileOut */
         ProProfileOut: {

@@ -46,12 +46,27 @@ class JobPhotoOut(_Out):
     expires_at: datetime
 
 
+class PhotoKindCounts(_Out):
+    """A count of the job's photos per kind."""
+
+    before: int
+    after: int
+
+
 class ProJobPhotos(_Out):
     """The pro's own photos of the job, oldest first: each as its privacy-safe copy once it is
     made, else the pro's original."""
 
     before: list[JobPhotoOut]
     after: list[JobPhotoOut]
+    pending: PhotoKindCounts = Field(
+        description="Listed photos whose privacy-safe copy is still being made: the customer "
+        "does not see them yet."
+    )
+    failed: PhotoKindCounts = Field(
+        description="Listed photos whose privacy-safe copy could not be made: the customer "
+        "never sees them."
+    )
 
 
 class CustomerJobPhotos(_Out):
@@ -143,6 +158,11 @@ class ProJob(_Out):
     started_at: datetime | None = Field(description="When the work started (Working).")
     completed_at: datetime | None = Field(
         description="When the pro marked the job done: the customer's confirmation window opens."
+    )
+    confirm_by: datetime | None = Field(
+        description="While the job is completed: when it is confirmed automatically if the "
+        "customer neither confirms it nor reports a problem (the pro's Job's done plus "
+        "JOB_AUTO_CONFIRM_AFTER_HOURS). Null in every other status."
     )
     photos: ProJobPhotos
     pro_payout_cents: int = Field(description="What the pro receives for the job.")
