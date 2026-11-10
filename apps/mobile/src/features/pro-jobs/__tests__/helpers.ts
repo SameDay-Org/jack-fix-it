@@ -27,6 +27,12 @@ export const PAINTING = {
   names: { en: "Painting", es: "Pintura" },
 };
 
+/** No photo of either kind pending or failed: the pro view's counts (#343). */
+export const NO_PHOTO_COUNTS = {
+  pending: { before: 0, after: 0 },
+  failed: { before: 0, after: 0 },
+};
+
 /** A scheduled job three hours from now, for Maria, paying the pro $153.00. */
 export const proJob = (overrides: Partial<ProJob> = {}): ProJob => ({
   id: JOB_ID,
@@ -47,7 +53,8 @@ export const proJob = (overrides: Partial<ProJob> = {}): ProJob => ({
   arrival_code_locked: false,
   started_at: null,
   completed_at: null,
-  photos: { before: [], after: [] },
+  confirm_by: null,
+  photos: { before: [], after: [], ...NO_PHOTO_COUNTS },
   pro_payout_cents: 15_300,
   unread_messages: 0,
   ...overrides,

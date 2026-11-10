@@ -19,6 +19,7 @@ import {
   JOB_ID,
   minutesFromNow,
   navigation,
+  NO_PHOTO_COUNTS,
   proJob,
   renderWithQuery,
   signedIn,
@@ -79,7 +80,7 @@ const photos = (from: number, count: number): JobPhoto[] =>
 
 /** The job working, with these after photos on it. */
 const workingWith = (after: JobPhoto[], before: JobPhoto[] = []): ProJob =>
-  working({ photos: { before, after } });
+  working({ photos: { before, after, ...NO_PHOTO_COUNTS } });
 
 const asset = (n: number): ImagePicker.ImagePickerAsset => ({
   uri: `file:///picked/${n}.jpg`,

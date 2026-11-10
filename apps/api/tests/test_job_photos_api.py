@@ -29,6 +29,7 @@ from tests.conftest import make_settings
 from tests.job_world import JobWorld, build_world, events, job_row, make_job
 from tests.test_media_copies import MAX_TRIES, MemoryStorage, ctx, gps_jpeg
 from tests.test_media_logging import leaks
+from tests.test_quote_list_api import counted_statements
 
 BASE = "/v1/pros/me/jobs"
 CAP = 3
@@ -959,7 +960,12 @@ async def test_no_photo_no_storage(
     response = await db_client.get(f"{BASE}/{job.id}", headers=world.pro.headers)
 
     assert response.status_code == 200
-    assert response.json()["photos"] == {"before": [], "after": []}
+    assert response.json()["photos"] == {
+        "before": [],
+        "after": [],
+        "pending": {"before": 0, "after": 0},
+        "failed": {"before": 0, "after": 0},
+    }
 
 
 async def test_a_cannot_see_bs_job_photos(
@@ -977,6 +983,121 @@ async def test_a_cannot_see_bs_job_photos(
     assert (other_customer.status_code, other_pro.status_code) == (404, 404)
     assert other_list.json()["items"] == []
     assert storage.gets == []
+
+
+# The pro's photo counts (#343)
+
+
+async def mixed_photos(session: AsyncSession, world: JobWorld, job: Job) -> list[JobPhoto]:
+    """2 before (ready, pending) and 3 after (pending, failed, ready), oldest first."""
+    t0 = datetime.now(UTC) - timedelta(minutes=10)
+    rows = [
+        (JobPhotoKind.BEFORE, MediaSafeStatus.READY),
+        (JobPhotoKind.BEFORE, MediaSafeStatus.PENDING),
+        (JobPhotoKind.AFTER, MediaSafeStatus.PENDING),
+        (JobPhotoKind.AFTER, MediaSafeStatus.FAILED),
+        (JobPhotoKind.AFTER, MediaSafeStatus.READY),
+    ]
+    return [
+        await photo_row(
+            session,
+            world,
+            job,
+            kind,
+            status,
+            safe_key() if status is MediaSafeStatus.READY else None,
+            t0 + timedelta(minutes=n),
+        )
+        for n, (kind, status) in enumerate(rows)
+    ]
+
+
+async def test_pro_job_photo_counts_per_kind(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld, storage: FakeStorage
+) -> None:
+    job = await make_job(db_session, world, JobStatus.IN_PROGRESS)
+    photos = await mixed_photos(db_session, world, job)
+
+    one = await db_client.get(f"{BASE}/{job.id}", headers=world.pro.headers)
+    page = await db_client.get(BASE, headers=world.pro.headers)
+
+    [listed] = page.json()["items"]
+    for body in (one.json(), listed):
+        assert body["photos"]["pending"] == {"before": 1, "after": 1}
+        assert body["photos"]["failed"] == {"before": 0, "after": 1}
+        # The lists are unchanged: every photo, oldest first, original while not ready.
+        ids = [photo["id"] for photo in [*body["photos"]["before"], *body["photos"]["after"]]]
+        assert ids == [str(photo.id) for photo in photos]
+
+
+async def test_pro_job_no_photos_counts_zero(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld, storage: FakeStorage
+) -> None:
+    job = await make_job(db_session, world, JobStatus.IN_PROGRESS)
+
+    one = await db_client.get(f"{BASE}/{job.id}", headers=world.pro.headers)
+    page = await db_client.get(BASE, headers=world.pro.headers)
+
+    zero = {"before": 0, "after": 0}
+    for photos in (one.json()["photos"], page.json()["items"][0]["photos"]):
+        assert (photos["pending"], photos["failed"]) == (zero, zero)
+    assert storage.gets == []
+
+
+async def test_customer_job_view_unchanged_keys(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld, storage: FakeStorage
+) -> None:
+    # The pro's counts stay on the pro's side: the customer's view is exactly develop's.
+    job = await make_job(db_session, world, JobStatus.IN_PROGRESS)
+    await mixed_photos(db_session, world, job)
+
+    response = await db_client.get(
+        f"/v1/requests/{job.request_id}/job", headers=world.customer.headers
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert list(body) == [
+        "id",
+        "status",
+        "customer_status",
+        "scheduled_start_at",
+        "pro",
+        "eta_at",
+        "arrival_code",
+        "confirm_by",
+        "timeline",
+        "photos",
+        "amount_cents",
+        "tax_cents",
+        "customer_total_cents",
+        "unread_messages",
+    ]
+    assert list(body["photos"]) == ["before", "after", "pending"]
+    assert body["photos"]["pending"] == 2
+    listed = [*body["photos"]["before"], *body["photos"]["after"]]
+    assert len(listed) == 2
+    for photo in listed:
+        assert list(photo) == ["id", "content_type", "url", "expires_at"]
+
+
+async def test_pro_job_read_query_count_unchanged(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld, storage: FakeStorage
+) -> None:
+    bare = await make_job(db_session, world, JobStatus.IN_PROGRESS)
+    with_photos = await make_job(db_session, world, JobStatus.IN_PROGRESS)
+    await mixed_photos(db_session, world, with_photos)
+
+    counts: list[int] = []
+    for job in (bare, with_photos):
+        db_session.expunge_all()  # nothing served from the identity map
+        with counted_statements(db_session) as statements:
+            response = await db_client.get(f"{BASE}/{job.id}", headers=world.pro.headers)
+        assert response.status_code == 200
+        counts.append(len(statements))
+
+    # develop's count before #343, photos or not: the counts come from the rows already loaded.
+    assert counts == [14, 14]
 
 
 # Permissions and logs
