@@ -205,6 +205,8 @@ beforeEach(() => {
     .mockReset()
     .mockImplementation((async (path: string, options?: ApiOptions) => {
       if (path === REQUESTS_PATH) return { items: mockApi.requests, next_cursor: null };
+      // The Account tab counts a customer's saved addresses.
+      if (path === "/v1/addresses") return { items: [] };
       if (path === JOB_PATH) {
         const found = mockApi.jobs[options?.params?.request_id ?? ""];
         if (!found) throw new ApiError(404, "not_found");
