@@ -47,8 +47,9 @@ class ChatMessageOut(_Out):
     created_at: datetime
     receipt: Receipt | None = Field(
         description="On the caller's own messages (sender me): seen once the other side marked "
-        "it read, delivered once their app fetched it (listed the chat), sent before that. Null "
-        "on the other side's messages. A push notification does not count as delivered."
+        "it read, delivered once their app fetched it (a page of the chat returned it), sent "
+        "before that. Null on the other side's messages. A push notification does not count as "
+        "delivered."
     )
 
 

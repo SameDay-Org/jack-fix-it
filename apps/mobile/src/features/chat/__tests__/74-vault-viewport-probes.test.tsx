@@ -90,6 +90,7 @@ const message = (n: number, overrides: Partial<ChatMessage> = {}): ChatMessage =
     body: `Message number ${n} about the faucet`,
     redacted: false,
     created_at: iso(-n * MINUTE_MS),
+    receipt: null,
     ...overrides,
   };
   remember(built.body);

@@ -1,4 +1,4 @@
-"""Schema of the chat receipts (#331): job_chat_deliveries, its constraints, the migration round
+"""Schema of the chat receipts (#331): job_message_deliveries, its constraints, the migration round
 trip, and the API version before it working against it (Railway migrates while that version
 still serves, and it keeps serving when the new one fails)."""
 
@@ -26,17 +26,16 @@ MIGRATION = (
     Path(__file__).parents[1]
     / "alembic"
     / "versions"
-    / "20261107_5286e0060e55_chat_delivered_markers.py"
+    / "20261107_5286e0060e55_chat_message_deliveries.py"
 )
-TABLE = "job_chat_deliveries"
+TABLE = "job_message_deliveries"
 INSERT_DELIVERY = text(
-    "INSERT INTO job_chat_deliveries (job_id, user_id, last_delivered_message_id, "
-    "last_delivered_message_at) VALUES (:job_id, :user_id, :message_id, :message_at)"
+    "INSERT INTO job_message_deliveries (message_id, user_id) VALUES (:message_id, :user_id)"
 )
 
 
 def migration() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("chat_delivered_markers", MIGRATION)
+    spec = importlib.util.spec_from_file_location("chat_message_deliveries", MIGRATION)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -75,7 +74,7 @@ async def _two_messages(session: AsyncSession) -> tuple[JobWorld, Job, JobMessag
     return world, job, older, newer
 
 
-async def test_the_delivered_markers_are_indexed_and_unique(db_session: AsyncSession) -> None:
+async def test_the_deliveries_are_indexed_and_unique(db_session: AsyncSession) -> None:
     def names(connection: Connection) -> set[str]:
         inspector = inspect(connection)
         indexes = {str(i["name"]) for i in inspector.get_indexes(TABLE)}
@@ -83,26 +82,23 @@ async def test_the_delivered_markers_are_indexed_and_unique(db_session: AsyncSes
         return indexes | uniques
 
     assert {
-        "ix_job_chat_deliveries_last_delivered_message_id",
-        "ix_job_chat_deliveries_user_id",
-        "uq_job_chat_deliveries_job_id",
+        "ix_job_message_deliveries_user_id",
+        "uq_job_message_deliveries_message_id",
     } <= await (await db_session.connection()).run_sync(names)
 
 
-@pytest.mark.parametrize("bad", ["no_message", "no_message_at", "unknown_message", "second_row"])
-async def test_delivered_markers_refuse_bad_rows(db_session: AsyncSession, bad: str) -> None:
-    world, job, older, newer = await _two_messages(db_session)
-    good = {
-        "job_id": job.id,
-        "user_id": world.customer.id,
-        "message_id": older.id,
-        "message_at": older.created_at,
-    }
+@pytest.mark.parametrize(
+    "bad", ["no_message", "no_user", "unknown_message", "unknown_user", "second_row"]
+)
+async def test_deliveries_refuse_bad_rows(db_session: AsyncSession, bad: str) -> None:
+    world, _job, older, _newer = await _two_messages(db_session)
+    good = {"user_id": world.customer.id, "message_id": older.id}
     changes: dict[str, dict[str, object]] = {
         "no_message": {"message_id": None},
-        "no_message_at": {"message_at": None},
+        "no_user": {"user_id": None},
         "unknown_message": {"message_id": uuid.uuid4()},
-        "second_row": {"message_id": newer.id, "message_at": newer.created_at},
+        "unknown_user": {"user_id": uuid.uuid4()},
+        "second_row": {},  # the same message delivered to the same user twice
     }
     if bad == "second_row":
         await db_session.execute(INSERT_DELIVERY, good)
@@ -116,7 +112,7 @@ async def test_the_round_trip_keeps_the_read_markers(db_session: AsyncSession) -
     world, job, older, newer = await _two_messages(db_session)
     # The customer read the older message and received the newer.
     await ChatRepository(db_session).move_read(job.id, world.customer.id, older)
-    await ChatRepository(db_session).move_delivered(job.id, world.customer.id, newer)
+    await ChatRepository(db_session).mark_delivered(world.customer.id, [newer.id])
 
     def shape(connection: Connection) -> tuple[bool, list[tuple[str, bool]]]:
         inspector = inspect(connection)
@@ -136,8 +132,8 @@ async def test_the_round_trip_keeps_the_read_markers(db_session: AsyncSession) -
         # job_chat_reads is the same on both sides: the previous version's table.
         assert (has_deliveries, read_columns) == (name == "upgrade", at_head[1])
         assert await reads() == [(world.customer.id, older.id)]
-    # The delivered markers went with the table; up again, they start empty.
-    count = await db_session.scalar(text("SELECT count(*) FROM job_chat_deliveries"))
+    # The deliveries went with the table; up again, they start empty.
+    count = await db_session.scalar(text("SELECT count(*) FROM job_message_deliveries"))
     assert count == 0
 
 
@@ -215,7 +211,7 @@ async def test_the_previous_version_moves_read_markers(
     assert (await previous.unread_counts([job.id], world.customer.id)).get(job.id, 0) == 0
 
 
-async def test_the_previous_version_counts_unread_past_a_new_delivered_marker(
+async def test_the_previous_version_counts_unread_past_new_deliveries(
     db_session: AsyncSession,
 ) -> None:
     # The new version lists the thread (delivered) and the customer reads the older message;
@@ -223,7 +219,7 @@ async def test_the_previous_version_counts_unread_past_a_new_delivered_marker(
     world, job, older, newer = await _two_messages(db_session)
     repository, previous = ChatRepository(db_session), PreviousChatRepository(db_session)
 
-    await repository.move_delivered(job.id, world.customer.id, newer)
+    await repository.mark_delivered(world.customer.id, [older.id, newer.id])
     assert (await previous.unread_counts([job.id], world.customer.id))[job.id] == 2
     await repository.move_read(job.id, world.customer.id, older)
     assert (await previous.unread_counts([job.id], world.customer.id))[job.id] == 1

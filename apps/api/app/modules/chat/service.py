@@ -33,15 +33,15 @@ any exchange (Cesar, 2026-10-28). Text only here; photos are part 2.
   ids only.
 - Reading: newest first by (created_at, id), with a cursor; plus the caller's unread count.
 - Read markers: one per participant per job, moved forward only (never back), idempotent.
-- Receipts (#331, Cesar 2026-11-07: one tick sent, two received, blue seen): each participant
-  also has a delivered marker, moved forward when their app lists the thread: to the newest
-  message of the other side in the page, written only when that message was not delivered to
-  them yet (any page: forward-only makes older pages no-ops). Reading implies delivered
-  without moving it: a message at or behind the read marker is seen. The caller's own
-  messages carry `receipt` from the other side's markers (seen, delivered, sent), the other
-  side's carry null; staff see every message's. A push reaching a device does not count as
-  delivered here: only a listing does. The delivered markers have a table of their own
-  (job_chat_deliveries) so the API version before them keeps working during a deploy.
+- Receipts (#331, Cesar 2026-11-07: one tick sent, two received, blue seen): a message of the
+  other side is delivered to a participant when a page their app lists returns it, recorded
+  per message (job_message_deliveries), once: only what the page returned, never the older
+  messages it skipped (Vault round 1). Reading implies delivered without a delivery row: a
+  message at or behind the read marker is seen. The caller's own messages carry `receipt`
+  from the other side's read marker and deliveries (seen, delivered, sent), the other side's
+  carry null; staff see every message's. A push reaching a device does not count as
+  delivered here: only a listing does. The deliveries have a table of their own so the API
+  version before them keeps working during a deploy.
 - Unread: the other side's messages after the caller's marker, all of them without one. The
   job views (customer and pro) show it per job (ChatUnreadReader).
 
@@ -142,12 +142,17 @@ class ChatService:
         before = _decode_cursor(cursor) if cursor else None
         parties = await self._participant(user, job_id)
         page, next_cursor = await self._page(parties, limit, before)
-        # Newest first: the first message of the other side is the newest the caller received.
-        # Its receipt is from the caller's own markers: "sent" means their delivered marker is
-        # behind it (or absent). Otherwise nothing is written.
-        received = next((row for row in page if row.message.sender_id != user.id), None)
-        if received is not None and received.receipt is Receipt.SENT:
-            await self._chat.move_delivered(job_id, user.id, received.message)
+        # The other side's messages in the page are the caller's to receive: their receipt is
+        # from the caller's read marker and deliveries, so "sent" means neither covers it yet.
+        # Exactly those are delivered now, never a message the page did not return (one older
+        # than a short first page, or between an older page and the newest). Else no write.
+        received = [
+            row.message.id
+            for row in page
+            if row.message.sender_id != user.id and row.receipt is Receipt.SENT
+        ]
+        if received:
+            await self._chat.mark_delivered(user.id, received)
             await self._session.commit()
         unread = await self._unread.unread_counts([job_id], user.id)
         return ChatPage(
@@ -173,8 +178,8 @@ class ChatService:
         await self._participant(user, job_id)
         result = redact_contacts(body)
         text = result.text.strip()
-        parties = await self._jobs.parties(job_id, lock=True)
-        if parties is None or not parties.includes(user.id):
+        parties = await self._jobs.parties_for(user.id, job_id, lock=True)
+        if parties is None:
             raise NotFoundError
         if not parties.chat_open:
             raise ChatClosedError
@@ -382,8 +387,10 @@ class ChatService:
         )
 
     async def _participant(self, user: UserAccount, job_id: uuid.UUID) -> JobParties:
-        parties = await self._jobs.parties(job_id)
-        if parties is None or not parties.includes(user.id):
+        """404 for a job the user takes no part in, as for an unknown one: the same statement
+        (JobPartiesReader.parties_for), so the answer and the work tell nothing apart."""
+        parties = await self._jobs.parties_for(user.id, job_id)
+        if parties is None:
             raise NotFoundError
         return parties
 

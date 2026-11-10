@@ -10,9 +10,9 @@ from sqlalchemy.orm import aliased
 
 from app.modules.chat.models import (
     ChatOffenderFlag,
-    JobChatDelivery,
     JobChatRead,
     JobMessage,
+    JobMessageDelivery,
     Receipt,
 )
 
@@ -31,7 +31,7 @@ class FlagUpsert:
 
 class ChatRepository:
     """Queries only: job_messages and job_chat_reads (#71), chat_offender_flags (#72),
-    job_chat_deliveries (#331)."""
+    job_message_deliveries (#331)."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -56,28 +56,25 @@ class ChatRepository:
     ) -> list[MessageRow]:
         """The job's messages newest first (created_at, then id), after the cursor `before`,
         each with its receipt: how far it got with its recipient, the one of the two `parties`
-        (customer, pro user) who did not send it. One query: a join on each of the recipient's
-        marker rows (at most one each: (job_id, user_id) is unique)."""
+        (customer, pro user) who did not send it. One query: a join on the recipient's read
+        marker row ((job_id, user_id) is unique) and on the message's delivery to them
+        ((message_id, user_id) is unique): at most one row each."""
         customer_id, pro_user_id = parties
         read = aliased(JobChatRead)
-        delivery = aliased(JobChatDelivery)
+        delivery = aliased(JobMessageDelivery)
         recipient_id = case(
             (JobMessage.sender_id == customer_id, literal(pro_user_id, Uuid)),
             else_=literal(customer_id, Uuid),
         )
         position = tuple_(JobMessage.created_at, JobMessage.id)
-        # Read first: reading implies delivered, whatever the delivered marker says. A missing
+        # Read first: reading implies delivered, with or without a delivery row. A missing
         # marker row compares as NULL: the case moves on.
         receipt = case(
             (
                 tuple_(read.last_read_message_at, read.last_read_message_id) >= position,
                 literal(Receipt.SEEN.value),
             ),
-            (
-                tuple_(delivery.last_delivered_message_at, delivery.last_delivered_message_id)
-                >= position,
-                literal(Receipt.DELIVERED.value),
-            ),
+            (delivery.id.is_not(None), literal(Receipt.DELIVERED.value)),
             else_=literal(Receipt.SENT.value),
         )
         statement = (
@@ -85,7 +82,7 @@ class ChatRepository:
             .outerjoin(read, and_(read.job_id == JobMessage.job_id, read.user_id == recipient_id))
             .outerjoin(
                 delivery,
-                and_(delivery.job_id == JobMessage.job_id, delivery.user_id == recipient_id),
+                and_(delivery.message_id == JobMessage.id, delivery.user_id == recipient_id),
             )
             .where(JobMessage.job_id == job_id)
         )
@@ -104,8 +101,8 @@ class ChatRepository:
 
     async def move_read(self, job_id: uuid.UUID, user_id: uuid.UUID, message: JobMessage) -> None:
         """Sets the user's read marker on the job to `message`, only forward: one statement, so
-        two concurrent calls cannot move it back (the later message wins). The delivered marker
-        is left as it is: a read message counts as delivered from this marker (`page`)."""
+        two concurrent calls cannot move it back (the later message wins). No delivery is
+        written: a read message counts as delivered from this marker (`page`)."""
         statement = insert(JobChatRead).values(
             job_id=job_id,
             user_id=user_id,
@@ -126,30 +123,17 @@ class ChatRepository:
         )
         await self._session.execute(statement)
 
-    async def move_delivered(
-        self, job_id: uuid.UUID, user_id: uuid.UUID, message: JobMessage
-    ) -> None:
-        """Sets the user's delivered marker on the job to `message`, only forward (the read
-        marker is left as it is). One statement, like move_read."""
-        statement = insert(JobChatDelivery).values(
-            job_id=job_id,
-            user_id=user_id,
-            last_delivered_message_id=message.id,
-            last_delivered_message_at=message.created_at,
-        )
-        new = statement.excluded
-        statement = statement.on_conflict_do_update(
-            index_elements=[JobChatDelivery.job_id, JobChatDelivery.user_id],
-            set_={
-                "last_delivered_message_id": new.last_delivered_message_id,
-                "last_delivered_message_at": new.last_delivered_message_at,
-                "updated_at": func.now(),
-            },
-            where=tuple_(
-                JobChatDelivery.last_delivered_message_at,
-                JobChatDelivery.last_delivered_message_id,
-            )
-            < tuple_(new.last_delivered_message_at, new.last_delivered_message_id),
+    async def mark_delivered(self, user_id: uuid.UUID, message_ids: Collection[uuid.UUID]) -> None:
+        """Records each message as delivered to the user, in one statement; one recorded
+        already stays as it is (a retry, or another listing at the same time: it waits for that
+        one to commit, then does nothing). The rows go in id order, so two listings recording
+        overlapping pages at once take their row locks in the same order and never deadlock."""
+        if not message_ids:
+            return
+        rows = [{"message_id": m, "user_id": user_id} for m in sorted(set(message_ids))]
+        statement = insert(JobMessageDelivery).values(rows)
+        statement = statement.on_conflict_do_nothing(
+            index_elements=[JobMessageDelivery.message_id, JobMessageDelivery.user_id]
         )
         await self._session.execute(statement)
 

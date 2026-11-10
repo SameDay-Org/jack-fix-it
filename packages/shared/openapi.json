@@ -3376,7 +3376,7 @@
           "chat"
         ],
         "summary": "Read my job's chat",
-        "description": "The job's messages, newest first, with the caller's unread count and a receipt on each\nof the caller's own messages (sent, delivered, seen). Listing moves the caller's delivered\nmarker forward to the newest message of the other side in the page (the other side's\nreceipt turns delivered), never the read marker: POST .../read does. Readable in every job\nstatus.",
+        "description": "The job's messages, newest first, with the caller's unread count and a receipt on each\nof the caller's own messages (sent, delivered, seen). Listing delivers to the caller the\nother side's messages this page returns, and only those (their sender's receipt turns\ndelivered; an older message the page did not return stays sent). It never moves the read\nmarker: POST .../read does. Readable in every job status.",
         "operationId": "list_messages_v1_jobs__job_id__messages_get",
         "security": [
           {
@@ -3606,7 +3606,7 @@
           "chat"
         ],
         "summary": "Mark my job's chat read up to a message",
-        "description": "Moves the caller's read marker to the message, only forward: an older one, or the same\nagain, changes nothing. Reading implies delivered: the delivered marker moves there too\nunless it is further already. Allowed in every job status.",
+        "description": "Moves the caller's read marker to the message, only forward: an older one, or the same\nagain, changes nothing. Reading implies delivered: every message up to the marker reads as\nseen to its sender, whether or not a listing delivered it. Allowed in every job status.",
         "operationId": "mark_read_v1_jobs__job_id__messages_read_post",
         "security": [
           {
@@ -5030,7 +5030,7 @@
                 "type": "null"
               }
             ],
-            "description": "On the caller's own messages (sender me): seen once the other side marked it read, delivered once their app fetched it (listed the chat), sent before that. Null on the other side's messages. A push notification does not count as delivered."
+            "description": "On the caller's own messages (sender me): seen once the other side marked it read, delivered once their app fetched it (a page of the chat returned it), sent before that. Null on the other side's messages. A push notification does not count as delivered."
           }
         },
         "additionalProperties": false,
@@ -7716,7 +7716,7 @@
           "seen"
         ],
         "title": "Receipt",
-        "description": "How far a message got with its recipient, the participant who did not send it: sent,\ndelivered (their app fetched it) or seen (they marked it read). From the recipient's\nmarkers (#331)."
+        "description": "How far a message got with its recipient, the participant who did not send it: sent,\ndelivered (their app fetched it) or seen (they marked it read). From the recipient's read\nmarker and deliveries (#331)."
       },
       "RefreshTokenRequest": {
         "properties": {
@@ -8539,7 +8539,7 @@
                 "type": "null"
               }
             ],
-            "description": "On the caller's own messages (sender me): seen once the other side marked it read, delivered once their app fetched it (listed the chat), sent before that. Null on the other side's messages. A push notification does not count as delivered."
+            "description": "On the caller's own messages (sender me): seen once the other side marked it read, delivered once their app fetched it (a page of the chat returned it), sent before that. Null on the other side's messages. A push notification does not count as delivered."
           },
           "warning": {
             "anyOf": [

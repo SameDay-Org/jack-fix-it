@@ -232,9 +232,6 @@ class JobParties:
     pro_user_id: uuid.UUID
     chat_open: bool
 
-    def includes(self, user_id: uuid.UUID) -> bool:
-        return user_id in (self.customer_id, self.pro_user_id)
-
 
 class JobPartiesReader:
     """The parties of a job, for another module (the chat). Reads only."""
@@ -244,16 +241,30 @@ class JobPartiesReader:
         self._pros = pros
 
     async def parties(self, job_id: uuid.UUID, *, lock: bool = False) -> JobParties | None:
-        """The job's parties, or None for an unknown job. With `lock`, the job row is held FOR
-        NO KEY UPDATE until the caller's transaction ends: no status change can commit in
-        between, so what `chat_open` says stays true until then (a status change waiting on
-        the lock sees the caller's writes; one that committed first is what this reads)."""
-        job = await (self._jobs.get_for_no_key_update(job_id) if lock else self._jobs.get(job_id))
-        if job is None:
+        """The job's parties, or None for an unknown job: for staff, who may read any job.
+        One statement. With `lock`, the job row is held FOR NO KEY UPDATE until the caller's
+        transaction ends: no status change can commit in between, so what `chat_open` says
+        stays true until then (a status change waiting on the lock sees the caller's writes;
+        one that committed first is what this reads)."""
+        return await self._read(job_id, participant=None, lock=lock)
+
+    async def parties_for(
+        self, user_id: uuid.UUID, job_id: uuid.UUID, *, lock: bool = False
+    ) -> JobParties | None:
+        """The job's parties when `user_id` is one of them; None for any other job and for an
+        unknown one alike, through the same single statement scoped to the caller: a job of
+        others costs what an unknown id costs (#331, Vault round 1). `lock` as for `parties`."""
+        return await self._read(job_id, participant=user_id, lock=lock)
+
+    async def _read(
+        self, job_id: uuid.UUID, *, participant: uuid.UUID | None, lock: bool
+    ) -> JobParties | None:
+        found = await self._jobs.get_with_pro_user(
+            job_id, self._pros.users(), participant=participant, lock=lock
+        )
+        if found is None:
             return None
-        pro_user_id = await self._pros.get_user_id_for_profile(job.pro_id)
-        if pro_user_id is None:  # pragma: no cover - jobs.pro_id is a foreign key
-            return None
+        job, pro_user_id = found
         return JobParties(
             job_id=job.id,
             customer_id=job.customer_id,

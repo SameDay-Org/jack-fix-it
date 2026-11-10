@@ -105,6 +105,7 @@ const message = (n: number, overrides: Partial<ChatMessage> = {}): ChatMessage =
     body: `Message number ${n} about the faucet`,
     redacted: false,
     created_at: iso(-n * MINUTE_MS),
+    receipt: null,
     ...overrides,
   };
   remember(built.body);
@@ -579,7 +580,7 @@ describe("the job chat screen (#74)", () => {
     });
 
     it("an unknown receipt reads as sent", async () => {
-      const mine = { ...message(1, { sender: "me" }), receipt: "read" } as ChatMessage;
+      const mine = { ...message(1, { sender: "me" }), receipt: "read" } as unknown as ChatMessage;
       mockApi.messages = () => Promise.resolve(page([mine]));
       await renderChat();
       await screen.findByTestId("chat-list");

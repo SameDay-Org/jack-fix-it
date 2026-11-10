@@ -161,7 +161,7 @@ async def test_downgrade_drops_the_tables_and_upgrade_restores_them(
 
     connection = await db_session.connection()
     assert module.down_revision == "1f4aa780a8d2"
-    # The delivered markers (#331) reference job_messages: their revision goes down first.
+    # The deliveries (#331) reference job_messages: their revision goes down first.
     await receipts_step(db_session, "downgrade")
     assert await connection.run_sync(lambda c: after("downgrade", c)) == (False, False)
     assert await connection.run_sync(lambda c: after("upgrade", c)) == (True, True)

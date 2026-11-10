@@ -895,10 +895,10 @@ export interface paths {
         /**
          * Read my job's chat
          * @description The job's messages, newest first, with the caller's unread count and a receipt on each
-         *     of the caller's own messages (sent, delivered, seen). Listing moves the caller's delivered
-         *     marker forward to the newest message of the other side in the page (the other side's
-         *     receipt turns delivered), never the read marker: POST .../read does. Readable in every job
-         *     status.
+         *     of the caller's own messages (sent, delivered, seen). Listing delivers to the caller the
+         *     other side's messages this page returns, and only those (their sender's receipt turns
+         *     delivered; an older message the page did not return stays sent). It never moves the read
+         *     marker: POST .../read does. Readable in every job status.
          */
         get: operations["list_messages_v1_jobs__job_id__messages_get"];
         put?: never;
@@ -928,8 +928,8 @@ export interface paths {
         /**
          * Mark my job's chat read up to a message
          * @description Moves the caller's read marker to the message, only forward: an older one, or the same
-         *     again, changes nothing. Reading implies delivered: the delivered marker moves there too
-         *     unless it is further already. Allowed in every job status.
+         *     again, changes nothing. Reading implies delivered: every message up to the marker reads as
+         *     seen to its sender, whether or not a listing delivered it. Allowed in every job status.
          */
         post: operations["mark_read_v1_jobs__job_id__messages_read_post"];
         delete?: never;
@@ -1313,7 +1313,7 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-            /** @description On the caller's own messages (sender me): seen once the other side marked it read, delivered once their app fetched it (listed the chat), sent before that. Null on the other side's messages. A push notification does not count as delivered. */
+            /** @description On the caller's own messages (sender me): seen once the other side marked it read, delivered once their app fetched it (a page of the chat returned it), sent before that. Null on the other side's messages. A push notification does not count as delivered. */
             receipt: components["schemas"]["Receipt"] | null;
         };
         /** ChatOffenderFlagOut */
@@ -2665,8 +2665,8 @@ export interface components {
         /**
          * Receipt
          * @description How far a message got with its recipient, the participant who did not send it: sent,
-         *     delivered (their app fetched it) or seen (they marked it read). From the recipient's
-         *     markers (#331).
+         *     delivered (their app fetched it) or seen (they marked it read). From the recipient's read
+         *     marker and deliveries (#331).
          * @enum {string}
          */
         Receipt: "sent" | "delivered" | "seen";
@@ -3005,7 +3005,7 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-            /** @description On the caller's own messages (sender me): seen once the other side marked it read, delivered once their app fetched it (listed the chat), sent before that. Null on the other side's messages. A push notification does not count as delivered. */
+            /** @description On the caller's own messages (sender me): seen once the other side marked it read, delivered once their app fetched it (a page of the chat returned it), sent before that. Null on the other side's messages. A push notification does not count as delivered. */
             receipt: components["schemas"]["Receipt"] | null;
             /** @description contact_details_hidden when something in the text was masked (redacted is true): the app tells the sender that contact details are not shared in the chat. Null otherwise. */
             warning: components["schemas"]["ChatWarning"] | null;

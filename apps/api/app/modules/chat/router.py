@@ -84,10 +84,10 @@ async def list_messages(
     job_id: uuid.UUID, user: AppUser, chat: Chat, limit: Limit = None, cursor: Cursor = None
 ) -> ChatPage:
     """The job's messages, newest first, with the caller's unread count and a receipt on each
-    of the caller's own messages (sent, delivered, seen). Listing moves the caller's delivered
-    marker forward to the newest message of the other side in the page (the other side's
-    receipt turns delivered), never the read marker: POST .../read does. Readable in every job
-    status."""
+    of the caller's own messages (sent, delivered, seen). Listing delivers to the caller the
+    other side's messages this page returns, and only those (their sender's receipt turns
+    delivered; an older message the page did not return stays sent). It never moves the read
+    marker: POST .../read does. Readable in every job status."""
     return await chat.messages(user, job_id, limit=limit, cursor=cursor)
 
 
@@ -140,8 +140,8 @@ async def send_message(
 )
 async def mark_read(job_id: uuid.UUID, data: ChatReadIn, user: AppUser, chat: Chat) -> ChatReadOut:
     """Moves the caller's read marker to the message, only forward: an older one, or the same
-    again, changes nothing. Reading implies delivered: the delivered marker moves there too
-    unless it is further already. Allowed in every job status."""
+    again, changes nothing. Reading implies delivered: every message up to the marker reads as
+    seen to its sender, whether or not a listing delivered it. Allowed in every job status."""
     return ChatReadOut(unread_count=await chat.mark_read(user, job_id, data.up_to))
 
 
