@@ -54,17 +54,7 @@ export function ListRow({
 
   const content = (
     <>
-      {glyph ? (
-        <View
-          className="items-center justify-center rounded-sm"
-          style={[
-            continuousCorners,
-            { width: TILE.side, height: TILE.side, backgroundColor: ICON_TILE_TINT },
-          ]}
-        >
-          <CategoryIcon slug="" glyph={glyph} size={TILE.icon} />
-        </View>
-      ) : null}
+      {glyph ? <ListRowTile glyph={glyph} /> : null}
       <View className="flex-1 gap-0.5">
         {/* A word longer than the line (Configuración at a large font) is hyphenated on Android
             rather than cut at any letter. */}
@@ -112,6 +102,24 @@ export function ListRow({
     >
       {content}
     </Pressable>
+  );
+}
+
+/**
+ * A row's squircle icon tile, for a row of its own design that sits in a `ListGroup` beside
+ * `ListRow`s (the row then takes `glyph` too, so the separator above it starts past the tile).
+ */
+export function ListRowTile({ glyph }: { glyph: Glyph }) {
+  return (
+    <View
+      className="items-center justify-center rounded-sm"
+      style={[
+        continuousCorners,
+        { width: TILE.side, height: TILE.side, backgroundColor: ICON_TILE_TINT },
+      ]}
+    >
+      <CategoryIcon slug="" glyph={glyph} size={TILE.icon} />
+    </View>
   );
 }
 

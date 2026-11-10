@@ -18,6 +18,12 @@ const CONTROL_GLYPHS = {
   share: ["M12 14.5V4", "M8 8l4-4 4 4", "M6 11.5v7.5a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-7.5"],
   // An arrow rising, for sending a message.
   send: ["M12 19V5.5", "M6 11.5l6-6 6 6"],
+  // Three dots in a row, for a menu of more actions (draw it filled).
+  more: [
+    "M4.75 12a1.25 1.25 0 1 0 2.5 0a1.25 1.25 0 1 0-2.5 0",
+    "M10.75 12a1.25 1.25 0 1 0 2.5 0a1.25 1.25 0 1 0-2.5 0",
+    "M16.75 12a1.25 1.25 0 1 0 2.5 0a1.25 1.25 0 1 0-2.5 0",
+  ],
 } as const satisfies Record<string, readonly string[]>;
 
 export type ControlGlyphName = keyof typeof CONTROL_GLYPHS;

@@ -17,7 +17,7 @@ export type { GlassShape, GlassSurfaceProps, GlassTone } from "./GlassSurface";
 export { ICON_TILE, ICON_TILE_TINT, IconTile } from "./IconTile";
 export type { IconTileProps, IconTileSize } from "./IconTile";
 export { Input, useCounterAnnouncement } from "./Input";
-export { ListGroup, ListRow } from "./ListRow";
+export { ListGroup, ListRow, ListRowTile } from "./ListRow";
 export type { ListRowProps } from "./ListRow";
 export type { InputHandle, InputProps } from "./Input";
 export { Milestones } from "./Milestones";

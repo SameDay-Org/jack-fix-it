@@ -2,6 +2,9 @@ import { ApiError, SessionExpiredError } from "./errors";
 import {
   sendRequest,
   throwIfAborted,
+  type DeleteParams,
+  type DeletePath,
+  type DeleteResponse,
   type GetParams,
   type GetPath,
   type GetResponse,
@@ -88,6 +91,22 @@ export function apiPatch<P extends PatchPath>(
   return withSession(session, (accessToken) =>
     sendRequest<PatchResponse<P>>("PATCH", path, {
       body,
+      accessToken,
+      signal: session.signal,
+      params,
+      query,
+    }),
+  );
+}
+
+/** Typed DELETE, without a body: `undefined` back for a 204 (a saved address removed). */
+export function apiDelete<P extends DeletePath>(
+  path: P,
+  ...[options]: OptionsFor<DeleteParams<P>>
+): Promise<DeleteResponse<P>> {
+  const { params, query, ...session }: SentOptions = options ?? {};
+  return withSession(session, (accessToken) =>
+    sendRequest<DeleteResponse<P>>("DELETE", path, {
       accessToken,
       signal: session.signal,
       params,

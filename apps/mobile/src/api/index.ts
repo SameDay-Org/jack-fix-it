@@ -1,4 +1,4 @@
-export { apiGet, apiPatch, apiPost } from "./client";
+export { apiDelete, apiGet, apiPatch, apiPost } from "./client";
 export { apiConfig } from "./config";
 export type { ApiConfig } from "./config";
 export type { RequestOptions } from "./client";
