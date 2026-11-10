@@ -87,7 +87,6 @@ function AddressBook() {
             </ListGroup>
             <Button
               label={t("addresses.add")}
-              glyph="plus"
               variant="secondary"
               size="lg"
               onPress={add}
@@ -114,7 +113,6 @@ function EmptyBook({ onAdd }: { onAdd: () => void }) {
       </View>
       <Button
         label={t("addresses.add")}
-        glyph="plus"
         size="lg"
         onPress={onAdd}
         className="self-stretch"

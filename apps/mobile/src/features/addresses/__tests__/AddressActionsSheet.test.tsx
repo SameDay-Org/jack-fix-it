@@ -176,7 +176,7 @@ describe("AddressActionsSheet", () => {
     const { view } = openFor("work");
     await view;
 
-    expect(screen.getByRole("button", { name: "Hacer predeterminada" })).toBeOnTheScreen();
+    expect(screen.getByRole("button", { name: "Hacer principal" })).toBeOnTheScreen();
     await fireEvent.press(screen.getByRole("button", { name: "Eliminar dirección" }));
     expect(alert.mock.calls[0][0]).toBe("¿Eliminar Work?");
   });

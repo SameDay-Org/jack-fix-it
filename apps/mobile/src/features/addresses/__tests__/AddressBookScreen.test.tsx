@@ -143,7 +143,7 @@ describe("AddressBookScreen", () => {
     await renderAddresses(<AddressBookScreen />);
 
     expect(screen.getByRole("header", { name: "Direcciones" })).toBeOnTheScreen();
-    expect(await screen.findByText("Predeterminada")).toBeOnTheScreen();
+    expect(await screen.findByText("Principal")).toBeOnTheScreen();
     expect(screen.getByRole("button", { name: "Opciones de Home" })).toBeOnTheScreen();
     expect(screen.getByRole("button", { name: "Agregar dirección" })).toBeOnTheScreen();
   });

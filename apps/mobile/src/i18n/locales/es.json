@@ -327,15 +327,15 @@
   },
   "addresses": {
     "title": "Direcciones",
-    "support": "Tu dirección predeterminada se elige primero cuando pides un trabajo.",
-    "default": "Predeterminada",
+    "support": "Tu dirección principal se elige primero cuando pides un trabajo.",
+    "default": "Principal",
     "notServed": "Todavía no damos servicio en este código postal.",
     "add": "Agregar dirección",
     "retry": "Intentar de nuevo",
     "loadFailed": "No pudimos cargar tus direcciones.",
     "saved": "{{label}} guardada",
     "deleted": "{{label}} eliminada",
-    "madeDefault": "{{label}} ahora es tu predeterminada",
+    "madeDefault": "{{label}} ahora es tu dirección principal",
     "empty": {
       "title": "Aún no tienes direcciones guardadas",
       "body": "Guarda tu casa o cualquier lugar donde sueles necesitar ayuda, y elígelo con un toque cuando pidas un trabajo."
@@ -345,21 +345,21 @@
       "more": "Opciones de {{label}}"
     },
     "actions": {
-      "makeDefault": "Hacer predeterminada",
+      "makeDefault": "Hacer principal",
       "delete": "Eliminar dirección",
       "deleteHint": "Pregunta antes de eliminarla.",
-      "isDefault": "Esta es tu dirección predeterminada."
+      "isDefault": "Esta es tu dirección principal."
     },
     "delete": {
       "title": "¿Eliminar {{label}}?",
       "body": "Las solicitudes que ya enviaste conservan su dirección.",
-      "bodyNextDefault": "Las solicitudes que ya enviaste conservan su dirección. {{label}} pasa a ser tu predeterminada.",
+      "bodyNextDefault": "Las solicitudes que ya enviaste conservan su dirección. {{label}} pasa a ser tu dirección principal.",
       "cancel": "Cancelar",
       "confirm": "Eliminar"
     },
     "failed": {
       "delete": "No pudimos eliminar {{label}}. Intenta de nuevo en un momento.",
-      "makeDefault": "No pudimos hacer {{label}} tu predeterminada. Intenta de nuevo en un momento.",
+      "makeDefault": "No pudimos hacer {{label}} tu dirección principal. Intenta de nuevo en un momento.",
       "offline": "Estás sin conexión, así que nada cambió. Intenta de nuevo cuando te conectes.",
       "rateLimited": "Son muchos cambios a la vez. Intenta de nuevo en un momento.",
       "gone": "Esa dirección ya no está en tu libreta de direcciones."
