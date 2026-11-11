@@ -37,30 +37,32 @@ export function StatusControl({
 
   return (
     <form action={action} className="flex flex-col gap-3">
-      <div role="group" aria-label={text.label} className="flex flex-wrap gap-2">
-        {TICKET_STATUSES.map((value) => {
-          const current = value === status;
-          return (
-            <Button
-              key={value}
-              type="submit"
-              name="status"
-              value={value}
-              size="sm"
-              variant={current ? "primary" : "secondary"}
-              aria-pressed={current}
-              disabled={current || pending}
-              // The pressed one is not a dimmed choice: it is the answer.
-              className={current ? "disabled:opacity-100" : undefined}
-            >
-              {text.statuses[value]}
-            </Button>
-          );
-        })}
+      <div className="flex min-h-9 flex-wrap items-center gap-x-4 gap-y-2">
+        <div role="group" aria-label={text.label} className="flex flex-wrap gap-2">
+          {TICKET_STATUSES.map((value) => {
+            const current = value === status;
+            return (
+              <Button
+                key={value}
+                type="submit"
+                name="status"
+                value={value}
+                size="sm"
+                variant={current ? "primary" : "secondary"}
+                aria-pressed={current}
+                disabled={current || pending}
+                // The pressed one is not a dimmed choice: it is the answer.
+                className={current ? "disabled:opacity-100" : undefined}
+              >
+                {text.statuses[value]}
+              </Button>
+            );
+          })}
+        </div>
+        <p role="status" className="text-sm text-gray-500">
+          {pending ? text.saving : ""}
+        </p>
       </div>
-      <p role="status" className="min-h-5 text-sm text-gray-500">
-        {pending ? text.saving : ""}
-      </p>
       {error ? (
         <p role="alert" className="text-sm font-semibold text-danger">
           {error}
