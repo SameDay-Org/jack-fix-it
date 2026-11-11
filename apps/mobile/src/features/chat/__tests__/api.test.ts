@@ -106,6 +106,7 @@ const message = (
   body: BODIES[n - 1] ?? "",
   redacted: false,
   created_at: at(minutes),
+  receipt: null,
   ...overrides,
 });
 

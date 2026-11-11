@@ -27,6 +27,12 @@ export const PAINTING = {
   names: { en: "Painting", es: "Pintura" },
 };
 
+/** No photo of either kind pending or failed: the pro view's counts (#343). */
+export const NO_PHOTO_COUNTS = {
+  pending: { before: 0, after: 0 },
+  failed: { before: 0, after: 0 },
+};
+
 /** A scheduled job three hours from now, for Maria, paying the pro $153.00. */
 export const proJob = (overrides: Partial<ProJob> = {}): ProJob => ({
   id: JOB_ID,
@@ -47,7 +53,8 @@ export const proJob = (overrides: Partial<ProJob> = {}): ProJob => ({
   arrival_code_locked: false,
   started_at: null,
   completed_at: null,
-  photos: { before: [], after: [] },
+  confirm_by: null,
+  photos: { before: [], after: [], ...NO_PHOTO_COUNTS },
   pro_payout_cents: 15_300,
   unread_messages: 0,
   ...overrides,
@@ -81,14 +88,27 @@ export const jobPage = (items: ProJob[], next_cursor: string | null = null): Pro
  */
 export function apiMock() {
   const session = { generation: 1 };
+  const signOutListeners = new Set<() => void>();
   return {
     ...jest.requireActual("../../../api/errors"),
     apiGet: jest.fn(),
     apiPost: jest.fn(),
+    uploadMedia: jest.fn(),
     useSession: jest.fn(),
     mockSession: session,
     sessionGeneration: () => session.generation,
     useSessionGeneration: () => session.generation,
     isCurrentGeneration: (generation: number) => generation === session.generation,
+    onSignOut: (listener: () => void) => {
+      signOutListeners.add(listener);
+      return () => {
+        signOutListeners.delete(listener);
+      };
+    },
+    /** The account boundary: what `onSignOut` registered runs, and the generation moves on. */
+    mockSignOut: () => {
+      session.generation += 1;
+      signOutListeners.forEach((listener) => listener());
+    },
   };
 }

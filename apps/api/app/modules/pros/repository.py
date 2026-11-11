@@ -3,7 +3,7 @@ from collections.abc import Collection, Sequence
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Select, delete, func, select, update
+from sqlalchemy import Select, Subquery, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,12 @@ _RECEIVES_REQUESTS = (
 class ProProfileRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    @staticmethod
+    def users() -> Subquery:
+        """Every profile's id (`pro_id`) and user id (`user_id`) only, as a subquery for
+        another module's query."""
+        return select(ProProfile.id.label("pro_id"), ProProfile.user_id.label("user_id")).subquery()
 
     async def dispatch_candidates(
         self, category_id: uuid.UUID, service_area_ids: Collection[uuid.UUID]
@@ -53,9 +59,6 @@ class ProProfileRepository:
         return await self._session.scalar(
             select(ProProfile.id).where(ProProfile.user_id == user_id)
         )
-
-    async def get_user_id(self, pro_id: uuid.UUID) -> uuid.UUID | None:
-        return await self._session.scalar(select(ProProfile.user_id).where(ProProfile.id == pro_id))
 
     async def public_fields(
         self, pro_ids: Collection[uuid.UUID], *, hireable_only: bool

@@ -105,6 +105,7 @@ const message = (n: number, overrides: Partial<ChatMessage> = {}): ChatMessage =
     body: `Message number ${n} about the faucet`,
     redacted: false,
     created_at: iso(-n * MINUTE_MS),
+    receipt: null,
     ...overrides,
   };
   remember(built.body);
@@ -157,7 +158,13 @@ const proJob = (overrides: Partial<ProJob> = {}): ProJob => ({
   arrival_code_locked: false,
   started_at: null,
   completed_at: null,
-  photos: { before: [], after: [] },
+  confirm_by: null,
+  photos: {
+    before: [],
+    after: [],
+    pending: { before: 0, after: 0 },
+    failed: { before: 0, after: 0 },
+  },
   pro_payout_cents: 15_300,
   unread_messages: 0,
   ...overrides,
@@ -579,7 +586,7 @@ describe("the job chat screen (#74)", () => {
     });
 
     it("an unknown receipt reads as sent", async () => {
-      const mine = { ...message(1, { sender: "me" }), receipt: "read" } as ChatMessage;
+      const mine = { ...message(1, { sender: "me" }), receipt: "read" } as unknown as ChatMessage;
       mockApi.messages = () => Promise.resolve(page([mine]));
       await renderChat();
       await screen.findByTestId("chat-list");

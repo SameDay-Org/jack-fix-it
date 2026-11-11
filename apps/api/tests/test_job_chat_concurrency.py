@@ -15,7 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.modules.addresses.models import Address
 from app.modules.chat.errors import ChatClosedError
-from app.modules.chat.models import JobChatRead, JobMessage
+from app.modules.chat.models import JobChatRead, JobMessage, JobMessageDelivery
+from app.modules.chat.repository import ChatRepository
 from app.modules.chat.service import ChatConfig, ChatService
 from app.modules.jobs.models import Job, JobEvent, JobStatus
 from app.modules.jobs.service import JobPartiesReader, JobStateMachine
@@ -118,6 +119,13 @@ async def committed_job(test_database_url: URL) -> AsyncIterator[CommittedJob]:
         customer_id, pro_user_id, profile_id, address_id, request_id, quote_id, job_id = ids
         async with sessions() as session:
             await session.execute(delete(JobChatRead).where(JobChatRead.job_id == job_id))
+            await session.execute(
+                delete(JobMessageDelivery).where(
+                    JobMessageDelivery.message_id.in_(
+                        select(JobMessage.id).where(JobMessage.job_id == job_id)
+                    )
+                )
+            )
             await session.execute(delete(JobMessage).where(JobMessage.job_id == job_id))
             await session.execute(delete(JobEvent).where(JobEvent.job_id == job_id))
             await session.execute(delete(Job).where(Job.id == job_id))
@@ -229,3 +237,46 @@ async def test_concurrent_messages_commit_in_created_at_order(
     assert [m.body for m in stored] == ["first", "second"]
     assert stored[1].id == out.id
     assert stored[0].created_at < stored[1].created_at
+
+
+async def test_racing_listings_deliver_each_message_once(committed_job: CommittedJob) -> None:
+    # #331: two listings deliver overlapping pages at once, in opposite orders. The first holds
+    # its new rows; the other waits for it (rows in id order: never a lock cycle), then leaves
+    # them as they are. One delivery per message.
+    world = committed_job
+    async with world.sessions() as session:
+        messages = [
+            JobMessage(
+                job_id=world.job_id,
+                sender_id=world.pro.id,
+                body=body,
+                redacted=False,
+                created_at=NOW + timedelta(seconds=n),
+            )
+            for n, body in enumerate(("older", "newer", "newest"))
+        ]
+        session.add_all(messages)
+        await session.commit()
+    ids = [message.id for message in messages]
+
+    async def late(session: AsyncSession) -> None:
+        await ChatRepository(session).mark_delivered(world.customer.id, ids[::-1])
+        await session.commit()
+
+    async with world.sessions() as first, world.sessions() as second:
+        await ChatRepository(first).mark_delivered(world.customer.id, ids[:2])
+        holder = await backend_pid(first)
+        waiter = await backend_pid(second)
+        task = asyncio.create_task(late(second))
+        await wait_until_blocked(world.sessions, waiter=waiter, holder=holder)
+        await first.commit()
+        await task
+
+    async with world.sessions() as session:
+        delivered = await session.scalars(
+            select(JobMessageDelivery.message_id).where(
+                JobMessageDelivery.user_id == world.customer.id,
+                JobMessageDelivery.message_id.in_(ids),
+            )
+        )
+        assert sorted(delivered) == sorted(ids)

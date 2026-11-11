@@ -14,6 +14,7 @@ const message = (n: number): ChatMessage => ({
   body: `Message ${n}`,
   redacted: false,
   created_at: new Date(NOW + n * MINUTE_MS).toISOString(),
+  receipt: null,
 });
 
 const row = (stored: ChatMessage): Row => ({

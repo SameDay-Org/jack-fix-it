@@ -68,11 +68,14 @@ PRO_KEYS = {
     "arrival_code_locked",
     "started_at",
     "completed_at",
+    "confirm_by",
     "photos",
     "pro_payout_cents",
     "unread_messages",
 }
 BASE = "/v1/pros/me/jobs"
+# The settings' default (tests/conftest.py builds them without overrides).
+WINDOW = timedelta(hours=48)
 
 
 @pytest.fixture(autouse=True)
@@ -244,6 +247,34 @@ async def test_pro_sees_own_job(
     # Never the arrival code, the customer's last name or any contact.
     assert CODE not in response.text
     no_leaks(response.text)
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        JobStatus.COMPLETED,
+        JobStatus.ON_THE_WAY,
+        JobStatus.IN_PROGRESS,
+        JobStatus.CONFIRMED,
+    ],
+)
+async def test_pro_job_confirm_by_while_completed_only(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld, status: JobStatus
+) -> None:
+    # completed_at stays once the job moves on (confirmed...): only completed shows the window.
+    completed_at = datetime(2030, 1, 15, 16, 45, 12, 345678, tzinfo=UTC)
+    job = await make_job(db_session, world, status, completed_at=completed_at)
+
+    one = await db_client.get(f"{BASE}/{job.id}", headers=world.pro.headers)
+    page = await db_client.get(BASE, headers=world.pro.headers)
+
+    assert one.status_code == page.status_code == 200
+    [listed] = page.json()["items"]
+    for body in (one.json(), listed):
+        if status is JobStatus.COMPLETED:
+            assert datetime.fromisoformat(body["confirm_by"]) == completed_at + WINDOW
+        else:
+            assert body["confirm_by"] is None
 
 
 async def test_pro_cannot_read_another_pros_job(
