@@ -11,7 +11,13 @@ import { announce } from "@/components/ui/focus";
 import { stepFailure, useSingleFlight } from "@/features/pro-jobs/api";
 import { useSheetExit } from "@/features/pro-jobs/useSheetExit";
 
-import { confirmJob, customerJobQueryOptions, refreshCustomerJob } from "./api";
+import {
+  confirmJob,
+  customerJobQueryOptions,
+  isJobRefusal,
+  refreshCustomerJob,
+  useJobDenied,
+} from "./api";
 import { jobPhase, proNames } from "./phase";
 
 /** A failure the sheet stays open for: confirming again is safe (a repeat answers the same). */
@@ -23,12 +29,13 @@ type Retryable = "offline" | "failed";
  * however fast the taps. The answer decides the rest:
  * - confirmed: a success haptic, the sheet closes over the confirmed job (the screen under it
  *   turns as it closes, and says "Thanks! Job confirmed" aloud);
- * - the job moved on (409) or is gone (404): the sheet closes, a toast says so, and the job is
- *   asked again, so the screen shows where it stands;
+ * - the job moved on (409) or is refused (404 gone, 403): the sheet closes, a toast says so, and
+ *   the job is asked again, so the screen shows where it stands;
  * - offline or a server error: the sheet stays with the reason, said aloud, and Confirm again.
  * Every step is pinned to the session the tap started in: an answer after a sign-out does nothing
- * (no haptic, no toast, no cache write). The sheet also closes by itself when the job stops being
- * finished under it (a refresh, the automatic confirmation).
+ * (no haptic, no toast, no cache write). The sheet also closes by itself, and confirms nothing,
+ * when the job stops being finished under it (a refresh, the automatic confirmation) or was
+ * refused to this session with no answered read since (`isJobDenied`), opened again or not.
  */
 export function ConfirmJobSheet() {
   const { t } = useTranslation();
@@ -40,10 +47,11 @@ export function ConfirmJobSheet() {
   const { busy, run, mounted } = useSingleFlight();
   const { leave, leaving, sameSession } = useSheetExit(generation);
   const [failure, setFailure] = useState<Retryable | null>(null);
+  const denied = useJobDenied(id);
 
-  // Opened without a finished job on screen (a stale link), or the job moved on while the sheet
-  // was up: there is nothing to confirm.
-  const finished = job !== undefined && jobPhase(job) === "finished";
+  // Opened without a finished job on screen (a stale link), the job moved on while the sheet was
+  // up, or it was refused to this session: there is nothing to confirm.
+  const finished = job !== undefined && jobPhase(job) === "finished" && !denied;
   useEffect(() => {
     if (sameSession && !finished && !busy && !leaving.current) leave();
   }, [busy, finished, leave, leaving, sameSession]);
@@ -52,6 +60,7 @@ export function ConfirmJobSheet() {
   const name = proNames(t, job).inline;
 
   const confirm = () => {
+    if (!finished) return;
     void run(async () => {
       setFailure(null);
       const started = sessionGeneration();
@@ -63,7 +72,8 @@ export function ConfirmJobSheet() {
         );
         if (mounted.current) leave();
       } catch (error) {
-        const reason = stepFailure(error);
+        // A 403 is as final as a 404: this account cannot confirm the job, however often it asks.
+        const reason = isJobRefusal(error) ? "gone" : stepFailure(error);
         if (reason === "signedOut" || !isCurrentGeneration(started)) return;
         if ((reason === "offline" || reason === "failed") && mounted.current) {
           setFailure(reason);

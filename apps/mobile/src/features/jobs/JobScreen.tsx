@@ -13,7 +13,7 @@ import { isUuid, useGuardedPush } from "@/features/quotes/navigation";
 import { useSettledError } from "@/features/quotes/useRequestQuotes";
 import { tokens } from "@/theme";
 
-import { isNoJobYet, useCustomerJob, wasConfirmedHere } from "./api";
+import { isJobRefusal, isNoJobYet, useCustomerJob, useJobDenied, wasConfirmedHere } from "./api";
 import { ArrivalCode } from "./ArrivalCode";
 import { useMinuteClock } from "./clock";
 import { jobsConfig } from "./config";
@@ -83,8 +83,11 @@ export function JobScreen() {
   const [pulling, setPulling] = useState(false);
   // One guard for the finished job's photos and its dock: a photo tap and Confirm never both open.
   const push = useGuardedPush();
-  // A 404 over a finished job on screen (the confirmation found it gone): nothing to confirm.
-  const confirmable = data !== undefined && jobPhase(data) === "finished" && !isNoJobYet(error);
+  // The job refused (404, 403) by a read or the confirmation, and no read answered it since: it
+  // stays to look at, with nothing to confirm, whatever a failed retry left in `error`.
+  const denied = useJobDenied(id);
+  const confirmable =
+    data !== undefined && jobPhase(data) === "finished" && !denied && !isJobRefusal(error);
   // A new layout opens at its top: the offset the last one was read at means nothing in it, and
   // the confirmed seal grows where the customer can see it.
   const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);

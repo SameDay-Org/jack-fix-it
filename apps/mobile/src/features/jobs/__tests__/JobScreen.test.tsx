@@ -30,7 +30,7 @@ import {
   REQUEST_ID,
 } from "../../quotes/__tests__/helpers";
 import type { CustomerQuoteList } from "../../quotes/useRequestQuotes";
-import { confirmJob } from "../api";
+import { confirmJob, customerJobQueryKey, refreshCustomerJob } from "../api";
 import { jobsConfig } from "../config";
 import { JobScreen } from "../JobScreen";
 import { formatMoment, type CustomerJob, type JobStatus, type JobTimelineEntry } from "../phase";
@@ -980,6 +980,106 @@ describe("JobScreen, the finished job (#66)", () => {
 
     await waitFor(() => expect(screen.queryByTestId("job-confirm-dock")).toBeNull());
     expect(screen.getByTestId("job-finished")).toBeTruthy();
+  });
+
+  describe("round 1 (#347): a stale read or a refusal never offers Confirm again", () => {
+    const KEY = customerJobQueryKey(REQUEST_ID, 1);
+    const dock = () => screen.queryByTestId("job-confirm-dock");
+
+    /** Pulls to refresh with the next answer and waits until the screen has drawn it. */
+    async function refreshTo(client: QueryClient, answer: CustomerJob | Error) {
+      if (answer instanceof Error) failJob(answer);
+      else answerJob(answer);
+      const before = jobCalls();
+      await act(async () => pullToRefresh());
+      await waitFor(() => expect(jobCalls()).toBe(before + 1));
+      await waitFor(() => expect(client.getQueryState(KEY)?.fetchStatus).toBe("idle"));
+      await act(settle);
+    }
+
+    async function finishedOnScreen() {
+      answerJob(FINISHED_JOB);
+      const client = newQueryClient();
+      await renderWithQuery(<JobScreen />, client);
+      await headline("Dan marked the job done");
+      expect(dock()).toBeTruthy();
+      return client;
+    }
+
+    it("a read in flight when the confirmation lands never undoes it: no dock, no deadline, even after a failed refresh", async () => {
+      const client = await finishedOnScreen();
+
+      // A refresh started over the finished job is still out when the confirmation answers.
+      const held = holdJob();
+      await act(async () => pullToRefresh());
+      await waitFor(() => expect(jobCalls()).toBe(2));
+      post.mockResolvedValue(CONFIRMED_JOB);
+      await act(async () => {
+        await confirmJob(client, REQUEST_ID, 1);
+      });
+      await act(async () => held.resolve(FINISHED_JOB));
+      await act(settle);
+
+      expect(client.getQueryData<CustomerJob>(KEY)?.status).toBe("confirmed");
+      expect(await headline("Thanks! Job confirmed")).toBeTruthy();
+      expect(dock()).toBeNull();
+      expect(screen.queryByTestId("job-confirm-deadline")).toBeNull();
+
+      await refreshTo(client, new NetworkError(false));
+
+      expect(client.getQueryState(KEY)?.error).toBeInstanceOf(NetworkError);
+      expect(client.getQueryData<CustomerJob>(KEY)?.status).toBe("confirmed");
+      expect(screen.getByRole("header", { name: "Thanks! Job confirmed" })).toBeTruthy();
+      expect(dock()).toBeNull();
+      expect(screen.queryByTestId("job-confirm-deadline")).toBeNull();
+    });
+
+    it.each([
+      ["gone (404)", new ApiError(404, "not_found")],
+      ["refused (403)", new ApiError(403, "forbidden")],
+    ])(
+      "a finished job read as %s keeps the dock away through offline and server-error retries, until a read answers the job",
+      async (_name, refusal) => {
+        const client = await finishedOnScreen();
+
+        await refreshTo(client, refusal);
+        expect(dock()).toBeNull();
+
+        // Each failure replaces the refusal as the query's error; the job stays refused.
+        for (const failure of [new NetworkError(false), new ApiError(500, "internal_error")]) {
+          await refreshTo(client, failure);
+          expect(client.getQueryState(KEY)?.error).toBe(failure);
+          expect(dock()).toBeNull();
+        }
+        expect(screen.getByTestId("job-finished")).toBeTruthy();
+
+        await refreshTo(client, FINISHED_JOB);
+        expect(dock()).toBeTruthy();
+      },
+    );
+
+    it.each([
+      ["gone (404)", new ApiError(404, "not_found")],
+      ["refused (403)", new ApiError(403, "forbidden")],
+    ])(
+      "a confirmation %s keeps the dock away though the read after it fails",
+      async (_name, refusal) => {
+        const client = await finishedOnScreen();
+
+        post.mockRejectedValue(refusal);
+        failJob(new NetworkError(false));
+        await act(async () => {
+          await expect(confirmJob(client, REQUEST_ID, 1)).rejects.toBe(refusal);
+          refreshCustomerJob(client, REQUEST_ID, 1);
+        });
+        await waitFor(() => expect(client.getQueryState(KEY)?.error).toBeInstanceOf(NetworkError));
+        await act(settle);
+
+        expect(client.getQueryData<CustomerJob>(KEY)?.status).toBe("completed");
+        expect(dock()).toBeNull();
+        expect(screen.getByTestId("job-finished")).toBeTruthy();
+      },
+    );
   });
 
   it("a photo tap and Confirm in a row open only the first", async () => {

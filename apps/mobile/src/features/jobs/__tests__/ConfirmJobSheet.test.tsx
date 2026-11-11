@@ -126,6 +126,7 @@ describe("ConfirmJobSheet (#66)", () => {
       "This job changed. Here's where it stands now.",
     ],
     ["gone (404)", new ApiError(404, "not_found"), "This job is no longer available."],
+    ["refused (403)", new ApiError(403, "forbidden"), "This job is no longer available."],
   ])(
     "a job that %s: the sheet closes, says so, and the job is asked for again",
     async (_name, error, message) => {
@@ -140,6 +141,29 @@ describe("ConfirmJobSheet (#66)", () => {
       expect(router.back).toHaveBeenCalledTimes(1);
       expect(cached(client)).toEqual(FINISHED);
       expect(Haptics.notificationAsync).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["gone (404)", new ApiError(404, "not_found")],
+    ["refused (403)", new ApiError(403, "forbidden")],
+  ])(
+    "a confirmation %s: the sheet opened again over the same job closes at once and sends nothing",
+    async (_name, refusal) => {
+      post().mockRejectedValue(refusal);
+      const { client } = await open();
+
+      await press("confirm-job-send");
+      expect(router.back).toHaveBeenCalledTimes(1);
+      // The read after it has not answered: the screen under it still holds the finished job.
+      expect(cached(client)).toEqual(FINISHED);
+
+      await screen.unmount();
+      await renderWithQuery(<ConfirmJobSheet />, client);
+      await waitFor(() => expect(router.back).toHaveBeenCalledTimes(2));
+      await press("confirm-job-send");
+
+      expect(posts()).toHaveLength(1);
     },
   );
 
