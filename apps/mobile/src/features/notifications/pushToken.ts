@@ -25,14 +25,35 @@ class MissingProjectIdError extends Error {
   override name = "MissingProjectIdError";
 }
 
+/**
+ * The device's store failed to read or to record the token's state: what an account may hold is
+ * then unknown, or not recorded, so nothing is sent on a guess and the caller tries again. Carries
+ * the store's error code for the log, never its message (it can quote the value).
+ */
+class PushTokenStateError extends Error {
+  override name = "PushTokenStateError";
+  readonly code: unknown;
+
+  constructor(cause: unknown) {
+    super();
+    this.code = (cause as { code?: unknown } | null)?.code;
+  }
+}
+
+const stateFailure = (cause: unknown): never => {
+  throw new PushTokenStateError(cause);
+};
+
 type DevicePlatform = "ios" | "android";
 
 // The token this device last sent the API, kept on the device (`pushTokenStorage`) so it outlives
-// the process as well as the session. `owed` is written ahead: true before any request about the
-// token goes out, false only once the server confirms its DELETE. So whatever ends a session (a
-// logout cut off by its bound, an expired refresh token, the process killed at any step), an
-// account may still hold the token only while it is marked owed, and the next sign-in on this
-// device moves it off that account. `undefined` until read in this process.
+// the process as well as the session. `owed` is written ahead: true, on the device, before any
+// request that can leave an account holding the token (a write that fails stops that request),
+// false only once the server confirms its DELETE. So whatever ends a session (a logout cut off by
+// its bound, an expired refresh token, the process killed at any step), an account may still hold
+// the token only while it is marked owed, and the next sign-in on this device moves it off that
+// account. Here: what the last read or write that succeeded established. `undefined` until then,
+// and again after a write that failed (it may have landed or not), so the device is read again.
 let known: StoredPushToken | null | undefined;
 
 // The token this process registered with a confirmed PUT, and the session it did it in: while that
@@ -81,21 +102,34 @@ async function fetchDeviceToken(): Promise<string> {
   return token.data;
 }
 
-/** The last token sent, read from the device once per process (a failed read is no token). */
+/**
+ * The last token sent, read from the device once per process. A read that fails rejects and is
+ * not kept: the record may be there, with an account still holding its token, so it is never
+ * taken for "nothing owed", and the next call reads again.
+ */
 async function lastSent(): Promise<StoredPushToken | null> {
   if (known === undefined) {
-    const stored = await pushTokenStorage.read();
+    const stored = await pushTokenStorage.read().catch(stateFailure);
     known ??= stored;
   }
   return known;
 }
 
-/** Remembers `next` for this process, then on the device (awaited: a kill right after keeps it). */
+/**
+ * Records `next` on the device (awaited: a kill right after keeps it), then for this process.
+ * Rejects when the write fails: nothing is known to be recorded, so the request that relies on
+ * the record must not go out. Writes nothing when the device already holds exactly `next` (`known`
+ * is only ever what a read or a write that succeeded established, and nothing else writes it).
+ */
 async function remember(next: StoredPushToken): Promise<void> {
+  if (known?.token === next.token && known.owed === next.owed) return;
+  try {
+    await pushTokenStorage.write(next);
+  } catch (error) {
+    known = undefined;
+    throw new PushTokenStateError(error);
+  }
   known = next;
-  await pushTokenStorage
-    .write(next)
-    .catch((error: unknown) => reportFailure("Push token state write failed", error));
 }
 
 const pinnedTo = (startedIn: number) => ({ auth: true, generation: startedIn }) as const;
@@ -114,14 +148,17 @@ async function unregister(token: string, startedIn: number): Promise<void> {
 }
 
 /**
- * A token marked owed may be held by an account that signed out (its removal never completed),
- * so it moves to the signed-in account first, whatever Expo answers next: the API's upsert moves a
- * token to whoever registers it, and its DELETE only takes a token off its caller. Skipped when
- * this session's own PUT already put it here. The mark stays: this account holds it now. Resolves
- * to the token moved, or null.
+ * A token the device's record (`last`) marks owed may be held by an account that signed out (its
+ * removal never completed), so it moves to the signed-in account first, whatever Expo answers
+ * next: the API's upsert moves a token to whoever registers it, and its DELETE only takes a token
+ * off its caller. Skipped when this session's own PUT already put it here. The mark stays: this
+ * account holds it now. Resolves to the token moved, or null.
  */
-async function moveOwedToken(startedIn: number, platform: DevicePlatform): Promise<string | null> {
-  const last = await lastSent();
+async function moveOwedToken(
+  last: StoredPushToken | null,
+  startedIn: number,
+  platform: DevicePlatform,
+): Promise<string | null> {
   if (!last?.owed || !isCurrentGeneration(startedIn)) return null;
   if (registered?.token === last.token && registered.generation === startedIn) return null;
   await put(last.token, platform, startedIn);
@@ -133,8 +170,11 @@ async function register(startedIn: number): Promise<void> {
   if (!platform || !isCurrentGeneration(startedIn)) return;
   if ((await bounded(refreshPermission())) !== "granted") return;
   await bounded(ensureNotificationChannel());
-  const moved = await moveOwedToken(startedIn, platform);
-  const previous = (await lastSent())?.token ?? null;
+  // A record that cannot be read stops the registration here (the caller tries again): the token
+  // an earlier account may still hold is in it.
+  const last = await lastSent();
+  const moved = await moveOwedToken(last, startedIn, platform);
+  const previous = last?.token ?? null;
   let token: string;
   try {
     token = await fetchDeviceToken();
@@ -146,8 +186,11 @@ async function register(startedIn: number): Promise<void> {
     token = previous;
   }
   if (!isCurrentGeneration(startedIn)) return;
-  // Owed before the PUT: from here on this account may hold the token, so a logout removes it even
-  // when the PUT's answer is lost, and the next sign-in moves it if the logout never lands.
+  // Owed before the PUT, on the device: from here on this account may hold the token, so a logout
+  // removes it even when the PUT's answer is lost, and the next sign-in moves it if the logout
+  // never lands. A mark that cannot be written stops the registration (the caller tries again):
+  // a PUT without it could leave this account holding the token under a record that says nobody
+  // does.
   await remember({ token, owed: true });
   // A rotated token: the old one comes off the account first (best effort; the server also drops
   // a token Expo reports as gone).
@@ -177,6 +220,7 @@ function settled(what: string, operation: (startedIn: number) => Promise<void>):
  * at each sign-in and app start, when the permission turns on, and when the token changes. Pinned
  * to the session it starts in: after a sign-out or another sign-in nothing is sent for it. Never
  * rejects; resolves to false after a failure (logged by its class), for the caller to try again.
+ * A device store that cannot be read or written is such a failure: the token is not registered.
  */
 export function syncPushToken(): Promise<boolean> {
   armPushTokenRemoval();
@@ -187,15 +231,17 @@ export function syncPushToken(): Promise<boolean> {
  * For a signed-in account with notifications off: a token still marked owed (an account that
  * signed out may hold it, or this one did before notifications went off) moves to this account
  * and then comes off it too, so no account keeps this device. Sends nothing when nothing is owed.
- * Never rejects; resolves to false after a failure, to try again.
+ * Never rejects; resolves to false after a failure, to try again: a record that could not be read
+ * is one (it is read again then), and so is a cleared mark that could not be written.
  */
 export function settleOwedPushToken(): Promise<boolean> {
   armPushTokenRemoval();
   return settled("Owed push token removal failed", async (startedIn) => {
     const platform = devicePlatform();
+    if (!platform) return;
     const owed = await lastSent();
-    if (!platform || !owed?.owed || !isCurrentGeneration(startedIn)) return;
-    await moveOwedToken(startedIn, platform);
+    if (!owed?.owed || !isCurrentGeneration(startedIn)) return;
+    await moveOwedToken(owed, startedIn, platform);
     // Turned on meanwhile: the token stays on this account (still owed, by it now), for the
     // registration that follows.
     if ((await bounded(refreshPermission())) === "granted") return;
@@ -217,15 +263,21 @@ export function removePushToken(): Promise<void> {
     // Cut off (the logout's bound ran out while a registration held the queue): what the account
     // may hold is marked owed already, for the next sign-in to settle.
     if (!isCurrentGeneration(startedIn)) return;
+    // A logout has no later try: a record that cannot be read now is handled as no record (below),
+    // and is not kept, so the next sign-in reads the device again.
+    const last = await lastSent().catch((error: unknown) => {
+      reportFailure("Push token state read failed", error);
+      return null;
+    });
     // Still owed by an earlier account (notifications off since, the move failed): the DELETE
     // only takes a token off its caller, so the token moves here first.
     const platform = devicePlatform();
-    if (platform) await moveOwedToken(startedIn, platform);
+    if (platform) await moveOwedToken(last, startedIn, platform);
     // No token sent from this install yet (a logout right after the first start, notifications
     // off): ask Expo for it. The fetch needs no permission; the logout's own bound limits the wait.
-    const last = await lastSent();
     const token = last?.token ?? (await fetchDeviceToken().catch(() => null));
     if (!token || !isCurrentGeneration(startedIn)) return;
+    // Marked owed first, as before every PUT: when the mark cannot be written nothing is sent.
     if (!last?.owed) await remember({ token, owed: true });
     // With no record on the device (none sent, or the store could not be read) any account may
     // hold the token: it moves here first, as an owed one does.

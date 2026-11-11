@@ -464,25 +464,185 @@ describe("a removal that never reached the server, across a restart (#334 B1)", 
     expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: false });
   });
 
-  it("the device's record unreadable after a restart: B's logout still moves the token off A", async () => {
+  /** The store fails the next `times` reads of the token's record, then answers again. */
+  function failReads(times: number): () => void {
+    const read = secureStoreMock.getItemAsync.getMockImplementation();
+    let left = times;
+    secureStoreMock.getItemAsync.mockImplementation(async (key: string) => {
+      if (key === PUSH_TOKEN_KEY && left-- > 0) {
+        throw Object.assign(new Error(`keystore ${MOCK_PUSH_TOKEN}`), { code: "E_STORE_READ" });
+      }
+      return read ? read(key) : null;
+    });
+    return () => {
+      if (read) secureStoreMock.getItemAsync.mockImplementation(read);
+    };
+  }
+
+  /** The store fails the next `times` writes of the token's record, then records again. */
+  function failWrites(times: number): () => void {
+    const write = secureStoreMock.setItemAsync.getMockImplementation();
+    let left = times;
+    secureStoreMock.setItemAsync.mockImplementation(async (key: string, value: string) => {
+      if (key === PUSH_TOKEN_KEY && left-- > 0) {
+        throw Object.assign(new Error(`keystore ${value}`), { code: "E_STORE_WRITE" });
+      }
+      await write?.(key, value);
+    });
+    return () => {
+      if (write) secureStoreMock.setItemAsync.mockImplementation(write);
+    };
+  }
+
+  it.each([
+    ["off", false, "Owed push token removal failed"],
+    ["on", true, "Push token registration failed"],
+  ])(
+    "the device's record unreadable at B's sign-in (notifications %s), readable on the next try: nothing is sent, then the token moves off A",
+    async (_label, on, what) => {
+      const server = deviceServer();
+      await expiredSessionOfA(server);
+      restart();
+      if (!on) {
+        notifications.getPermissionsAsync.mockImplementation(async () =>
+          permission("denied", false),
+        );
+      }
+      await signInAs(userB);
+      const before = deviceCalls().length;
+      const restore = failReads(1);
+      try {
+        // A read that failed is not "nothing owed": the caller is told, and tries again.
+        await expect(on ? syncPushToken() : settleOwedPushToken()).resolves.toBe(false);
+        expect(deviceCalls()).toHaveLength(before);
+        expect(server.holders.get(MOCK_PUSH_TOKEN)).toBe("Bearer access-1");
+
+        // The next return to the app: the failure was not kept, the record is read again.
+        await expect(on ? syncPushToken() : settleOwedPushToken()).resolves.toBe(true);
+      } finally {
+        restore();
+      }
+
+      expect([...server.holders]).toEqual(on ? [[MOCK_PUSH_TOKEN, "Bearer access-2"]] : []);
+      expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: on });
+      expect(warnings()).toEqual([`${what}: PushTokenStateError (E_STORE_READ)`]);
+    },
+  );
+
+  it("the device's record unreadable for B's whole session: B's logout still moves the token off A", async () => {
     const server = deviceServer();
     await expiredSessionOfA(server);
     restart();
-    const read = secureStoreMock.getItemAsync.getMockImplementation();
-    let failures = 1;
-    secureStoreMock.getItemAsync.mockImplementation(async (key: string) => {
-      if (key === PUSH_TOKEN_KEY && failures-- > 0) throw new Error("keystore");
-      return read ? read(key) : null;
-    });
+    notifications.getPermissionsAsync.mockImplementation(async () => permission("denied", false));
+    await signInAs(userB);
+    const before = deviceCalls().length;
+    const restore = failReads(Infinity);
     try {
-      notifications.getPermissionsAsync.mockImplementation(async () => permission("denied", false));
-      await signInAs(userB);
-      await expect(settleOwedPushToken()).resolves.toBe(true); // the read failed: nothing seen
+      await expect(settleOwedPushToken()).resolves.toBe(false);
+      expect(deviceCalls()).toHaveLength(before);
 
       await logout();
     } finally {
-      if (read) secureStoreMock.getItemAsync.mockImplementation(read);
+      restore();
     }
+
+    // With no record to go by any account may hold the token: marked owed, moved to B, removed.
+    expect(deviceCalls().slice(before)).toEqual([
+      {
+        method: "PUT",
+        auth: "Bearer access-2",
+        body: { expo_push_token: MOCK_PUSH_TOKEN, platform: Platform.OS },
+      },
+      { method: "DELETE", auth: "Bearer access-2", body: { expo_push_token: MOCK_PUSH_TOKEN } },
+    ]);
+    expect(server.holders.size).toBe(0);
+    expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: false });
+  });
+
+  it("the owed mark cannot be written: no PUT goes out under a record that says nobody holds the token, and the next try registers", async () => {
+    const server = deviceServer();
+    await signInAs(userA);
+    await syncPushToken();
+    await logout(); // confirmed by the server: the record says nobody holds the token
+    expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: false });
+    await signInAs(userA);
+    const before = deviceCalls().length;
+    const restore = failWrites(2);
+    try {
+      // Twice: the mark that was not written is not remembered as written either, so the second
+      // try sends nothing on the strength of the first.
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        await expect(syncPushToken()).resolves.toBe(false);
+        expect(deviceCalls()).toHaveLength(before);
+        expect(server.holders.size).toBe(0);
+        expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: false });
+      }
+
+      // The next return to the app: the store records again.
+      await expect(syncPushToken()).resolves.toBe(true);
+    } finally {
+      restore();
+    }
+
+    expect(server.holders.get(MOCK_PUSH_TOKEN)).toBe("Bearer access-2");
+    expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: true });
+    expect(warnings()).toEqual([
+      "Push token registration failed: PushTokenStateError (E_STORE_WRITE)",
+      "Push token registration failed: PushTokenStateError (E_STORE_WRITE)",
+    ]);
+  });
+
+  it("a registration repeated with the mark already on the device writes nothing: a store failing then costs it nothing", async () => {
+    const server = deviceServer();
+    await signInAs(userA);
+    await syncPushToken();
+    const restore = failWrites(1);
+    try {
+      await expect(syncPushToken()).resolves.toBe(true);
+    } finally {
+      restore();
+    }
+
+    expect(server.holders.get(MOCK_PUSH_TOKEN)).toBe("Bearer access-1");
+    expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: true });
+    expect(warnings()).toEqual([]);
+  });
+
+  it("a logout with nothing recorded and a mark that cannot be written sends nothing", async () => {
+    const server = deviceServer();
+    notifications.getPermissionsAsync.mockImplementation(async () => permission("denied", false));
+    await signInAs(userA);
+    armPushTokenRemoval();
+    const restore = failWrites(Infinity);
+    try {
+      await logout();
+    } finally {
+      restore();
+    }
+
+    expect(sessionStore.getState().status).toBe("signedOut");
+    expect(deviceCalls()).toEqual([]);
+    expect(server.holders.size).toBe(0);
+    expect(warnings()).toEqual(["Push token removal failed: PushTokenStateError (E_STORE_WRITE)"]);
+  });
+
+  it("settle: the DELETE lands but the cleared mark cannot be written: reported, and the next try settles again", async () => {
+    const server = deviceServer();
+    await offlineLogoutOfA(server);
+    restart();
+    notifications.getPermissionsAsync.mockImplementation(async () => permission("denied", false));
+    await signInAs(userB);
+    const restore = failWrites(1);
+    try {
+      await expect(settleOwedPushToken()).resolves.toBe(false);
+    } finally {
+      restore();
+    }
+    // Off A already. The device still says owed, which costs one more move and removal.
+    expect(server.holders.size).toBe(0);
+    expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: true });
+
+    await expect(settleOwedPushToken()).resolves.toBe(true);
 
     expect(server.holders.size).toBe(0);
     expect(await stored()).toEqual({ token: MOCK_PUSH_TOKEN, owed: false });
@@ -798,27 +958,21 @@ describe("a removal that never reached the server, across a restart (#334 B1)", 
     },
   );
 
-  it("a store that fails both ways: the registration lands, the write is logged by its class", async () => {
-    const read = secureStoreMock.getItemAsync.getMockImplementation();
-    const write = secureStoreMock.setItemAsync.getMockImplementation();
-    secureStoreMock.getItemAsync.mockImplementation(async (key: string) => {
-      if (key === PUSH_TOKEN_KEY) throw new Error(`keystore ${MOCK_PUSH_TOKEN}`);
-      return read ? read(key) : null;
-    });
-    secureStoreMock.setItemAsync.mockImplementation(async (key: string, value: string) => {
-      if (key === PUSH_TOKEN_KEY) throw new Error(`keystore ${value}`);
-      await write?.(key, value);
-    });
+  it("a store that fails both ways: nothing is registered, the failure is logged by its class", async () => {
+    const restoreReads = failReads(Infinity);
+    const restoreWrites = failWrites(Infinity);
     try {
       await signInAs(userA);
 
-      await expect(syncPushToken()).resolves.toBe(true);
+      await expect(syncPushToken()).resolves.toBe(false);
 
-      expect(deviceCalls()).toHaveLength(1);
-      expect(warnings()).toEqual(["Push token state write failed: Error"]);
+      expect(deviceCalls()).toEqual([]);
+      expect(warnings()).toEqual([
+        "Push token registration failed: PushTokenStateError (E_STORE_READ)",
+      ]);
     } finally {
-      if (read) secureStoreMock.getItemAsync.mockImplementation(read);
-      if (write) secureStoreMock.setItemAsync.mockImplementation(write);
+      restoreReads();
+      restoreWrites();
     }
   });
 });
@@ -911,4 +1065,90 @@ describe("Gatekeeper334 durable removal boundaries round two", () => {
     await expect(settleOwedPushToken()).resolves.toBe(true);
     expect(api.holders.size).toBe(0);
   });
+});
+
+// The Gatekeeper's round-three probes (#334 B1a, B1b), as written: one failed write of the owed
+// mark before a registration, and one failed read of the record at the next account's sign-in,
+// each with its control where the store does not fail.
+describe("Gatekeeper334 round three storage recovery", () => {
+  const KEY = "jackfixit.notifications.pushToken";
+  function server() {
+    const holders = new Map<string, string>();
+    routes["/v1/devices"] = async (init) => {
+      const auth = new Headers(init?.headers).get("Authorization") ?? "";
+      const { expo_push_token: token } = JSON.parse(String(init?.body)) as {
+        expo_push_token: string;
+      };
+      if (init?.method === "PUT") holders.set(token, auth);
+      if (init?.method === "DELETE" && holders.get(token) === auth) holders.delete(token);
+      return jsonResponse(204);
+    };
+    routes["/v1/auth/refresh"] = async () =>
+      jsonResponse(401, { error: { code: "invalid_refresh_token" } });
+    return holders;
+  }
+  async function expireA() {
+    await expect(refreshSession()).rejects.toMatchObject({ name: "SessionExpiredError" });
+    expect(sessionStore.getState().status).toBe("signedOut");
+    resetPushTokenForTests();
+    notifications.getPermissionsAsync.mockImplementation(async () => permission("denied", false));
+    await signInAs(userB);
+  }
+
+  it.each([false, true])(
+    "write-ahead failure=%s: A must not own the token after B signs in and settles",
+    async (fail) => {
+      const holders = server();
+      // A prior confirmed removal leaves a legitimate owed:false record.
+      await signInAs(userA);
+      await syncPushToken();
+      await logout();
+      await signInAs(userA);
+      const write = secureStoreMock.setItemAsync.getMockImplementation();
+      let failOnce = fail;
+      secureStoreMock.setItemAsync.mockImplementation(async (key: string, value: string) => {
+        if (key === KEY && failOnce) {
+          failOnce = false;
+          throw new Error("keystore unavailable");
+        }
+        await write?.(key, value);
+      });
+      try {
+        await syncPushToken();
+        // Storage is healthy again before session expiry and B's sign-in.
+      } finally {
+        if (write) secureStoreMock.setItemAsync.mockImplementation(write);
+      }
+      await expireA();
+      await settleOwedPushToken();
+      expect([...holders]).toEqual([]);
+    },
+  );
+
+  it.each([false, true])(
+    "transient read failure=%s: B sign-in retries after storage recovers",
+    async (fail) => {
+      const holders = server();
+      await signInAs(userA);
+      await syncPushToken();
+      await expireA();
+      const read = secureStoreMock.getItemAsync.getMockImplementation();
+      let failOnce = fail;
+      secureStoreMock.getItemAsync.mockImplementation(async (key: string) => {
+        if (key === KEY && failOnce) {
+          failOnce = false;
+          throw new Error("keystore unavailable");
+        }
+        return read ? read(key) : null;
+      });
+      try {
+        await settleOwedPushToken();
+      } finally {
+        if (read) secureStoreMock.getItemAsync.mockImplementation(read);
+      }
+      // Even an explicit foreground retry with a now-readable record must reconcile A's token.
+      await settleOwedPushToken();
+      expect([...holders]).toEqual([]);
+    },
+  );
 });

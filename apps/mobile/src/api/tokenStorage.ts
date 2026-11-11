@@ -122,12 +122,14 @@ function parsePushToken(value: string | null): StoredPushToken | null {
 
 /**
  * The push token's state, in one entry so a token and its `owed` flag are written together.
- * Nothing here is logged. A failed or unreadable read counts as no token (the app asks Expo
- * again); a failed write rejects, for the caller to log.
+ * Nothing here is logged. An entry that cannot be parsed counts as no token (the app asks Expo
+ * again). A read that fails rejects: the entry may be there, with an account still holding its
+ * token, so the caller must not take it for no token. A failed write rejects too: nothing was
+ * recorded.
  */
 export const pushTokenStorage = {
   read: (): Promise<StoredPushToken | null> =>
-    serialized(() => SecureStore.getItemAsync(PUSH_TOKEN_KEY).then(parsePushToken, () => null)),
+    serialized(() => SecureStore.getItemAsync(PUSH_TOKEN_KEY).then(parsePushToken)),
 
   write: (value: StoredPushToken): Promise<void> =>
     serialized(() =>
