@@ -14,6 +14,13 @@ describe("withPeriod", () => {
     expect(withPeriod(i18n.t, "Tue, Nov 4", "evening")).toMatch(/· Evening$/);
   });
 
+  it("keeps a period of several words in one piece: the Spanish morning", async () => {
+    await i18n.changeLanguage("es");
+    expect(withPeriod(i18n.t, "jue, 12 de nov", "morning")).toBe(
+      `jue,${NBSP}12${NBSP}de${NBSP}nov${NBSP}· Por${NBSP}la${NBSP}mañana`,
+    );
+  });
+
   it("leaves the day alone, still unbroken, when the period is flexible or unknown (before #237)", () => {
     expect(withPeriod(i18n.t, "Tue, Nov 4", "flexible")).toBe(`Tue,${NBSP}Nov${NBSP}4`);
     expect(withPeriod(i18n.t, "Tue, Nov 4", null)).toBe(`Tue,${NBSP}Nov${NBSP}4`);
@@ -36,8 +43,9 @@ describe("withPeriod", () => {
       "Flexible",
     ]);
     await i18n.changeLanguage("es");
+    // "Por la mañana", since the day bubble's "Mañana" is tomorrow.
     expect(PREFERRED_PERIODS.map((period) => periodLabel(i18n.t, period))).toEqual([
-      "Mañana",
+      "Por la mañana",
       "Tarde",
       "Noche",
       "Flexible",
