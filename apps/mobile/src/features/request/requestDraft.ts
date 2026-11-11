@@ -5,6 +5,7 @@ import { createStore } from "zustand/vanilla";
 import { onSignOut } from "@/api";
 import { EMPTY_ADDRESS_FIELDS, type AddressFields } from "@/features/addresses/addressFields";
 
+import { FLEXIBLE_PERIOD, type PreferredPeriod } from "./period";
 import { flowRisen, setFlowRisen } from "./rise";
 import type { StepId } from "./steps";
 
@@ -38,6 +39,8 @@ export type RequestDraft = {
   typedAddress: AddressFields;
   /** A day as YYYY-MM-DD, or null for "I'm flexible". */
   preferredDate: string | null;
+  /** When in that day; it goes with a day only, and each new day starts flexible. */
+  preferredPeriod: PreferredPeriod;
   refusal: StepRefusal | null;
 };
 
@@ -50,6 +53,7 @@ const EMPTY_DRAFT: RequestDraft = {
   address: null,
   typedAddress: EMPTY_ADDRESS,
   preferredDate: null,
+  preferredPeriod: FLEXIBLE_PERIOD,
   refusal: null,
 };
 
@@ -132,8 +136,18 @@ export function setTypedAddress(field: keyof AddressFields, value: string): void
   }));
 }
 
+/** Another day keeps the period; "I'm flexible" (null) clears it, so the next day starts flexible. */
 export function setPreferredDate(preferredDate: string | null): void {
-  requestDraftStore.setState((draft) => ({ preferredDate, ...clearRefusalOn(draft, "when") }));
+  requestDraftStore.setState((draft) => ({
+    preferredDate,
+    ...(preferredDate === null ? { preferredPeriod: FLEXIBLE_PERIOD } : {}),
+    ...clearRefusalOn(draft, "when"),
+  }));
+}
+
+/** The server never refuses a period, so a refusal on When (a day gone by) stays. */
+export function setPreferredPeriod(preferredPeriod: PreferredPeriod): void {
+  requestDraftStore.setState({ preferredPeriod });
 }
 
 /** The server refused the request because of `step`: the flow goes back there and says why. */

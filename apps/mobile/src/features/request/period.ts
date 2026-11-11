@@ -1,0 +1,39 @@
+import type { ApiSchema } from "@jack/shared";
+import type { TFunction } from "i18next";
+
+import { joinFacts } from "@/features/quotes/format";
+
+/**
+ * When in the preferred day the customer would like the visit (#237). It only refines a preferred
+ * day: each pro still proposes the exact start in their quote.
+ */
+export type PreferredPeriod = ApiSchema<"PreferredPeriod">;
+
+/** The period a picked day starts with, and the one that adds nothing to the day. */
+export const FLEXIBLE_PERIOD: PreferredPeriod = "flexible";
+
+/** The choices in the order of the day, flexible last. */
+export const PREFERRED_PERIODS: readonly PreferredPeriod[] = [
+  "morning",
+  "afternoon",
+  "evening",
+  FLEXIBLE_PERIOD,
+];
+
+// Keyed by every period, so one the API adds fails the type check here first.
+const LABEL_KEYS = {
+  morning: "request.period.morning",
+  afternoon: "request.period.afternoon",
+  evening: "request.period.evening",
+  flexible: "request.period.flexible",
+} as const satisfies Record<PreferredPeriod, string>;
+
+/** "Morning", "Tarde": the period's name in the app's language. */
+export const periodLabel = (t: TFunction, period: PreferredPeriod): string => t(LABEL_KEYS[period]);
+
+/**
+ * A preferred day with its period, "Tue, Nov 4 · Morning". The day stands alone when the period
+ * is flexible, or unknown: requests made before #237 carry none.
+ */
+export const withPeriod = (t: TFunction, day: string, period: PreferredPeriod | null): string =>
+  period === null || period === FLEXIBLE_PERIOD ? day : joinFacts([day, periodLabel(t, period)]);

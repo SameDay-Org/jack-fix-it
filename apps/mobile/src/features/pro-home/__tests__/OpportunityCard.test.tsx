@@ -15,7 +15,7 @@ describe("OpportunityCard", () => {
 
     const card = screen.getByRole("button");
     expect(card.props.accessibilityLabel).toBe(
-      "Painting, Fort Lauderdale 33301, Preferred Fri, Oct 30, Sent 2 h ago, New.",
+      "Painting, Fort Lauderdale 33301, Preferred: Fri, Oct 30, Sent 2 h ago, New.",
     );
     // The lines inside say nothing on their own: the sentence is the whole card.
     expect(screen.queryByText("Painting")).toBeNull();
@@ -40,6 +40,21 @@ describe("OpportunityCard", () => {
     );
     expect(screen.getByText("Other request", { includeHiddenElements: true })).toBeTruthy();
     expect(screen.queryByText("New", { includeHiddenElements: true })).toBeNull();
+  });
+
+  it.each([
+    ["morning", /^Preferred: Fri,\sOct\s30\s· Morning$/],
+    ["evening", /^Preferred: Fri,\sOct\s30\s· Evening$/],
+    ["flexible", /^Preferred: Fri, Oct 30$/],
+  ] as const)("names a %s visit after the day, and never Flexible", async (period, line) => {
+    const opportunity = summary(1, { preferred_period: period });
+    await render(<OpportunityCard opportunity={opportunity} now={NOW} onPress={onPress} />);
+
+    const id = `opportunity-${opportunity.dispatch_id}-preferred`;
+    expect(screen.getByTestId(id, { includeHiddenElements: true })).toHaveTextContent(line);
+    expect(screen.getByRole("button").props.accessibilityLabel).toMatch(
+      new RegExp(`, ${line.source.slice(1, -1)}, Sent 2 h ago, New\.$`),
+    );
   });
 
   it("clamps the excerpt to two lines", async () => {
