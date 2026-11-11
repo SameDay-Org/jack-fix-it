@@ -94,8 +94,16 @@ export default async function SupportPage({
           </Link>
         </Card>
       ) : page.items.length === 0 ? (
-        <Card>
-          <CardDescription>{t(`admin.support.empty.${filter}`)}</CardDescription>
+        <Card className="flex flex-col items-start gap-4">
+          {/* Past the last page (the older tickets changed status meanwhile): not "none". */}
+          <CardDescription>
+            {cursor ? t("admin.support.noOlder") : t(`admin.support.empty.${filter}`)}
+          </CardDescription>
+          {cursor ? (
+            <Link href={listHref(filter)} className={PILL_LINK}>
+              {t("admin.support.newest")}
+            </Link>
+          ) : null}
         </Card>
       ) : (
         <div className="flex flex-col gap-3">

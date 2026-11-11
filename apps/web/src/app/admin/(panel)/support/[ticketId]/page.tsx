@@ -123,6 +123,7 @@ export default async function TicketPage({ params }: { params: Promise<{ ticketI
               text={{
                 label: t("admin.support.detail.statusLabel"),
                 saving: t("admin.support.detail.saving"),
+                saved: t("admin.support.detail.saved"),
                 statuses: {
                   open: t("admin.support.status.open"),
                   in_progress: t("admin.support.status.in_progress"),

@@ -3,13 +3,14 @@
 import { revalidatePath } from "next/cache";
 
 import { ApiError, apiPatch } from "@/lib/api";
-import { staffAuth } from "@/lib/session";
+import { staffActionAuth } from "@/lib/session";
 
 import { isTicketStatus, isUuid, SUPPORT_PATH, ticketHref } from "./tickets";
 
 /** The outcomes the status control shows, each with its own i18n message. */
 export type StatusError = "not_found" | "forbidden" | "unavailable";
-export type StatusState = { error: StatusError | null };
+/** `saved` once a change went through, so the control can say so. */
+export type StatusState = { error: StatusError | null; saved: boolean };
 
 function errorOf(failure: unknown): StatusError {
   if (!(failure instanceof ApiError)) return "unavailable"; // network or configuration
@@ -20,10 +21,11 @@ function errorOf(failure: unknown): StatusError {
 
 /**
  * Moves a ticket to another status. A server action is a public endpoint, so it checks the
- * staff session itself (`staffAuth`, which redirects when there is none) and sends only a
- * ticket id that is a UUID and a status the API knows. The API checks the role again and
- * records the change in the audit log. Next.js checks that the action's Origin matches the
- * host, so another site cannot post this form.
+ * staff session itself (`staffActionAuth`: an expired access token is renewed in place, and
+ * without a staff session the person goes to the login) and sends only a ticket id that is a
+ * UUID and a status the API knows. The API checks the role again and records the change in
+ * the audit log. Next.js checks that the action's Origin matches the host, so another site
+ * cannot post this form.
  */
 export async function setTicketStatus(
   ticketId: string,
@@ -31,8 +33,8 @@ export async function setTicketStatus(
   form: FormData,
 ): Promise<StatusState> {
   const status = form.get("status");
-  if (!isUuid(ticketId) || !isTicketStatus(status)) return { error: "unavailable" };
-  const auth = await staffAuth();
+  if (!isUuid(ticketId) || !isTicketStatus(status)) return { error: "unavailable", saved: false };
+  const auth = await staffActionAuth();
   try {
     await apiPatch(
       "/v1/admin/support/tickets/{ticket_id}",
@@ -40,10 +42,10 @@ export async function setTicketStatus(
       { ...auth, params: { ticket_id: ticketId } },
     );
   } catch (failure) {
-    return { error: errorOf(failure) };
+    return { error: errorOf(failure), saved: false };
   }
   // The page shows the ticket as the API has it now, and the list moves it to its new status.
   revalidatePath(ticketHref(ticketId));
   revalidatePath(SUPPORT_PATH);
-  return { error: null };
+  return { error: null, saved: true };
 }

@@ -10,15 +10,21 @@ import { TICKET_STATUSES, type TicketStatus } from "../tickets";
 export type StatusControlText = {
   label: string;
   saving: string;
+  saved: string;
   statuses: Record<TicketStatus, string>;
   errors: Record<StatusError, string>;
 };
 
-const initialState: StatusState = { error: null };
+const initialState: StatusState = { error: null, saved: false };
 
 /**
  * The ticket's status as three buttons: the current one is pressed, the others move the
  * ticket there through the server action. The staff session never reaches this component.
+ *
+ * No button is ever `disabled`: the one just clicked keeps the keyboard focus while the change
+ * is saved and when it becomes the pressed one. The pressed button submits nothing, a click
+ * while a change is being saved is ignored, and the outcome is announced (saving, saved, or
+ * the error).
  */
 export function StatusControl({
   ticketId,
@@ -41,18 +47,25 @@ export function StatusControl({
         <div role="group" aria-label={text.label} className="flex flex-wrap gap-2">
           {TICKET_STATUSES.map((value) => {
             const current = value === status;
+            const waiting = pending && !current;
             return (
               <Button
                 key={value}
-                type="submit"
+                type={current ? "button" : "submit"}
                 name="status"
                 value={value}
                 size="sm"
                 variant={current ? "primary" : "secondary"}
                 aria-pressed={current}
-                disabled={current || pending}
-                // The pressed one is not a dimmed choice: it is the answer.
-                className={current ? "disabled:opacity-100" : undefined}
+                aria-disabled={waiting ? true : undefined}
+                onClick={pending ? (event) => event.preventDefault() : undefined}
+                className={
+                  current
+                    ? "cursor-default hover:bg-green-500 hover:text-navy-900"
+                    : waiting
+                      ? "cursor-default opacity-60"
+                      : undefined
+                }
               >
                 {text.statuses[value]}
               </Button>
@@ -60,7 +73,7 @@ export function StatusControl({
           })}
         </div>
         <p role="status" className="text-sm text-gray-500">
-          {pending ? text.saving : ""}
+          {pending ? text.saving : state.saved ? text.saved : ""}
         </p>
       </div>
       {error ? (

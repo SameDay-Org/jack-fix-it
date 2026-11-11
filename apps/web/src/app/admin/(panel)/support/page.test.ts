@@ -138,6 +138,17 @@ describe("support list page", () => {
     expect(await render(query)).toContain(text);
   });
 
+  it("offers the way back from a page past the last one", async () => {
+    // The older tickets changed status since the cursor was issued: not "no tickets".
+    api(() => Response.json({ items: [], next_cursor: null }));
+
+    const page = await render({ status: "closed", cursor: "abc-123" });
+
+    expect(page).toContain("No older tickets.");
+    expect(page).not.toContain("No closed tickets.");
+    expect(page).toMatch(/<a[^>]*href="\/admin\/support\?status=closed"[^>]*>Back to the newest/);
+  });
+
   it.each([
     ["the API fails", () => Response.json({ error: { code: "internal_error" } }, { status: 500 })],
     ["the cursor is refused", () => Response.json({ error: { code: "x" } }, { status: 422 })],

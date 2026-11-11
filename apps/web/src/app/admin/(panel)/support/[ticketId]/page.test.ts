@@ -96,6 +96,16 @@ describe("support ticket page", () => {
     expect(html).toContain("&lt;b&gt;please&lt;/b&gt;");
     expect(page).toContain("whitespace-pre-wrap");
     expect(pressed(page)).toEqual({ Open: "false", "In progress": "true", Closed: "false" });
+    // No button is disabled (the focus never lands on a dead control): the pressed one
+    // submits nothing, the others submit their status.
+    const buttons = page.match(/<button[^>]*>/g) ?? [];
+    expect(buttons).toHaveLength(3);
+    for (const button of buttons) {
+      expect(button).not.toContain('disabled=""');
+      const type = button.includes('aria-pressed="true"') ? 'type="button"' : 'type="submit"';
+      expect(button).toContain(type);
+    }
+    expect(page).toContain('role="status"');
     expect(page).toContain("Nov 7, 2026, 2:30 PM UTC");
     expect(page).not.toContain(ACCESS_TOKEN);
   });

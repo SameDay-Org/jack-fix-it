@@ -83,6 +83,7 @@
         "all": "No tickets yet."
       },
       "older": "Older tickets",
+      "noOlder": "No older tickets.",
       "newest": "Back to the newest",
       "loadError": "We couldn't load the tickets. Try again in a moment.",
       "retry": "Try again",
@@ -98,6 +99,7 @@
         "loadError": "We couldn't load this ticket. Try again in a moment.",
         "statusLabel": "Status",
         "saving": "Saving…",
+        "saved": "Saved.",
         "errors": {
           "not_found": "This ticket no longer exists.",
           "forbidden": "Your account can't change tickets.",

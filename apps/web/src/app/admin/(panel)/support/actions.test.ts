@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { FakeCookieJar, RedirectSignal, routeFetch } from "@/lib/test-helpers";
+import { REFRESH_COOKIE, SESSION_COOKIE } from "@/lib/session";
+import {
+  auth,
+  bound,
+  FakeCookieJar,
+  MARKER,
+  RedirectSignal,
+  routeFetch,
+  TOKENS,
+} from "@/lib/test-helpers";
 
 const { jar, revalidatePath } = vi.hoisted(() => ({
   jar: { current: null as unknown },
@@ -31,6 +40,7 @@ beforeEach(() => {
   signIn(cookies);
   vi.stubEnv("API_INTERNAL_URL", "http://api.test.invalid:8000");
   vi.stubEnv("API_TIMEOUT_MS", "1000");
+  vi.stubEnv("REFRESH_TOKEN_TTL_SECONDS", "2592000");
   vi.stubGlobal("fetch", fetchMock);
 });
 
@@ -42,7 +52,13 @@ afterEach(() => {
 });
 
 function api(patch: () => Response, role: "agent" | "admin" | "customer" = "agent"): void {
-  fetchMock.mockImplementation(routeFetch({ "/v1/auth/me": () => me(role), [TICKET]: patch }));
+  fetchMock.mockImplementation(
+    routeFetch({
+      "/v1/auth/me": () => me(role),
+      "/v1/auth/logout": () => new Response(null, { status: 204 }),
+      [TICKET]: patch,
+    }),
+  );
 }
 
 function form(status: string | null): FormData {
@@ -52,7 +68,7 @@ function form(status: string | null): FormData {
 }
 
 async function submit(status: string | null, ticketId = TICKET_ID) {
-  return setTicketStatus(ticketId, { error: null }, form(status));
+  return setTicketStatus(ticketId, { error: null, saved: false }, form(status));
 }
 
 function paths(): string[] {
@@ -67,7 +83,7 @@ describe("setTicketStatus", () => {
 
       const state = await submit(status);
 
-      expect(state).toEqual({ error: null });
+      expect(state).toEqual({ error: null, saved: true });
       // The session is checked first, then the one PATCH.
       expect(paths()).toEqual(["/v1/auth/me", TICKET]);
       const [request] = requestsTo(fetchMock.mock.calls, TICKET);
@@ -94,7 +110,7 @@ describe("setTicketStatus", () => {
 
     const state = await submit(status, ticketId);
 
-    expect(state).toEqual({ error: "unavailable" });
+    expect(state).toEqual({ error: "unavailable", saved: false });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(revalidatePath).not.toHaveBeenCalled();
   });
@@ -108,7 +124,7 @@ describe("setTicketStatus", () => {
   ] as const)("reports a refusal of the API (%i) and refreshes nothing", async (status, error) => {
     api(() => Response.json({ error: { code: "x", message: "x" } }, { status }));
 
-    expect(await submit("closed")).toEqual({ error });
+    expect(await submit("closed")).toEqual({ error, saved: false });
     expect(revalidatePath).not.toHaveBeenCalled();
   });
 
@@ -117,7 +133,30 @@ describe("setTicketStatus", () => {
       throw new TypeError("fetch failed");
     });
 
-    expect(await submit("closed")).toEqual({ error: "unavailable" });
+    expect(await submit("closed")).toEqual({ error: "unavailable", saved: false });
+  });
+
+  it("renews an expired access token in place and still changes the status", async () => {
+    // Fifteen minutes on a ticket: the access cookie is gone, the refresh cookie is not.
+    cookies.reset({ [SESSION_COOKIE]: MARKER, [REFRESH_COOKIE]: bound("rt-old") });
+    fetchMock.mockImplementation(
+      routeFetch({
+        "/v1/auth/refresh": () => Response.json(auth("agent")),
+        "/v1/auth/me": () => me("agent"),
+        [TICKET]: () => Response.json(ticket()),
+      }),
+    );
+
+    const state = await submit("closed");
+
+    // No redirect to a session route: the click is applied, with the renewed token.
+    expect(state).toEqual({ error: null, saved: true });
+    expect(paths()).toEqual(["/v1/auth/refresh", "/v1/auth/me", TICKET]);
+    const [request] = requestsTo(fetchMock.mock.calls, TICKET);
+    expect(new Headers(request?.init?.headers).get("Authorization")).toBe(
+      `Bearer ${TOKENS.access_token}`,
+    );
+    expect(cookies.get(REFRESH_COOKIE)?.value).toBe(bound(TOKENS.refresh_token));
   });
 
   it.each(["customer", "none"] as const)(
@@ -126,7 +165,8 @@ describe("setTicketStatus", () => {
       if (who === "none") cookies.reset({});
       api(() => Response.json(ticket()), "customer");
 
-      await expect(submit("closed")).rejects.toBeInstanceOf(RedirectSignal);
+      // To the login, never to a session route (Next would follow that one on the server).
+      await expect(submit("closed")).rejects.toMatchObject(new RedirectSignal("/admin/login"));
 
       expect(paths()).not.toContain(TICKET);
       expect(revalidatePath).not.toHaveBeenCalled();

@@ -37,6 +37,7 @@ import {
   SESSION_COOKIE,
   requireStaff,
   setSession,
+  staffActionAuth,
   staffAuth,
 } from "./session";
 
@@ -194,6 +195,138 @@ describe("staffAuth", () => {
     cookies.reset({});
 
     expect(await redirectOf(staffAuth)).toBe(END_PATH);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("staffActionAuth", () => {
+  const unauthorized = () => Response.json({ error: { code: "invalid_token" } }, { status: 401 });
+
+  function bearerOf(init: RequestInit): string | null {
+    return new Headers(init.headers).get("Authorization");
+  }
+
+  /** Each `/me` answers for the token it was asked with. */
+  function meByToken(answers: Record<string, () => Response>) {
+    return () => {
+      const [, init] = fetchMock.mock.calls.at(-1)!;
+      const token = new Headers(init?.headers).get("Authorization")?.replace("Bearer ", "") ?? "";
+      return (answers[token] ?? unauthorized)();
+    };
+  }
+
+  it("gives the bearer of a token /me accepts, and writes no cookie", async () => {
+    cookies.reset({
+      [SESSION_COOKIE]: MARKER,
+      [ACCESS_COOKIE]: bound("at-1"),
+      [REFRESH_COOKIE]: bound("rt-1"),
+    });
+    fetchMock.mockImplementation(routeFetch({ "/v1/auth/me": () => Response.json(user("agent")) }));
+
+    expect(bearerOf(await staffActionAuth())).toBe("Bearer at-1");
+    expect(calledPaths()).toEqual(["/v1/auth/me"]);
+    expect(cookies.sets).toEqual([]);
+  });
+
+  it.each([
+    ["expired (the cookie is gone)", {}, ["/v1/auth/refresh", "/v1/auth/me"]],
+    [
+      "refused by the API",
+      { [ACCESS_COOKIE]: bound("at-old") },
+      ["/v1/auth/me", "/v1/auth/refresh", "/v1/auth/me"],
+    ],
+  ])("renews in place an access token that is %s", async (_, access, paths) => {
+    cookies.reset({ [SESSION_COOKIE]: MARKER, [REFRESH_COOKIE]: bound("rt-old"), ...access });
+    fetchMock.mockImplementation(
+      routeFetch({
+        "/v1/auth/me": meByToken({ [TOKENS.access_token]: () => Response.json(user("agent")) }),
+        "/v1/auth/refresh": () => Response.json(auth("agent")),
+      }),
+    );
+
+    const init = await staffActionAuth();
+
+    // One refresh, then the renewed token checked like any other: never a session route.
+    expect(bearerOf(init)).toBe(`Bearer ${TOKENS.access_token}`);
+    expect(calledPaths()).toEqual(paths);
+    const [, refresh] = fetchMock.mock.calls.find(
+      ([input]) => new URL(String(input)).pathname === "/v1/auth/refresh",
+    )!;
+    expect(JSON.parse(String(refresh?.body))).toEqual({ refresh_token: "rt-old" });
+    // Both cookies rotate under the login's sid, and the refresh is marked as done.
+    expect(cookies.get(ACCESS_COOKIE)?.value).toBe(bound(TOKENS.access_token));
+    expect(cookies.get(REFRESH_COOKIE)?.value).toBe(bound(TOKENS.refresh_token));
+    expect(cookies.get(REFRESHED_COOKIE)?.value).toBe("1");
+    expect(cookies.get(SESSION_COOKIE)?.value).toBe(MARKER);
+  });
+
+  it("ends the session when the renewed token is refused too: one refresh, never a loop", async () => {
+    cookies.reset({ [SESSION_COOKIE]: MARKER, [REFRESH_COOKIE]: bound("rt-old") });
+    fetchMock.mockImplementation(
+      routeFetch({
+        "/v1/auth/me": unauthorized,
+        "/v1/auth/refresh": () => Response.json(auth("agent")),
+        "/v1/auth/logout": () => new Response(null, { status: 204 }),
+      }),
+    );
+
+    expect(await redirectOf(staffActionAuth)).toBe(LOGIN_PATH);
+    expect(calledPaths().filter((path) => path === "/v1/auth/refresh")).toHaveLength(1);
+    expect(calledPaths().at(-1)).toBe("/v1/auth/logout");
+    expect([...cookies.values.keys()]).toEqual([]);
+  });
+
+  it("does not refresh twice: a refused token after a refresh ends the session", async () => {
+    cookies.reset({
+      [SESSION_COOKIE]: MARKER,
+      [ACCESS_COOKIE]: bound("at-new"),
+      [REFRESH_COOKIE]: bound("rt-new"),
+      [REFRESHED_COOKIE]: "1",
+    });
+    fetchMock.mockImplementation(
+      routeFetch({
+        "/v1/auth/me": unauthorized,
+        "/v1/auth/logout": () => new Response(null, { status: 204 }),
+      }),
+    );
+
+    expect(await redirectOf(staffActionAuth)).toBe(LOGIN_PATH);
+    expect(calledPaths()).toEqual(["/v1/auth/me", "/v1/auth/logout"]);
+    expect([...cookies.values.keys()]).toEqual([]);
+  });
+
+  it("goes to the login with the session cleared when the refresh is refused", async () => {
+    cookies.reset({ [SESSION_COOKIE]: MARKER, [REFRESH_COOKIE]: bound("rt-old") });
+    fetchMock.mockImplementation(routeFetch({ "/v1/auth/refresh": unauthorized }));
+
+    expect(await redirectOf(staffActionAuth)).toBe(LOGIN_PATH);
+    expect(calledPaths()).toEqual(["/v1/auth/refresh"]);
+    expect([...cookies.values.keys()]).toEqual([]);
+  });
+
+  it.each(["customer", "pro"] as const)("ends the session of a %s account", async (role) => {
+    cookies.reset({
+      [SESSION_COOKIE]: MARKER,
+      [ACCESS_COOKIE]: bound("at-1"),
+      [REFRESH_COOKIE]: bound("rt-1"),
+    });
+    fetchMock.mockImplementation(
+      routeFetch({
+        "/v1/auth/me": () => Response.json(user(role)),
+        "/v1/auth/logout": () => new Response(null, { status: 204 }),
+      }),
+    );
+
+    expect(await redirectOf(staffActionAuth)).toBe(LOGIN_PATH);
+    // Never a refresh for an account that is not staff; its refresh token is revoked.
+    expect(calledPaths()).toEqual(["/v1/auth/me", "/v1/auth/logout"]);
+    expect([...cookies.values.keys()]).toEqual([]);
+  });
+
+  it("goes to the login without a session, asking nothing of the API", async () => {
+    cookies.reset({});
+
+    expect(await redirectOf(staffActionAuth)).toBe(LOGIN_PATH);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

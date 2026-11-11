@@ -19,7 +19,9 @@ const subscribe = () => () => {};
 
 /**
  * A moment in the reader's own time zone. The server does not know that zone, so it renders
- * UTC; the browser swaps in the local time once it takes over.
+ * UTC; the browser swaps in the local time once it takes over. Browsers do not all format a
+ * date exactly as Node does (the space before AM/PM, for one), so a difference in this text
+ * while the browser takes over is expected, not a hydration error.
  */
 export function LocalTime({ iso, locale }: { iso: string; locale: string }) {
   const text = useSyncExternalStore(
@@ -27,5 +29,9 @@ export function LocalTime({ iso, locale }: { iso: string; locale: string }) {
     () => format(iso, locale),
     () => format(iso, locale, "UTC"),
   );
-  return <time dateTime={iso}>{text}</time>;
+  return (
+    <time dateTime={iso} suppressHydrationWarning>
+      {text}
+    </time>
+  );
 }
