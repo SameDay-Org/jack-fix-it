@@ -18,6 +18,7 @@ import {
   JOB_ID,
   minutesFromNow,
   navigation,
+  NO_PHOTO_COUNTS,
   renderWithQuery,
   signedIn,
   working,
@@ -58,7 +59,11 @@ const photo = (n: number): JobPhoto => ({
 /** Working, with `count` after photos on the job. */
 const withAfter = (count: number, overrides: Partial<ProJob> = {}): ProJob =>
   working({
-    photos: { before: [], after: Array.from({ length: count }, (_, i) => photo(i + 1)) },
+    photos: {
+      before: [],
+      after: Array.from({ length: count }, (_, i) => photo(i + 1)),
+      ...NO_PHOTO_COUNTS,
+    },
     ...overrides,
   });
 

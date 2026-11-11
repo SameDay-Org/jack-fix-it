@@ -83,8 +83,11 @@ _RESPONSES: dict[int | str, dict[str, Any]] = {
 async def list_messages(
     job_id: uuid.UUID, user: AppUser, chat: Chat, limit: Limit = None, cursor: Cursor = None
 ) -> ChatPage:
-    """The job's messages, newest first, with the caller's unread count. Reading does not move
-    the read marker: POST .../read does. Readable in every job status."""
+    """The job's messages, newest first, with the caller's unread count and a receipt on each
+    of the caller's own messages (sent, delivered, seen). Listing delivers to the caller the
+    other side's messages this page returns, and only those (their sender's receipt turns
+    delivered; an older message the page did not return stays sent). It never moves the read
+    marker: POST .../read does. Readable in every job status."""
     return await chat.messages(user, job_id, limit=limit, cursor=cursor)
 
 
@@ -137,7 +140,8 @@ async def send_message(
 )
 async def mark_read(job_id: uuid.UUID, data: ChatReadIn, user: AppUser, chat: Chat) -> ChatReadOut:
     """Moves the caller's read marker to the message, only forward: an older one, or the same
-    again, changes nothing. Allowed in every job status."""
+    again, changes nothing. Reading implies delivered: every message up to the marker reads as
+    seen to its sender, whether or not a listing delivered it. Allowed in every job status."""
     return ChatReadOut(unread_count=await chat.mark_read(user, job_id, data.up_to))
 
 
@@ -156,8 +160,9 @@ async def staff_list_messages(
     job_id: uuid.UUID, user: PanelUser, chat: Chat, limit: Limit = None, cursor: Cursor = None
 ) -> StaffChatPage:
     """Any job's messages, newest first, for the BDC and admins, with the original of each
-    redacted message while it is kept. Read-only: no read marker moves, and the parties' unread
-    counts do not change. A response that carries an original is recorded in the audit log."""
+    redacted message while it is kept, and every message's receipt. Read-only: no marker moves,
+    and the parties' unread counts and receipts do not change. A response that carries an
+    original is recorded in the audit log."""
     return await chat.staff_messages(user, job_id, limit=limit, cursor=cursor)
 
 

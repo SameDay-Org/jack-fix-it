@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import Select
+from sqlalchemy import Select, Subquery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -102,6 +102,12 @@ class ProService:
         self._categories = CategoryService(session)
 
     @staticmethod
+    def users() -> Subquery:
+        """Each profile's id (`pro_id`) and user id (`user_id`), as a subquery: a job's
+        parties resolve in the job's own query (#331)."""
+        return ProProfileRepository.users()
+
+    @staticmethod
     def photo_keys_among(keys: Collection[str]) -> Select[str | None]:
         """The upload keys among `keys` that a profile holds as its photo, as a statement (the
         uploads sweep of unreferenced uploads, #191)."""
@@ -134,10 +140,6 @@ class ProService:
     async def get_profile_id_for_user(self, user_id: uuid.UUID) -> uuid.UUID | None:
         """The pro_profiles.id of a user, or None when the user has no pro profile."""
         return await self._profiles.get_id_by_user_id(user_id)
-
-    async def get_user_id_for_profile(self, pro_id: uuid.UUID) -> uuid.UUID | None:
-        """The user behind a pro_profiles.id, or None for an unknown profile."""
-        return await self._profiles.get_user_id(pro_id)
 
     async def lock_payout_account(self, user_id: uuid.UUID) -> tuple[bool, PayoutAccount]:
         """(created, account): the user's payout account (#39), its profile row locked FOR

@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from enum import StrEnum
 from typing import Final
 
 from sqlalchemy import (
@@ -20,6 +21,16 @@ from app.db import Base, IdTimestampsMixin
 
 # The longest message body, in characters, as stored (after cleaning and redaction).
 MESSAGE_MAX_LENGTH: Final = 2000
+
+
+class Receipt(StrEnum):
+    """How far a message got with its recipient, the participant who did not send it: sent,
+    delivered (their app fetched it) or seen (they marked it read). From the recipient's read
+    marker and deliveries (#331)."""
+
+    SENT = "sent"  # stored; the recipient's app has not fetched it yet
+    DELIVERED = "delivered"  # a listing returned it to the recipient (job_message_deliveries)
+    SEEN = "seen"  # the recipient marked it read (their read marker)
 
 
 class JobMessage(IdTimestampsMixin, Base):
@@ -90,6 +101,25 @@ class JobChatRead(IdTimestampsMixin, Base):
         ForeignKey("job_messages.id"), index=True
     )
     last_read_message_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class JobMessageDelivery(IdTimestampsMixin, Base):
+    """One message delivered to its recipient: a listing returned it to their app (#331).
+    Written once per (message, recipient), never moved or removed.
+
+    Per message, not a marker: a page holds a slice of the thread (the newest, or an older one
+    by cursor), so "everything up to the newest message returned" would claim messages the page
+    skipped. Only what a page returned is delivered.
+
+    A table of its own, not columns on job_chat_reads, so the API version still serving while
+    the migration runs (which knows only job_chat_reads) keeps working. Reading implies
+    delivered without writing here: a message at or behind the read marker is seen."""
+
+    __tablename__ = "job_message_deliveries"
+    __table_args__ = (UniqueConstraint("message_id", "user_id"),)
+
+    message_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("job_messages.id"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
 
 
 class ChatOffenderFlag(IdTimestampsMixin, Base):

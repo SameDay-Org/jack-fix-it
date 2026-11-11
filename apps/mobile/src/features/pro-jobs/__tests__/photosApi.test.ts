@@ -11,7 +11,7 @@ import {
   type DoneOutcome,
 } from "../api";
 import type { JobPhoto, ProJob } from "../phase";
-import { JOB_ID, minutesFromNow, newQueryClient, working } from "./helpers";
+import { JOB_ID, minutesFromNow, newQueryClient, NO_PHOTO_COUNTS, working } from "./helpers";
 
 jest.mock("@/api", () => jest.requireActual("./helpers").apiMock());
 
@@ -32,7 +32,8 @@ const afterPhoto = (): JobPhoto => ({
 });
 
 /** Working with the after photo on the job, as the attach answer brings it back. */
-const withAfter = (): ProJob => working({ photos: { before: [], after: [afterPhoto()] } });
+const withAfter = (): ProJob =>
+  working({ photos: { before: [], after: [afterPhoto()], ...NO_PHOTO_COUNTS } });
 
 /** The same job once Job's done went through. */
 const completed = (): ProJob => ({
