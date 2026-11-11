@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Select, func, select, tuple_
+from sqlalchemy import Select, func, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.support.models import SupportTicket, TicketStatus
@@ -16,10 +16,6 @@ class SupportTicketRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def now(self) -> datetime:
-        """The database clock: `closed_at` and `created_at` come from the same clock."""
-        return (await self._session.execute(select(func.now()))).scalar_one()
-
     async def add(self, ticket: SupportTicket) -> SupportTicket:
         """Inserts the ticket and reads back what Postgres set (id, status, timestamps)."""
         self._session.add(ticket)
@@ -27,10 +23,19 @@ class SupportTicketRepository:
         await self._session.refresh(ticket)
         return ticket
 
-    async def save(self, ticket: SupportTicket) -> None:
-        """Writes the ticket's changes now and reads back what Postgres set (updated_at)."""
-        await self._session.flush()
-        await self._session.refresh(ticket)
+    async def set_status(self, ticket_id: uuid.UUID, status: TicketStatus) -> SupportTicket:
+        """Moves the ticket to `status` in one statement, so status and closed_at reach the
+        database together (closed_at_matches_status): closed_at is the database clock while
+        the ticket is closed, and cleared otherwise. Returns the ticket as written. The caller
+        holds the row's lock (get_for_update)."""
+        statement = (
+            update(SupportTicket)
+            .where(SupportTicket.id == ticket_id)
+            .values(status=status, closed_at=func.now() if status == TicketStatus.CLOSED else None)
+            .returning(SupportTicket)
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one()
 
     async def get(self, ticket_id: uuid.UUID) -> SupportTicket | None:
         return await self._session.get(SupportTicket, ticket_id)

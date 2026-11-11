@@ -83,7 +83,7 @@ async def seed(
     **fields: Any,
 ) -> SupportTicket:
     """A ticket of `writer`, `age` old by the database clock, in `status`."""
-    now = await SupportTicketRepository(session).now()
+    now = (await session.execute(select(func.now()))).scalar_one()
     values: dict[str, Any] = {"topic": TicketTopic.OTHER, "message": MESSAGE, **fields}
     ticket = SupportTicket(
         user_id=writer.id,
@@ -304,21 +304,25 @@ async def test_mine_lists_only_the_callers_tickets_newest_first(
     )
     newest = await seed(db_session, world.customer, age=timedelta(hours=1))
     theirs = await seed(db_session, world.other_customer, age=timedelta(minutes=30))
+    theirs_older = await seed(db_session, world.other_customer, age=timedelta(hours=5))
 
     first = await db_client.get(MINE, params={"limit": 2}, headers=world.customer.headers)
     cursor = first.json()["next_cursor"]
     second = await db_client.get(
         MINE, params={"limit": 2, "cursor": cursor}, headers=world.customer.headers
     )
-    # The same cursor in another user's hands only positions their own list.
-    others = await db_client.get(MINE, params={"cursor": cursor}, headers=world.pro.headers)
+    # The same cursor in another user's hands only positions their own list: their tickets
+    # older than it, never the first customer's (whose oldest is older than the cursor too).
+    others = await db_client.get(
+        MINE, params={"cursor": cursor}, headers=world.other_customer.headers
+    )
     other_customer = await db_client.get(MINE, headers=world.other_customer.headers)
 
     assert ids(first) == [str(newest.id), str(middle.id)]
     assert ids(second) == [str(oldest.id)]
     assert second.json()["next_cursor"] is None
-    assert ids(others) == []
-    assert ids(other_customer) == [str(theirs.id)]
+    assert ids(others) == [str(theirs_older.id)]
+    assert ids(other_customer) == [str(theirs.id), str(theirs_older.id)]
     closed, last = first.json()["items"][1], second.json()["items"][0]
     assert set(closed) == MINE_KEYS
     assert (closed["status"], closed["closed_at"] is not None) == ("closed", True)
@@ -544,7 +548,7 @@ async def test_an_invalid_status_change_is_422_and_changes_nothing(
     assert await audit_rows(db_session) == []
 
 
-@pytest.mark.parametrize("failure", ["audit_write_fails", "actor_no_longer_staff"])
+@pytest.mark.parametrize("failure", ["audit_write_fails", "audit_refuses_the_actor"])
 async def test_a_change_that_cannot_be_audited_does_not_happen(
     db_client: httpx.AsyncClient,
     db_session: AsyncSession,
@@ -562,6 +566,8 @@ async def test_a_change_that_cannot_be_audited_does_not_happen(
 
         monkeypatch.setattr(AuditRepository, "add", fail)
     else:
+        # The refusal itself (who counts as active staff) is proven in test_audit_log.py; here,
+        # what the route does with one: the change is rolled back and the answer is 403.
 
         async def refuse(self: AuditService, *args: Any) -> None:
             raise ActorNotStaffError

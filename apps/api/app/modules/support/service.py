@@ -11,9 +11,11 @@ team from the app's Help page, and the team works the tickets in the panel.
   a job exists.
 - Staff (agent, admin) list every ticket, newest first, by status; read one; and change its
   status. Any status may follow any other (a closed ticket can be reopened). A change locks
-  the ticket row, writes one audit_log row (the actor, before and after) in the same
-  transaction, and commits both: a failed audit write changes nothing. The same status again
-  changes nothing and writes nothing. `closed_at` is set while the ticket is closed.
+  the ticket row, writes the status and closed_at in one UPDATE (the repository's: like every
+  status column, it is never assigned on the model), writes one audit_log row (the actor,
+  before and after) in the same transaction, and commits both: a failed audit write changes
+  nothing. The same status again changes nothing and writes nothing. `closed_at` is set while
+  the ticket is closed.
 - Lists: newest first by (created_at, id), with a cursor.
 
 Never logged: the message, the writer's name or the app version. Logs carry ids, the role, the
@@ -183,18 +185,13 @@ class SupportTicketService:
         if previous == status:
             await self._session.commit()  # nothing changed: only the row lock goes
             return await self._detail(ticket)
-        # Read before the ticket changes: a query flushes what is pending, and status and
-        # closed_at must reach the database in one statement (closed_at_matches_status).
-        closed_at = await self._tickets.now() if status == TicketStatus.CLOSED else None
-        ticket.status = status
-        ticket.closed_at = closed_at
-        await self._tickets.save(ticket)
+        ticket = await self._tickets.set_status(ticket_id, status)
         try:
             # In the change's transaction: an audit write that fails rolls the change back.
             await self._audit.record_staff_action(
                 staff.id,
                 AuditAction.SUPPORT_TICKET_SET_STATUS,
-                AuditEntity(AuditEntityType.SUPPORT_TICKET, ticket.id),
+                AuditEntity(AuditEntityType.SUPPORT_TICKET, ticket_id),
                 {"status": previous.value},
                 {"status": status.value},
             )
@@ -205,7 +202,7 @@ class SupportTicketService:
         logger.info(
             "support_ticket_status_changed",
             extra={
-                "ticket_id": str(ticket.id),
+                "ticket_id": str(ticket_id),
                 "staff_id": str(staff.id),
                 "from_status": previous.value,
                 "to_status": status.value,

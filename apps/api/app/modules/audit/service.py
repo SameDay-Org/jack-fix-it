@@ -12,8 +12,9 @@ messages): `record_read` writes the row of a read by an active agent or admin, a
 commits it before answering, so nothing is shown unaudited.
 
 Staff actions that are not about money and that the BDC takes too (#274: a support ticket's
-status) go through `record_staff_action`: the actor is an active agent or admin, checked
-again here, and the row is flushed in the caller's transaction, as for `record`.
+status) go through `record_staff_action`: the actor must be an active agent or admin as this
+transaction reads the account (a caller that never checked a role is refused here), and the
+row is flushed in the caller's transaction, as for `record`.
 
 before and after carry ids, statuses, Stripe object ids and ISO timestamps only: never PII
 (names, emails, phones, addresses) or secrets.
@@ -98,8 +99,9 @@ class AuditService:
         """Adds the row of an action any staff member may take (the BDC's agents included) to
         the caller's transaction and flushes it, so a failure surfaces before the caller
         commits the change it describes. ActorNotStaffError when the actor is not an active
-        agent or admin (demoted or suspended since the route's check). Money overrides never
-        come through here: `record` takes an admin only."""
+        agent or admin, as this transaction reads the account: the route checked the role
+        already, so this refuses a caller that did not. Money overrides never come through
+        here: `record` takes an admin only."""
         if not _active_staff(await self._users.get_by_id(actor_id)):
             raise ActorNotStaffError
         await self._audit.add(
