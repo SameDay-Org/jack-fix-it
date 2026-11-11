@@ -19,6 +19,15 @@ describe("withPeriod", () => {
     expect(withPeriod(i18n.t, "Tue, Nov 4", null)).toBe(`Tue,${NBSP}Nov${NBSP}4`);
   });
 
+  it("lets a long day wrap at its spaces on request, never the period", () => {
+    expect(withPeriod(i18n.t, "Wednesday, November 11", "afternoon", { wrapDay: true })).toBe(
+      `Wednesday, November 11${NBSP}· Afternoon`,
+    );
+    expect(withPeriod(i18n.t, "Wednesday, November 11", null, { wrapDay: true })).toBe(
+      "Wednesday, November 11",
+    );
+  });
+
   it("names every period in both languages, in the order of the day", async () => {
     expect(PREFERRED_PERIODS.map((period) => periodLabel(i18n.t, period))).toEqual([
       "Morning",

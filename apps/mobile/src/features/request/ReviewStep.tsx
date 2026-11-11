@@ -170,7 +170,9 @@ export function ReviewStep({ category, steps }: ReviewStepProps) {
         <Text className="text-body text-navy-900">
           {draft.preferredDate === null
             ? t("request.review.flexible")
-            : withPeriod(t, formatLongDay(draft.preferredDate, locale), draft.preferredPeriod)}
+            : withPeriod(t, formatLongDay(draft.preferredDate, locale), draft.preferredPeriod, {
+                wrapDay: true,
+              })}
         </Text>
       </ReviewSection>
     </StepScreen>

@@ -39,7 +39,8 @@ export type RequestDraft = {
   typedAddress: AddressFields;
   /** A day as YYYY-MM-DD, or null for "I'm flexible". */
   preferredDate: string | null;
-  /** When in that day; it goes with a day only, and each new day starts flexible. */
+  /** When in that day, sent with a day only: flexible until the customer picks a time, it
+   * follows them from day to day, and "I'm flexible" sets it back. */
   preferredPeriod: PreferredPeriod;
   refusal: StepRefusal | null;
 };

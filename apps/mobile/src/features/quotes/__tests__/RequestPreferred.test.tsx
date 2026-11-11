@@ -5,7 +5,8 @@ import i18n from "@/i18n";
 
 import { created } from "../../request/__tests__/helpers";
 import { RequestPreferred } from "../RequestPreferred";
-import { renderWithQuery, REQUEST_ID } from "./helpers";
+import { myRequestQueryKey } from "../useMyRequest";
+import { newQueryClient, renderWithQuery, REQUEST_ID } from "./helpers";
 
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../../api/errors"),
@@ -74,15 +75,21 @@ describe("RequestPreferred", () => {
       .mockResolvedValueOnce(created({ preferred_date: null, preferred_period: null }))
       .mockRejectedValueOnce(new NetworkError(false))
       .mockReturnValueOnce(new Promise(() => undefined));
+    const client = newQueryClient();
+    const status = (id: string) => client.getQueryState(myRequestQueryKey(id))?.status;
     await renderWithQuery(
       <>
         <RequestPreferred requestId="no-day" />
         <RequestPreferred requestId="failing" />
         <RequestPreferred requestId="loading" />
       </>,
+      client,
     );
 
-    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(3));
-    await waitFor(() => expect(screen.queryByTestId(LINE)).toBeNull());
+    // Each answer is in (and rendered) before the absence counts.
+    await waitFor(() => expect(status("no-day")).toBe("success"));
+    await waitFor(() => expect(status("failing")).toBe("error"));
+    expect(status("loading")).toBe("pending");
+    expect(screen.queryByTestId(LINE)).toBeNull();
   });
 });
