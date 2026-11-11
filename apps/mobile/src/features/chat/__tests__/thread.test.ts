@@ -25,6 +25,7 @@ const msg = (id: string, at: string | number, sender: Sender = "pro", body = "x"
   body,
   redacted: false,
   created_at: typeof at === "number" ? new Date(at).toISOString() : at,
+  receipt: null,
 });
 
 const page = (

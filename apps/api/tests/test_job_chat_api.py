@@ -44,7 +44,7 @@ OPEN = (
     JobStatus.DISPUTED,
 )
 CLOSED = (JobStatus.CONFIRMED, JobStatus.PAID_OUT, JobStatus.REFUNDED, JobStatus.CANCELLED)
-MESSAGE_KEYS = {"id", "sender", "body", "redacted", "created_at"}
+MESSAGE_KEYS = {"id", "sender", "body", "redacted", "created_at", "receipt"}
 # The POST answer adds the sender's warning (#72).
 SENT_KEYS = MESSAGE_KEYS | {"warning"}
 T0 = datetime(2030, 1, 15, 15, 0, tzinfo=UTC)
