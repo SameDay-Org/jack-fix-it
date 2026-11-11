@@ -29,8 +29,6 @@ const nearLimit = (text: string, max: number): string | undefined =>
 type QuoteFormStepProps = {
   quote: QuoteDraftState;
   takeRateBps: number;
-  /** The caps the draft is checked against, which an above-the-cap message names. */
-  caps: QuoteCaps;
   preferredDate: string | null;
   onReview: () => void;
 };
@@ -75,15 +73,9 @@ function problemText(
  * The quote itself: the price with what the pro will receive under it, live; what is included;
  * how the pro will do the job; how long it takes; and when they propose to start.
  */
-export function QuoteFormStep({
-  quote,
-  takeRateBps,
-  caps,
-  preferredDate,
-  onReview,
-}: QuoteFormStepProps) {
+export function QuoteFormStep({ quote, takeRateBps, preferredDate, onReview }: QuoteFormStepProps) {
   const { t } = useTranslation();
-  const { draft, problems, now, duration } = quote;
+  const { draft, problems, caps, now, duration } = quote;
   const startError = problemText(t, "start", problems.start, caps);
   const durationError = problemText(t, "duration", problems.duration, caps);
   const anyProblem = Object.keys(problems).length > 0;

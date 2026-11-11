@@ -495,6 +495,32 @@ describe("QuoteFormScreen: the opportunity's caps", () => {
 
     await press("quote-minutes-decrement");
     expect(screen.queryByText(DURATION_MAX)).toBeNull();
+    await press("quote-review");
+    expect(await screen.findByTestId("quote-review-step")).toBeTruthy();
+  });
+
+  it("checks the marks again when the detail refreshes with other caps", async () => {
+    const client = await renderWithCaps({ quote_max_amount_cents: 10_000 });
+    // The cache tells its observers on a (real) zero timeout: waiting one out lands the render.
+    const refresh = (caps: Partial<OpportunityDetail>) =>
+      act(async () => {
+        client.setQueryData(opportunityQueryKey(DISPATCH_ID), detail(caps));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    await fill({ price: "150" });
+    await press("quote-review");
+    expect(screen.getByText(PRICE_MAX)).toBeTruthy();
+
+    // Raised past the price, nothing is marked; lowered under it, the mark names the new cap.
+    await refresh({ quote_max_amount_cents: 20_000 });
+    expect(screen.queryByText(PRICE_MAX)).toBeNull();
+    expect(screen.queryByTestId("quote-form-problems")).toBeNull();
+    await refresh({ quote_max_amount_cents: 12_000 });
+    expect(screen.getByText("The maximum quote is $120.")).toBeTruthy();
+    // No cap left: no mark, and no summary over an unmarked form.
+    await refresh({ quote_max_amount_cents: null });
+    expect(screen.queryByText("The maximum quote is $120.")).toBeNull();
+    expect(screen.queryByTestId("quote-form-problems")).toBeNull();
   });
 
   it("never blocks on null caps: the API's largest price and a 31-hour job go to the review", async () => {

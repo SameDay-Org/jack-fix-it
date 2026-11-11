@@ -89,20 +89,45 @@ function durationProblem(minutes: number, maxMinutes: number | null): FieldProbl
   return undefined;
 }
 
+/** The two fields the caps bear on, the price and the duration, checked under `caps`. */
+function cappedProblems(draft: QuoteDraft, caps: QuoteCaps): DraftProblems {
+  const problems: DraftProblems = {};
+  const price = priceProblem(draft.price, caps.quote_max_amount_cents);
+  if (price) problems.price = price;
+  const duration = durationProblem(draft.durationMinutes, caps.quote_max_duration_minutes);
+  if (duration) problems.duration = duration;
+  return problems;
+}
+
 /**
  * Everything the app can check before sending, the opportunity's caps included; an empty result
  * means the draft can be sent. The server checks the caps again: they can change meanwhile.
  */
 export function draftProblems(draft: QuoteDraft, now: number, caps: QuoteCaps): DraftProblems {
-  const problems: DraftProblems = {};
-  const price = priceProblem(draft.price, caps.quote_max_amount_cents);
-  if (price) problems.price = price;
+  const problems = cappedProblems(draft, caps);
   if (draft.scope.trim() === "") problems.scope = "required";
-  const duration = durationProblem(draft.durationMinutes, caps.quote_max_duration_minutes);
-  if (duration) problems.duration = duration;
   if (draft.startAt <= now) problems.start = "past";
   return problems;
 }
+
+/**
+ * `problems` under caps that changed since they were found: the price and the duration checked
+ * again, the scope and the start as they were.
+ */
+export function recheckCaps(
+  problems: DraftProblems,
+  draft: QuoteDraft,
+  caps: QuoteCaps,
+): DraftProblems {
+  const rechecked = cappedProblems(draft, caps);
+  if (problems.scope) rechecked.scope = problems.scope;
+  if (problems.start) rechecked.start = problems.start;
+  return rechecked;
+}
+
+export const sameCaps = (a: QuoteCaps, b: QuoteCaps): boolean =>
+  a.quote_max_amount_cents === b.quote_max_amount_cents &&
+  a.quote_max_duration_minutes === b.quote_max_duration_minutes;
 
 export const hasProblems = (problems: DraftProblems): boolean => Object.keys(problems).length > 0;
 

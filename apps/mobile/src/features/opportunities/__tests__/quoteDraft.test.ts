@@ -4,6 +4,7 @@ import {
   emptyDraft,
   isDirty,
   quoteBody,
+  recheckCaps,
   type QuoteCaps,
   type QuoteDraft,
 } from "../quoteDraft";
@@ -103,6 +104,19 @@ describe("draftProblems", () => {
   it("refuses a blank scope and a start that is not ahead", () => {
     expect(draftProblems(filled({ scope: " \n " }), NOW, NO_CAPS)).toEqual({ scope: "required" });
     expect(draftProblems(filled({ startAt: NOW }), NOW, NO_CAPS)).toEqual({ start: "past" });
+  });
+});
+
+describe("recheckCaps", () => {
+  it("checks the price and the duration again and keeps the other marks as found", () => {
+    const draft = filled({ price: "2500.01", durationMinutes: 481 });
+    const found = { ...draftProblems(draft, NOW, CAPS), scope: "required" as const };
+    expect(recheckCaps(found, draft, NO_CAPS)).toEqual({ scope: "required" });
+    expect(recheckCaps({ start: "past" }, draft, CAPS)).toEqual({
+      price: "aboveMax",
+      duration: "aboveMax",
+      start: "past",
+    });
   });
 });
 

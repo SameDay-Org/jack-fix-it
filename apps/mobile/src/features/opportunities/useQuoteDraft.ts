@@ -7,6 +7,8 @@ import {
   emptyDraft,
   hasProblems,
   isDirty,
+  recheckCaps,
+  sameCaps,
   type DraftProblems,
   type QuoteCaps,
   type QuoteDraft,
@@ -52,8 +54,9 @@ function keepCapMarks(
 /**
  * The quote the pro is writing, kept while the form, the review and a failed send come and go.
  * Problems show from the first "Review quote" on and then follow every change, checked against
- * the opportunity's `caps`. `now` is the time of the last change, for the steppers' lower bounds:
- * the start can't be stepped into the past.
+ * the opportunity's `caps`, and against new caps when its detail refreshes meanwhile. `now` is
+ * the time of the last change, for the steppers' lower bounds: the start can't be stepped into
+ * the past.
  */
 export function useQuoteDraft(preferredDate: string | null, caps: QuoteCaps) {
   const [initial] = useState(() => emptyDraft(defaultStartAt(preferredDate, Date.now())));
@@ -61,6 +64,14 @@ export function useQuoteDraft(preferredDate: string | null, caps: QuoteCaps) {
   const [now, setNow] = useState(Date.now);
   const [checking, setChecking] = useState(false);
   const [problems, setProblems] = useState<DraftProblems>({});
+  // Adjusted while rendering, so no mark ever names a cap that no longer holds, not even once.
+  const [checkedCaps, setCheckedCaps] = useState(caps);
+  if (!sameCaps(caps, checkedCaps)) {
+    setCheckedCaps(caps);
+    if (checking) {
+      setProblems((previous) => keepCapMarks(previous, recheckCaps(previous, draft, caps), {}));
+    }
+  }
 
   const change = (patch: Partial<QuoteDraft>) => {
     const next = { ...draft, ...patch };
@@ -82,8 +93,8 @@ export function useQuoteDraft(preferredDate: string | null, caps: QuoteCaps) {
 
   /**
    * The server answered 422. A field that fails here now (a start that passed while the pro was
-   * reviewing, a cap the opportunity's refreshed detail lowered) is the cause; otherwise the caps
-   * changed since the detail was read, and the app cannot name them: the amount or the duration.
+   * reviewing, or a cap the detail lowered before the send) is the cause; otherwise the caps
+   * changed after that, and the app cannot name them: the amount or the duration.
    */
   const refused = () => {
     const found = draftProblems(draft, Date.now(), caps);
@@ -103,6 +114,8 @@ export function useQuoteDraft(preferredDate: string | null, caps: QuoteCaps) {
   return {
     draft,
     problems,
+    /** The caps the problems were found under, which a message names. */
+    caps,
     now,
     dirty: isDirty(draft, initial),
     check,

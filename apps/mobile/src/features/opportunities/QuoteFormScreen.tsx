@@ -212,7 +212,6 @@ function QuoteFlow({ opportunity, sending, onSend }: QuoteFlowProps) {
           <QuoteFormStep
             quote={quote}
             takeRateBps={opportunity.take_rate_bps}
-            caps={opportunity}
             preferredDate={opportunity.preferred_date}
             onReview={review}
           />
