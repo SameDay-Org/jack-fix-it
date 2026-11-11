@@ -4,7 +4,7 @@ import { Text, View } from "react-native";
 
 import { Button, Input, ValueStepper } from "@/components/ui";
 import { BackButton } from "@/features/auth/components/BackButton";
-import { formatMoneyExact, formatRate } from "@/features/quotes/format";
+import { formatMinutes, formatMoney, formatMoneyExact, formatRate } from "@/features/quotes/format";
 
 import { formatDay, formatInstantDay, formatTimeOfDay } from "./format";
 import { MAX_AMOUNT_CENTS, parsePriceCents, split } from "./money";
@@ -12,6 +12,7 @@ import {
   APPROACH_MAX_LENGTH,
   SCOPE_MAX_LENGTH,
   type FieldProblem,
+  type QuoteCaps,
   type QuoteField,
 } from "./quoteDraft";
 import { DURATION_MINUTES_STEP, START_STEP_MINUTES, type QuoteDraftState } from "./useQuoteDraft";
@@ -28,6 +29,8 @@ const nearLimit = (text: string, max: number): string | undefined =>
 type QuoteFormStepProps = {
   quote: QuoteDraftState;
   takeRateBps: number;
+  /** The caps the draft is checked against, which an above-the-cap message names. */
+  caps: QuoteCaps;
   preferredDate: string | null;
   onReview: () => void;
 };
@@ -44,12 +47,26 @@ const MESSAGES: Record<QuoteField, Partial<Record<FieldProblem, ParseKeys>>> = {
   start: { past: "quoteForm.start.past" },
 };
 
+/** "The maximum quote is $2,500." or "The longest job you can quote is 8 h.": the cap itself. */
+function maxText(t: TFunction, field: QuoteField, caps: QuoteCaps): string | undefined {
+  const { quote_max_amount_cents: maxCents, quote_max_duration_minutes: maxMinutes } = caps;
+  if (field === "price" && maxCents !== null) {
+    return t("quoteForm.price.aboveMax", { amount: formatMoney(maxCents) });
+  }
+  if (field === "duration" && maxMinutes !== null) {
+    return t("quoteForm.duration.aboveMax", { duration: formatMinutes(t, maxMinutes) });
+  }
+  return undefined;
+}
+
 /** The message for a field's problem, or none. */
 function problemText(
   t: TFunction,
   field: QuoteField,
   problem: FieldProblem | undefined,
+  caps: QuoteCaps,
 ): string | undefined {
+  if (problem === "aboveMax") return maxText(t, field, caps);
   const key = problem ? MESSAGES[field][problem] : undefined;
   return key ? t(key) : undefined;
 }
@@ -58,11 +75,17 @@ function problemText(
  * The quote itself: the price with what the pro will receive under it, live; what is included;
  * how the pro will do the job; how long it takes; and when they propose to start.
  */
-export function QuoteFormStep({ quote, takeRateBps, preferredDate, onReview }: QuoteFormStepProps) {
+export function QuoteFormStep({
+  quote,
+  takeRateBps,
+  caps,
+  preferredDate,
+  onReview,
+}: QuoteFormStepProps) {
   const { t } = useTranslation();
   const { draft, problems, now, duration } = quote;
-  const startError = problemText(t, "start", problems.start);
-  const durationError = problemText(t, "duration", problems.duration);
+  const startError = problemText(t, "start", problems.start, caps);
+  const durationError = problemText(t, "duration", problems.duration, caps);
   const anyProblem = Object.keys(problems).length > 0;
 
   return (
@@ -83,7 +106,7 @@ export function QuoteFormStep({ quote, takeRateBps, preferredDate, onReview }: Q
           onChangeText={quote.setPrice}
           onBlur={quote.tidyPrice}
           hint={t("quoteForm.price.hint")}
-          error={problemText(t, "price", problems.price)}
+          error={problemText(t, "price", problems.price, caps)}
           keyboardType="decimal-pad"
           inputMode="decimal"
           testID="quote-price"
@@ -96,7 +119,7 @@ export function QuoteFormStep({ quote, takeRateBps, preferredDate, onReview }: Q
         value={draft.scope}
         onChangeText={quote.setScope}
         hint={t("quoteForm.scope.hint")}
-        error={problemText(t, "scope", problems.scope)}
+        error={problemText(t, "scope", problems.scope, caps)}
         multiline
         maxLength={SCOPE_MAX_LENGTH}
         counter={nearLimit(draft.scope, SCOPE_MAX_LENGTH)}

@@ -152,7 +152,7 @@ type QuoteFlowProps = {
  */
 function QuoteFlow({ opportunity, sending, onSend }: QuoteFlowProps) {
   const { t } = useTranslation();
-  const quote = useQuoteDraft(opportunity.preferred_date);
+  const quote = useQuoteDraft(opportunity.preferred_date, opportunity);
   const [step, setStep] = useState<Step>({ kind: "form" });
   const [discarding, setDiscarding] = useState(false);
 
@@ -212,6 +212,7 @@ function QuoteFlow({ opportunity, sending, onSend }: QuoteFlowProps) {
           <QuoteFormStep
             quote={quote}
             takeRateBps={opportunity.take_rate_bps}
+            caps={opportunity}
             preferredDate={opportunity.preferred_date}
             onReview={review}
           />

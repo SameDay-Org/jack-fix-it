@@ -46,6 +46,7 @@ jest.mock(
 const POST = "/v1/pros/me/opportunities/{dispatch_id}/quote";
 const SCOPE = "Paint the hallway and two bedrooms, two coats.";
 const CAP = "Above the most Jack allows for one quote.";
+const NBSP = " ";
 const HIDDEN = { includeHiddenElements: true };
 const PART = { exact: false };
 /** The customer's preferred day in the fixture (2026-10-30) at 9:00 AM, in the test's time zone. */
@@ -93,15 +94,28 @@ const typeInto = (testID: string, text: string) =>
   fireEvent.changeText(screen.getByTestId(testID), text);
 const press = (testID: string) => fireEvent.press(screen.getByTestId(testID));
 
-/** $100, the scope, 1 h 15 min, the default start; then the review. */
-async function fillAndReview({ approach = "" } = {}) {
-  await typeInto("quote-price", "100");
+/** $100 (or `price`), the scope, 1 h 15 min, the default start. */
+async function fill({ price = "100", approach = "" } = {}) {
+  await typeInto("quote-price", price);
   await typeInto("quote-scope", SCOPE);
   if (approach) await typeInto("quote-approach", approach);
   await press("quote-hours-increment");
   await press("quote-minutes-increment");
+}
+
+/** The filled form, then the review. */
+async function fillAndReview({ approach = "" } = {}) {
+  await fill({ approach });
   await press("quote-review");
   await screen.findByTestId("quote-review-step");
+}
+
+/** The form over an opportunity with these caps, cached and answered alike. */
+async function renderWithCaps(caps: Partial<OpportunityDetail>) {
+  const client = seededClient();
+  client.setQueryData(opportunityQueryKey(DISPATCH_ID), detail(caps));
+  jest.mocked(apiGet).mockResolvedValue(detail(caps));
+  return renderForm(client);
 }
 
 /** A POST the test answers when it chooses. */
@@ -433,6 +447,75 @@ describe("QuoteFormScreen: review and send", () => {
       expect(jest.mocked(apiPost).mock.calls[1]).toEqual(jest.mocked(apiPost).mock.calls[0]);
     },
   );
+});
+
+describe("QuoteFormScreen: the opportunity's caps", () => {
+  const PRICE_MAX = "The maximum quote is $100.";
+  const DURATION_MAX = `The longest job you can quote is 1${NBSP}h${NBSP}14${NBSP}min.`;
+
+  it("sends a quote at both caps", async () => {
+    await renderWithCaps({ quote_max_amount_cents: 10_000, quote_max_duration_minutes: 75 });
+    await fillAndReview();
+    await press("quote-send");
+
+    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
+    expect(jest.mocked(apiPost).mock.calls[0]?.[1]).toMatchObject({
+      amount_cents: 10_000,
+      duration_minutes: 75,
+    });
+  });
+
+  it("names the price cap one cent above it and does not send", async () => {
+    await renderWithCaps({ quote_max_amount_cents: 10_000 });
+    await fill({ price: "100.01" });
+    await press("quote-review");
+
+    expect(screen.getByText(PRICE_MAX)).toBeTruthy();
+    expect(screen.queryByText(CAP)).toBeNull();
+    expect(screen.getByTestId("quote-form-problems")).toBeTruthy();
+    expect(screen.queryByTestId("quote-review-step")).toBeNull();
+    expect(apiPost).not.toHaveBeenCalled();
+
+    // The mark follows the edits: back at the cap, the review opens.
+    await typeInto("quote-price", "100");
+    expect(screen.queryByText(PRICE_MAX)).toBeNull();
+    await press("quote-review");
+    expect(await screen.findByTestId("quote-review-step")).toBeTruthy();
+  });
+
+  it("names the duration cap one minute above it and does not send", async () => {
+    await renderWithCaps({ quote_max_duration_minutes: 74 });
+    await fill();
+    await press("quote-review");
+
+    expect(screen.getByText(DURATION_MAX)).toBeTruthy();
+    expect(screen.queryByText(CAP)).toBeNull();
+    expect(screen.queryByTestId("quote-review-step")).toBeNull();
+    expect(apiPost).not.toHaveBeenCalled();
+
+    await press("quote-minutes-decrement");
+    expect(screen.queryByText(DURATION_MAX)).toBeNull();
+  });
+
+  it("never blocks on null caps: the API's largest price and a 31-hour job go to the review", async () => {
+    await renderForm();
+    await fill({ price: "21,474,836.47" });
+    for (let hour = 0; hour < 30; hour += 1) await press("quote-hours-increment");
+    await press("quote-review");
+
+    expect(await screen.findByTestId("quote-review-step")).toBeTruthy();
+  });
+
+  it("on a 422 within the caps it read, falls back to the generic mark on both fields", async () => {
+    jest.mocked(apiPost).mockRejectedValue(new ApiError(422, "validation_error"));
+    await renderWithCaps({ quote_max_amount_cents: 10_000, quote_max_duration_minutes: 75 });
+    await fillAndReview();
+    await press("quote-send");
+
+    expect(await screen.findByTestId("quote-form")).toBeTruthy();
+    expect(screen.getAllByText(CAP)).toHaveLength(2);
+    expect(screen.queryByText(PRICE_MAX)).toBeNull();
+  });
 });
 
 describe("QuoteFormScreen: leaving", () => {

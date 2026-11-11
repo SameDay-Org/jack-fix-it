@@ -8,6 +8,7 @@ import {
   hasProblems,
   isDirty,
   type DraftProblems,
+  type QuoteCaps,
   type QuoteDraft,
 } from "./quoteDraft";
 
@@ -30,8 +31,8 @@ export function shiftMinutes(at: number, minutes: number): number {
 }
 
 /**
- * The server refused the amount or the duration as above a cap (422); the mark stays on a
- * field until that field changes, whatever else the pro edits.
+ * The server refused the amount or the duration as above a cap the app could not name (422); the
+ * mark stays on a field until that field changes, whatever else the pro edits.
  */
 function keepCapMarks(
   previous: DraftProblems,
@@ -50,10 +51,11 @@ function keepCapMarks(
 
 /**
  * The quote the pro is writing, kept while the form, the review and a failed send come and go.
- * Problems show from the first "Review quote" on and then follow every change. `now` is the time
- * of the last change, for the steppers' lower bounds: the start can't be stepped into the past.
+ * Problems show from the first "Review quote" on and then follow every change, checked against
+ * the opportunity's `caps`. `now` is the time of the last change, for the steppers' lower bounds:
+ * the start can't be stepped into the past.
  */
-export function useQuoteDraft(preferredDate: string | null) {
+export function useQuoteDraft(preferredDate: string | null, caps: QuoteCaps) {
   const [initial] = useState(() => emptyDraft(defaultStartAt(preferredDate, Date.now())));
   const [draft, setDraft] = useState(initial);
   const [now, setNow] = useState(Date.now);
@@ -65,12 +67,14 @@ export function useQuoteDraft(preferredDate: string | null) {
     const at = Date.now();
     setDraft(next);
     setNow(at);
-    if (checking) setProblems((previous) => keepCapMarks(previous, draftProblems(next, at), patch));
+    if (checking) {
+      setProblems((previous) => keepCapMarks(previous, draftProblems(next, at, caps), patch));
+    }
   };
 
   /** Checks everything the app can; true when the draft may go to the review. */
   const check = (): boolean => {
-    const found = draftProblems(draft, Date.now());
+    const found = draftProblems(draft, Date.now(), caps);
     setChecking(true);
     setProblems(found);
     return !hasProblems(found);
@@ -78,11 +82,11 @@ export function useQuoteDraft(preferredDate: string | null) {
 
   /**
    * The server answered 422. A field that fails here now (a start that passed while the pro was
-   * reviewing) is the cause; otherwise it is a platform cap the app does not know (#258), on the
-   * amount or the duration.
+   * reviewing, a cap the opportunity's refreshed detail lowered) is the cause; otherwise the caps
+   * changed since the detail was read, and the app cannot name them: the amount or the duration.
    */
   const refused = () => {
-    const found = draftProblems(draft, Date.now());
+    const found = draftProblems(draft, Date.now(), caps);
     setChecking(true);
     setProblems(hasProblems(found) ? found : { price: "aboveCap", duration: "aboveCap" });
   };
