@@ -6,6 +6,8 @@ import { NOW, summary } from "../../opportunities/__tests__/helpers";
 import { OpportunityCard } from "../OpportunityCard";
 
 const onPress = jest.fn();
+/** The day is one unbroken unit in the line (and in what screen readers get). */
+const NBSP = " ";
 
 beforeEach(() => onPress.mockClear());
 
@@ -15,7 +17,7 @@ describe("OpportunityCard", () => {
 
     const card = screen.getByRole("button");
     expect(card.props.accessibilityLabel).toBe(
-      "Painting, Fort Lauderdale 33301, Preferred: Fri, Oct 30, Sent 2 h ago, New.",
+      `Painting, Fort Lauderdale 33301, Preferred: Fri,${NBSP}Oct${NBSP}30, Sent 2 h ago, New.`,
     );
     // The lines inside say nothing on their own: the sentence is the whole card.
     expect(screen.queryByText("Painting")).toBeNull();
@@ -45,7 +47,7 @@ describe("OpportunityCard", () => {
   it.each([
     ["morning", /^Preferred: Fri,\sOct\s30\s· Morning$/],
     ["evening", /^Preferred: Fri,\sOct\s30\s· Evening$/],
-    ["flexible", /^Preferred: Fri, Oct 30$/],
+    ["flexible", /^Preferred: Fri,\sOct\s30$/],
   ] as const)("names a %s visit after the day, and never Flexible", async (period, line) => {
     const opportunity = summary(1, { preferred_period: period });
     await render(<OpportunityCard opportunity={opportunity} now={NOW} onPress={onPress} />);

@@ -14,9 +14,9 @@ describe("withPeriod", () => {
     expect(withPeriod(i18n.t, "Tue, Nov 4", "evening")).toMatch(/· Evening$/);
   });
 
-  it("leaves the day alone when the period is flexible or unknown (a request from before #237)", () => {
-    expect(withPeriod(i18n.t, "Tue, Nov 4", "flexible")).toBe("Tue, Nov 4");
-    expect(withPeriod(i18n.t, "Tue, Nov 4", null)).toBe("Tue, Nov 4");
+  it("leaves the day alone, still unbroken, when the period is flexible or unknown (before #237)", () => {
+    expect(withPeriod(i18n.t, "Tue, Nov 4", "flexible")).toBe(`Tue,${NBSP}Nov${NBSP}4`);
+    expect(withPeriod(i18n.t, "Tue, Nov 4", null)).toBe(`Tue,${NBSP}Nov${NBSP}4`);
   });
 
   it("names every period in both languages, in the order of the day", async () => {

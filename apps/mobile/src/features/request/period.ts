@@ -1,7 +1,7 @@
 import type { ApiSchema } from "@jack/shared";
 import type { TFunction } from "i18next";
 
-import { joinFacts } from "@/features/quotes/format";
+import { joinFacts, keepTogether } from "@/features/quotes/format";
 
 /**
  * When in the preferred day the customer would like the visit (#237). It only refines a preferred
@@ -32,8 +32,11 @@ const LABEL_KEYS = {
 export const periodLabel = (t: TFunction, period: PreferredPeriod): string => t(LABEL_KEYS[period]);
 
 /**
- * A preferred day with its period, "Tue, Nov 4 · Morning". The day stands alone when the period
- * is flexible, or unknown: requests made before #237 carry none.
+ * A preferred day with its period, "Tue, Nov 4 · Morning": a line breaks after the dot, never
+ * inside the day or the period. The day stands alone when the period is flexible, or unknown:
+ * requests made before #237 carry none.
  */
 export const withPeriod = (t: TFunction, day: string, period: PreferredPeriod | null): string =>
-  period === null || period === FLEXIBLE_PERIOD ? day : joinFacts([day, periodLabel(t, period)]);
+  period === null || period === FLEXIBLE_PERIOD
+    ? keepTogether(day)
+    : joinFacts([day, periodLabel(t, period)]);
