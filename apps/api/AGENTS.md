@@ -70,6 +70,22 @@ rules apply.
   TRUNCATE (SQLSTATE 42501). before/after hold ids, statuses, Stripe object ids and
   timestamps only, never PII or secrets; a new staff money action adds an `AuditAction`.
 
+## Live position (#350)
+
+The pro's position while on the way (`jobs/location.py`) lives in Redis only: the latest one per
+job, for `PRO_LOCATION_TTL_SECONDS`, never in Postgres, never in a log or an error body (ids and
+the event name only).
+
+- **Tracking** is the time from On my way to the check-in. Outside it a ping is 409
+  `not_on_the_way` and the customer reads `{"position": null}`.
+- **Delete on leave.** `JobStateMachine.transition` (any move out of `on_the_way`) and
+  `JobExecutionService.check_in` delete the position under the job's row lock, before the
+  commit; a ping holds the row `FOR SHARE` until its Redis write, so none lands after the delete.
+- **Build with the store.** Whatever can move a job out of `on_the_way`, or check a pro in, passes
+  a `JobLocationStore` to the machine or the service. Without one that step raises
+  (`RuntimeError`, nothing written) instead of leaving a position behind. Tests use
+  `tests/conftest.py::InMemoryJobLocationStore` (`make_app` installs it).
+
 ## Worker
 
 ARQ tasks are async functions registered in `app/worker.py` `WorkerSettings.functions`. Make
