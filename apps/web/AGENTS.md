@@ -33,9 +33,12 @@ apply.
 - Panel pages that call staff routes take the bearer from `staffAuth()` (`src/lib/session.ts`:
   `requireStaff()` first, then the login's access token) and spread it into `apiGet` /
   `apiPatch`, with `params` for the path's `{placeholders}` and `query` for its query string
-  (`src/lib/api.ts`). A server action is a public endpoint: it calls `staffAuth()` itself and
-  validates its input before the API call. Support tickets (#274) live in
-  `src/app/admin/(panel)/support/`.
+  (`src/lib/api.ts`). A server action is a public endpoint: it validates its input and takes
+  the bearer from `staffActionAuth()`, never `staffAuth()` or `requireStaff()`. An action must
+  not redirect to `/admin/session/refresh` or `/admin/session/end`: Next follows an action's
+  redirect on the server and drops its Set-Cookie, so the refresh token would rotate while the
+  browser kept the old cookies. `staffActionAuth()` renews or ends the session in place.
+  Support tickets (#274) live in `src/app/admin/(panel)/support/`.
 - UI kit: shadcn/ui components in `src/components/ui/`, written on the deck tokens (no extra
   color variables: `src/theme/tokens.test.ts` allows only the mobile tokens) with `cn()` from
   `src/lib/utils.ts`. Icons from `lucide-react`. TanStack Table comes with #81.
