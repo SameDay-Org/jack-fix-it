@@ -344,6 +344,9 @@ class Settings(BaseSettings):
     # Job chat (D14.1, #71): messages one user may send in one job's chat per window.
     chat_message_rate_limit: int = Field(default=20, gt=0)
     chat_message_rate_window_seconds: int = Field(default=60, gt=0)
+    # Support tickets ("Talk to Jack", #274): tickets one user may write per window.
+    support_ticket_create_limit: int = Field(default=5, gt=0)
+    support_ticket_create_window_seconds: int = Field(default=3_600, gt=0)
     # The original of a redacted chat message (#72, Cesar 2026-11-07): kept encrypted for staff
     # only (app.crypto), deleted after CHAT_ORIGINAL_RETENTION_DAYS. CHAT_ORIGINAL_KEYS is a JSON
     # object {key_id: base64 32-byte key}; CHAT_ORIGINAL_ACTIVE_KEY_ID names the key new originals

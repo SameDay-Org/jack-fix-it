@@ -1,6 +1,6 @@
 """What other modules see of the audit log (#58, Vault round 1 B2; staff reads of chat
-originals, #72): the action names, the audited entity, the operator and the audited values,
-never the ORM model (ADR 0003)."""
+originals, #72; staff changes to a support ticket, #274): the action names, the audited entity,
+the operator and the audited values, never the ORM model (ADR 0003)."""
 
 import uuid
 from collections.abc import Mapping
@@ -24,12 +24,15 @@ class AuditAction(StrEnum):
     PAYOUT_ACCOUNT_ALLOW_NEW = "pro_profile.allow_new_payout_account"
     # A staff read of a job's chat that returned at least one original (#72).
     JOB_CHAT_ORIGINALS_READ = "job.read_chat_originals"
+    # A staff member moved a support ticket to another status (#274).
+    SUPPORT_TICKET_SET_STATUS = "support_ticket.set_status"
 
 
 class AuditEntityType(StrEnum):
     PAYMENT = "payment"
     PRO_PROFILE = "pro_profile"
     JOB = "job"
+    SUPPORT_TICKET = "support_ticket"
 
 
 @dataclass(frozen=True)
@@ -53,6 +56,10 @@ class OperatorNotAdminError(Exception):
 
 class ReaderNotStaffError(Exception):
     """The reader is not (or no longer) an active agent or admin account: nothing is shown."""
+
+
+class ActorNotStaffError(Exception):
+    """The actor is not (or no longer) an active agent or admin account: nothing changes."""
 
 
 def timestamp(value: datetime | None) -> str | None:
