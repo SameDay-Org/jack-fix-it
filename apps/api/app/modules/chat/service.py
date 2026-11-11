@@ -33,6 +33,15 @@ any exchange (Cesar, 2026-10-28). Text only here; photos are part 2.
   ids only.
 - Reading: newest first by (created_at, id), with a cursor; plus the caller's unread count.
 - Read markers: one per participant per job, moved forward only (never back), idempotent.
+- Receipts (#331, Cesar 2026-11-07: one tick sent, two received, blue seen): a message of the
+  other side is delivered to a participant when a page their app lists returns it, recorded
+  per message (job_message_deliveries), once: only what the page returned, never the older
+  messages it skipped (Vault round 1). Reading implies delivered without a delivery row: a
+  message at or behind the read marker is seen. The caller's own messages carry `receipt`
+  from the other side's read marker and deliveries (seen, delivered, sent), the other side's
+  carry null; staff see every message's. A push reaching a device does not count as
+  delivered here: only a listing does. The deliveries have a table of their own so the API
+  version before them keeps working during a deploy.
 - Unread: the other side's messages after the caller's marker, all of them without one. The
   job views (customer and pro) show it per job (ChatUnreadReader).
 
@@ -56,8 +65,8 @@ from app.errors import NotFoundError
 from app.modules.audit.service import AuditService
 from app.modules.audit.types import AuditAction, AuditEntity, AuditEntityType
 from app.modules.chat.errors import ChatClosedError, InvalidChatInputError, InvalidMessageError
-from app.modules.chat.models import MESSAGE_MAX_LENGTH, ChatOffenderFlag, JobMessage
-from app.modules.chat.repository import ChatRepository
+from app.modules.chat.models import MESSAGE_MAX_LENGTH, ChatOffenderFlag, JobMessage, Receipt
+from app.modules.chat.repository import ChatRepository, MessageRow
 from app.modules.chat.schemas import (
     ChatMessageOut,
     ChatOffenderFlagOut,
@@ -132,18 +141,31 @@ class ChatService:
     ) -> ChatPage:
         before = _decode_cursor(cursor) if cursor else None
         parties = await self._participant(user, job_id)
-        page, next_cursor = await self._page(job_id, limit, before)
+        page, next_cursor = await self._page(parties, limit, before)
+        # The other side's messages in the page are the caller's to receive: their receipt is
+        # from the caller's read marker and deliveries, so "sent" means neither covers it yet.
+        # Exactly those are delivered now, never a message the page did not return (one older
+        # than a short first page, or between an older page and the newest). Else no write.
+        received = [
+            row.message.id
+            for row in page
+            if row.message.sender_id != user.id and row.receipt is Receipt.SENT
+        ]
+        if received:
+            await self._chat.mark_delivered(user.id, received)
+            await self._session.commit()
         unread = await self._unread.unread_counts([job_id], user.id)
         return ChatPage(
             items=[
                 ChatMessageOut(
-                    id=message.id,
-                    sender=_side(message, parties, viewer=user.id),
-                    body=message.body,
-                    redacted=message.redacted,
-                    created_at=message.created_at,
+                    id=row.message.id,
+                    sender=_side(row.message, parties, viewer=user.id),
+                    body=row.message.body,
+                    redacted=row.message.redacted,
+                    created_at=row.message.created_at,
+                    receipt=row.receipt if row.message.sender_id == user.id else None,
                 )
-                for message in page
+                for row in page
             ],
             next_cursor=next_cursor,
             unread_count=unread[job_id],
@@ -156,8 +178,8 @@ class ChatService:
         await self._participant(user, job_id)
         result = redact_contacts(body)
         text = result.text.strip()
-        parties = await self._jobs.parties(job_id, lock=True)
-        if parties is None or not parties.includes(user.id):
+        parties = await self._jobs.parties_for(user.id, job_id, lock=True)
+        if parties is None:
             raise NotFoundError
         if not parties.chat_open:
             raise ChatClosedError
@@ -202,6 +224,7 @@ class ChatService:
             body=message.body,
             redacted=message.redacted,
             created_at=message.created_at,
+            receipt=Receipt.SENT,
             warning=ChatWarning.CONTACT_DETAILS_HIDDEN if result.redacted else None,
         )
         # After the answer is built: a failed check rolls the session back, which expires the
@@ -249,23 +272,24 @@ class ChatService:
         message = await self._chat.get_in_job(job_id, up_to)
         if message is None:
             raise InvalidMessageError
-        await self._chat.move_marker(job_id, user.id, message)
+        await self._chat.move_read(job_id, user.id, message)
         await self._session.commit()
         return (await self._unread.unread_counts([job_id], user.id))[job_id]
 
     async def staff_messages(
         self, staff: UserAccount, job_id: uuid.UUID, *, limit: int | None, cursor: str | None
     ) -> StaffChatPage:
-        """The thread for the BDC and admins: read-only, no read marker moves."""
+        """The thread for the BDC and admins, with every message's receipt: read-only, no
+        marker moves."""
         before = _decode_cursor(cursor) if cursor else None
         parties = await self._jobs.parties(job_id)
         if parties is None:
             raise NotFoundError
-        page, next_cursor = await self._page(job_id, limit, before)
+        page, next_cursor = await self._page(parties, limit, before)
         now = await self._chat.now()
         originals = {
             message.id: original
-            for message in page
+            for message in (row.message for row in page)
             if (original := self._original(message, now, staff.id)) is not None
         }
         if originals:
@@ -293,14 +317,15 @@ class ChatService:
         return StaffChatPage(
             items=[
                 StaffChatMessageOut(
-                    id=message.id,
-                    sender=_side(message, parties, viewer=None),
-                    body=message.body,
-                    redacted=message.redacted,
-                    original=originals.get(message.id),
-                    created_at=message.created_at,
+                    id=row.message.id,
+                    sender=_side(row.message, parties, viewer=None),
+                    body=row.message.body,
+                    redacted=row.message.redacted,
+                    original=originals.get(row.message.id),
+                    created_at=row.message.created_at,
+                    receipt=row.receipt,
                 )
-                for message in page
+                for row in page
             ],
             next_cursor=next_cursor,
         )
@@ -362,19 +387,23 @@ class ChatService:
         )
 
     async def _participant(self, user: UserAccount, job_id: uuid.UUID) -> JobParties:
-        parties = await self._jobs.parties(job_id)
-        if parties is None or not parties.includes(user.id):
+        """404 for a job the user takes no part in, as for an unknown one: the same statement
+        (JobPartiesReader.parties_for), so the answer and the work tell nothing apart."""
+        parties = await self._jobs.parties_for(user.id, job_id)
+        if parties is None:
             raise NotFoundError
         return parties
 
     async def _page(
-        self, job_id: uuid.UUID, limit: int | None, before: tuple[datetime, uuid.UUID] | None
-    ) -> tuple[Sequence[JobMessage], str | None]:
+        self, parties: JobParties, limit: int | None, before: tuple[datetime, uuid.UUID] | None
+    ) -> tuple[Sequence[MessageRow], str | None]:
         """`limit` above the maximum is capped, not refused."""
         size = min(limit or self._config.list_default_limit, self._config.list_max_limit)
-        rows = await self._chat.page(job_id, size + 1, before)
+        rows = await self._chat.page(
+            parties.job_id, (parties.customer_id, parties.pro_user_id), size + 1, before
+        )
         page, more = rows[:size], len(rows) > size
-        return page, _encode_cursor(page[-1]) if more and page else None
+        return page, _encode_cursor(page[-1].message) if more and page else None
 
 
 def _side(message: JobMessage, parties: JobParties, *, viewer: uuid.UUID | None) -> Sender:

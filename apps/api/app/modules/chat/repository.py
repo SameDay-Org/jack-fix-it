@@ -3,11 +3,24 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import and_, func, or_, select, tuple_, update
+from sqlalchemy import Uuid, and_, case, func, literal, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
-from app.modules.chat.models import ChatOffenderFlag, JobChatRead, JobMessage
+from app.modules.chat.models import (
+    ChatOffenderFlag,
+    JobChatRead,
+    JobMessage,
+    JobMessageDelivery,
+    Receipt,
+)
+
+
+@dataclass(frozen=True)
+class MessageRow:
+    message: JobMessage
+    receipt: Receipt  # with the recipient: the participant who did not send it
 
 
 @dataclass(frozen=True)
@@ -17,7 +30,8 @@ class FlagUpsert:
 
 
 class ChatRepository:
-    """Queries only: job_messages and job_chat_reads (#71), chat_offender_flags (#72)."""
+    """Queries only: job_messages and job_chat_reads (#71), chat_offender_flags (#72),
+    job_message_deliveries (#331)."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -34,16 +48,49 @@ class ChatRepository:
         return message
 
     async def page(
-        self, job_id: uuid.UUID, limit: int, before: tuple[datetime, uuid.UUID] | None
-    ) -> list[JobMessage]:
-        """The job's messages newest first (created_at, then id), after the cursor `before`."""
-        statement = select(JobMessage).where(JobMessage.job_id == job_id)
-        if before is not None:
-            statement = statement.where(
-                tuple_(JobMessage.created_at, JobMessage.id) < tuple_(*before)
+        self,
+        job_id: uuid.UUID,
+        parties: tuple[uuid.UUID, uuid.UUID],
+        limit: int,
+        before: tuple[datetime, uuid.UUID] | None,
+    ) -> list[MessageRow]:
+        """The job's messages newest first (created_at, then id), after the cursor `before`,
+        each with its receipt: how far it got with its recipient, the one of the two `parties`
+        (customer, pro user) who did not send it. One query: a join on the recipient's read
+        marker row ((job_id, user_id) is unique) and on the message's delivery to them
+        ((message_id, user_id) is unique): at most one row each."""
+        customer_id, pro_user_id = parties
+        read = aliased(JobChatRead)
+        delivery = aliased(JobMessageDelivery)
+        recipient_id = case(
+            (JobMessage.sender_id == customer_id, literal(pro_user_id, Uuid)),
+            else_=literal(customer_id, Uuid),
+        )
+        position = tuple_(JobMessage.created_at, JobMessage.id)
+        # Read first: reading implies delivered, with or without a delivery row. A missing
+        # marker row compares as NULL: the case moves on.
+        receipt = case(
+            (
+                tuple_(read.last_read_message_at, read.last_read_message_id) >= position,
+                literal(Receipt.SEEN.value),
+            ),
+            (delivery.id.is_not(None), literal(Receipt.DELIVERED.value)),
+            else_=literal(Receipt.SENT.value),
+        )
+        statement = (
+            select(JobMessage, receipt)
+            .outerjoin(read, and_(read.job_id == JobMessage.job_id, read.user_id == recipient_id))
+            .outerjoin(
+                delivery,
+                and_(delivery.message_id == JobMessage.id, delivery.user_id == recipient_id),
             )
+            .where(JobMessage.job_id == job_id)
+        )
+        if before is not None:
+            statement = statement.where(position < tuple_(*before))
         statement = statement.order_by(JobMessage.created_at.desc(), JobMessage.id.desc())
-        return list((await self._session.scalars(statement.limit(limit))).all())
+        result = await self._session.execute(statement.limit(limit))
+        return [MessageRow(message, Receipt(value)) for message, value in result]
 
     async def get_in_job(self, job_id: uuid.UUID, message_id: uuid.UUID) -> JobMessage | None:
         """The message, only when it belongs to the job."""
@@ -52,9 +99,10 @@ class ChatRepository:
         )
         return (await self._session.scalars(statement)).one_or_none()
 
-    async def move_marker(self, job_id: uuid.UUID, user_id: uuid.UUID, message: JobMessage) -> None:
+    async def move_read(self, job_id: uuid.UUID, user_id: uuid.UUID, message: JobMessage) -> None:
         """Sets the user's read marker on the job to `message`, only forward: one statement, so
-        two concurrent calls cannot move it back (the later message wins)."""
+        two concurrent calls cannot move it back (the later message wins). No delivery is
+        written: a read message counts as delivered from this marker (`page`)."""
         statement = insert(JobChatRead).values(
             job_id=job_id,
             user_id=user_id,
@@ -72,6 +120,20 @@ class ChatRepository:
             < tuple_(
                 statement.excluded.last_read_message_at, statement.excluded.last_read_message_id
             ),
+        )
+        await self._session.execute(statement)
+
+    async def mark_delivered(self, user_id: uuid.UUID, message_ids: Collection[uuid.UUID]) -> None:
+        """Records each message as delivered to the user, in one statement; one recorded
+        already stays as it is (a retry, or another listing at the same time: it waits for that
+        one to commit, then does nothing). The rows go in id order, so two listings recording
+        overlapping pages at once take their row locks in the same order and never deadlock."""
+        if not message_ids:
+            return
+        rows = [{"message_id": m, "user_id": user_id} for m in sorted(set(message_ids))]
+        statement = insert(JobMessageDelivery).values(rows)
+        statement = statement.on_conflict_do_nothing(
+            index_elements=[JobMessageDelivery.message_id, JobMessageDelivery.user_id]
         )
         await self._session.execute(statement)
 

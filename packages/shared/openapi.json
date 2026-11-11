@@ -3565,7 +3565,7 @@
           "chat"
         ],
         "summary": "Read my job's chat",
-        "description": "The job's messages, newest first, with the caller's unread count. Reading does not move\nthe read marker: POST .../read does. Readable in every job status.",
+        "description": "The job's messages, newest first, with the caller's unread count and a receipt on each\nof the caller's own messages (sent, delivered, seen). Listing delivers to the caller the\nother side's messages this page returns, and only those (their sender's receipt turns\ndelivered; an older message the page did not return stays sent). It never moves the read\nmarker: POST .../read does. Readable in every job status.",
         "operationId": "list_messages_v1_jobs__job_id__messages_get",
         "security": [
           {
@@ -3795,7 +3795,7 @@
           "chat"
         ],
         "summary": "Mark my job's chat read up to a message",
-        "description": "Moves the caller's read marker to the message, only forward: an older one, or the same\nagain, changes nothing. Allowed in every job status.",
+        "description": "Moves the caller's read marker to the message, only forward: an older one, or the same\nagain, changes nothing. Reading implies delivered: every message up to the marker reads as\nseen to its sender, whether or not a listing delivered it. Allowed in every job status.",
         "operationId": "mark_read_v1_jobs__job_id__messages_read_post",
         "security": [
           {
@@ -3884,7 +3884,7 @@
           "chat"
         ],
         "summary": "Read a job's chat (staff)",
-        "description": "Any job's messages, newest first, for the BDC and admins, with the original of each\nredacted message while it is kept. Read-only: no read marker moves, and the parties' unread\ncounts do not change. A response that carries an original is recorded in the audit log.",
+        "description": "Any job's messages, newest first, for the BDC and admins, with the original of each\nredacted message while it is kept, and every message's receipt. Read-only: no marker moves,\nand the parties' unread counts and receipts do not change. A response that carries an\noriginal is recorded in the audit log.",
         "operationId": "staff_list_messages_v1_admin_jobs__job_id__messages_get",
         "security": [
           {
@@ -5209,6 +5209,17 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "receipt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Receipt"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "On the caller's own messages (sender me): seen once the other side marked it read, delivered once their app fetched it (a page of the chat returned it), sent before that. Null on the other side's messages. A push notification does not count as delivered."
           }
         },
         "additionalProperties": false,
@@ -5218,7 +5229,8 @@
           "sender",
           "body",
           "redacted",
-          "created_at"
+          "created_at",
+          "receipt"
         ],
         "title": "ChatMessageOut"
       },
@@ -8064,6 +8076,16 @@
         ],
         "title": "ReadinessResponse"
       },
+      "Receipt": {
+        "type": "string",
+        "enum": [
+          "sent",
+          "delivered",
+          "seen"
+        ],
+        "title": "Receipt",
+        "description": "How far a message got with its recipient, the participant who did not send it: sent,\ndelivered (their app fetched it) or seen (they marked it read). From the recipient's read\nmarker and deliveries (#331)."
+      },
       "RefreshTokenRequest": {
         "properties": {
           "refresh_token": {
@@ -8876,6 +8898,17 @@
             "format": "date-time",
             "title": "Created At"
           },
+          "receipt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Receipt"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "On the caller's own messages (sender me): seen once the other side marked it read, delivered once their app fetched it (a page of the chat returned it), sent before that. Null on the other side's messages. A push notification does not count as delivered."
+          },
           "warning": {
             "anyOf": [
               {
@@ -8896,6 +8929,7 @@
           "body",
           "redacted",
           "created_at",
+          "receipt",
           "warning"
         ],
         "title": "SentMessageOut"
@@ -9049,6 +9083,10 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/Receipt",
+            "description": "How far the message got with the other side (the one who did not send it): seen, delivered or sent, as its sender sees it."
           }
         },
         "additionalProperties": false,
@@ -9059,7 +9097,8 @@
           "body",
           "redacted",
           "original",
-          "created_at"
+          "created_at",
+          "receipt"
         ],
         "title": "StaffChatMessageOut"
       },

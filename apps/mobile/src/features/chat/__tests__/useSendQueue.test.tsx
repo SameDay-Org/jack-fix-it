@@ -34,6 +34,7 @@ const stored = (body: string): ChatMessage => ({
   body,
   redacted: false,
   created_at: new Date(NOW).toISOString(),
+  receipt: null,
 });
 
 const sentBodies = () => send.mock.calls.map(([, , body, generation]) => [body, generation]);
