@@ -203,6 +203,20 @@ export const requireStaff = cache(async (): Promise<User> => {
 });
 
 /**
+ * The signed-in staff member's API credentials, for server components and server actions that
+ * call staff routes. It runs `requireStaff()` first, with the same redirects, so an account
+ * that is suspended, demoted or signed out never gets a header; the token stays on the server.
+ */
+export async function staffAuth(): Promise<RequestInit> {
+  await requireStaff();
+  const jar = await cookies();
+  const login = loginOf(jar.get(SESSION_COOKIE)?.value);
+  const accessToken = login && tokenOf(jar, ACCESS_COOKIE, login);
+  if (!accessToken) redirect(END_PATH); // requireStaff just accepted it: fail closed
+  return bearer(accessToken);
+}
+
+/**
  * Route handler side of the refresh: one `POST /v1/auth/refresh`, then both cookies rotate.
  * Returns where to go next: the panel on success, the login otherwise (session cleared). With
  * no refresh cookie it clears nothing: there is nothing to clear. A refresh token of another

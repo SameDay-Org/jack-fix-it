@@ -25,7 +25,8 @@
     },
     "nav": {
       "label": "Panel",
-      "home": "Home"
+      "home": "Home",
+      "support": "Support"
     },
     "roles": {
       "agent": "Agent",
@@ -35,6 +36,74 @@
     "home": {
       "welcome": "Welcome, {{email}}",
       "queueSoon": "The operations queue arrives soon. New requests will show up here."
+    },
+    "support": {
+      "title": "Support",
+      "subtitle": "Messages people sent to the team from the app.",
+      "filter": {
+        "label": "Tickets by status",
+        "open": "Open",
+        "in_progress": "In progress",
+        "closed": "Closed",
+        "all": "All"
+      },
+      "status": {
+        "open": "Open",
+        "in_progress": "In progress",
+        "closed": "Closed"
+      },
+      "topic": {
+        "account": "Account",
+        "payment": "Payment",
+        "job": "Job",
+        "safety": "Safety",
+        "app_problem": "App problem",
+        "other": "Other"
+      },
+      "role": {
+        "customer": "Customer",
+        "pro": "Pro"
+      },
+      "platform": {
+        "ios": "iOS",
+        "android": "Android"
+      },
+      "columns": {
+        "from": "From",
+        "topic": "Topic",
+        "sent": "Sent",
+        "status": "Status"
+      },
+      "noName": "No name on file",
+      "aboutJob": "About a job",
+      "empty": {
+        "open": "No open tickets.",
+        "in_progress": "No tickets in progress.",
+        "closed": "No closed tickets.",
+        "all": "No tickets yet."
+      },
+      "older": "Older tickets",
+      "newest": "Back to the newest",
+      "loadError": "We couldn't load the tickets. Try again in a moment.",
+      "retry": "Try again",
+      "detail": {
+        "back": "All tickets",
+        "from": "From",
+        "sent": "Sent",
+        "closed": "Closed",
+        "job": "Job",
+        "app": "App",
+        "message": "Message",
+        "notFound": "This ticket doesn't exist.",
+        "loadError": "We couldn't load this ticket. Try again in a moment.",
+        "statusLabel": "Status",
+        "saving": "Saving…",
+        "errors": {
+          "not_found": "This ticket no longer exists.",
+          "forbidden": "Your account can't change tickets.",
+          "unavailable": "We couldn't save the status. Try again in a moment."
+        }
+      }
     }
   }
 }

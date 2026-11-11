@@ -37,6 +37,7 @@ import {
   SESSION_COOKIE,
   requireStaff,
   setSession,
+  staffAuth,
 } from "./session";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -164,6 +165,37 @@ describe("requireStaff", () => {
       expect(await redirectOf(requireStaff)).toBe(END_PATH);
     },
   );
+});
+
+describe("staffAuth", () => {
+  it("gives the login's access token as a bearer header once /me accepted it", async () => {
+    cookies.reset({
+      [SESSION_COOKIE]: MARKER,
+      [ACCESS_COOKIE]: bound("at-1"),
+      [REFRESH_COOKIE]: bound("rt-1"),
+    });
+    fetchMock.mockImplementation(routeFetch({ "/v1/auth/me": () => Response.json(user("agent")) }));
+
+    const init = await staffAuth();
+
+    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer at-1");
+    expect(init.cache).toBe("no-store");
+    expect(calledPaths()).toEqual(["/v1/auth/me"]);
+  });
+
+  it.each(["customer", "pro"] as const)("gives no header to a %s account", async (role) => {
+    cookies.reset({ [SESSION_COOKIE]: MARKER, [ACCESS_COOKIE]: bound("at-1") });
+    fetchMock.mockImplementation(routeFetch({ "/v1/auth/me": () => Response.json(user(role)) }));
+
+    expect(await redirectOf(staffAuth)).toBe(END_PATH);
+  });
+
+  it("gives no header without a session", async () => {
+    cookies.reset({});
+
+    expect(await redirectOf(staffAuth)).toBe(END_PATH);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("refreshStaffSession", () => {
