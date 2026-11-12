@@ -126,7 +126,7 @@ that Redis writes the position nowhere else, so the positions get a Redis servic
 - Start it with no RDB snapshot, no AOF and the slow log off:
   `redis-server --requirepass $REDIS_PASSWORD --save "" --appendonly no --slowlog-log-slower-than -1`.
 - No volume, no backups and no replica on that service: what it holds must end with the
-  container. The API cannot see these three; they are the deployer's to keep.
+  container. The API's check does not cover these three; they are the deployer's to keep.
 - Set `LOCATION_REDIS_URL` on api to that service's private URL. The worker does not use it.
 
 The API asks that Redis what it keeps (`CONFIG GET save`, `appendonly`,

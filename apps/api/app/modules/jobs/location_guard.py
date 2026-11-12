@@ -24,8 +24,8 @@ LOCATION_REDIS_RECHECK_SECONDS old. What it does with the answer:
 Refusing is for staging and production (`enforce`). Development and test run on the shared
 local Redis, which keeps snapshots: there the answer is only logged.
 
-What the check cannot see is the deployer's to keep (docs/railway.md): no volume, no backup and
-no replica on that Redis service.
+The check stops at those three settings. The rest is the deployer's to keep (docs/railway.md):
+no volume, no backup and no replica on that Redis service.
 """
 
 import asyncio
