@@ -923,11 +923,21 @@
     "title": "Settings",
     "sections": {
       "account": "Your account",
+      "language": "Language",
       "notifications": "Notifications"
     },
     "email": "Email",
     "phone": "Phone",
-    "phoneNotVerified": "Not verified yet"
+    "phoneNotVerified": "Not verified yet",
+    "language": {
+      "en": "English",
+      "es": "Español",
+      "unsaved": {
+        "title": "Not saved to your account yet",
+        "body": "This device stays in English. You can try again in a moment.",
+        "retry": "Try again"
+      }
+    }
   },
   "notifications": {
     "channel": "Updates",
