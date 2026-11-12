@@ -11,6 +11,8 @@ import { useFlag } from "./useFlag";
 /** The row's icon tile and glyph, in dp; the tile's radius is the small token, its squircle. */
 const TILE = { side: 40, icon: 24 } as const;
 const CHEVRON = 20;
+/** The check mark of the chosen row of a set; every row of the set keeps its place for it. */
+const CHECK = 24;
 /** The separator starts where the label does: the row's `px-4`, then the tile and the `gap-3`. */
 const ROW_PADDING = 16;
 const SEPARATOR_INSET = ROW_PADDING + TILE.side + 12;
@@ -31,13 +33,23 @@ export type ListRowProps = {
   accessibilityHint?: string;
   /** Anything after the label column: a badge. */
   accessory?: ReactNode;
+  /**
+   * Makes the row one choice of a set, a radio: the chosen one carries a check mark, and none has
+   * a chevron. The set is a `ListGroup` with `accessibilityRole="radiogroup"`.
+   */
+  selected?: boolean;
+  /**
+   * The language the label is written in (a BCP 47 tag), when it is not the app's: a screen reader
+   * pronounces it in that language (iOS).
+   */
+  accessibilityLanguage?: string;
   testID?: string;
 };
 
 /**
  * One row of a settings-style list: an icon tile, the name (and its value), and a chevron when it
- * opens a screen. A pressable row is one button for assistive technology; a static one is text.
- * Rows sit in a `ListGroup`.
+ * opens a screen. A pressable row is one button for assistive technology (one radio, when it is a
+ * choice of a set); a static one is text. Rows sit in a `ListGroup`.
  */
 export function ListRow({
   label,
@@ -48,9 +60,12 @@ export function ListRow({
   busy = false,
   accessibilityHint,
   accessory,
+  selected,
+  accessibilityLanguage,
   testID,
 }: ListRowProps) {
   const [pressed, pressIn, pressOut] = useFlag();
+  const choice = selected !== undefined;
 
   const content = (
     <>
@@ -83,6 +98,18 @@ export function ListRow({
           color={tokens.colors["navy-900"]}
           testID={testID ? `${testID}-busy` : undefined}
         />
+      ) : choice ? (
+        // The place is held on every row of the set, so choosing one moves no text.
+        <View style={{ width: CHECK, height: CHECK }}>
+          {selected ? (
+            <ControlIcon
+              name="check"
+              size={CHECK}
+              color={tokens.colors["green-700"]}
+              testID={testID ? `${testID}-check` : undefined}
+            />
+          ) : null}
+        </View>
       ) : onPress && chevron ? (
         <ControlIcon name="chevron" size={CHEVRON} color={tokens.colors["gray-500"]} />
       ) : null}
@@ -99,10 +126,13 @@ export function ListRow({
   }
   return (
     <Pressable
-      accessibilityRole="button"
+      accessibilityRole={choice ? "radio" : "button"}
       accessibilityLabel={value ? `${label}, ${value}` : label}
       accessibilityHint={accessibilityHint}
-      accessibilityState={{ disabled: busy, busy }}
+      accessibilityLanguage={accessibilityLanguage}
+      accessibilityState={
+        choice ? { checked: selected, disabled: busy, busy } : { disabled: busy, busy }
+      }
       disabled={busy}
       onPress={onPress}
       onPressIn={pressIn}
@@ -117,16 +147,28 @@ export function ListRow({
 
 type ListGroupProps = {
   children: ReactNode;
+  /** A set of choice rows (`selected`), of which one holds. */
+  accessibilityRole?: "radiogroup";
+  /** What the set chooses, when the group has a role. */
+  accessibilityLabel?: string;
   className?: string;
   testID?: string;
 };
 
 /** A white bubble holding `ListRow`s, with a separator between rows from the label's edge. */
-export function ListGroup({ children, className, testID }: ListGroupProps) {
+export function ListGroup({
+  children,
+  accessibilityRole,
+  accessibilityLabel,
+  className,
+  testID,
+}: ListGroupProps) {
   const rows = Children.toArray(children);
   // The shadow on the outer view, the clip on the inner one: iOS clips a shadow with its own view.
   return (
     <View
+      accessibilityRole={accessibilityRole}
+      accessibilityLabel={accessibilityLabel}
       className={cx("rounded-lg bg-white", className)}
       style={[bubbleShadow, continuousCorners]}
       testID={testID}
