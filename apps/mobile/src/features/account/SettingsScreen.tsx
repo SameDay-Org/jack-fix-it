@@ -5,14 +5,16 @@ import { ScrollView, Text, View } from "react-native";
 import { useSession } from "@/api";
 import { ListGroup, ListRow, Screen, StatusBadge } from "@/components/ui";
 import { BackButton } from "@/features/auth/components/BackButton";
+import { NotificationsSettingRow } from "@/features/notifications";
 
 import { cardDetails } from "./identity";
 import { LanguageSection } from "./LanguageSection";
 
 /**
  * Settings (#293): what the Account tab used to list about the person, shown to them only (the
- * email they sign in with, and the phone: the verified number, or the way to verify it), and the
- * app's language (#218). The notification settings arrive with the rest of #218.
+ * email they sign in with, and the phone: the verified number, or the way to verify it), the
+ * app's language (#218), then whether notifications are on, and the way to turn them on (#334).
+ * The notification kinds arrive with the rest of #218.
  */
 export function SettingsScreen() {
   const { t } = useTranslation();
@@ -53,6 +55,14 @@ export function SettingsScreen() {
           </ListGroup>
         </View>
         <LanguageSection user={user} />
+        <View className="gap-3">
+          <Text className="text-footnote font-semibold uppercase text-gray-500">
+            {t("settings.sections.notifications")}
+          </Text>
+          <ListGroup testID="settings-notifications-group">
+            <NotificationsSettingRow />
+          </ListGroup>
+        </View>
       </ScrollView>
     </Screen>
   );

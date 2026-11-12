@@ -20,6 +20,11 @@ const BASE_APP_ID = "com.jackfixit.app";
 const EAS_OWNER = "johngotitcom";
 const EAS_PROJECT_ID = "dc856055-5039-4f97-aeff-dc6aea84f8c0";
 
+// Firebase's Android config (#335), the path EAS gives a file environment variable: with it the
+// build can fetch Expo push tokens on Android. Absent (local builds, until #335), the build has
+// none and the app skips the token quietly. A change needs a new dev build.
+const GOOGLE_SERVICES_JSON = process.env.GOOGLE_SERVICES_JSON || undefined;
+
 // Apple Pay's merchant id (#59), registered in the Apple Developer account before an iOS build
 // with Apple Pay; `APPLE_MERCHANT_ID` overrides it. Public, not a secret.
 const APPLE_MERCHANT_ID = process.env.APPLE_MERCHANT_ID || `merchant.${BASE_APP_ID}`;
@@ -68,6 +73,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     },
     android: {
       package: appId,
+      ...(GOOGLE_SERVICES_JSON ? { googleServicesFile: GOOGLE_SERVICES_JSON } : {}),
       // expo-sensors declares the step counter's permission; the ID card only reads the gyroscope.
       blockedPermissions: ["android.permission.ACTIVITY_RECOGNITION"],
     },
@@ -136,7 +142,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // its screen. The tray icon is tinted navy until the logo (#8) brings a monochrome icon.
       // iOS uses production APNs: every device build is ad hoc (internal distribution: the dev
       // client, preview) or the store's; only a simulator would use development. Registration and
-      // the credentials come in #334 and #335.
+      // the credentials come in #334 and #335 (`googleServicesFile` above).
       ["expo-notifications", { color: colors["navy-900"], mode: "production" }],
     ],
     locales: {
