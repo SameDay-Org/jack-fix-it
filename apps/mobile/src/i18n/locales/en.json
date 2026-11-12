@@ -931,6 +931,10 @@
   "help": {
     "title": "Support when you need it",
     "intro": "Answers to common questions about requests, payments and jobs.",
+    "contact": {
+      "title": "Still need help?",
+      "action": "Talk to Jack"
+    },
     "sections": {
       "booking": "Booking and quotes",
       "payments": "Payments",
@@ -952,7 +956,7 @@
       },
       "cancel": {
         "question": "Can I cancel after I've booked?",
-        "answer": "Plans change. For now, the Jack Fix It team reviews every cancellation individually, and what happens with your payment is decided case by case."
+        "answer": "Plans change. Write to us from Talk to Jack, at the end of this page. For now, the Jack Fix It team reviews every cancellation individually, and what happens with your payment is decided case by case."
       },
       "whenPay": {
         "question": "When do I pay?",
@@ -984,7 +988,7 @@
       },
       "problem": {
         "question": "What if something isn't right with the job?",
-        "answer": "Tell your pro in the chat first: it's the fastest way to sort things out. If that doesn't settle it, the Jack Fix It team reviews what happened and decides case by case, including whether any money is returned. While a reported problem is open, the pro isn't paid."
+        "answer": "Tell your pro in the chat first: it's the fastest way to sort things out. If that doesn't settle it, write to us from Talk to Jack, at the end of this page: the Jack Fix It team reviews what happened and decides case by case, including whether any money is returned. While a reported problem is open, the pro isn't paid."
       },
       "verified": {
         "question": "How are pros verified?",
@@ -1001,6 +1005,67 @@
       "language": {
         "question": "Which languages is the app in?",
         "answer": "English and Spanish. Jack Fix It follows your phone's language; with any other language, it shows in English."
+      }
+    }
+  },
+  "support": {
+    "title": "Talk to Jack",
+    "intro": "Tell us what's going on. The Jack Fix It team reads every message.",
+    "topic": {
+      "label": "What is it about?",
+      "account": "My account",
+      "payment": "A payment",
+      "job": "A job",
+      "safety": "Safety",
+      "app_problem": "The app",
+      "other": "Something else"
+    },
+    "job": {
+      "label": "Is it about one of your jobs?",
+      "none": "Not about a job",
+      "withPro": "My job with {{name}}",
+      "forCustomer": "My job for {{name}}",
+      "own": "My current job"
+    },
+    "message": {
+      "label": "Your message",
+      "hint": "Only the Jack Fix It team reads it. Leave out passwords and card numbers.",
+      "tooLong_one": "Your message is {{count}} character too long.",
+      "tooLong_other": "Your message is {{count}} characters too long."
+    },
+    "send": "Send message",
+    "retry": "Try again",
+    "failure": {
+      "offline": {
+        "title": "We couldn't send your message",
+        "body": "It's still here. Check your connection, then try again."
+      },
+      "failed": {
+        "title": "We couldn't send your message",
+        "body": "It's still here. Try again in a moment."
+      },
+      "rateLimited": {
+        "title": "You've sent several messages recently",
+        "body": "Your message is still here. Please try again later."
+      },
+      "invalidJob": {
+        "title": "We removed the job from your message",
+        "body": "That job can't be attached anymore. You can send your message without it."
+      }
+    },
+    "sent": {
+      "title": "We got your message",
+      "body": "The Jack Fix It team will review it. You can follow where it stands under Your messages.",
+      "another": "Write another message"
+    },
+    "mine": {
+      "title": "Your messages",
+      "error": "We couldn't load your messages",
+      "retry": "Try again",
+      "status": {
+        "open": "Open",
+        "in_progress": "In progress",
+        "closed": "Closed"
       }
     }
   },

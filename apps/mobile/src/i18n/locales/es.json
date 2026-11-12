@@ -931,6 +931,10 @@
   "help": {
     "title": "Apoyo cuando lo necesites",
     "intro": "Respuestas a preguntas frecuentes sobre solicitudes, pagos y trabajos.",
+    "contact": {
+      "title": "¿Aún necesitas ayuda?",
+      "action": "Habla con Jack"
+    },
     "sections": {
       "booking": "Reservas y presupuestos",
       "payments": "Pagos",
@@ -952,7 +956,7 @@
       },
       "cancel": {
         "question": "¿Puedo cancelar después de reservar?",
-        "answer": "Los planes cambian. Por ahora, el equipo de Jack Fix It revisa cada cancelación de forma individual, y lo que pasa con tu pago se decide caso por caso."
+        "answer": "Los planes cambian. Escríbenos desde Habla con Jack, al final de esta página. Por ahora, el equipo de Jack Fix It revisa cada cancelación de forma individual, y lo que pasa con tu pago se decide caso por caso."
       },
       "whenPay": {
         "question": "¿Cuándo pago?",
@@ -984,7 +988,7 @@
       },
       "problem": {
         "question": "¿Y si algo no sale bien con el trabajo?",
-        "answer": "Díselo primero a tu profesional por el chat: es la forma más rápida de resolverlo. Si eso no lo soluciona, el equipo de Jack Fix It revisa lo ocurrido y decide caso por caso, incluido si se devuelve dinero. Mientras haya un problema reportado sin resolver, el profesional no recibe su pago."
+        "answer": "Díselo primero a tu profesional por el chat: es la forma más rápida de resolverlo. Si eso no lo soluciona, escríbenos desde Habla con Jack, al final de esta página: el equipo de Jack Fix It revisa lo ocurrido y decide caso por caso, incluido si se devuelve dinero. Mientras haya un problema reportado sin resolver, el profesional no recibe su pago."
       },
       "verified": {
         "question": "¿Cómo se verifica a los profesionales?",
@@ -1001,6 +1005,67 @@
       "language": {
         "question": "¿En qué idiomas está la app?",
         "answer": "En inglés y en español. Jack Fix It usa el idioma de tu teléfono; con cualquier otro idioma, se muestra en inglés."
+      }
+    }
+  },
+  "support": {
+    "title": "Habla con Jack",
+    "intro": "Cuéntanos qué pasa. El equipo de Jack Fix It lee cada mensaje.",
+    "topic": {
+      "label": "¿De qué se trata?",
+      "account": "Mi cuenta",
+      "payment": "Un pago",
+      "job": "Un trabajo",
+      "safety": "Seguridad",
+      "app_problem": "La app",
+      "other": "Otra cosa"
+    },
+    "job": {
+      "label": "¿Es sobre uno de tus trabajos?",
+      "none": "No es sobre un trabajo",
+      "withPro": "Mi trabajo con {{name}}",
+      "forCustomer": "Mi trabajo para {{name}}",
+      "own": "Mi trabajo actual"
+    },
+    "message": {
+      "label": "Tu mensaje",
+      "hint": "Solo lo lee el equipo de Jack Fix It. No incluyas contraseñas ni números de tarjeta.",
+      "tooLong_one": "A tu mensaje le sobra {{count}} carácter.",
+      "tooLong_other": "A tu mensaje le sobran {{count}} caracteres."
+    },
+    "send": "Enviar mensaje",
+    "retry": "Reintentar",
+    "failure": {
+      "offline": {
+        "title": "No pudimos enviar tu mensaje",
+        "body": "Sigue aquí. Revisa tu conexión e inténtalo de nuevo."
+      },
+      "failed": {
+        "title": "No pudimos enviar tu mensaje",
+        "body": "Sigue aquí. Inténtalo de nuevo en un momento."
+      },
+      "rateLimited": {
+        "title": "Enviaste varios mensajes hace poco",
+        "body": "Tu mensaje sigue aquí. Inténtalo de nuevo más tarde."
+      },
+      "invalidJob": {
+        "title": "Quitamos el trabajo de tu mensaje",
+        "body": "Ese trabajo ya no se puede adjuntar. Puedes enviar tu mensaje sin él."
+      }
+    },
+    "sent": {
+      "title": "Recibimos tu mensaje",
+      "body": "El equipo de Jack Fix It lo revisará. Puedes seguir cómo va en Tus mensajes.",
+      "another": "Escribir otro mensaje"
+    },
+    "mine": {
+      "title": "Tus mensajes",
+      "error": "No pudimos cargar tus mensajes",
+      "retry": "Reintentar",
+      "status": {
+        "open": "Abierto",
+        "in_progress": "En curso",
+        "closed": "Cerrado"
       }
     }
   },
