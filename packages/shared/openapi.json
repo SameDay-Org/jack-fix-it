@@ -4218,6 +4218,59 @@
         ]
       }
     },
+    "/v1/devices/unregister": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "summary": "Stop pushes to this device, without a session",
+        "description": "Removes the token's device for an app that has no session left: a sign-out whose\n`DELETE /v1/devices` did not get through is retried here, so the account that left stops\nreceiving pushes on that phone.\n\nNo sign-in: holding the exact token is the credential, and an `Authorization` header, if\nsent, is not read. Only that token's device can go. Limited per client IP.",
+        "operationId": "unregister_device_without_session_v1_devices_unregister_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceRemoval"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Always, whether or not the token was registered."
+          },
+          "422": {
+            "description": "validation_error: not an Expo push token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many requests from this client; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/waitlist": {
       "post": {
         "tags": [

@@ -1040,6 +1040,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/devices/unregister": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop pushes to this device, without a session
+         * @description Removes the token's device for an app that has no session left: a sign-out whose
+         *     `DELETE /v1/devices` did not get through is retried here, so the account that left stops
+         *     receiving pushes on that phone.
+         *
+         *     No sign-in: holding the exact token is the credential, and an `Authorization` header, if
+         *     sent, is not read. Only that token's device can go. Limited per client IP.
+         */
+        post: operations["unregister_device_without_session_v1_devices_unregister_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/waitlist": {
         parameters: {
             query?: never;
@@ -6461,6 +6486,48 @@ export interface operations {
             /** @description validation_error: not an Expo push token, or an unknown platform. */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    unregister_device_without_session_v1_devices_unregister_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceRemoval"];
+            };
+        };
+        responses: {
+            /** @description Always, whether or not the token was registered. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description validation_error: not an Expo push token. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many requests from this client; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
