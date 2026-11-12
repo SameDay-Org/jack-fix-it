@@ -1,3 +1,5 @@
+export { AccordionRow, useAccordion } from "./Accordion";
+export type { AccordionAnchor, AccordionRowProps } from "./Accordion";
 export { Avatar, initialsOf } from "./Avatar";
 export type { AvatarProps, AvatarSize } from "./Avatar";
 export { Button } from "./Button";
