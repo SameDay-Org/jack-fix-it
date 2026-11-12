@@ -300,6 +300,10 @@ class Settings(BaseSettings):
     stripe_publishable_key: str | None = None
     stripe_timeout_seconds: float = Field(default=10.0, gt=0)
     stripe_max_network_retries: int = Field(default=0, ge=0)
+    # Saved cards (#253): how many setup intents, default changes and deletes together one
+    # customer may make per window. Each one is a call to Stripe.
+    payment_method_write_limit: int = Field(default=20, gt=0)
+    payment_method_write_window_seconds: int = Field(default=600, gt=0)
     # A profile with no stored account whose first create was attempted at least this many
     # seconds ago looks its account up in Stripe instead of creating again: Stripe may forget an
     # idempotency key once it is 24 hours old, so the value stays below that. The lookup lists
