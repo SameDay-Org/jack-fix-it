@@ -6,6 +6,7 @@ afterwards; the server's clock for positions is fixed (`clock`), and a test move
 """
 
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -15,12 +16,14 @@ from typing import Any
 
 import httpx
 import pytest
+import sentry_sdk
 from fastapi import FastAPI
 from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.db import get_session
 from app.modules.jobs.errors import NotOnTheWayError
 from app.modules.jobs.execution import JobExecutionService
 from app.modules.jobs.location import (
@@ -43,7 +46,9 @@ from app.rate_limit import get_rate_limiter
 from tests.conftest import (
     InMemoryJobLocationStore,
     InMemoryRateLimiter,
+    _rolled_back_session,
     backend_pid,
+    make_app,
     make_settings,
     wait_until_blocked,
 )
@@ -52,12 +57,18 @@ from tests.test_arrival_code import CONFIG as EXECUTION_CONFIG
 from tests.test_arrival_code import CommittedJob, committed_job, no_storage
 from tests.test_requests_api import RecordingQueue
 from tests.test_saved_addresses_api import counted_statements
+from tests.test_sentry_scrubbing import TEST_DSN, MemoryTransport, _payloads, sentry_transport
 
-__all__ = ["committed_job"]  # a fixture, used by name
+__all__ = ["committed_job", "sentry_transport"]  # fixtures, used by name
 
 NOW = datetime(2026, 11, 10, 15, 0, tzinfo=UTC)
 CODE = "0427"
 TTL = 120
+# The most of the retention a test's own steps may use up between a write and its reading of
+# the expiry: the time left must be the configured retention less this, at the least.
+RETENTION_SLACK_SECONDS = 5
+# Not the default: the retention comes from settings.
+OTHER_TTL = 45
 STORE_TIMEOUT = 2.0
 # Coordinates no id, time or other number of a response or a log line looks like.
 LAT, LNG = 26.123457, -80.143219
@@ -161,6 +172,16 @@ async def plant(store: JobLocationStore, job_id: uuid.UUID, at: datetime = NOW) 
     assert await store.put(job_id, position(at), min_interval=timedelta(0), ttl_seconds=TTL)
 
 
+async def assert_kept_for(
+    redis: Redis, store: RedisJobLocationStore, job_id: uuid.UUID, ttl_seconds: int
+) -> None:
+    """Read just after a write, the time Redis will still keep the job's position is the
+    configured retention, less the little that passed (PTTL: milliseconds, not rounded). A
+    shorter expiry than the setting fails, and so does a longer one."""
+    left = await redis.pttl(store.key(job_id)) / 1000
+    assert ttl_seconds - RETENTION_SLACK_SECONDS <= left <= ttl_seconds, left
+
+
 async def on_the_way_job(session: AsyncSession, world: JobWorld, **fields: Any) -> Job:
     fields.setdefault("arrival_code", CODE)
     fields.setdefault("eta_at", datetime.now(UTC) + timedelta(minutes=30))
@@ -210,6 +231,7 @@ async def test_pro_ping_is_readable_by_the_customer(
     redis: Redis,
     prefix: str,
     clock: list[datetime],
+    settings: Settings,
 ) -> None:
     job = await on_the_way_job(db_session, world)
     assert await shown(db_client, job.id, world) is None  # before the first ping
@@ -229,10 +251,11 @@ async def test_pro_ping_is_readable_by_the_customer(
         "heading_deg": 271.0,
         "updated_at": "2026-11-10T15:00:00Z",
     }
-    # Redis only: one key, which expires; the ping read the database and wrote nothing to it.
+    # Redis only: one key, which expires after the configured retention; the ping read the
+    # database and wrote nothing to it.
     keys = [key.decode() async for key in redis.scan_iter(match=f"{prefix}:*")]
     assert keys == [f"{prefix}:{job.id}"]
-    assert 0 < await redis.ttl(store.key(job.id)) <= TTL
+    await assert_kept_for(redis, store, job.id, settings.pro_location_ttl_seconds)
     assert statements
     assert all(s.lstrip().upper().startswith("SELECT") for s in statements), statements
     assert await db_session.scalar(select(func.count()).select_from(JobEvent)) == events_before
@@ -295,16 +318,22 @@ async def test_newer_ping_replaces_the_older(
     db_client: httpx.AsyncClient,
     db_session: AsyncSession,
     world: JobWorld,
-    store: JobLocationStore,
+    store: RedisJobLocationStore,
+    redis: Redis,
     clock: list[datetime],
+    settings: Settings,
 ) -> None:
     job = await on_the_way_job(db_session, world)
     assert (await ping(db_client, job.id, world.pro)).status_code == 204
+    # As if most of the first one's retention had passed.
+    assert await redis.expire(store.key(job.id), 50)
 
     clock[0] = NOW + timedelta(seconds=10)
     newer = fix(clock[0], lat=LAT2, lng=LNG2, accuracy_m=None, heading_deg=None)
     assert (await ping(db_client, job.id, world.pro, newer)).status_code == 204
 
+    # The newer one is kept for the whole configured retention, counted from its own write.
+    await assert_kept_for(redis, store, job.id, settings.pro_location_ttl_seconds)
     assert await shown(db_client, job.id, world) == {
         "lat": LAT2,
         "lng": LNG2,
@@ -524,16 +553,43 @@ async def test_position_expires_on_its_own(
     world: JobWorld,
     store: RedisJobLocationStore,
     redis: Redis,
+    settings: Settings,
 ) -> None:
     job = await on_the_way_job(db_session, world)
     assert (await ping(db_client, job.id, world.pro)).status_code == 204
-    assert 0 < await redis.ttl(store.key(job.id)) <= TTL
+    await assert_kept_for(redis, store, job.id, settings.pro_location_ttl_seconds)
 
     # An expiry time already past: Redis drops the key at once, no waiting.
     assert await redis.pexpireat(store.key(job.id), 1)
 
     assert await redis.exists(store.key(job.id)) == 0
     assert await shown(db_client, job.id, world) is None
+
+
+@pytest.mark.parametrize("settings", [{"pro_location_ttl_seconds": OTHER_TTL}], indirect=True)
+async def test_retention_comes_from_settings(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    store: RedisJobLocationStore,
+    redis: Redis,
+    clock: list[datetime],
+    settings: Settings,
+) -> None:
+    """PRO_LOCATION_TTL_SECONDS is how long a kept ping, and one that replaces it, stay: not
+    the default, not a constant of the code."""
+    assert settings.pro_location_ttl_seconds == OTHER_TTL
+    assert OTHER_TTL < TTL - RETENTION_SLACK_SECONDS  # the default would fail the checks below
+    job = await on_the_way_job(db_session, world)
+
+    assert (await ping(db_client, job.id, world.pro)).status_code == 204
+    await assert_kept_for(redis, store, job.id, OTHER_TTL)
+
+    assert await redis.expire(store.key(job.id), 10)
+    clock[0] = NOW + timedelta(seconds=10)
+    replacing = fix(clock[0], lat=LAT2, lng=LNG2)
+    assert (await ping(db_client, job.id, world.pro, replacing)).status_code == 204
+    await assert_kept_for(redis, store, job.id, OTHER_TTL)
 
 
 async def test_leaving_on_the_way_without_the_store_is_refused(
@@ -912,6 +968,79 @@ async def test_no_coordinate_in_logs(
         if record.name == "app.modules.jobs.location":
             extras = set(vars(record)) - set(vars(logging.makeLogRecord({})))
             assert extras <= {"job_id", "pro_id", "request_id", "message", "asctime"}, extras
+
+
+class FailsAfterWriting(RedisJobLocationStore):
+    """Writes the position to Redis, then fails as an unexpected bug would."""
+
+    async def put(
+        self, job_id: uuid.UUID, position: Position, *, min_interval: timedelta, ttl_seconds: int
+    ) -> bool:
+        await super().put(job_id, position, min_interval=min_interval, ttl_seconds=ttl_seconds)
+        raise RuntimeError("after the write")
+
+
+async def test_no_coordinate_reaches_sentry(
+    sentry_transport: MemoryTransport,
+    db_session: AsyncSession,
+    world: JobWorld,
+    redis: Redis,
+    prefix: str,
+    dead_redis: Redis,
+) -> None:
+    """Sentry on, sending to memory. An unexpected error inside a ping, after the real Redis
+    write (its event carries the request and its breadcrumbs, the Redis call among them), and
+    a ping while the store is down (the ERROR log is an event): no coordinate in either."""
+    app = make_app(make_settings(sentry_dsn=TEST_DSN))
+    record_pushes(app)
+    app.dependency_overrides[get_location_clock] = lambda: lambda: NOW
+    app.state.rolled_back_session = db_session
+    app.dependency_overrides[get_session] = _rolled_back_session
+    failing = FailsAfterWriting(redis, timeout_seconds=STORE_TIMEOUT, prefix=prefix)
+    down = RedisJobLocationStore(dead_redis, timeout_seconds=0.3, prefix="jobloc-test-down")
+    job = await on_the_way_job(db_session, world)
+
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        app.dependency_overrides[get_job_location_store] = lambda: failing
+        crashed = await ping(client, job.id, world.pro)
+        written = await failing.get(job.id)
+        app.dependency_overrides[get_job_location_store] = lambda: down
+        unavailable = await ping(client, job.id, world.pro, fix(lat=LAT2, lng=LNG2))
+    sentry_sdk.flush()
+
+    assert crashed.status_code == 500, crashed.text
+    assert written is not None  # the write was real: the coordinates went through Redis
+    assert (written.lat, written.lng) == (LAT, LNG)
+    assert (unavailable.status_code, unavailable.json()) == (503, UNAVAILABLE)
+    payloads = _payloads(sentry_transport)
+    events = [json.loads(payload) for payload in payloads]
+    # Both failures were captured, and they are these requests' (the path names the job). The
+    # crash's event has the write's own Redis call among its breadcrumbs: the command, its
+    # arguments (the position) filtered.
+    [crash] = [
+        event
+        for event in events
+        if [value["type"] for value in event.get("exception", {}).get("values", [])]
+        == ["RuntimeError"]
+    ]
+    assert str(job.id) in crash["request"]["url"]
+    redis_calls = [
+        crumb["message"]
+        for crumb in crash["breadcrumbs"]["values"]
+        if crumb.get("category") == "redis"
+    ]
+    assert redis_calls, "the write left no Redis breadcrumb"
+    assert all(call.startswith("EVALSHA") for call in redis_calls), redis_calls
+    assert any(
+        event.get("logentry", {}).get("message") == "pro_location_unavailable" for event in events
+    )
+    wire = "\n".join(payloads)
+    for needle in NEEDLES:
+        assert needle not in wire, needle
+    for response in (crashed, unavailable):
+        for needle in NEEDLES:
+            assert needle not in response.text, needle
 
 
 # Criterion 10: the contract
