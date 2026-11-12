@@ -930,7 +930,7 @@
   },
   "help": {
     "title": "Apoyo cuando lo necesites",
-    "intro": "Respuestas a las preguntas más frecuentes sobre solicitudes, pagos y trabajos.",
+    "intro": "Respuestas a preguntas frecuentes sobre solicitudes, pagos y trabajos.",
     "sections": {
       "booking": "Reservas y presupuestos",
       "payments": "Pagos",
@@ -943,11 +943,11 @@
         "answer": "En Inicio, elige una categoría y cuéntanos qué pasa. Agrega fotos o un video si ayudan, y luego tu dirección y el día que te convenga. Enviamos tu solicitud a profesionales cercanos, que te responden con presupuestos."
       },
       "quote": {
-        "question": "¿Qué trae un presupuesto?",
-        "answer": "Un presupuesto es el precio de un profesional por tu trabajo. Muestra qué incluye, cuánto dura aproximadamente y cuándo puede empezar. Puedes abrir el perfil del profesional desde el presupuesto antes de decidir."
+        "question": "¿Qué incluye un presupuesto?",
+        "answer": "Un presupuesto es el precio de un profesional por tu trabajo. Muestra qué incluye, cuánto dura aproximadamente el trabajo y cuándo puede empezar el profesional. Puedes abrir el perfil del profesional desde el presupuesto antes de decidir."
       },
       "quoteExpiry": {
-        "question": "¿Cuánto tiempo vale un presupuesto?",
+        "question": "¿Hasta cuándo es válido un presupuesto?",
         "answer": "Cada presupuesto muestra cuándo vence. Después ya no se puede aceptar, así que reserva el que quieras mientras siga abierto."
       },
       "cancel": {
@@ -984,7 +984,7 @@
       },
       "problem": {
         "question": "¿Y si algo no sale bien con el trabajo?",
-        "answer": "Díselo primero a tu profesional por el chat: es la forma más rápida de resolverlo. Si eso no lo soluciona, el equipo de Jack Fix It revisa lo ocurrido y decide caso por caso, incluso si se devuelve dinero. Mientras haya un problema reportado sin resolver, el profesional no recibe su pago."
+        "answer": "Díselo primero a tu profesional por el chat: es la forma más rápida de resolverlo. Si eso no lo soluciona, el equipo de Jack Fix It revisa lo ocurrido y decide caso por caso, incluido si se devuelve dinero. Mientras haya un problema reportado sin resolver, el profesional no recibe su pago."
       },
       "verified": {
         "question": "¿Cómo se verifica a los profesionales?",

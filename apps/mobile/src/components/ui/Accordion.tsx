@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
 import Animated, {
   Easing,
+  measure,
   runOnJS,
+  runOnUI,
   scrollTo,
   useAnimatedReaction,
   useAnimatedRef,
@@ -30,17 +32,19 @@ const FOLD = { duration: tokens.motion.transitionMs, easing: Easing.out(Easing.c
 const AT_ONCE = { duration: 0 };
 
 /**
- * The row folding shut above the one just opened. Its height leaves the page from under the
- * reader, so the scroll gives the same amount back, frame by frame: the row they tapped stays
- * where their finger is. `from` and `full` are read on the first frame of the fold.
+ * The row last tapped stays where the finger is. A row folding shut above it takes its height out
+ * from under the reader, so the scroll gives the same amount back, frame by frame. `at` is where
+ * the scroll is held: read from the scroll view when the first row starts to fold, then kept here,
+ * because the scroll view reports its new offset a frame late. Each tap starts a new hold, so a
+ * tap that lands while a row is still folding can leave the row a frame of that fold off.
  */
-type Pull = { id: string; from: number | null; full: number | null };
+type Hold = { index: number; at: number | null };
 
 export type AccordionAnchor = {
   scrollRef: AnimatedRef<Animated.ScrollView>;
   /** The scroll view's current offset. */
   offset: SharedValue<number>;
-  pull: SharedValue<Pull | null>;
+  hold: SharedValue<Hold | null>;
 };
 
 /**
@@ -52,36 +56,39 @@ export function useAccordion<Id extends string>(order: readonly Id[]) {
   const [open, setOpen] = useState<Id | null>(null);
   const scrollRef = useAnimatedRef<Animated.ScrollView>();
   const offset = useSharedValue(0);
-  const pull = useSharedValue<Pull | null>(null);
+  const hold = useSharedValue<Hold | null>(null);
   const onScroll = useAnimatedScrollHandler((event) => {
     offset.value = event.contentOffset.y;
   });
   const anchor = useMemo<AccordionAnchor>(
-    () => ({ scrollRef, offset, pull }),
-    [scrollRef, offset, pull],
+    () => ({ scrollRef, offset, hold }),
+    [scrollRef, offset, hold],
   );
 
   const toggle = (id: Id) => {
-    const closesAbove = open !== null && open !== id && order.indexOf(open) < order.indexOf(id);
-    pull.set(closesAbove ? { id: open, from: null, full: null } : null);
+    hold.set({ index: order.indexOf(id), at: null });
     setOpen(open === id ? null : id);
   };
 
   return {
     scroll: { ref: scrollRef, onScroll },
-    row: (id: Id) => ({ id, open: open === id, onToggle: () => toggle(id), anchor }),
+    row: (id: Id) => ({
+      index: order.indexOf(id),
+      open: open === id,
+      onToggle: () => toggle(id),
+      anchor,
+    }),
   };
 }
 
 export type AccordionRowProps = {
-  /** The row's name in its list, as given to `useAccordion`. */
-  id: string;
   title: string;
   open: boolean;
   onToggle: () => void;
   /** The body under the title: mounted while the row is open and while it folds away. */
   children: ReactNode;
-  /** From `useAccordion`: keeps the tapped row in place while a row above it folds. */
+  /** From `useAccordion`: the row's place in the list, and the scroll view it sits in. */
+  index?: number;
   anchor?: AccordionAnchor;
   testID?: string;
 };
@@ -89,14 +96,16 @@ export type AccordionRowProps = {
 /**
  * A row that opens in place: its title is a button that says whether it is expanded, and its body
  * unfolds under it over `motion.transitionMs` (at once under Reduce Motion). A shut row's body is
- * not in the tree, so a screen reader never lands on hidden text. Rows sit in a `ListGroup`.
+ * not in the tree, so a screen reader never lands on hidden text. In a `useAccordion` list the
+ * tapped row holds its place while the one above folds, and an answer that ends below the screen
+ * is brought up once it has unfolded. Rows sit in a `ListGroup`.
  */
 export function AccordionRow({
-  id,
   title,
   open,
   onToggle,
   children,
+  index,
   anchor,
   testID,
 }: AccordionRowProps) {
@@ -106,35 +115,64 @@ export function AccordionRow({
   // Opening mounts the body in the same render; it leaves once the fold has reached zero.
   if (open && !shown) setShown(true);
 
+  const rowRef = useAnimatedRef<Animated.View>();
   const progress = useSharedValue(open ? 1 : 0);
   const bodyHeight = useSharedValue(0);
+  const measured = useRef(false);
   const scrollRef = anchor?.scrollRef;
   const offset = anchor?.offset;
-  const pull = anchor?.pull;
+  const hold = anchor?.hold;
+  const fold = reduceMotion ? AT_ONCE : FOLD;
+
+  // Runs a frame or two after the unfold, when the layout and the scroll offset have settled.
+  const reveal = useCallback(() => {
+    if (!scrollRef || !offset) return;
+    runOnUI(() => {
+      "worklet";
+      const row = measure(rowRef);
+      const view = measure(scrollRef);
+      if (row === null || view === null) return;
+      const below = row.pageY + row.height - (view.pageY + view.height);
+      // Never further than the title can rise: it stays the first line on screen.
+      const room = row.pageY - view.pageY;
+      if (below <= 0 || room <= 0) return;
+      scrollTo(scrollRef, 0, offset.get() + Math.min(below, room), !reduceMotion);
+    })();
+  }, [offset, reduceMotion, rowRef, scrollRef]);
+
+  const unfold = useCallback(() => {
+    progress.set(
+      withTiming(1, fold, (finished) => {
+        if (finished) runOnJS(reveal)();
+      }),
+    );
+  }, [fold, progress, reveal]);
 
   useEffect(() => {
-    const config = reduceMotion ? AT_ONCE : FOLD;
     if (open) {
-      progress.value = withTiming(1, config);
+      // A first unfold waits for the body's height (`measureBody` starts it): started blind, the
+      // fold would jump to wherever the curve already is when the height lands.
+      if (measured.current) unfold();
       return;
     }
     // A row that was never opened has nothing to fold.
     if (!shown) return;
-    progress.value = withTiming(0, config, (finished) => {
-      if (finished) runOnJS(setShown)(false);
-    });
-  }, [open, shown, progress, reduceMotion]);
+    progress.set(
+      withTiming(0, fold, (finished) => {
+        if (finished) runOnJS(setShown)(false);
+      }),
+    );
+  }, [open, shown, progress, fold, unfold]);
 
   useAnimatedReaction(
     () => bodyHeight.value * progress.value,
     (height, before) => {
-      const pulled = pull?.get();
-      if (!scrollRef || !offset || !pull || !pulled) return;
-      if (pulled.id !== id || before === null || height >= before) return;
-      const from = pulled.from ?? offset.get();
-      const full = pulled.full ?? before;
-      if (pulled.from === null) pull.set({ id, from, full });
-      scrollTo(scrollRef, 0, Math.max(0, from - (full - height)), false);
+      const held = hold?.get();
+      if (!scrollRef || !offset || !hold || !held || index === undefined) return;
+      if (index >= held.index || before === null || height >= before) return;
+      const at = (held.at ?? offset.get()) - (before - height);
+      hold.set({ index: held.index, at });
+      scrollTo(scrollRef, 0, Math.max(0, at), false);
     },
   );
 
@@ -143,12 +181,16 @@ export function AccordionRow({
     transform: [{ rotate: `${CHEVRON_SHUT_DEG + progress.value * CHEVRON_TURN_DEG}deg` }],
   }));
 
-  const measure = (event: LayoutChangeEvent) => {
-    bodyHeight.value = event.nativeEvent.layout.height;
+  const measureBody = (event: LayoutChangeEvent) => {
+    bodyHeight.set(event.nativeEvent.layout.height);
+    if (measured.current) return;
+    measured.current = true;
+    if (open) unfold();
   };
 
   return (
-    <View testID={testID}>
+    // Never flattened away on Android: `reveal` measures this view.
+    <Animated.View ref={rowRef} collapsable={false} testID={testID}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={title}
@@ -172,7 +214,7 @@ export function AccordionRow({
           {/* Out of the flow, so its height is the text's own and never the fold's: the fold
               follows this measure, not the other way round. */}
           <View
-            onLayout={measure}
+            onLayout={measureBody}
             style={styles.body}
             className="px-4 pb-4"
             testID={testID && `${testID}-body`}
@@ -181,7 +223,7 @@ export function AccordionRow({
           </View>
         </Animated.View>
       ) : null}
-    </View>
+    </Animated.View>
   );
 }
 

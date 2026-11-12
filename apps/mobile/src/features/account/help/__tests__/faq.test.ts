@@ -45,19 +45,26 @@ describe("the FAQ", () => {
 
   // The cancellation and refund rule (#3), the take rate (#2) and the problem window (#4) are
   // open or live in settings: copy that names an amount or a length of time would state them.
-  it.each(CATALOGS)("%s answers state no number, price or percentage", (_, help) => {
+  it.each(CATALOGS)("%s answers state no number, price, percentage or deadline", (_, help) => {
+    const stated =
+      /[\d$%]|\b(hours?|horas?|percent|por ciento|fifteen|twenty|forty|quince|veinte|cuarenta)\b/i;
     for (const { id } of FAQ) {
-      expect(`${help.faq[id].question} ${help.faq[id].answer}`).not.toMatch(/[\d$%]/);
+      expect(`${help.faq[id].question} ${help.faq[id].answer}`).not.toMatch(stated);
     }
   });
 
-  // Legal copy rule: no insurance, labor warranty, escrow or guaranteed refund until approved.
+  // Legal copy rule: no insurance, labor warranty, escrow, guaranteed refund or licensing claim
+  // until approved.
   it("promises nothing the legal copy rule forbids", () => {
     const text = (help: (typeof CATALOGS)[number][1]) =>
       [help.title, help.intro, ...FAQ.flatMap(({ id }) => Object.values(help.faq[id]))].join(" ");
 
-    expect(text(en.help)).not.toMatch(/guarantee|insur|warrant|escrow|refund|protected/i);
-    expect(text(es.help)).not.toMatch(/garant|\bseguros?\b|reembols|fideicomiso|protegid/i);
+    expect(text(en.help)).not.toMatch(
+      /guarantee|insur|warrant|escrow|refund|money back|protected|licens/i,
+    );
+    expect(text(es.help)).not.toMatch(
+      /garant|asegur|\bseguros?\b|reembols|devolvemos|fideicomiso|protegid|licenc/i,
+    );
   });
 
   it("sends people to the job's chat, never to a contact outside the app", () => {

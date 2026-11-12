@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 import { Text } from "react-native";
-import Animated, { scrollTo, useReducedMotion, withTiming } from "react-native-reanimated";
+import Animated, { measure, scrollTo, useReducedMotion, withTiming } from "react-native-reanimated";
 
 import { tokens } from "@/theme";
 
@@ -15,21 +15,32 @@ jest.mock("react-native-reanimated", () => {
     useReducedMotion: jest.fn(() => false),
     withTiming: jest.fn(actual.withTiming),
     scrollTo: jest.fn(),
+    measure: jest.fn(() => null),
   };
 });
 
 const HIDDEN = { includeHiddenElements: true };
-const ROWS = ["first", "second", "third"] as const;
+const ROWS = ["first", "second", "third", "fourth"] as const;
 
-function List() {
+/** `open` forces which rows are open: the state of rows tapped faster than they fold. */
+function List({ open }: { open?: readonly string[] }) {
   const accordion = useAccordion(ROWS);
   return (
     <Animated.ScrollView {...accordion.scroll} testID="scroll">
-      {ROWS.map((id) => (
-        <AccordionRow key={id} title={`Question ${id}`} testID={id} {...accordion.row(id)}>
-          <Text>{`Answer ${id}`}</Text>
-        </AccordionRow>
-      ))}
+      {ROWS.map((id) => {
+        const row = accordion.row(id);
+        return (
+          <AccordionRow
+            key={id}
+            title={`Question ${id}`}
+            testID={id}
+            {...row}
+            open={open ? open.includes(id) : row.open}
+          >
+            <Text>{`Answer ${id}`}</Text>
+          </AccordionRow>
+        );
+      })}
     </Animated.ScrollView>
   );
 }
@@ -46,32 +57,57 @@ const frames = async (count = 4) => {
   }
 };
 
-/** Opens a row as the device would: the press, then the body's measured height. */
-const openMeasured = async (id: string, height: number) => {
-  await fireEvent.press(title(id));
-  await fireEvent(screen.getByTestId(`${id}-body`), "layout", {
+/** The body's layout event: Jest has no layout engine, the device sends this on mount. */
+const measured = (id: string, height: number) =>
+  fireEvent(screen.getByTestId(`${id}-body`), "layout", {
     nativeEvent: { layout: { x: 0, y: 0, width: 288, height } },
   });
+
+/** Opens a row as the device would: the press, then the body's measured height, then the fold. */
+const openMeasured = async (id: string, height: number) => {
+  await fireEvent.press(title(id));
+  await measured(id, height);
+  await waitFor(() => expect(lastTiming()).toEqual([1, true]));
   await frames();
 };
 
-const scrolledTo = async (y: number) => {
-  await fireEvent.scroll(screen.getByTestId("scroll"), {
-    nativeEvent: { contentOffset: { x: 0, y } },
-  });
-};
+const scrolledTo = (y: number) =>
+  fireEvent.scroll(screen.getByTestId("scroll"), { nativeEvent: { contentOffset: { x: 0, y } } });
+
+/** The scroll positions the list asked for, in order. */
+const scrolls = () => jest.mocked(scrollTo).mock.calls.map(([, , y]) => y);
+
+const lastScroll = () => scrolls()[scrolls().length - 1];
+
+/** The last fold started and whether it has finished: `[target, done]`. */
+const timings: [number, boolean][] = [];
+const lastTiming = () => timings[timings.length - 1];
 
 beforeEach(() => {
+  timings.length = 0;
   jest.mocked(useReducedMotion).mockReturnValue(false);
-  jest.mocked(withTiming).mockClear();
   jest.mocked(scrollTo).mockClear();
+  jest.mocked(measure).mockReset().mockReturnValue(null);
+  const actual =
+    jest.requireActual<typeof import("react-native-reanimated")>("react-native-reanimated");
+  jest
+    .mocked(withTiming)
+    .mockReset()
+    .mockImplementation((to, config, done) => {
+      const entry: [number, boolean] = [to as number, false];
+      timings.push(entry);
+      return actual.withTiming(to, config, (finished, current) => {
+        entry[1] = finished === true;
+        done?.(finished, current);
+      });
+    });
 });
 
 describe("AccordionRow", () => {
   it("shut, is a collapsed button with no body in the tree; a press asks to toggle", async () => {
     const onToggle = jest.fn();
     await render(
-      <AccordionRow id="row" title="Question" open={false} onToggle={onToggle} testID="row">
+      <AccordionRow title="Question" open={false} onToggle={onToggle} testID="row">
         <Text>Answer</Text>
       </AccordionRow>,
     );
@@ -87,7 +123,7 @@ describe("AccordionRow", () => {
 
   it("open, says it is expanded and shows its body, which takes its own height", async () => {
     await render(
-      <AccordionRow id="row" title="Question" open onToggle={jest.fn()} testID="row">
+      <AccordionRow title="Question" open onToggle={jest.fn()} testID="row">
         <Text>Answer</Text>
       </AccordionRow>,
     );
@@ -101,7 +137,7 @@ describe("AccordionRow", () => {
 
   it("the title is a 48 dp target at least, and its label wraps freely", async () => {
     await render(
-      <AccordionRow id="row" title="Question" open={false} onToggle={jest.fn()} testID="row">
+      <AccordionRow title="Question" open={false} onToggle={jest.fn()} testID="row">
         <Text>Answer</Text>
       </AccordionRow>,
     );
@@ -116,51 +152,129 @@ describe("useAccordion", () => {
     await render(<List />);
 
     await fireEvent.press(title("first"));
-    expect(ROWS.map(expanded)).toEqual([true, false, false]);
+    expect(ROWS.map(expanded)).toEqual([true, false, false, false]);
 
     await fireEvent.press(title("third"));
-    expect(ROWS.map(expanded)).toEqual([false, false, true]);
+    expect(ROWS.map(expanded)).toEqual([false, false, true, false]);
     expect(screen.getByText("Answer third")).toBeOnTheScreen();
     await waitFor(() => expect(screen.queryByText("Answer first", HIDDEN)).toBeNull());
 
     await fireEvent.press(title("third"));
-    expect(ROWS.map(expanded)).toEqual([false, false, false]);
+    expect(ROWS.map(expanded)).toEqual([false, false, false, false]);
     await waitFor(() => expect(screen.queryByText("Answer third", HIDDEN)).toBeNull());
   });
 
-  it("folds over the transition token, and in one frame under Reduce Motion", async () => {
+  it("a first unfold waits for the body's height, then runs over the transition token", async () => {
     await render(<List />);
 
     await fireEvent.press(title("first"));
-    expect(withTiming).toHaveBeenLastCalledWith(1, {
-      duration: tokens.motion.transitionMs,
-      easing: expect.any(Function),
-    });
+    // Started blind, the fold would jump to wherever the curve is when the height lands.
+    expect(withTiming).not.toHaveBeenCalled();
 
+    await measured("first", 300);
+    expect(withTiming).toHaveBeenLastCalledWith(
+      1,
+      { duration: tokens.motion.transitionMs, easing: expect.any(Function) },
+      expect.any(Function),
+    );
+  });
+
+  it("an unfold of a row measured before starts at once", async () => {
+    await render(<List />);
+    await openMeasured("first", 300);
+    await fireEvent.press(title("first"));
+    await waitFor(() => expect(screen.queryByText("Answer first", HIDDEN)).toBeNull());
+
+    await fireEvent.press(title("first"));
+
+    expect(lastTiming()[0]).toBe(1);
+  });
+
+  it("folds in one frame under Reduce Motion", async () => {
     jest.mocked(useReducedMotion).mockReturnValue(true);
+    await render(<List />);
+
+    await fireEvent.press(title("first"));
+    await measured("first", 300);
+    expect(withTiming).toHaveBeenLastCalledWith(1, { duration: 0 }, expect.any(Function));
+
     await fireEvent.press(title("first"));
     expect(withTiming).toHaveBeenLastCalledWith(0, { duration: 0 }, expect.any(Function));
     await waitFor(() => expect(screen.queryByText("Answer first", HIDDEN)).toBeNull());
   });
 
-  it.each([
-    [400, 100],
-    // Near the top there is less to give back than the fold takes.
-    [120, 0],
-  ])(
-    "a row folding above the opened one gives its height back to the scroll (%d to %d)",
-    async (from, to) => {
-      jest.mocked(useReducedMotion).mockReturnValue(true);
-      await render(<List />);
-      await openMeasured("first", 300);
-      await scrolledTo(from);
+  it("a row opened again while it folds keeps its body", async () => {
+    await render(<List />);
+    await openMeasured("first", 300);
 
-      await fireEvent.press(title("third"));
-      await frames();
+    await fireEvent.press(title("first"));
+    await fireEvent.press(title("first"));
+    await waitFor(() => expect(lastTiming()).toEqual([1, true]));
+    await frames();
 
-      expect(scrollTo).toHaveBeenLastCalledWith(expect.anything(), 0, to, false);
-    },
-  );
+    expect(expanded("first")).toBe(true);
+    expect(screen.getByText("Answer first")).toBeOnTheScreen();
+  });
+
+  it("a row folding above the opened one gives its height back, frame by frame", async () => {
+    await render(<List />);
+    await openMeasured("first", 300);
+    await scrolledTo(400);
+
+    await fireEvent.press(title("third"));
+    await waitFor(() => expect(lastScroll()).toBeCloseTo(100, 3));
+
+    // Several frames, each a little further, none past the row's whole height: the scroll view
+    // never reported an offset in between, so the list kept count itself.
+    expect(scrolls().length).toBeGreaterThan(2);
+    expect(scrolls()).toEqual([...scrolls()].sort((a, b) => b - a));
+    expect(
+      jest.mocked(scrollTo).mock.calls.every(([, x, , animated]) => x === 0 && !animated),
+    ).toBe(true);
+  });
+
+  it("gives back no more than the scroll has: near the top it stops at zero", async () => {
+    jest.mocked(useReducedMotion).mockReturnValue(true);
+    await render(<List />);
+    await openMeasured("first", 300);
+    await scrolledTo(120);
+
+    await fireEvent.press(title("third"));
+    await frames();
+
+    expect(scrolls()).toEqual([0]);
+  });
+
+  it("starts each switch from where the scroll is then", async () => {
+    jest.mocked(useReducedMotion).mockReturnValue(true);
+    await render(<List />);
+    await openMeasured("first", 300);
+    await scrolledTo(400);
+    await openMeasured("third", 200);
+    expect(scrolls()).toEqual([100]);
+
+    await scrolledTo(700);
+    await fireEvent.press(title("fourth"));
+    await frames();
+
+    expect(scrolls()).toEqual([100, 500]);
+  });
+
+  it("gives back the height of every row folding above the tapped one", async () => {
+    // Rows tapped faster than they fold: two are still folding when a third, below, is tapped.
+    jest.mocked(useReducedMotion).mockReturnValue(true);
+    const view = await render(<List open={["first", "second"]} />);
+    await measured("first", 300);
+    await measured("second", 200);
+    await frames();
+    await scrolledTo(700);
+
+    await fireEvent.press(title("fourth"));
+    await view.rerender(<List open={[]} />);
+    await frames();
+
+    expect(scrolls()).toEqual([400, 200]);
+  });
 
   it("a row folding below the opened one, or shut on its own, leaves the scroll alone", async () => {
     jest.mocked(useReducedMotion).mockReturnValue(true);
@@ -173,6 +287,37 @@ describe("useAccordion", () => {
     await fireEvent.press(title("first"));
     await frames();
 
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    // The answer ends 184 dp below the scroll view: it comes up by that much.
+    [{ pageY: 500, height: 300 }, 584],
+    // Taller than the screen: only until the title reaches the top.
+    [{ pageY: 100, height: 900 }, 476],
+  ])("brings an unfolded answer that ends off screen into view (%o)", async (row, to) => {
+    await render(<List />);
+    await scrolledTo(400);
+    jest
+      .mocked(measure)
+      .mockReturnValueOnce({ x: 0, y: 0, width: 288, pageX: 16, ...row })
+      .mockReturnValueOnce({ x: 0, y: 0, width: 320, height: 592, pageX: 0, pageY: 24 });
+
+    await openMeasured("second", 244);
+
+    expect(jest.mocked(scrollTo).mock.calls).toEqual([[expect.anything(), 0, to, true]]);
+  });
+
+  it("leaves an answer that fits where it is", async () => {
+    await render(<List />);
+    jest
+      .mocked(measure)
+      .mockReturnValueOnce({ x: 0, y: 0, width: 288, pageX: 16, pageY: 200, height: 300 })
+      .mockReturnValueOnce({ x: 0, y: 0, width: 320, height: 592, pageX: 0, pageY: 24 });
+
+    await openMeasured("second", 244);
+
+    expect(measure).toHaveBeenCalledTimes(2);
     expect(scrollTo).not.toHaveBeenCalled();
   });
 });

@@ -123,6 +123,8 @@ describe("HelpScreen", () => {
     expect(screen.getByRole("button", { name: "Atrás" })).toBeOnTheScreen();
   });
 
+  // Jest lays nothing out: that no line is clipped at 2.0 is the emulator's proof (PR evidence).
+  // This pins what makes it possible: no text opts out of the system font size or caps its lines.
   it("renders at font scale 2.0 on a 320 dp phone with no text capped or held back", async () => {
     jest.spyOn(ReactNative.PixelRatio, "getFontScale").mockReturnValue(2);
     jest
