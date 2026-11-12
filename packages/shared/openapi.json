@@ -2531,6 +2531,373 @@
         }
       }
     },
+    "/v1/me/payment-methods/setup-intent": {
+      "post": {
+        "tags": [
+          "payment-methods"
+        ],
+        "summary": "Start adding a card to my wallet",
+        "description": "What the Payment Sheet needs, in setup mode, to save a card: a new SetupIntent's client\nsecret, the caller's Stripe Customer (created on the first call, the same one ever after)\nand a new ephemeral key for it, and the publishable key. The card data goes from the app to\nStripe, never through this API. The body takes no field.",
+        "operationId": "create_setup_intent_v1_me_payment_methods_setup_intent_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupIntentOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers keep payment methods.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many payment-method changes; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not_configured: payments are not configured; payments_unavailable: Stripe is not reachable, asked to retry later or refused the call; retry later.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/me/payment-methods": {
+      "get": {
+        "tags": [
+          "payment-methods"
+        ],
+        "summary": "List my saved cards",
+        "description": "The caller's saved cards, the most recently added first: the brand, the last four\ndigits, the expiry and whether it is the default. Empty until a card is saved. At most the\n100 most recent.",
+        "operationId": "list_payment_methods_v1_me_payment_methods_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PaymentMethodOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Payment Methods V1 Me Payment Methods Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers keep payment methods.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not_configured: payments are not configured; payments_unavailable: Stripe is not reachable, asked to retry later or refused the call; retry later.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/me/payment-methods/{payment_method_id}/default": {
+      "post": {
+        "tags": [
+          "payment-methods"
+        ],
+        "summary": "Make a saved card my default",
+        "description": "Makes the card the caller's default payment method and returns it. Asking again for\nthe card that is the default already changes nothing.",
+        "operationId": "set_default_payment_method_v1_me_payment_methods__payment_method_id__default_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "payment_method_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^pm_[A-Za-z0-9_]{1,252}$",
+              "description": "The saved card's Stripe PaymentMethod id, as the list returns it.",
+              "title": "Payment Method Id"
+            },
+            "description": "The saved card's Stripe PaymentMethod id, as the list returns it."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentMethodOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: the id is not a PaymentMethod id (pm_ and letters, digits or _).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers keep payment methods.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "payment_method_not_found: no saved card of the caller with this id (an unknown id and another user's card answer the same).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many payment-method changes; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not_configured: payments are not configured; payments_unavailable: Stripe is not reachable, asked to retry later or refused the call; retry later.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/payment-methods/{payment_method_id}": {
+      "delete": {
+        "tags": [
+          "payment-methods"
+        ],
+        "summary": "Delete a saved card",
+        "description": "Removes the card from the caller's wallet for good. Deleting the default makes the most\nrecently added of the other cards the default; with no other card, none is. A card deleted\nalready is a 404.",
+        "operationId": "delete_payment_method_v1_me_payment_methods__payment_method_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "payment_method_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^pm_[A-Za-z0-9_]{1,252}$",
+              "description": "The saved card's Stripe PaymentMethod id, as the list returns it.",
+              "title": "Payment Method Id"
+            },
+            "description": "The saved card's Stripe PaymentMethod id, as the list returns it."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "validation_error: the id is not a PaymentMethod id (pm_ and letters, digits or _).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers keep payment methods.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "payment_method_not_found: no saved card of the caller with this id (an unknown id and another user's card answer the same).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many payment-method changes; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not_configured: payments are not configured; payments_unavailable: Stripe is not reachable, asked to retry later or refused the call; retry later.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/requests/{request_id}/job": {
       "get": {
         "tags": [
@@ -6813,6 +7180,64 @@
         "title": "PaymentCreate",
         "description": "No input: every amount comes from the accepted quote and the platform's take rate, read\nfrom the database (AGENTS.md \"Money\"). A client sending any field, an amount above all,\ngets a 422; an empty body or none at all is fine."
       },
+      "PaymentMethodOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "The Stripe PaymentMethod id: the path id of the other routes."
+          },
+          "brand": {
+            "type": "string",
+            "title": "Brand",
+            "description": "Stripe's card brand: amex, diners, discover, eftpos_au, jcb, link, mastercard, unionpay, visa or unknown.",
+            "examples": [
+              "visa"
+            ]
+          },
+          "last4": {
+            "type": "string",
+            "title": "Last4",
+            "description": "The card number's last four digits.",
+            "examples": [
+              "4242"
+            ]
+          },
+          "exp_month": {
+            "type": "integer",
+            "title": "Exp Month",
+            "description": "The expiry month, 1 to 12.",
+            "examples": [
+              12
+            ]
+          },
+          "exp_year": {
+            "type": "integer",
+            "title": "Exp Year",
+            "description": "The expiry year, four digits.",
+            "examples": [
+              2028
+            ]
+          },
+          "is_default": {
+            "type": "boolean",
+            "title": "Is Default",
+            "description": "Whether this is the customer's default payment method."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "brand",
+          "last4",
+          "exp_month",
+          "exp_year",
+          "is_default"
+        ],
+        "title": "PaymentMethodOut",
+        "description": "A saved card as the wallet shows it: never the full number, the CVC, the fingerprint or\nthe billing details (the API never holds them)."
+      },
       "PaymentSheetOut": {
         "properties": {
           "payment_intent_client_secret": {
@@ -8662,6 +9087,40 @@
           "region"
         ],
         "title": "ServiceAreaOut"
+      },
+      "SetupIntentOut": {
+        "properties": {
+          "client_secret": {
+            "type": "string",
+            "title": "Client Secret",
+            "description": "The SetupIntent's client secret: the sheet confirms the card with it. Shown once per call, never logged; a new SetupIntent on every call."
+          },
+          "ephemeral_key_secret": {
+            "type": "string",
+            "title": "Ephemeral Key Secret",
+            "description": "A short-lived key that lets the sheet act for the customer; new on each call."
+          },
+          "customer_id": {
+            "type": "string",
+            "title": "Customer Id",
+            "description": "The customer's Stripe Customer id, for the sheet."
+          },
+          "publishable_key": {
+            "type": "string",
+            "title": "Publishable Key",
+            "description": "The Stripe publishable key the sheet initializes with (pk_test_ until launch)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "client_secret",
+          "ephemeral_key_secret",
+          "customer_id",
+          "publishable_key"
+        ],
+        "title": "SetupIntentOut",
+        "description": "What the app's Payment Sheet needs, in setup mode, to save a card on the customer."
       },
       "SingleChoiceQuestion": {
         "properties": {
