@@ -4,11 +4,14 @@ The cards live in Stripe, attached to the customer's Stripe Customer; the API st
 them (no table, no card data), only the Customer's id on the user (#58). Stripe must be
 configured: else 503 not_configured.
 
-- Adding a card: the Customer is created on first use, exactly as a first payment does (#58:
-  key `customer:<user id>`, metadata user_id, no email or name; two calls at once send the same
-  key, Stripe answers both with one customer, the first to store wins and the other reads the
-  stored id back). Then a new SetupIntent for it and a new ephemeral key: what the app's Payment
-  Sheet needs, in setup mode, to send the card to Stripe. The publishable key must be set too.
+- Adding a card: the Customer is created on first use, with the key and the parameters of a
+  first payment (#58: key `customer:<user id>`, metadata user_id, no email or name), under the
+  user's row lock. Stripe answers a key whose first request is still in flight with a 409, so
+  a second tap must not reach Stripe: it waits on the lock and reads the id the first stored.
+  A first payment's create (#58) takes no such lock: racing it, one of the two calls is a 503
+  to ask again, and one Customer exists either way (the same key). Then a new SetupIntent for
+  the Customer and a new ephemeral key: what the app's Payment Sheet needs, in setup mode, to
+  send the card to Stripe. The publishable key must be set too.
 - The list: the customer's cards, the most recently added first, each with `is_default` from
   the Customer's `invoice_settings.default_payment_method`. A user with no Customer has no
   cards, and Stripe is not asked.
@@ -24,11 +27,13 @@ configured: else 503 not_configured.
 
 Stripe failing in any way (unreachable, a timeout, a 409, 429 or 5xx, or a refusal) is 503
 payments_unavailable: one stable body, never Stripe's message. Nothing is retried here, and the
-SDK retries only as STRIPE_MAX_NETWORK_RETRIES says. Logs carry the user's id, the operation and
-Stripe's request id and error code only: never a client secret, an ephemeral key, a customer id,
-a PaymentMethod id or anything of a card.
+SDK retries only as STRIPE_MAX_NETWORK_RETRIES says. This module's logs carry the user's id, the
+operation and Stripe's request id and error code only: never a client secret, an ephemeral key,
+a customer id, a PaymentMethod id or anything of a card. (The access log records the path of
+every request, which for the default and the delete holds the card's id.)
 
-No transaction stays open across a Stripe call.
+No transaction stays open across a Stripe call, but the one that creates the Customer: once per
+user, for the lock above.
 """
 
 import logging
@@ -195,10 +200,16 @@ class PaymentMethodService:
 
     async def _customer(self, payments: StripePayments, user: UserAccount) -> str:
         """The caller's Stripe Customer id: the stored one, else created with the user's key
-        and stored (see the module doc). Ends the transaction."""
+        and stored, under the user's row lock (see the module doc). Ends the transaction."""
         stored = await self._stored_customer(user)
         if stored is not None:
             return stored
+        # First use. Read again under the lock: a call that held it has stored the id by now.
+        stored = await self._users.lock_stripe_customer_id(user.id)
+        if stored is not None:
+            await self._session.commit()
+            return stored
+        # A failure rolls back, which releases the lock.
         async with self._stripe_call(user, "create_customer"):
             created = await payments.create_customer(
                 user_id=str(user.id), idempotency_key=customer_idempotency_key(user.id)
@@ -210,13 +221,11 @@ class PaymentMethodService:
                 extra={"user_id": str(user.id), "stripe_request_id": created.request_id},
             )
             return created.customer_id
-        # Another call of the customer (a payment, a second tap) stored one meanwhile: the
-        # stored one is theirs.
-        await self._session.rollback()
-        stored = await self._stored_customer(user)
-        if stored is None:  # pragma: no cover - the update failed because one is stored
-            return created.customer_id
-        return stored
+        # Not reached under the lock: nothing else stores an id while it is held. Kept so
+        # that a caller gets the stored id, never one that was not stored.
+        await self._session.rollback()  # pragma: no cover
+        stored = await self._stored_customer(user)  # pragma: no cover
+        return stored or created.customer_id  # pragma: no cover
 
     async def _own_card(
         self, methods: StripePaymentMethods, user: UserAccount, payment_method_id: str

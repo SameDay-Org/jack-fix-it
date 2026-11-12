@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 import pytest
 from fastapi import FastAPI, Request
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -61,6 +61,8 @@ RATE_LIMITED = {"error": {"code": "rate_limited", "message": "Too many requests.
 NOW = 1_800_000_000.0  # a fixed clock, so no test straddles two rate-limit windows
 WRITE_LIMIT = 3
 WRITE_WINDOW = 120
+# Stripe's code for a request whose idempotency key has its first request still in flight.
+KEY_IN_USE = "idempotency_key_in_use"
 # What Stripe's own errors carry and no response may show.
 STRIPE_REQUEST_ID = "req_zqstripeleak"
 STRIPE_CODE = "zq_stripe_code_leak"
@@ -266,23 +268,36 @@ async def test_setup_intent_takes_no_customer_from_the_client(
 async def test_two_first_setup_intents_at_once_make_one_customer(
     app: FastAPI, committed: Committed
 ) -> None:
-    """A double tap: both calls reach Stripe before either stores a customer. They send the
-    same key, the first to store wins, and the other answers with the stored one."""
+    """A double tap. Stripe answers a key whose first request is still in flight with a 409
+    (idempotency_key_in_use), so the second call must not reach Stripe: it waits on the user's
+    row, which the first holds until the customer is stored, and reads the stored id."""
     fakes = install_fakes(app)
     account = (await register_account(committed.client, email=committed.email)).json()
     user_id = uuid.UUID(account["user"]["id"])
     headers = {"Authorization": f"Bearer {account['access_token']}"}
-    arrived = 0
-    both = asyncio.Event()
+    waiting = text(
+        "SELECT count(*) FROM pg_stat_activity "
+        "WHERE datname = current_database() AND cardinality(pg_blocking_pids(pid)) > 0"
+    )
+    in_flight = False
 
-    async def wait_for_both() -> None:
-        nonlocal arrived
-        arrived += 1
-        if arrived == 2:
-            both.set()
-        await asyncio.wait_for(both.wait(), LOCK_WAIT_DEADLINE_SECONDS)
+    async def as_stripe_with_a_create_in_flight() -> None:
+        nonlocal in_flight
+        if in_flight:
+            raise StripeUnavailableError(request_id="req_fake_in_use", code=KEY_IN_USE)
+        in_flight = True
+        try:
+            # Answers only once the other call is waiting on a lock: the race is real. Each
+            # poll is the query itself, on its own connection.
+            async with committed.sessions() as monitor, asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+                while not await monitor.scalar(waiting):
+                    pass
+        except TimeoutError:
+            pytest.fail("the second call never waited on the lock of the first")
+        finally:
+            in_flight = False
 
-    fakes.payments.on_create_customer = wait_for_both
+    fakes.payments.on_create_customer = as_stripe_with_a_create_in_flight
 
     first, second = await asyncio.gather(
         committed.client.post(SETUP, headers=headers),
@@ -290,15 +305,37 @@ async def test_two_first_setup_intents_at_once_make_one_customer(
     )
 
     assert (first.status_code, second.status_code) == (200, 200)
+    # One create reached Stripe; the other call read what it stored.
     key = f"customer:{user_id}"
-    assert [call["idempotency_key"] for call in fakes.payments.customer_calls] == [key, key]
-    assert len(fakes.payments.customers) == 1
+    assert [call["idempotency_key"] for call in fakes.payments.customer_calls] == [key]
     async with committed.sessions() as check:
         stored = await stored_customer(check, user_id)
     assert first.json()["customer_id"] == second.json()["customer_id"] == stored
     assert stored == fakes.payments.customers[key]
     # Each call still got its own SetupIntent, for the one customer.
     assert fakes.methods.calls == [("create_setup_intent", stored)] * 2
+
+
+async def test_a_customer_create_stripe_has_in_flight_is_503_and_the_next_call_works(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, fakes: Fakes
+) -> None:
+    """Racing a first payment's create (#58, which takes no lock) Stripe may answer the 409:
+    503, nothing stored or created after it, and the call can be made again."""
+    user_id, headers = await caller(db_session)
+    fakes.payments.errors["create_customer"] = StripeUnavailableError(
+        request_id="req_fake_in_use", code=KEY_IN_USE
+    )
+
+    refused = await db_client.post(SETUP, headers=headers)
+    stored_after_refusal = await stored_customer(db_session, user_id)
+    del fakes.payments.errors["create_customer"]
+    again = await db_client.post(SETUP, headers=headers)
+
+    assert (refused.status_code, refused.json()) == (503, UNAVAILABLE)
+    assert stored_after_refusal is None
+    assert again.status_code == 200
+    assert again.json()["customer_id"] == await stored_customer(db_session, user_id)
+    assert fakes.methods.calls == [("create_setup_intent", again.json()["customer_id"])]
 
 
 # AC2: the list
@@ -542,6 +579,7 @@ async def test_a_caller_without_a_customer_gets_the_same_404(
         "pm_1Abc def",
         "pm_" + "a" * 253,  # past the 255 characters Stripe allows an id
         "pm_caf%C3%A9",  # not ASCII
+        "pm_1Abc%0A",  # a trailing newline
     ],
 )
 async def test_a_malformed_id_is_422_before_anything_is_asked(
