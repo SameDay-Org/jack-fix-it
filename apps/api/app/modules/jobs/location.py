@@ -6,6 +6,11 @@ reads the latest one. Both sides poll; there is no history.
 - Where it lives: Redis only, one hash per job under `<prefix>:<job id>`, holding the latest
   position alone, for PRO_LOCATION_TTL_SECONDS after its write. Nothing goes to Postgres. Logs
   and error bodies carry ids and the event name, never a coordinate.
+- Which Redis: one of the positions' own (LOCATION_REDIS_URL) that keeps nothing but its live
+  keys, so the expiry and the delete are the whole retention; location_guard.py checks it and
+  says what happens otherwise. Development and test use REDIS_URL's. A store that is missing
+  or refused answers 503 location_unavailable to the ping and to the read; a delete is never
+  refused.
 - Tracking is the time between On my way and the check-in: the job is on_the_way and the pro has
   not checked in. Outside it a ping is refused (409 not_on_the_way) and the customer reads "no
   position", the very answer they get before the first ping: the read says nothing about the
@@ -44,9 +49,10 @@ from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
-from app.config import Settings, get_app_settings
+from app.config import LOCATION_REDIS_REQUIRED_IN, Settings, get_app_settings
 from app.errors import NotFoundError
 from app.modules.jobs.errors import NotOnTheWayError, ProLocationUnavailableError
+from app.modules.jobs.location_guard import EphemeralRedisGuard, LocationStoreRefusedError
 from app.modules.jobs.models import Job, JobStatus
 from app.modules.jobs.repository import JobRepository
 from app.modules.jobs.schemas import ProLocationIn, ProLocationOut, ProPosition
@@ -94,7 +100,8 @@ class Position:
 
 class JobLocationStore(Protocol):
     """The latest position of each job. Every call may raise RedisError or OSError (TimeoutError
-    included) when the store is down or slow."""
+    included) when the store is down or slow; `put` and `get` may raise
+    LocationStoreRefusedError when positions must not use it."""
 
     async def put(
         self, job_id: uuid.UUID, position: Position, *, min_interval: timedelta, ttl_seconds: int
@@ -180,11 +187,91 @@ def _decode(raw: bytes | str) -> Position | None:
         return None
 
 
+class GuardedJobLocationStore:
+    """`inner`, behind the check that its Redis keeps nothing (location_guard.py): no position
+    goes into, or comes out of, one that may keep it. A delete is never refused: it carries no
+    position and only removes one. The check and the operation share one `timeout_seconds`, so
+    a call still gives up after it."""
+
+    def __init__(
+        self, inner: JobLocationStore, guard: EphemeralRedisGuard, *, timeout_seconds: float
+    ) -> None:
+        self._inner = inner
+        self._guard = guard
+        self._timeout = timeout_seconds
+
+    async def put(
+        self, job_id: uuid.UUID, position: Position, *, min_interval: timedelta, ttl_seconds: int
+    ) -> bool:
+        async with asyncio.timeout(self._timeout):
+            await self._guard.require()
+            return await self._inner.put(
+                job_id, position, min_interval=min_interval, ttl_seconds=ttl_seconds
+            )
+
+    async def get(self, job_id: uuid.UUID) -> Position | None:
+        async with asyncio.timeout(self._timeout):
+            await self._guard.require()
+            return await self._inner.get(job_id)
+
+    async def delete(self, job_id: uuid.UUID) -> None:
+        await self._inner.delete(job_id)
+
+
+class NoJobLocationStore:
+    """The store where LOCATION_REDIS_URL is required and missing: it takes and gives no
+    position. Nothing was written, so a delete has nothing to remove."""
+
+    async def put(
+        self, job_id: uuid.UUID, position: Position, *, min_interval: timedelta, ttl_seconds: int
+    ) -> bool:
+        raise LocationStoreRefusedError("not_configured")
+
+    async def get(self, job_id: uuid.UUID) -> Position | None:
+        raise LocationStoreRefusedError("not_configured")
+
+    async def delete(self, job_id: uuid.UUID) -> None:
+        return None
+
+
+@dataclass(frozen=True)
+class LocationBackend:
+    """The positions' Redis and the check of what it keeps: made once at startup (app.main),
+    kept on the app's state, so the check's answer is shared by every request."""
+
+    redis: Redis
+    guard: EphemeralRedisGuard
+
+
+def location_backend(settings: Settings, shared: Redis) -> LocationBackend | None:
+    """LOCATION_REDIS_URL's Redis. Without the setting: the app's own Redis (`shared`) in
+    development and test, and None in staging and production, where positions never share the
+    Redis that the queue needs durable."""
+    required = settings.app_env in LOCATION_REDIS_REQUIRED_IN
+    if settings.location_redis_url is not None:
+        redis: Redis = Redis.from_url(settings.location_redis_url)
+    elif required:
+        return None
+    else:
+        redis = shared
+    guard = EphemeralRedisGuard(
+        redis,
+        enforce=required,
+        assume_ephemeral=settings.location_redis_assume_ephemeral,
+        recheck_seconds=settings.location_redis_recheck_seconds,
+    )
+    return LocationBackend(redis, guard)
+
+
 def get_job_location_store(
     request: Request, settings: Annotated[Settings, Depends(get_app_settings)]
 ) -> JobLocationStore:
-    redis: Redis = request.app.state.redis
-    return RedisJobLocationStore(redis, timeout_seconds=settings.pro_location_timeout_seconds)
+    backend: LocationBackend | None = request.app.state.location_backend
+    if backend is None:
+        return NoJobLocationStore()
+    timeout = settings.pro_location_timeout_seconds
+    store = RedisJobLocationStore(backend.redis, timeout_seconds=timeout)
+    return GuardedJobLocationStore(store, backend.guard, timeout_seconds=timeout)
 
 
 async def forget_position(store: JobLocationStore | None, job_id: uuid.UUID) -> None:
@@ -284,6 +371,9 @@ class ProLocationService:
                 min_interval=self._config.min_interval,
                 ttl_seconds=self._config.ttl_seconds,
             )
+        except LocationStoreRefusedError as refused:
+            logger.error("pro_location_refused", extra={**ids, "reason": refused.reason})
+            raise ProLocationUnavailableError from None
         except (RedisError, OSError):  # OSError includes TimeoutError
             logger.error("pro_location_unavailable", extra=ids)
             raise ProLocationUnavailableError from None
@@ -292,7 +382,8 @@ class ProLocationService:
 
     async def last_position(self, user: UserAccount, job_id: uuid.UUID) -> ProLocationOut:
         """The latest position of the pro of the customer's own job, while it is tracked and a
-        ping is fresh; NO_POSITION otherwise, whatever the reason."""
+        ping is fresh; NO_POSITION otherwise, whatever the reason. A store that is missing or
+        refused is the one error: the app can tell it from "no position yet"."""
         job = await self._jobs.get(job_id)
         if job is None or job.customer_id != user.id:
             raise NotFoundError
@@ -303,6 +394,11 @@ class ProLocationService:
             return NO_POSITION
         try:
             position = await self._store.get(job_id)
+        except LocationStoreRefusedError as refused:
+            logger.error(
+                "pro_location_refused", extra={"job_id": str(job_id), "reason": refused.reason}
+            )
+            raise ProLocationUnavailableError from None
         except (RedisError, OSError):  # OSError includes TimeoutError
             logger.error("pro_location_unavailable", extra={"job_id": str(job_id)})
             return NO_POSITION

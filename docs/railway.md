@@ -20,6 +20,8 @@ names, so set **Config-as-code file path** in every service's settings.
 | Postgres | Railway Postgres 16 | -                               | -          | -                                   | -             |
 | Redis    | Railway Redis       | -                               | -          | -                                   | -             |
 
+- **Redis-positions** is a second Railway Redis, for the pros' live positions only (#350):
+  no volume, no backups, its own start command. See "Live positions" under the api variables.
 - **api** runs these as its pre-deploy command, in order, on every deploy:
 
   1. `alembic upgrade head`
@@ -87,6 +89,9 @@ environment as **shared variables** referenced from both services, so the two ne
 | `CHAT_ORIGINAL_KEYS`               | JSON `{"<key id>": "<base64 32-byte key>"}`; see "Chat originals" below     | yes             | #72        |
 | `CHAT_ORIGINAL_ACTIVE_KEY_ID`      | the key id of `CHAT_ORIGINAL_KEYS` new originals are sealed with            | no              | #72        |
 | `CHAT_ORIGINAL_RETENTION_DAYS`     | optional; `90` by default                                                   | no              | #72        |
+| `LOCATION_REDIS_URL`               | `${{Redis-positions.REDIS_URL}}`; unset, positions give 503 (see below)     | yes (reference) | #350       |
+| `LOCATION_REDIS_RECHECK_SECONDS`   | optional; `60` by default                                                   | no              | #350       |
+| `LOCATION_REDIS_ASSUME_EPHEMERAL`  | optional; only for a Redis that refuses `CONFIG GET` (see below)            | no              | #350       |
 
 "Required" means the API refuses to start in staging and production without it (the settings
 validators in `apps/api/app/config.py`). Every other setting has a working default; the
@@ -110,6 +115,47 @@ print(base64.b64encode(os.urandom(32)).decode())"`. Set `CHAT_ORIGINAL_KEYS` to
   removed what it sealed); a key removed early makes those originals unreadable (`original:
 null`, ERROR `chat_original_unreadable`).
 - Only the api needs these; the worker's purge clears rows without decrypting.
+
+#### Live positions (#350)
+
+While a pro is on the way, the API keeps their latest position in Redis for
+`PRO_LOCATION_TTL_SECONDS` and deletes it at the check-in. That is the whole retention only if
+that Redis writes the position nowhere else, so the positions get a Redis service of their own,
+`Redis-positions`, apart from `Redis` (the queue's, which stays durable):
+
+- Start it with no RDB snapshot, no AOF and the slow log off:
+  `redis-server --requirepass $REDIS_PASSWORD --save "" --appendonly no --slowlog-log-slower-than -1`.
+- No volume, no backups and no replica on that service: what it holds must end with the
+  container. The API cannot see these three; they are the deployer's to keep.
+- Set `LOCATION_REDIS_URL` on api to that service's private URL. The worker does not use it.
+
+The API asks that Redis what it keeps (`CONFIG GET save`, `appendonly`,
+`slowlog-log-slower-than`) before a position goes in or out, and again every
+`LOCATION_REDIS_RECHECK_SECONDS`. In staging and production:
+
+| State of the positions' Redis | Log                                                         | Position routes            |
+| ----------------------------- | ----------------------------------------------------------- | -------------------------- |
+| `LOCATION_REDIS_URL` unset    | WARNING `location_redis_not_configured` at startup          | 503 `location_unavailable` |
+| snapshots, AOF or slow log on | ERROR `location_redis_not_ephemeral` (`unsafe` lists which) | 503 `location_unavailable` |
+| `CONFIG GET` refused          | ERROR `location_redis_unverifiable`                         | 503 `location_unavailable` |
+| all three off                 | INFO `location_redis_ephemeral`                             | work                       |
+
+Each refused request also logs ERROR `pro_location_refused` with the job id and the reason,
+never a coordinate. The API starts in all four states, and On my way, check-in, start and every
+other job step keep working. Fixing the Redis brings the routes back within the check interval,
+with no redeploy. In development and test the positions use `REDIS_URL`'s Redis and the same
+findings are only logged (WARNING).
+
+`LOCATION_REDIS_ASSUME_EPHEMERAL=true` is only for a managed Redis that refuses `CONFIG GET`:
+the deployer vouches that it keeps nothing (WARNING `location_redis_assume_ephemeral_set` at
+startup, `location_redis_assumed_ephemeral` at the check). It never overrides a Redis that
+answers that it keeps positions. Leave it unset on Railway.
+
+Verify after the first deploy with the variable: from a shell with `redis-cli`,
+`redis-cli -u "$LOCATION_REDIS_URL" CONFIG GET save` gives an empty value, `CONFIG GET
+appendonly` gives `no` and `CONFIG GET slowlog-log-slower-than` gives `-1`; the service has no
+volume; and the api log shows `location_redis_ephemeral` after the first position. Confirm the
+exact dashboard steps on the first setup and update this section.
 
 Leave `HOST` unset: the default `::` listens on IPv6 (private network) and IPv4 (public proxy
 and healthcheck) on one socket.
@@ -223,7 +269,8 @@ Confirm the exact dashboard steps on the first drill and update this section.
 ## First-time setup (human)
 
 1. Create the project and the `staging` and `production` environments.
-2. Add Postgres and Redis to each environment; enable backups and PITR.
+2. Add Postgres and Redis to each environment; enable backups and PITR. Add a second
+   Redis, `Redis-positions`, with no volume and no backups ("Live positions" above).
 3. Create api, worker and web from the GitHub repo with the root directories and config file
    paths above.
 4. Set the variables above, then enable Wait for CI.

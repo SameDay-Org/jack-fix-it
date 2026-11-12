@@ -34,6 +34,7 @@ from app.modules.jobs.location import (
     RedisJobLocationStore,
     get_job_location_store,
     get_location_clock,
+    location_backend,
 )
 from app.modules.jobs.models import Job, JobEvent, JobStatus
 from app.modules.jobs.schemas import ProLocationIn
@@ -868,10 +869,14 @@ async def test_redis_down_does_not_500(
     dead_redis: Redis,
     hung_redis: Redis,
     caplog: pytest.LogCaptureFixture,
+    settings: Settings,
     broken: str,
 ) -> None:
-    # The app's own store, on the app's Redis, with the timeout Settings gives it.
-    app.state.redis = {"dead_redis": dead_redis, "hung_redis": hung_redis}[broken]
+    # The app's own store, as startup builds it for these settings (no LOCATION_REDIS_URL in
+    # test: the app's Redis), with the timeout Settings gives it: the check of what that Redis
+    # keeps and the operation end within it together.
+    broken_redis = {"dead_redis": dead_redis, "hung_redis": hung_redis}[broken]
+    app.state.location_backend = location_backend(settings, broken_redis)
     del app.dependency_overrides[get_job_location_store]
     job = await on_the_way_job(db_session, world)
     ids = {"job_id": str(job.id), "pro_id": str(world.pro.profile_id)}
@@ -1055,7 +1060,7 @@ def test_openapi_documents_the_position_routes(app: FastAPI) -> None:
         assert "never stored in the database" in operation["summary"]
     assert set(path["put"]["responses"]) == {"204", "401", "403", "404", "409", "422", "429", "503"}
     assert "content" not in path["put"]["responses"]["204"]
-    assert set(path["get"]["responses"]) == {"200", "401", "403", "404", "422"}
+    assert set(path["get"]["responses"]) == {"200", "401", "403", "404", "422", "503"}
     schemas = schema["components"]["schemas"]
     ping_schema = schemas["ProLocationIn"]
     assert ping_schema["additionalProperties"] is False

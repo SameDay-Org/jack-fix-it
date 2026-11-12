@@ -28,7 +28,9 @@ class NotOnTheWayError(ConflictError):
 
 class ProLocationUnavailableError(AppError):
     """The store of the pros' live positions (Redis) is down or too slow (#350): the position
-    is dropped, and the pro's app sends its next one."""
+    is dropped, and the pro's app sends its next one. Also the answer of both position
+    routes while that Redis is missing or refused (jobs/location_guard.py): no position is
+    kept or shown until the deploy is fixed."""
 
     status_code = 503
     code = "location_unavailable"

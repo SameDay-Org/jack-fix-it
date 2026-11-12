@@ -85,6 +85,16 @@ the event name only).
   a `JobLocationStore` to the machine or the service. Without one that step raises
   (`RuntimeError`, nothing written) instead of leaving a position behind. Tests use
   `tests/conftest.py::InMemoryJobLocationStore` (`make_app` installs it).
+- **Its own Redis.** Positions go to `LOCATION_REDIS_URL`, a Redis that keeps nothing but its
+  live keys (no RDB, no AOF, slow log off); `jobs/location_guard.py` asks it (`CONFIG GET`)
+  and remembers the answer for `LOCATION_REDIS_RECHECK_SECONDS`. In staging and
+  production a Redis that is missing, keeps positions or will not say makes both routes
+  answer 503 `location_unavailable`; a delete is never refused. Development and test fall
+  back to `REDIS_URL`'s and only log. Never point a test at `CONFIG SET` on the shared Redis:
+  `tests/test_pro_location_retention.py` has a stand-in. Deploy contract: `docs/railway.md`.
+- **No HTTP cache.** `location_router` uses `NoStoreRoute` (`app/middleware.py`): every
+  response of these routes, errors included, says `Cache-Control: no-store`. Use the same
+  route class for any new route that returns a position.
 
 ## Worker
 

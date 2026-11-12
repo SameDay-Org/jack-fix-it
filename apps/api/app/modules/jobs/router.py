@@ -10,6 +10,7 @@ from app.config import Settings, get_app_settings
 from app.db import get_session
 from app.errors import ErrorResponse
 from app.integrations.storage import StorageProvider, get_storage_provider
+from app.middleware import NoStoreRoute
 from app.modules.auth.permissions import CustomerUser, ProUser
 from app.modules.jobs.errors import ATTEMPTS_REMAINING_HEADER
 from app.modules.jobs.execution import JobExecutionConfig, JobExecutionService
@@ -38,8 +39,11 @@ customer_router = APIRouter(prefix="/requests", tags=["jobs"])
 # The pro's side: their own jobs and the steps they take on them (#63).
 router = APIRouter(prefix="/pros/me/jobs", tags=["jobs"])
 # The pro's live position while on the way (#350): the pro's app writes it, the customer's
-# reads it.
-location_router = APIRouter(prefix="/jobs/{job_id}/pro-location", tags=["jobs"])
+# reads it. No HTTP cache may keep a response of these routes: a stored position would
+# outlive its expiry and its delete.
+location_router = APIRouter(
+    prefix="/jobs/{job_id}/pro-location", tags=["jobs"], route_class=NoStoreRoute
+)
 
 _UNAUTHORIZED = {"model": ErrorResponse, "description": "invalid_token: missing or expired."}
 
@@ -334,7 +338,8 @@ async def complete_job(
             "rate_limited: far too many positions from this pro; Retry-After has the wait."
         ),
         status.HTTP_503_SERVICE_UNAVAILABLE: _error(
-            "location_unavailable: the position could not be kept; drop it and send the next."
+            "location_unavailable: the position could not be kept (the store is down, or "
+            "must not hold positions); drop it and send the next."
         ),
     },
 )
@@ -356,6 +361,10 @@ async def share_pro_location(
         status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
         status.HTTP_403_FORBIDDEN: _error("forbidden: only customers follow their pro."),
         status.HTTP_404_NOT_FOUND: _error("not_found: no job of the caller with this id."),
+        status.HTTP_503_SERVICE_UNAVAILABLE: _error(
+            "location_unavailable: the store must not hold positions (a deploy problem); "
+            "there is none to show until it is fixed."
+        ),
     },
 )
 async def get_pro_location(
@@ -364,5 +373,6 @@ async def get_pro_location(
     """The pro's latest position on the way to the customer's own job, to poll every few
     seconds. `position` is null whenever there is none to show: before the first one, once it
     is too old, and whenever the pro is not on the way (the job's own status says which).
-    Positions are kept in memory for a short time only, never in the database."""
+    Positions are kept in memory for a short time only, never in the database, and every
+    response says `Cache-Control: no-store`."""
     return await locations.last_position(user, job_id)

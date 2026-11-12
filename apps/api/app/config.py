@@ -60,6 +60,11 @@ _STRIPE_PUBLISHABLE_KEY = re.compile(r"pk_(test|live)_[A-Za-z0-9]+")
 # Where a missing chat original key is logged at startup (#72): the API still starts, and no
 # original is stored until the key is set (fail closed).
 CHAT_ORIGINAL_KEY_EXPECTED_IN = _JWT_SECRET_REQUIRED_IN
+# Where the pros' live positions need a Redis of their own, LOCATION_REDIS_URL (#350): the
+# API still starts without it, and the position routes answer 503. Elsewhere they use
+# REDIS_URL's.
+LOCATION_REDIS_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
+_REDIS_URL_SCHEMES = ("redis://", "rediss://", "unix://")
 
 
 def is_publishable_key(value: str) -> bool:
@@ -358,6 +363,18 @@ class Settings(BaseSettings):
     # delete (the position expires on its own). A position is written under the job's row
     # lock, so this also bounds how long one can hold a check-in off.
     pro_location_timeout_seconds: float = Field(default=0.5, gt=0)
+    # The Redis the positions live in (#350, Vault round 1): one of their own that keeps
+    # nothing but its live keys (no RDB snapshot, no AOF, no slow log), so a position is gone
+    # once it is deleted or expires. Required in staging and production: without it the API
+    # starts and the position routes answer 503. Development and test use REDIS_URL's.
+    location_redis_url: str | None = None
+    # The API asks that Redis what it keeps (CONFIG GET) before a position goes in or out,
+    # and again once the answer is this many seconds old. In staging and production a Redis
+    # that keeps positions, or will not say, is refused (503); elsewhere it is only logged.
+    location_redis_recheck_seconds: float = Field(default=60.0, gt=0)
+    # For a managed Redis that refuses CONFIG GET: true takes the deployer's word that it
+    # keeps nothing. It never overrides an answer: a Redis that says it keeps is refused.
+    location_redis_assume_ephemeral: bool = False
     # Job chat (D14.1, #71): messages one user may send in one job's chat per window.
     chat_message_rate_limit: int = Field(default=20, gt=0)
     chat_message_rate_window_seconds: int = Field(default=60, gt=0)
@@ -441,6 +458,7 @@ class Settings(BaseSettings):
         "stripe_secret_key",
         "stripe_publishable_key",
         "public_api_url",
+        "location_redis_url",
         mode="before",
     )
     @classmethod
@@ -456,6 +474,14 @@ class Settings(BaseSettings):
                 "STRIPE_PUBLISHABLE_KEY must be a Stripe publishable key (pk_test_... or "
                 "pk_live_...); a secret (sk_) or restricted (rk_) key is refused"
             )
+        return value
+
+    @field_validator("location_redis_url")
+    @classmethod
+    def _check_location_redis_url(cls, value: str | None) -> str | None:
+        # The message never repeats the value: the URL holds the Redis password.
+        if value is not None and not value.startswith(_REDIS_URL_SCHEMES):
+            raise ValueError("LOCATION_REDIS_URL must start with redis://, rediss:// or unix://")
         return value
 
     @field_validator("public_api_url")
