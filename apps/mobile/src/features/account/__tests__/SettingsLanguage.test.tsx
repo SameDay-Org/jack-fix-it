@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
+import { AccessibilityInfo } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { logout } from "@/api";
@@ -19,6 +20,7 @@ import {
 } from "../../../api/__tests__/helpers";
 import { sessionStore } from "../../../api/session";
 import { METRICS, SIGNED_OUT } from "../../auth/__tests__/helpers";
+import { AccountLanguage } from "../AccountLanguage";
 import { SettingsScreen } from "../SettingsScreen";
 
 jest.mock(
@@ -72,6 +74,8 @@ async function renderSettings() {
   return render(
     <SafeAreaProvider initialMetrics={METRICS}>
       <QueryClientProvider client={client}>
+        {/* As the root layout mounts it: the app's language follows the account. */}
+        <AccountLanguage />
         <SettingsScreen />
       </QueryClientProvider>
     </SafeAreaProvider>,
@@ -193,10 +197,14 @@ describe("Settings: language", () => {
     expect(notice()).toBeOnTheScreen();
     expect(screen.getByTestId("settings-language-retry")).toBeBusy();
 
-    // Still failing: the notice is there, its button ready again.
+    // Still failing: the notice is there, its button ready again, and a screen reader is told
+    // (the notice's text has not changed, so it would announce nothing by itself).
+    const spoken = jest.mocked(AccessibilityInfo.announceForAccessibilityWithOptions);
+    spoken.mockClear();
     await answer(1, (save) => save.reject(new TypeError("Network request failed")));
     await waitFor(() => expect(screen.getByTestId("settings-language-retry")).not.toBeBusy());
     expect(notice()).toBeOnTheScreen();
+    expect(spoken.mock.calls).toEqual([["Aún no se guardó en tu cuenta", { queue: true }]]);
 
     await fireEvent.press(screen.getByRole("button", { name: "Reintentar" }));
     await answer(2, (save) => save.resolve(saved("es")));
@@ -204,6 +212,44 @@ describe("Settings: language", () => {
     await waitFor(() => expect(notice()).toBeNull());
     expect(sessionLocale()).toBe("es");
     expect(i18n.language).toBe("es");
+  });
+
+  it("a new choice during a retry is a first save again: no notice while it is on its way", async () => {
+    await renderSettings();
+    await fireEvent.press(radio("Español"));
+    await answer(0, (save) => save.reject(new TypeError("Network request failed")));
+    await fireEvent.press(await screen.findByRole("button", { name: "Reintentar" }));
+    await waitFor(() => expect(saves).toHaveLength(2));
+
+    const spoken = jest.mocked(AccessibilityInfo.announceForAccessibilityWithOptions);
+    spoken.mockClear();
+    await fireEvent.press(radio("English"));
+
+    expect(notice()).toBeNull();
+    // The retry lands: the account holds Spanish while English is still being saved.
+    await answer(1, (save) => save.resolve(saved("es")));
+    await waitFor(() => expect(sessionLocale()).toBe("es"));
+    expect(notice()).toBeNull();
+    expect(screen.getByRole("header", { name: "Settings" })).toBeOnTheScreen();
+    await waitFor(() => expect(saves).toHaveLength(3));
+    expect(callBody(saveCalls()[2]!)).toEqual({ locale: "en" });
+
+    await answer(2, (save) => save.resolve(saved("en")));
+
+    await waitFor(() => expect(sessionLocale()).toBe("en"));
+    expect(notice()).toBeNull();
+    expect(radio("English")).toBeChecked();
+    // Not for one render either: a notice that showed and went would have been spoken.
+    expect(spoken).not.toHaveBeenCalled();
+  });
+
+  it("shows no notice for an account saved in a language the app is not written in", async () => {
+    signIn("pt");
+
+    await renderSettings();
+
+    expect(radio("English")).toBeChecked();
+    expect(notice()).toBeNull();
   });
 
   it("sends nothing when the language on screen is chosen again", async () => {

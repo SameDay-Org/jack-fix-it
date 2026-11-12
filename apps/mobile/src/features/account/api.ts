@@ -1,4 +1,4 @@
-import { useIsMutating, useMutation } from "@tanstack/react-query";
+import { useIsMutating, useMutation, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { Image } from "react-native";
 
@@ -58,6 +58,10 @@ export function useSaveLocale() {
 
 /** Whether a language save is on its way or waiting its turn, whichever screen started it. */
 export const useLocaleSaving = (): boolean => useIsMutating({ mutationKey: LOCALE_SAVE_KEY }) > 0;
+
+/** The same, read at once (in an effect), not on the next render. */
+export const isSavingLocale = (client: QueryClient): boolean =>
+  client.isMutating({ mutationKey: LOCALE_SAVE_KEY }) > 0;
 
 /*
  * The signed-in user lives in the session store, not in the Query cache: a cached copy of

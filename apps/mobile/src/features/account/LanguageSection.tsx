@@ -2,9 +2,9 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
 
-import { sessionGeneration, type SessionUser } from "@/api";
-import { Button, ListGroup, ListRow, Notice } from "@/components/ui";
-import { activeLanguage, LANGUAGES, setLanguage, type Language } from "@/i18n";
+import { isCurrentGeneration, sessionGeneration, type SessionUser } from "@/api";
+import { announce, Button, ListGroup, ListRow, Notice } from "@/components/ui";
+import { activeLanguage, languageOf, LANGUAGES, setLanguage, type Language } from "@/i18n";
 
 import { useLocaleSaving, useSaveLocale } from "./api";
 
@@ -15,7 +15,8 @@ import { useLocaleSaving, useSaveLocale } from "./api";
  *
  * The device never waits for the save and never goes back on it: while the account still holds
  * another language than the one on screen (the save failed, or there is no connection), a notice
- * says so and offers to send it again.
+ * says so and offers to send it again. An account saved in a language the app is not written in
+ * has nothing to be out of step with: no notice until a language is chosen here.
  */
 export function LanguageSection({ user }: { user: SessionUser }) {
   // Subscribes to the language: this section renders again in the one just chosen.
@@ -25,19 +26,28 @@ export function LanguageSection({ user }: { user: SessionUser }) {
   const saving = useLocaleSaving();
   // A retry keeps the notice up, with its button busy; a first save is silent until it fails.
   const [retrying, setRetrying] = useState(false);
-  const unsaved = user.locale !== language;
+  const saved = languageOf(user.locale);
+  const unsaved = saved !== null && saved !== language;
 
   const choose = (next: Language) => {
     if (next === language) return;
+    // A new choice is a first save again, silent until it fails, whatever a retry is still doing.
+    setRetrying(false);
     setLanguage(next);
     save.mutate({ locale: next, generation: sessionGeneration() });
   };
   const retry = () => {
     setRetrying(true);
-    save.mutate(
-      { locale: language, generation: sessionGeneration() },
-      { onSettled: () => setRetrying(false) },
-    );
+    // The promise, not the per-call callbacks: those are dropped once another save starts.
+    const generation = sessionGeneration();
+    save
+      .mutateAsync({ locale: language, generation })
+      // Still not saved: the notice has not changed, so a screen reader would hear nothing.
+      // Unless the session ended meanwhile: there is nobody left to tell.
+      .catch(() => {
+        if (isCurrentGeneration(generation)) announce(t("settings.language.unsaved.title"));
+      })
+      .finally(() => setRetrying(false));
   };
 
   return (

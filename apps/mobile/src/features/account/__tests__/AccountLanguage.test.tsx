@@ -1,5 +1,6 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render } from "@testing-library/react-native";
-import { useLayoutEffect, useState } from "react";
+import { useLayoutEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Text } from "react-native";
 
@@ -59,11 +60,27 @@ beforeEach(async () => {
   deviceIn("en");
   sessionStore.setState({ ...SIGNED_OUT, status: "restoring" });
   await i18n.changeLanguage("en");
+  // Nothing in the cache expires: a garbage-collection timer would outlive the test.
+  client = new QueryClient({
+    defaultOptions: { queries: { gcTime: Infinity }, mutations: { gcTime: Infinity } },
+  });
 });
 
-/** The app's root, as far as the language goes; `work` is what the session then does. */
+let client: QueryClient;
+
+/** The app's root, as far as the language goes, ahead of the screens (`children`). */
+function App({ children }: { children?: ReactNode }) {
+  return (
+    <QueryClientProvider client={client}>
+      <AccountLanguage />
+      {children}
+    </QueryClientProvider>
+  );
+}
+
+/** Mounts the root; `work` is what the session then does. */
 async function withApp(work: () => Promise<unknown>): Promise<void> {
-  await render(<AccountLanguage />);
+  await render(<App />);
   await act(async () => {
     await work();
   });
@@ -106,8 +123,9 @@ describe("the app's language follows the account", () => {
     expect(activeLanguage()).toBe("es");
   });
 
-  it("a launch with nobody signed in stays in the device's language", async () => {
-    await i18n.changeLanguage("es"); // what a device in Spanish starts in
+  it("a launch with nobody signed in leaves the language the app started in", async () => {
+    deviceIn("es");
+    await i18n.changeLanguage("es"); // what the app starts in on that device
 
     await withApp(restoreSession);
 
@@ -143,6 +161,18 @@ describe("the app's language follows the account", () => {
     expect(activeLanguage()).toBe("es");
   });
 
+  it("follows the account when it is saved in another language elsewhere", async () => {
+    serveAccount("en");
+    await withApp(() => login(CREDENTIALS));
+
+    // Another device saved Spanish; this one learns it from a fresher copy of the account.
+    await act(async () => {
+      setSessionUser({ ...user, locale: "es" });
+    });
+
+    expect(activeLanguage()).toBe("es");
+  });
+
   it("a saved language the app is not written in leaves the device's", async () => {
     deviceIn("es");
     serveAccount("pt");
@@ -152,7 +182,31 @@ describe("the app's language follows the account", () => {
     expect(activeLanguage()).toBe("es");
   });
 
-  it("the app's first render after a sign-in is already in the account's language", async () => {
+  it("has set the account's language by the layout effect that swaps the app's screens in", async () => {
+    // As the session gate, mounted after it: a layout effect of the commit that signs in.
+    const atSwap: string[] = [];
+    function Gate() {
+      const { status } = useSession();
+      useLayoutEffect(() => {
+        if (status === "signedIn") atSwap.push(activeLanguage());
+      }, [status]);
+      return null;
+    }
+    serveAccount("es");
+    await render(
+      <App>
+        <Gate />
+      </App>,
+    );
+
+    await act(async () => {
+      await login(CREDENTIALS);
+    });
+
+    expect(atSwap).toEqual(["es"]);
+  });
+
+  it("the screens the gate then mounts never render in another language", async () => {
     const renders: string[] = [];
     function Home() {
       const { t } = useTranslation();
@@ -163,15 +217,17 @@ describe("the app's language follows the account", () => {
     function Gate() {
       const { status } = useSession();
       const [shown, setShown] = useState(false);
-      useLayoutEffect(() => setShown(status === "signedIn"), [status]);
+      useLayoutEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- models SessionGate, which changes its guards from a layout effect so the swap commits before paint.
+        setShown(status === "signedIn");
+      }, [status]);
       return shown ? <Home /> : null;
     }
     serveAccount("es");
     await render(
-      <>
-        <AccountLanguage />
+      <App>
         <Gate />
-      </>,
+      </App>,
     );
 
     await act(async () => {
