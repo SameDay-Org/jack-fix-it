@@ -2599,7 +2599,7 @@
             }
           },
           "503": {
-            "description": "not_configured: payments are not configured; payments_unavailable: Stripe is not reachable, asked to retry later or refused the call; retry later.",
+            "description": "not_configured: payments are not configured; payments_unavailable: Stripe is not reachable, asked to retry later or refused the call, the wallet holds more cards than the API reads, or another change of the same wallet did not end in time; retry later.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2622,7 +2622,7 @@
           "payment-methods"
         ],
         "summary": "List my saved cards",
-        "description": "The caller's saved cards, the most recently added first: the brand, the last four\ndigits, the expiry and whether it is the default. Empty until a card is saved. At most the\n100 most recent.",
+        "description": "The caller's saved cards, the most recently added first: the brand, the last four\ndigits, the expiry and whether it is the default. Empty until a card is saved. Always the\nwhole wallet, in one response: the API reads at most PAYMENT_METHOD_LIST_MAX_PAGES pages\nof 100 cards of one customer from Stripe (500 cards unless the setting is changed), and a\nwallet with more is 503 payments_unavailable, never a partial list.",
         "operationId": "list_payment_methods_v1_me_payment_methods_get",
         "responses": {
           "200": {
@@ -2670,7 +2670,7 @@
             }
           },
           "503": {
-            "description": "not_configured: payments are not configured; payments_unavailable: Stripe is not reachable, asked to retry later or refused the call; retry later.",
+            "description": "not_configured: payments are not configured; payments_unavailable: Stripe is not reachable, asked to retry later or refused the call, the wallet holds more cards than the API reads, or another change of the same wallet did not end in time; retry later.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2693,7 +2693,7 @@
           "payment-methods"
         ],
         "summary": "Make a saved card my default",
-        "description": "Makes the card the caller's default payment method and returns it. Asking again for\nthe card that is the default already changes nothing.",
+        "description": "Makes the card the caller's default payment method and returns it. Asking again for\nthe card that is the default already changes nothing. Default changes and deletes of one\nwallet run one at a time: a call waits for the one before it, and is 503\npayments_unavailable when the wait and its own work together take longer than\nPAYMENT_METHOD_CHANGE_TIMEOUT_SECONDS.",
         "operationId": "set_default_payment_method_v1_me_payment_methods__payment_method_id__default_post",
         "security": [
           {
@@ -2784,7 +2784,7 @@
             }
           },
           "503": {
-            "description": "not_configured: payments are not configured; payments_unavailable: Stripe is not reachable, asked to retry later or refused the call; retry later.",
+            "description": "not_configured: payments are not configured; payments_unavailable: Stripe is not reachable, asked to retry later or refused the call, the wallet holds more cards than the API reads, or another change of the same wallet did not end in time; retry later.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2802,7 +2802,7 @@
           "payment-methods"
         ],
         "summary": "Delete a saved card",
-        "description": "Removes the card from the caller's wallet for good. Deleting the default makes the most\nrecently added of the other cards the default; with no other card, none is. A card deleted\nalready is a 404.",
+        "description": "Removes the card from the caller's wallet for good. Deleting the default makes the most\nrecently added of the other cards the default; with no other card, none is. A card deleted\nalready is a 404. Default changes and deletes of one wallet run one at a time, so two\ndeletes at once end as one after the other would: a call waits for the one before it, and\nis 503 payments_unavailable when the wait and its own work together take longer than\nPAYMENT_METHOD_CHANGE_TIMEOUT_SECONDS. A wallet with more cards than the list reads cannot\ndelete its default card (503): the next default could not be chosen among all of them.",
         "operationId": "delete_payment_method_v1_me_payment_methods__payment_method_id__delete",
         "security": [
           {
@@ -2886,7 +2886,7 @@
             }
           },
           "503": {
-            "description": "not_configured: payments are not configured; payments_unavailable: Stripe is not reachable, asked to retry later or refused the call; retry later.",
+            "description": "not_configured: payments are not configured; payments_unavailable: Stripe is not reachable, asked to retry later or refused the call, the wallet holds more cards than the API reads, or another change of the same wallet did not end in time; retry later.",
             "content": {
               "application/json": {
                 "schema": {
