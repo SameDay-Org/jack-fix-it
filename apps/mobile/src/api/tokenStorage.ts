@@ -100,21 +100,37 @@ export const notificationsPromptStorage = {
 };
 
 /**
- * The push token this device last sent the API. `owed`: a logout's removal of it has not been
- * confirmed, so the account that signed out may still receive this device's pushes until the next
- * sign-in moves the token.
+ * What the device records about its push token (`features/notifications/pushToken.ts` owns the
+ * rules):
+ * - `owed`: an account may hold `token`; its removal is not confirmed.
+ * - `unanswered`: a PUT of `token` left this device and no answer to it is recorded. It may still
+ *   land, so an acknowledged PUT after it does not prove who holds the token.
+ * - `retired`: tokens Expo replaced, each until the server confirms its removal.
+ * A flag or a list that holds nothing is not written.
  */
-export type StoredPushToken = { token: string; owed: boolean };
+export type StoredPushToken = {
+  token: string;
+  owed: boolean;
+  unanswered?: true;
+  retired?: string[];
+};
 
 function parsePushToken(value: string | null): StoredPushToken | null {
   if (value === null) return null;
   try {
     const parsed: unknown = JSON.parse(value);
     if (typeof parsed !== "object" || parsed === null) return null;
-    const { token, owed } = parsed as Record<string, unknown>;
-    return typeof token === "string" && token !== "" && typeof owed === "boolean"
-      ? { token, owed }
-      : null;
+    const { token, owed, unanswered, retired } = parsed as Record<string, unknown>;
+    if (typeof token !== "string" || token === "" || typeof owed !== "boolean") return null;
+    const tokens = Array.isArray(retired)
+      ? retired.filter((item): item is string => typeof item === "string" && item !== "")
+      : [];
+    return {
+      token,
+      owed,
+      ...(unanswered === true ? { unanswered: true as const } : {}),
+      ...(tokens.length > 0 ? { retired: tokens } : {}),
+    };
   } catch {
     return null;
   }
@@ -135,7 +151,12 @@ export const pushTokenStorage = {
     serialized(() =>
       SecureStore.setItemAsync(
         PUSH_TOKEN_KEY,
-        JSON.stringify({ token: value.token, owed: value.owed }),
+        JSON.stringify({
+          token: value.token,
+          owed: value.owed,
+          ...(value.unanswered ? { unanswered: true } : {}),
+          ...(value.retired?.length ? { retired: value.retired } : {}),
+        }),
         WRITE_OPTIONS,
       ),
     ),
