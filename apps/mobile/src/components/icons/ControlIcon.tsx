@@ -6,6 +6,13 @@ import { GLYPH_STROKE_WIDTH, GLYPH_VIEW_BOX } from "./glyphs";
 const CONTROL_GLYPHS = {
   plus: ["M12 6v12", "M6 12h12"],
   minus: ["M6 12h12"],
+  // A cross, for closing a full-screen view.
+  close: ["M7 7l10 10", "M17 7L7 17"],
+  // A picture frame with hills, where a photo cannot be shown.
+  photo: [
+    "M6.5 5h11A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-9A2.5 2.5 0 0 1 6.5 5Z",
+    "M5 17l4.5-4.5 3 3 2.5-2.5L19 17",
+  ],
   // A play triangle, for a video's thumbnail.
   play: ["M9 6.5v11l8.5-5.5Z"],
   // A check mark, for a request that went through.

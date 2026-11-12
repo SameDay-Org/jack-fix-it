@@ -199,11 +199,11 @@ export function jobText(
     }
     case "finished":
       return {
-        headline: t("jobs.headline.done"),
-        support: t("jobs.support.finished", { name: lead }),
+        headline: t("jobs.headline.finished", { name: lead }),
+        support: t("jobs.support.finished"),
       };
     case "done":
-      return { headline: t("jobs.headline.done"), support: t("jobs.support.done") };
+      return { headline: t("jobs.headline.done"), support: t("jobs.support.done", { inline }) };
     case "attention":
       return { headline: t("jobs.headline.attention"), support: t("jobs.support.attention") };
     case "cancelled":
@@ -262,13 +262,16 @@ export function bannerText(
     case "working":
       return t("jobs.banner.working", { name: lead });
     case "finished":
-      return t("jobs.banner.finished", { name: lead });
+      return t("jobs.banner.finishedConfirm", { name: lead });
     case "done":
     case "attention":
     case "cancelled":
       return null;
   }
 }
+
+/** The banner's line as drawn: `action` marks a tail that asks for something ("confirm"). */
+export type BannerParts = { main: string; tail: string | null; action?: boolean };
 
 /**
  * The banner's line in two parts for drawing it: the sentence, which may be cut short, and the
@@ -280,7 +283,7 @@ export function bannerParts(
   now: number,
   closeMinutes: number,
   locale: string = formatLocale(),
-): { main: string; tail: string | null } | null {
+): BannerParts | null {
   const { lead, inline } = proNames(t, job);
   switch (jobPhase(job)) {
     case "scheduled":
@@ -304,6 +307,13 @@ export function bannerParts(
       }
       break;
     }
+    case "finished":
+      // The tail is what the customer is asked to do, drawn as a call to it.
+      return {
+        main: t("jobs.banner.finished", { name: lead }),
+        tail: t("jobs.banner.confirm"),
+        action: true,
+      };
     default:
       break;
   }

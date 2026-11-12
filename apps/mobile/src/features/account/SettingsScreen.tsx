@@ -7,11 +7,12 @@ import { ListGroup, ListRow, Screen, StatusBadge } from "@/components/ui";
 import { BackButton } from "@/features/auth/components/BackButton";
 
 import { cardDetails } from "./identity";
+import { LanguageSection } from "./LanguageSection";
 
 /**
- * Settings (#293): for now what the Account tab used to list about the person, shown to them only:
- * the email they sign in with, and the phone (the verified number, or the way to verify it). The
- * rest of the settings (notifications, language) arrives with #218.
+ * Settings (#293): what the Account tab used to list about the person, shown to them only (the
+ * email they sign in with, and the phone: the verified number, or the way to verify it), and the
+ * app's language (#218). The notification settings arrive with the rest of #218.
  */
 export function SettingsScreen() {
   const { t } = useTranslation();
@@ -51,6 +52,7 @@ export function SettingsScreen() {
             )}
           </ListGroup>
         </View>
+        <LanguageSection user={user} />
       </ScrollView>
     </Screen>
   );
