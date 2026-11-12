@@ -930,7 +930,79 @@
   },
   "help": {
     "title": "Apoyo cuando lo necesites",
-    "body": "Aquí encontrarás respuestas a preguntas comunes y una forma de contactar al equipo de Jack Fix It. Todavía las estamos preparando."
+    "intro": "Respuestas a preguntas frecuentes sobre solicitudes, pagos y trabajos.",
+    "sections": {
+      "booking": "Reservas y presupuestos",
+      "payments": "Pagos",
+      "job": "Durante el trabajo",
+      "account": "Cuenta y seguridad"
+    },
+    "faq": {
+      "request": {
+        "question": "¿Cómo pido un servicio?",
+        "answer": "En Inicio, elige una categoría y cuéntanos qué pasa. Agrega fotos o un video si ayudan, y luego tu dirección y el día que te convenga. Enviamos tu solicitud a profesionales cercanos, que te responden con presupuestos."
+      },
+      "quote": {
+        "question": "¿Qué incluye un presupuesto?",
+        "answer": "Un presupuesto es el precio de un profesional por tu trabajo. Muestra qué incluye, cuánto dura aproximadamente el trabajo y cuándo puede empezar el profesional. Puedes abrir el perfil del profesional desde el presupuesto antes de decidir."
+      },
+      "quoteExpiry": {
+        "question": "¿Hasta cuándo es válido un presupuesto?",
+        "answer": "Cada presupuesto muestra cuándo vence. Después ya no se puede aceptar, así que reserva el que quieras mientras siga abierto."
+      },
+      "cancel": {
+        "question": "¿Puedo cancelar después de reservar?",
+        "answer": "Los planes cambian. Por ahora, el equipo de Jack Fix It revisa cada cancelación de forma individual, y lo que pasa con tu pago se decide caso por caso."
+      },
+      "whenPay": {
+        "question": "¿Cuándo pago?",
+        "answer": "Solo cuando aceptas un presupuesto: enviar una solicitud y recibir presupuestos es gratis. Tu pago reserva al profesional, y ves el total, con los impuestos que correspondan, antes de confirmarlo."
+      },
+      "payMethods": {
+        "question": "¿Cómo puedo pagar?",
+        "answer": "Con tarjeta, o con Apple Pay o Google Pay si tu teléfono los ofrece. El pago se hace en la plataforma segura de Stripe, así que Jack Fix It nunca guarda el número de tu tarjeta."
+      },
+      "payFailed": {
+        "question": "¿Qué pasa si mi pago no se completa?",
+        "answer": "Tu trabajo no queda reservado hasta que el pago se complete. Inténtalo de nuevo desde el mismo presupuesto, con la misma tarjeta u otro método de pago, mientras el presupuesto siga abierto."
+      },
+      "proPaid": {
+        "question": "¿Cuándo recibe su pago el profesional?",
+        "answer": "Cuando el trabajo se confirma, no cuando tú pagas. Cuando el profesional marca el trabajo como terminado, empieza un período de confirmación; si nadie reporta un problema antes de que termine, el trabajo se confirma automáticamente y el profesional recibe su pago."
+      },
+      "follow": {
+        "question": "¿Cómo sigo mi trabajo?",
+        "answer": "La página de tu trabajo muestra cada paso a medida que ocurre: en camino, llegó, trabajando, terminado. Un aviso en cada pestaña te lleva hasta ahí, y recibes una notificación en cada paso si tienes las notificaciones activadas."
+      },
+      "arrivalCode": {
+        "question": "¿Qué es el código de llegada?",
+        "answer": "Un código corto que aparece en la página de tu trabajo cuando tu profesional está en camino. Dáselo cuando llegue: lo escribe en su app para registrar su llegada. Compártelo solo en persona, en la puerta."
+      },
+      "chat": {
+        "question": "¿Cómo me comunico con mi profesional?",
+        "answer": "Por el chat de la página de tu trabajo, que se abre en cuanto reservas. Los teléfonos, correos y enlaces se ocultan en los mensajes, así que toda la conversación queda en un solo lugar: Jack Fix It."
+      },
+      "problem": {
+        "question": "¿Y si algo no sale bien con el trabajo?",
+        "answer": "Díselo primero a tu profesional por el chat: es la forma más rápida de resolverlo. Si eso no lo soluciona, el equipo de Jack Fix It revisa lo ocurrido y decide caso por caso, incluido si se devuelve dinero. Mientras haya un problema reportado sin resolver, el profesional no recibe su pago."
+      },
+      "verified": {
+        "question": "¿Cómo se verifica a los profesionales?",
+        "answer": "Antes de que un profesional pueda enviarte un presupuesto, nuestro equipo revisa la información y los documentos que presenta y aprueba su perfil. Verás el sello verde junto al nombre de un profesional verificado."
+      },
+      "privacy": {
+        "question": "¿Quién puede ver mis datos de contacto y mi dirección?",
+        "answer": "Los profesionales nunca ven tu teléfono ni tu correo. Antes de que reserves, solo ven tu ciudad y tu código postal; el profesional que reservas recibe la dirección completa para hacer el trabajo. Para hablar, los dos usan el chat."
+      },
+      "verifyPhone": {
+        "question": "¿Cómo verifico mi teléfono?",
+        "answer": "En Cuenta, abre Configuración y toca Verifica tu teléfono. Te enviamos un código por SMS para confirmar que el número es tuyo. Tu número es privado: los profesionales nunca lo ven."
+      },
+      "language": {
+        "question": "¿En qué idiomas está la app?",
+        "answer": "En inglés y en español. Jack Fix It usa el idioma de tu teléfono; con cualquier otro idioma, se muestra en inglés."
+      }
+    }
   },
   "legal": {
     "title": "Legal",
