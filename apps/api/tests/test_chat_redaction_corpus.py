@@ -81,6 +81,10 @@ EVASIONS: Final = [
     ("t_me_https", "https://t.me/jdoefixit", "jdoefixit"),
     ("zero_width_link", f"wa{ZW}.me/13055550199", "13055550199"),
     ("spelled_dot_com", "visit jdoefixit dot com", "jdoefixit"),
+    # A handle longer than a platform allows: the mask used to stop at the count (#241).
+    ("long_handle", "@" + "jackfixit" * 5, "fixit"),
+    ("long_handle_after_platform", "ig @" + "jack.fixit." * 4 + "miami", "miami"),
+    ("long_cashtag", "$" + "jack-fixit-" * 3 + "miami", "miami"),
 ]
 
 # Not caught yet: each would need a rule whose false positives were judged worse (#72).
@@ -120,6 +124,19 @@ GAPS: Final = [
         "three oh five triple five oh one double nine",
         "double nine",
         "'double' and 'triple' multipliers in a spelled number",
+    ),
+    (
+        "platform_id_over_30",
+        "insta: " + "jackfixit" * 5,
+        "fixit",
+        "an id over 30 characters with no '.' or '-' to stop at is read as no handle at all; "
+        "#241 masks the rest of a handle a rule reads, not what counts as one",
+    ),
+    (
+        "cashtag_over_20",
+        "$" + "jackfixit" * 3,
+        "fixit",
+        "a cashtag over 20 characters with no '-' to stop at is read as no cashtag: as above",
     ),
 ]
 
