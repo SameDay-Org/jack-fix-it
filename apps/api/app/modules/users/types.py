@@ -4,7 +4,10 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, StrEnum
-from typing import Final
+from typing import Final, Literal
+
+# The app languages a user may pick: at sign-up and in PATCH /v1/auth/me (#218).
+Locale = Literal["en", "es"]
 
 
 class UserRole(StrEnum):

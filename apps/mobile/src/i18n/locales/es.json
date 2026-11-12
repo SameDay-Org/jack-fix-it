@@ -976,9 +976,11 @@
       "onTheWay": "{{name}} va en camino",
       "arrived": "{{name}} llegó",
       "working": "{{name}} está trabajando",
-      "done": "Trabajo terminado",
+      "done": "Trabajo confirmado",
       "attention": "Este trabajo necesita atención",
-      "cancelled": "Este trabajo se canceló"
+      "cancelled": "Este trabajo se canceló",
+      "finished": "{{name}} marcó el trabajo como terminado",
+      "thanks": "¡Gracias! Trabajo confirmado"
     },
     "support": {
       "scheduled": "Programado para el {{date}}",
@@ -986,8 +988,8 @@
       "arrivedNow": "Se registró con tu código",
       "working": "Empezó: {{time}}",
       "workingNow": "El trabajo está en marcha",
-      "finished": "{{name}} marcó el trabajo como terminado. Revisa cómo quedó.",
-      "done": "Gracias por reservar con Jack Fix It.",
+      "finished": "Revisa cómo quedó y luego confirma que está terminado.",
+      "done": "El pago se libera a {{inline}}.",
       "attention": "Se reportó un problema en este trabajo.",
       "cancelled": "No necesitas hacer nada más."
     },
@@ -1044,6 +1046,8 @@
       "working": "{{name}} está trabajando",
       "finished": "{{name}} terminó el trabajo",
       "hint": "Abre tu trabajo",
+      "finishedConfirm": "{{name}} terminó el trabajo · confirmar",
+      "confirm": "confirmar",
       "unread_one": "{{count}} mensaje sin leer",
       "unread_other": "{{count}} mensajes sin leer"
     },
@@ -1065,6 +1069,37 @@
       "title": "No pudimos cargar tu trabajo",
       "body": "Revisa tu conexión e inténtalo de nuevo.",
       "retry": "Intentar de nuevo"
+    },
+    "finished": {
+      "confirm": "Confirmar que está terminado",
+      "confirmShort": "Confirmar",
+      "problems": "¿Algún problema?",
+      "deadline": {
+        "today_one": "Se confirma automáticamente hoy a la {{time}} si no respondes.",
+        "today_other": "Se confirma automáticamente hoy a las {{time}} si no respondes.",
+        "tomorrow_one": "Se confirma automáticamente mañana a la {{time}} si no respondes.",
+        "tomorrow_other": "Se confirma automáticamente mañana a las {{time}} si no respondes.",
+        "day_one": "Se confirma automáticamente el {{day}} a la {{time}} si no respondes.",
+        "day_other": "Se confirma automáticamente el {{day}} a las {{time}} si no respondes.",
+        "due": "Se confirmará automáticamente en cualquier momento."
+      }
+    },
+    "confirmSheet": {
+      "title": "¿Confirmas que el trabajo está terminado?",
+      "body": "El pago se libera a {{name}}.",
+      "confirm": "Confirmar",
+      "notYet": "Todavía no",
+      "offline": "No pudimos conectar con Jack Fix It. Revisa tu conexión e inténtalo de nuevo.",
+      "failed": "No pudimos confirmar el trabajo. Inténtalo de nuevo.",
+      "changed": "Este trabajo cambió. Así está ahora.",
+      "gone": "Este trabajo ya no está disponible."
+    },
+    "afterPhotos": {
+      "title": "El trabajo terminado",
+      "photo": "Foto del trabajo terminado, {{number}} de {{total}}",
+      "page": "{{number}} de {{total}}",
+      "openHint": "La abre en pantalla completa",
+      "close": "Cerrar fotos"
     },
     "photos": {
       "title": "Fotos",

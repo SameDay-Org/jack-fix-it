@@ -66,7 +66,11 @@ export function JobBanner({ active, updatedAt }: JobBannerProps) {
             {parts.main}
           </Text>
           {parts.tail ? (
-            <Text numberOfLines={1} className="text-callout font-semibold text-white">
+            <Text
+              numberOfLines={1}
+              className={`text-callout font-semibold ${parts.action ? "text-green-500" : "text-white"}`}
+              testID="job-banner-tail"
+            >
               {` · ${parts.tail}`}
             </Text>
           ) : null}

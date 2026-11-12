@@ -258,8 +258,8 @@ describe("jobText", () => {
     ["onTheWay", "Dan is on the way", "Arriving around 2:30 PM · in 30 min"],
     ["arrived", "Dan has arrived", "Checked in at 1:55 PM"],
     ["working", "Dan is working", "Started at 1:50 PM"],
-    ["finished", "Job's done", "Dan marked the job as done. Take a look at the work."],
-    ["done", "Job's done", "Thanks for booking with Jack Fix It."],
+    ["finished", "Dan marked the job done", "Take a look at the work, then confirm it's done."],
+    ["done", "Job confirmed", "Payment is released to Dan."],
     ["attention", "This job needs attention", "A problem was reported on this job."],
     ["cancelled", "This job was cancelled", "Nothing more is needed from you."],
   ])("%s: %s / %s", (phase, headline, support) => {
@@ -293,8 +293,11 @@ describe("jobText", () => {
     expect(jobText(t, job({ proName: null }), NOW, CLOSE, EN).headline).toBe("Your pro is booked");
     expect(
       jobText(t, { ...JOBS.finished, pro: { ...JOBS.finished.pro, name: null } }, NOW, CLOSE, EN)
-        .support,
-    ).toBe("Your pro marked the job as done. Take a look at the work.");
+        .headline,
+    ).toBe("Your pro marked the job done");
+    expect(
+      jobText(t, { ...JOBS.done, pro: { ...JOBS.done.pro, name: null } }, NOW, CLOSE, EN).support,
+    ).toBe("Payment is released to your pro.");
   });
 
   it("speaks Spanish", async () => {
@@ -320,7 +323,7 @@ describe("bannerText", () => {
     ["onTheWay", "Dan is on the way · 30 min"],
     ["arrived", "Dan has arrived"],
     ["working", "Dan is working"],
-    ["finished", "Dan finished the job"],
+    ["finished", "Dan finished the job · confirm"],
     ["done", null],
     ["attention", null],
     ["cancelled", null],
@@ -359,7 +362,7 @@ describe("bannerText", () => {
     await i18n.changeLanguage("es");
     expect(plain(bannerText(t, JOBS.onTheWay, NOW, CLOSE, "es"))).toBe("Dan va en camino · 30 min");
     expect(bannerText(t, job({ status: "completed", proName: null }), NOW, CLOSE, "es")).toBe(
-      "Tu profesional terminó el trabajo",
+      "Tu profesional terminó el trabajo · confirmar",
     );
   });
 });
