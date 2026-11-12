@@ -63,9 +63,15 @@ const measured = (id: string, height: number) =>
     nativeEvent: { layout: { x: 0, y: 0, width: 288, height } },
   });
 
+/** A finger on a row's title: `top` is where the title's top edge is on screen. */
+const TITLE = 56;
+const pressAt = (id: string, top: number) =>
+  fireEvent.press(title(id), { nativeEvent: { pageY: top + 20, locationY: 20 } });
+
 /** Opens a row as the device would: the press, then the body's measured height, then the fold. */
-const openMeasured = async (id: string, height: number) => {
-  await fireEvent.press(title(id));
+const openMeasured = async (id: string, height: number, top = 0) => {
+  await pressAt(id, top);
+  await fireEvent(title(id), "layout", { nativeEvent: { layout: { height: TITLE } } });
   await measured(id, height);
   await waitFor(() => expect(lastTiming()).toEqual([1, true]));
   await frames();
@@ -290,16 +296,11 @@ describe("useAccordion", () => {
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
-  /** What the device measures once a row has unfolded: the row, its body's fold, the scroll view. */
-  const laidOut = (rowTop: number) => {
-    const at = { x: 0, y: 0, width: 288, pageX: 16 };
+  /** The scroll view's own frame, the one thing measured: under a 24 dp bar, 592 dp tall. */
+  const viewport = () =>
     jest
       .mocked(measure)
-      .mockReturnValueOnce({ ...at, pageY: rowTop, height: 56 })
-      // A fold caught a frame short of its body: the body's own height is what counts.
-      .mockReturnValueOnce({ ...at, pageY: rowTop + 56, height: 1 })
-      .mockReturnValueOnce({ ...at, width: 320, pageX: 0, pageY: 24, height: 592 });
-  };
+      .mockReturnValue({ x: 0, y: 24, width: 320, height: 592, pageX: 0, pageY: 24 });
 
   it.each([
     // The answer ends 184 dp below the scroll view: it comes up by that much.
@@ -307,46 +308,73 @@ describe("useAccordion", () => {
     // Taller than the screen: only until the title reaches the top.
     [100, 844, 476],
   ])("brings an unfolded answer that ends off screen into view (%d, %d)", async (top, body, to) => {
+    viewport();
     await render(<List />);
     await scrolledTo(400);
-    laidOut(top);
 
-    await openMeasured("second", body);
+    await openMeasured("second", body, top);
 
     expect(jest.mocked(scrollTo).mock.calls).toEqual([[expect.anything(), 0, to, true]]);
   });
 
   it("brings it up from where the hold left the scroll, at once under Reduce Motion", async () => {
     jest.mocked(useReducedMotion).mockReturnValue(true);
+    viewport();
     await render(<List />);
     await openMeasured("first", 300);
     await scrolledTo(400);
-    laidOut(500);
 
-    await openMeasured("second", 244);
+    await openMeasured("second", 244, 500);
 
     // The fold of the first row gave 300 back; the reveal starts from there, not from 400.
     expect(scrolls()).toEqual([100, 284]);
     expect(jest.mocked(scrollTo).mock.calls[1][3]).toBe(false);
   });
 
-  it("leaves an answer that fits where it is", async () => {
+  it("counts how far the row rose when the scroll ran out above it", async () => {
+    jest.mocked(useReducedMotion).mockReturnValue(true);
+    viewport();
     await render(<List />);
-    laidOut(200);
+    await openMeasured("first", 300);
+    await scrolledTo(120);
 
-    await openMeasured("second", 244);
+    await openMeasured("second", 244, 500);
 
-    expect(measure).toHaveBeenCalledTimes(3);
+    // Only 120 of the 300 could be given back: the row rose 180, to 320, and its answer now ends
+    // 4 dp below the scroll view.
+    expect(scrolls()).toEqual([0, 4]);
+  });
+
+  it("leaves an answer that fits where it is", async () => {
+    viewport();
+    await render(<List />);
+
+    await openMeasured("second", 244, 200);
+
+    expect(measure).toHaveBeenCalledTimes(1);
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
+  it("does not guess where the row is when the press says nothing (a screen reader)", async () => {
+    viewport();
+    await render(<List />);
+
+    await fireEvent.press(title("second"), { nativeEvent: {} });
+    await measured("second", 844);
+    await waitFor(() => expect(lastTiming()).toEqual([1, true]));
+    await frames();
+
+    expect(expanded("second")).toBe(true);
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
   it("stops moving the page once the reader drags it", async () => {
+    viewport();
     await render(<List />);
     await openMeasured("first", 300);
     await scrolledTo(400);
-    laidOut(500);
 
-    await fireEvent.press(title("third"));
+    await pressAt("third", 500);
     await measured("third", 244);
     await fireEvent(screen.getByTestId("scroll"), "scrollBeginDrag", {
       nativeEvent: { contentOffset: { x: 0, y: 400 } },
