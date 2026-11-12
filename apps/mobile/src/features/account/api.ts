@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useIsMutating, useMutation, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { Image } from "react-native";
 
@@ -11,6 +11,7 @@ import {
   type PatchBody,
   type SessionUser,
 } from "@/api";
+import type { Language } from "@/i18n";
 
 /** PATCH /v1/auth/me: the fields to change, the rest left as they are. */
 export type MeUpdate = PatchBody<"/v1/auth/me">;
@@ -32,6 +33,35 @@ export function useUpdateMe() {
     onSuccess: (user) => setSessionUser(user),
   });
 }
+
+const LOCALE_SAVE_KEY = ["account", "locale"] as const;
+
+/** The language to save, and the session generation it was chosen in. */
+export type LocaleSave = { locale: Language; generation: number };
+
+/**
+ * Saves the app's language to the account (#218), where the server reads it for what it sends.
+ * Saves run one at a time, in the order they were chosen (`scope`): the account ends on the last
+ * choice and the session on the last answer, whatever the network did to the ones before. Each is
+ * pinned to the session it was chosen in, so one still waiting its turn is never sent for the
+ * next account.
+ */
+export function useSaveLocale() {
+  return useMutation({
+    mutationKey: LOCALE_SAVE_KEY,
+    scope: { id: LOCALE_SAVE_KEY.join(".") },
+    mutationFn: ({ locale, generation }: LocaleSave) =>
+      apiPatch("/v1/auth/me", { locale }, { auth: true, generation }),
+    onSuccess: (user) => setSessionUser(user),
+  });
+}
+
+/** Whether a language save is on its way or waiting its turn, whichever screen started it. */
+export const useLocaleSaving = (): boolean => useIsMutating({ mutationKey: LOCALE_SAVE_KEY }) > 0;
+
+/** The same, read at once (in an effect), not on the next render. */
+export const isSavingLocale = (client: QueryClient): boolean =>
+  client.isMutating({ mutationKey: LOCALE_SAVE_KEY }) > 0;
 
 /*
  * The signed-in user lives in the session store, not in the Query cache: a cached copy of

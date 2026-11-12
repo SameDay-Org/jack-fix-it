@@ -922,11 +922,21 @@
   "settings": {
     "title": "Configuración",
     "sections": {
-      "account": "Tu cuenta"
+      "account": "Tu cuenta",
+      "language": "Idioma"
     },
     "email": "Correo",
     "phone": "Teléfono",
-    "phoneNotVerified": "Aún no verificado"
+    "phoneNotVerified": "Aún no verificado",
+    "language": {
+      "en": "English",
+      "es": "Español",
+      "unsaved": {
+        "title": "Aún no se guardó en tu cuenta",
+        "body": "Este dispositivo sigue en español. Puedes intentarlo de nuevo en un momento.",
+        "retry": "Reintentar"
+      }
+    }
   },
   "help": {
     "title": "Apoyo cuando lo necesites",

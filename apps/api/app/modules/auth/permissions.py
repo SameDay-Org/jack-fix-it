@@ -50,6 +50,11 @@ PUBLIC_ROUTES: Final[frozenset[tuple[str, str]]] = frozenset(
         # token. Static pages that link back to the app; they read nothing and echo nothing.
         ("GET", "/v1/payouts/onboarding/return"),
         ("GET", "/v1/payouts/onboarding/refresh"),
+        # A signed-out app removes its own push token (#345): the sign-out's DELETE may not get
+        # through, and no session is left to retry it with. The exact token, an unguessable
+        # device secret the app sends only from that device, is the credential, and only its
+        # one row can go. Rate-limited per IP; answers the same whether or not it was registered.
+        ("POST", "/v1/devices/unregister"),
     }
 )
 

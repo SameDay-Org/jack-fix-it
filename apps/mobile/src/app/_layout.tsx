@@ -11,6 +11,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { attachQueryClient, restoreSession } from "@/api";
+import { AccountLanguage } from "@/features/account";
 import { LaunchShell } from "@/features/launch";
 import { listenForPushTaps } from "@/features/notifications/listen";
 
@@ -43,6 +44,8 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
+          {/* Ahead of the screens: the account's saved language is set before they are drawn. */}
+          <AccountLanguage />
           <LaunchShell />
         </QueryClientProvider>
       </SafeAreaProvider>

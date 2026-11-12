@@ -1,7 +1,9 @@
 """Devices: the only way other modules reach push tokens (ADR 0003).
 
 A user registers and removes only their own tokens; removing answers the same whether or not
-the token existed. Logs carry user and device ids and counts: never a token.
+the token existed. A device with no session left removes its own token by presenting it (#345):
+the exact token is the proof, and nothing but that one row can go. Logs carry user and device
+ids and counts: never a token.
 """
 
 import logging
@@ -39,8 +41,11 @@ class DeviceService:
         from changing before its lock is taken. Owner locks make two registrations of one
         user take turns, so each prunes after seeing the other's device and the cap holds; the
         sorted order makes two crossing transfers (A takes B's token while B takes A's) queue
-        instead of deadlocking. unregister and forget delete one row each and take no other
-        lock while waiting on it, so they cannot close a cycle with this order."""
+        instead of deadlocking. unregister, unregister_by_token and forget delete one row each
+        and take no other lock while waiting on it, so they cannot close a cycle with this order.
+        A sessionless unregister racing a registration of the same token at most waits on
+        that row, in either order, and the one that commits last decides: the delete after
+        the upsert removes the device, the upsert after the delete creates it again."""
         await self._devices.lock_token(data.expo_push_token)
         owners = {user.id}
         if (previous_owner := await self._devices.owner_of(data.expo_push_token)) is not None:
@@ -62,6 +67,17 @@ class DeviceService:
         removed = await self._devices.delete_own(user.id, token)
         await self._session.commit()
         logger.info("device_unregistered", extra={"user_id": str(user.id), "removed": removed})
+
+    async def unregister_by_token(self, token: str) -> None:
+        """Removes the token's device for a caller with no session (#345): holding the exact
+        token is the proof, so it removes that one row and never reads who owned it.
+
+        One DELETE and one commit whether or not the token was registered, so neither the
+        answer nor the work done tells a caller if a token exists. No advisory lock: see the
+        lock order in `register`. The log says only whether a row went."""
+        removed = await self._devices.delete_by_token(token)
+        await self._session.commit()
+        logger.info("device_unregistered_without_session", extra={"removed": removed})
 
     async def targets_for(self, user_id: uuid.UUID) -> list[PushTarget]:
         return [
