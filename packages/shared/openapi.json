@@ -3470,7 +3470,7 @@
             }
           },
           "503": {
-            "description": "location_unavailable: the position could not be kept; drop it and send the next.",
+            "description": "location_unavailable: the position could not be kept (the store is down, or must not hold positions); drop it and send the next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3486,7 +3486,7 @@
           "jobs"
         ],
         "summary": "See where my pro is while on the way (never stored in the database)",
-        "description": "The pro's latest position on the way to the customer's own job, to poll every few\nseconds. `position` is null whenever there is none to show: before the first one, once it\nis too old, and whenever the pro is not on the way (the job's own status says which).\nPositions are kept in memory for a short time only, never in the database.",
+        "description": "The pro's latest position on the way to the customer's own job, to poll every few\nseconds. `position` is null whenever there is none to show: before the first one, once it\nis too old, and whenever the pro is not on the way (the job's own status says which).\nPositions are kept in memory for a short time only, never in the database, and every\nresponse says `Cache-Control: no-store`.",
         "operationId": "get_pro_location_v1_jobs__job_id__pro_location_get",
         "security": [
           {
@@ -3548,6 +3548,16 @@
           },
           "404": {
             "description": "not_found: no job of the caller with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "location_unavailable: the store must not hold positions (a deploy problem); there is none to show until it is fixed.",
             "content": {
               "application/json": {
                 "schema": {

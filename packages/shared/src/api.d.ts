@@ -897,7 +897,8 @@ export interface paths {
          * @description The pro's latest position on the way to the customer's own job, to poll every few
          *     seconds. `position` is null whenever there is none to show: before the first one, once it
          *     is too old, and whenever the pro is not on the way (the job's own status says which).
-         *     Positions are kept in memory for a short time only, never in the database.
+         *     Positions are kept in memory for a short time only, never in the database, and every
+         *     response says `Cache-Control: no-store`.
          */
         get: operations["get_pro_location_v1_jobs__job_id__pro_location_get"];
         /**
@@ -5986,6 +5987,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description location_unavailable: the store must not hold positions (a deploy problem); there is none to show until it is fixed. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     share_pro_location_v1_jobs__job_id__pro_location_put: {
@@ -6064,7 +6074,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description location_unavailable: the position could not be kept; drop it and send the next. */
+            /** @description location_unavailable: the position could not be kept (the store is down, or must not hold positions); drop it and send the next. */
             503: {
                 headers: {
                     [name: string]: unknown;
