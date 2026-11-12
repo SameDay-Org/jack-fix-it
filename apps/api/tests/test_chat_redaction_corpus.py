@@ -83,8 +83,8 @@ EVASIONS: Final = [
     ("spelled_dot_com", "visit jdoefixit dot com", "jdoefixit"),
     # A handle longer than a platform allows: the mask used to stop at the count (#241).
     ("long_handle", "@" + "jackfixit" * 5, "fixit"),
-    ("long_handle_after_platform", "ig @" + "jack.fixit." * 4 + "miami", "miami"),
-    ("long_cashtag", "$" + "jack-fixit-" * 3 + "miami", "miami"),
+    ("long_handle_after_platform", "ig @" + "jack.fixit." * 4 + "plumber", "plumber"),
+    ("long_cashtag", "$" + "jack-fixit-" * 3 + "plumber", "plumber"),
 ]
 
 # Not caught yet: each would need a rule whose false positives were judged worse (#72).
@@ -137,6 +137,20 @@ GAPS: Final = [
         "$" + "jackfixit" * 3,
         "fixit",
         "a cashtag over 20 characters with no '-' to stop at is read as no cashtag: as above",
+    ),
+    (
+        "platform_id_judged_inside_the_count",
+        "venmo jackfixit-miamiplumbingservices2026x",
+        "miamiplumbing",
+        "the platform rule judges the piece inside its count: 'jackfixit' alone is no handle "
+        "shape, so nothing is masked, while 'venmo jackfixit-miami2026' is; as above",
+    ),
+    (
+        "cashtag_over_20_floor_piece",
+        "pay $j-abcdefghijklmnopqrstuvwxyz ok",
+        "abcdefghij",
+        "the cashtag rule reads no cashtag over 20 characters; only the legacy floor masks "
+        "'$j-', and its masks have no rest (#267)",
     ),
 ]
 

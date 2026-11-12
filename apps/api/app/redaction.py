@@ -15,8 +15,8 @@ first. It masks, with the language-neutral MASK:
 - URLs and domains: http(s)://, www., a known TLD, any TLD followed by a path ("linktr.ee/x"),
   a spaced ". com" and a spelled "dot com";
 - social and payment handles: "@handle", "$cashtag", and a platform word (instagram, ig,
-  snap, whatsapp, venmo, gmail, ...) followed by an id, each to the end of its token when it
-  is longer than the platform allows (#241);
+  snap, whatsapp, venmo, gmail, ...) followed by an id; what these rules mask runs to the end
+  of its token, however long it is (#241);
 - addresses: US street addresses (a house number, a street name, a suffix such as St or Avenue,
   in either order, with directions and units), the Miami grid ("8800 SW 72nd"), US-1 style
   highways, PO boxes, apartment and suite numbers, and the Spanish forms (Calle, Avenida, Av.,
@@ -1379,8 +1379,11 @@ _UNMARKED_FIRST: Final[frozenset[_Search]] = frozenset(
 # and ending as its body ends (a platform id may end on "." or "-", the other two end on a word
 # character and the marks glued to it). The rules in order still read the text with the counted
 # mask, as before, so they hide what they hid: the rest is masked on top of them (_hidden), and
-# a text never shows what it did not show before. A token no rule reads at all is still no
-# contact (a platform id over 30 characters with no "." or "-" to stop at, a cashtag over 20).
+# a text never shows what was hidden before. Only what a rule masks has a rest: a long token
+# its rule does not mask is still no contact, so the same texts are flagged. The platform rule
+# judges the piece inside its count alone ("venmo jackfixit-" and a long word leaves
+# "jackfixit", no handle shape; "ig " and 31 letters has no "." or "-" to stop at), and a
+# cashtag over 20 characters with no "-" to stop at is no cashtag.
 # Each rest is one run of a single class: the engine walks back from the run's end once and
 # keeps no state per character, so a handle of a million characters costs one pass.
 _TOKEN_RESTS: Final[dict[_Search, re.Pattern[str]]] = {

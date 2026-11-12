@@ -87,8 +87,9 @@ async def test_a_long_handle_is_hidden_whole_and_its_original_sealed(
     assert message.original_ciphertext is not None
     assert message.original_key_id is not None
     assert message.original_expires_at == message.created_at + timedelta(days=RETENTION_DAYS)
-    for leak in LEAKS:
-        assert leak.encode() not in message.original_ciphertext
+    # A long slice of what was typed: two bytes turn up in random ciphertext by chance.
+    assert PIECE * 4 in typed
+    assert (PIECE * 4).encode() not in message.original_ciphertext
     sealed = Sealed(message.original_key_id, message.original_ciphertext)
     assert cipher().decrypt(sealed, original_associated_data(message.id)) == typed
 
