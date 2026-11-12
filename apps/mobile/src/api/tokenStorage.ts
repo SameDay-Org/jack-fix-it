@@ -6,6 +6,13 @@ const REFRESH_TOKEN_KEY = "jackfixit.session.refreshToken";
 // The id of the account whose sign-up flow this device has not finished (#292): next to the token
 // it belongs with, in the one store the app keeps between launches.
 const ONBOARDING_USER_KEY = "jackfixit.session.onboardingUserId";
+// The person closed the notifications pre-prompt on this device (#334). Not account data: it
+// stays across sign-outs, like the permission it is about.
+const NOTIFICATIONS_PROMPT_KEY = "jackfixit.notifications.promptDismissed";
+const DISMISSED = "1";
+// The push token this device last sent the API, and whether an account may still hold it after a
+// removal that never completed (#334). The device's, not an account's: it stays across sign-outs.
+const PUSH_TOKEN_KEY = "jackfixit.notifications.pushToken";
 const WRITE_OPTIONS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
 };
@@ -73,4 +80,84 @@ export const onboardingMarkerStorage = {
 
   clear: (): Promise<void> =>
     serialized(() => SecureStore.deleteItemAsync(ONBOARDING_USER_KEY).catch(() => undefined)),
+};
+
+/**
+ * Whether the notifications pre-prompt was closed on this device. A failed read counts as not
+ * closed (the card can be closed again); a failed write rejects, for the caller to log.
+ */
+export const notificationsPromptStorage = {
+  readDismissed: (): Promise<boolean> =>
+    serialized(() =>
+      SecureStore.getItemAsync(NOTIFICATIONS_PROMPT_KEY).then(
+        (value) => value === DISMISSED,
+        () => false,
+      ),
+    ),
+
+  writeDismissed: (): Promise<void> =>
+    serialized(() => SecureStore.setItemAsync(NOTIFICATIONS_PROMPT_KEY, DISMISSED, WRITE_OPTIONS)),
+};
+
+/**
+ * What the device records about its push token (`features/notifications/pushToken.ts` owns the
+ * rules):
+ * - `owed`: an account may hold `token`; its removal is not confirmed.
+ * - `unanswered`: a PUT of `token` left this device and no answer to it is recorded. It may still
+ *   land, so an acknowledged PUT after it does not prove who holds the token.
+ * - `retired`: tokens Expo replaced, each until the server confirms its removal.
+ * A flag or a list that holds nothing is not written.
+ */
+export type StoredPushToken = {
+  token: string;
+  owed: boolean;
+  unanswered?: true;
+  retired?: string[];
+};
+
+function parsePushToken(value: string | null): StoredPushToken | null {
+  if (value === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const { token, owed, unanswered, retired } = parsed as Record<string, unknown>;
+    if (typeof token !== "string" || token === "" || typeof owed !== "boolean") return null;
+    const tokens = Array.isArray(retired)
+      ? retired.filter((item): item is string => typeof item === "string" && item !== "")
+      : [];
+    return {
+      token,
+      owed,
+      ...(unanswered === true ? { unanswered: true as const } : {}),
+      ...(tokens.length > 0 ? { retired: tokens } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The push token's state, in one entry so a token and its `owed` flag are written together.
+ * Nothing here is logged. An entry that cannot be parsed counts as no token (the app asks Expo
+ * again). A read that fails rejects: the entry may be there, with an account still holding its
+ * token, so the caller must not take it for no token. A failed write rejects too: nothing was
+ * recorded.
+ */
+export const pushTokenStorage = {
+  read: (): Promise<StoredPushToken | null> =>
+    serialized(() => SecureStore.getItemAsync(PUSH_TOKEN_KEY).then(parsePushToken)),
+
+  write: (value: StoredPushToken): Promise<void> =>
+    serialized(() =>
+      SecureStore.setItemAsync(
+        PUSH_TOKEN_KEY,
+        JSON.stringify({
+          token: value.token,
+          owed: value.owed,
+          ...(value.unanswered ? { unanswered: true } : {}),
+          ...(value.retired?.length ? { retired: value.retired } : {}),
+        }),
+        WRITE_OPTIONS,
+      ),
+    ),
 };

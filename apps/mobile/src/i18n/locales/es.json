@@ -923,7 +923,8 @@
     "title": "Configuración",
     "sections": {
       "account": "Tu cuenta",
-      "language": "Idioma"
+      "language": "Idioma",
+      "notifications": "Notificaciones"
     },
     "email": "Correo",
     "phone": "Teléfono",
@@ -936,6 +937,24 @@
         "body": "Este dispositivo sigue en español. Puedes intentarlo de nuevo en un momento.",
         "retry": "Reintentar"
       }
+    }
+  },
+  "notifications": {
+    "channel": "Novedades",
+    "prompt": {
+      "title": "Activa las notificaciones",
+      "customer": "Recibe avisos cuando tu profesional vaya en camino.",
+      "pro": "Entérate de trabajos nuevos cerca de ti y de cuando un cliente te contrata.",
+      "turnOn": "Activar",
+      "notNow": "Ahora no"
+    },
+    "settings": {
+      "label": "Notificaciones",
+      "on": "Activadas",
+      "off": "Desactivadas",
+      "blocked": "Desactivadas en los ajustes del teléfono",
+      "askHint": "Le pide a tu teléfono activar las notificaciones",
+      "openHint": "Abre los ajustes del teléfono"
     }
   },
   "help": {
