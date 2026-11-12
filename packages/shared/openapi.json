@@ -383,7 +383,7 @@
           "auth"
         ],
         "summary": "Update the current user",
-        "description": "Sets the caller's own first and last name (#165), home city and state and ID photo\n(#250). Both names are required together while they are not stored; afterwards either may\nchange alone. The city and the state are set together, or both cleared with null. The\nphoto is the caller's own profile_photo upload key; for a pro without a public profile\nphoto it becomes that photo too. Nothing changes when any field is refused.",
+        "description": "Sets the caller's own first and last name (#165), home city and state, ID photo (#250)\nand app language (#218). Both names are required together while they are not stored;\nafterwards either may change alone. The city and the state are set together, or both\ncleared with null. The photo is the caller's own profile_photo upload key; for a pro\nwithout a public profile photo it becomes that photo too. The locale (en or es) is also\nthe language of later pushes and emails. Nothing changes when any field is refused.",
         "operationId": "update_me_v1_auth_me_patch",
         "requestBody": {
           "content": {
@@ -407,7 +407,7 @@
             }
           },
           "422": {
-            "description": "validation_error: an invalid or null name, an unknown field, an empty body, one name while the other is not stored yet, or home_city without home_state (or the other way round). invalid_media: photo_key is not the caller's own profile_photo upload.",
+            "description": "validation_error: an invalid or null name, an unsupported or null locale (only en and es), an unknown field, an empty body, one name while the other is not stored yet, or home_city without home_state (or the other way round). invalid_media: photo_key is not the caller's own profile_photo upload.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6271,12 +6271,28 @@
             ],
             "title": "Photo Key",
             "description": "Key of the caller's own profile_photo upload (POST /v1/uploads); null clears."
+          },
+          "locale": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "en",
+                  "es"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locale",
+            "description": "The app language, as at sign-up: en or es. Never null."
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "MeUpdateRequest",
-        "description": "PATCH /v1/auth/me: the caller's own names (#165) and ID card fields (#250). Omit a field\nto keep it. A name is never null. home_city and home_state travel together: both set, or\nboth null to clear them. photo_key null clears the ID photo."
+        "description": "PATCH /v1/auth/me: the caller's own names (#165), ID card fields (#250) and app language\n(#218). Omit a field to keep it. A name or the locale is never null. home_city and\nhome_state travel together: both set, or both null to clear them. photo_key null clears\nthe ID photo."
       },
       "MediaOut": {
         "properties": {

@@ -152,11 +152,12 @@ export interface paths {
         head?: never;
         /**
          * Update the current user
-         * @description Sets the caller's own first and last name (#165), home city and state and ID photo
-         *     (#250). Both names are required together while they are not stored; afterwards either may
-         *     change alone. The city and the state are set together, or both cleared with null. The
-         *     photo is the caller's own profile_photo upload key; for a pro without a public profile
-         *     photo it becomes that photo too. Nothing changes when any field is refused.
+         * @description Sets the caller's own first and last name (#165), home city and state, ID photo (#250)
+         *     and app language (#218). Both names are required together while they are not stored;
+         *     afterwards either may change alone. The city and the state are set together, or both
+         *     cleared with null. The photo is the caller's own profile_photo upload key; for a pro
+         *     without a public profile photo it becomes that photo too. The locale (en or es) is also
+         *     the language of later pushes and emails. Nothing changes when any field is refused.
          */
         patch: operations["update_me_v1_auth_me_patch"];
         trace?: never;
@@ -1904,9 +1905,10 @@ export interface components {
         };
         /**
          * MeUpdateRequest
-         * @description PATCH /v1/auth/me: the caller's own names (#165) and ID card fields (#250). Omit a field
-         *     to keep it. A name is never null. home_city and home_state travel together: both set, or
-         *     both null to clear them. photo_key null clears the ID photo.
+         * @description PATCH /v1/auth/me: the caller's own names (#165), ID card fields (#250) and app language
+         *     (#218). Omit a field to keep it. A name or the locale is never null. home_city and
+         *     home_state travel together: both set, or both null to clear them. photo_key null clears
+         *     the ID photo.
          */
         MeUpdateRequest: {
             /**
@@ -1934,6 +1936,11 @@ export interface components {
              * @description Key of the caller's own profile_photo upload (POST /v1/uploads); null clears.
              */
             photo_key?: string | null;
+            /**
+             * Locale
+             * @description The app language, as at sign-up: en or es. Never null.
+             */
+            locale?: ("en" | "es") | null;
         };
         /** MediaOut */
         MediaOut: {
@@ -3697,7 +3704,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description validation_error: an invalid or null name, an unknown field, an empty body, one name while the other is not stored yet, or home_city without home_state (or the other way round). invalid_media: photo_key is not the caller's own profile_photo upload. */
+            /** @description validation_error: an invalid or null name, an unsupported or null locale (only en and es), an unknown field, an empty body, one name while the other is not stored yet, or home_city without home_state (or the other way round). invalid_media: photo_key is not the caller's own profile_photo upload. */
             422: {
                 headers: {
                     [name: string]: unknown;
