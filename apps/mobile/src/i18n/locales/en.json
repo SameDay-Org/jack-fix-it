@@ -957,9 +957,11 @@
       "onTheWay": "{{name}} is on the way",
       "arrived": "{{name}} has arrived",
       "working": "{{name}} is working",
-      "done": "Job's done",
+      "done": "Job confirmed",
       "attention": "This job needs attention",
-      "cancelled": "This job was cancelled"
+      "cancelled": "This job was cancelled",
+      "finished": "{{name}} marked the job done",
+      "thanks": "Thanks! Job confirmed"
     },
     "support": {
       "scheduled": "Scheduled for {{date}}",
@@ -967,8 +969,8 @@
       "arrivedNow": "Checked in with your code",
       "working": "Started at {{time}}",
       "workingNow": "The work is under way",
-      "finished": "{{name}} marked the job as done. Take a look at the work.",
-      "done": "Thanks for booking with Jack Fix It.",
+      "finished": "Take a look at the work, then confirm it's done.",
+      "done": "Payment is released to {{inline}}.",
       "attention": "A problem was reported on this job.",
       "cancelled": "Nothing more is needed from you."
     },
@@ -1025,6 +1027,8 @@
       "working": "{{name}} is working",
       "finished": "{{name}} finished the job",
       "hint": "Opens your job",
+      "finishedConfirm": "{{name}} finished the job · confirm",
+      "confirm": "confirm",
       "unread_one": "{{count}} unread message",
       "unread_other": "{{count}} unread messages"
     },
@@ -1046,6 +1050,37 @@
       "title": "We couldn't load your job",
       "body": "Check your connection and try again.",
       "retry": "Try again"
+    },
+    "finished": {
+      "confirm": "Confirm the job is done",
+      "confirmShort": "Confirm",
+      "problems": "Problems?",
+      "deadline": {
+        "today_one": "Confirms automatically today at {{time}} if you don't answer.",
+        "today_other": "Confirms automatically today at {{time}} if you don't answer.",
+        "tomorrow_one": "Confirms automatically tomorrow at {{time}} if you don't answer.",
+        "tomorrow_other": "Confirms automatically tomorrow at {{time}} if you don't answer.",
+        "day_one": "Confirms automatically on {{day}} at {{time}} if you don't answer.",
+        "day_other": "Confirms automatically on {{day}} at {{time}} if you don't answer.",
+        "due": "Confirms automatically any moment now."
+      }
+    },
+    "confirmSheet": {
+      "title": "Confirm the job is done?",
+      "body": "Payment is released to {{name}}.",
+      "confirm": "Confirm",
+      "notYet": "Not yet",
+      "offline": "We couldn't reach Jack Fix It. Check your connection and try again.",
+      "failed": "We couldn't confirm the job. Please try again.",
+      "changed": "This job changed. Here's where it stands now.",
+      "gone": "This job is no longer available."
+    },
+    "afterPhotos": {
+      "title": "The finished work",
+      "photo": "Photo of the finished work, {{number}} of {{total}}",
+      "page": "{{number}} of {{total}}",
+      "openHint": "Opens it full screen",
+      "close": "Close photos"
     },
     "photos": {
       "title": "Photos",
