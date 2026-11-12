@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen } from "@testing-library/react-native";
 import { router } from "expo-router";
 import type { ReactElement } from "react";
@@ -21,8 +22,13 @@ jest.mock(
   () => jest.requireActual("react-native-safe-area-context/jest/mock").default,
 );
 
+// Settings saves the language through a mutation (#218), so it renders under a Query cache.
 const renderScreen = (ui: ReactElement) =>
-  render(<SafeAreaProvider initialMetrics={METRICS}>{ui}</SafeAreaProvider>);
+  render(
+    <SafeAreaProvider initialMetrics={METRICS}>
+      <QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>
+    </SafeAreaProvider>,
+  );
 
 beforeEach(() => {
   jest.mocked(router.push).mockClear();
