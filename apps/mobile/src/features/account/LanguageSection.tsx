@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
 
@@ -26,28 +26,40 @@ export function LanguageSection({ user }: { user: SessionUser }) {
   const saving = useLocaleSaving();
   // A retry keeps the notice up, with its button busy; a first save is silent until it fails.
   const [retrying, setRetrying] = useState(false);
+  // Counts the choices and the retries. A retry speaks for the screen only while it is the latest
+  // of them: once another language is chosen, or sent again, what became of it is old news.
+  const attempt = useRef(0);
   const saved = languageOf(user.locale);
   const unsaved = saved !== null && saved !== language;
 
   const choose = (next: Language) => {
     if (next === language) return;
-    // A new choice is a first save again, silent until it fails, whatever a retry is still doing.
+    // A new choice is a first save again, silent until it fails, whatever a retry is still doing:
+    // that retry, failing later, has nothing to say about this choice.
+    attempt.current += 1;
     setRetrying(false);
     setLanguage(next);
     save.mutate({ locale: next, generation: sessionGeneration() });
   };
   const retry = () => {
+    const mine = ++attempt.current;
+    const latest = () => mine === attempt.current;
     setRetrying(true);
     // The promise, not the per-call callbacks: those are dropped once another save starts.
     const generation = sessionGeneration();
     save
       .mutateAsync({ locale: language, generation })
       // Still not saved: the notice has not changed, so a screen reader would hear nothing.
-      // Unless the session ended meanwhile: there is nobody left to tell.
+      // Unless the session ended meanwhile (there is nobody left to tell), or a newer choice or
+      // retry took over: the language this one was sending is no longer the one waiting.
       .catch(() => {
-        if (isCurrentGeneration(generation)) announce(t("settings.language.unsaved.title"));
+        if (latest() && isCurrentGeneration(generation)) {
+          announce(t("settings.language.unsaved.title"));
+        }
       })
-      .finally(() => setRetrying(false));
+      .finally(() => {
+        if (latest()) setRetrying(false);
+      });
   };
 
   return (

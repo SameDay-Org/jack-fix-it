@@ -243,6 +243,30 @@ describe("Settings: language", () => {
     expect(spoken).not.toHaveBeenCalled();
   });
 
+  it("a retry that fails after a new choice says nothing: it no longer speaks for the screen", async () => {
+    await renderSettings();
+    await fireEvent.press(radio("Español"));
+    await answer(0, (save) => save.reject(new TypeError("Network request failed")));
+    await fireEvent.press(await screen.findByRole("button", { name: "Reintentar" }));
+    await waitFor(() => expect(saves).toHaveLength(2));
+
+    const spoken = jest.mocked(AccessibilityInfo.announceForAccessibilityWithOptions);
+    spoken.mockClear();
+    await fireEvent.press(radio("English"));
+    expect(notice()).toBeNull();
+
+    // The Spanish retry fails while English waits its turn, then English is saved: the account
+    // and the screen agree, and nothing was left unsaved to tell a screen reader about.
+    await answer(1, (save) => save.reject(new TypeError("Network request failed")));
+    await waitFor(() => expect(saves).toHaveLength(3));
+    await answer(2, (save) => save.resolve(saved("en")));
+
+    await waitFor(() => expect(sessionLocale()).toBe("en"));
+    expect(i18n.language).toBe("en");
+    expect(notice()).toBeNull();
+    expect(spoken).not.toHaveBeenCalled();
+  });
+
   it("shows no notice for an account saved in a language the app is not written in", async () => {
     signIn("pt");
 
