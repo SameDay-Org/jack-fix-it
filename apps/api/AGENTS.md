@@ -69,6 +69,9 @@ rules apply.
   refusal or a dry run writes nothing. Append-only: a trigger refuses UPDATE, DELETE and
   TRUNCATE (SQLSTATE 42501). before/after hold ids, statuses, Stripe object ids and
   timestamps only, never PII or secrets; a new staff money action adds an `AuditAction`.
+  A staff action the BDC takes too goes through `AuditService.record_staff_action`, which
+  takes an active agent or admin: today a support ticket's status (#274,
+  `PATCH /v1/admin/support/tickets/{id}`), written in the change's transaction the same way.
 
 ## Worker
 
