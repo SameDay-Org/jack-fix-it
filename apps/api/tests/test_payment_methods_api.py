@@ -5,7 +5,7 @@ import asyncio
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -13,18 +13,22 @@ import httpx
 import pytest
 from fastapi import FastAPI, Request
 from sqlalchemy import select, text, update
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
 from app.db import get_session
 from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailableError
 from app.integrations.stripe_payment_methods import (
+    LIST_INCOMPLETE,
     CreatedSetupIntent,
     SavedCard,
     StripePaymentMethods,
+    StripePaymentMethodsClient,
     get_stripe_payment_methods,
 )
 from app.integrations.stripe_payments import StripePayments, get_stripe_payments
+from app.modules.payment_methods.repository import PaymentMethodRepository, WalletBusyError
 from app.modules.users.models import User
 from app.modules.users.types import UserRole
 from app.observability import JsonFormatter
@@ -39,6 +43,8 @@ from tests.conftest import (
 from tests.test_auth_api import register as register_account
 from tests.test_devices_api import caller
 from tests.test_payments_api import FakeStripePayments
+from tests.test_stripe_connect import FAKE_KEY, Answer, RecordingHTTPClient
+from tests.test_stripe_payment_methods import error_body, list_page, method_body, page_ids
 
 BASE = "/v1/me/payment-methods"
 SETUP = f"{BASE}/setup-intent"
@@ -71,6 +77,13 @@ SECRET_SENTINEL = "ZQSETUPSECRETZQ"
 BRAND_SENTINEL = "zqbrandzq"
 LAST4_SENTINEL = "zqxj"
 EXP_YEAR_SENTINEL = 73_591_846
+# How many backends of the test database wait on a lock another one holds.
+LOCK_WAITERS = text(
+    "SELECT count(*) FROM pg_stat_activity "
+    "WHERE datname = current_database() AND cardinality(pg_blocking_pids(pid)) > 0"
+)
+# A wait for the wallet's lock, and a time for a change's Stripe calls, short enough to test.
+SHORT_CHANGE = {"payment_method_change_timeout_seconds": 0.2}
 
 
 @dataclass
@@ -78,7 +91,9 @@ class FakeStripePaymentMethods:
     """Keeps cards as Stripe does and records every call, in order. `errors` makes one
     operation fail, after the call is recorded. A card whose `customer_id` is None is detached.
     `list_cards` answers the oldest first, the reverse of what the API must return.
-    `clears_default_on_detach` False: Stripe keeps pointing at a detached default."""
+    `clears_default_on_detach` False: Stripe keeps pointing at a detached default.
+    `on_read` is awaited by a read of one card or of the default once it has its answer, with
+    the call: a test holds the request there, its read already made."""
 
     cards: dict[str, SavedCard] = field(default_factory=dict)
     defaults: dict[str, str] = field(default_factory=dict)  # customer id -> PaymentMethod id
@@ -86,6 +101,7 @@ class FakeStripePaymentMethods:
     calls: list[tuple[str, ...]] = field(default_factory=list)
     clears_default_on_detach: bool = True
     clock: int = 1_790_000_000
+    on_read: Callable[[tuple[str, ...]], Awaitable[None]] | None = None
 
     def add_card(self, customer_id: str | None, **fields: Any) -> SavedCard:
         """A card attached to the customer, a minute newer than the last one added."""
@@ -126,13 +142,21 @@ class FakeStripePaymentMethods:
         self._begin("list_cards", customer_id)
         return tuple(card for card in self.cards.values() if card.customer_id == customer_id)
 
+    async def _answered(self, *call: str) -> None:
+        if self.on_read is not None:
+            await self.on_read(call)
+
     async def retrieve_card(self, payment_method_id: str) -> SavedCard | None:
         self._begin("retrieve_card", payment_method_id)
-        return self.cards.get(payment_method_id)
+        card = self.cards.get(payment_method_id)
+        await self._answered("retrieve_card", payment_method_id)
+        return card
 
     async def default_payment_method(self, customer_id: str) -> str | None:
         self._begin("default_payment_method", customer_id)
-        return self.defaults.get(customer_id)
+        default = self.defaults.get(customer_id)
+        await self._answered("default_payment_method", customer_id)
+        return default
 
     async def set_default_payment_method(self, customer_id: str, payment_method_id: str) -> None:
         self._begin("set_default_payment_method", customer_id, payment_method_id)
@@ -145,6 +169,9 @@ class FakeStripePaymentMethods:
     async def detach(self, payment_method_id: str) -> None:
         self._begin("detach", payment_method_id)
         card = self.cards[payment_method_id]
+        if card.customer_id is None:
+            # As Stripe does for a PaymentMethod detached already: a 4xx with no code.
+            raise StripeRejectedError(request_id="req_fake_detach")
         self.cards[payment_method_id] = replace(card, customer_id=None)
         if (
             self.clears_default_on_detach
@@ -180,10 +207,14 @@ def install_fakes(app: FastAPI) -> Fakes:
 
 
 @pytest.fixture
-def settings() -> Settings:
+def settings(request: pytest.FixtureRequest) -> Settings:
     # The secret key is passed as None so a STRIPE_SECRET_KEY in the shell never reaches the
-    # app: without the fakes, the real dependencies find no Stripe.
-    return make_settings(stripe_secret_key=None, stripe_publishable_key=PUBLISHABLE_KEY)
+    # app: without the fakes, the real dependencies find no Stripe. A test asks for other
+    # values with an indirect parameter.
+    overrides: dict[str, object] = getattr(request, "param", {})
+    return make_settings(
+        stripe_secret_key=None, stripe_publishable_key=PUBLISHABLE_KEY, **overrides
+    )
 
 
 @pytest.fixture
@@ -210,6 +241,52 @@ async def stored_customer(session: AsyncSession, user_id: uuid.UUID) -> str | No
 
 def default_path(payment_method_id: str) -> str:
     return f"{BASE}/{payment_method_id}/default"
+
+
+async def committed_wallet(committed: Committed) -> tuple[uuid.UUID, dict[str, str], str]:
+    """The fixture's customer, registered, with a Stripe Customer stored and committed: the
+    id, the auth headers, the customer."""
+    account = (await register_account(committed.client, email=committed.email)).json()
+    user_id = uuid.UUID(account["user"]["id"])
+    customer_id = f"cus_fake{uuid.uuid4().hex[:12]}"
+    async with committed.sessions() as session:
+        await session.execute(
+            update(User).where(User.id == user_id).values(stripe_customer_id=customer_id)
+        )
+        await session.commit()
+    return user_id, {"Authorization": f"Bearer {account['access_token']}"}, customer_id
+
+
+async def waits_on_a_lock(
+    sessions: async_sessionmaker[AsyncSession], request: asyncio.Task[httpx.Response]
+) -> bool:
+    """True once a backend of the test database waits on a lock while the request runs; False
+    when the request ends without one having waited. Each poll is the query itself, on its own
+    connection, in its own transaction (Postgres keeps one view of the backends per
+    transaction)."""
+    try:
+        async with sessions() as monitor, asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+            while not request.done():
+                if await monitor.scalar(LOCK_WAITERS):
+                    return True
+                await monitor.rollback()
+    except TimeoutError:
+        pytest.fail(f"the request neither ended nor waited within {LOCK_WAIT_DEADLINE_SECONDS} s")
+    return False
+
+
+def recorded_stripe(app: FastAPI, *answers: Answer, max_pages: int = 5) -> RecordingHTTPClient:
+    """The real wrapper over recorded HTTP answers, in place of the fake (after
+    install_fakes): what the API does with Stripe's own pages."""
+    http = RecordingHTTPClient(*answers)
+    app.state.fake_stripe_payment_methods = StripePaymentMethodsClient(
+        secret_key=FAKE_KEY,
+        timeout_seconds=5.0,
+        max_network_retries=0,
+        list_max_pages=max_pages,
+        http_client=http,
+    )
+    return http
 
 
 # AC1: the setup intent, and the customer created once
@@ -275,10 +352,6 @@ async def test_two_first_setup_intents_at_once_make_one_customer(
     account = (await register_account(committed.client, email=committed.email)).json()
     user_id = uuid.UUID(account["user"]["id"])
     headers = {"Authorization": f"Bearer {account['access_token']}"}
-    waiting = text(
-        "SELECT count(*) FROM pg_stat_activity "
-        "WHERE datname = current_database() AND cardinality(pg_blocking_pids(pid)) > 0"
-    )
     in_flight = False
 
     async def as_stripe_with_a_create_in_flight() -> None:
@@ -290,8 +363,8 @@ async def test_two_first_setup_intents_at_once_make_one_customer(
             # Answers only once the other call is waiting on a lock: the race is real. Each
             # poll is the query itself, on its own connection.
             async with committed.sessions() as monitor, asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
-                while not await monitor.scalar(waiting):
-                    pass
+                while not await monitor.scalar(LOCK_WAITERS):
+                    await monitor.rollback()
         except TimeoutError:
             pytest.fail("the second call never waited on the lock of the first")
         finally:
@@ -400,6 +473,105 @@ async def test_list_returns_the_wallet_fields_only_newest_first(
     assert [(item["last4"], item["is_default"]) for item in theirs.json()] == [("0005", False)]
 
 
+async def test_list_shows_a_default_that_is_on_stripes_second_page(
+    app: FastAPI, db_client: httpx.AsyncClient, db_session: AsyncSession, fakes: Fakes
+) -> None:
+    """A wallet of more than one Stripe page: every card is listed, and the default, an older
+    card Stripe answers on the second page, is marked."""
+    _, headers, customer_id = await customer_with_stripe(db_session)
+    first, second = page_ids(1), page_ids(2, size=1)
+    http = recorded_stripe(
+        app,
+        list_page(first, has_more=True),
+        list_page(second, has_more=False),
+        (
+            200,
+            {
+                "id": customer_id,
+                "object": "customer",
+                "invoice_settings": {"default_payment_method": second[0]},
+            },
+        ),
+    )
+
+    response = await db_client.get(BASE, headers=headers)
+
+    assert response.status_code == 200
+    listed = response.json()
+    assert {item["id"] for item in listed} == {*first, *second}
+    assert len(listed) == len(first) + 1
+    assert [item["id"] for item in listed if item["is_default"]] == second
+    stripe = "https://api.stripe.com/v1"
+    assert [url.partition("?")[0] for _, url, _, _ in http.sent] == [
+        f"{stripe}/payment_methods",
+        f"{stripe}/payment_methods",
+        f"{stripe}/customers/{customer_id}",
+    ]
+    assert http.sent[1][1].endswith(f"&starting_after={first[-1]}")
+
+
+async def test_a_later_stripe_page_failing_is_503_never_the_cards_read_so_far(
+    app: FastAPI, db_client: httpx.AsyncClient, db_session: AsyncSession, fakes: Fakes
+) -> None:
+    _, headers, _ = await customer_with_stripe(db_session)
+    http = recorded_stripe(
+        app,
+        list_page(page_ids(1), has_more=True),
+        (500, error_body("api_error", "Boom on the second page")),
+    )
+
+    response = await db_client.get(BASE, headers=headers)
+
+    assert (response.status_code, response.json()) == (503, UNAVAILABLE)
+    assert len(http.sent) == 2  # the page is not asked for again, the default is never read
+
+
+async def test_a_wallet_past_the_page_cap_is_503_and_its_default_cannot_be_deleted(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    fakes: Fakes,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """More cards than PAYMENT_METHOD_LIST_MAX_PAGES pages hold: the list is the stable 503,
+    never a partial wallet; and a delete of the default, which could not choose the next
+    default among all the cards, changes nothing in Stripe."""
+    user_id, headers, customer_id = await customer_with_stripe(db_session)
+    first, second = page_ids(1), page_ids(2)
+    pages = (list_page(first, has_more=True), list_page(second, has_more=True))
+    default = method_body(id=first[0], customer=customer_id)
+    customer: Answer = (
+        200,
+        {
+            "id": customer_id,
+            "object": "customer",
+            "invoice_settings": {"default_payment_method": first[0]},
+        },
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        http = recorded_stripe(app, *pages, max_pages=2)
+        listed = await db_client.get(BASE, headers=headers)
+        asked_for_the_list = len(http.sent)
+        http = recorded_stripe(app, (200, default), customer, *pages, max_pages=2)
+        deleted = await db_client.delete(f"{BASE}/{first[0]}", headers=headers)
+
+    assert (listed.status_code, listed.json()) == (503, UNAVAILABLE)
+    assert asked_for_the_list == 2  # the cap: no third page
+    assert (deleted.status_code, deleted.json()) == (503, UNAVAILABLE)
+    refusals = [
+        json.loads(JsonFormatter().format(record))
+        for record in caplog.records
+        if record.message == "payment_method_stripe_rejected"
+    ]
+    # One per request, each naming the list and the cap's own code.
+    assert [(entry["user_id"], entry["operation"], entry["stripe_code"]) for entry in refusals] == [
+        (str(user_id), "list_cards", LIST_INCOMPLETE)
+    ] * 2
+    # The card and the default were read, the two pages, and nothing was written.
+    assert [method for method, _, _, _ in http.sent] == ["get"] * 4
+
+
 # AC3: the default and the delete
 
 
@@ -502,6 +674,238 @@ async def test_deleting_the_only_card_leaves_no_default(
     fakes.methods.add_card(customer_id, last4="9999")
     later = await db_client.get(BASE, headers=headers)
     assert [(item["last4"], item["is_default"]) for item in later.json()] == [("9999", False)]
+
+
+# AC3: two changes of one wallet at once
+
+
+@dataclass(frozen=True)
+class Race:
+    """Two changes of one wallet at once. The wallet: the `oldest` card, then the `default`
+    one, then the `newest`. `first` is held once the Stripe read `held_after` has answered it,
+    and `second` is made meanwhile. What must be left is what `first`, then `second`, leaves."""
+
+    first: tuple[str, str]  # the action (delete or default) and the card
+    held_after: str
+    second: tuple[str, str]
+    statuses: tuple[int, int]
+    default: str  # the card that is the default in the end
+    attached: tuple[str, ...]  # the cards left, the oldest first
+
+
+RACES = {
+    # Without the lock: the second promotes `newest`, which the first, that read the old
+    # default, then detaches without promoting: `oldest` is left, and it is not the default.
+    "two-deletes": Race(
+        first=("delete", "newest"),
+        held_after="default_payment_method",
+        second=("delete", "default"),
+        statuses=(204, 204),
+        default="oldest",
+        attached=("oldest",),
+    ),
+    # Without the lock: the delete, that read the old default, promotes `newest` over the
+    # default the customer chose meanwhile.
+    "default-change-during-a-delete": Race(
+        first=("delete", "default"),
+        held_after="default_payment_method",
+        second=("default", "oldest"),
+        statuses=(204, 200),
+        default="oldest",
+        attached=("oldest", "newest"),
+    ),
+    # Without the lock: the card is detached under the default change, which Stripe refuses.
+    "delete-during-a-default-change": Race(
+        first=("default", "newest"),
+        held_after="retrieve_card",
+        second=("delete", "newest"),
+        statuses=(200, 204),
+        default="default",
+        attached=("oldest", "default"),
+    ),
+    # Without the lock: both read the card attached, and Stripe refuses the second detach.
+    "one-card-deleted-twice": Race(
+        first=("delete", "newest"),
+        held_after="retrieve_card",
+        second=("delete", "newest"),
+        statuses=(204, 404),
+        default="default",
+        attached=("oldest", "default"),
+    ),
+}
+
+
+@pytest.mark.parametrize("race", RACES.values(), ids=RACES.keys())
+async def test_two_changes_of_one_wallet_end_as_one_after_the_other(
+    app: FastAPI, committed: Committed, race: Race
+) -> None:
+    """Each change reads the wallet and writes what it read, so the second must not start
+    reading before the first has written: it waits on the wallet's lock, which the test sees
+    in Postgres before it lets the first go on."""
+    fakes = install_fakes(app)
+    _, headers, customer_id = await committed_wallet(committed)
+    cards = {name: fakes.methods.add_card(customer_id) for name in ("oldest", "default", "newest")}
+    fakes.methods.defaults[customer_id] = cards["default"].payment_method_id
+    first_has_read, first_may_go_on = asyncio.Event(), asyncio.Event()
+
+    async def hold_the_first_read(call: tuple[str, ...]) -> None:
+        if call[0] == race.held_after and not first_has_read.is_set():
+            first_has_read.set()
+            await first_may_go_on.wait()
+
+    async def change(action: str, card: str) -> httpx.Response:
+        path = f"{BASE}/{cards[card].payment_method_id}"
+        if action == "delete":
+            return await committed.client.delete(path, headers=headers)
+        return await committed.client.post(f"{path}/default", headers=headers)
+
+    fakes.methods.on_read = hold_the_first_read
+    requests = [asyncio.create_task(change(*race.first))]
+    try:
+        async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+            await first_has_read.wait()
+        calls_of_the_first = len(fakes.methods.calls)
+        requests.append(asyncio.create_task(change(*race.second)))
+        # With no lock the second runs to its end here, on what the first has yet to change.
+        second_waited = await waits_on_a_lock(committed.sessions, requests[1])
+        calls_while_held = len(fakes.methods.calls)
+    finally:
+        first_may_go_on.set()
+        # Whatever failed above, both requests end before the fixture removes their user.
+        await asyncio.gather(*requests, return_exceptions=True)
+
+    assert tuple(request.result().status_code for request in requests) == race.statuses
+    assert fakes.methods.defaults == {customer_id: cards[race.default].payment_method_id}
+    assert fakes.methods.attached(customer_id) == [
+        cards[name].payment_method_id for name in race.attached
+    ]
+    listed = (await committed.client.get(BASE, headers=headers)).json()
+    assert [item["id"] for item in listed if item["is_default"]] == [
+        cards[race.default].payment_method_id
+    ]
+    # The second asked Stripe nothing until the first was done.
+    assert second_waited
+    assert calls_while_held == calls_of_the_first
+
+
+@pytest.mark.parametrize("settings", [SHORT_CHANGE], indirect=True)
+@pytest.mark.parametrize("action", ["default", "delete"])
+async def test_a_wallet_whose_lock_stays_taken_is_503_and_stripe_is_not_asked(
+    app: FastAPI, committed: Committed, caplog: pytest.LogCaptureFixture, action: str
+) -> None:
+    """Another change holds the wallet for longer than PAYMENT_METHOD_CHANGE_TIMEOUT_SECONDS:
+    the stable 503, nothing read or written in Stripe, and the same call works once the wallet
+    is free. The lock is the customer's own: another customer's wallet is free meanwhile."""
+    fakes = install_fakes(app)
+    user_id, headers, customer_id = await committed_wallet(committed)
+    card = fakes.methods.add_card(customer_id)
+
+    async def act() -> httpx.Response:
+        if action == "default":
+            return await committed.client.post(
+                default_path(card.payment_method_id), headers=headers
+            )
+        return await committed.client.delete(f"{BASE}/{card.payment_method_id}", headers=headers)
+
+    async with committed.sessions() as holder, committed.sessions() as other:
+        await PaymentMethodRepository(holder).lock_wallet(user_id, wait_seconds=1)
+        with caplog.at_level(logging.DEBUG):
+            refused = await act()
+        asked = fakes.methods.calls.copy()
+        with pytest.raises(WalletBusyError):
+            await PaymentMethodRepository(other).lock_wallet(user_id, wait_seconds=0.001)
+        await other.rollback()
+        await PaymentMethodRepository(other).lock_wallet(uuid.uuid4(), wait_seconds=0.001)
+        await other.rollback()
+        await holder.rollback()
+    again = await act()
+
+    assert (refused.status_code, refused.json()) == (503, UNAVAILABLE)
+    assert "Retry-After" not in refused.headers
+    assert asked == []
+    assert again.status_code == (200 if action == "default" else 204)
+    [record] = [r for r in caplog.records if r.message == "payment_method_wallet_busy"]
+    logged = json.loads(JsonFormatter().format(record))
+    assert logged["level"] == "WARNING"
+    assert {key: logged[key] for key in ("user_id", "operation")} == {
+        "user_id": str(user_id),
+        "operation": "set_default" if action == "default" else "delete",
+    }
+
+
+# The last Stripe read of each change, which a test never answers, and what was asked by then.
+LAST_READS = {
+    "default": ["retrieve_card"],
+    "delete": ["retrieve_card", "default_payment_method"],
+}
+
+
+@pytest.mark.parametrize("settings", [SHORT_CHANGE], indirect=True)
+@pytest.mark.parametrize("action", sorted(LAST_READS))
+async def test_a_change_whose_stripe_calls_take_too_long_is_503_and_frees_the_wallet(
+    app: FastAPI, committed: Committed, caplog: pytest.LogCaptureFixture, action: str
+) -> None:
+    """The lock is never held past PAYMENT_METHOD_CHANGE_TIMEOUT_SECONDS: a change Stripe
+    keeps waiting is cut there, with the stable 503 and nothing written, and the wallet's next
+    change goes on."""
+    fakes = install_fakes(app)
+    user_id, headers, customer_id = await committed_wallet(committed)
+    kept = fakes.methods.add_card(customer_id)
+    card = fakes.methods.add_card(customer_id)
+    fakes.methods.defaults[customer_id] = kept.payment_method_id
+
+    async def never_answer(call: tuple[str, ...]) -> None:
+        if call[0] == LAST_READS[action][-1]:
+            await asyncio.Event().wait()
+
+    async def act() -> httpx.Response:
+        if action == "default":
+            return await committed.client.post(
+                default_path(card.payment_method_id), headers=headers
+            )
+        return await committed.client.delete(f"{BASE}/{card.payment_method_id}", headers=headers)
+
+    fakes.methods.on_read = never_answer
+    with caplog.at_level(logging.DEBUG):
+        cut = await act()
+    asked = fakes.methods.operations()
+    async with committed.sessions() as other:
+        await PaymentMethodRepository(other).lock_wallet(user_id, wait_seconds=0.001)
+        await other.rollback()
+    fakes.methods.on_read = None
+    again = await act()
+
+    assert (cut.status_code, cut.json()) == (503, UNAVAILABLE)
+    assert asked == LAST_READS[action]  # cut there: nothing written
+    assert again.status_code == (200 if action == "default" else 204)
+    # The call made again did its work: the card is the default, or it is gone.
+    left = [kept.payment_method_id] + ([card.payment_method_id] if action == "default" else [])
+    assert fakes.methods.attached(customer_id) == left
+    assert fakes.methods.defaults == {customer_id: left[-1]}
+    [record] = [r for r in caplog.records if r.message == "payment_method_change_timed_out"]
+    logged = json.loads(JsonFormatter().format(record))
+    assert logged["level"] == "ERROR"
+    assert {key: logged[key] for key in ("user_id", "operation")} == {
+        "user_id": str(user_id),
+        "operation": "set_default" if action == "default" else "delete",
+    }
+
+
+async def test_another_database_error_on_the_lock_is_not_a_busy_wallet(
+    committed: Committed,
+) -> None:
+    """Only Postgres's lock_timeout is a busy wallet. Any other failure of the lock's statement
+    (here a statement timeout, shorter than the wait) stays the database error it is."""
+    user_id = uuid.uuid4()
+    async with committed.sessions() as holder, committed.sessions() as other:
+        await PaymentMethodRepository(holder).lock_wallet(user_id, wait_seconds=1)
+        await other.execute(text("SELECT set_config('statement_timeout', '50', true)"))
+        with pytest.raises(DBAPIError) as caught:
+            await PaymentMethodRepository(other).lock_wallet(user_id, wait_seconds=5)
+        await other.rollback()
+        await holder.rollback()
+
+    assert getattr(caught.value.orig, "sqlstate", None) == "57014"  # query_canceled
 
 
 @pytest.mark.parametrize("action", ["default", "delete"])

@@ -9,11 +9,16 @@ no idempotency key of ours (the SDK sends a random one per call, for its own ret
 is a new attempt to add a card, and a replayed SetupIntent may be one the sheet completed
 already.
 
-The other calls read and change what Stripe keeps for the customer: the cards attached to it
-(one page of PAYMENT_METHOD_PAGE_SIZE, Stripe's largest), the default one
-(`invoice_settings.default_payment_method`), and a detach. They carry no key of ours either: a
-replayed answer to "make A the default" would skip a later A after B, and none of them moves
-money.
+The other calls read and change what Stripe keeps for the customer: the cards attached to it,
+the default one (`invoice_settings.default_payment_method`), and a detach. They carry no key of
+ours either: a replayed answer to "make A the default" would skip a later A after B, and none of
+them moves money.
+
+The cards are read page by page (PAYMENT_METHOD_PAGE_SIZE each, Stripe's largest, following its
+`starting_after` cursor), at most PAYMENT_METHOD_LIST_MAX_PAGES pages. The list is whole or it
+is a failure: a later page that fails, and a customer with more cards than those pages hold
+(`StripeRejectedError` with the code LIST_INCOMPLETE), never answer the cards read so far. A
+partial list could miss the default card, or the card a delete must promote.
 
 What leaves this module is typed and minimal: a SetupIntent's client secret, and of a card its
 PaymentMethod id, the customer it is attached to, the brand, the last four digits, the expiry
@@ -40,8 +45,10 @@ from app.integrations.stripe_errors import StripeRejectedError, raise_typed
 
 # The only type the wallet saves and lists.
 CARD: Final = "card"
-# Stripe's largest page: a wallet with more cards shows the most recent ones.
+# Stripe's largest page.
 PAYMENT_METHOD_PAGE_SIZE: Final = 100
+# The code of the refusal for a customer with more cards than the pages read: ours, not Stripe's.
+LIST_INCOMPLETE: Final = "payment_method_list_incomplete"
 
 
 @dataclass(frozen=True)
@@ -72,7 +79,8 @@ class StripePaymentMethods(Protocol):
         ...
 
     async def list_cards(self, customer_id: str) -> tuple[SavedCard, ...]:
-        """The cards attached to the customer: one page, at most PAYMENT_METHOD_PAGE_SIZE."""
+        """Every card attached to the customer; a refusal (LIST_INCOMPLETE) when it has more
+        than the pages read hold (see the module doc)."""
         ...
 
     async def retrieve_card(self, payment_method_id: str) -> SavedCard | None:
@@ -100,8 +108,10 @@ class StripePaymentMethodsClient:
         secret_key: str,
         timeout_seconds: float,
         max_network_retries: int,
+        list_max_pages: int,
         http_client: stripe.HTTPClient | None = None,
     ) -> None:
+        self._list_max_pages = list_max_pages
         self._client = stripe.StripeClient(
             secret_key,
             # The async-only httpx client: a synchronous call raises instead of blocking.
@@ -117,6 +127,7 @@ class StripePaymentMethodsClient:
             secret_key=settings.stripe_secret_key.get_secret_value(),
             timeout_seconds=settings.stripe_timeout_seconds,
             max_network_retries=settings.stripe_max_network_retries,
+            list_max_pages=settings.payment_method_list_max_pages,
         )
 
     async def create_setup_intent(self, customer_id: str) -> CreatedSetupIntent:
@@ -142,12 +153,22 @@ class StripePaymentMethodsClient:
             "type": CARD,
             "limit": PAYMENT_METHOD_PAGE_SIZE,
         }
-        try:
-            page = await self._client.v1.payment_methods.list_async(params=params)
-        except stripe.StripeError as error:
-            raise_typed(error)
-        cards = (_card(method) for method in page.data)
-        return tuple(card for card in cards if card is not None)
+        cards: list[SavedCard] = []
+        request_id: str | None = None
+        for _ in range(self._list_max_pages):
+            try:
+                page = await self._client.v1.payment_methods.list_async(params=params)
+            except stripe.StripeError as error:
+                raise_typed(error)
+            request_id = _request_id(page)
+            cards += [card for card in map(_card, page.data) if card is not None]
+            if not page.has_more:
+                return tuple(cards)
+            if not page.data:  # more, but no cursor to reach it
+                break
+            params["starting_after"] = page.data[-1].id
+        # More cards than the pages read: never the ones read so far as if they were all.
+        raise StripeRejectedError(request_id=request_id, code=LIST_INCOMPLETE)
 
     async def retrieve_card(self, payment_method_id: str) -> SavedCard | None:
         try:

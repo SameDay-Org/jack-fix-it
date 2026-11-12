@@ -304,6 +304,14 @@ class Settings(BaseSettings):
     # customer may make per window. Each one is a call to Stripe.
     payment_method_write_limit: int = Field(default=20, gt=0)
     payment_method_write_window_seconds: int = Field(default=600, gt=0)
+    # The cards are read from Stripe 100 per page, at most this many pages: a customer with
+    # more cards gets 503 payments_unavailable, never a partial list.
+    payment_method_list_max_pages: int = Field(default=5, gt=0)
+    # Default changes and deletes of one customer's wallet run one at a time (a lock per
+    # customer, held across the change's Stripe calls). The longest one change may take, its
+    # wait for another one's lock and its own Stripe calls together: past it, 503
+    # payments_unavailable, and the lock is released. Keep it below the app's request timeout.
+    payment_method_change_timeout_seconds: float = Field(default=10.0, gt=0)
     # A profile with no stored account whose first create was attempted at least this many
     # seconds ago looks its account up in Stripe instead of creating again: Stripe may forget an
     # idempotency key once it is 24 hours old, so the value stays below that. The lookup lists
