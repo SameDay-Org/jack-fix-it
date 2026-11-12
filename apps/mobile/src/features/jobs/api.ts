@@ -29,9 +29,9 @@ export const customerJobQueryKey = (requestId: string, generation: number) =>
   [JOB_KEY, requestId, generation] as const;
 
 /**
- * Asks again for one request's job wherever it is on screen, each observer under its own session.
- * The request's notice is never polled, so the payment that finds the new job tells it this way
- * (`features/payments`).
+ * Asks again for one request's job wherever it is on screen, each observer under its own session:
+ * for a caller that learned the job may exist now and does not hold it (a payment refused because
+ * the quote was paid elsewhere, `features/payments`). The request's notice is never polled.
  */
 export const refreshCustomerJob = (client: QueryClient, requestId: string): Promise<void> =>
   client.invalidateQueries({ queryKey: [JOB_KEY, requestId] });

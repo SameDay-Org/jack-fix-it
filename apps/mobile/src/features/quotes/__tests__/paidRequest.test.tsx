@@ -166,11 +166,14 @@ describe("a paid request says it is booked once (#324)", () => {
     expect(paidState()).toHaveLength(0);
     expect(bookedTexts()).toHaveLength(0);
 
-    // The webhook created the job: the card's wait finds it and the notice, never polled, is told.
+    // The webhook created the job: the card's wait finds it and hands it to the notice, which is
+    // never polled and asks nothing itself (one request, the card's).
+    const before = callsTo(apiGet, JOB_PATH).length;
     api.job = () => Promise.resolve(JOB);
     await act(async () => jest.advanceTimersByTime(2_000));
     await screen.findByTestId(`${payTestId(ACCEPTED)}-paid`);
-    expect(await screen.findByRole("header", { name: "Your job is booked" })).toBeTruthy();
+    expect(screen.getByRole("header", { name: "Your job is booked" })).toBeTruthy();
+    expect(callsTo(apiGet, JOB_PATH)).toHaveLength(before + 1);
     expect(bookedTexts()).toHaveLength(1);
     expect(paidState()).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: FOLLOW })).toHaveLength(1);
@@ -219,12 +222,21 @@ describe("a paid request says it is booked once (#324)", () => {
       await screen.findByRole("header", { name: "Your job is booked" });
       await screen.findByTestId(`${payTestId(ACCEPTED)}-paid`);
 
-      // The job moved while the customer was away; coming back asks for it again.
-      api.job = () => Promise.resolve({ ...JOB, status });
+      // The job moved while the customer was away; coming back asks for it again, once for the
+      // notice and once for the card.
+      const before = callsTo(apiGet, JOB_PATH).length;
+      const answers: Promise<unknown>[] = [];
+      api.job = () => {
+        const answer = Promise.resolve({ ...JOB, status });
+        answers.push(answer);
+        return answer;
+      };
       await act(async () => navigation.setFocused(false));
       await act(async () => navigation.setFocused(true));
 
       expect(await screen.findByRole("header", { name: title })).toBeTruthy();
+      await waitFor(() => expect(callsTo(apiGet, JOB_PATH)).toHaveLength(before + 2));
+      await act(async () => void (await Promise.all(answers)));
       await waitFor(() => expect(paidState()).toHaveLength(paid ? 1 : 0));
       expect(bookedTexts()).toHaveLength(0);
       expect(screen.queryByRole("button", { name: FOLLOW })).toBeNull();

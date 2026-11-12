@@ -38,8 +38,22 @@ const PAY_PLACEHOLDER_HEIGHT = 56;
 /** About the note bubble's height (one callout line and its padding) while the job is looked up. */
 const NOTE_PLACEHOLDER_HEIGHT = 48;
 
-/** Jobs whose payment no longer stands as made: "Paid" would be a stale claim on the card. */
-const PAYMENT_UNDONE: ReadonlySet<CustomerJob["status"]> = new Set(["cancelled", "refunded"]);
+/**
+ * Whether the card says "Paid" for a job in each status; a new status has to choose. A cancelled
+ * or refunded job gets no payment word here: the notice says the job was cancelled, and what
+ * became of the money is not the card's to claim (the refund rule is still open, #3).
+ */
+const SHOWS_PAID = {
+  scheduled: true,
+  on_the_way: true,
+  in_progress: true,
+  completed: true,
+  confirmed: true,
+  paid_out: true,
+  disputed: true,
+  refunded: false,
+  cancelled: false,
+} as const satisfies Record<CustomerJob["status"], boolean>;
 
 // Nothing for the customer to fix, so no alarm: the info tint. A failed payment is the danger one.
 const CALM_FAILURES: ReadonlySet<PayFailure> = new Set([
@@ -74,8 +88,7 @@ export function PaymentPanel({ requestId, quoteId, amountCents, pro, testID }: P
   );
 
   if (phase === "booked" && job) {
-    // Once the job is cancelled or refunded the notice says so, and the card claims nothing.
-    if (PAYMENT_UNDONE.has(job.status)) return null;
+    if (!SHOWS_PAID[job.status]) return null;
     return (
       <View
         accessible
