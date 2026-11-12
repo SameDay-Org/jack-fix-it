@@ -1,9 +1,11 @@
+import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { useIsFocused } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AccessibilityInfo } from "react-native";
 
+import { refreshCustomerJob } from "@/features/jobs/api";
 import { useRefetchOnReturn } from "@/features/quotes/useRequestQuotes";
 
 import { paymentConfig } from "./config";
@@ -14,7 +16,7 @@ import { useRequestJob, type CustomerJob } from "./useRequestJob";
  * Where the accepted quote's payment stands: `loading` (first look at the job), `unpaid` (no job:
  * Pay; also when the look failed, since paying again is safe), `confirming` (the sheet reported a
  * payment and the job is not there yet), `delayed` (still no job when the wait ran out), `booked`
- * (the job exists: the webhook confirmed the payment).
+ * (the job exists: the webhook confirmed the payment; the card says "Paid").
  */
 export type PaymentPhase = "loading" | "unpaid" | "confirming" | "delayed" | "booked";
 
@@ -39,14 +41,16 @@ function useDeadlinePassed(deadline: number | null): boolean {
  * asks for the job every `pollIntervalMs`, only while the screen is in front and for at most
  * `pollTimeoutMs`, with every call pinned to the payment's session; a sign-out forgets the wait
  * and the cache, which ends it. The job showing up ends the wait, is announced and felt (a
- * success haptic). The job is also asked for again whenever the screen comes back into focus or
- * the app returns to the foreground, so a delayed confirmation still lands.
+ * success haptic), and the request's own notice above the quotes (#64) is told to ask for it. The
+ * job is also asked for again whenever the screen comes back into focus or the app returns to
+ * the foreground, so a delayed confirmation still lands.
  */
 export function useJobConfirmation(
   requestId: string,
   quoteId: string,
 ): { phase: PaymentPhase; job: CustomerJob | null | undefined } {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const confirming = useConfirming(quoteId);
   const focused = useIsFocused();
   const expired = useDeadlinePassed(
@@ -79,9 +83,11 @@ export function useJobConfirmation(
   useEffect(() => {
     if (!booked || confirming === undefined) return;
     stopConfirming(quoteId);
+    // The notice asked before the payment and found no job; it is not polled, so it is told.
+    void refreshCustomerJob(queryClient, requestId);
     AccessibilityInfo.announceForAccessibility(t("payment.booked.announcement"));
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-  }, [booked, confirming, quoteId, t]);
+  }, [booked, confirming, queryClient, quoteId, requestId, t]);
 
   const phase: PaymentPhase = job
     ? "booked"

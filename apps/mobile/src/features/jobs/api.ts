@@ -12,6 +12,8 @@ import { isActive, isMoving, pickActive, type ActiveJob, type CustomerJob } from
 
 type Href = { pathname: "/requests/[id]/job"; params: { id: string } };
 
+const JOB_KEY = "job";
+
 /** The ongoing job screen of one request. */
 export const jobHref = (requestId: string): Href => ({
   pathname: "/requests/[id]/job",
@@ -24,7 +26,15 @@ export const jobHref = (requestId: string): Href => ({
  * never land where the next one reads.
  */
 export const customerJobQueryKey = (requestId: string, generation: number) =>
-  ["job", requestId, generation] as const;
+  [JOB_KEY, requestId, generation] as const;
+
+/**
+ * Asks again for one request's job wherever it is on screen, each observer under its own session.
+ * The request's notice is never polled, so the payment that finds the new job tells it this way
+ * (`features/payments`).
+ */
+export const refreshCustomerJob = (client: QueryClient, requestId: string): Promise<void> =>
+  client.invalidateQueries({ queryKey: [JOB_KEY, requestId] });
 
 /** No job on the request yet: the payment has not created it (404, as for anyone else's request). */
 export const isNoJobYet = (error: unknown): boolean =>

@@ -122,7 +122,7 @@ async function openUnpaid(client = newQueryClient()) {
 }
 
 describe("paying an accepted quote", () => {
-  it("accept, then the payment call, the sheet, the confirmation and You're booked", async () => {
+  it("accept, then the payment call, the sheet, the confirmation and Paid", async () => {
     fakeClock();
     api.quotes = () => Promise.resolve(list([QUOTE, OTHER]));
     const client = newQueryClient();
@@ -181,11 +181,10 @@ describe("paying an accepted quote", () => {
 
     api.job = () => Promise.resolve(JOB);
     await act(async () => jest.advanceTimersByTime(2_000));
-    const booked = await screen.findByTestId(`${payTestId(QUOTE)}-booked`);
-    expect(within(booked).getByText("You're booked")).toBeTruthy();
-    expect(
-      within(booked).getByText(/^Your service with María P\. is set for [A-Z][a-z]{2}, /),
-    ).toBeTruthy();
+    const paid = await screen.findByTestId(`${payTestId(QUOTE)}-paid`);
+    expect(within(paid).getByText("Paid")).toBeTruthy();
+    // That the job is booked is the request's notice (#64): the card does not say it again.
+    expect(screen.queryByText(/booked|is set for/i)).toBeNull();
     expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith(
       "You're booked. Your payment is confirmed.",
     );
@@ -193,7 +192,7 @@ describe("paying an accepted quote", () => {
       Haptics.NotificationFeedbackType.Success,
     );
 
-    // Booked ends the polling, and the sheet was opened once.
+    // The job ends the polling, and the sheet was opened once.
     const total = callsTo(apiGet, JOB_PATH).length;
     await act(async () => jest.advanceTimersByTime(10_000));
     expect(callsTo(apiGet, JOB_PATH)).toHaveLength(total);
@@ -415,15 +414,20 @@ describe("paying an accepted quote", () => {
       ),
     );
     await waitFor(() => expect(callsTo(apiGet, JOB_PATH).length).toBeGreaterThan(jobFetches));
-    await screen.findByTestId(`${payTestId(ACCEPTED)}-booked`);
+    await screen.findByTestId(`${payTestId(ACCEPTED)}-paid`);
     expect(presentPaymentSheet).not.toHaveBeenCalled();
     expect(screen.queryByTestId(`${payTestId(ACCEPTED)}-failure`)).toBeNull();
   });
 
-  it("an existing job shows You're booked and no Pay", async () => {
+  it("an existing job shows Paid, under one label, and no Pay", async () => {
     api.job = () => Promise.resolve(JOB);
     await renderWithQuery(<App />);
-    await screen.findByTestId(`${payTestId(ACCEPTED)}-booked`);
+    const paid = await screen.findByTestId(`${payTestId(ACCEPTED)}-paid`);
+    expect(paid.props).toMatchObject({
+      accessible: true,
+      accessibilityRole: "text",
+      accessibilityLabel: "Paid",
+    });
     expect(screen.queryByRole("button", { name: PAY_NAME })).toBeNull();
     expect(apiPost).not.toHaveBeenCalled();
     // Not a payment that just landed: nothing is announced or felt.
@@ -433,14 +437,37 @@ describe("paying an accepted quote", () => {
     expect(Haptics.notificationAsync).not.toHaveBeenCalled();
   });
 
-  it("a job past Scheduled shows its status from the glossary, with no planned date", async () => {
-    api.job = () => Promise.resolve({ ...JOB, status: "on_the_way" });
-    await renderWithQuery(<App />);
-    const booked = await screen.findByTestId(`${payTestId(ACCEPTED)}-booked`);
-    expect(within(booked).getByText("Professional On The Way")).toBeTruthy();
-    expect(within(booked).queryByText(/is set for/)).toBeNull();
-    expect(screen.queryByRole("button", { name: PAY_NAME })).toBeNull();
-  });
+  it.each(["on_the_way", "in_progress", "completed", "confirmed", "paid_out", "disputed"] as const)(
+    "a job past Scheduled (%s) still shows only Paid: no status, no planned date",
+    async (status) => {
+      api.job = () => Promise.resolve({ ...JOB, status });
+      await renderWithQuery(<App />);
+      const paid = await screen.findByTestId(`${payTestId(ACCEPTED)}-paid`);
+      expect(within(paid).getByText("Paid")).toBeTruthy();
+      // Where the job stands is the notice's and the job screen's, never the card's.
+      expect(
+        card(ACCEPTED).queryByText(/is set for|On The Way|In Progress|Waiting|Completed|Attention/),
+      ).toBeNull();
+      expect(screen.queryByRole("button", { name: PAY_NAME })).toBeNull();
+    },
+  );
+
+  it.each(["cancelled", "refunded"] as const)(
+    "a %s job leaves the card with no payment state at all: not Paid, not Pay",
+    async (status) => {
+      api.job = () => Promise.resolve({ ...JOB, status });
+      await renderWithQuery(<App />);
+      await screen.findByTestId(`quote-${ACCEPTED.id}`);
+      await waitFor(() =>
+        expect(screen.queryByTestId(`${payTestId(ACCEPTED)}-loading`)).toBeNull(),
+      );
+      expect(screen.queryByTestId(`${payTestId(ACCEPTED)}-paid`)).toBeNull();
+      expect(card(ACCEPTED).queryByText(/Paid|Cancelled|booked/i)).toBeNull();
+      expect(screen.queryByRole("button", { name: PAY_NAME })).toBeNull();
+      // The quote itself is still the accepted one.
+      expect(card(ACCEPTED).getByText("Accepted")).toBeTruthy();
+    },
+  );
 
   it("a job lookup that fails still offers Pay (paying again is safe)", async () => {
     api.job = () => Promise.reject(new NetworkError(false));
@@ -827,7 +854,7 @@ describe("the confirmation", () => {
     api.job = () => Promise.resolve(JOB);
     await act(async () => navigation.setFocused(false));
     await act(async () => navigation.setFocused(true));
-    await screen.findByTestId(`${payTestId(ACCEPTED)}-booked`);
+    await screen.findByTestId(`${payTestId(ACCEPTED)}-paid`);
   });
 
   it("a card that remounts after the wait ran out shows the calm message from its first frame", async () => {
@@ -871,7 +898,7 @@ describe("secrets", () => {
       await screen.findByText(CONFIRMING);
       api.job = () => Promise.resolve(JOB);
       await act(async () => jest.advanceTimersByTime(2_000));
-      await screen.findByTestId(`${payTestId(QUOTE)}-booked`);
+      await screen.findByTestId(`${payTestId(QUOTE)}-paid`);
 
       const logged = spies.flatMap((spy) => spy.mock.calls).map((args) => JSON.stringify(args));
       for (const secret of SECRETS) {
