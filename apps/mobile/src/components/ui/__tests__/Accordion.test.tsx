@@ -290,34 +290,73 @@ describe("useAccordion", () => {
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
-  it.each([
-    // The answer ends 184 dp below the scroll view: it comes up by that much.
-    [{ pageY: 500, height: 300 }, 584],
-    // Taller than the screen: only until the title reaches the top.
-    [{ pageY: 100, height: 900 }, 476],
-  ])("brings an unfolded answer that ends off screen into view (%o)", async (row, to) => {
-    await render(<List />);
-    await scrolledTo(400);
+  /** What the device measures once a row has unfolded: the row, its body's fold, the scroll view. */
+  const laidOut = (rowTop: number) => {
+    const at = { x: 0, y: 0, width: 288, pageX: 16 };
     jest
       .mocked(measure)
-      .mockReturnValueOnce({ x: 0, y: 0, width: 288, pageX: 16, ...row })
-      .mockReturnValueOnce({ x: 0, y: 0, width: 320, height: 592, pageX: 0, pageY: 24 });
+      .mockReturnValueOnce({ ...at, pageY: rowTop, height: 56 })
+      // A fold caught a frame short of its body: the body's own height is what counts.
+      .mockReturnValueOnce({ ...at, pageY: rowTop + 56, height: 1 })
+      .mockReturnValueOnce({ ...at, width: 320, pageX: 0, pageY: 24, height: 592 });
+  };
 
-    await openMeasured("second", 244);
+  it.each([
+    // The answer ends 184 dp below the scroll view: it comes up by that much.
+    [500, 244, 584],
+    // Taller than the screen: only until the title reaches the top.
+    [100, 844, 476],
+  ])("brings an unfolded answer that ends off screen into view (%d, %d)", async (top, body, to) => {
+    await render(<List />);
+    await scrolledTo(400);
+    laidOut(top);
+
+    await openMeasured("second", body);
 
     expect(jest.mocked(scrollTo).mock.calls).toEqual([[expect.anything(), 0, to, true]]);
   });
 
-  it("leaves an answer that fits where it is", async () => {
+  it("brings it up from where the hold left the scroll, at once under Reduce Motion", async () => {
+    jest.mocked(useReducedMotion).mockReturnValue(true);
     await render(<List />);
-    jest
-      .mocked(measure)
-      .mockReturnValueOnce({ x: 0, y: 0, width: 288, pageX: 16, pageY: 200, height: 300 })
-      .mockReturnValueOnce({ x: 0, y: 0, width: 320, height: 592, pageX: 0, pageY: 24 });
+    await openMeasured("first", 300);
+    await scrolledTo(400);
+    laidOut(500);
 
     await openMeasured("second", 244);
 
-    expect(measure).toHaveBeenCalledTimes(2);
+    // The fold of the first row gave 300 back; the reveal starts from there, not from 400.
+    expect(scrolls()).toEqual([100, 284]);
+    expect(jest.mocked(scrollTo).mock.calls[1][3]).toBe(false);
+  });
+
+  it("leaves an answer that fits where it is", async () => {
+    await render(<List />);
+    laidOut(200);
+
+    await openMeasured("second", 244);
+
+    expect(measure).toHaveBeenCalledTimes(3);
     expect(scrollTo).not.toHaveBeenCalled();
+  });
+
+  it("stops moving the page once the reader drags it", async () => {
+    await render(<List />);
+    await openMeasured("first", 300);
+    await scrolledTo(400);
+    laidOut(500);
+
+    await fireEvent.press(title("third"));
+    await measured("third", 244);
+    await fireEvent(screen.getByTestId("scroll"), "scrollBeginDrag", {
+      nativeEvent: { contentOffset: { x: 0, y: 400 } },
+    });
+    const moves = scrolls().length;
+    await waitFor(() => expect(screen.queryByText("Answer first", HIDDEN)).toBeNull());
+    await waitFor(() => expect(lastTiming()).toEqual([1, true]));
+    await frames();
+
+    // Neither the rest of the fold above nor the reveal of the opened answer.
+    expect(scrolls()).toHaveLength(moves);
   });
 });
