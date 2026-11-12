@@ -127,10 +127,10 @@ class AuthService:
         return await self._start_session(user)
 
     async def update_me(self, user: UserAccount, data: MeUpdateRequest) -> UserOut:
-        """Sets the caller's own names and ID card fields and commits, all or nothing. A pro's
-        new ID photo also becomes their public profile photo while they have none (#250).
-        Logs carry the user id and the field names: never a name, the city, the state or
-        the key."""
+        """Sets the caller's own names, ID card fields and app language and commits, all or
+        nothing. A pro's new ID photo also becomes their public profile photo while they have
+        none (#250). Logs carry the user id and the field names: never a name, the city, the
+        state or the key."""
         sent = data.model_fields_set
         account = await self._users.update_profile(
             user.id,
@@ -139,6 +139,7 @@ class AuthService:
             home_city=data.home_city if "home_city" in sent else KEEP,
             home_state=data.home_state if "home_state" in sent else KEEP,
             photo_key=data.photo_key if "photo_key" in sent else KEEP,
+            locale=data.locale,
         )
         if user.role is UserRole.PRO and account.photo_key is not None and "photo_key" in sent:
             await ProService(self._session).adopt_photo_if_missing(user.id, account.photo_key)

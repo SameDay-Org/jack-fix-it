@@ -167,10 +167,10 @@ async def me(user: CurrentUser, auth: Annotated[AuthService, Depends(get_auth_se
             "invalid_token: missing, invalid or expired access token."
         ),
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
-            "validation_error: an invalid or null name, an unknown field, an empty body, one "
-            "name while the other is not stored yet, or home_city without home_state (or the "
-            "other way round). invalid_media: photo_key is not the caller's own profile_photo "
-            "upload."
+            "validation_error: an invalid or null name, an unsupported or null locale (only en "
+            "and es), an unknown field, an empty body, one name while the other is not stored "
+            "yet, or home_city without home_state (or the other way round). invalid_media: "
+            "photo_key is not the caller's own profile_photo upload."
         ),
     },
 )
@@ -179,11 +179,12 @@ async def update_me(
     user: CurrentUser,
     auth: Annotated[AuthService, Depends(get_auth_service)],
 ) -> UserOut:
-    """Sets the caller's own first and last name (#165), home city and state and ID photo
-    (#250). Both names are required together while they are not stored; afterwards either may
-    change alone. The city and the state are set together, or both cleared with null. The
-    photo is the caller's own profile_photo upload key; for a pro without a public profile
-    photo it becomes that photo too. Nothing changes when any field is refused."""
+    """Sets the caller's own first and last name (#165), home city and state, ID photo (#250)
+    and app language (#218). Both names are required together while they are not stored;
+    afterwards either may change alone. The city and the state are set together, or both
+    cleared with null. The photo is the caller's own profile_photo upload key; for a pro
+    without a public profile photo it becomes that photo too. The locale (en or es) is also
+    the language of later pushes and emails. Nothing changes when any field is refused."""
     return await auth.update_me(user, data)
 
 
