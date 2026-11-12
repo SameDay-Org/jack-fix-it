@@ -55,7 +55,7 @@ ITEM_KEYS = {
     "created_at",
 }
 DETAIL_KEYS = ITEM_KEYS | {"message", "closed_at", "app_version", "platform", "updated_at"}
-MINE_KEYS = {"id", "topic", "message", "job_id", "status", "created_at", "closed_at"}
+MINE_KEYS = {"id", "topic", "job_id", "status", "created_at", "closed_at"}
 
 
 @pytest.fixture
@@ -134,6 +134,7 @@ async def test_a_customer_writes_a_ticket_kept_as_typed(
     assert response.status_code == 201, response.text
     answer = response.json()
     assert set(answer) == {"id", "status", "created_at"}
+    assert all(leak not in response.text for leak in TEXT_LEAKS)
     assert answer["status"] == "open"
     [ticket] = await rows(db_session)
     assert (str(ticket.id), ticket.user_id) == (answer["id"], world.customer.id)
@@ -294,11 +295,13 @@ async def test_the_staff_routes_refuse_the_apps_users_even_the_writer(
 # --- My tickets ------------------------------------------------------------------------------
 
 
-async def test_mine_lists_only_the_callers_tickets_newest_first(
+async def test_mine_lists_only_the_callers_tickets_newest_first_without_the_message(
     db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
 ) -> None:
     job = await make_job(db_session, world)
-    oldest = await seed(db_session, world.customer, age=timedelta(hours=3), job_id=job.id)
+    oldest = await seed(
+        db_session, world.customer, age=timedelta(hours=3), job_id=job.id, app_version=VERSION
+    )
     middle = await seed(
         db_session, world.customer, age=timedelta(hours=2), status=TicketStatus.CLOSED
     )
@@ -323,10 +326,23 @@ async def test_mine_lists_only_the_callers_tickets_newest_first(
     assert second.json()["next_cursor"] is None
     assert ids(others) == [str(theirs_older.id)]
     assert ids(other_customer) == [str(theirs.id), str(theirs_older.id)]
+    # No list carries the text, not even the writer's own: every item of every page is without
+    # the field, and no body holds a word of the message, its phone or its email.
+    pages = (first, second, others, other_customer)
+    items = [item for page in pages for item in page.json()["items"]]
+    assert len(items) == 6
+    assert all(set(item) == MINE_KEYS and "message" not in item for item in items)
+    assert all(leak not in page.text for page in pages for leak in TEXT_LEAKS)
     closed, last = first.json()["items"][1], second.json()["items"][0]
-    assert set(closed) == MINE_KEYS
     assert (closed["status"], closed["closed_at"] is not None) == ("closed", True)
-    assert (last["message"], last["job_id"], last["closed_at"]) == (MESSAGE, str(job.id), None)
+    assert last == {
+        "id": str(oldest.id),
+        "topic": "other",
+        "job_id": str(job.id),
+        "status": "open",
+        "created_at": last["created_at"],
+        "closed_at": None,
+    }
 
 
 @pytest.mark.parametrize("path", [MINE, STAFF])

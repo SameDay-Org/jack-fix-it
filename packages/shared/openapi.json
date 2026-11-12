@@ -4799,7 +4799,7 @@
           "support"
         ],
         "summary": "List my support tickets",
-        "description": "The caller's own tickets, newest first, with their status: what the app shows after a\nticket was sent. Never anyone else's.",
+        "description": "The caller's own tickets, newest first: the topic, the job, the status and the dates,\nwhat the app shows after a ticket was sent. Never the message, and never anyone else's.",
         "operationId": "list_my_tickets_v1_support_tickets_mine_get",
         "security": [
           {
@@ -6867,11 +6867,6 @@
           "topic": {
             "$ref": "#/components/schemas/TicketTopic"
           },
-          "message": {
-            "type": "string",
-            "title": "Message",
-            "description": "The caller's own text, as stored."
-          },
           "job_id": {
             "anyOf": [
               {
@@ -6911,13 +6906,13 @@
         "required": [
           "id",
           "topic",
-          "message",
           "job_id",
           "status",
           "created_at",
           "closed_at"
         ],
-        "title": "MySupportTicketOut"
+        "title": "MySupportTicketOut",
+        "description": "One of the caller's tickets in their list: no free text, so never the message."
       },
       "MySupportTicketPage": {
         "properties": {

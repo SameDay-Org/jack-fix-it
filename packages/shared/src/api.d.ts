@@ -1188,8 +1188,8 @@ export interface paths {
         };
         /**
          * List my support tickets
-         * @description The caller's own tickets, newest first, with their status: what the app shows after a
-         *     ticket was sent. Never anyone else's.
+         * @description The caller's own tickets, newest first: the topic, the job, the status and the dates,
+         *     what the app shows after a ticket was sent. Never the message, and never anyone else's.
          */
         get: operations["list_my_tickets_v1_support_tickets_mine_get"];
         put?: never;
@@ -2086,7 +2086,10 @@ export interface components {
              */
             max_selected?: number | null;
         };
-        /** MySupportTicketOut */
+        /**
+         * MySupportTicketOut
+         * @description One of the caller's tickets in their list: no free text, so never the message.
+         */
         MySupportTicketOut: {
             /**
              * Id
@@ -2094,11 +2097,6 @@ export interface components {
              */
             id: string;
             topic: components["schemas"]["TicketTopic"];
-            /**
-             * Message
-             * @description The caller's own text, as stored.
-             */
-            message: string;
             /** Job Id */
             job_id: string | null;
             status: components["schemas"]["TicketStatus"];
