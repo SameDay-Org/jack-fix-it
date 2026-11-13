@@ -21,9 +21,9 @@ import {
   useSessionGeneration,
 } from "@/api";
 import type { GetResponse } from "@/api";
-import { RECEIPT_SEEN } from "@/components/ui";
 import { formatTimeOfDay } from "@/features/opportunities/format";
 import { formatLocale } from "@/features/quotes/format";
+import { tokens } from "@/theme";
 
 import { deferred } from "../../../api/__tests__/helpers";
 import { METRICS } from "../../auth/__tests__/helpers";
@@ -551,7 +551,7 @@ describe("the job chat screen (#74)", () => {
         );
         expect(within(bubble).getAllByTestId("chat-receipt-tick", HIDDEN)).toHaveLength(ticks);
         const stroke = within(bubble).getByTestId("chat-receipt", HIDDEN).props.stroke as string;
-        expect(stroke === RECEIPT_SEEN).toBe(blue);
+        expect(stroke === tokens.colors["receipt-seen"]).toBe(blue);
       },
     );
 

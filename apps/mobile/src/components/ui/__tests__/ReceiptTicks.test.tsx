@@ -2,10 +2,11 @@ import { render, screen } from "@testing-library/react-native";
 
 import { tokens, withOpacity } from "@/theme";
 
-import { RECEIPT_SEEN, ReceiptTicks } from "../ReceiptTicks";
+import { ReceiptTicks } from "../ReceiptTicks";
 
 const HIDDEN = { includeHiddenElements: true };
 const MUTED = withOpacity("white", 0.7);
+const SEEN = tokens.colors["receipt-seen"];
 
 /** WCAG 2.x relative luminance of a #RRGGBB color. */
 function luminance(hex: string): number {
@@ -24,13 +25,13 @@ const AA_NON_TEXT = 3;
 
 describe("ReceiptTicks", () => {
   it("draws seen in a light blue that reads on my navy bubble (at least 3:1)", () => {
-    expect(contrast(RECEIPT_SEEN, tokens.colors["navy-900"])).toBeGreaterThanOrEqual(AA_NON_TEXT);
+    expect(contrast(SEEN, tokens.colors["navy-900"])).toBeGreaterThanOrEqual(AA_NON_TEXT);
   });
 
   it.each([
     ["sent", 1, MUTED],
     ["delivered", 2, MUTED],
-    ["seen", 2, RECEIPT_SEEN],
+    ["seen", 2, SEEN],
   ] as const)("draws %s as %i tick(s) in its color", async (state, ticks, color) => {
     await render(<ReceiptTicks state={state} testID="r" />);
 

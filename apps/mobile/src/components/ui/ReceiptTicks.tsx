@@ -1,7 +1,7 @@
 import { useWindowDimensions } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
 
-import { withOpacity } from "@/theme";
+import { tokens, withOpacity } from "@/theme";
 
 import { GLYPH_STROKE_WIDTH, GLYPH_VIEW_BOX } from "../icons/glyphs";
 
@@ -19,12 +19,10 @@ const SIZE = 16;
 const MUTED_OPACITY = 0.7;
 // Muted marks on navy are white at reduced opacity (gray-500 is forbidden on navy).
 const MUTED = withOpacity("white", MUTED_OPACITY);
-/**
- * The kit's light blue for "seen": a graphic on the navy bubble of my own messages, 9:1 against
- * navy-900 (the WCAG non-text bar is 3:1; ReceiptTicks.test.ts checks it). Kept here rather than in
- * tokens.json until the web theme mirrors it (its parity test reads every mobile color token).
- */
-export const RECEIPT_SEEN = "#7CC6FF";
+// "Seen" is the receipt-seen token, a light blue: a graphic on the navy bubble of my own messages,
+// 9:1 against navy-900 (the WCAG non-text bar is 3:1; ReceiptTicks.test.tsx checks it). The web
+// theme mirrors the token.
+const SEEN = tokens.colors["receipt-seen"];
 
 const ONE_TICK = ["M5 12.5l4.5 4.5 9.5-10"];
 // The second tick sits to the right; its short stroke tucks under the first tick's long one.
@@ -42,7 +40,7 @@ const CENTER = GLYPH_VIEW_BOX / 2;
 export function ReceiptTicks({ state, testID }: ReceiptTicksProps) {
   // Grows with the text size, so the mark keeps its weight beside the time at any scale.
   const size = Math.round(SIZE * useWindowDimensions().fontScale);
-  const color = state === "seen" ? RECEIPT_SEEN : MUTED;
+  const color = state === "seen" ? SEEN : MUTED;
   const paths = state === "sent" ? ONE_TICK : TWO_TICKS;
   return (
     <Svg

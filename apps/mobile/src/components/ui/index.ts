@@ -5,7 +5,7 @@ export type { ButtonProps, ButtonSize, ButtonVariant } from "./Button";
 export { Card } from "./Card";
 export type { CardProps } from "./Card";
 export { ChatBubble } from "./ChatBubble";
-export { RECEIPT_SEEN, ReceiptTicks } from "./ReceiptTicks";
+export { ReceiptTicks } from "./ReceiptTicks";
 export type { ReceiptState, ReceiptTicksProps } from "./ReceiptTicks";
 export type { ChatBubbleProps, ChatBubbleSide } from "./ChatBubble";
 export { Chip, ChipSkeleton } from "./Chip";
