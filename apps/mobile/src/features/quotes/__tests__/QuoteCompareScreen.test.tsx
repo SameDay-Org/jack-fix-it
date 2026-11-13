@@ -45,6 +45,16 @@ jest.mock("@/api", () => ({
 jest.mock("expo-router", () => jest.requireActual("./helpers").routerMock);
 // The job notice over the list (#64) has its own tests (features/jobs); here the list is alone.
 jest.mock("@/features/jobs/JobBookedNotice", () => ({ JobBookedNotice: () => null }));
+// The preferred day under the title has its own suite (RequestPreferred.test): here it is a
+// stand-in that names the request it was handed and asks the API nothing.
+jest.mock("../RequestPreferred", () => {
+  const { Text } = jest.requireActual<typeof import("react-native")>("react-native");
+  return {
+    RequestPreferred: ({ requestId }: { requestId: string }) => (
+      <Text testID="request-preferred">{requestId}</Text>
+    ),
+  };
+});
 // The accepted card's payment has its own suite (features/payments): here it is a stand-in that
 // shows the note and records what the list handed it.
 jest.mock("@/features/payments", () => {
@@ -117,6 +127,7 @@ describe("QuoteCompareScreen", () => {
     await screen.findByText("$250");
 
     expect(cardIds()).toEqual(QUOTES.map((item) => `quote-${item.id}`));
+    expect(screen.getByTestId("request-preferred")).toHaveTextContent(REQUEST_ID);
     expect(apiGet).toHaveBeenCalledWith("/v1/requests/{request_id}/quotes", {
       auth: true,
       signal: expect.any(AbortSignal),

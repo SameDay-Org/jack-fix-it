@@ -1,7 +1,7 @@
 import "@/i18n";
 
 import { act, renderRouter, screen } from "expo-router/testing-library";
-import { router, useLocalSearchParams, usePreventRemove } from "expo-router";
+import { router, useLocalSearchParams, usePreventRemove, type Href } from "expo-router";
 import { createElement } from "react";
 import { Text } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -16,6 +16,7 @@ import RequestLayout, {
 } from "../../../app/(app)/requests/[id]/_layout";
 import { METRICS, SIGNED_OUT, WithQuery } from "../../auth/__tests__/helpers";
 import { SessionGate } from "../../auth/SessionGate";
+import { TabsLayout } from "../../tabs/TabsLayout";
 import { receivePushTap } from "../pushTaps";
 
 type MockSession = ReturnType<typeof import("@/api").useSession>;
@@ -42,6 +43,7 @@ jest.mock("@/api", () => {
     ...errors,
     apiGet: (path: string) => mockApiGet(path),
     onSignOut: jest.fn(() => () => undefined),
+    beforeSignOut: jest.fn(() => () => undefined),
     useSession: () =>
       useSyncExternalStore(
         (listener: () => void) => {
@@ -359,5 +361,122 @@ describe("a push that launched the app (cold)", () => {
     await act(async () => mockSession.set(CUSTOMER, { newGeneration: true }));
     expect(screen.getByText("home")).toBeTruthy();
     expect(mockApiGet).not.toHaveBeenCalledWith(QUOTES_PATH);
+  });
+});
+
+describe("a push for Home (`/`, #338)", () => {
+  it.each([
+    ["customer", CUSTOMER, `/requests/${ID}`, `compare ${ID}`],
+    ["pro", PRO, `/jobs/${ID}`, `pro job ${ID}`],
+  ])(
+    "a %s's tap goes back to their Home from %s, asking the API nothing",
+    async (_, session, url, text) => {
+      const result = await signedInAtHome(session);
+      // A screen of the table above: its path is a typed route.
+      await act(async () => router.push(url as Href));
+      expect(screen.getByText(text)).toBeTruthy();
+
+      await tap("/");
+
+      expect(result.getPathname()).toBe("/");
+      expect(screen.getByText("home")).toBeTruthy();
+      expect(router.canGoBack()).toBe(false);
+      expect(mockApiGet).not.toHaveBeenCalled();
+    },
+  );
+
+  it("already Home: stays as it is", async () => {
+    const result = await signedInAtHome(PRO);
+
+    await tap("/");
+
+    expect(result.getPathname()).toBe("/");
+    expect(router.canGoBack()).toBe(false);
+  });
+
+  it("a screen holding a draft asks before leaving it", async () => {
+    const result = await signedInAtHome(PRO);
+    await act(async () => router.push("/help"));
+
+    await tap("/");
+
+    expect(mockLeaveAsked).toHaveBeenCalledTimes(1);
+    expect(result.getPathname()).toBe("/help");
+  });
+
+  it("signed out: nothing opens, then or after the next sign-in", async () => {
+    const result = await renderRouter(routes, { initialUrl: "/" });
+    await tap("/");
+    expect(screen.getByText("welcome")).toBeTruthy();
+
+    await act(async () => mockSession.set(PRO, { newGeneration: true }));
+    await act(async () => router.push(`/jobs/${ID}`));
+    expect(result.getPathname()).toBe(`/jobs/${ID}`);
+  });
+
+  it("a push that launched the app lands on Home once the session is restored", async () => {
+    mockSession.state = { ...SIGNED_OUT, status: "restoring" };
+    const result = await renderRouter(routes, { initialUrl: "/" });
+    await tap("/");
+
+    await act(async () => mockSession.set(PRO));
+
+    expect(result.getPathname()).toBe("/");
+    expect(screen.getByText("home")).toBeTruthy();
+  });
+});
+
+describe("a push for Home from the app's other tabs (#338)", () => {
+  // The real tab shell: Home, History and Account under it.
+  const tabRoutes = {
+    ...routes,
+    "(app)/(tabs)/_layout": TabsLayout,
+    "(app)/(tabs)/history": () => <Text>history</Text>,
+    "(app)/(tabs)/account": () => <Text>account</Text>,
+  };
+
+  async function onTab(session: MockSession, tab: "/history" | "/account") {
+    mockSession.state = session;
+    const result = await renderRouter(tabRoutes, { initialUrl: "/" });
+    await act(async () => router.navigate(tab));
+    expect(result.getPathname()).toBe(tab);
+    return result;
+  }
+
+  it.each([
+    ["customer", CUSTOMER, "/history"],
+    ["customer", CUSTOMER, "/account"],
+    ["pro", PRO, "/history"],
+    ["pro", PRO, "/account"],
+  ] as const)("a %s on %s: the Home tab shows", async (_, session, tab) => {
+    const result = await onTab(session, tab);
+
+    await tap("/");
+
+    expect(result.getPathname()).toBe("/");
+    expect(screen.getByText("home")).toBeTruthy();
+  });
+
+  it("a screen opened over another tab comes off, and Home shows", async () => {
+    const result = await onTab(CUSTOMER, "/history");
+    await act(async () => router.push(`/requests/${ID}`));
+    expect(result.getPathname()).toBe(`/requests/${ID}`);
+
+    await tap("/");
+
+    expect(result.getPathname()).toBe("/");
+    expect(screen.getByText("home")).toBeTruthy();
+  });
+
+  it("after a sign-in in this launch: the Home tab shows from Account", async () => {
+    const result = await renderRouter(tabRoutes, { initialUrl: "/" });
+    expect(screen.getByText("welcome")).toBeTruthy();
+    await act(async () => mockSession.set(PRO, { newGeneration: true }));
+    await act(async () => router.navigate("/account"));
+    expect(result.getPathname()).toBe("/account");
+
+    await tap("/");
+
+    expect(result.getPathname()).toBe("/");
   });
 });

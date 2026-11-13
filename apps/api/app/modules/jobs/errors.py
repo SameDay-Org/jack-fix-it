@@ -19,10 +19,32 @@ class JobNotCompletedError(ConflictError):
 
 
 class NotOnTheWayError(ConflictError):
-    """A check-in on a job that is not on the way (#63)."""
+    """A check-in on a job that is not on the way (#63), or a position sent for a job whose pro
+    is not on the way any more: another status, or already checked in (#350)."""
 
     code = "not_on_the_way"
     message = "The job is not on the way."
+
+
+class ProLocationUnavailableError(AppError):
+    """The store of the pros' live positions (Redis) is down or too slow (#350): the position
+    is dropped, and the pro's app sends its next one. Also the answer of both position
+    routes while that Redis is missing or refused (jobs/location_guard.py): no position is
+    kept or shown until the deploy is fixed."""
+
+    status_code = 503
+    code = "location_unavailable"
+    message = "Location sharing is unavailable right now. Try again later."
+
+
+class RouteUnavailableError(AppError):
+    """The route to the job's address cannot be computed right now (#351): the provider
+    (Mapbox) is down, slow, refusing or not configured, or the route cache is. The pro's
+    position is unaffected: the app still shows it. Never the provider's own text."""
+
+    status_code = 503
+    code = "route_unavailable"
+    message = "The route is unavailable right now. Try again later."
 
 
 class CheckInRequiredError(ConflictError):

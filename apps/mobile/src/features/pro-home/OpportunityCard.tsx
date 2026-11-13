@@ -18,6 +18,13 @@ import {
   locationLabel,
   sentAgo,
 } from "@/features/opportunities/format";
+import {
+  FLEXIBLE_PERIOD,
+  periodLabel,
+  PREFERRED_PERIODS,
+  withPeriod,
+  type PreferredPeriod,
+} from "@/features/request/period";
 
 import type { OpportunitySummary } from "./useOpportunities";
 
@@ -51,10 +58,16 @@ const SAMPLE_CATEGORY: Record<ReturnType<typeof deviceLocale>, string> = {
 /** A day whose short form is as wide as they come in either language: a four-letter month, two digits. */
 const SAMPLE_DAY = "2026-09-30";
 
+/** Of the periods a day shows, the one with the longest name in the app's language. */
+const longestPeriod = (t: TFunction): PreferredPeriod =>
+  PREFERRED_PERIODS.filter((period) => period !== FLEXIBLE_PERIOD).reduce((longest, period) =>
+    periodLabel(t, period).length > periodLabel(t, longest).length ? period : longest,
+  );
+
 type CardText = {
   category: string;
   place: string;
-  /** "Preferred Fri, Oct 30", when the customer named a day. */
+  /** "Preferred: Fri, Oct 30 · Morning", when the customer named a day. */
   preferred: string | null;
   sent: string;
   /** The whole card as one sentence: category, place, date, when it was sent, new. */
@@ -65,7 +78,9 @@ function cardText(t: TFunction, opportunity: OpportunitySummary, now: number): C
   const category = categoryLabel(t, opportunity.category);
   const place = locationLabel(opportunity.location);
   const preferred = opportunity.preferred_date
-    ? t("opportunities.preferred", { date: formatDay(opportunity.preferred_date) })
+    ? t("opportunities.preferred", {
+        date: withPeriod(t, formatDay(opportunity.preferred_date), opportunity.preferred_period),
+      })
     : null;
   const sent = t("opportunities.sentAgo", { ago: sentAgo(t, opportunity.sent_at, now) });
   const isNew = opportunity.viewed ? null : t("opportunities.new");
@@ -136,7 +151,9 @@ export function OpportunityCard({ opportunity, now, onPress }: OpportunityCardPr
  */
 export function OpportunityCardSkeleton({ testID }: { testID?: string }) {
   const { t } = useTranslation();
-  const preferred = t("opportunities.preferred", { date: formatDay(SAMPLE_DAY) });
+  const preferred = t("opportunities.preferred", {
+    date: withPeriod(t, formatDay(SAMPLE_DAY), longestPeriod(t)),
+  });
 
   return (
     <Card testID={testID}>

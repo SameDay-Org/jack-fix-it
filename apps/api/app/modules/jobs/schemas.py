@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Final
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
 
 from app.modules.jobs.models import JobPhotoKind, JobStatus
 from app.modules.quotes.schemas import QuotePro
@@ -17,6 +17,8 @@ from app.modules.quotes.schemas import QuotePro
 # "On my way" asks how far the pro is: from 5 minutes to 4 hours (#63).
 ETA_MIN_MINUTES: Final = 5
 ETA_MAX_MINUTES: Final = 240
+# A device's accuracy radius past this is not a position worth showing (#350).
+ACCURACY_MAX_M: Final = 10_000
 
 
 class _Out(BaseModel):
@@ -195,6 +197,96 @@ class CheckInIn(BaseModel):
     )
     lat: float = Field(ge=-90, le=90, allow_inf_nan=False, description="The pro's latitude.")
     lng: float = Field(ge=-180, le=180, allow_inf_nan=False, description="The pro's longitude.")
+
+
+class ProLocationIn(BaseModel):
+    """One fix of the pro's device while on the way (#350). Numbers only: a string or a boolean
+    is refused, not converted."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    lat: float = Field(
+        ge=-90, le=90, strict=True, allow_inf_nan=False, description="Latitude, in degrees."
+    )
+    lng: float = Field(
+        ge=-180, le=180, strict=True, allow_inf_nan=False, description="Longitude, in degrees."
+    )
+    accuracy_m: float | None = Field(
+        default=None,
+        ge=0,
+        le=ACCURACY_MAX_M,
+        strict=True,
+        allow_inf_nan=False,
+        description="The fix's accuracy radius in meters; null or left out when unknown.",
+    )
+    heading_deg: float | None = Field(
+        default=None,
+        ge=0,
+        le=360,
+        strict=True,
+        allow_inf_nan=False,
+        description="Direction of travel, in degrees clockwise from north; null or left out "
+        "when unknown.",
+    )
+    recorded_at: AwareDatetime = Field(
+        description="When the device took the fix, with its UTC offset. Refused when too far "
+        "from the server's time (ahead or behind)."
+    )
+
+
+class ProPosition(_Out):
+    """Where the pro was at `updated_at` (#350)."""
+
+    lat: float
+    lng: float
+    accuracy_m: float | None = Field(description="Accuracy radius in meters, when known.")
+    heading_deg: float | None = Field(
+        description="Direction of travel, in degrees clockwise from north, when known."
+    )
+    updated_at: datetime = Field(description="When the server received this position.")
+
+
+class ProLocationOut(_Out):
+    position: ProPosition | None = Field(
+        description="The pro's latest position. null whenever there is none to show: the pro "
+        "is not on the way (not yet, arrived, or the job moved on), has sent none yet, or "
+        "the last one is too old."
+    )
+
+
+class JobRouteStep(_Out):
+    """One stretch of the route on one street. No instruction text."""
+
+    street_name: str | None = Field(description="The street's name; null on an unnamed road.")
+    distance_m: float = Field(description="Meters driven on it.")
+    duration_s: float = Field(description="Seconds it takes, as estimated.")
+
+
+class JobRoute(_Out):
+    """The pro's driving route to the job's address, as computed at `computed_at` (#351)."""
+
+    geometry: list[tuple[float, float]] = Field(
+        description="The line to draw, from the pro to the address: `[lng, lat]` pairs in "
+        "order (GeoJSON's order), thinned to a few hundred points at most."
+    )
+    distance_m: float = Field(description="Meters left to drive.")
+    duration_s: float = Field(description="Seconds left, as estimated when computed.")
+    steps: list[JobRouteStep] = Field(
+        description="The next streets of the route, in order: the first few dozen at most."
+    )
+    computed_at: datetime = Field(
+        description="When the route was computed. The same route is answered for a short "
+        "while, until the pro has moved away from where it starts."
+    )
+
+
+class JobRouteOut(_Out):
+    route: JobRoute | None = Field(
+        description="The pro's route to the job's address. null whenever there is none to "
+        "show: the pro is not on the way (not yet, arrived, or the job moved on), has sent "
+        "no position yet, the address cannot be placed on the map, no road leads there, or "
+        "the route is being computed right now (ask again)."
+    )
 
 
 class JobPhotosIn(BaseModel):

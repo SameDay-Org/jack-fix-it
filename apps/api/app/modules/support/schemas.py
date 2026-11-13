@@ -1,7 +1,7 @@
 """Support tickets as their writer and staff see them ("Talk to Jack", #274).
 
-The message is the writer's own text, stored as typed: the writer reads it back in their own
-list, and staff read it in the panel. No other user ever does.
+The message is the writer's own text, stored as typed. Only the staff ticket detail returns it:
+no list carries it, not even the writer's own, and no other user ever reads it.
 """
 
 import uuid
@@ -71,9 +71,10 @@ class SupportTicketCreatedOut(_Out):
 
 
 class MySupportTicketOut(_Out):
+    """One of the caller's tickets in their list: no free text, so never the message."""
+
     id: uuid.UUID
     topic: TicketTopic
-    message: str = Field(description="The caller's own text, as stored.")
     job_id: uuid.UUID | None
     status: TicketStatus
     created_at: datetime

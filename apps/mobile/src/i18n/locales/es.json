@@ -269,10 +269,17 @@
       "flexible": "Soy flexible",
       "flexibleHint": "Cualquier día me sirve",
       "pickDay": "O elige un día",
+      "period": "Momento del día",
       "today": "Hoy",
       "tomorrow": "Mañana",
       "staleTitle": "Ese día ya pasó",
       "staleBody": "Elige otro día o déjalo abierto."
+    },
+    "period": {
+      "morning": "Por la mañana",
+      "afternoon": "Tarde",
+      "evening": "Noche",
+      "flexible": "Flexible"
     },
     "review": {
       "title": "Revisa tu solicitud",
@@ -405,6 +412,7 @@
   "quotes": {
     "title": "Tus presupuestos",
     "subtitle": "Compáralos y acepta el que te convenga.",
+    "preferred": "Preferencia: {{date}}",
     "loading": "Cargando presupuestos",
     "span": {
       "minutes": "{{minutes}} min",
@@ -562,7 +570,7 @@
     "loading": "Cargando oportunidades",
     "new": "Nueva",
     "otherCategory": "Otra solicitud",
-    "preferred": "Fecha preferida {{date}}",
+    "preferred": "Preferencia: {{date}}",
     "sentAgo": "Enviada {{ago}}",
     "ago": {
       "justNow": "hace un momento",
@@ -591,7 +599,7 @@
     "detail": {
       "loading": "Cargando solicitud",
       "where": "Dónde",
-      "when": "Fecha preferida",
+      "when": "Preferencia",
       "sent": "Enviada",
       "description": "Qué pasa",
       "redacted": "Los datos de contacto se ocultaron.",
@@ -922,11 +930,40 @@
   "settings": {
     "title": "Configuración",
     "sections": {
-      "account": "Tu cuenta"
+      "account": "Tu cuenta",
+      "language": "Idioma",
+      "notifications": "Notificaciones"
     },
     "email": "Correo",
     "phone": "Teléfono",
-    "phoneNotVerified": "Aún no verificado"
+    "phoneNotVerified": "Aún no verificado",
+    "language": {
+      "en": "English",
+      "es": "Español",
+      "unsaved": {
+        "title": "Aún no se guardó en tu cuenta",
+        "body": "Este dispositivo sigue en español. Puedes intentarlo de nuevo en un momento.",
+        "retry": "Reintentar"
+      }
+    }
+  },
+  "notifications": {
+    "channel": "Novedades",
+    "prompt": {
+      "title": "Activa las notificaciones",
+      "customer": "Recibe avisos cuando tu profesional vaya en camino.",
+      "pro": "Entérate de trabajos nuevos cerca de ti y de cuando un cliente te contrata.",
+      "turnOn": "Activar",
+      "notNow": "Ahora no"
+    },
+    "settings": {
+      "label": "Notificaciones",
+      "on": "Activadas",
+      "off": "Desactivadas",
+      "blocked": "Desactivadas en los ajustes del teléfono",
+      "askHint": "Le pide a tu teléfono activar las notificaciones",
+      "openHint": "Abre los ajustes del teléfono"
+    }
   },
   "help": {
     "title": "Apoyo cuando lo necesites",
@@ -1004,7 +1041,7 @@
       },
       "language": {
         "question": "¿En qué idiomas está la app?",
-        "answer": "En inglés y en español. Jack Fix It usa el idioma de tu teléfono; con cualquier otro idioma, se muestra en inglés."
+        "answer": "En inglés y en español. En Cuenta, abre Configuración y elige uno en Idioma. Tu elección se guarda en tu cuenta, así que la app la usa la próxima vez que inicies sesión en otro dispositivo."
       }
     }
   },

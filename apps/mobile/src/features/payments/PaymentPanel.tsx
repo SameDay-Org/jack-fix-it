@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { ActivityIndicator, Text, View } from "react-native";
 
 import { Button, Notice, Skeleton } from "@/components/ui";
+import { NotificationsPrompt } from "@/features/notifications/NotificationsPrompt";
 import { formatDateTime, formatMoney } from "@/features/quotes/format";
 import { continuousCorners, tokens } from "@/theme";
 
@@ -83,21 +84,27 @@ export function PaymentPanel({ requestId, quoteId, amountCents, pro, testID }: P
   );
 
   if (phase === "booked" && job) {
+    // Once booked, the job's updates are what notifications bring: the pre-prompt asks here (#334).
     return (
-      <View
-        style={continuousCorners}
-        className="gap-1 rounded-md bg-green-500/10 p-3"
-        testID={`${testID}-booked`}
-      >
-        <Text accessibilityRole="header" className="text-headline text-navy-900">
-          {job.status === "scheduled" ? t("payment.booked.title") : t(JOB_STATUS_KEYS[job.status])}
-        </Text>
-        {/* The date is the plan only while the job is Scheduled; its own screens come with #64. */}
-        {job.status === "scheduled" ? (
-          <Text className="text-callout text-navy-900">
-            {t("payment.booked.body", { pro, date: formatDateTime(job.scheduled_start_at) })}
+      <View className="gap-3">
+        <View
+          style={continuousCorners}
+          className="gap-1 rounded-md bg-green-500/10 p-3"
+          testID={`${testID}-booked`}
+        >
+          <Text accessibilityRole="header" className="text-headline text-navy-900">
+            {job.status === "scheduled"
+              ? t("payment.booked.title")
+              : t(JOB_STATUS_KEYS[job.status])}
           </Text>
-        ) : null}
+          {/* The date is the plan only while the job is Scheduled; its own screens come with #64. */}
+          {job.status === "scheduled" ? (
+            <Text className="text-callout text-navy-900">
+              {t("payment.booked.body", { pro, date: formatDateTime(job.scheduled_start_at) })}
+            </Text>
+          ) : null}
+        </View>
+        <NotificationsPrompt audience="customer" testID={`${testID}-notifications`} />
       </View>
     );
   }

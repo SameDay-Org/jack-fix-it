@@ -115,8 +115,8 @@ async def create_ticket(
 async def list_my_tickets(
     user: AppUser, tickets: Tickets, limit: Limit = None, cursor: Cursor = None
 ) -> MySupportTicketPage:
-    """The caller's own tickets, newest first, with their status: what the app shows after a
-    ticket was sent. Never anyone else's."""
+    """The caller's own tickets, newest first: the topic, the job, the status and the dates,
+    what the app shows after a ticket was sent. Never the message, and never anyone else's."""
     return await tickets.mine(user, limit=limit, cursor=cursor)
 
 

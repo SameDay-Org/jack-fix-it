@@ -25,6 +25,8 @@ import {
   renderWithQuery,
   REQUEST_ID,
 } from "../../quotes/__tests__/helpers";
+import { refreshPermission, resetPermissionForTests } from "../../notifications/permission";
+import { resetPromptDismissalForTests } from "../../notifications/promptDismissal";
 import { paymentStore, type PaymentSheetOut } from "../paymentStore";
 import {
   ACCEPT_PATH,
@@ -75,6 +77,7 @@ jest.mock(
 // One instance for the component and the test (root __mocks__, see jest-root-mocks note).
 jest.mock("@stripe/stripe-react-native");
 jest.mock("expo-haptics");
+jest.mock("expo-notifications");
 
 const session = jest.requireMock<{ mockSession: SessionDouble }>("@/api").mockSession;
 // Each test renders the whole quote screen and walks a payment through it, several steps of
@@ -418,6 +421,25 @@ describe("paying an accepted quote", () => {
     await screen.findByTestId(`${payTestId(ACCEPTED)}-booked`);
     expect(presentPaymentSheet).not.toHaveBeenCalled();
     expect(screen.queryByTestId(`${payTestId(ACCEPTED)}-failure`)).toBeNull();
+  });
+
+  it("once booked, the notifications pre-prompt asks the customer, never the system (#334)", async () => {
+    resetPermissionForTests();
+    resetPromptDismissalForTests();
+    await act(async () => {
+      await refreshPermission();
+    });
+    api.job = () => Promise.resolve(JOB);
+    await renderWithQuery(<App />);
+    await screen.findByTestId(`${payTestId(ACCEPTED)}-booked`);
+
+    const prompt = await screen.findByTestId(`${payTestId(ACCEPTED)}-notifications`);
+    expect(within(prompt).getByText("Get updates when your pro is on the way.")).toBeTruthy();
+    const notifications =
+      jest.requireMock<typeof import("../../../../__mocks__/expo-notifications")>(
+        "expo-notifications",
+      );
+    expect(notifications.requestPermissionsAsync).not.toHaveBeenCalled();
   });
 
   it("an existing job shows You're booked and no Pay", async () => {

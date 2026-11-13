@@ -4,8 +4,9 @@ team from the app's Help page, and the team works the tickets in the panel.
 - Who writes: the app's users (customer, pro). The ticket keeps the writer's role as it was.
   Rate-limited per user (the router).
 - The message is stored as typed, not redacted: only staff read it, and the writer may need to
-  give a phone or an email to be reached. The writer reads their own tickets back; no other
-  user ever sees one.
+  give a phone or an email to be reached. It leaves the API in the staff ticket detail alone:
+  no list carries it, not even the writer's own, which shows the topic, the job, the status
+  and the dates. No other user ever sees a ticket.
 - `job_id`: only a job the writer takes part in (its customer or its pro, JobPartiesReader).
   Any other job, and an unknown one, is a 422 with one body, so the answer never tells whether
   a job exists.
@@ -126,7 +127,7 @@ class SupportTicketService:
     async def mine(
         self, user: UserAccount, *, limit: int | None, cursor: str | None
     ) -> MySupportTicketPage:
-        """The caller's own tickets, newest first."""
+        """The caller's own tickets, newest first. Never the message: no list carries it."""
         before = _decode_cursor(cursor) if cursor else None
         size = self._size(limit)
         rows = await self._tickets.page_of_user(user.id, limit=size + 1, before=before)
@@ -136,7 +137,6 @@ class SupportTicketService:
                 MySupportTicketOut(
                     id=ticket.id,
                     topic=ticket.topic,
-                    message=ticket.message,
                     job_id=ticket.job_id,
                     status=ticket.status,
                     created_at=ticket.created_at,

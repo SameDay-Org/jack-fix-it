@@ -173,18 +173,22 @@ export const screenNavigation = {
   ),
 };
 
+const router = {
+  push: jest.fn((href: PushedHref) => {
+    if (href.pathname === "/requests/[id]/accept") {
+      update({ sheet: href.params as SheetParams });
+    }
+  }),
+  back: jest.fn(() => update({ sheet: null })),
+  canGoBack: jest.fn(() => true),
+  setParams: jest.fn(),
+  dismissTo: jest.fn(),
+};
+
 export const routerMock = {
-  router: {
-    push: jest.fn((href: PushedHref) => {
-      if (href.pathname === "/requests/[id]/accept") {
-        update({ sheet: href.params as SheetParams });
-      }
-    }),
-    back: jest.fn(() => update({ sheet: null })),
-    canGoBack: jest.fn(() => true),
-    setParams: jest.fn(),
-    dismissTo: jest.fn(),
-  },
+  router,
+  // A screen's own router (`useRouter`, #344) is the same recorded one.
+  useRouter: () => router,
   useLocalSearchParams: () => nav.sheet ?? nav.params ?? { id: REQUEST_ID },
   useNavigation: () => screenNavigation,
   unstable_useIsNavigating: useIsNavigating,

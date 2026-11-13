@@ -269,10 +269,17 @@
       "flexible": "I'm flexible",
       "flexibleHint": "Any day works for me",
       "pickDay": "Or pick a day",
+      "period": "Time of day",
       "today": "Today",
       "tomorrow": "Tomorrow",
       "staleTitle": "That day has passed",
       "staleBody": "Pick another day, or stay flexible."
+    },
+    "period": {
+      "morning": "Morning",
+      "afternoon": "Afternoon",
+      "evening": "Evening",
+      "flexible": "Flexible"
     },
     "review": {
       "title": "Check your request",
@@ -405,6 +412,7 @@
   "quotes": {
     "title": "Your quotes",
     "subtitle": "Compare them and accept the one that fits.",
+    "preferred": "Preferred: {{date}}",
     "loading": "Loading quotes",
     "span": {
       "minutes": "{{minutes}} min",
@@ -562,7 +570,7 @@
     "loading": "Loading opportunities",
     "new": "New",
     "otherCategory": "Other request",
-    "preferred": "Preferred {{date}}",
+    "preferred": "Preferred: {{date}}",
     "sentAgo": "Sent {{ago}}",
     "ago": {
       "justNow": "just now",
@@ -591,7 +599,7 @@
     "detail": {
       "loading": "Loading request",
       "where": "Where",
-      "when": "Preferred date",
+      "when": "Preferred",
       "sent": "Sent",
       "description": "What's going on",
       "redacted": "Contact details were hidden.",
@@ -922,11 +930,40 @@
   "settings": {
     "title": "Settings",
     "sections": {
-      "account": "Your account"
+      "account": "Your account",
+      "language": "Language",
+      "notifications": "Notifications"
     },
     "email": "Email",
     "phone": "Phone",
-    "phoneNotVerified": "Not verified yet"
+    "phoneNotVerified": "Not verified yet",
+    "language": {
+      "en": "English",
+      "es": "Español",
+      "unsaved": {
+        "title": "Not saved to your account yet",
+        "body": "This device stays in English. You can try again in a moment.",
+        "retry": "Try again"
+      }
+    }
+  },
+  "notifications": {
+    "channel": "Updates",
+    "prompt": {
+      "title": "Turn on notifications",
+      "customer": "Get updates when your pro is on the way.",
+      "pro": "Hear about new jobs near you, and when a customer hires you.",
+      "turnOn": "Turn on",
+      "notNow": "Not now"
+    },
+    "settings": {
+      "label": "Notifications",
+      "on": "On",
+      "off": "Off",
+      "blocked": "Off in your phone's settings",
+      "askHint": "Asks your phone to turn on notifications",
+      "openHint": "Opens your phone's settings"
+    }
   },
   "help": {
     "title": "Support when you need it",
@@ -1004,7 +1041,7 @@
       },
       "language": {
         "question": "Which languages is the app in?",
-        "answer": "English and Spanish. Jack Fix It follows your phone's language; with any other language, it shows in English."
+        "answer": "English and Spanish. In Account, open Settings and choose one under Language. Your choice is saved to your account, so the app uses it the next time you log in on another device."
       }
     }
   },
