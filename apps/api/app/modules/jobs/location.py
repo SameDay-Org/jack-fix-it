@@ -21,7 +21,8 @@ reads the latest one. Both sides poll; there is no history.
   write, so it either ends before that lock is taken, and what it wrote is deleted, or waits
   for the commit and is refused: no position outlives tracking. A delete Redis refuses is logged
   and never fails the step; the position is unreadable from then on (both routes look at the
-  job first) and expires on its own.
+  job first) and expires on its own. The route computed from the position (#351, route.py)
+  starts at it, so the same delete removes it.
 - A ping is kept only when it is news, decided in Redis in one step (two pings of a job may
   race): one arriving less than PRO_LOCATION_MIN_INTERVAL_SECONDS after the stored one was
   written, or taken by the device before the stored one (`recorded_at`), is answered 204 and
@@ -85,6 +86,15 @@ return 1
 """
 
 
+def position_key(prefix: str, job_id: uuid.UUID) -> str:
+    return f"{prefix}:{job_id}"
+
+
+def route_key(prefix: str, job_id: uuid.UUID) -> str:
+    """Where the job's computed route is cached (#351, route.py), next to its position."""
+    return f"{prefix}:route:{job_id}"
+
+
 @dataclass(frozen=True)
 class Position:
     """`recorded_at` is the device's time of the fix, `updated_at` the server's of the write;
@@ -127,7 +137,7 @@ class RedisJobLocationStore:
         self._put = redis.register_script(_PUT_SCRIPT)
 
     def key(self, job_id: uuid.UUID) -> str:
-        return f"{self._prefix}:{job_id}"
+        return position_key(self._prefix, job_id)
 
     async def put(
         self, job_id: uuid.UUID, position: Position, *, min_interval: timedelta, ttl_seconds: int
@@ -150,8 +160,9 @@ class RedisJobLocationStore:
         return None if raw is None else _decode(raw)
 
     async def delete(self, job_id: uuid.UUID) -> None:
+        # One command: the position and the route computed from it (#351) go together.
         async with asyncio.timeout(self._timeout):
-            await self._redis.delete(self.key(job_id))
+            await self._redis.delete(self.key(job_id), route_key(self._prefix, job_id))
 
 
 def _micros(moment: datetime) -> int:
