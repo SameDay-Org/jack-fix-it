@@ -85,7 +85,10 @@ export type UpdateAddressVariables = {
   generation: number;
 };
 
-/** Changes an address of the book (PATCH); requests already sent from it keep their own copy. */
+/**
+ * Changes an address of the book (PATCH); requests already sent from it keep their own copy. The
+ * book takes from the answer the fields `body` sent, no other (`withFields`).
+ */
 export function useUpdateAddress() {
   const client = useQueryClient();
   return useMutation({
@@ -96,8 +99,8 @@ export function useUpdateAddress() {
         params: { address_id: id },
       }),
     onMutate: ({ generation }): WriteContext => ({ write: openWrite(client, generation) }),
-    onSuccess: (address, { generation }, context) =>
-      answerWrite(client, generation, context.write, (book) => withFields(book, address)),
+    onSuccess: (address, { body, generation }, context) =>
+      answerWrite(client, generation, context.write, (book) => withFields(book, address, body)),
     onError: (_error, { generation }, context) => dropWrite(client, generation, context?.write),
   });
 }
@@ -183,10 +186,9 @@ export function useMakeDefaultAddress() {
       write: openWrite(client, generation, (book) => withDefault(book, address.id)),
     }),
     onSuccess: (saved, { generation }, context) => {
-      // The server's copy of it, and the chip: its answer says nothing of the others.
-      answerWrite(client, generation, context.write, (book) =>
-        withDefault(withFields(book, saved), saved.id),
-      );
+      // Of its answer, the chip alone: the request sent nothing else, and the other fields are
+      // the address as it was then, which an edit in flight may have changed by now.
+      answerWrite(client, generation, context.write, (book) => withDefault(book, saved.id));
       if (!isCurrentGeneration(generation)) return;
       AccessibilityInfo.announceForAccessibility(
         t("addresses.madeDefault", { label: saved.label }),

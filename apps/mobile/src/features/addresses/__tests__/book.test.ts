@@ -107,27 +107,77 @@ describe("the book's edits keep the API's order, and say when they no longer can
     expect(alone.ordered).toBe(true);
   });
 
-  it("a new address the book already lists keeps its place", () => {
-    // Its answer replayed over a GET that already has it, and a newer address after it.
+  it("a new address the book already lists stays as listed, in its place", () => {
+    // Its answer replayed over a GET that already has it, and a newer address after it: that list
+    // read the address after the server added it, so the answer's copy is the older one.
     const lake = savedAddress({ id: "lake", label: "Lake", is_default: false });
-    const book = listed([HOME, WORK, MOM, lake]);
-    expect(order(withAdded(book, { ...MOM, label: "Mom" }))).toEqual([
-      "home*",
-      "work",
-      "mom",
-      "lake",
-    ]);
+    const book = listed([HOME, WORK, { ...MOM, label: "Mom" }, lake]);
+    expect(withAdded(book, MOM)).toBe(book);
   });
 
-  it("an edited address keeps its place and the chip as drawn, with the server's fields", () => {
-    const edited = withFields(listed(BOOK), { ...WORK, label: "Office", line1: "1 Bay St" });
+  it("an edited address keeps its place and the chip as drawn, with the fields it sent", () => {
+    const sent = { label: "Office", line1: "1 Bay St" };
+    const edited = withFields(listed(BOOK), { ...WORK, ...sent }, sent);
     expect(order(edited)).toEqual(["home*", "work", "mom"]);
-    expect(edited.items[1]).toMatchObject({ label: "Office", line1: "1 Bay St" });
+    expect(edited.items[1]).toEqual({ ...WORK, ...sent });
     expect(edited.ordered).toBe(true);
     // An answer from before a default change drawn since does not take the chip back.
-    const moved = withFields(withDefault(listed(BOOK), "mom"), { ...HOME, label: "House" });
+    const house = { label: "House" };
+    const moved = withFields(withDefault(listed(BOOK), "mom"), { ...HOME, ...house }, house);
     expect(order(moved)).toEqual(["mom*", "home", "work"]);
-    expect(moved.items[1]).toMatchObject({ label: "House", is_default: false });
+    expect(moved.items[1]).toEqual({ ...HOME, label: "House", is_default: false });
+    // An address the book no longer has is not brought back.
+    expect(withFields(listed([HOME, MOM]), { ...WORK, ...sent }, sent).items).toEqual([HOME, MOM]);
+  });
+
+  it("an edit's answer changes only what its request sent: the rest of it may be older", () => {
+    // The street was changed by another write, already drawn; this answer was read before it.
+    const drawn = listed([HOME, { ...WORK, line1: "250 Changed St" }, MOM]);
+    const stale = { ...WORK, label: "Office", is_default: true };
+    expect(withFields(drawn, stale, { label: "Office" }).items[1]).toEqual({
+      ...WORK,
+      label: "Office",
+      line1: "250 Changed St",
+    });
+    // A request that sent no field of the address (the default alone) changes none.
+    expect(withFields(drawn, stale, { is_default: true })).toEqual(drawn);
+  });
+
+  it("whether the ZIP is served goes with the ZIP, and the coordinates go together", () => {
+    const answer = {
+      ...WORK,
+      label: "Old name",
+      zip_code: "99950",
+      served: false,
+      lat: 40.5,
+      lng: -74.25,
+    };
+    // The ZIP alone: `served` is the server's reading of that ZIP.
+    expect(withFields(listed(BOOK), answer, { zip_code: "99950" }).items[1]).toEqual({
+      ...WORK,
+      zip_code: "99950",
+      served: false,
+    });
+    // Another field alone: the ZIP of that answer and what the server read from it stay out.
+    expect(withFields(listed(BOOK), answer, { line1: WORK.line1 }).items[1]).toEqual(WORK);
+    expect(withFields(listed(BOOK), answer, { lat: 40.5, lng: -74.25 }).items[1]).toEqual({
+      ...WORK,
+      lat: 40.5,
+      lng: -74.25,
+    });
+  });
+
+  it("a field sent as null is changed only where null clears it", () => {
+    const located = { ...WORK, line2: "Suite 12", lat: 40.5, lng: -74.25 };
+    const book = listed([HOME, located, MOM]);
+    const answer = { ...located, label: "Office", city: "Elsewhere", line2: null };
+    // The unit is cleared; a null name or city asks for no change, so the answer's are not taken.
+    expect(withFields(book, answer, { label: null, city: null, line2: null }).items[1]).toEqual({
+      ...located,
+      line2: null,
+    });
+    const cleared = { ...located, lat: null, lng: null };
+    expect(withFields(book, cleared, { lat: null, lng: null }).items[1]).toEqual(cleared);
   });
 });
 

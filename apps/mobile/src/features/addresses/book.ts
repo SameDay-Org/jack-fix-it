@@ -1,4 +1,4 @@
-import { ApiError, NetworkError } from "@/api";
+import { ApiError, NetworkError, type PatchBody } from "@/api";
 
 import type { SavedAddress } from "./api";
 
@@ -57,23 +57,61 @@ export function withoutAddress(book: Book, id: string): Book {
 
 /**
  * The book with the server's copy of a new address: the newest, so the last of the others, or
- * the default when the server made it one (the first address of a book).
+ * the default when the server made it one (the first address of a book). A book that already has
+ * it stays as it is: its list was read after the server added the address, so its copy is the
+ * newer one.
  */
 export function withAdded(book: Book, address: SavedAddress): Book {
-  if (book.items.some((saved) => saved.id === address.id)) return withFields(book, address);
+  if (book.items.some((saved) => saved.id === address.id)) return book;
   const added = { ...book, items: [...book.items, { ...address, is_default: false }] };
   return address.is_default ? withDefault(added, address.id) : withSoleDefault(added);
 }
 
+type AddressPatch = PatchBody<"/v1/addresses/{address_id}">;
+
 /**
- * The book with the server's copy of an address's fields, in its place. Who is the default stays
- * as drawn: an edit never moves it, and its answer may be older than a change drawn since.
+ * What each field of a PATCH sets on the server's copy of the address: itself, and what the API
+ * reads from it (`served` follows the ZIP; the coordinates are stored together). Who is the
+ * default is not one address's field: `withDefault` draws it.
  */
-export function withFields(book: Book, address: SavedAddress): Book {
+const SET_BY: {
+  readonly [Field in keyof Required<AddressPatch>]: (saved: SavedAddress) => Partial<SavedAddress>;
+} = {
+  label: ({ label }) => ({ label }),
+  line1: ({ line1 }) => ({ line1 }),
+  line2: ({ line2 }) => ({ line2 }),
+  city: ({ city }) => ({ city }),
+  state: ({ state }) => ({ state }),
+  zip_code: ({ zip_code, served }) => ({ zip_code, served }),
+  lat: ({ lat, lng }) => ({ lat, lng }),
+  lng: ({ lat, lng }) => ({ lat, lng }),
+  is_default: () => ({}),
+};
+const PATCH_FIELDS = Object.keys(SET_BY) as (keyof AddressPatch)[];
+
+/** The fields a PATCH clears when it sends null; null for any other leaves the field as it is. */
+const CLEARED_BY_NULL: ReadonlySet<keyof AddressPatch> = new Set(["line2", "lat", "lng"]);
+
+const sends = (sent: AddressPatch, field: keyof AddressPatch): boolean =>
+  sent[field] !== undefined && (sent[field] !== null || CLEARED_BY_NULL.has(field));
+
+/**
+ * The book with what an edit changed: of the server's answer `saved`, only the fields its request
+ * `sent`, on the address in its place. The answer is a copy of the whole address as it was when
+ * the server answered, and the server takes two writes in flight in either order: its other
+ * fields may be older than what another write (a second edit, a default change) changed and
+ * already answered, so replaying them would draw over that answer. Who is the default stays as
+ * drawn for the same reason.
+ */
+export function withFields(book: Book, saved: SavedAddress, sent: AddressPatch): Book {
+  const changed = PATCH_FIELDS.filter((field) => sends(sent, field)).reduce<Partial<SavedAddress>>(
+    (fields, field) => ({ ...fields, ...SET_BY[field](saved) }),
+    {},
+  );
   return {
     ...book,
-    items: book.items.map((saved) =>
-      saved.id === address.id ? { ...address, is_default: saved.is_default } : saved,
+    items: book.items.map((address) =>
+      address.id === saved.id ? { ...address, ...changed } : address,
     ),
   };
 }

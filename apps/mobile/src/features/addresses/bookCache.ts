@@ -33,7 +33,10 @@ export type OpenWrite = { edit?: BookEdit; answered: boolean };
  * - A refused write leaves the log: the book reads as if it had never been asked, whatever the
  *   others drew meanwhile.
  * - An answered write stays in its place, with the server's answer as its edit: the answer never
- *   draws over a write asked after it.
+ *   draws over a write asked after it. Of that answer the edit takes only what the write's own
+ *   request changed (the fields an edit sent, who is the default for a default change): the rest
+ *   is the address as it was when the server answered, and the server takes two writes in either
+ *   order, so those fields may be older than another write's own answer.
  * - A GET that lands is the new `confirmed`, and every write is replayed over it, the answered
  *   ones too: that list may have been read before the server took them (it was in flight when
  *   they were asked, or passed them on the way).

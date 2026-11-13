@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react-native";
 import { createElement, type ReactNode } from "react";
 import { AccessibilityInfo } from "react-native";
@@ -9,6 +9,7 @@ import "@/i18n";
 
 import { deferred, settle } from "../../../api/__tests__/helpers";
 import { savedAddress } from "../../request/__tests__/helpers";
+import { resolveAddress } from "../../request/address";
 import {
   SAVED_ADDRESSES_QUERY_KEY,
   useCreateAddress,
@@ -1089,5 +1090,332 @@ describe("a write asked before the book was cached", () => {
 
     await waitFor(() => expect(cached(client)).toEqual(["home*", "office"]));
     expect(apiGet).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("an answer changes only what its request sent", () => {
+  const ORDERS = ["edit", "default"] as const;
+  const other = (write: (typeof ORDERS)[number]) => (write === "edit" ? "default" : "edit");
+  const CHANGES = { label: "Office", line1: "250 Changed St" };
+  /** Work as the server has it once it took both writes, in either order. */
+  const OFFICE = { ...WORK, ...CHANGES, is_default: true };
+  const items = (client: QueryClient) =>
+    client.getQueryData<SavedBook>(SAVED_ADDRESSES_QUERY_KEY)?.items;
+
+  // Work is edited and made the default, both in flight together. The server takes the two in
+  // either order, so each answer is the address with or without the other write's change, and the
+  // answers land in either order too. No list comes after: the answers are all the device has.
+  it.each(
+    ORDERS.flatMap((asked) =>
+      ORDERS.flatMap((taken) => ORDERS.map((answered) => ({ asked, taken, answered }))),
+    ),
+  )(
+    "an edit and a default change of one address both stay: $asked asked first, $taken taken first by the server, $answered answered first",
+    async ({ asked, taken, answered }) => {
+      const answers = { edit: deferred<SavedAddress>(), default: deferred<SavedAddress>() };
+      jest
+        .mocked(apiPatch)
+        .mockReturnValueOnce(answers[asked].promise)
+        .mockReturnValueOnce(answers[other(asked)].promise);
+      const { result, client } = await renderBook();
+      jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+      const ask = {
+        edit: () => result.current.update.mutate({ id: "work", body: CHANGES, generation: 1 }),
+        default: () => result.current.makeDefault(WORK),
+      };
+      const land = {
+        edit: () => answers.edit.resolve({ ...OFFICE, is_default: taken === "default" }),
+        default: () => answers.default.resolve(taken === "edit" ? OFFICE : { ...OFFICE, ...WORK }),
+      };
+
+      await act(async () => ask[asked]());
+      await act(async () => ask[other(asked)]());
+      await act(async () => land[answered]());
+      await act(async () => land[other(answered)]());
+
+      await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+      expect(cached(client)).toEqual(["work*", "home", "mom"]);
+      expect(items(client)?.[0]).toEqual(OFFICE);
+      // The request flow's Where step reads the same book: it goes to the address as edited.
+      expect(resolveAddress(null, items(client))).toEqual({ kind: "saved", address: OFFICE });
+    },
+  );
+
+  // Two edits of Work, each sending its own field. Whichever the server took first, the answer of
+  // the other has both changes and its own has one: neither answer takes the other's field back.
+  const FIELDS = ["name", "street"] as const;
+  it.each(FIELDS.flatMap((taken) => FIELDS.map((answered) => ({ taken, answered }))))(
+    "two edits of one address that sent different fields both stay: the $taken taken first by the server, the $answered answered first",
+    async ({ taken, answered }) => {
+      const answers = { name: deferred<SavedAddress>(), street: deferred<SavedAddress>() };
+      jest
+        .mocked(apiPatch)
+        .mockReturnValueOnce(answers.name.promise)
+        .mockReturnValueOnce(answers.street.promise);
+      const { result, client } = await renderBook();
+      jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+      const both = { ...WORK, ...CHANGES };
+      const land = {
+        name: () => answers.name.resolve(taken === "name" ? { ...both, line1: WORK.line1 } : both),
+        street: () =>
+          answers.street.resolve(taken === "street" ? { ...both, label: WORK.label } : both),
+      };
+
+      await act(async () =>
+        result.current.update.mutate({
+          id: "work",
+          body: { label: CHANGES.label },
+          generation: 1,
+        }),
+      );
+      await act(async () =>
+        result.current.update.mutate({
+          id: "work",
+          body: { line1: CHANGES.line1 },
+          generation: 1,
+        }),
+      );
+      await act(async () => land[answered]());
+      await act(async () => land[answered === "name" ? "street" : "name"]());
+
+      await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+      expect(items(client)).toEqual([HOME, both, MOM]);
+    },
+  );
+
+  it("a new address the list already has stays as listed under its own answer", async () => {
+    // The add's answer is still to come when a list that has the address lands: read after the
+    // server added it, and after it was renamed elsewhere.
+    const office = savedAddress({ id: "office", label: "Office", is_default: false });
+    const renamed = { ...office, label: "Studio" };
+    const added = deferred<SavedAddress>();
+    jest.mocked(apiPost).mockReturnValue(added.promise);
+    const { result, client } = await renderBook();
+    await act(async () =>
+      result.current.create.mutate({
+        body: {
+          line1: office.line1,
+          city: office.city,
+          state: office.state,
+          zip_code: office.zip_code,
+          label: office.label,
+          is_default: false,
+        },
+        generation: 1,
+      }),
+    );
+    server = [HOME, WORK, MOM, renamed];
+    await act(async () => {
+      await client.refetchQueries({ queryKey: SAVED_ADDRESSES_QUERY_KEY });
+    });
+    jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+
+    await act(async () => added.resolve(office));
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(3));
+    expect(items(client)).toEqual([HOME, WORK, MOM, renamed]);
+  });
+});
+
+// The Gatekeeper's probes of round 2 (PR #354), as it wrote them but for the types (no address
+// picked is null; an added address says it is not the default). The first one failed while a
+// default change's answer was replayed whole.
+describe("Gatekeeper r2: new interleavings", () => {
+  const CABIN = savedAddress({ id: "cabin", label: "Cabin", is_default: false });
+  const EDITED = { ...HOME, line1: "250 Changed St" };
+  const CREATE_BODY = {
+    label: CABIN.label,
+    line1: CABIN.line1,
+    city: CABIN.city,
+    state: CABIN.state,
+    zip_code: CABIN.zip_code,
+    is_default: false,
+  };
+
+  const permutations = <T,>(items: T[]): T[][] =>
+    items.length === 0
+      ? [[]]
+      : items.flatMap((item, index) =>
+          permutations(items.filter((_, i) => i !== index)).map((rest) => [item, ...rest]),
+        );
+
+  it.each([true, false])(
+    "a default-only response cannot erase an overlapping edit, default response delivered first=%s",
+    async (defaultFirst) => {
+      const edit = deferred<SavedAddress>();
+      const def = deferred<SavedAddress>();
+      jest.mocked(apiPatch).mockReturnValueOnce(edit.promise).mockReturnValueOnce(def.promise);
+      const { result, client } = await renderBook();
+      jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+      await act(async () => {
+        result.current.update.mutate({
+          id: "work",
+          body: { label: "Office", line1: "250 Changed St" },
+          generation: 1,
+        });
+      });
+      await act(async () => result.current.makeDefault(WORK));
+      // The server processes the later default-only request first, then commits the edit.
+      // Those two responses can be delivered in either order.
+      const answers = [
+        () => def.resolve({ ...WORK, is_default: true }),
+        () => edit.resolve({ ...WORK, label: "Office", line1: "250 Changed St", is_default: true }),
+      ];
+      if (!defaultFirst) answers.reverse();
+      for (const answer of answers) await act(async () => answer());
+      await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+      expect(cached(client)).toEqual(["work*", "home", "mom"]);
+      expect(
+        resolveAddress(null, client.getQueryData<SavedBook>(SAVED_ADDRESSES_QUERY_KEY)?.items),
+      ).toMatchObject({
+        kind: "saved",
+        address: { id: "work", label: "Office", line1: "250 Changed St" },
+      });
+      expect(client.getQueryData<SavedBook>(SAVED_ADDRESSES_QUERY_KEY)?.items[0]).toMatchObject({
+        id: "work",
+        label: "Office",
+        line1: "250 Changed St",
+        is_default: true,
+      });
+    },
+  );
+
+  it.each(permutations([0, 1, 2, 3]).map((order) => [order.join(""), order] as const))(
+    "add/edit/delete/default survive response order %s with a failed repair GET",
+    async (_name, order) => {
+      const add = deferred<SavedAddress>();
+      const edit = deferred<SavedAddress>();
+      const del = deferred<undefined>();
+      const def = deferred<SavedAddress>();
+      jest.mocked(apiPost).mockReturnValue(add.promise);
+      jest.mocked(apiPatch).mockReturnValueOnce(edit.promise).mockReturnValueOnce(def.promise);
+      jest.mocked(apiDelete).mockReturnValue(del.promise);
+      const { result, client } = await renderBook();
+      jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+      await act(async () => {
+        result.current.create.mutate({ body: CREATE_BODY, generation: 1 });
+      });
+      await act(async () => {
+        result.current.update.mutate({
+          id: "home",
+          body: { line1: EDITED.line1 },
+          generation: 1,
+        });
+      });
+      await act(async () => result.current.remove(WORK));
+      await act(async () => result.current.makeDefault(MOM));
+      const answers = [
+        () => add.resolve(CABIN),
+        () => edit.resolve(EDITED),
+        () => del.resolve(undefined),
+        () => def.reject(new NetworkError(false)),
+      ];
+      for (const index of order) await act(async () => answers[index]());
+      await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+      expect(cached(client)).toEqual(["home*", "mom", "cabin"]);
+      const items = client.getQueryData<SavedBook>(SAVED_ADDRESSES_QUERY_KEY)?.items ?? [];
+      expect(items.find((item) => item.id === "home")?.line1).toBe(EDITED.line1);
+      expect(resolveAddress(null, items)).toMatchObject({
+        kind: "saved",
+        address: { id: "home", line1: EDITED.line1 },
+      });
+      expect(resolveAddress({ kind: "saved", id: "cabin" }, items)).toMatchObject({
+        kind: "saved",
+        address: { id: "cabin" },
+      });
+      expect(resolveAddress({ kind: "saved", id: "work" }, items)).toEqual({ kind: "typed" });
+    },
+  );
+
+  it.each([true, false])(
+    "edit of a deleted row never resurrects it, edit answers first=%s",
+    async (first) => {
+      const edit = deferred<SavedAddress>();
+      const del = deferred<undefined>();
+      jest.mocked(apiPatch).mockReturnValue(edit.promise);
+      jest.mocked(apiDelete).mockReturnValue(del.promise);
+      const { result, client } = await renderBook();
+      jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+      await act(async () => {
+        result.current.update.mutate({
+          id: "home",
+          body: { line1: EDITED.line1 },
+          generation: 1,
+        });
+      });
+      await act(async () => result.current.remove(HOME));
+      const answers = [() => edit.resolve(EDITED), () => del.resolve(undefined)];
+      if (!first) answers.reverse();
+      for (const answer of answers) await act(async () => answer());
+      await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+      expect(cached(client)).toEqual(["work*", "mom"]);
+    },
+  );
+
+  it("four pending writes cannot affect a replacement session, including its own pending default", async () => {
+    const add = deferred<SavedAddress>();
+    const edit = deferred<SavedAddress>();
+    const del = deferred<undefined>();
+    const def = deferred<SavedAddress>();
+    jest.mocked(apiPost).mockReturnValue(add.promise);
+    jest.mocked(apiPatch).mockReturnValueOnce(edit.promise).mockReturnValueOnce(def.promise);
+    jest.mocked(apiDelete).mockReturnValue(del.promise);
+    const { result, client, unmount } = await renderBook();
+    await act(async () => {
+      result.current.create.mutate({ body: CREATE_BODY, generation: 1 });
+    });
+    await act(async () => {
+      result.current.update.mutate({ id: "home", body: { line1: EDITED.line1 }, generation: 1 });
+    });
+    await act(async () => result.current.remove(WORK));
+    await act(async () => result.current.makeDefault(MOM));
+    await unmount();
+    mockGeneration = 2;
+    client.clear();
+    const other = savedAddress({ id: "other", label: "Other", is_default: true });
+    const second = savedAddress({ id: "second", label: "Second", is_default: false });
+    server = [other, second];
+    const next = await renderBook(client);
+    const pending = deferred<SavedAddress>();
+    jest.mocked(apiPatch).mockReturnValue(pending.promise);
+    await act(async () => next.result.current.makeDefault(second));
+    const gets = jest.mocked(apiGet).mock.calls.length;
+    announce.mockClear();
+    await act(async () => {
+      add.resolve(CABIN);
+      edit.resolve(EDITED);
+      del.reject(new NetworkError(false));
+      def.resolve({ ...MOM, is_default: true });
+    });
+    expect(cached(client)).toEqual(["second*", "other"]);
+    expect(apiGet).toHaveBeenCalledTimes(gets);
+    expect(announce).not.toHaveBeenCalled();
+    expect(toast()).toBeNull();
+    jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+    await act(async () => pending.reject(new NetworkError(false)));
+    expect(cached(client)).toEqual(["other*", "second"]);
+  });
+
+  it("offline paused default and delete resume and roll back with a failing repair read", async () => {
+    const { result, client } = await renderBook();
+    jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+    jest.mocked(apiPatch).mockRejectedValue(new NetworkError(false));
+    jest.mocked(apiDelete).mockRejectedValue(new NetworkError(false));
+    onlineManager.setOnline(false);
+    try {
+      await act(async () => result.current.makeDefault(MOM));
+      await act(async () => result.current.remove(WORK));
+      expect(cached(client)).toEqual(["mom*", "home"]);
+      expect(apiPatch).not.toHaveBeenCalled();
+      expect(apiDelete).not.toHaveBeenCalled();
+      await act(async () => {
+        onlineManager.setOnline(true);
+        await client.resumePausedMutations();
+      });
+      await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+      expect(cached(client)).toEqual(["home*", "work", "mom"]);
+    } finally {
+      onlineManager.setOnline(true);
+    }
   });
 });
