@@ -1,5 +1,5 @@
 import type { ApiSchema } from "@jack/shared";
-import { useQuery, type QueryClient } from "@tanstack/react-query";
+import { replaceEqualDeep, useQuery, type QueryClient } from "@tanstack/react-query";
 import Constants from "expo-constants";
 import { Platform } from "react-native";
 
@@ -23,7 +23,6 @@ export type MyTicket = Pick<
   ApiSchema<"MySupportTicketOut">,
   "id" | "topic" | "status" | "created_at"
 >;
-type MyTickets = { items: MyTicket[] };
 
 /** The topics of a message to the team, in the order the form lists them. */
 export const TICKET_TOPICS = [
@@ -45,29 +44,88 @@ export type Ticket = { topic: TicketTopic; message: string; jobId: string | null
 const myTicketsKey = (generation: number) => ["support-tickets", "mine", generation] as const;
 
 /**
+ * The list as the app keeps it: the server's newest page as it last answered (null while none
+ * has), and what was sent from this phone since that the page does not hold yet, newest first.
+ * A page read before the server took a message cannot hold it, and must not take it off the
+ * screen either: a sent message stays until a page lists it.
+ */
+type MineCache = { page: MyTicket[] | null; sent: MyTicket[] };
+
+/** What "Your messages" shows: the messages, newest first, and whether the server's list came. */
+export type MyTickets = { items: MyTicket[]; listed: boolean };
+
+/** The sent messages a page does not hold, each once, in their order. */
+function notOn(page: readonly MyTicket[] | null, sent: readonly MyTicket[]): MyTicket[] {
+  const known = new Set(page?.map((item) => item.id));
+  const kept: MyTicket[] = [];
+  for (const item of sent) {
+    if (known.has(item.id)) continue;
+    known.add(item.id);
+    kept.push(item);
+  }
+  return kept;
+}
+
+/**
+ * Every write to the cache, a page that arrives or a message that went, keeps what the cache
+ * holds as sent at that moment. Done here, where TanStack stores the data, and not in the query
+ * function: an answer read before a message went is stored only after, and would otherwise
+ * draw over it.
+ */
+function keepSent(old: unknown, next: unknown): unknown {
+  // Only `MineCache` values are ever stored under this key.
+  const before = old as MineCache | undefined;
+  const after = next as MineCache;
+  const kept = {
+    page: after.page,
+    sent: notOn(after.page, [...after.sent, ...(before?.sent ?? [])]),
+  };
+  return replaceEqualDeep(before, kept);
+}
+
+const shown = ({ page, sent }: MineCache): MyTickets => ({
+  items: [...sent, ...(page ?? [])],
+  listed: page !== null,
+});
+
+/**
+ * Reads the list again, from now: a read already on its way may have left before the server took
+ * the last message, so it is dropped instead of joined (TanStack joins a first read in flight).
+ */
+function readAgain(client: QueryClient, key: ReturnType<typeof myTicketsKey>): void {
+  void client.cancelQueries({ queryKey: key });
+  void client.invalidateQueries({ queryKey: key });
+}
+
+/**
  * The signed-in person's own messages to the team, newest first (the newest page: there is no
- * thread to scroll back through, and a person can send only a few an hour). Only the fields of
- * `MyTicket` are kept from the answer, whatever else it carries.
+ * thread to scroll back through, and a person can send only a few an hour), headed by those sent
+ * from this phone that the server has not listed yet. Only the fields of `MyTicket` are kept from
+ * the answer, whatever else it carries.
  */
 export function useMyTickets() {
   const generation = useSessionGeneration();
   const { status } = useSession();
-  return useQuery({
+  const { data, isError, isFetching, dataUpdatedAt, refetch } = useQuery({
     queryKey: myTicketsKey(generation),
-    queryFn: async ({ signal }): Promise<MyTickets> => {
-      const page = await apiGet("/v1/support/tickets/mine", { auth: true, signal, generation });
+    queryFn: async ({ signal }): Promise<MineCache> => {
+      const answer = await apiGet("/v1/support/tickets/mine", { auth: true, signal, generation });
       return {
-        items: page.items.map(({ id, topic, status, created_at }) => ({
+        page: answer.items.map(({ id, topic, status, created_at }) => ({
           id,
           topic,
           status,
           created_at,
         })),
+        sent: [],
       };
     },
+    // Not with `select`: TanStack passes what `select` returns through this too.
+    structuralSharing: keepSent,
     enabled: status === "signedIn",
     retry: false,
   });
+  return { data: data && shown(data), isError, isFetching, dataUpdatedAt, refetch };
 }
 
 /**
@@ -99,26 +157,22 @@ export async function sendTicket(
   } catch (error) {
     // No answer is not a refusal: the message may have arrived all the same. The list is read
     // again, so a message that did arrive shows there before the person sends it a second time.
-    if (error instanceof NetworkError) void client.invalidateQueries({ queryKey: mine });
+    if (error instanceof NetworkError) readAgain(client, mine);
     throw error;
   }
-  // The new message heads the list at once; the server's page follows.
-  client.setQueryData<MyTickets>(
-    mine,
-    (page) =>
-      page && {
-        items: [
-          {
-            id: created.id,
-            topic: ticket.topic,
-            status: created.status,
-            created_at: created.created_at,
-          },
-          ...page.items.filter((item) => item.id !== created.id),
-        ],
-      },
-  );
-  void client.invalidateQueries({ queryKey: mine });
+  // The new message heads the list at once, with or without a page yet; the server's page follows
+  // and keeps it until it lists it. Only what the list shows is kept, never the text.
+  const sent: MyTicket = {
+    id: created.id,
+    topic: ticket.topic,
+    status: created.status,
+    created_at: created.created_at,
+  };
+  client.setQueryData<MineCache>(mine, (cache) => ({
+    page: cache?.page ?? null,
+    sent: notOn(cache?.page ?? null, [sent, ...(cache?.sent ?? [])]),
+  }));
+  readAgain(client, mine);
 }
 
 /**

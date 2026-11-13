@@ -181,50 +181,52 @@ export function ContactScreen() {
 
 /**
  * "Your messages": what the person sent, newest first, each with its topic, its day and where it
- * stands. Nothing while there is none; a quiet notice with a retry when the list did not load.
+ * stands. Nothing while there is none. A quiet notice with a retry while the list never loaded,
+ * below what is known all the same: a message that just went shows even then.
  */
 function MyTickets() {
   const { t } = useTranslation();
   const tickets = useMyTickets();
-
-  if (tickets.isError && !tickets.data) {
-    return (
-      <Notice tone="info" title={t("support.mine.error")} testID="contact-mine-error">
-        <Button
-          label={t("support.mine.retry")}
-          variant="secondary"
-          loading={tickets.isFetching}
-          onPress={() => void tickets.refetch()}
-          testID="contact-mine-retry"
-        />
-      </Notice>
-    );
-  }
   const items = tickets.data?.items ?? [];
-  if (items.length === 0) return null;
+  const failed = tickets.isError && !tickets.data?.listed;
 
   return (
-    <View className="gap-3">
-      <Text accessibilityRole="header" className="text-title-2 text-navy-900">
-        {t("support.mine.title")}
-      </Text>
-      <ListGroup testID="contact-mine">
-        {items.map((ticket) => (
-          <ListRow
-            key={ticket.id}
-            label={t(`support.topic.${ticket.topic}`)}
-            // "Today" against the moment the list was answered, not a clock read while drawing.
-            value={sentDay(t, ticket.created_at, tickets.dataUpdatedAt)}
-            accessory={
-              <StatusBadge
-                label={t(`support.mine.status.${ticket.status}`)}
-                tone={STATUS_TONE[ticket.status]}
+    <>
+      {items.length > 0 ? (
+        <View className="gap-3">
+          <Text accessibilityRole="header" className="text-title-2 text-navy-900">
+            {t("support.mine.title")}
+          </Text>
+          <ListGroup testID="contact-mine">
+            {items.map((ticket) => (
+              <ListRow
+                key={ticket.id}
+                label={t(`support.topic.${ticket.topic}`)}
+                // "Today" against the moment the list was answered, not a clock read while drawing.
+                value={sentDay(t, ticket.created_at, tickets.dataUpdatedAt)}
+                accessory={
+                  <StatusBadge
+                    label={t(`support.mine.status.${ticket.status}`)}
+                    tone={STATUS_TONE[ticket.status]}
+                  />
+                }
+                testID={`contact-ticket-${ticket.id}`}
               />
-            }
-            testID={`contact-ticket-${ticket.id}`}
+            ))}
+          </ListGroup>
+        </View>
+      ) : null}
+      {failed ? (
+        <Notice tone="info" title={t("support.mine.error")} testID="contact-mine-error">
+          <Button
+            label={t("support.mine.retry")}
+            variant="secondary"
+            loading={tickets.isFetching}
+            onPress={() => void tickets.refetch()}
+            testID="contact-mine-retry"
           />
-        ))}
-      </ListGroup>
-    </View>
+        </Notice>
+      ) : null}
+    </>
   );
 }

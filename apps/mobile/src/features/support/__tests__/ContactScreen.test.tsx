@@ -10,6 +10,7 @@ import i18n from "@/i18n";
 import {
   callBody,
   callPath,
+  callsTo,
   deferred,
   errorResponse,
   installFetchMock,
@@ -508,6 +509,92 @@ describe("Talk to Jack: the person's messages", () => {
     await waitFor(() =>
       expect(screen.getByTestId(`contact-ticket-${ticket().id}`)).toBeOnTheScreen(),
     );
+  });
+});
+
+describe("Talk to Jack: a message that went before the list came", () => {
+  const row = () => screen.queryByTestId(`contact-ticket-${ticket().id}`);
+
+  /** Holds back the first `count` reads of the list for the test to answer; the rest answer as usual. */
+  function holdMine(count: number): Answer[] {
+    const held: Answer[] = [];
+    const usual = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((...call) => {
+      if (callPath(call) === "/v1/support/tickets/mine" && held.length < count) {
+        const read = deferred<Response>();
+        held.push(read);
+        return read.promise;
+      }
+      return usual(...call);
+    });
+    return held;
+  }
+
+  // Gatekeeper probe 1, PR #379 round 1.
+  it("shows it although the first read of the list lands after it, with its older empty page", async () => {
+    const held = holdMine(1);
+    await renderForm();
+    await write();
+    await fireEvent.press(sendButton());
+    mine = [ticket()];
+    await answer(0, (post) => post.resolve(created()));
+
+    await waitFor(() => expect(screen.getByTestId("contact-sent")).toBeOnTheScreen());
+    // At once, with no page yet: what the list shows of it, and no text.
+    expect(row()).toHaveTextContent("A paymentTodayOpen");
+    // The list is read again from now: the first read, on its way since before, is not joined.
+    expect(callsTo(fetchMock, "/v1/support/tickets/mine")).toHaveLength(2);
+
+    await act(async () => {
+      held[0]!.resolve(jsonResponse(200, { items: [], next_cursor: null }));
+      await settle();
+    });
+    expect(row()).toBeOnTheScreen();
+    expect(screen.getAllByTestId(/^contact-ticket-/)).toHaveLength(1);
+  });
+
+  // Gatekeeper probe 2, PR #379 round 1.
+  it("shows it when the list cannot be read before or after it went, with the retry", async () => {
+    mine = "down";
+    await renderForm();
+    await write();
+    await fireEvent.press(sendButton());
+    await answer(0, (post) => post.resolve(created()));
+    await waitFor(() => expect(screen.getByTestId("contact-sent")).toBeOnTheScreen());
+    await act(settle);
+
+    expect(row()).toHaveTextContent("A paymentTodayOpen");
+    expect(screen.getByTestId("contact-mine-error")).toBeOnTheScreen();
+
+    mine = [ticket(), ticket({ id: "a", topic: "job" })];
+    await fireEvent.press(screen.getByTestId("contact-mine-retry"));
+    await waitFor(() => expect(screen.queryByTestId("contact-mine-error")).toBeNull());
+    expect(screen.getAllByTestId(/^contact-ticket-/).map((item) => item.props.testID)).toEqual([
+      `contact-ticket-${ticket().id}`,
+      "contact-ticket-a",
+    ]);
+  });
+
+  it("keeps it through a page that does not list it yet; the page that does takes its place", async () => {
+    mine = [ticket({ id: "a", topic: "job", status: "closed" })];
+    await renderForm();
+    await write();
+    await fireEvent.press(sendButton());
+    // The server has not listed it yet when the list is read again.
+    await answer(0, (post) => post.resolve(created()));
+    await waitFor(() => expect(callsTo(fetchMock, "/v1/support/tickets/mine")).toHaveLength(2));
+    await act(settle);
+
+    expect(row()).toHaveTextContent("A paymentTodayOpen");
+    expect(screen.getByTestId("contact-ticket-a")).toBeOnTheScreen();
+
+    mine = [ticket({ status: "in_progress" }), ...mine];
+    await act(async () => {
+      await client.invalidateQueries();
+      await settle();
+    });
+    expect(row()).toHaveTextContent("A paymentTodayIn progress");
+    expect(screen.getAllByTestId(/^contact-ticket-/)).toHaveLength(2);
   });
 });
 
