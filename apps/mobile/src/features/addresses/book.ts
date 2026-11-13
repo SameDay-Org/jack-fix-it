@@ -13,10 +13,10 @@ type Addresses = readonly SavedAddress[];
  *
  * `unplaced` marks a book with an address added while another Add was unanswered: the server
  * takes the two in either order, their answers do not say which, and the other one may not be
- * drawn yet. As long as the log replays that Add, the device vouches for no order of the others
- * and works out no default by itself, however few addresses it draws. The log ends with a list
- * from the server, or, when none comes, with both Adds answered and the book cached as `guessed`:
- * every address is drawn by then, and only their order stays unknown.
+ * drawn yet. From then on the device vouches for no order of the others and works out no default
+ * by itself, however few addresses it draws, until the server lists the book. The mark is cached
+ * with the book for that (`SavedBook`): the log that drew it can close with no list from the
+ * server, and with the other Add unanswered when that one was asked before the book was cached.
  */
 export type Book = {
   readonly items: Addresses;

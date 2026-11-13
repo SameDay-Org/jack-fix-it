@@ -11,9 +11,11 @@ export type SavedAddress = SavedAddressList["items"][number];
  * The book as cached. `guessed` marks one whose other addresses (the ones that are not the
  * default) the device cannot vouch for: a change of its own is still unanswered, or it no longer
  * knows their order, or an address was added while another Add was unanswered (see `Book`). Who
- * the server would make the default next is then unknown.
+ * the server would make the default next is then unknown. `unplaced` is the last of the three,
+ * kept apart for the log that starts on this book: the server may have an address this book does
+ * not draw (`Book.unplaced`).
  */
-export type SavedBook = SavedAddressList & { guessed?: true };
+export type SavedBook = SavedAddressList & { guessed?: true; unplaced?: true };
 
 export const SAVED_ADDRESSES_QUERY_KEY = ["addresses"] as const;
 const BOOK_HASH = hashKey(SAVED_ADDRESSES_QUERY_KEY);
@@ -44,8 +46,10 @@ export type OpenWrite = { edit?: BookEdit; answered: boolean };
  *
  * Once the last write is answered the book is fetched again. That GET was asked after every
  * answer so far, so its list has them: when it lands those writes leave the log, and the log
- * closes unless a write was asked meanwhile. The log also goes with the cached book when the
- * cache drops it (a sign-out clears it); what its writes answer later is drawn nowhere.
+ * closes unless a write was asked meanwhile. When no list comes it closes on the book as drawn,
+ * which is cached with what its addresses alone do not say (`SavedBook`): the next log starts
+ * from there. The log also goes with the cached book when the cache drops it (a sign-out clears
+ * it); what its writes answer later is drawn nowhere.
  */
 type WriteLog = {
   confirmed: Book;
@@ -68,25 +72,36 @@ function closeLog(client: QueryClient, log: WriteLog): void {
   logs.delete(client);
 }
 
-/** Draws the book as the log has it: `confirmed`, then each write in the order asked. */
+/**
+ * Draws the book as the log has it: `confirmed`, then each write in the order asked. Its marks
+ * are cached with it: this log may close before the server lists the book.
+ */
 function draw(client: QueryClient, log: WriteLog): void {
   const book = log.writes.reduce((drawn, write) => write.edit?.(drawn) ?? drawn, log.confirmed);
   const guessed =
     !book.ordered || book.unplaced || log.writes.some((write) => write.edit && !write.answered);
   client.setQueryData<SavedBook>(SAVED_ADDRESSES_QUERY_KEY, (cached) => {
     if (!cached) return cached;
-    const { guessed: _guessed, ...list } = cached;
-    const items = [...book.items];
-    return guessed ? { ...list, items, guessed } : { ...list, items };
+    const { guessed: _guessed, unplaced: _unplaced, ...list } = cached;
+    const drawn: SavedBook = { ...list, items: [...book.items] };
+    if (guessed) drawn.guessed = true;
+    if (book.unplaced) drawn.unplaced = true;
+    return drawn;
   });
 }
 
-/** Starts a log over the book as cached, if it is: with no book there is nothing to draw on. */
+/**
+ * Starts a log over the book as cached, if it is: with no book there is nothing to draw on. A
+ * book cached `unplaced` stays that: the log that drew it closed with no list from the server,
+ * and an Add may be unanswered still (one asked before the book was cached had no place in that
+ * log to keep it open).
+ */
 function startLog(client: QueryClient): WriteLog | undefined {
   const cached = client.getQueryData<SavedBook>(SAVED_ADDRESSES_QUERY_KEY);
   if (!cached) return undefined;
+  const book: Book = { items: cached.items, ordered: !cached.guessed };
   const log: WriteLog = {
-    confirmed: { items: cached.items, ordered: !cached.guessed },
+    confirmed: cached.unplaced ? { ...book, unplaced: true } : book,
     writes: [],
     landed: false,
     stop: client.getQueryCache().subscribe((event) => {
@@ -112,7 +127,8 @@ function startLog(client: QueryClient): WriteLog | undefined {
 /**
  * Draws the book after an answer. With the last write answered, fetches the book again: the list
  * that comes back replaces the writes answered by now, and the log closes if none was asked since.
- * If no list comes (offline, or no screen is reading the book) it closes on the book as drawn.
+ * If no list comes (offline, or no screen is reading the book) it closes on the book as drawn,
+ * though an Add with no place in it may be unanswered still: the cached book says so (`draw`).
  */
 function settle(client: QueryClient, log: WriteLog): void {
   draw(client, log);

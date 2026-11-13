@@ -1654,3 +1654,330 @@ describe("two Adds in flight together", () => {
     expect(guessed(client)).toBe(true);
   });
 });
+
+// The Gatekeeper's probes of round 3 (PR #354), as it wrote them but for the layout. The second
+// one failed on both rows: the log closed with an Add asked before the book was cached still
+// unanswered, and the next one no longer knew the book could be missing that address.
+describe("Gatekeeper r3: five writes and a cold Add", () => {
+  const CABIN = savedAddress({ id: "cabin", label: "Cabin", is_default: false });
+  const LAKE = savedAddress({ id: "lake", label: "Lake", is_default: false });
+  const bodyOf = (a: SavedAddress) => ({
+    label: a.label,
+    line1: a.line1,
+    city: a.city,
+    state: a.state,
+    zip_code: a.zip_code,
+    is_default: false,
+  });
+  const itemsOf = (client: QueryClient) =>
+    client.getQueryData<SavedBook>(SAVED_ADDRESSES_QUERY_KEY)?.items;
+  const permutations = <T,>(items: T[]): T[][] =>
+    items.length === 0
+      ? [[]]
+      : items.flatMap((item, i) =>
+          permutations(items.filter((_, j) => i !== j)).map((rest) => [item, ...rest]),
+        );
+
+  it.each(permutations([0, 1, 2, 3, 4]).map((order) => [order.join(""), order] as const))(
+    "add/add/edit/default/delete, response order %s, repair GET fails",
+    async (_name, order) => {
+      server = [HOME, WORK];
+      const first = deferred<SavedAddress>(),
+        second = deferred<SavedAddress>();
+      const edit = deferred<SavedAddress>(),
+        def = deferred<SavedAddress>(),
+        del = deferred<undefined>();
+      jest.mocked(apiPost).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+      jest.mocked(apiPatch).mockReturnValueOnce(edit.promise).mockReturnValueOnce(def.promise);
+      jest.mocked(apiDelete).mockReturnValue(del.promise);
+      const { result, client } = await renderBook();
+      jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+      await act(async () => result.current.create.mutate({ body: bodyOf(CABIN), generation: 1 }));
+      await act(async () => result.current.create.mutate({ body: bodyOf(LAKE), generation: 1 }));
+      await act(async () =>
+        result.current.update.mutate({
+          id: WORK.id,
+          body: { line1: "900 New St" },
+          generation: 1,
+        }),
+      );
+      await act(async () => result.current.makeDefault(WORK));
+      await act(async () => result.current.remove(HOME));
+      const answers = [
+        () => first.resolve(CABIN),
+        () => second.resolve(LAKE),
+        () => edit.resolve({ ...WORK, line1: "900 New St" }),
+        () => def.resolve({ ...WORK, is_default: true }),
+        () => del.resolve(undefined),
+      ];
+      for (const i of order) await act(async () => answers[i]());
+      await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+      expect(cached(client)).toEqual(["work*", "cabin", "lake"]);
+      expect(guessed(client)).toBe(true);
+      expect(resolveAddress(null, itemsOf(client))).toMatchObject({
+        kind: "saved",
+        address: { id: WORK.id, line1: "900 New St" },
+      });
+      jest.mocked(apiDelete).mockResolvedValue(undefined);
+      await act(async () => result.current.remove({ ...WORK, is_default: true }));
+      await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(3));
+      expect(cached(client)).toEqual(["cabin", "lake"]);
+      expect(guessed(client)).toBe(true);
+    },
+  );
+
+  it.each([true, false])(
+    "a pre-cache Add still pending prevents a sole survivor being crowned after failed repair (delete answers=%s)",
+    async (deleteAnswers) => {
+      server = [HOME];
+      const first = deferred<SavedAddress>(),
+        second = deferred<SavedAddress>();
+      const del = deferred<undefined>();
+      jest.mocked(apiPost).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+      jest.mocked(apiDelete).mockReturnValue(del.promise);
+      const client = newQueryClient();
+      jest.mocked(apiGet).mockRejectedValueOnce(new NetworkError(false));
+      const { result } = await renderHook(
+        () => ({
+          book: useSavedAddresses(),
+          create: useCreateAddress(),
+          remove: useDeleteAddress(),
+        }),
+        {
+          wrapper: ({ children }: { children: ReactNode }) =>
+            createElement(QueryClientProvider, { client }, children),
+        },
+      );
+      await waitFor(() => expect(result.current.book.isError).toBe(true));
+      await act(async () => result.current.create.mutate({ body: bodyOf(CABIN), generation: 1 }));
+      await act(async () => {
+        await result.current.book.refetch();
+      });
+      await act(async () => result.current.create.mutate({ body: bodyOf(LAKE), generation: 1 }));
+      jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+      // Server has [Home*, Cabin, Lake], but the first Add's answer is still travelling.
+      await act(async () => second.resolve(LAKE));
+      await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(3));
+      await act(() => settle());
+      expect(cached(client)).toEqual(["home*", "lake"]);
+      expect(guessed(client)).toBe(true);
+      await act(async () => result.current.remove(HOME));
+      if (deleteAnswers) await act(async () => del.resolve(undefined));
+      // Capture both the intermediate and settled state; no write answer is lost in this case.
+      const afterDelete = { items: cached(client), guessed: guessed(client) };
+      await act(async () => first.resolve(CABIN));
+      if (!deleteAnswers) await act(async () => del.resolve(undefined));
+      await act(() => settle());
+      const afterAllAnswers = {
+        items: cached(client),
+        defaultIds: itemsOf(client)
+          ?.filter((a) => a.is_default)
+          .map((a) => a.id),
+        guessed: guessed(client),
+      };
+      // The server promotes Cabin. Lake must not be guessed as default merely because Cabin was
+      // not drawn yet.
+      expect({ afterDelete, afterAllAnswers }).toMatchObject({
+        afterDelete: { items: ["lake"], guessed: true },
+        afterAllAnswers: { defaultIds: [], guessed: true },
+      });
+    },
+  );
+
+  it.each([true, false])(
+    "five old writes settling after sign-out leave a replacement Add untouched, reverse=%s",
+    async (reverse) => {
+      const adds = [deferred<SavedAddress>(), deferred<SavedAddress>()];
+      const edit = deferred<SavedAddress>(),
+        def = deferred<SavedAddress>(),
+        del = deferred<undefined>();
+      jest
+        .mocked(apiPost)
+        .mockReturnValueOnce(adds[0].promise)
+        .mockReturnValueOnce(adds[1].promise);
+      jest.mocked(apiPatch).mockReturnValueOnce(edit.promise).mockReturnValueOnce(def.promise);
+      jest.mocked(apiDelete).mockReturnValue(del.promise);
+      const { result, client, unmount } = await renderBook();
+      await act(async () => result.current.create.mutate({ body: bodyOf(CABIN), generation: 1 }));
+      await act(async () => result.current.create.mutate({ body: bodyOf(LAKE), generation: 1 }));
+      await act(async () =>
+        result.current.update.mutate({ id: WORK.id, body: { label: "Office" }, generation: 1 }),
+      );
+      await act(async () => result.current.makeDefault(WORK));
+      await act(async () => result.current.remove(HOME));
+      await unmount();
+      mockGeneration = 2;
+      client.clear();
+      server = [savedAddress({ id: "other", label: "Other", is_default: true })];
+      const next = await renderBook(client);
+      const own = deferred<SavedAddress>();
+      jest.mocked(apiPost).mockReturnValue(own.promise);
+      jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+      await act(async () =>
+        next.result.current.create.mutate({ body: bodyOf(MOM), generation: 2 }),
+      );
+      const gets = jest.mocked(apiGet).mock.calls.length;
+      announce.mockClear();
+      const answers = [
+        () => adds[0].resolve(CABIN),
+        () => adds[1].reject(new NetworkError(false)),
+        () => edit.resolve({ ...WORK, label: "Office" }),
+        () => def.resolve({ ...WORK, is_default: true }),
+        () => del.reject(new NetworkError(false)),
+      ];
+      if (reverse) answers.reverse();
+      for (const answer of answers) await act(async () => answer());
+      expect(cached(client)).toEqual(["other*"]);
+      expect(apiGet).toHaveBeenCalledTimes(gets);
+      expect(announce).not.toHaveBeenCalled();
+      expect(toast()).toBeNull();
+      await act(async () => own.resolve(MOM));
+      await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(gets + 1));
+      expect(cached(client)).toEqual(["other*", "mom"]);
+      expect(guessed(client)).toBe(false);
+    },
+  );
+});
+
+// An Add asked before the book was cached has no place in the log. The log can then close (its
+// last write answered, and no list after it) while that Add is unanswered: the server may have
+// its address, older than one the device draws, and the next log has to know it.
+describe("an Add asked before the book was cached, unanswered when the log closes", () => {
+  const CABIN = savedAddress({ id: "cabin", label: "Cabin", is_default: false });
+  const LAKE = savedAddress({ id: "lake", label: "Lake", is_default: false });
+  const bodyOf = (address: SavedAddress) => ({
+    line1: address.line1,
+    city: address.city,
+    state: address.state,
+    zip_code: address.zip_code,
+    label: address.label,
+    is_default: false,
+  });
+  const getsFail = () => jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+
+  /**
+   * The book cannot load, and Cabin, then Lake if `both`, is asked. The book loads as `listed`,
+   * read before the server took either. Lake is asked if it was not, and answered; the list asked
+   * after its answer does not come. So Lake is drawn, Cabin is unanswered (`cabin` answers it),
+   * and no write is left in the log. The server took Cabin first: neither answer says so.
+   */
+  async function lakeDrawnCabinUnanswered({ listed = [HOME], both = false } = {}) {
+    server = listed;
+    const cabin = deferred<SavedAddress>();
+    const lake = deferred<SavedAddress>();
+    jest.mocked(apiPost).mockReturnValueOnce(cabin.promise).mockReturnValueOnce(lake.promise);
+    jest.mocked(apiGet).mockRejectedValueOnce(new NetworkError(false));
+    jest.mocked(apiDelete).mockResolvedValue(undefined);
+    const client = newQueryClient();
+    const { result } = await renderHook(
+      () => ({ book: useSavedAddresses(), create: useCreateAddress(), remove: useDeleteAddress() }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) =>
+          createElement(QueryClientProvider, { client }, children),
+      },
+    );
+    await waitFor(() => expect(result.current.book.isError).toBe(true));
+    const add = (address: SavedAddress) =>
+      act(async () => result.current.create.mutate({ body: bodyOf(address), generation: 1 }));
+
+    await add(CABIN);
+    if (both) await add(LAKE);
+    await act(async () => {
+      await result.current.book.refetch();
+    });
+    if (!both) await add(LAKE);
+    getsFail();
+    await act(async () => lake.resolve(LAKE));
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(3));
+    await act(() => settle());
+    expect(cached(client)).toEqual([...cached(client)!.slice(0, listed.length), "lake"]);
+    expect(guessed(client)).toBe(true);
+    return { result, client, cabin };
+  }
+
+  /** Deletes `address`, and waits for the list asked after the server's answer to fail. */
+  async function remove(
+    result: Awaited<ReturnType<typeof lakeDrawnCabinUnanswered>>["result"],
+    address: SavedAddress,
+  ) {
+    const gets = jest.mocked(apiGet).mock.calls.length;
+    await act(async () => result.current.remove(address));
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(gets + 1));
+    await act(() => settle());
+  }
+
+  it.each(["before", "after"] as const)(
+    "no address is crowned while it is: neither the next of two, nor the last one drawn (answered %s the last delete's answer)",
+    async (cabinAnswers) => {
+      const { result, client, cabin } = await lakeDrawnCabinUnanswered({ listed: [HOME, WORK] });
+
+      // The server makes Work the default, then Cabin: the device draws neither as one.
+      await remove(result, HOME);
+      expect(cached(client)).toEqual(["work", "lake"]);
+      const answer = deferred<undefined>();
+      jest.mocked(apiDelete).mockReturnValue(answer.promise);
+      await act(async () => result.current.remove(WORK));
+      expect(cached(client)).toEqual(["lake"]);
+
+      if (cabinAnswers === "before") await act(async () => cabin.resolve(CABIN));
+      await act(async () => answer.resolve(undefined));
+      await act(() => settle());
+      if (cabinAnswers === "before") expect(cached(client)).toEqual(["lake", "cabin"]);
+      else expect(cached(client)).toEqual(["lake"]);
+      expect(guessed(client)).toBe(true);
+      if (cabinAnswers === "after") await act(async () => cabin.resolve(CABIN));
+      await act(() => settle());
+
+      expect(cached(client)).toEqual(["lake", "cabin"]);
+      expect(guessed(client)).toBe(true);
+
+      // Every Add is answered now, and the book is still not the server's: the one left when
+      // the other goes is drawn without the chip, until the server lists it.
+      jest.mocked(apiDelete).mockResolvedValue(undefined);
+      await remove(result, LAKE);
+      expect(cached(client)).toEqual(["cabin"]);
+      expect(guessed(client)).toBe(true);
+
+      server = [{ ...CABIN, is_default: true }];
+      jest.mocked(apiGet).mockImplementation(async () => ({ items: server }));
+      await act(async () => {
+        await result.current.book.refetch();
+      });
+      expect(cached(client)).toEqual(["cabin*"]);
+      expect(guessed(client)).toBe(false);
+    },
+  );
+
+  it("nor when the address drawn was asked before the book was cached too", async () => {
+    const { result, client, cabin } = await lakeDrawnCabinUnanswered({ both: true });
+
+    await remove(result, HOME);
+    expect(cached(client)).toEqual(["lake"]);
+    expect(guessed(client)).toBe(true);
+
+    await act(async () => cabin.resolve(CABIN));
+    await act(() => settle());
+    expect(cached(client)).toEqual(["lake", "cabin"]);
+    expect(guessed(client)).toBe(true);
+  });
+
+  it("a list from the server says where it is: the book is vouched for again", async () => {
+    const { result, client, cabin } = await lakeDrawnCabinUnanswered();
+    server = [HOME, CABIN, LAKE];
+    jest.mocked(apiGet).mockImplementation(async () => ({ items: server }));
+
+    await act(async () => {
+      await result.current.book.refetch();
+    });
+    expect(cached(client)).toEqual(["home*", "cabin", "lake"]);
+    expect(guessed(client)).toBe(false);
+
+    // Its answer is still to come, and changes nothing: the list has the address, in its place.
+    getsFail();
+    await remove(result, HOME);
+    expect(cached(client)).toEqual(["cabin*", "lake"]);
+    await act(async () => cabin.resolve(CABIN));
+    await act(() => settle());
+    expect(cached(client)).toEqual(["cabin*", "lake"]);
+  });
+});
