@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_app_settings
 from app.db import get_session
 from app.errors import ErrorResponse
+from app.middleware import NoStoreRoute
 from app.modules.auth.permissions import AppUser
 from app.modules.reviews.models import COMMENT_MAX_LENGTH
 from app.modules.reviews.schemas import MyReviewOut, RatingOut, ReviewCreatedOut, ReviewIn
@@ -16,9 +17,10 @@ from app.modules.reviews.service import ReviewConfig, ReviewService, utc_now
 from app.rate_limit import RateLimiter, enforce_limit, get_rate_limiter
 
 # The job's customer and pro review each other once it is confirmed (#77).
-router = APIRouter(prefix="/jobs/{job_id}/reviews", tags=["reviews"])
+# Authored comments and ratings are private: no HTTP cache keeps any answer, errors too (#392).
+router = APIRouter(prefix="/jobs/{job_id}/reviews", tags=["reviews"], route_class=NoStoreRoute)
 # The caller's own rating, as a customer or as a pro (#77, #252).
-rating_router = APIRouter(prefix="/users/me/rating", tags=["reviews"])
+rating_router = APIRouter(prefix="/users/me/rating", tags=["reviews"], route_class=NoStoreRoute)
 
 
 def _error(description: str) -> dict[str, Any]:
