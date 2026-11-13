@@ -7,6 +7,7 @@ import {
   ApiError,
   apiGet,
   apiPost,
+  isCurrentGeneration,
   NetworkError,
   SessionExpiredError,
   useSession,
@@ -160,6 +161,8 @@ export async function sendTicket(
     if (error instanceof NetworkError) readAgain(client, mine);
     throw error;
   }
+  // A sign-out since the answer: the cache is the next session's now, nothing goes in it.
+  if (!isCurrentGeneration(generation)) return;
   // The new message heads the list at once, with or without a page yet; the server's page follows
   // and keeps it until it lists it. Only what the list shows is kept, never the text.
   const sent: MyTicket = {
