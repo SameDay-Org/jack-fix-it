@@ -20,6 +20,7 @@ const DRAFT: RequestDraft = {
   address: null,
   typedAddress: { line1: "", line2: "", city: "", state: "", zipCode: "" },
   preferredDate: null,
+  preferredPeriod: "flexible",
   refusal: null,
 };
 
@@ -48,12 +49,23 @@ describe("requestBody", () => {
       media_keys: ["uploads/b.jpg", "uploads/a.mp4"],
     });
   });
-  it("sends the chosen day as YYYY-MM-DD and leaves it out when flexible", () => {
+  it("sends the chosen day as YYYY-MM-DD with its period, and neither when flexible", () => {
     const parts = { category: PAINTING, address: ADDRESS, mediaKeys: [] };
-    expect(
-      requestBody({ ...parts, draft: { ...DRAFT, preferredDate: "2026-11-03" } }).preferred_date,
-    ).toBe("2026-11-03");
-    expect(requestBody({ ...parts, draft: DRAFT })).not.toHaveProperty("preferred_date");
+    const dated = (draft: Partial<RequestDraft>) =>
+      requestBody({ ...parts, draft: { ...DRAFT, ...draft } });
+
+    expect(dated({ preferredDate: "2026-11-03" })).toMatchObject({
+      preferred_date: "2026-11-03",
+      preferred_period: "flexible",
+    });
+    expect(dated({ preferredDate: "2026-11-03", preferredPeriod: "evening" })).toMatchObject({
+      preferred_date: "2026-11-03",
+      preferred_period: "evening",
+    });
+    // "I'm flexible" sends no period, whatever the draft holds.
+    const flexible = dated({ preferredPeriod: "morning" });
+    expect(flexible).not.toHaveProperty("preferred_date");
+    expect(flexible).not.toHaveProperty("preferred_period");
   });
 });
 

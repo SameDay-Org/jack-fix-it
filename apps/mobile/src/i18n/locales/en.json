@@ -273,10 +273,17 @@
       "flexible": "I'm flexible",
       "flexibleHint": "Any day works for me",
       "pickDay": "Or pick a day",
+      "period": "Time of day",
       "today": "Today",
       "tomorrow": "Tomorrow",
       "staleTitle": "That day has passed",
       "staleBody": "Pick another day, or stay flexible."
+    },
+    "period": {
+      "morning": "Morning",
+      "afternoon": "Afternoon",
+      "evening": "Evening",
+      "flexible": "Flexible"
     },
     "review": {
       "title": "Check your request",
@@ -471,6 +478,7 @@
   "quotes": {
     "title": "Your quotes",
     "subtitle": "Compare them and accept the one that fits.",
+    "preferred": "Preferred: {{date}}",
     "loading": "Loading quotes",
     "span": {
       "minutes": "{{minutes}} min",
@@ -628,7 +636,7 @@
     "loading": "Loading opportunities",
     "new": "New",
     "otherCategory": "Other request",
-    "preferred": "Preferred {{date}}",
+    "preferred": "Preferred: {{date}}",
     "sentAgo": "Sent {{ago}}",
     "ago": {
       "justNow": "just now",
@@ -657,7 +665,7 @@
     "detail": {
       "loading": "Loading request",
       "where": "Where",
-      "when": "Preferred date",
+      "when": "Preferred",
       "sent": "Sent",
       "description": "What's going on",
       "redacted": "Contact details were hidden.",

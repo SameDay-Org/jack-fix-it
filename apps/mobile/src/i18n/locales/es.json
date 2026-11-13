@@ -273,10 +273,17 @@
       "flexible": "Soy flexible",
       "flexibleHint": "Cualquier día me sirve",
       "pickDay": "O elige un día",
+      "period": "Momento del día",
       "today": "Hoy",
       "tomorrow": "Mañana",
       "staleTitle": "Ese día ya pasó",
       "staleBody": "Elige otro día o déjalo abierto."
+    },
+    "period": {
+      "morning": "Por la mañana",
+      "afternoon": "Tarde",
+      "evening": "Noche",
+      "flexible": "Flexible"
     },
     "review": {
       "title": "Revisa tu solicitud",
@@ -471,6 +478,7 @@
   "quotes": {
     "title": "Tus presupuestos",
     "subtitle": "Compáralos y acepta el que te convenga.",
+    "preferred": "Preferencia: {{date}}",
     "loading": "Cargando presupuestos",
     "span": {
       "minutes": "{{minutes}} min",
@@ -628,7 +636,7 @@
     "loading": "Cargando oportunidades",
     "new": "Nueva",
     "otherCategory": "Otra solicitud",
-    "preferred": "Fecha preferida {{date}}",
+    "preferred": "Preferencia: {{date}}",
     "sentAgo": "Enviada {{ago}}",
     "ago": {
       "justNow": "hace un momento",
@@ -657,7 +665,7 @@
     "detail": {
       "loading": "Cargando solicitud",
       "where": "Dónde",
-      "when": "Fecha preferida",
+      "when": "Preferencia",
       "sent": "Enviada",
       "description": "Qué pasa",
       "redacted": "Los datos de contacto se ocultaron.",
