@@ -21,6 +21,7 @@ from app.modules.jobs.transitions import REVIEWABLE, TRANSITIONS
 from app.modules.pros.service import ProService
 from app.modules.reviews.models import Review, ReviewAuthorRole
 from app.modules.reviews.repository import ReviewRepository
+from app.modules.reviews.router import get_review_clock
 from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount
 from app.observability import JsonFormatter
@@ -773,12 +774,30 @@ async def test_mine_is_about_one_job_only(
 
 # --- My rating --------------------------------------------------------------------------------
 
+# The publication window (the settings' default) and an age safely past it.
+WINDOW: Final = timedelta(days=14)
+LONG_AGO: Final = timedelta(days=15)
+NO_RATING: Final = {"average": None, "count": 0}
+
+
+async def published_job(session: AsyncSession, world: JobWorld, *, pro: Pro | None = None) -> Job:
+    """A job confirmed longer ago than the publication window: a review of it counts for its
+    target whether or not the target reviewed it too."""
+    confirmed_at = datetime.now(UTC) - LONG_AGO
+    return await confirmed_job(
+        session,
+        world,
+        pro=pro,
+        completed_at=confirmed_at - timedelta(hours=4),
+        confirmed_at=confirmed_at,
+    )
+
 
 @pytest.mark.parametrize("side", ["customer", "pro", "pro_without_profile"])
 async def test_no_reviews_is_no_rating_yet(
     db_client: httpx.AsyncClient, world: JobWorld, side: str
 ) -> None:
-    assert await rating(db_client, getattr(world, side)) == {"average": None, "count": 0}
+    assert await rating(db_client, getattr(world, side)) == NO_RATING
 
 
 @pytest.mark.parametrize(
@@ -803,7 +822,7 @@ async def test_the_rating_is_the_average_to_one_decimal_and_the_count(
     average: float,
 ) -> None:
     for overall in ratings:
-        job = await confirmed_job(db_session, world)
+        job = await published_job(db_session, world)
         # The other dimensions never count.
         await seed(db_session, job, world.customer, world.pro, overall, quality=1, value=5)
 
@@ -813,8 +832,8 @@ async def test_the_rating_is_the_average_to_one_decimal_and_the_count(
 async def test_a_rating_counts_only_the_reviews_of_the_caller(
     db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
 ) -> None:
-    jobs = [await confirmed_job(db_session, world) for _ in range(3)]
-    elsewhere = await confirmed_job(db_session, world, pro=world.other_pro)
+    jobs = [await published_job(db_session, world) for _ in range(3)]
+    elsewhere = await published_job(db_session, world, pro=world.other_pro)
     for job, overall in zip(jobs, (5, 4, 4), strict=True):
         await seed(db_session, job, world.customer, world.pro, overall)
     # What the pro wrote about the customer, and what another pro got and wrote.
@@ -826,19 +845,163 @@ async def test_a_rating_counts_only_the_reviews_of_the_caller(
     assert await rating(db_client, world.pro) == {"average": 4.3, "count": 3}
     assert await rating(db_client, world.customer) == {"average": 2.0, "count": 3}
     assert await rating(db_client, world.other_pro) == {"average": 1.0, "count": 1}
-    assert await rating(db_client, world.other_customer) == {"average": None, "count": 0}
+    assert await rating(db_client, world.other_customer) == NO_RATING
 
 
-async def test_a_review_written_through_the_api_shows_in_the_targets_rating(
+async def test_a_review_i_wrote_never_counts_in_my_own_rating(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    job = await published_job(db_session, world)
+
+    created = await post(db_client, world.customer, job.id, overall=5)
+
+    assert created.status_code == 201, created.text
+    assert await rating(db_client, world.pro) == {"average": 5.0, "count": 1}
+    assert await rating(db_client, world.customer) == NO_RATING
+
+
+# --- A review counts once it is published ----------------------------------------------------
+
+
+@pytest.mark.parametrize("author", ["customer", "pro"])
+async def test_a_review_its_target_has_not_answered_is_not_counted_for_them(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld, author: str
+) -> None:
+    job = await confirmed_job(db_session, world)  # confirmed an hour ago
+    writer: Party = getattr(world, author)
+    target: Party = world.pro if author == "customer" else world.customer
+
+    created = await post(db_client, writer, job.id, overall=1)
+
+    assert created.status_code == 201, created.text
+    # The target wrote no review of this job yet: the score is not theirs to see.
+    assert await rating(db_client, target) == NO_RATING
+    assert (await mine(db_client, target, job.id)).json() == {"review": None, "can_review": True}
+    # The review exists all the same: its author reads it back and cannot write another.
+    own = await mine(db_client, writer, job.id)
+    again = await post(db_client, writer, job.id, overall=5)
+    assert (own.json()["review"]["overall"], own.json()["can_review"]) == (1, False)
+    assert (again.status_code, again.json()) == (409, ALREADY_REVIEWED)
+
+
+async def test_both_reviews_count_once_both_sides_reviewed_the_job(
     db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
 ) -> None:
     job = await confirmed_job(db_session, world)
 
     await post(db_client, world.customer, job.id, overall=4)
+    before = [await rating(db_client, party) for party in (world.pro, world.customer)]
     await post(db_client, world.pro, job.id, overall=2)
 
+    assert before == [NO_RATING, NO_RATING]
     assert await rating(db_client, world.pro) == {"average": 4.0, "count": 1}
     assert await rating(db_client, world.customer) == {"average": 2.0, "count": 1}
+
+
+async def test_a_review_of_another_job_publishes_nothing(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    first, second = [await confirmed_job(db_session, world) for _ in range(2)]
+
+    # Each side wrote one review, of different jobs: neither answered the other's.
+    await post(db_client, world.customer, first.id, overall=1)
+    await post(db_client, world.pro, second.id, overall=2)
+
+    assert await rating(db_client, world.pro) == NO_RATING
+    assert await rating(db_client, world.customer) == NO_RATING
+
+
+async def test_a_lone_review_counts_once_the_window_since_the_confirmation_has_passed(
+    app: FastAPI, db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    confirmed_at = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
+    clock = [confirmed_at]
+    app.dependency_overrides[get_review_clock] = lambda: lambda: clock[0]
+    job = await make_job(
+        db_session,
+        world,
+        JobStatus.CONFIRMED,
+        completed_at=confirmed_at - timedelta(hours=4),
+        confirmed_at=confirmed_at,
+    )
+    await seed(db_session, job, world.customer, world.pro, 3)
+    counted = {"average": 3.0, "count": 1}
+    ages = {
+        "an hour": timedelta(hours=1),
+        "13 days 23 hours": timedelta(days=13, hours=23),
+        "a microsecond short": WINDOW - timedelta(microseconds=1),
+        "14 days": WINDOW,
+        "15 days": timedelta(days=15),
+    }
+
+    seen = {}
+    for label, age in ages.items():
+        clock[0] = confirmed_at + age
+        seen[label] = await rating(db_client, world.pro)
+
+    # The window is due at its very end; the pro never reviewed this job.
+    assert seen == {
+        "an hour": NO_RATING,
+        "13 days 23 hours": NO_RATING,
+        "a microsecond short": NO_RATING,
+        "14 days": counted,
+        "15 days": counted,
+    }
+    assert (await mine(db_client, world.pro, job.id)).json() == {
+        "review": None,
+        "can_review": True,
+    }
+
+
+async def test_only_the_published_reviews_are_averaged(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    answered = await confirmed_job(db_session, world)
+    old = await published_job(db_session, world)
+    fresh = await confirmed_job(db_session, world)
+    await seed(db_session, answered, world.customer, world.pro, 5)
+    await seed(db_session, answered, world.pro, world.customer, 2)
+    await seed(db_session, old, world.customer, world.pro, 3)
+    await seed(db_session, fresh, world.customer, world.pro, 1)
+
+    # Answered and past the window count; the fresh, unanswered one does not.
+    assert await rating(db_client, world.pro) == {"average": 4.0, "count": 2}
+    assert await rating(db_client, world.customer) == {"average": 2.0, "count": 1}
+
+
+async def test_the_window_comes_from_settings(db_session: AsyncSession, world: JobWorld) -> None:
+    confirmed_at = datetime.now(UTC) - timedelta(days=3, minutes=1)
+    job = await confirmed_job(
+        db_session,
+        world,
+        completed_at=confirmed_at - timedelta(hours=4),
+        confirmed_at=confirmed_at,
+    )
+    await seed(db_session, job, world.customer, world.pro, 5)
+    seen = {}
+
+    for days in (14, 3):
+        app = _app(make_settings(review_publish_after_days=days), db_session)
+        async with _client(app) as client:
+            seen[days] = await rating(client, world.pro)
+
+    assert make_settings().review_publish_after_days == 14
+    assert seen == {14: NO_RATING, 3: {"average": 5.0, "count": 1}}
+
+
+async def test_a_job_with_no_confirmation_time_never_passes_the_window(
+    app: FastAPI, db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    app.dependency_overrides[get_review_clock] = lambda: lambda: datetime(2099, 1, 1, tzinfo=UTC)
+    # Fixtures only: the state machine sets confirmed_at on every job it confirms.
+    job = await make_job(db_session, world, JobStatus.CONFIRMED)
+    await seed(db_session, job, world.customer, world.pro, 5)
+
+    unanswered = await rating(db_client, world.pro)
+    await seed(db_session, job, world.pro, world.customer, 4)
+
+    assert unanswered == NO_RATING
+    assert await rating(db_client, world.pro) == {"average": 5.0, "count": 1}
 
 
 # --- The comment is redacted ------------------------------------------------------------------
@@ -1047,6 +1210,10 @@ def test_openapi_documents_every_answer(app: FastAPI) -> None:
     assert set(create["responses"]) == {"201", "401", "403", "404", "409", "422", "429"}
     assert set(read["responses"]) == {"200", "401", "403", "404", "422"}
     assert {"200", "401", "403"} <= set(my_rating["responses"])
+    assert "counts published reviews" in my_rating["description"]
+    rating_fields = app.openapi()["components"]["schemas"]["RatingOut"]["properties"]
+    assert "published reviews" in rating_fields["average"]["description"]
+    assert "published reviews" in rating_fields["count"]["description"]
     for operation in (create, read, my_rating):
         for code, answer in operation["responses"].items():
             if code not in ("200", "201"):

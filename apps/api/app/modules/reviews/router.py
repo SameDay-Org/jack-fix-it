@@ -1,4 +1,6 @@
 import uuid
+from collections.abc import Callable
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, status
@@ -10,7 +12,7 @@ from app.errors import ErrorResponse
 from app.modules.auth.permissions import AppUser
 from app.modules.reviews.models import COMMENT_MAX_LENGTH
 from app.modules.reviews.schemas import MyReviewOut, RatingOut, ReviewCreatedOut, ReviewIn
-from app.modules.reviews.service import ReviewService
+from app.modules.reviews.service import ReviewConfig, ReviewService, utc_now
 from app.rate_limit import RateLimiter, enforce_limit, get_rate_limiter
 
 # The job's customer and pro review each other once it is confirmed (#77).
@@ -23,10 +25,18 @@ def _error(description: str) -> dict[str, Any]:
     return {"model": ErrorResponse, "description": description}
 
 
+def get_review_clock() -> Callable[[], datetime]:
+    """FastAPI dependency: the server's clock for the publication window (a fixed one in
+    tests)."""
+    return utc_now
+
+
 def get_review_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    clock: Annotated[Callable[[], datetime], Depends(get_review_clock)],
 ) -> ReviewService:
-    return ReviewService(session)
+    return ReviewService(session, ReviewConfig.from_settings(settings), clock)
 
 
 Reviews = Annotated[ReviewService, Depends(get_review_service)]
@@ -132,5 +142,10 @@ async def read_my_review(job_id: uuid.UUID, user: AppUser, reviews: Reviews) -> 
 )
 async def read_my_rating(user: AppUser, reviews: Reviews) -> RatingOut:
     """The caller's own rating, as a customer or as a pro: the average of the overall ratings
-    they received, to one decimal, and how many; null and 0 with none."""
+    they received, to one decimal, and how many; null and 0 with none.
+
+    It counts published reviews only. A review is published once its target reviewed the same
+    job too, or 14 days (REVIEW_PUBLISH_AFTER_DAYS) after the job's confirmation, whichever
+    comes first: until then it is not in the average or the count, so nobody reads the other
+    side's score of a job before writing their own."""
     return await reviews.rating(user)

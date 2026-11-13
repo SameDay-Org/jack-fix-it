@@ -29,7 +29,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Final
 
-from sqlalchemy import text
+from sqlalchemy import Subquery, text
 from sqlalchemy.exc import DBAPIError, PendingRollbackError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -263,11 +263,17 @@ def is_reviewable(job: Job) -> bool:
 
 
 class JobPartiesReader:
-    """The parties of a job, for another module (the chat). Reads only."""
+    """The parties of a job, for another module (the chat, the reviews). Reads only."""
 
     def __init__(self, session: AsyncSession, pros: ProService) -> None:
         self._jobs = JobRepository(session)
         self._pros = pros
+
+    @staticmethod
+    def confirmations() -> Subquery:
+        """Each job's id (`job_id`) and confirmation time (`confirmed_at`), as a subquery: a
+        review's publication window is read in the reviews' own query (#77)."""
+        return JobRepository.confirmations()
 
     async def parties(self, job_id: uuid.UUID, *, lock: bool = False) -> JobParties | None:
         """The job's parties, or None for an unknown job: for staff, who may read any job.

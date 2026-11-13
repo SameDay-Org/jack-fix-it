@@ -7,6 +7,7 @@ go first.
 
 import asyncio
 from collections.abc import AsyncIterator
+from datetime import timedelta
 
 import pytest
 from sqlalchemy import delete, select
@@ -18,7 +19,7 @@ from app.modules.reviews.errors import AlreadyReviewedError
 from app.modules.reviews.models import Review, ReviewAuthorRole
 from app.modules.reviews.repository import ReviewRepository
 from app.modules.reviews.schemas import ReviewIn
-from app.modules.reviews.service import ReviewService
+from app.modules.reviews.service import ReviewConfig, ReviewService
 from app.modules.users.types import UserRole
 from tests.conftest import Committed, backend_pid, wait_until_blocked
 from tests.job_world import headers_for
@@ -30,6 +31,7 @@ ALREADY_REVIEWED = {
     "error": {"code": "already_reviewed", "message": "You already reviewed this job."}
 }
 SUBMITS = 5
+CONFIG = ReviewConfig(publish_after=timedelta(days=14))
 
 
 @pytest.fixture
@@ -79,7 +81,7 @@ async def test_a_submit_waiting_on_another_is_refused_once_that_one_commits(
         holder = await backend_pid(first)
         waiter = await backend_pid(second)
         submit = asyncio.create_task(
-            ReviewService(second).create(world.customer, world.job_id, ReviewIn(overall=1))
+            ReviewService(second, CONFIG).create(world.customer, world.job_id, ReviewIn(overall=1))
         )
         # The second passed every check (no review is committed) and waits on the constraint.
         await wait_until_blocked(world.sessions, waiter=waiter, holder=holder)
@@ -101,7 +103,7 @@ async def test_a_submit_waiting_on_another_goes_through_when_that_one_rolls_back
         holder = await backend_pid(first)
         waiter = await backend_pid(second)
         submit = asyncio.create_task(
-            ReviewService(second).create(world.customer, world.job_id, ReviewIn(overall=1))
+            ReviewService(second, CONFIG).create(world.customer, world.job_id, ReviewIn(overall=1))
         )
         await wait_until_blocked(world.sessions, waiter=waiter, holder=holder)
         await first.rollback()

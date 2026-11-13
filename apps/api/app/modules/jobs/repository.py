@@ -15,6 +15,12 @@ class JobRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    @staticmethod
+    def confirmations() -> Subquery:
+        """Every job's id (`job_id`) and confirmation time (`confirmed_at`, NULL when it was
+        never confirmed) only, as a subquery for another module's query."""
+        return select(Job.id.label("job_id"), Job.confirmed_at.label("confirmed_at")).subquery()
+
     async def get_for_update(self, job_id: uuid.UUID) -> Job | None:
         """The job, locked until the transaction ends, so transitions on it run one at a time.
 

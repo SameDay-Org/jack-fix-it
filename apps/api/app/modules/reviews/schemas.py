@@ -86,7 +86,10 @@ class MyReviewOut(_Out):
 
 class RatingOut(_Out):
     average: float | None = Field(
-        description="The average of the overall ratings the caller received, to one decimal; "
-        "null with none (No ratings yet)."
+        description="The average of the overall ratings of the caller's published reviews, to "
+        "one decimal; null with none (No ratings yet)."
     )
-    count: int = Field(description="How many reviews the caller received.")
+    count: int = Field(
+        description="How many published reviews the caller received. A review the caller has "
+        "not answered yet is not counted until it is published."
+    )

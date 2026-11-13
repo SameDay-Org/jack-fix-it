@@ -15,18 +15,28 @@ each review the other, once.
   the chat (app.redaction.redact_contacts) and only the redacted text is stored: no original is
   kept anywhere. `comment_redacted` tells the author that something was masked.
 - Reading: an author reads back their own review only (`mine`), never the other side's. A
-  user's rating is the average of `overall` over the reviews of them, with the count, computed
-  by a query.
+  user's rating is the average of `overall` over the published reviews of them, with the
+  count, computed by a query.
+- Publication (Foreman 2026-11-13, for Cesar's veto): a review counts for its target only once
+  it is published: the target reviewed the same job too, or REVIEW_PUBLISH_AFTER_DAYS passed
+  since the job's confirmation (repository.published). No cron and no column: the rating's
+  query decides, from the job's confirmed_at and the server's clock. So nobody reads the other
+  side's score before writing their own, and a review is not hidden for good by a target who
+  never writes one. `mine`, `can_review` and `already_reviewed` do not depend on it.
 
 Never logged: the comment. Logs carry ids, the author's side and whether a comment was masked.
 """
 
 import logging
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import Settings
 from app.db import violated_constraint
 from app.errors import NotFoundError
 from app.modules.jobs.service import JobParties, JobPartiesReader
@@ -60,9 +70,30 @@ logger = logging.getLogger(__name__)
 CUSTOMER_ONLY_DIMENSIONS = ("quality", "value")
 
 
+def utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+@dataclass(frozen=True)
+class ReviewConfig:
+    # How long after a job's confirmation a review of it is published without its target's.
+    publish_after: timedelta
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> "ReviewConfig":
+        return cls(publish_after=timedelta(days=settings.review_publish_after_days))
+
+
 class ReviewService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        config: ReviewConfig,
+        clock: Callable[[], datetime] = utc_now,
+    ) -> None:
         self._session = session
+        self._config = config
+        self._clock = clock
         self._reviews = ReviewRepository(session)
         self._jobs = JobPartiesReader(session, ProService(session))
 
@@ -130,9 +161,13 @@ class ReviewService:
         )
 
     async def rating(self, user: UserAccount) -> RatingOut:
-        """The caller's own rating: the average of `overall` over the reviews of them, to one
-        decimal, and how many there are."""
-        average, count = await self._reviews.rating_of(user.id)
+        """The caller's own rating: the average of `overall` over the published reviews of
+        them, to one decimal, and how many there are. A review the caller did not answer yet
+        is left out until its job's confirmation is the publication window old."""
+        confirmed_by = self._clock() - self._config.publish_after
+        average, count = await self._reviews.rating_of(
+            user.id, JobPartiesReader.confirmations(), confirmed_by
+        )
         return RatingOut(average=None if average is None else float(average), count=count)
 
     async def _parties(self, user: UserAccount, job_id: uuid.UUID) -> JobParties:
