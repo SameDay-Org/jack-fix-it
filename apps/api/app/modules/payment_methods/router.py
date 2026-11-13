@@ -54,7 +54,8 @@ _UNAVAILABLE: dict[int | str, dict[str, Any]] = {
     status.HTTP_503_SERVICE_UNAVAILABLE: _error(
         "not_configured: payments are not configured; payments_unavailable: Stripe is not "
         "reachable, asked to retry later or refused the call, the wallet holds more cards than "
-        "the API reads, or another change of the same wallet did not end in time; retry later."
+        "the API reads, or a change of the wallet did not end in time (its wait for a database "
+        "connection and for another change of the same wallet included); retry later."
     ),
 }
 _NOT_FOUND: dict[int | str, dict[str, Any]] = {
@@ -150,8 +151,8 @@ async def set_default_payment_method(
     """Makes the card the caller's default payment method and returns it. Asking again for
     the card that is the default already changes nothing. Default changes and deletes of one
     wallet run one at a time: a call waits for the one before it, and is 503
-    payments_unavailable when the wait and its own work together take longer than
-    PAYMENT_METHOD_CHANGE_TIMEOUT_SECONDS."""
+    payments_unavailable when its waits (for a database connection, then for that call) and
+    its own work together take longer than PAYMENT_METHOD_CHANGE_TIMEOUT_SECONDS."""
     return await payment_methods.set_default(user, payment_method_id)
 
 
@@ -171,8 +172,9 @@ async def delete_payment_method(
     recently added of the other cards the default; with no other card, none is. A card deleted
     already is a 404. Default changes and deletes of one wallet run one at a time, so two
     deletes at once end as one after the other would: a call waits for the one before it, and
-    is 503 payments_unavailable when the wait and its own work together take longer than
-    PAYMENT_METHOD_CHANGE_TIMEOUT_SECONDS. A wallet with more cards than the list reads cannot
-    delete its default card (503): the next default could not be chosen among all of them."""
+    is 503 payments_unavailable when its waits (for a database connection, then for that call)
+    and its own work together take longer than PAYMENT_METHOD_CHANGE_TIMEOUT_SECONDS. A wallet
+    with more cards than the list reads cannot delete its default card (503): the next default
+    could not be chosen among all of them."""
     await payment_methods.delete(user, payment_method_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

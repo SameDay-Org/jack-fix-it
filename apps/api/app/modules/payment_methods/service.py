@@ -32,18 +32,25 @@ configured: else 503 not_configured.
   changes of one customer's wallet therefore run one at a time, across API processes: each
   takes a transaction-scoped advisory lock keyed by the user, before its first read of Stripe,
   and holds it to its last write. A change has PAYMENT_METHOD_CHANGE_TIMEOUT_SECONDS in all,
-  for its wait for the lock and then its own Stripe calls: past that it is the 503 below and
-  the lock is released, as it is by any failure. The list takes no lock: it shows what Stripe
-  holds at that moment. A card saved meanwhile (the sheet talks to Stripe, not to this API) is
-  not the default by itself, so it breaks neither order.
+  for its wait for a database connection (the pool's own limit is longer), its wait for the
+  lock and then its own Stripe calls: past that, whatever it awaits is cut, it is the 503
+  below and the lock is released, as it is by any failure. A change whose time is spent
+  before its turn comes asks Stripe nothing. The time starts when the change does: after the
+  caller's authentication and the read of their Customer, which use the request's first
+  connection, taken as on any route. A wait for the lock that is cut closes its connection
+  before the 503 goes out, which is what ends the wait in Postgres (SQLAlchemy does it, and
+  gives Postgres at most 2 s to answer). The list takes no lock: it shows what Stripe holds
+  at that moment. A card saved meanwhile (the sheet talks to Stripe, not to this API) is not
+  the default by itself, so it breaks neither order.
   The order holds while Stripe answers each write. A write cut by the time limit, or by
   Stripe's own timeout, may still be applied by Stripe after the lock is released: no lock of
   ours can cover that, and the next list shows what Stripe then holds.
 
 Stripe failing in any way (unreachable, a timeout, a 409, 429 or 5xx, or a refusal), a wallet
-whose lock stayed busy and a change past its time are 503 payments_unavailable: one stable
-body, never Stripe's message. Nothing is retried here, and the
-SDK retries only as STRIPE_MAX_NETWORK_RETRIES says. This module's logs carry the user's id, the
+whose lock stayed busy, a change that got no database connection (in its time, or in the
+pool's) and a change past its time are 503 payments_unavailable: one stable body, never
+Stripe's message. Nothing is retried here, and the SDK retries only as
+STRIPE_MAX_NETWORK_RETRIES says. This module's logs carry the user's id, the
 operation and Stripe's request id and error code only: never a client secret, an ephemeral key,
 a customer id, a PaymentMethod id or anything of a card. (The access log records the path of
 every request, which for the default and the delete holds the card's id.)
@@ -59,6 +66,7 @@ from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, is_publishable_key
@@ -81,8 +89,8 @@ logger = logging.getLogger(__name__)
 class PaymentMethodsConfig:
     # The key the Payment Sheet initializes Stripe with; None: adding a card is not configured.
     publishable_key: str | None
-    # The longest a default change or a delete may take: its wait for the wallet's lock and
-    # its Stripe calls together.
+    # The longest a default change or a delete may take: its wait for a database connection
+    # and for the wallet's lock, and its Stripe calls together.
     change_timeout_seconds: float
 
     @classmethod
@@ -284,34 +292,47 @@ class PaymentMethodService:
     @asynccontextmanager
     async def _wallet_change(self, user: UserAccount, operation: str) -> AsyncIterator[None]:
         """One change of the caller's wallet, alone (see the module doc): the wallet's lock
-        from the first read of Stripe to the last write, within one time limit for the wait
-        and the Stripe calls together. Commits to release the lock; any failure rolls back,
-        which releases it too."""
+        from the first read of Stripe to the last write, within one time limit for all of it:
+        the wait for a database connection, the wait for the lock and the Stripe calls. Past
+        the limit, whatever the change awaits is cut. Commits to release the lock; any failure
+        rolls back, which releases it too."""
         seconds = self._config.change_timeout_seconds
-        ends_at = asyncio.get_running_loop().time() + seconds
+        loop = asyncio.get_running_loop()
+        ends_at = loop.time() + seconds
+        deadline = asyncio.timeout_at(ends_at)
+        locked = spent = False
         try:
-            await self._wallets.lock_wallet(user.id, wait_seconds=seconds)
-        except WalletBusyError:
-            await self._session.rollback()
-            logger.warning(
-                "payment_method_wallet_busy",
-                extra={"user_id": str(user.id), "operation": operation},
-            )
-            raise PaymentsUnavailableError from None
-        try:
-            # What the wait for the lock left of the limit.
-            async with asyncio.timeout_at(ends_at) as deadline:
+            # Entered before the lock is asked for, not after: the caller's read of the
+            # Customer has committed, so the lock's first statement waits for a pooled
+            # connection, and no limit of Postgres's ends that wait.
+            async with deadline:
+                await self._wallets.lock_wallet(user.id, wait_seconds=seconds)
+                locked = True
+                if loop.time() >= ends_at:
+                    # The lock came with the time spent, before the timer could cut the
+                    # wait: no Stripe call starts.
+                    spent = True
+                    raise TimeoutError
                 yield
         except BaseException as error:
+            # Cut while it waited for Postgres, the connection is closed, which ends the
+            # wait and releases the lock as a rollback does.
             await self._session.rollback()
-            if not (isinstance(error, TimeoutError) and deadline.expired()):
+            out_of_time = spent or (isinstance(error, TimeoutError) and deadline.expired())
+            if isinstance(error, WalletBusyError) or (
+                out_of_time and not locked and self._wallets.asked_for_lock
+            ):
+                level, event = logging.WARNING, "payment_method_wallet_busy"
+            elif isinstance(error, PoolTimeoutError) or (out_of_time and not locked):
+                level, event = logging.ERROR, "payment_method_database_busy"
+            elif out_of_time:
+                # Cut in its Stripe calls: Stripe may or may not have applied the one that was
+                # cut, now or later (see the module doc), as after a timeout of Stripe's own.
+                # Or the lock came with the time spent, and Stripe was asked nothing.
+                level, event = logging.ERROR, "payment_method_change_timed_out"
+            else:
                 raise
-            # Stripe may or may not have applied the call that was cut, now or later (see the
-            # module doc): as after a timeout of Stripe's own.
-            logger.error(
-                "payment_method_change_timed_out",
-                extra={"user_id": str(user.id), "operation": operation},
-            )
+            logger.log(level, event, extra={"user_id": str(user.id), "operation": operation})
             raise PaymentsUnavailableError from None
         await self._session.commit()
 

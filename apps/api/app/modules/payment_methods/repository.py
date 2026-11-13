@@ -19,17 +19,25 @@ class PaymentMethodRepository:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        # True once the last `lock_wallet` had its connection and asked Postgres for the lock:
+        # a caller that cuts the call short reads here what it was waiting for.
+        self.asked_for_lock = False
 
     async def lock_wallet(self, user_id: uuid.UUID, *, wait_seconds: float) -> None:
         """Transaction-scoped advisory lock on the user's wallet, waiting at most
         `wait_seconds` for another change to end: `WalletBusyError` past that, and the
-        transaction must be rolled back. The wait limit lasts as long as the transaction."""
+        transaction must be rolled back. The wait limit lasts as long as the transaction.
+
+        The limit is Postgres's, on the lock alone. A session that holds no connection gets
+        one from the pool first, and that wait is the caller's to bound."""
+        self.asked_for_lock = False
         # 0 would wait for ever.
         milliseconds = max(1, round(wait_seconds * 1000))
         await self._session.execute(
             text("SELECT set_config('lock_timeout', :milliseconds, true)"),
             {"milliseconds": str(milliseconds)},
         )
+        self.asked_for_lock = True
         try:
             await self._session.execute(
                 text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),

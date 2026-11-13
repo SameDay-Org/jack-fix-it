@@ -6,6 +6,7 @@ import json
 import logging
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -13,8 +14,14 @@ import httpx
 import pytest
 from fastapi import FastAPI, Request
 from sqlalchemy import select, text, update
+from sqlalchemy.engine import URL
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from app.config import Settings
 from app.db import get_session
@@ -889,6 +896,221 @@ async def test_a_change_whose_stripe_calls_take_too_long_is_503_and_frees_the_wa
         "user_id": str(user_id),
         "operation": "set_default" if action == "default" else "delete",
     }
+
+
+@asynccontextmanager
+async def pool_of_one(
+    app: FastAPI, committed: Committed, url: URL, **limits: float
+) -> AsyncIterator[AsyncEngine]:
+    """The app's requests on a real pool of one connection, for the length of the block."""
+    engine = create_async_engine(url, pool_size=1, max_overflow=0, **limits)
+    app.state.session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        yield engine
+    finally:
+        app.state.session_factory = committed.sessions
+        await engine.dispose()
+
+
+# A change that finds the pool empty: its own time ends the wait (the pool's own limit is the
+# engine's default, 30 s), or the pool's does (the change's time is the default, 10 s).
+NO_CONNECTION: dict[str, tuple[dict[str, float], dict[str, float]]] = {
+    "the-change-is-cut": (SHORT_CHANGE, {}),
+    "the-pool-gives-up": ({}, {"pool_timeout": 0.05}),
+}
+
+
+@pytest.mark.parametrize(
+    ("settings", "pool_limits"),
+    NO_CONNECTION.values(),
+    ids=NO_CONNECTION.keys(),
+    indirect=["settings"],
+)
+async def test_a_change_that_gets_no_database_connection_is_503_and_stripe_is_not_asked(
+    app: FastAPI,
+    committed: Committed,
+    test_database_url: URL,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    pool_limits: dict[str, float],
+) -> None:
+    """The read of the caller's Customer has committed, so the lock's first statement needs a
+    pooled connection again, and no limit of Postgres's ends that wait. Here a real pool of
+    one connection is taken between the two (events, no sleep): the stable 503 comes while the
+    pool is still empty, nothing is asked of Stripe, and the same call works once a connection
+    is free. (Round 2 of the review: with the time limit entered after the lock, the first
+    case waited for as long as the pool let it, and the second was a 500.)"""
+    fakes = install_fakes(app)
+    user_id, headers, customer_id = await committed_wallet(committed)
+    card = fakes.methods.add_card(customer_id)
+    at_the_lock, pool_is_empty = asyncio.Event(), asyncio.Event()
+    asked_the_pool = asyncio.Event()
+    lock_wallet = PaymentMethodRepository.lock_wallet
+
+    async def lock_once_the_pool_is_empty(
+        self: PaymentMethodRepository, user_id: uuid.UUID, *, wait_seconds: float
+    ) -> None:
+        at_the_lock.set()
+        await pool_is_empty.wait()
+        asked_the_pool.set()
+        await lock_wallet(self, user_id, wait_seconds=wait_seconds)
+
+    async def act() -> httpx.Response:
+        return await committed.client.post(default_path(card.payment_method_id), headers=headers)
+
+    monkeypatch.setattr(PaymentMethodRepository, "lock_wallet", lock_once_the_pool_is_empty)
+    async with pool_of_one(app, committed, test_database_url, **pool_limits) as engine:
+        request = asyncio.create_task(act())
+        try:
+            async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+                await at_the_lock.wait()
+            # The pool's one connection, which the request gave back when its read committed.
+            async with engine.connect():
+                pool_is_empty.set()
+                try:
+                    with caplog.at_level(logging.DEBUG):
+                        async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+                            refused = await asyncio.shield(request)
+                except TimeoutError:
+                    pytest.fail(
+                        "the change still waited for a connection "
+                        f"{LOCK_WAIT_DEADLINE_SECONDS} s after the pool was emptied"
+                    )
+                asked = fakes.methods.calls.copy()
+                # Not the test's own event: the wait that ended was the one for the pool.
+                reached_the_pool = asked_the_pool.is_set()
+            async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+                again = await act()
+        finally:
+            pool_is_empty.set()
+            await asyncio.gather(request, return_exceptions=True)
+
+    assert (refused.status_code, refused.json()) == (503, UNAVAILABLE)
+    assert "Retry-After" not in refused.headers
+    assert reached_the_pool
+    assert asked == []
+    # Through the same pool of one: the wait that was cut took no connection with it.
+    assert again.status_code == 200
+    assert fakes.methods.defaults == {customer_id: card.payment_method_id}
+    [record] = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert record.message == "payment_method_database_busy"
+    logged = json.loads(JsonFormatter().format(record))
+    assert logged["level"] == "ERROR"
+    assert {key: logged[key] for key in ("user_id", "operation")} == {
+        "user_id": str(user_id),
+        "operation": "set_default",
+    }
+
+
+# A wait for a lock another change keeps: the change's time ends it (Postgres's own limit on
+# the wait is made far longer), or Postgres's limit does (the change's time is the default).
+LOCK_WAITS: dict[str, tuple[dict[str, float], float]] = {
+    "the-change-is-cut": (SHORT_CHANGE, 4 * LOCK_WAIT_DEADLINE_SECONDS),
+    "postgres-ends-it": ({}, 0.001),
+}
+
+
+@pytest.mark.parametrize(
+    ("settings", "lock_wait"), LOCK_WAITS.values(), ids=LOCK_WAITS.keys(), indirect=["settings"]
+)
+async def test_a_wait_for_the_lock_is_ended_by_the_changes_time_and_by_postgres(
+    app: FastAPI,
+    committed: Committed,
+    test_database_url: URL,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    lock_wait: float,
+) -> None:
+    """Two limits end a change's wait for the wallet's lock, and here each does alone. The
+    change's time cuts the statement itself, and Postgres's own limit on the wait stays behind
+    it: a backend the cut never reached stops waiting by itself. Either way: the stable 503,
+    nothing asked of Stripe, no backend left waiting in Postgres, and the same call works,
+    through the same pool of one, once the wallet is free."""
+    fakes = install_fakes(app)
+    user_id, headers, customer_id = await committed_wallet(committed)
+    card = fakes.methods.add_card(customer_id)
+    lock_wallet = PaymentMethodRepository.lock_wallet
+
+    async def lock_with_this_wait(
+        self: PaymentMethodRepository, user_id: uuid.UUID, *, wait_seconds: float
+    ) -> None:
+        await lock_wallet(self, user_id, wait_seconds=lock_wait)
+
+    async def act() -> httpx.Response:
+        try:
+            async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+                return await committed.client.post(
+                    default_path(card.payment_method_id), headers=headers
+                )
+        except TimeoutError:
+            pytest.fail(f"the change had no answer after {LOCK_WAIT_DEADLINE_SECONDS} s")
+
+    async with (
+        pool_of_one(app, committed, test_database_url),
+        committed.sessions() as holder,
+        committed.sessions() as monitor,
+    ):
+        await lock_wallet(PaymentMethodRepository(holder), user_id, wait_seconds=1)
+        monkeypatch.setattr(PaymentMethodRepository, "lock_wallet", lock_with_this_wait)
+        with caplog.at_level(logging.DEBUG):
+            refused = await act()
+        left_waiting = await monitor.scalar(LOCK_WAITERS)
+        asked = fakes.methods.calls.copy()
+        await holder.rollback()
+        again = await act()
+
+    assert (refused.status_code, refused.json()) == (503, UNAVAILABLE)
+    assert asked == []
+    assert left_waiting == 0
+    assert again.status_code == 200
+    assert fakes.methods.defaults == {customer_id: card.payment_method_id}
+    [record] = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert (record.levelname, record.message) == ("WARNING", "payment_method_wallet_busy")
+
+
+@pytest.mark.parametrize("settings", [SHORT_CHANGE], indirect=True)
+async def test_a_lock_that_comes_with_the_time_spent_asks_stripe_nothing(
+    app: FastAPI,
+    committed: Committed,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The timer that cuts a change runs when the event loop does. Here the lock is granted
+    with the change's time spent and the loop never free to run the timer, and this fake
+    Stripe never yields to the loop: unchecked, the change would run to its end past its
+    time. It is the stable 503, Stripe is asked nothing, and the next change goes on."""
+    fakes = install_fakes(app)
+    _, headers, customer_id = await committed_wallet(committed)
+    card = fakes.methods.add_card(customer_id)
+    lock_wallet = PaymentMethodRepository.lock_wallet
+
+    async def lock_with_the_time_spent(
+        self: PaymentMethodRepository, user_id: uuid.UUID, *, wait_seconds: float
+    ) -> None:
+        await lock_wallet(self, user_id, wait_seconds=wait_seconds)
+        loop = asyncio.get_running_loop()
+        # The change's time began before this call, so it ends before this does.
+        spent_at = loop.time() + wait_seconds
+        while loop.time() < spent_at:  # no await: the loop cannot run the change's timer
+            pass
+
+    async def act() -> httpx.Response:
+        return await committed.client.post(default_path(card.payment_method_id), headers=headers)
+
+    monkeypatch.setattr(PaymentMethodRepository, "lock_wallet", lock_with_the_time_spent)
+    with caplog.at_level(logging.DEBUG):
+        refused = await act()
+    asked = fakes.methods.calls.copy()
+    monkeypatch.setattr(PaymentMethodRepository, "lock_wallet", lock_wallet)
+    again = await act()
+
+    assert (refused.status_code, refused.json()) == (503, UNAVAILABLE)
+    assert asked == []
+    assert again.status_code == 200
+    assert fakes.methods.defaults == {customer_id: card.payment_method_id}
+    # No other change held the wallet and the pool was not empty: neither is blamed.
+    [record] = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert (record.levelname, record.message) == ("ERROR", "payment_method_change_timed_out")
 
 
 async def test_another_database_error_on_the_lock_is_not_a_busy_wallet(
