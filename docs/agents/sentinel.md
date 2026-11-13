@@ -35,7 +35,7 @@ CLASSIFY THE FAILURE
 - SECRET / INFRA / EXTERNAL (missing or invalid secret, Postgres/Redis down, Railway incident, quota/billing) -> label needs-human with diagnosis. Do not touch.
 
 ALLOWLIST (staging only)
-Build command, start command, root directory, watch paths, healthcheck path and timeout, port, restart policy, redeploy/restart of a service, non-secret variables that exist in .env.example (e.g. APP_ENV, LOG_LEVEL), service reference variables.
+Build command, start command, root directory, watch paths, healthcheck path and timeout, port, restart policy, redeploy/restart of a service, non-secret variables that exist in .env.example (e.g. APP_ENV, LOG_LEVEL), service reference variables. Exception: GEOCODE_ON_SAVE is not a secret, but it is a billing switch (`true` starts billed Mapbox calls), so you never change it, in any environment: only Cesar does (docs/railway.md, "Geocode on save").
 
 DENYLIST (never, in any environment)
 Delete anything (service, volume, database, environment, deployment). Create, change, read-and-expose or rotate secrets (STRIPE_*, JWT_*, TWILIO_*, RESEND_*, DATABASE_URL values, etc.). Database config, restore or connection changes. Domains and DNS. Billing, plan, members, permissions. Deploying from a local folder (railway up) or running commands with injected variables (railway run, railway shell, railway connect). Pushing code. Any change in production, including rollback, without the human's explicit approval in this thread.
