@@ -886,6 +886,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/jobs/{job_id}/pro-location": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * See where my pro is while on the way (never stored in the database)
+         * @description The pro's latest position on the way to the customer's own job, to poll every few
+         *     seconds. `position` is null whenever there is none to show: before the first one, once it
+         *     is too old, and whenever the pro is not on the way (the job's own status says which).
+         *     Positions are kept in memory for a short time only, never in the database, and every
+         *     response says `Cache-Control: no-store`.
+         */
+        get: operations["get_pro_location_v1_jobs__job_id__pro_location_get"];
+        /**
+         * Share my position while I am on my way (never stored in the database)
+         * @description The pro's app sends this every few seconds from On my way to the check-in. Only the
+         *     latest position of a job is kept, in memory, for a short time; it is deleted when the pro
+         *     checks in or the job leaves on the way, and no position is ever written to the database.
+         *     One sent too soon after the last, or older than it, is answered 204 and dropped.
+         */
+        put: operations["share_pro_location_v1_jobs__job_id__pro_location_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/jobs/{job_id}/messages": {
         parameters: {
             query?: never;
@@ -2475,6 +2506,70 @@ export interface components {
             pending: components["schemas"]["PhotoKindCounts"];
             /** @description Listed photos whose privacy-safe copy could not be made: the customer never sees them. */
             failed: components["schemas"]["PhotoKindCounts"];
+        };
+        /**
+         * ProLocationIn
+         * @description One fix of the pro's device while on the way (#350). Numbers only: a string or a boolean
+         *     is refused, not converted.
+         */
+        ProLocationIn: {
+            /**
+             * Lat
+             * @description Latitude, in degrees.
+             */
+            lat: number;
+            /**
+             * Lng
+             * @description Longitude, in degrees.
+             */
+            lng: number;
+            /**
+             * Accuracy M
+             * @description The fix's accuracy radius in meters; null or left out when unknown.
+             */
+            accuracy_m?: number | null;
+            /**
+             * Heading Deg
+             * @description Direction of travel, in degrees clockwise from north; null or left out when unknown.
+             */
+            heading_deg?: number | null;
+            /**
+             * Recorded At
+             * Format: date-time
+             * @description When the device took the fix, with its UTC offset. Refused when too far from the server's time (ahead or behind).
+             */
+            recorded_at: string;
+        };
+        /** ProLocationOut */
+        ProLocationOut: {
+            /** @description The pro's latest position. null whenever there is none to show: the pro is not on the way (not yet, arrived, or the job moved on), has sent none yet, or the last one is too old. */
+            position: components["schemas"]["ProPosition"] | null;
+        };
+        /**
+         * ProPosition
+         * @description Where the pro was at `updated_at` (#350).
+         */
+        ProPosition: {
+            /** Lat */
+            lat: number;
+            /** Lng */
+            lng: number;
+            /**
+             * Accuracy M
+             * @description Accuracy radius in meters, when known.
+             */
+            accuracy_m: number | null;
+            /**
+             * Heading Deg
+             * @description Direction of travel, in degrees clockwise from north, when known.
+             */
+            heading_deg: number | null;
+            /**
+             * Updated At
+             * Format: date-time
+             * @description When the server received this position.
+             */
+            updated_at: string;
         };
         /** ProProfileOut */
         ProProfileOut: {
@@ -5834,6 +5929,160 @@ export interface operations {
             };
             /** @description The request is invalid. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_pro_location_v1_jobs__job_id__pro_location_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProLocationOut"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers follow their pro. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job of the caller with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description location_unavailable: the store must not hold positions (a deploy problem); there is none to show until it is fixed. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    share_pro_location_v1_jobs__job_id__pro_location_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProLocationIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros share their position. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job of the caller with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_on_the_way: the pro is not on the way to this job: not yet, already checked in, or the job moved on. Stop sending. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a coordinate, accuracy or heading out of range or not a finite number, an unknown field, or recorded_at too far from the server's time. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: far too many positions from this pro; Retry-After has the wait. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description location_unavailable: the position could not be kept (the store is down, or must not hold positions); drop it and send the next. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

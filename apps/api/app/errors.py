@@ -17,7 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
 
 from app.db_errors import summary_of
-from app.middleware import REQUEST_ID_HEADER
+from app.middleware import CACHE_CONTROL_HEADER, NO_STORE, REQUEST_ID_HEADER, is_no_store
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +119,9 @@ async def _handle_unexpected_error(request: Request, exc: Exception) -> JSONResp
                 extra={"table": summary.guard_table, "request_id": request_id},
             )
         logger.error("unhandled_error", extra={**summary.as_extra(), "request_id": request_id})
-    headers = {REQUEST_ID_HEADER: request_id} if request_id else None
+    headers = {REQUEST_ID_HEADER: request_id} if request_id else {}
+    if is_no_store(request.scope):  # NoStoreMiddleware never sees this response
+        headers[CACHE_CONTROL_HEADER] = NO_STORE
     return error_response(500, AppError.code, AppError.message, headers=headers)
 
 

@@ -30,7 +30,7 @@ from app.modules.requests.models import RequestOrigin, RequestStatus, ServiceReq
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole
 from app.observability import JsonFormatter, init_sentry
-from tests.conftest import make_settings
+from tests.conftest import InMemoryJobLocationStore, make_settings
 from tests.helpers import as_status_writer
 from tests.job_world import JobWorld, build_world, make_job, record_pushes
 from tests.test_requests_api import RecordingQueue
@@ -195,7 +195,8 @@ async def test_the_code_is_compared_in_constant_time(
         return real(a, b)
 
     monkeypatch.setattr("app.modules.jobs.execution.hmac.compare_digest", compare_digest)
-    service = JobExecutionService(db_session, CONFIG, no_storage)
+    # With a location store: the right code ends the live position (#350).
+    service = JobExecutionService(db_session, CONFIG, no_storage, InMemoryJobLocationStore())
 
     with pytest.raises(ArrivalCodeInvalidError):
         await service.check_in(pro, job.id, "9999", 0.0, 0.0, RecordingQueue())

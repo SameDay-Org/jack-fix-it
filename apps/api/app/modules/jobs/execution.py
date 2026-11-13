@@ -75,6 +75,11 @@ the system confirms the job on its own if neither the customer confirms nor a pr
 and the cron take the same lock and read the job again under it, so racing they make one
 transition, one event and one push.
 
+The pro's live position (#350, location.py) ends at the check-in, and at any status change out
+of on_the_way (the state machine's): the check-in deletes it under the job's row lock, before
+its commit. The service is built with the location store for that; without it a check-in, or a
+move out of on_the_way, raises instead of leaving a position behind.
+
 The arrival code is never logged, never in an error, never in a pro response. Logs carry ids:
 never an upload key.
 """
@@ -115,6 +120,7 @@ from app.modules.jobs.errors import (
     JobPhotoUploadExpiredError,
     NotOnTheWayError,
 )
+from app.modules.jobs.location import JobLocationStore, forget_position
 from app.modules.jobs.models import Job, JobEvent, JobPhoto, JobPhotoKind, JobStatus
 from app.modules.jobs.photos import JobPhotoSigner, enqueue_photo_sanitize
 from app.modules.jobs.repository import JobPhotoRepository, JobRepository
@@ -199,7 +205,11 @@ def new_arrival_code() -> str:
 
 class JobExecutionService:
     def __init__(
-        self, session: AsyncSession, config: JobExecutionConfig, storage: StorageProvider
+        self,
+        session: AsyncSession,
+        config: JobExecutionConfig,
+        storage: StorageProvider,
+        locations: JobLocationStore | None = None,
     ) -> None:
         self._session = session
         self._config = config
@@ -207,7 +217,8 @@ class JobExecutionService:
         self._photos = JobPhotoRepository(session)
         self._signer = JobPhotoSigner(storage, config.photo_url_ttl_seconds)
         self._pros = ProService(session)
-        self._machine = JobStateMachine(session, self._pros)
+        self._locations = locations
+        self._machine = JobStateMachine(session, self._pros, locations)
         self._customer_requests = CustomerRequestReader(session)
         self._requests = ProRequestReader(session)
         self._quotes = QuoteReader(session)
@@ -338,6 +349,9 @@ class JobExecutionService:
         if job.arrival_code_locked_at is not None:
             raise ArrivalCodeLockedError
         if _same_code(job.arrival_code, arrival_code):
+            # Arrived: the live position ends here (#350), under the row lock, which holds
+            # every ping off until the commit below.
+            await forget_position(self._locations, job.id)
             job.checked_in_at = datetime.now(UTC)
             job.arrival_code = None
             await self._jobs.add_event(
