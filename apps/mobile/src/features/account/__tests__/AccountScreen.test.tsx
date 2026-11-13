@@ -1,3 +1,4 @@
+import { QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react-native";
 import { Directory, File, Paths } from "expo-file-system";
 import { router, useIsFocused, useScrollToTop } from "expo-router";
@@ -32,7 +33,8 @@ import i18n from "@/i18n";
 
 import { deferred } from "../../../api/__tests__/helpers";
 import { METRICS } from "../../auth/__tests__/helpers";
-import { signedIn } from "../../home/__tests__/helpers";
+import { newQueryClient, signedIn } from "../../home/__tests__/helpers";
+import { savedAddress } from "../../request/__tests__/helpers";
 import { AccountScreen } from "../AccountScreen";
 
 jest.mock("@/api", () => ({
@@ -108,12 +110,17 @@ const FRONT_LABEL = `ID card, PRO, Alex Morgan, Fort Lauderdale, FL, ${PHONE}`;
 const BACK_BUTTON = "Back to your account";
 const SHARE = "Share your ID card as an image";
 
+// The menu counts a customer's addresses through the Query cache (a pro's asks nothing); one
+// cache per test, kept across a rerender.
+let queryClient = newQueryClient();
 const tree = () => (
-  <GestureHandlerRootView>
-    <SafeAreaProvider initialMetrics={METRICS}>
-      <AccountScreen />
-    </SafeAreaProvider>
-  </GestureHandlerRootView>
+  <QueryClientProvider client={queryClient}>
+    <GestureHandlerRootView>
+      <SafeAreaProvider initialMetrics={METRICS}>
+        <AccountScreen />
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
+  </QueryClientProvider>
 );
 const renderAccount = () => render(tree());
 
@@ -152,6 +159,7 @@ const busyOf = (name: string) =>
   screen.getByRole("button", { name }).props.accessibilityState as { busy?: boolean };
 
 beforeEach(() => {
+  queryClient = newQueryClient();
   jest.mocked(useSession).mockReturnValue(signedIn(ALEX));
   jest.mocked(useIsFocused).mockReturnValue(true);
   jest.mocked(useReducedMotion).mockReturnValue(false);
@@ -395,6 +403,60 @@ describe("AccountScreen", () => {
     await fireEvent.press(screen.getByRole("button", { name }));
 
     expect(router.push).toHaveBeenCalledWith(href);
+  });
+
+  describe("the Addresses row", () => {
+    const book = (count: number) => ({
+      items: Array.from({ length: count }, (_, index) =>
+        savedAddress({ id: `a-${index}`, label: `Place ${index}`, is_default: index === 0 }),
+      ),
+    });
+    const answer = (items: ReturnType<typeof book>) =>
+      jest
+        .mocked(apiGet)
+        .mockImplementation(async (path) =>
+          path === "/v1/addresses" ? items : Promise.reject(new Error(`unexpected ${path}`)),
+        );
+
+    it.each([
+      [0, "Addresses, None saved yet"],
+      [1, "Addresses, 1 saved"],
+      [3, "Addresses, 3 saved"],
+    ])("shows a customer how many are saved (%i) and opens the book", async (count, name) => {
+      jest.mocked(useSession).mockReturnValue(signedIn({ ...ALEX, role: "customer" }));
+      answer(book(count));
+      await renderAccount();
+
+      const row = await screen.findByRole("button", { name });
+      await fireEvent.press(row);
+
+      expect(router.push).toHaveBeenCalledWith("/account/addresses");
+    });
+
+    it("names the row alone while the book loads or when it failed", async () => {
+      jest.mocked(useSession).mockReturnValue(signedIn({ ...ALEX, role: "customer" }));
+      jest.mocked(apiGet).mockRejectedValue(new Error("offline"));
+      await renderAccount();
+
+      await waitFor(() => expect(apiGet).toHaveBeenCalledWith("/v1/addresses", expect.anything()));
+      expect(screen.getByRole("button", { name: "Addresses" })).toBeOnTheScreen();
+    });
+
+    it("is not there for a pro, who keeps no addresses, and nothing is asked", async () => {
+      await renderAccount();
+
+      expect(screen.queryByText("Addresses")).toBeNull();
+      expect(apiGet).not.toHaveBeenCalledWith("/v1/addresses", expect.anything());
+    });
+
+    it("reads in Spanish", async () => {
+      await i18n.changeLanguage("es");
+      jest.mocked(useSession).mockReturnValue(signedIn({ ...ALEX, role: "customer" }));
+      answer(book(2));
+      await renderAccount();
+
+      expect(await screen.findByRole("button", { name: "Direcciones, 2 guardadas" })).toBeTruthy();
+    });
   });
 
   it("log out asks first, then signs out with the row busy", async () => {

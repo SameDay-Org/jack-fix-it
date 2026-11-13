@@ -29,6 +29,9 @@ export type AddressErrors = Partial<Record<keyof AddressFields, AddressError>>;
  */
 export const ADDRESS_MAX = { line1: 255, line2: 255, city: 128 } as const;
 
+/** The most characters a saved address's name takes (`SavedAddressIn.label`), counted the same way. */
+export const LABEL_MAX = 30;
+
 // What the API takes (AddressIn): a two-letter state and a 5-digit ZIP (ZIP+4 is not offered).
 const STATE = /^[A-Za-z]{2}$/;
 const ZIP = /^[0-9]{5}$/;
@@ -86,4 +89,19 @@ export function savedAddressInput(
     label,
     is_default: isDefault,
   };
+}
+
+/** What a one-line address needs: a saved address, or the copy a request keeps. */
+type AddressParts = {
+  line1: string;
+  line2?: string | null;
+  city: string;
+  state: string;
+  zip_code: string;
+};
+
+/** One line for an address: "120 Main St, Apt 4, Miami, FL 33101". */
+export function addressLine(address: AddressParts): string {
+  const street = [address.line1, address.line2].filter(Boolean).join(", ");
+  return `${street}, ${address.city}, ${address.state} ${address.zip_code}`;
 }
