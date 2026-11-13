@@ -67,6 +67,7 @@ const message = (n: number): ChatMessage => ({
   body: BODIES[n - 1] ?? "",
   redacted: false,
   created_at: new Date(NOW + n * MINUTE_MS).toISOString(),
+  receipt: null,
 });
 const m = (n: number): ChatMessage => message(n);
 

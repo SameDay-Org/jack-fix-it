@@ -13,7 +13,8 @@ apply.
 - Styling: Tailwind classes using the brand tokens in `src/app/globals.css` `@theme`, the deck
   palette described in `docs/design/README.md` and provisional until the design system (D2.1,
   #18). Colors: `navy-900`, `navy-700`, `green-500`, `green-700`, `white`, `gray-50`,
-  `gray-500`, `danger`, `success`, `warning`; radius: `sm`, `md`, `lg`, `xl`, `pill`. They mirror
+  `gray-500`, `danger`, `success`, `warning`, `receipt-seen` (the chat "seen" tick, on navy
+  only: 1.8:1 on white); radius: `sm`, `md`, `lg`, `xl`, `pill`. They mirror
   `apps/mobile/src/theme/tokens.json` (the source) and `src/theme/tokens.test.ts` fails when the
   two drift. Muted text is `gray-500`, never navy with opacity; `green-500` is decoration only on
   light surfaces, never text.
@@ -30,6 +31,15 @@ apply.
   included, and sign-out clears the cookies before it revokes. Server actions keep Next's
   Origin check: never set `serverActions.allowedOrigins`. `/admin` responses are
   `Cache-Control: no-store` (`next.config.ts`).
+- Panel pages that call staff routes take the bearer from `staffAuth()` (`src/lib/session.ts`:
+  `requireStaff()` first, then the login's access token) and spread it into `apiGet` /
+  `apiPatch`, with `params` for the path's `{placeholders}` and `query` for its query string
+  (`src/lib/api.ts`). A server action is a public endpoint: it validates its input and takes
+  the bearer from `staffActionAuth()`, never `staffAuth()` or `requireStaff()`. An action must
+  not redirect to `/admin/session/refresh` or `/admin/session/end`: Next follows an action's
+  redirect on the server and drops its Set-Cookie, so the refresh token would rotate while the
+  browser kept the old cookies. `staffActionAuth()` renews or ends the session in place.
+  Support tickets (#274) live in `src/app/admin/(panel)/support/`.
 - UI kit: shadcn/ui components in `src/components/ui/`, written on the deck tokens (no extra
   color variables: `src/theme/tokens.test.ts` allows only the mobile tokens) with `cn()` from
   `src/lib/utils.ts`. Icons from `lucide-react`. TanStack Table comes with #81.

@@ -154,7 +154,7 @@ export function useDeleteAddress() {
     mutationKey: ADDRESS_WRITE_KEY,
     mutationFn: async ({ address, generation }) => {
       try {
-        await apiDelete("/v1/addresses/{address_id}", {
+        await apiDelete("/v1/addresses/{address_id}", undefined, {
           auth: true,
           generation,
           params: { address_id: address.id },

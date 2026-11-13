@@ -248,7 +248,7 @@ describe("path parameters", () => {
   it("deletes with no body, and a 204 answers undefined", async () => {
     fetchMock.mockResolvedValue(jsonResponse(204));
 
-    const answer = await apiDelete("/v1/addresses/{address_id}", {
+    const answer = await apiDelete("/v1/addresses/{address_id}", undefined, {
       params: { address_id: "a/1" },
     });
 

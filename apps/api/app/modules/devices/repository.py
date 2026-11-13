@@ -69,6 +69,12 @@ class DeviceRepository:
         )
         return bool(result.rowcount)  # type: ignore[attr-defined]  # as above
 
+    async def delete_by_token(self, token: str) -> bool:
+        """Deletes the token's device, whoever owns it. One statement keyed on the token alone,
+        the same one whether or not a row matches."""
+        result = await self._session.execute(delete(Device).where(Device.expo_push_token == token))
+        return bool(result.rowcount)  # type: ignore[attr-defined]  # as above
+
     async def delete_by_id(self, device_id: uuid.UUID) -> bool:
         result = await self._session.execute(delete(Device).where(Device.id == device_id))
         return bool(result.rowcount)  # type: ignore[attr-defined]  # as above

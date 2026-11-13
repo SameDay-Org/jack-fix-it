@@ -4,3 +4,7 @@ export { ALLOWED_PUSH_PATHS, parsePushLink, pushRoute } from "./deepLinks";
 export type { PushLink, PushPath } from "./deepLinks";
 export { receivePushTap } from "./pushTaps";
 export { openPushTap, useOpenPushTaps } from "./useOpenPushTaps";
+export { NotificationsPrompt } from "./NotificationsPrompt";
+export type { NotificationsPromptProps } from "./NotificationsPrompt";
+export { NotificationsSettingRow } from "./NotificationsSettingRow";
+export { usePushRegistration } from "./usePushRegistration";

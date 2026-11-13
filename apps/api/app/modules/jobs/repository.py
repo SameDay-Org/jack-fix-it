@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Collection
 from datetime import datetime
 
-from sqlalchemy import Select, Subquery, exists, func, select, tuple_, update
+from sqlalchemy import Select, Subquery, exists, func, or_, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.jobs.models import Job, JobEvent, JobPhoto, JobPhotoKind, JobStatus
@@ -53,6 +53,22 @@ class JobRepository:
         )
         return (await self._session.scalars(statement)).one_or_none()
 
+    async def get_of_pro_for_share(self, job_id: uuid.UUID, pro_id: uuid.UUID) -> Job | None:
+        """The pro's own job, locked FOR SHARE until the transaction ends: no status change or
+        check-in (get_for_update), nor any other write of the row, can commit meanwhile, while
+        other readers holding it this way do not wait for each other. Another pro's job is no
+        row, like one that does not exist, so it is never locked.
+
+        populate_existing: a waiter gets the row as the transaction that held the lock left it.
+        """
+        statement = (
+            select(Job)
+            .where(Job.id == job_id, Job.pro_id == pro_id)
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
     async def completed_before(
         self, completed_before: datetime, after: uuid.UUID | None, limit: int
     ) -> list[uuid.UUID]:
@@ -76,6 +92,32 @@ class JobRepository:
     async def get(self, job_id: uuid.UUID) -> Job | None:
         """The job, unlocked: for reads."""
         return await self._session.get(Job, job_id)
+
+    async def get_with_pro_user(
+        self, job_id: uuid.UUID, pros: Subquery, *, participant: uuid.UUID | None, lock: bool
+    ) -> tuple[Job, uuid.UUID] | None:
+        """The job with its pro's user id (`pros`: `pro_id`, `user_id`), in one statement.
+        With `participant`, only when they take part (the customer or the pro's user): a job of
+        others is None like an unknown id, through the same statement. With `lock`, the job row
+        is held as get_for_no_key_update holds it (the pros' rows are not locked)."""
+        statement = (
+            select(Job, pros.c.user_id)
+            .join(pros, pros.c.pro_id == Job.pro_id)
+            .where(Job.id == job_id)
+        )
+        if participant is not None:
+            statement = statement.where(
+                or_(Job.customer_id == participant, pros.c.user_id == participant)
+            )
+        if lock:
+            statement = statement.with_for_update(key_share=True, of=Job).execution_options(
+                populate_existing=True
+            )
+        row = (await self._session.execute(statement)).one_or_none()
+        if row is None:
+            return None
+        job, pro_user_id = row
+        return job, pro_user_id
 
     async def page_for_pro(
         self,

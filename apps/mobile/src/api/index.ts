@@ -1,4 +1,4 @@
-export { apiDelete, apiGet, apiPatch, apiPost } from "./client";
+export { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "./client";
 export { apiConfig } from "./config";
 export type { ApiConfig } from "./config";
 export type { RequestOptions } from "./client";
@@ -12,6 +12,8 @@ export {
 } from "./errors";
 export type { ErrorHeaders, UploadFailure } from "./errors";
 export type {
+  DeleteBody,
+  DeletePath,
   GetPath,
   GetResponse,
   PatchBody,
@@ -20,9 +22,12 @@ export type {
   PostBody,
   PostPath,
   PostResponse,
+  PutBody,
+  PutPath,
 } from "./http";
 export {
   attachQueryClient,
+  beforeSignOut,
   endOnboarding,
   isCurrentGeneration,
   login,
@@ -36,5 +41,6 @@ export {
   useSessionGeneration,
 } from "./session";
 export type { RegisterOptions, RestoreFailure, SessionStatus, SessionUser } from "./session";
+export { notificationsPromptStorage } from "./tokenStorage";
 export { localFileSize, uploadMedia } from "./upload";
 export type { UploadFile, UploadMediaOptions, UploadPurpose } from "./upload";

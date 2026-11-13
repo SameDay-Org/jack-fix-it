@@ -119,7 +119,7 @@ describe("Delete", () => {
 
     // The default went with it: the oldest other address is the default now, as on the server.
     expect(cached(client)).toEqual(["work*", "mom"]);
-    expect(apiDelete).toHaveBeenCalledWith("/v1/addresses/{address_id}", {
+    expect(apiDelete).toHaveBeenCalledWith("/v1/addresses/{address_id}", undefined, {
       auth: true,
       generation: 1,
       params: { address_id: "home" },

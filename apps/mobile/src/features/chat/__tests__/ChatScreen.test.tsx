@@ -21,9 +21,9 @@ import {
   useSessionGeneration,
 } from "@/api";
 import type { GetResponse } from "@/api";
-import { RECEIPT_SEEN } from "@/components/ui";
 import { formatTimeOfDay } from "@/features/opportunities/format";
 import { formatLocale } from "@/features/quotes/format";
+import { tokens } from "@/theme";
 
 import { deferred } from "../../../api/__tests__/helpers";
 import { METRICS } from "../../auth/__tests__/helpers";
@@ -105,6 +105,7 @@ const message = (n: number, overrides: Partial<ChatMessage> = {}): ChatMessage =
     body: `Message number ${n} about the faucet`,
     redacted: false,
     created_at: iso(-n * MINUTE_MS),
+    receipt: null,
     ...overrides,
   };
   remember(built.body);
@@ -550,7 +551,7 @@ describe("the job chat screen (#74)", () => {
         );
         expect(within(bubble).getAllByTestId("chat-receipt-tick", HIDDEN)).toHaveLength(ticks);
         const stroke = within(bubble).getByTestId("chat-receipt", HIDDEN).props.stroke as string;
-        expect(stroke === RECEIPT_SEEN).toBe(blue);
+        expect(stroke === tokens.colors["receipt-seen"]).toBe(blue);
       },
     );
 
@@ -585,7 +586,7 @@ describe("the job chat screen (#74)", () => {
     });
 
     it("an unknown receipt reads as sent", async () => {
-      const mine = { ...message(1, { sender: "me" }), receipt: "read" } as ChatMessage;
+      const mine = { ...message(1, { sender: "me" }), receipt: "read" } as unknown as ChatMessage;
       mockApi.messages = () => Promise.resolve(page([mine]));
       await renderChat();
       await screen.findByTestId("chat-list");

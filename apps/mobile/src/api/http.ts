@@ -18,6 +18,11 @@ export type PatchPath = {
   [P in keyof paths]: paths[P] extends { patch: object } ? P : never;
 }[keyof paths];
 
+/** Paths that accept PUT, from the OpenAPI schema. */
+export type PutPath = {
+  [P in keyof paths]: paths[P] extends { put: object } ? P : never;
+}[keyof paths];
+
 /** Paths that accept DELETE, from the OpenAPI schema. */
 export type DeletePath = {
   [P in keyof paths]: paths[P] extends { delete: object } ? P : never;
@@ -44,6 +49,7 @@ type SuccessBody<Operation> = Operation extends { responses: infer Responses }
 export type GetResponse<P extends GetPath> = SuccessBody<paths[P]["get"]>;
 export type PostResponse<P extends PostPath> = SuccessBody<paths[P]["post"]>;
 export type PatchResponse<P extends PatchPath> = SuccessBody<paths[P]["patch"]>;
+export type PutResponse<P extends PutPath> = SuccessBody<paths[P]["put"]>;
 export type DeleteResponse<P extends DeletePath> = SuccessBody<paths[P]["delete"]>;
 
 /** The JSON request body a POST path takes; `undefined` for one that takes none (a quote's accept). */
@@ -60,6 +66,20 @@ export type PatchBody<P extends PatchPath> = paths[P]["patch"] extends {
   ? Body
   : undefined;
 
+/** The JSON request body a PUT path takes: the whole resource (a device registration). */
+export type PutBody<P extends PutPath> = paths[P]["put"] extends {
+  requestBody: { content: { "application/json": infer Body } };
+}
+  ? Body
+  : undefined;
+
+/** The JSON request body a DELETE path takes (a push token, kept out of the logged path). */
+export type DeleteBody<P extends DeletePath> = paths[P]["delete"] extends {
+  requestBody: { content: { "application/json": infer Body } };
+}
+  ? Body
+  : undefined;
+
 /** The `{name}` segments an operation declares, e.g. `{ request_id: string }`; `never` when it has none. */
 type PathParams<Operation> = Operation extends { parameters: { path: infer Params } }
   ? Params
@@ -68,9 +88,10 @@ type PathParams<Operation> = Operation extends { parameters: { path: infer Param
 export type GetParams<P extends GetPath> = PathParams<paths[P]["get"]>;
 export type PostParams<P extends PostPath> = PathParams<paths[P]["post"]>;
 export type PatchParams<P extends PatchPath> = PathParams<paths[P]["patch"]>;
+export type PutParams<P extends PutPath> = PathParams<paths[P]["put"]>;
 export type DeleteParams<P extends DeletePath> = PathParams<paths[P]["delete"]>;
 
-type Method = "GET" | "POST" | "PATCH" | "DELETE";
+type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
 const ACCEPTED = 202;
 
@@ -140,7 +161,7 @@ async function readErrorCode(response: Response): Promise<string | undefined> {
  */
 export async function sendRequest<T>(
   method: Method,
-  path: GetPath | PostPath | PatchPath | DeletePath,
+  path: GetPath | PostPath | PatchPath | PutPath | DeletePath,
   options: SendOptions = {},
 ): Promise<T> {
   throwIfAborted(options.signal);

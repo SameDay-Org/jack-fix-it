@@ -9,6 +9,7 @@ const badgeVariants = cva("inline-flex items-center rounded-pill px-3 py-1 text-
     variant: {
       onNavy: "bg-navy-700 text-white",
       warning: "bg-warning text-navy-900",
+      muted: "bg-gray-50 text-navy-900",
     },
   },
   defaultVariants: { variant: "onNavy" },
