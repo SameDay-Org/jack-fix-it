@@ -21,6 +21,7 @@ import type { SentQuote } from "../useSendQuote";
 import {
   detail,
   DISPATCH_ID,
+  fakeClock,
   freezeClock,
   GO_BACK,
   hoursFromNow,
@@ -162,12 +163,20 @@ function deferredGet() {
 
 const alertButtons = (): AlertButton[] => jest.mocked(Alert.alert).mock.calls[0]?.[2] ?? [];
 
-/** The detail refreshed with other caps: the cache tells its observers on a (real) zero timeout. */
-const refreshCaps = (client: QueryClient, caps: Partial<OpportunityDetail>) =>
-  act(async () => {
-    client.setQueryData(opportunityQueryKey(DISPATCH_ID), detail(caps));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+/** Under `fakeClock()`: moves the clock on by `ms`, and what falls due runs inside `act`. */
+const elapse = (ms: number) =>
+  act(() => {
+    jest.advanceTimersByTime(ms);
   });
+
+/**
+ * Under `fakeClock()`: the detail refreshed with other caps. The cache tells its observers on a
+ * zero timeout, run here and now.
+ */
+const refreshCaps = async (client: QueryClient, caps: Partial<OpportunityDetail>) => {
+  client.setQueryData(opportunityQueryKey(DISPATCH_ID), detail(caps));
+  await elapse(0);
+};
 
 const scrollTo = ScrollView.prototype.scrollTo as jest.Mock;
 
@@ -179,12 +188,18 @@ const focusedIds = () =>
     return String(host?.props?.testID ?? host?.testID ?? typeof host);
   });
 
-/** Screen-reader focus went, in order, to these controls: it follows the scroll by a settle. */
-const expectFocused = (...ids: string[]) => waitFor(() => expect(focusedIds()).toEqual(ids));
-
-/** Long enough for a focus move that was coming to have come. */
-const settle = () =>
-  act(() => new Promise<void>((resolve) => setTimeout(resolve, REVEAL_SETTLE_MS + 100)));
+/**
+ * Under `fakeClock()`, called as the reveal's scroll starts (no time has passed since): focus
+ * stays on `before` up to 1 ms short of the scroll's settle time, then follows the scroll to
+ * `after`.
+ */
+const expectFocusFollowsScroll = async (before: string[], after: string[]) => {
+  expect(focusedIds()).toEqual(before);
+  await elapse(REVEAL_SETTLE_MS - 1);
+  expect(focusedIds()).toEqual(before);
+  await elapse(1);
+  expect(focusedIds()).toEqual(after);
+};
 
 /** The form laid out: each field's section at its top, as the native side reports it. */
 const SECTION_TOPS = { price: 120, scope: 300, duration: 700, start: 950 };
@@ -454,6 +469,7 @@ describe("QuoteFormScreen: review and send", () => {
   });
 
   it("on a 422 after the start went by while the quote was out marks the start, not the caps", async () => {
+    fakeClock();
     const post = deferredPost();
     await renderForm();
     await fillAndReview();
@@ -465,10 +481,11 @@ describe("QuoteFormScreen: review and send", () => {
     expect(await screen.findByText("Pick a start that is still ahead.")).toBeTruthy();
     expect(screen.queryByText(CAP)).toBeNull();
     await layOut();
-    await expectFocused("quote-time");
+    await expectFocusFollowsScroll([], ["quote-time"]);
   });
 
   it("does not send a quote whose start went by on the review: back to the form, start marked", async () => {
+    fakeClock();
     await renderForm();
     await fillAndReview();
     jest.setSystemTime(PREFERRED_START + 60_000);
@@ -478,8 +495,8 @@ describe("QuoteFormScreen: review and send", () => {
     expect(screen.getByTestId("quote-form")).toBeTruthy();
     expect(apiPost).not.toHaveBeenCalled();
     await layOut();
-    await expectFocused("quote-time");
     expect(scrollTo.mock.calls).toEqual([[{ y: SECTION_TOPS.start, animated: true }]]);
+    await expectFocusFollowsScroll([], ["quote-time"]);
   });
 
   it.each([
@@ -511,6 +528,11 @@ describe("QuoteFormScreen: review and send", () => {
 describe("QuoteFormScreen: the opportunity's caps", () => {
   const PRICE_MAX = "The maximum quote is $100.";
   const DURATION_MAX = `The longest job you can quote is 1${NBSP}h${NBSP}14${NBSP}min.`;
+
+  // Time is the test's to move: a refresh notifies and a refusal's focus comes when it says so.
+  beforeEach(() => {
+    fakeClock();
+  });
 
   it("sends a quote at both caps", async () => {
     await renderWithCaps({ quote_max_amount_cents: 10_000, quote_max_duration_minutes: 75 });
@@ -638,7 +660,7 @@ describe("QuoteFormScreen: the opportunity's caps", () => {
     expect(screen.queryByText(CAP)).toBeNull();
     expect(apiPost).toHaveBeenCalledTimes(1);
     await layOut();
-    await expectFocused("quote-minutes");
+    await expectFocusFollowsScroll([], ["quote-minutes"]);
   });
 
   it.each<[string, string, string]>([
@@ -698,6 +720,11 @@ describe("QuoteFormScreen: a refused Review or Send shows and reads its first pr
   const DURATION_MAX = `The longest job you can quote is 1${NBSP}h${NBSP}14${NBSP}min.`;
   const SUMMARY = "Check the fields marked in red.";
 
+  // Time is the test's to move: focus comes after the scroll's settle time and no sooner.
+  beforeEach(() => {
+    fakeClock();
+  });
+
   /** The message under a field: read politely when it appears, and the field's own hint. */
   const expectAnnounced = (controlId: string, message: string) => {
     for (const text of screen.getAllByText(message)) {
@@ -720,14 +747,13 @@ describe("QuoteFormScreen: a refused Review or Send shows and reads its first pr
     // focus follows it, since a screen reader takes focus only on what is on screen.
     expectAnnounced("quote-price", PRICE_MAX);
     expect(scrollTo.mock.calls).toEqual([[{ y: SECTION_TOPS.price, animated: true }]]);
-    expect(moveAccessibilityFocus).not.toHaveBeenCalled();
-    await expectFocused("quote-price");
+    await expectFocusFollowsScroll([], ["quote-price"]);
     expect(apiPost).not.toHaveBeenCalled();
 
     // A second refusal over the same field reads it again.
     await press("quote-review");
-    await expectFocused("quote-price", "quote-price");
     expect(scrollTo).toHaveBeenCalledTimes(2);
+    await expectFocusFollowsScroll(["quote-price"], ["quote-price", "quote-price"]);
   });
 
   it("a Review refused for the duration cap: the stepper stating it is announced, focused and scrolled to", async () => {
@@ -738,7 +764,7 @@ describe("QuoteFormScreen: a refused Review or Send shows and reads its first pr
 
     expectAnnounced("quote-minutes", DURATION_MAX);
     expect(scrollTo.mock.calls).toEqual([[{ y: SECTION_TOPS.duration, animated: true }]]);
-    await expectFocused("quote-minutes");
+    await expectFocusFollowsScroll([], ["quote-minutes"]);
   });
 
   it.each<[string, string, string]>([
@@ -756,7 +782,7 @@ describe("QuoteFormScreen: a refused Review or Send shows and reads its first pr
     expect(scrollTo.mock.calls).toEqual([
       [{ y: SECTION_TOPS[field as keyof typeof SECTION_TOPS], animated: true }],
     ]);
-    await expectFocused(controlId);
+    await expectFocusFollowsScroll([], [controlId]);
   });
 
   it.each<[string, Partial<OpportunityDetail>, string, string]>([
@@ -772,9 +798,9 @@ describe("QuoteFormScreen: a refused Review or Send shows and reads its first pr
 
       await screen.findByTestId("quote-form");
       expectAnnounced(controlId, message);
-      // The form mounted anew: the scroll waits for the section's place and goes there once,
-      // and focus follows the scroll.
-      await settle();
+      // The form mounted anew: the scroll waits for the section's place, however long it takes,
+      // and goes there once; focus follows the scroll.
+      await elapse(REVEAL_SETTLE_MS);
       expect(scrollTo).not.toHaveBeenCalled();
       expect(moveAccessibilityFocus).not.toHaveBeenCalled();
       await layOut();
@@ -782,7 +808,7 @@ describe("QuoteFormScreen: a refused Review or Send shows and reads its first pr
       expect(scrollTo.mock.calls).toEqual([
         [{ y: SECTION_TOPS[field as keyof typeof SECTION_TOPS], animated: true }],
       ]);
-      await expectFocused(controlId);
+      await expectFocusFollowsScroll([], [controlId]);
       expect(apiPost).not.toHaveBeenCalled();
     },
   );
@@ -796,7 +822,7 @@ describe("QuoteFormScreen: a refused Review or Send shows and reads its first pr
     await screen.findByTestId("quote-form");
     expectAnnounced("quote-price", CAP);
     await layOut();
-    await expectFocused("quote-price");
+    await expectFocusFollowsScroll([], ["quote-price"]);
   });
 
   it("moves nothing when the Review passes or the pro comes back by Edit, a refusal before or not", async () => {
@@ -804,7 +830,7 @@ describe("QuoteFormScreen: a refused Review or Send shows and reads its first pr
     await layOut();
     await fill({ price: "100.01" });
     await press("quote-review");
-    await expectFocused("quote-price");
+    await expectFocusFollowsScroll([], ["quote-price"]);
 
     // Corrected, the Review passes; Edit brings the form back with no refusal to show.
     await typeInto("quote-price", "100");
@@ -813,7 +839,7 @@ describe("QuoteFormScreen: a refused Review or Send shows and reads its first pr
     await press("quote-edit");
     await screen.findByTestId("quote-form");
     await layOut();
-    await settle();
+    await elapse(REVEAL_SETTLE_MS);
 
     expect(focusedIds()).toEqual(["quote-price"]);
     expect(scrollTo).toHaveBeenCalledTimes(1);
@@ -824,12 +850,19 @@ describe("QuoteFormScreen: a refused Review or Send shows and reads its first pr
     await layOut();
     await fill({ price: "100.01" });
     await press("quote-review");
-    // Corrected and reviewed before the scroll landed: the form is gone, nothing is focused.
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    // 1 ms short of the scroll landing, the focus move is still to come.
+    await elapse(REVEAL_SETTLE_MS - 1);
+    expect(moveAccessibilityFocus).not.toHaveBeenCalled();
+
+    // Corrected and reviewed now, with no time passing: the form goes before the scroll lands.
     await typeInto("quote-price", "100");
     await press("quote-review");
-    await screen.findByTestId("quote-review-step");
-    await settle();
+    expect(screen.getByTestId("quote-review-step")).toBeTruthy();
+    expect(screen.queryByTestId("quote-form")).toBeNull();
 
+    // Past the time the focus would have come, nothing was focused.
+    await elapse(REVEAL_SETTLE_MS);
     expect(moveAccessibilityFocus).not.toHaveBeenCalled();
   });
 });
