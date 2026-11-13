@@ -11,9 +11,12 @@ import httpx
 import pytest
 import sentry_sdk
 from fastapi import FastAPI
+from fastapi.routing import APIRoute, iter_route_contexts
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.main import create_app
+from app.middleware import NoStoreRoute
 from app.modules.jobs.confirmation import JobAutoConfirmer
 from app.modules.jobs.models import Job, JobStatus
 from app.modules.jobs.service import SYSTEM, JobStateMachine, is_reviewable
@@ -1228,3 +1231,91 @@ def test_openapi_documents_every_answer(app: FastAPI) -> None:
     for dimension in ("quality", "value"):
         assert "refused (422) from the pro" in fields[dimension]["description"]
     assert "Retry-After" in create["responses"]["429"]["headers"]
+
+
+# --- No HTTP cache keeps an answer (#392) -----------------------------------------------------
+
+
+def test_every_reviews_route_is_a_no_store_route() -> None:
+    """Whatever route the app serves under the reviews tag answers `no-store`, so a route
+    added later, on these routers or another one, cannot forget it."""
+    served = {
+        (method, context.path): isinstance(context.original_route, NoStoreRoute)
+        for context in iter_route_contexts(create_app(make_settings()).routes)
+        if isinstance(context.original_route, APIRoute)
+        and "reviews" in context.original_route.tags
+        for method in context.methods or ()
+    }
+
+    assert served == {
+        ("POST", "/v1/jobs/{job_id}/reviews"): True,
+        ("GET", "/v1/jobs/{job_id}/reviews/mine"): True,
+        ("GET", "/v1/users/me/rating"): True,
+    }
+
+
+async def test_every_review_response_says_no_store(
+    db_session: AsyncSession, world: JobWorld
+) -> None:
+    job = await confirmed_job(db_session, world)
+    open_job = await make_job(db_session, world, JobStatus.SCHEDULED)
+    other = await confirmed_job(db_session, world)
+    app = _app(make_settings(review_create_limit=2, review_create_window_seconds=3_600), db_session)
+    limiter = InMemoryRateLimiter(lambda: NOW)
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    responses: dict[str, httpx.Response] = {}
+    async with _client(app) as client:
+        responses["write: created"] = await post(client, world.customer, job.id, comment=COMMENT)
+        responses["mine: reviewed"] = await mine(client, world.customer, job.id)
+        responses["mine: not yet"] = await mine(client, world.pro, job.id)
+        responses["rating"] = await client.get(RATING, headers=world.customer.headers)
+        responses["write: anonymous"] = await client.post(path(job.id), json={"overall": 5})
+        responses["mine: anonymous"] = await client.get(mine_path(job.id))
+        responses["rating: anonymous"] = await client.get(RATING)
+        responses["write: staff"] = await post(client, world.agent, job.id)
+        responses["rating: staff"] = await client.get(RATING, headers=world.admin.headers)
+        responses["write: another's job"] = await post(client, world.other_customer, job.id)
+        responses["mine: another's job"] = await mine(client, world.other_customer, job.id)
+        responses["write: again"] = await post(client, world.customer, job.id)
+        responses["write: not confirmed"] = await post(client, world.pro, open_job.id)
+        responses["write: invalid"] = await post(client, world.other_customer, job.id, overall=9)
+        responses["mine: invalid id"] = await mine(client, world.customer, "not-a-uuid")
+        responses["write: flood"] = await post(client, world.customer, other.id)
+        responses["wrong method"] = await client.delete(path(job.id), headers=world.customer.headers)
+
+        def crash() -> datetime:
+            raise RuntimeError("an unexpected bug")
+
+        app.dependency_overrides[get_review_clock] = lambda: crash
+        responses["rating: crash"] = await client.get(RATING, headers=world.pro.headers)
+        elsewhere = await client.get("/health")
+
+    assert {name: r.status_code for name, r in responses.items()} == {
+        "write: created": 201,
+        "mine: reviewed": 200,
+        "mine: not yet": 200,
+        "rating": 200,
+        "write: anonymous": 401,
+        "mine: anonymous": 401,
+        "rating: anonymous": 401,
+        "write: staff": 403,
+        "rating: staff": 403,
+        "write: another's job": 404,
+        "mine: another's job": 404,
+        "write: again": 409,
+        "write: not confirmed": 409,
+        "write: invalid": 422,
+        "mine: invalid id": 422,
+        "write: flood": 429,
+        "wrong method": 405,
+        "rating: crash": 500,
+    }
+    # `private` or `no-cache` would still let a cache store the response: exactly no-store.
+    assert {name: r.headers.get("cache-control") for name, r in responses.items()} == dict.fromkeys(
+        responses, "no-store"
+    )
+    assert responses["write: flood"].headers["retry-after"]  # the handler's own header stays
+    assert responses["rating: crash"].headers["x-request-id"]
+    # Only these routes: the header is the routes', not the app's.
+    assert elsewhere.status_code == 200
+    assert "cache-control" not in elsewhere.headers

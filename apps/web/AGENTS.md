@@ -43,6 +43,11 @@ apply.
 - UI kit: shadcn/ui components in `src/components/ui/`, written on the deck tokens (no extra
   color variables: `src/theme/tokens.test.ts` allows only the mobile tokens) with `cn()` from
   `src/lib/utils.ts`. Icons from `lucide-react`. TanStack Table comes with #81.
+- User-authored text shown to anyone (review comments first: the public pro profile, #78, and
+  any panel view of reviews) renders as escaped plain text only: a React text node, never
+  `dangerouslySetInnerHTML`, no markdown and no auto-linked URLs, emails or phones. The API's
+  contact redaction is not HTML sanitization: `<svg onload=alert(390)>` is stored and returned
+  verbatim as a JSON string, so only the rendering keeps it inert (#392).
 - `src/app/robots.ts` allows indexing only when `APP_ENV=production`.
 - UI changes need screenshots at mobile and desktop width in the PR.
 
