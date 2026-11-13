@@ -91,6 +91,11 @@ class UserRepository:
         statement = select(User.stripe_customer_id).where(User.id == user_id)
         return await self._session.scalar(statement)
 
+    async def get_stripe_customer_id_for_update(self, user_id: uuid.UUID) -> str | None:
+        """The same read, the user's row locked until the transaction ends."""
+        statement = select(User.stripe_customer_id).where(User.id == user_id).with_for_update()
+        return await self._session.scalar(statement)
+
     async def set_stripe_customer_id_if_missing(self, user_id: uuid.UUID, customer_id: str) -> bool:
         """Stores the customer id unless the row holds one already; False then."""
         result = await self._session.execute(

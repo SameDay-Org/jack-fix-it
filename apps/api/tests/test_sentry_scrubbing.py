@@ -597,3 +597,28 @@ def test_before_breadcrumb_and_before_send_redact_stripe_payment_ids() -> None:
     # Only a whole id: a word that merely contains a prefix stays.
     plain: Any = {"type": "default", "message": "api_key focus_cus_x my_pi_total"}
     assert before_breadcrumb(plain, {})["message"] == "api_key focus_cus_x my_pi_total"
+
+
+def test_before_breadcrumb_and_before_send_redact_saved_card_ids() -> None:
+    """A saved card's PaymentMethod id and a SetupIntent's id (its client secret starts with
+    it) go the same way (#253): in Stripe's URLs and in the wallet's own path."""
+    crumb: Any = {
+        "type": "http",
+        "message": "POST /v1/payment_methods/pm_1Abc/detach then seti_1Abc_secret_Xyz9",
+        "data": {"url": "https://api.stripe.com/v1/payment_methods/pm_1Abc/detach"},
+    }
+    assert before_breadcrumb(crumb, {}) == {
+        "type": "http",
+        "message": "POST /v1/payment_methods/pm_[Filtered]/detach then seti_[Filtered]",
+        "data": {"url": "https://api.stripe.com/v1/payment_methods/pm_[Filtered]/detach"},
+    }
+    event: Any = {
+        "request": {"url": "https://api.example.invalid/v1/me/payment-methods/pm_1Abc/default"}
+    }
+    assert (
+        before_send(event, {})["request"]["url"]
+        == "https://api.example.invalid/v1/me/payment-methods/pm_[Filtered]/default"
+    )
+    # Only a whole id: a word that merely contains a prefix stays.
+    plain: Any = {"type": "default", "message": "3pm_today reseti_x"}
+    assert before_breadcrumb(plain, {})["message"] == "3pm_today reseti_x"
