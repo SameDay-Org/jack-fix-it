@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { router, useLocalSearchParams, usePreventRemove } from "expo-router";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentRef, type ReactNode, type Ref } from "react";
 import { useTranslation } from "react-i18next";
 import { AccessibilityInfo, Alert, KeyboardAvoidingView, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -12,7 +12,7 @@ import { isOpportunityDenied, useOpportunityDenied } from "@/features/pro-home/u
 import { QuoteFormStep } from "./QuoteFormStep";
 import { QuoteReviewStep } from "./QuoteReviewStep";
 import { QuoteSentStep } from "./QuoteSentStep";
-import { quoteBody, type QuoteCreate } from "./quoteDraft";
+import { quoteBody, type QuoteCreate, type QuoteField } from "./quoteDraft";
 import { StateCard } from "./StateCard";
 import {
   forgetOpportunity,
@@ -21,6 +21,7 @@ import {
   type OpportunityDetail,
 } from "./useOpportunity";
 import { useQuoteDraft } from "./useQuoteDraft";
+import type { Refusal } from "./useRefusalReveal";
 import { useSendQuote, type SendFailure, type SentQuote } from "./useSendQuote";
 
 type ClosedReason = "gone" | "alreadyQuoted";
@@ -34,7 +35,10 @@ type Outgoing = { body: QuoteCreate; takeRateBps: number };
 /** A send the form may try again, or the session's own screens take over (`signedOut`). */
 type RetryableFailure = Exclude<SendFailure, ClosedReason>;
 
-type Step = { kind: "form" } | { kind: "review"; failed: boolean };
+/** The form carries the Review or Send that was just refused, when one opened or kept it. */
+type Step = { kind: "form"; refusal?: Refusal } | { kind: "review"; failed: boolean };
+
+type FormScroll = ComponentRef<typeof ScrollView>;
 
 const HOME = "/";
 const SKELETON_FIELDS = 3;
@@ -155,6 +159,7 @@ function QuoteFlow({ opportunity, sending, onSend }: QuoteFlowProps) {
   const quote = useQuoteDraft(opportunity.preferred_date, opportunity);
   const [step, setStep] = useState<Step>({ kind: "form" });
   const [discarding, setDiscarding] = useState(false);
+  const scrollRef = useRef<FormScroll>(null);
 
   // expo-router blocks every removal while the guard is on, a replayed one too: a confirmed
   // discard turns it off and replays the blocked back with `repeat`.
@@ -177,18 +182,26 @@ function QuoteFlow({ opportunity, sending, onSend }: QuoteFlowProps) {
     }
   });
 
+  /** The form, with what it marked: `field`, the first of it, is brought into view and read. */
+  const refuse = (field: QuoteField) => setStep({ kind: "form", refusal: { field } });
+
   const review = () => {
-    if (quote.check()) setStep({ kind: "review", failed: false });
+    const wrong = quote.check();
+    if (wrong) refuse(wrong);
+    else setStep({ kind: "review", failed: false });
   };
 
   const sendQuote = () => {
+    // Checked again as it leaves: while the review was open the detail may have refreshed with a
+    // lower cap, or the start gone by. What the app already knows is wrong costs no request.
+    const wrong = quote.check();
+    if (wrong) {
+      refuse(wrong);
+      return;
+    }
     onSend({ body: quoteBody(quote.draft), takeRateBps: opportunity.take_rate_bps }, (failure) => {
-      if (failure === "invalid") {
-        quote.refused();
-        setStep({ kind: "form" });
-      } else if (failure === "failed") {
-        setStep({ kind: "review", failed: true });
-      }
+      if (failure === "invalid") refuse(quote.refused());
+      else if (failure === "failed") setStep({ kind: "review", failed: true });
     });
   };
 
@@ -208,12 +221,14 @@ function QuoteFlow({ opportunity, sending, onSend }: QuoteFlowProps) {
       );
     case "form":
       return (
-        <FormScreen>
+        <FormScreen scrollRef={scrollRef}>
           <QuoteFormStep
             quote={quote}
             takeRateBps={opportunity.take_rate_bps}
             preferredDate={opportunity.preferred_date}
             onReview={review}
+            refusal={step.refusal}
+            scrollRef={scrollRef}
           />
         </FormScreen>
       );
@@ -221,7 +236,7 @@ function QuoteFlow({ opportunity, sending, onSend }: QuoteFlowProps) {
 }
 
 /** The light page with the keyboard avoided, so the focused field and the button stay in view. */
-function FormScreen({ children }: { children: ReactNode }) {
+function FormScreen({ children, scrollRef }: { children: ReactNode; scrollRef: Ref<FormScroll> }) {
   const { top } = useSafeAreaInsets();
   return (
     <Screen bar="light" testID="quote-screen">
@@ -233,6 +248,7 @@ function FormScreen({ children }: { children: ReactNode }) {
         className="flex-1"
       >
         <ScrollView
+          ref={scrollRef}
           contentContainerClassName="flex-grow px-4 pb-6 pt-2"
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"

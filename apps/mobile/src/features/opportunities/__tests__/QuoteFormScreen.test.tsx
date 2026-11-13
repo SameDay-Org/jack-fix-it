@@ -1,11 +1,11 @@
-import "@/i18n";
-
 import type { QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { router } from "expo-router";
-import { AccessibilityInfo, Alert, type AlertButton } from "react-native";
+import { AccessibilityInfo, Alert, ScrollView, type AlertButton } from "react-native";
 
 import { ApiError, apiGet, apiPost, NetworkError } from "@/api";
+import { moveAccessibilityFocus } from "@/components/ui/focus";
+import i18n from "@/i18n";
 
 import { flattenOpportunities, OPPORTUNITIES_QUERY_KEY } from "../../pro-home/useOpportunities";
 import { OpportunityDetailScreen } from "../OpportunityDetailScreen";
@@ -35,6 +35,10 @@ jest.mock("@/api", () => ({
   ...jest.requireActual("../../../api/errors"),
   apiGet: jest.fn(),
   apiPost: jest.fn(),
+}));
+jest.mock("@/components/ui/focus", () => ({
+  ...jest.requireActual("../../../components/ui/focus"),
+  moveAccessibilityFocus: jest.fn(),
 }));
 jest.mock("expo-router", () => jest.requireActual("./helpers").routerMock);
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
@@ -157,6 +161,33 @@ function deferredGet() {
 
 const alertButtons = (): AlertButton[] => jest.mocked(Alert.alert).mock.calls[0]?.[2] ?? [];
 
+/** The detail refreshed with other caps: the cache tells its observers on a (real) zero timeout. */
+const refreshCaps = (client: QueryClient, caps: Partial<OpportunityDetail>) =>
+  act(async () => {
+    client.setQueryData(opportunityQueryKey(DISPATCH_ID), detail(caps));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+const scrollTo = ScrollView.prototype.scrollTo as jest.Mock;
+
+/** The test id of each control screen-reader focus was sent to, in order (by id: printing a host
+ * instance in a failed assertion walks the whole tree). */
+const focusedIds = () =>
+  jest.mocked(moveAccessibilityFocus).mock.calls.map(([target]) => {
+    const host = target as { props?: { testID?: string }; testID?: string } | null;
+    return String(host?.props?.testID ?? host?.testID ?? typeof host);
+  });
+
+/** The form laid out: each field's section at its top, as the native side reports it. */
+const SECTION_TOPS = { price: 120, scope: 300, duration: 700, start: 950 };
+const layOut = async () => {
+  for (const [field, y] of Object.entries(SECTION_TOPS)) {
+    await fireEvent(screen.getByTestId(`quote-${field}-section`), "layout", {
+      nativeEvent: { layout: { x: 0, y, width: 288, height: 160 } },
+    });
+  }
+};
+
 beforeEach(() => {
   freezeClock();
   navigation.reset();
@@ -166,6 +197,8 @@ beforeEach(() => {
   jest.mocked(router.dismissTo).mockClear();
   jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
   jest.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+  jest.mocked(moveAccessibilityFocus).mockClear();
+  scrollTo.mockClear();
 });
 
 afterEach(() => {
@@ -412,15 +445,28 @@ describe("QuoteFormScreen: review and send", () => {
     expect(screen.queryByText(CAP)).toBeNull();
   });
 
-  it("on a 422 after the start went by marks the start, not the caps", async () => {
-    jest.mocked(apiPost).mockRejectedValue(new ApiError(422, "validation_error"));
+  it("on a 422 after the start went by while the quote was out marks the start, not the caps", async () => {
+    const post = deferredPost();
+    await renderForm();
+    await fillAndReview();
+    await press("quote-send");
+    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
+    jest.setSystemTime(PREFERRED_START + 60_000);
+    await act(async () => post.fail(new ApiError(422, "validation_error")));
+
+    expect(await screen.findByText("Pick a start that is still ahead.")).toBeTruthy();
+    expect(screen.queryByText(CAP)).toBeNull();
+  });
+
+  it("does not send a quote whose start went by on the review: back to the form, start marked", async () => {
     await renderForm();
     await fillAndReview();
     jest.setSystemTime(PREFERRED_START + 60_000);
     await press("quote-send");
 
     expect(await screen.findByText("Pick a start that is still ahead.")).toBeTruthy();
-    expect(screen.queryByText(CAP)).toBeNull();
+    expect(screen.getByTestId("quote-form")).toBeTruthy();
+    expect(apiPost).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -501,12 +547,7 @@ describe("QuoteFormScreen: the opportunity's caps", () => {
 
   it("checks the marks again when the detail refreshes with other caps", async () => {
     const client = await renderWithCaps({ quote_max_amount_cents: 10_000 });
-    // The cache tells its observers on a (real) zero timeout: waiting one out lands the render.
-    const refresh = (caps: Partial<OpportunityDetail>) =>
-      act(async () => {
-        client.setQueryData(opportunityQueryKey(DISPATCH_ID), detail(caps));
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      });
+    const refresh = (caps: Partial<OpportunityDetail>) => refreshCaps(client, caps);
     await fill({ price: "150" });
     await press("quote-review");
     expect(screen.getByText(PRICE_MAX)).toBeTruthy();
@@ -522,6 +563,81 @@ describe("QuoteFormScreen: the opportunity's caps", () => {
     expect(screen.queryByText("The maximum quote is $120.")).toBeNull();
     expect(screen.queryByTestId("quote-form-problems")).toBeNull();
   });
+
+  it.each<[string, Partial<OpportunityDetail>, string]>([
+    [
+      "price",
+      { quote_max_amount_cents: 9999, quote_max_duration_minutes: 75 },
+      "The maximum quote is $99.99.",
+    ],
+    ["duration", { quote_max_amount_cents: 10_000, quote_max_duration_minutes: 74 }, DURATION_MAX],
+  ])(
+    "checks the %s cap again before sending: lowered while the review was open, no request goes out",
+    async (_field, lowered, message) => {
+      const client = await renderWithCaps({
+        quote_max_amount_cents: 10_000,
+        quote_max_duration_minutes: 75,
+      });
+      await fillAndReview();
+      await refreshCaps(client, lowered);
+      await press("quote-send");
+
+      expect(await screen.findByTestId("quote-form")).toBeTruthy();
+      expect(screen.getByText(message)).toBeTruthy();
+      expect(screen.queryByText(CAP)).toBeNull();
+      expect(apiPost).not.toHaveBeenCalled();
+
+      // Raised again, the same quote goes out, once.
+      await refreshCaps(client, { quote_max_amount_cents: 10_000, quote_max_duration_minutes: 75 });
+      await press("quote-review");
+      await press("quote-send");
+      await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
+    },
+  );
+
+  it("checks the caps again before a retry: lowered after a failed send, no second request", async () => {
+    jest.mocked(apiPost).mockRejectedValueOnce(new NetworkError(false));
+    const client = await renderWithCaps({ quote_max_amount_cents: 10_000 });
+    await fillAndReview();
+    await press("quote-send");
+    await waitFor(() => expect(screen.getByTestId("quote-send")).toHaveTextContent("Try again"));
+    await refreshCaps(client, { quote_max_amount_cents: 9999 });
+    await press("quote-send");
+
+    expect(await screen.findByText("The maximum quote is $99.99.")).toBeTruthy();
+    expect(apiPost).toHaveBeenCalledTimes(1);
+  });
+
+  it.each<[string, string, string]>([
+    ["en", "The maximum quote is $123.45.", "The longest job you can quote is 1 h 14 min."],
+    [
+      "es",
+      "La cotización máxima es de 123,45 US$.",
+      "El trabajo más largo que puedes cotizar es de 1 h 14 min.",
+    ],
+  ])(
+    "prints a fractional price cap and a mixed duration cap exactly in %s, as each field's hint",
+    async (language, amount, duration) => {
+      await i18n.changeLanguage(language);
+      try {
+        await renderWithCaps({ quote_max_amount_cents: 12_345, quote_max_duration_minutes: 74 });
+        await fill({ price: "123,46" });
+        await press("quote-review");
+
+        // The formatters join a number and its unit with no-break spaces.
+        const plain = (text: string) => text.replace(/\s/g, " ");
+        const priceHint = String(screen.getByTestId("quote-price").props.accessibilityHint);
+        const durationHint = String(screen.getByTestId("quote-minutes").props.accessibilityHint);
+        expect(plain(priceHint)).toBe(amount);
+        expect(plain(durationHint)).toBe(duration);
+        expect(screen.getByText(priceHint).props.accessibilityLiveRegion).toBe("polite");
+        expect(screen.getByText(durationHint).props.accessibilityLiveRegion).toBe("polite");
+        expect(apiPost).not.toHaveBeenCalled();
+      } finally {
+        await i18n.changeLanguage("en");
+      }
+    },
+  );
 
   it("never blocks on null caps: the API's largest price and a 31-hour job go to the review", async () => {
     await renderForm();
@@ -541,6 +657,119 @@ describe("QuoteFormScreen: the opportunity's caps", () => {
     expect(await screen.findByTestId("quote-form")).toBeTruthy();
     expect(screen.getAllByText(CAP)).toHaveLength(2);
     expect(screen.queryByText(PRICE_MAX)).toBeNull();
+  });
+});
+
+describe("QuoteFormScreen: a refused Review or Send shows and reads its first problem", () => {
+  const PRICE_MAX = "The maximum quote is $100.";
+  const DURATION_MAX = `The longest job you can quote is 1${NBSP}h${NBSP}14${NBSP}min.`;
+  const SUMMARY = "Check the fields marked in red.";
+
+  /** The message under a field: read politely when it appears, and the field's own hint. */
+  const expectAnnounced = (controlId: string, message: string) => {
+    for (const text of screen.getAllByText(message)) {
+      expect(text.props.accessibilityLiveRegion).toBe("polite");
+    }
+    expect(screen.getByTestId(controlId).props.accessibilityHint).toBe(message);
+    const summary = screen.getByTestId("quote-form-problems");
+    expect(summary).toHaveTextContent(SUMMARY);
+    expect(summary.props.accessibilityRole).toBe("alert");
+    expect(summary.props.accessibilityLiveRegion).toBe("polite");
+  };
+
+  it("a Review refused for the price cap: the price is announced, focused and scrolled to", async () => {
+    await renderWithCaps({ quote_max_amount_cents: 10_000, quote_max_duration_minutes: 74 });
+    await layOut();
+    await fill({ price: "100.01" });
+    await press("quote-review");
+
+    // Both caps are exceeded: the price comes first down the form.
+    expectAnnounced("quote-price", PRICE_MAX);
+    expect(focusedIds()).toEqual(["quote-price"]);
+    expect(scrollTo.mock.calls).toEqual([[{ y: SECTION_TOPS.price, animated: true }]]);
+    expect(apiPost).not.toHaveBeenCalled();
+
+    // A second refusal over the same field reads it again.
+    await press("quote-review");
+    expect(focusedIds()).toEqual(["quote-price", "quote-price"]);
+    expect(scrollTo).toHaveBeenCalledTimes(2);
+  });
+
+  it("a Review refused for the duration cap: the stepper stating it is announced, focused and scrolled to", async () => {
+    await renderWithCaps({ quote_max_duration_minutes: 74 });
+    await layOut();
+    await fill();
+    await press("quote-review");
+
+    expectAnnounced("quote-minutes", DURATION_MAX);
+    expect(focusedIds()).toEqual(["quote-minutes"]);
+    expect(scrollTo.mock.calls).toEqual([[{ y: SECTION_TOPS.duration, animated: true }]]);
+  });
+
+  it.each<[string, string, string]>([
+    ["scope", "quote-scope", "Say what your price includes."],
+    ["start", "quote-time", "Pick a start that is still ahead."],
+  ])("a Review refused for the %s focuses and scrolls to it", async (field, controlId, message) => {
+    await renderForm();
+    await layOut();
+    await fill();
+    if (field === "scope") await typeInto("quote-scope", " ");
+    else jest.setSystemTime(PREFERRED_START + 60_000);
+    await press("quote-review");
+
+    expect(screen.getByTestId(controlId).props.accessibilityHint).toBe(message);
+    expect(focusedIds()).toEqual([controlId]);
+    expect(scrollTo.mock.calls).toEqual([
+      [{ y: SECTION_TOPS[field as keyof typeof SECTION_TOPS], animated: true }],
+    ]);
+  });
+
+  it.each<[string, Partial<OpportunityDetail>, string, string]>([
+    ["price", { quote_max_amount_cents: 9999 }, "quote-price", "The maximum quote is $99.99."],
+    ["duration", { quote_max_duration_minutes: 74 }, "quote-minutes", DURATION_MAX],
+  ])(
+    "a Send refused for the %s cap: back on the form, announced, focused, scrolled to once laid out",
+    async (field, lowered, controlId, message) => {
+      const client = await renderWithCaps({});
+      await fillAndReview();
+      await refreshCaps(client, lowered);
+      await press("quote-send");
+
+      await screen.findByTestId("quote-form");
+      expectAnnounced(controlId, message);
+      expect(focusedIds()).toEqual([controlId]);
+      // The form mounted anew: the scroll waits for the section's place, and goes there once.
+      expect(scrollTo).not.toHaveBeenCalled();
+      await layOut();
+      await layOut();
+      expect(scrollTo.mock.calls).toEqual([
+        [{ y: SECTION_TOPS[field as keyof typeof SECTION_TOPS], animated: true }],
+      ]);
+      expect(apiPost).not.toHaveBeenCalled();
+    },
+  );
+
+  it("a Send the server refused (422): the price, first of the two marks, is focused", async () => {
+    jest.mocked(apiPost).mockRejectedValue(new ApiError(422, "validation_error"));
+    await renderForm();
+    await fillAndReview();
+    await press("quote-send");
+
+    await screen.findByTestId("quote-form");
+    expectAnnounced("quote-price", CAP);
+    expect(focusedIds()).toEqual(["quote-price"]);
+  });
+
+  it("moves nothing when the Review passes or the pro comes back by Edit", async () => {
+    await renderForm();
+    await layOut();
+    await fillAndReview();
+    await press("quote-edit");
+    await screen.findByTestId("quote-form");
+    await layOut();
+
+    expect(moveAccessibilityFocus).not.toHaveBeenCalled();
+    expect(scrollTo).not.toHaveBeenCalled();
   });
 });
 

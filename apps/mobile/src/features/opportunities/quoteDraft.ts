@@ -33,6 +33,9 @@ export type QuoteDraft = {
 
 export type QuoteField = "price" | "scope" | "duration" | "start";
 
+/** The fields from the top of the form down. */
+const FIELD_ORDER: readonly QuoteField[] = ["price", "scope", "duration", "start"];
+
 /**
  * Why a field cannot be sent: `required` (empty or zero), `invalid` (not a price, or $0),
  * `past` (the start is no longer in the future), `aboveMax` (above the cap the opportunity
@@ -129,7 +132,9 @@ export const sameCaps = (a: QuoteCaps, b: QuoteCaps): boolean =>
   a.quote_max_amount_cents === b.quote_max_amount_cents &&
   a.quote_max_duration_minutes === b.quote_max_duration_minutes;
 
-export const hasProblems = (problems: DraftProblems): boolean => Object.keys(problems).length > 0;
+/** The first field down the form that cannot be sent, or none. */
+export const firstProblem = (problems: DraftProblems): QuoteField | undefined =>
+  FIELD_ORDER.find((field) => problems[field] !== undefined);
 
 /** The pro has typed or changed something that a discard would lose. */
 export const isDirty = (draft: QuoteDraft, initial: QuoteDraft): boolean =>

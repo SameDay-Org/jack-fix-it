@@ -2,6 +2,7 @@ import {
   defaultStartAt,
   draftProblems,
   emptyDraft,
+  firstProblem,
   isDirty,
   quoteBody,
   recheckCaps,
@@ -117,6 +118,18 @@ describe("recheckCaps", () => {
       duration: "aboveMax",
       start: "past",
     });
+  });
+});
+
+describe("firstProblem", () => {
+  it("is the first field down the form, whatever order the problems were found in", () => {
+    expect(firstProblem({})).toBeUndefined();
+    expect(firstProblem({ start: "past", duration: "aboveMax" })).toBe("duration");
+    expect(firstProblem({ duration: "required", scope: "required", price: "aboveMax" })).toBe(
+      "price",
+    );
+    expect(firstProblem({ start: "past", scope: "required" })).toBe("scope");
+    expect(firstProblem({ start: "past" })).toBe("start");
   });
 });
 

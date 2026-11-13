@@ -5,13 +5,14 @@ import {
   defaultStartAt,
   draftProblems,
   emptyDraft,
-  hasProblems,
+  firstProblem,
   isDirty,
   recheckCaps,
   sameCaps,
   type DraftProblems,
   type QuoteCaps,
   type QuoteDraft,
+  type QuoteField,
 } from "./quoteDraft";
 
 /** The day and time steppers move the start by these; the duration steppers by an hour and 15 min. */
@@ -83,23 +84,30 @@ export function useQuoteDraft(preferredDate: string | null, caps: QuoteCaps) {
     }
   };
 
-  /** Checks everything the app can; true when the draft may go to the review. */
-  const check = (): boolean => {
+  /**
+   * Checks everything the app can, under the caps the opportunity states now, and marks what it
+   * finds: the first field down the form that cannot be sent, or none when the draft may go on
+   * (to the review, and from the review out).
+   */
+  const check = (): QuoteField | undefined => {
     const found = draftProblems(draft, Date.now(), caps);
     setChecking(true);
     setProblems(found);
-    return !hasProblems(found);
+    return firstProblem(found);
   };
 
   /**
    * The server answered 422. A field that fails here now (a start that passed while the pro was
    * reviewing, or a cap the detail lowered before the send) is the cause; otherwise the caps
-   * changed after that, and the app cannot name them: the amount or the duration.
+   * changed after that, and the app cannot name them: the amount or the duration. Returns the
+   * first field it marked.
    */
-  const refused = () => {
+  const refused = (): QuoteField => {
     const found = draftProblems(draft, Date.now(), caps);
+    const first = firstProblem(found);
     setChecking(true);
-    setProblems(hasProblems(found) ? found : { price: "aboveCap", duration: "aboveCap" });
+    setProblems(first ? found : { price: "aboveCap", duration: "aboveCap" });
+    return first ?? "price";
   };
 
   /** The price field lost focus: a valid price is rewritten as "1000.00". */
