@@ -215,6 +215,8 @@ class Settings(BaseSettings):
     request_media_max_items: int = Field(default=10, gt=0)
     request_create_limit: int = Field(default=10, gt=0)
     request_create_window_seconds: int = Field(default=3_600, gt=0)
+    # How long a create's Idempotency-Key answers its retries with the request it made (#264).
+    request_idempotency_window_seconds: int = Field(default=86_400, gt=0)
     request_list_default_limit: int = Field(default=20, gt=0)
     request_list_max_limit: int = Field(default=50, gt=0)
     # Reverse geocoding through Google (D8.2, #215): the device position becomes an address.
@@ -388,6 +390,22 @@ class Settings(BaseSettings):
     # For a managed Redis that refuses CONFIG GET: true takes the deployer's word that it
     # keeps nothing. It never overrides an answer: a Redis that says it keeps is refused.
     location_redis_assume_ephemeral: bool = False
+    # The route from the pro to the job's address (#351, live map part 2; Cesar 2026-11-10),
+    # asked of Mapbox. The token is a secret, and optional in every environment: without it
+    # the API starts and GET /v1/jobs/{job_id}/route answers 503. Seconds one call to Mapbox
+    # may take (a route is one call, or two when the address has no coordinates yet).
+    mapbox_access_token: SecretStr | None = None
+    mapbox_timeout_seconds: float = Field(default=5.0, gt=0)
+    # A job's computed route is kept this long, in the positions' Redis only, and reused
+    # until the pro is farther than ROUTE_REFRESH_DISTANCE_M from where it started (0: any
+    # move asks Mapbox again). The answer carries at most ROUTE_MAX_POINTS points of the
+    # line and the first ROUTE_MAX_STEPS streets. After Mapbox failed for a job it is not
+    # asked again for that job for ROUTE_RETRY_SECONDS (the route answers 503 meanwhile).
+    route_cache_seconds: int = Field(default=30, gt=0)
+    route_retry_seconds: int = Field(default=10, gt=0)
+    route_refresh_distance_m: float = Field(default=100.0, ge=0)
+    route_max_points: int = Field(default=500, ge=2)
+    route_max_steps: int = Field(default=30, gt=0)
     # Job chat (D14.1, #71): messages one user may send in one job's chat per window.
     chat_message_rate_limit: int = Field(default=20, gt=0)
     chat_message_rate_window_seconds: int = Field(default=60, gt=0)
@@ -475,6 +493,7 @@ class Settings(BaseSettings):
         "stripe_publishable_key",
         "public_api_url",
         "location_redis_url",
+        "mapbox_access_token",
         mode="before",
     )
     @classmethod
