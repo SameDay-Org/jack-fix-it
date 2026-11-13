@@ -161,6 +161,18 @@ describe("OpportunityDetailScreen", () => {
   });
 
   it.each([
+    ["afternoon", /^PreferredFri,\sOct\s30\s· Afternoon$/],
+    ["flexible", /^PreferredFri, Oct 30$/],
+    [null, /^PreferredFri, Oct 30$/],
+  ] as const)("shows the preferred day with a %s period as one fact", async (period, fact) => {
+    jest.mocked(apiGet).mockResolvedValue(detail({ preferred_period: period }));
+    await renderWithQuery(<OpportunityDetailScreen />);
+
+    await screen.findByText("JF-000124");
+    expect(screen.getByTestId("opportunity-date")).toHaveTextContent(fact);
+  });
+
+  it.each([
     ["only the pending note", 1, "1 more being prepared"],
     ["no media section", 0, null],
   ])("with nothing ready shows %s", async (_, pending, note) => {

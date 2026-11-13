@@ -20,6 +20,7 @@ import {
 } from "./address";
 import { answerText } from "./answerText";
 import { formatLongDay, isPastDay } from "./dates";
+import { withPeriod } from "./period";
 import { refuseStep, useRequestDraft, type RequestDraft, type StepRefusal } from "./requestDraft";
 import { useRequestFlowContext } from "./RequestFlowLayout";
 import { requestBody } from "./send";
@@ -169,7 +170,9 @@ export function ReviewStep({ category, steps }: ReviewStepProps) {
         <Text className="text-body text-navy-900">
           {draft.preferredDate === null
             ? t("request.review.flexible")
-            : formatLongDay(draft.preferredDate, locale)}
+            : withPeriod(t, formatLongDay(draft.preferredDate, locale), draft.preferredPeriod, {
+                wrapDay: true,
+              })}
         </Text>
       </ReviewSection>
     </StepScreen>
