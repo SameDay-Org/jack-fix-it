@@ -1462,6 +1462,11 @@ export interface paths {
          * Read my rating
          * @description The caller's own rating, as a customer or as a pro: the average of the overall ratings
          *     they received, to one decimal, and how many; null and 0 with none.
+         *
+         *     It counts published reviews only. A review is published once its target reviewed the same
+         *     job too, or 14 days (REVIEW_PUBLISH_AFTER_DAYS) after the job's confirmation, whichever
+         *     comes first: until then it is not in the average or the count, so nobody reads the other
+         *     side's score of a job before writing their own.
          */
         get: operations["read_my_rating_v1_users_me_rating_get"];
         put?: never;
@@ -3236,12 +3241,12 @@ export interface components {
         RatingOut: {
             /**
              * Average
-             * @description The average of the overall ratings the caller received, to one decimal; null with none (No ratings yet).
+             * @description The average of the overall ratings of the caller's published reviews, to one decimal; null with none (No ratings yet).
              */
             average: number | null;
             /**
              * Count
-             * @description How many reviews the caller received.
+             * @description How many published reviews the caller received. A review the caller has not answered yet is not counted until it is published.
              */
             count: number;
         };
