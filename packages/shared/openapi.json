@@ -4995,6 +4995,465 @@
           }
         ]
       }
+    },
+    "/v1/support/tickets": {
+      "post": {
+        "tags": [
+          "support"
+        ],
+        "summary": "Write to the team (Talk to Jack)",
+        "description": "Opens a support ticket for the team. The message is kept as typed and read by the team\nonly. `job_id` ties the ticket to one of the caller's jobs.",
+        "operationId": "create_ticket_v1_support_tickets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportTicketIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportTicketCreatedOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_job: job_id is not a job of which the caller is the customer or the pro (an unknown job answers the same); validation_error: an unknown topic or platform, a message empty, blank or longer than 2000 characters, an app_version out of format.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers and pros write tickets.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many tickets; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/support/tickets/mine": {
+      "get": {
+        "tags": [
+          "support"
+        ],
+        "summary": "List my support tickets",
+        "description": "The caller's own tickets, newest first: the topic, the job, the status and the dates,\nwhat the app shows after a ticket was sent. Never the message, and never anyone else's.",
+        "operationId": "list_my_tickets_v1_support_tickets_mine_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size; capped.",
+              "title": "Limit"
+            },
+            "description": "Page size; capped."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MySupportTicketPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a bad cursor or limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers and pros write tickets.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/support/tickets": {
+      "get": {
+        "tags": [
+          "support"
+        ],
+        "summary": "List support tickets (staff)",
+        "description": "Every ticket, newest first, for the BDC and admins: the writer's first name and role,\nthe topic, the job and the status. The message is in the ticket's detail only.",
+        "operationId": "staff_list_tickets_v1_admin_support_tickets_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TicketStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tickets in this status; all when left out.",
+              "title": "Status"
+            },
+            "description": "Only tickets in this status; all when left out."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size; capped.",
+              "title": "Limit"
+            },
+            "description": "Page size; capped."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffSupportTicketPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: an unknown status, a bad cursor or limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/support/tickets/{ticket_id}": {
+      "get": {
+        "tags": [
+          "support"
+        ],
+        "summary": "Read a support ticket (staff)",
+        "description": "One ticket with its message as the writer typed it.",
+        "operationId": "staff_get_ticket_v1_admin_support_tickets__ticket_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Ticket Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffSupportTicketOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a ticket_id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ticket_not_found: no support ticket with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "support"
+        ],
+        "summary": "Change a support ticket's status (staff)",
+        "description": "Moves the ticket to open, in_progress or closed; any status may follow any other. Each\nchange is recorded in the audit log with the staff member who made it; the same status\nagain changes nothing.",
+        "operationId": "staff_set_ticket_status_v1_admin_support_tickets__ticket_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Ticket Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportTicketStatusIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffSupportTicketOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: an unknown status, a field other than status, or a ticket_id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ticket_not_found: no support ticket with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6798,6 +7257,94 @@
           "type"
         ],
         "title": "MultiChoiceQuestion"
+      },
+      "MySupportTicketOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "topic": {
+            "$ref": "#/components/schemas/TicketTopic"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TicketStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At",
+            "description": "Set while the ticket is closed."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "topic",
+          "job_id",
+          "status",
+          "created_at",
+          "closed_at"
+        ],
+        "title": "MySupportTicketOut",
+        "description": "One of the caller's tickets in their list: no free text, so never the message."
+      },
+      "MySupportTicketPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MySupportTicketOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Newest first."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Pass as `cursor` for older tickets."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "MySupportTicketPage"
       },
       "NotificationPreferences": {
         "properties": {
@@ -9414,6 +9961,324 @@
         ],
         "title": "StaffChatPage"
       },
+      "StaffSupportTicketItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id",
+            "description": "Who wrote the ticket."
+          },
+          "user_first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User First Name",
+            "description": "The writer's first name alone; null when they have none or it shows a contact detail."
+          },
+          "role": {
+            "$ref": "#/components/schemas/TicketRole",
+            "description": "The writer's role when they wrote the ticket."
+          },
+          "topic": {
+            "$ref": "#/components/schemas/TicketTopic"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id",
+            "description": "The job the ticket is about, if any."
+          },
+          "status": {
+            "$ref": "#/components/schemas/TicketStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "user_first_name",
+          "role",
+          "topic",
+          "job_id",
+          "status",
+          "created_at"
+        ],
+        "title": "StaffSupportTicketItem"
+      },
+      "StaffSupportTicketOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id",
+            "description": "Who wrote the ticket."
+          },
+          "user_first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User First Name",
+            "description": "The writer's first name alone; null when they have none or it shows a contact detail."
+          },
+          "role": {
+            "$ref": "#/components/schemas/TicketRole",
+            "description": "The writer's role when they wrote the ticket."
+          },
+          "topic": {
+            "$ref": "#/components/schemas/TicketTopic"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id",
+            "description": "The job the ticket is about, if any."
+          },
+          "status": {
+            "$ref": "#/components/schemas/TicketStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "The writer's text, as typed: it may hold contact details."
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At",
+            "description": "Set while the ticket is closed."
+          },
+          "app_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Version"
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TicketPlatform"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "user_first_name",
+          "role",
+          "topic",
+          "job_id",
+          "status",
+          "created_at",
+          "message",
+          "closed_at",
+          "app_version",
+          "platform",
+          "updated_at"
+        ],
+        "title": "StaffSupportTicketOut"
+      },
+      "StaffSupportTicketPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StaffSupportTicketItem"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Newest first."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Pass as `cursor` for older tickets."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "StaffSupportTicketPage"
+      },
+      "SupportTicketCreatedOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TicketStatus",
+            "description": "open: a new ticket waits for the team."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "created_at"
+        ],
+        "title": "SupportTicketCreatedOut"
+      },
+      "SupportTicketIn": {
+        "properties": {
+          "topic": {
+            "$ref": "#/components/schemas/TicketTopic",
+            "description": "What the ticket is about."
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "pattern": "^[^\\x00]*$",
+            "title": "Message",
+            "description": "The text, trimmed. Stored as typed and read by the team only: a phone or an email written here is kept, so the team can reach the writer."
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id",
+            "description": "The job the ticket is about: one of which the caller is the customer or the pro. Leave out when the ticket is about no job."
+          },
+          "app_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32,
+                "minLength": 1,
+                "pattern": "^[0-9A-Za-z][0-9A-Za-z .()+_-]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Version",
+            "description": "The app's version, e.g. \"1.4.0 (52)\"."
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TicketPlatform"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The device the ticket was written on."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "topic",
+          "message"
+        ],
+        "title": "SupportTicketIn"
+      },
+      "SupportTicketStatusIn": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/TicketStatus",
+            "description": "The ticket's new status. Any status may follow any other (a closed ticket can be reopened); the same status again changes nothing."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "SupportTicketStatusIn"
+      },
       "TextQuestion": {
         "properties": {
           "key": {
@@ -9471,6 +10336,46 @@
           "max_length"
         ],
         "title": "TextQuestion"
+      },
+      "TicketPlatform": {
+        "type": "string",
+        "enum": [
+          "ios",
+          "android"
+        ],
+        "title": "TicketPlatform",
+        "description": "The device the ticket was written on, as the app reports it."
+      },
+      "TicketRole": {
+        "type": "string",
+        "enum": [
+          "customer",
+          "pro"
+        ],
+        "title": "TicketRole",
+        "description": "Who wrote the ticket, as they were when they wrote it: the app's users only (agents and\nadmins use the panel and write no tickets)."
+      },
+      "TicketStatus": {
+        "type": "string",
+        "enum": [
+          "open",
+          "in_progress",
+          "closed"
+        ],
+        "title": "TicketStatus"
+      },
+      "TicketTopic": {
+        "type": "string",
+        "enum": [
+          "account",
+          "payment",
+          "job",
+          "safety",
+          "app_problem",
+          "other"
+        ],
+        "title": "TicketTopic",
+        "description": "What the ticket is about, as the user picked it in the app."
       },
       "UploadPurpose": {
         "type": "string",

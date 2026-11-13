@@ -25,7 +25,8 @@
     },
     "nav": {
       "label": "Panel",
-      "home": "Inicio"
+      "home": "Inicio",
+      "support": "Soporte"
     },
     "roles": {
       "agent": "Agente",
@@ -35,6 +36,76 @@
     "home": {
       "welcome": "Te damos la bienvenida, {{email}}",
       "queueSoon": "La cola de operaciones llega pronto. Las nuevas solicitudes aparecerán aquí."
+    },
+    "support": {
+      "title": "Soporte",
+      "subtitle": "Mensajes que las personas enviaron al equipo desde la app.",
+      "filter": {
+        "label": "Tickets por estado",
+        "open": "Abiertos",
+        "in_progress": "En curso",
+        "closed": "Cerrados",
+        "all": "Todos"
+      },
+      "status": {
+        "open": "Abierto",
+        "in_progress": "En curso",
+        "closed": "Cerrado"
+      },
+      "topic": {
+        "account": "Cuenta",
+        "payment": "Pago",
+        "job": "Trabajo",
+        "safety": "Seguridad",
+        "app_problem": "Problema con la app",
+        "other": "Otro"
+      },
+      "role": {
+        "customer": "Cliente",
+        "pro": "Profesional"
+      },
+      "platform": {
+        "ios": "iOS",
+        "android": "Android"
+      },
+      "columns": {
+        "from": "De",
+        "topic": "Tema",
+        "sent": "Enviado",
+        "status": "Estado"
+      },
+      "noName": "Sin nombre registrado",
+      "aboutJob": "Sobre un trabajo",
+      "empty": {
+        "open": "No hay tickets abiertos.",
+        "in_progress": "No hay tickets en curso.",
+        "closed": "No hay tickets cerrados.",
+        "all": "Aún no hay tickets."
+      },
+      "older": "Tickets anteriores",
+      "noOlder": "No hay tickets anteriores.",
+      "newest": "Volver a los más recientes",
+      "loadError": "No pudimos cargar los tickets. Vuelve a intentarlo en un momento.",
+      "retry": "Reintentar",
+      "detail": {
+        "back": "Todos los tickets",
+        "from": "De",
+        "sent": "Enviado",
+        "closed": "Cerrado",
+        "job": "Trabajo",
+        "app": "App",
+        "message": "Mensaje",
+        "notFound": "Este ticket no existe.",
+        "loadError": "No pudimos cargar este ticket. Vuelve a intentarlo en un momento.",
+        "statusLabel": "Estado",
+        "saving": "Guardando…",
+        "saved": "Guardado.",
+        "errors": {
+          "not_found": "Este ticket ya no existe.",
+          "forbidden": "Tu cuenta no puede cambiar tickets.",
+          "unavailable": "No pudimos guardar el estado. Vuelve a intentarlo en un momento."
+        }
+      }
     }
   }
 }
