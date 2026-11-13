@@ -4,7 +4,7 @@ from enum import StrEnum
 from typing import Final
 
 from pydantic import JsonValue
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,6 +20,9 @@ PUBLIC_CODE_SEQUENCE: Final = "service_request_code_seq"
 PUBLIC_CODE_DEFAULT: Final = (
     f"'JF-' || to_char(nextval('{PUBLIC_CODE_SEQUENCE}'::regclass), 'FM9999999000000')"
 )
+# One request per customer and Idempotency-Key (#264): the index decides between two creates
+# racing with the same key. Keys are per customer, so another customer's never collides.
+IDEMPOTENCY_KEY_INDEX: Final = "uq_service_requests_customer_id_idempotency_key"
 
 
 class RequestStatus(StrEnum):
@@ -58,6 +61,13 @@ class ServiceRequest(IdTimestampsMixin, Base):
             "preferred_period IS NULL OR preferred_date IS NOT NULL",
             name="preferred_period_needs_date",
         ),
+        Index(
+            IDEMPOTENCY_KEY_INDEX,
+            "customer_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+        ),
     )
 
     # Shown to customers and the BDC (e.g. JF-000124); the id stays internal.
@@ -92,6 +102,11 @@ class ServiceRequest(IdTimestampsMixin, Base):
     last_contact_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     origin: Mapped[RequestOrigin] = mapped_column(str_enum(RequestOrigin, "request_origin"))
     utm: Mapped[dict[str, str] | None] = mapped_column(JSONB)
+    # The create's Idempotency-Key (#264), NULL without one, and the SHA-256 (hex) of the body
+    # it came with, so a retry with another body is refused. A key older than the window stays
+    # here until the same customer sends it again, which clears it from this request.
+    idempotency_key: Mapped[uuid.UUID | None]
+    idempotency_fingerprint: Mapped[str | None] = mapped_column(String(64))
 
 
 class RequestMediaKind(StrEnum):

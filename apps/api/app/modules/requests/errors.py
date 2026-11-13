@@ -40,6 +40,15 @@ class ZipNotServedError(AppError):
     message = "This ZIP code is not served yet."
 
 
+class IdempotencyKeyReusedError(ConflictError):
+    """The caller's Idempotency-Key already made a request from another body (#264). Keys are
+    per customer: another customer's key is never a conflict, so this reveals nothing about
+    anyone else."""
+
+    code = "idempotency_key_reused"
+    message = "This Idempotency-Key was already used with a different request."
+
+
 class InvalidTransitionError(ConflictError):
     """The request's current status has no edge to the requested one (also for a terminal
     status). The same code as the jobs' error: one invalid_transition for every state machine."""

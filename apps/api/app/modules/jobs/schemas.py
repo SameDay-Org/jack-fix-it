@@ -254,6 +254,41 @@ class ProLocationOut(_Out):
     )
 
 
+class JobRouteStep(_Out):
+    """One stretch of the route on one street. No instruction text."""
+
+    street_name: str | None = Field(description="The street's name; null on an unnamed road.")
+    distance_m: float = Field(description="Meters driven on it.")
+    duration_s: float = Field(description="Seconds it takes, as estimated.")
+
+
+class JobRoute(_Out):
+    """The pro's driving route to the job's address, as computed at `computed_at` (#351)."""
+
+    geometry: list[tuple[float, float]] = Field(
+        description="The line to draw, from the pro to the address: `[lng, lat]` pairs in "
+        "order (GeoJSON's order), thinned to a few hundred points at most."
+    )
+    distance_m: float = Field(description="Meters left to drive.")
+    duration_s: float = Field(description="Seconds left, as estimated when computed.")
+    steps: list[JobRouteStep] = Field(
+        description="The next streets of the route, in order: the first few dozen at most."
+    )
+    computed_at: datetime = Field(
+        description="When the route was computed. The same route is answered for a short "
+        "while, until the pro has moved away from where it starts."
+    )
+
+
+class JobRouteOut(_Out):
+    route: JobRoute | None = Field(
+        description="The pro's route to the job's address. null whenever there is none to "
+        "show: the pro is not on the way (not yet, arrived, or the job moved on), has sent "
+        "no position yet, the address cannot be placed on the map, no road leads there, or "
+        "the route is being computed right now (ask again)."
+    )
+
+
 class JobPhotosIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

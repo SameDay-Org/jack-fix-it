@@ -9,6 +9,7 @@ commits. The two never share a row: a saved address is copied into a request by 
 import logging
 import uuid
 from collections.abc import Collection
+from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +34,19 @@ from app.modules.service_areas.service import ServiceAreaService
 from app.modules.users.types import UserAccount
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AddressPlace:
+    """Where an address is, for the route to it (#351): the street line and the place, and
+    the coordinates once the row has them. For the server's own use: never part of a response."""
+
+    line1: str
+    city: str
+    state: str
+    zip_code: str
+    lat: float | None
+    lng: float | None
 
 
 class AddressService:
@@ -92,6 +106,24 @@ class AddressService:
             city=address.city,
             state=address.state,
             zip_code=address.zip_code,
+        )
+
+    async def place(self, address_id: uuid.UUID) -> AddressPlace | None:
+        """The address as a place to route to (#351): no unit line, the coordinates when both
+        are set."""
+        address = await self._addresses.get_by_id(address_id)
+        if address is None:
+            return None
+        lat, lng = address.lat, address.lng
+        if lat is None or lng is None:
+            lat = lng = None
+        return AddressPlace(
+            line1=address.line1,
+            city=address.city,
+            state=address.state,
+            zip_code=address.zip_code,
+            lat=None if lat is None else float(lat),
+            lng=None if lng is None else float(lng),
         )
 
 
