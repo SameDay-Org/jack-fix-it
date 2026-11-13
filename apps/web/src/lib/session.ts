@@ -19,6 +19,10 @@
  * - Both session routes act only on requests from this site (`fromThisSite`): a cross-site
  *   navigation arrives without the Strict cookies, and a Set-Cookie on it would still delete
  *   them in the browser.
+ * - A server action never leaves through the session routes (`staffActionAuth`): Next follows
+ *   an action's redirect itself, on the server, and drops that inner response's Set-Cookie, so
+ *   the refresh route would rotate the refresh token at the API while the browser kept the old
+ *   cookies. An action may write cookies, so it renews or ends the session in place.
  */
 import { timingSafeEqual } from "node:crypto";
 
@@ -180,6 +184,29 @@ async function currentUser(accessToken: string): Promise<User | null> {
   }
 }
 
+type StaffSession = { user: User; accessToken: string };
+
+/**
+ * The session as the cookies and `/me` describe it: the staff member with the login's access
+ * token, or where a server component goes instead. That is the one-time refresh when the
+ * login's access token is missing or refused, else the session end (no login, another login's
+ * token, another user, not staff).
+ */
+async function readStaffSession(): Promise<StaffSession | typeof REFRESH_PATH | typeof END_PATH> {
+  const jar = await cookies();
+  const login = loginOf(jar.get(SESSION_COOKIE)?.value);
+  if (login === null) return END_PATH; // tokens without a login are no session
+  const accessToken = tokenOf(jar, ACCESS_COOKIE, login);
+  if (jar.get(ACCESS_COOKIE) && accessToken === null) return END_PATH; // another login's
+  const user = accessToken ? await currentUser(accessToken) : null;
+  if (accessToken && user !== null) {
+    // Another user than the login's, or the role changed: no panel any more.
+    return user.id === login.userId && isStaff(user) ? { user, accessToken } : END_PATH;
+  }
+  if (tokenOf(jar, REFRESH_COOKIE, login) && !jar.get(REFRESHED_COOKIE)) return REFRESH_PATH;
+  return END_PATH;
+}
+
 /**
  * The signed-in staff member, for server components. Redirects when there is no valid staff
  * session: to the one-time refresh when the login's access token is missing or refused, else
@@ -187,20 +214,47 @@ async function currentUser(accessToken: string): Promise<User | null> {
  * request, so the layout and the page share one `/me` call.
  */
 export const requireStaff = cache(async (): Promise<User> => {
+  const session = await readStaffSession();
+  if (typeof session === "string") redirect(session);
+  return session.user;
+});
+
+/**
+ * The signed-in staff member's API credentials, for server components that call staff routes.
+ * It runs `requireStaff()` first, with the same redirects, so an account that is suspended,
+ * demoted or signed out never gets a header; the token stays on the server. Server actions
+ * use `staffActionAuth()` instead.
+ */
+export async function staffAuth(): Promise<RequestInit> {
+  await requireStaff();
   const jar = await cookies();
   const login = loginOf(jar.get(SESSION_COOKIE)?.value);
-  if (login === null) redirect(END_PATH); // tokens without a login are no session
-  const accessToken = tokenOf(jar, ACCESS_COOKIE, login);
-  if (jar.get(ACCESS_COOKIE) && accessToken === null) redirect(END_PATH); // another login's
-  const user = accessToken ? await currentUser(accessToken) : null;
-  if (user !== null) {
-    // Another user than the login's, or the role changed: no panel any more.
-    if (user.id === login.userId && isStaff(user)) return user;
-    redirect(END_PATH);
+  const accessToken = login && tokenOf(jar, ACCESS_COOKIE, login);
+  if (!accessToken) redirect(END_PATH); // requireStaff just accepted it: fail closed
+  return bearer(accessToken);
+}
+
+/**
+ * The signed-in staff member's API credentials, for a server action. The same checks as
+ * `requireStaff()`, but it never redirects to a session route (see the note at the top): a
+ * missing or refused access token is renewed here, once, by the `refreshStaffSession()` the
+ * refresh route runs, and the renewed token is checked like any other; a session that cannot
+ * be used is ended here (`endSession()`, as the logout action does) and the person goes to
+ * the login. A header is only ever given for an account `/me` just named as this login's
+ * staff member.
+ */
+export async function staffActionAuth(): Promise<RequestInit> {
+  let session = await readStaffSession();
+  if (session === REFRESH_PATH && (await refreshStaffSession()) === PANEL_PATH) {
+    // Renewed: REFRESHED_COOKIE is set now, so a token still refused ends the session.
+    session = await readStaffSession();
   }
-  if (tokenOf(jar, REFRESH_COOKIE, login) && !jar.get(REFRESHED_COOKIE)) redirect(REFRESH_PATH);
-  redirect(END_PATH);
-});
+  if (typeof session === "string") {
+    await endSession();
+    redirect(LOGIN_PATH);
+  }
+  return bearer(session.accessToken);
+}
 
 /**
  * Route handler side of the refresh: one `POST /v1/auth/refresh`, then both cookies rotate.

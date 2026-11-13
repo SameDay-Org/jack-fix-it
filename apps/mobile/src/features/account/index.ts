@@ -1,4 +1,5 @@
 export { AccountActions } from "./AccountActions";
+export { AccountLanguage } from "./AccountLanguage";
 export { AccountScreen } from "./AccountScreen";
 export { cardDetails, fullName, ROLE_TONE } from "./identity";
 export type { CardDetails } from "./identity";

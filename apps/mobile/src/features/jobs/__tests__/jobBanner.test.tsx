@@ -31,6 +31,7 @@ import {
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../../api/errors"),
   onSignOut: jest.fn(),
+  beforeSignOut: jest.fn(() => () => undefined),
   apiConfig: { timeoutMs: 15_000 },
   apiGet: jest.fn(),
   isCurrentGeneration: jest.fn(() => true),
@@ -225,7 +226,7 @@ describe("the tabs' job banner (#64)", () => {
     ["on the way, close", ON_THE_WAY, `Dan is on the way · 12${NBSP}min`],
     ["arrived", ARRIVED, "Dan has arrived"],
     ["working", WORKING, "Dan is working"],
-    ["finished", FINISHED, "Dan finished the job"],
+    ["finished", FINISHED, "Dan finished the job · confirm"],
   ] as const)("shows on Home, History and Account while %s", async (_, active, line) => {
     mockApi.requests = [request(1, "accepted"), request(2, "quote_ready")];
     mockApi.jobs = { [requestId(1)]: active };

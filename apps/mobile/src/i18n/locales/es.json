@@ -269,10 +269,17 @@
       "flexible": "Soy flexible",
       "flexibleHint": "Cualquier día me sirve",
       "pickDay": "O elige un día",
+      "period": "Momento del día",
       "today": "Hoy",
       "tomorrow": "Mañana",
       "staleTitle": "Ese día ya pasó",
       "staleBody": "Elige otro día o déjalo abierto."
+    },
+    "period": {
+      "morning": "Por la mañana",
+      "afternoon": "Tarde",
+      "evening": "Noche",
+      "flexible": "Flexible"
     },
     "review": {
       "title": "Revisa tu solicitud",
@@ -405,6 +412,7 @@
   "quotes": {
     "title": "Tus presupuestos",
     "subtitle": "Compáralos y acepta el que te convenga.",
+    "preferred": "Preferencia: {{date}}",
     "loading": "Cargando presupuestos",
     "span": {
       "minutes": "{{minutes}} min",
@@ -562,7 +570,7 @@
     "loading": "Cargando oportunidades",
     "new": "Nueva",
     "otherCategory": "Otra solicitud",
-    "preferred": "Fecha preferida {{date}}",
+    "preferred": "Preferencia: {{date}}",
     "sentAgo": "Enviada {{ago}}",
     "ago": {
       "justNow": "hace un momento",
@@ -591,7 +599,7 @@
     "detail": {
       "loading": "Cargando solicitud",
       "where": "Dónde",
-      "when": "Fecha preferida",
+      "when": "Preferencia",
       "sent": "Enviada",
       "description": "Qué pasa",
       "redacted": "Los datos de contacto se ocultaron.",
@@ -922,11 +930,40 @@
   "settings": {
     "title": "Configuración",
     "sections": {
-      "account": "Tu cuenta"
+      "account": "Tu cuenta",
+      "language": "Idioma",
+      "notifications": "Notificaciones"
     },
     "email": "Correo",
     "phone": "Teléfono",
-    "phoneNotVerified": "Aún no verificado"
+    "phoneNotVerified": "Aún no verificado",
+    "language": {
+      "en": "English",
+      "es": "Español",
+      "unsaved": {
+        "title": "Aún no se guardó en tu cuenta",
+        "body": "Este dispositivo sigue en español. Puedes intentarlo de nuevo en un momento.",
+        "retry": "Reintentar"
+      }
+    }
+  },
+  "notifications": {
+    "channel": "Novedades",
+    "prompt": {
+      "title": "Activa las notificaciones",
+      "customer": "Recibe avisos cuando tu profesional vaya en camino.",
+      "pro": "Entérate de trabajos nuevos cerca de ti y de cuando un cliente te contrata.",
+      "turnOn": "Activar",
+      "notNow": "Ahora no"
+    },
+    "settings": {
+      "label": "Notificaciones",
+      "on": "Activadas",
+      "off": "Desactivadas",
+      "blocked": "Desactivadas en los ajustes del teléfono",
+      "askHint": "Le pide a tu teléfono activar las notificaciones",
+      "openHint": "Abre los ajustes del teléfono"
+    }
   },
   "help": {
     "title": "Apoyo cuando lo necesites",
@@ -1029,9 +1066,11 @@
       "onTheWay": "{{name}} va en camino",
       "arrived": "{{name}} llegó",
       "working": "{{name}} está trabajando",
-      "done": "Trabajo terminado",
+      "done": "Trabajo confirmado",
       "attention": "Este trabajo necesita atención",
-      "cancelled": "Este trabajo se canceló"
+      "cancelled": "Este trabajo se canceló",
+      "finished": "{{name}} marcó el trabajo como terminado",
+      "thanks": "¡Gracias! Trabajo confirmado"
     },
     "support": {
       "scheduled": "Programado para el {{date}}",
@@ -1039,8 +1078,8 @@
       "arrivedNow": "Se registró con tu código",
       "working": "Empezó: {{time}}",
       "workingNow": "El trabajo está en marcha",
-      "finished": "{{name}} marcó el trabajo como terminado. Revisa cómo quedó.",
-      "done": "Gracias por reservar con Jack Fix It.",
+      "finished": "Revisa cómo quedó y luego confirma que está terminado.",
+      "done": "El pago se libera a {{inline}}.",
       "attention": "Se reportó un problema en este trabajo.",
       "cancelled": "No necesitas hacer nada más."
     },
@@ -1097,6 +1136,8 @@
       "working": "{{name}} está trabajando",
       "finished": "{{name}} terminó el trabajo",
       "hint": "Abre tu trabajo",
+      "finishedConfirm": "{{name}} terminó el trabajo · confirmar",
+      "confirm": "confirmar",
       "unread_one": "{{count}} mensaje sin leer",
       "unread_other": "{{count}} mensajes sin leer"
     },
@@ -1118,6 +1159,37 @@
       "title": "No pudimos cargar tu trabajo",
       "body": "Revisa tu conexión e inténtalo de nuevo.",
       "retry": "Intentar de nuevo"
+    },
+    "finished": {
+      "confirm": "Confirmar que está terminado",
+      "confirmShort": "Confirmar",
+      "problems": "¿Algún problema?",
+      "deadline": {
+        "today_one": "Se confirma automáticamente hoy a la {{time}} si no respondes.",
+        "today_other": "Se confirma automáticamente hoy a las {{time}} si no respondes.",
+        "tomorrow_one": "Se confirma automáticamente mañana a la {{time}} si no respondes.",
+        "tomorrow_other": "Se confirma automáticamente mañana a las {{time}} si no respondes.",
+        "day_one": "Se confirma automáticamente el {{day}} a la {{time}} si no respondes.",
+        "day_other": "Se confirma automáticamente el {{day}} a las {{time}} si no respondes.",
+        "due": "Se confirmará automáticamente en cualquier momento."
+      }
+    },
+    "confirmSheet": {
+      "title": "¿Confirmas que el trabajo está terminado?",
+      "body": "El pago se libera a {{name}}.",
+      "confirm": "Confirmar",
+      "notYet": "Todavía no",
+      "offline": "No pudimos conectar con Jack Fix It. Revisa tu conexión e inténtalo de nuevo.",
+      "failed": "No pudimos confirmar el trabajo. Inténtalo de nuevo.",
+      "changed": "Este trabajo cambió. Así está ahora.",
+      "gone": "Este trabajo ya no está disponible."
+    },
+    "afterPhotos": {
+      "title": "El trabajo terminado",
+      "photo": "Foto del trabajo terminado, {{number}} de {{total}}",
+      "page": "{{number}} de {{total}}",
+      "openHint": "La abre en pantalla completa",
+      "close": "Cerrar fotos"
     },
     "photos": {
       "title": "Fotos",

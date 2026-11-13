@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react"
 
 import { ApiError, isCurrentGeneration, useSession, type SessionUser } from "@/api";
 
-import { parsePushLink, pushRoute } from "./deepLinks";
+import { HOME_PUSH_PATH, parsePushLink, pushRoute } from "./deepLinks";
 import { peekPushTap, subscribePushTaps, takePushTap, type PendingPushTap } from "./pushTaps";
 
 // The newest tap being opened: an older one still waiting for the API opens nothing.
@@ -24,7 +24,9 @@ const isRefused = (error: unknown): boolean =>
  * the screen, which shows its own error and retry, and the API refuses it the data all the same.
  * Nothing opens once the session the push was tapped in is gone, or a newer tap came in
  * meanwhile. A screen already on top for that path stays as it is (the answer refreshed what it
- * shows); any other opens over the current one, so Back returns there.
+ * shows); any other opens over the current one, so Back returns there. Home (`/`, #338) is the
+ * signed-in account's own, so nothing is asked: the app goes back to it like its other "back to
+ * Home" actions, and a screen holding a draft asks first.
  */
 export async function openPushTap(
   tap: PendingPushTap,
@@ -36,6 +38,14 @@ export async function openPushTap(
   const wanted = () => ticket === latest && isCurrentGeneration(tap.generation);
   if (!wanted()) return;
   const link = parsePushLink(tap.url);
+  if (link?.path === HOME_PUSH_PATH) {
+    if (currentPath() === HOME_PUSH_PATH) return;
+    // Screens over the tabs come off (a draft asks first); on another tab, the Home tab shows (the
+    // tab navigator ignores a dismiss).
+    if (router.canDismiss()) router.dismissTo(HOME_PUSH_PATH);
+    else router.navigate(HOME_PUSH_PATH);
+    return;
+  }
   const route = pushRoute(link, role);
   if (link === null || route === null) return;
   try {

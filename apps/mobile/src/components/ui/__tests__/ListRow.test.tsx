@@ -63,6 +63,34 @@ describe("ListRow", () => {
     ).toBeOnTheScreen();
   });
 
+  it("a choice of a set is a radio: the chosen one checked, with the check mark", async () => {
+    const onPress = jest.fn();
+    await render(
+      <>
+        <ListRow label="English" selected onPress={jest.fn()} testID="en" />
+        <ListRow
+          label="Español"
+          selected={false}
+          accessibilityLanguage="es"
+          onPress={onPress}
+          testID="es"
+        />
+      </>,
+    );
+
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByRole("radio", { name: "English" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Español" })).not.toBeChecked();
+    expect(screen.getByRole("radio", { name: "Español" }).props.accessibilityLanguage).toBe("es");
+    // One drawing in the chosen row, the check; none in the other, and no chevron in either.
+    expect(screen.getByTestId("en-check", { includeHiddenElements: true })).toBeOnTheScreen();
+    expect(drawingsIn("en")).toHaveLength(1);
+    expect(drawingsIn("es")).toHaveLength(0);
+
+    await fireEvent.press(screen.getByRole("radio", { name: "Español" }));
+    expect(onPress).toHaveBeenCalledTimes(1);
+  });
+
   it("hyphenates a word too long for the line instead of cutting it at any letter", async () => {
     await render(<ListRow label="Configuración" value="Aún no verificado" onPress={jest.fn()} />);
 

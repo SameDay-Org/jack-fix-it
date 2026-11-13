@@ -11,6 +11,11 @@ Staff reads of what only staff may see are audited too (#72: the originals of re
 messages): `record_read` writes the row of a read by an active agent or admin, and the caller
 commits it before answering, so nothing is shown unaudited.
 
+Staff actions that are not about money and that the BDC takes too (#274: a support ticket's
+status) go through `record_staff_action`: the actor must be an active agent or admin as this
+transaction reads the account (a caller that never checked a role is refused here), and the
+row is flushed in the caller's transaction, as for `record`.
+
 before and after carry ids, statuses, Stripe object ids and ISO timestamps only: never PII
 (names, emails, phones, addresses) or secrets.
 """
@@ -21,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.audit.repository import AuditRepository
 from app.modules.audit.types import (
+    ActorNotStaffError,
     AuditAction,
     AuditEntity,
     AuditState,
@@ -80,6 +86,32 @@ class AuditService:
             before=before,
             after=after,
             reason=operator.reason,
+        )
+
+    async def record_staff_action(
+        self,
+        actor_id: uuid.UUID,
+        action: AuditAction,
+        entity: AuditEntity,
+        before: AuditState,
+        after: AuditState,
+    ) -> None:
+        """Adds the row of an action any staff member may take (the BDC's agents included) to
+        the caller's transaction and flushes it, so a failure surfaces before the caller
+        commits the change it describes. ActorNotStaffError when the actor is not an active
+        agent or admin, as this transaction reads the account: the route checked the role
+        already, so this refuses a caller that did not. Money overrides never come through
+        here: `record` takes an admin only."""
+        if not _active_staff(await self._users.get_by_id(actor_id)):
+            raise ActorNotStaffError
+        await self._audit.add(
+            actor_user_id=actor_id,
+            action=action.value,
+            entity_type=entity.type.value,
+            entity_id=entity.id,
+            before=before,
+            after=after,
+            reason=None,
         )
 
     async def record_read(

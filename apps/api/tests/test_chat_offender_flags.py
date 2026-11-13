@@ -1,9 +1,10 @@
 """Repeat-offender flags (#72): a sender with CHAT_OFFENDER_THRESHOLD redacted messages, across
 all jobs, within CHAT_OFFENDER_WINDOW_DAYS gets one open flag; staff list them."""
 
+import copy
 import logging
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Final
 
 import httpx
@@ -21,6 +22,11 @@ from tests.test_chat_originals import _app, _client
 
 REDACTED: Final = "the gate code is 4411, call 305-555-0199"
 PLAIN: Final = "see you at 9"
+# What must never leave REDACTED: pieces no timestamp, uuid or counter can spell. A bare "4411"
+# matched a log timestamp's microseconds at random (#355).
+LEAKS: Final = ("gate code is 4411", "305-555-0199", MASK)
+# A log clock that spells 4411: 2026-11-11T12:00:00.441100+00:00.
+CLOCK_4411: Final = datetime(2026, 11, 11, 12, 0, 0, 441100, tzinfo=UTC).timestamp()
 FLAGS = "/v1/admin/chat/flags"
 FLAG_KEYS = {"id", "user_id", "job_id", "window_count", "created_at", "updated_at", "resolved_at"}
 
@@ -65,6 +71,16 @@ async def seed_redacted(
     await session.flush()
 
 
+def logs_at_4411(records: list[logging.LogRecord]) -> str:
+    """The records as JsonFormatter ships them, plus their messages, stamped at a time that
+    spells 4411: the leak check must hold whatever the clock says (#355)."""
+    formatter = JsonFormatter()
+    stamped = [copy.copy(record) for record in records]
+    for record in stamped:
+        record.created = CLOCK_4411
+    return "\n".join(formatter.format(r) + r.getMessage() for r in stamped)
+
+
 async def test_the_third_redaction_within_the_window_opens_one_flag(
     db_client: httpx.AsyncClient,
     db_session: AsyncSession,
@@ -90,8 +106,9 @@ async def test_the_third_redaction_within_the_window_opens_one_flag(
     assert record.__dict__["job_id"] == str(other_job.id)
     assert record.__dict__["flag_id"] == str(flag.id)
     assert record.__dict__["window_count"] == 3
-    logs = "\n".join(JsonFormatter().format(r) + r.getMessage() for r in caplog.records)
-    for leak in ("gate code", "4411", "305-555-0199", MASK):
+    logs = logs_at_4411(caplog.records)
+    assert "4411" in logs  # the clock alone spells it: a bare "4411" sentinel would fail here
+    for leak in LEAKS:
         assert leak not in logs
     # The other side sent nothing redacted: no flag.
     assert await flags(db_session, world.pro.id) == []
@@ -227,7 +244,7 @@ async def test_staff_list_open_flags_newest_first_with_ids_only(
             3,
         )
         assert item["resolved_at"] is None
-        for leak in ("gate code", "4411", "305-555-0199", MASK):
+        for leak in LEAKS:
             assert leak not in listed.text
 
     resolved = await db_client.get(FLAGS, params={"open": "false"}, headers=world.admin.headers)

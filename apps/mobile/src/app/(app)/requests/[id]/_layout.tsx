@@ -3,7 +3,8 @@ import { Stack } from "expo-router";
 import { sheetOptions } from "@/components/ui";
 
 // The quote list is always under the accept sheet and the pro's profile, even when a link opens
-// one of them directly: back from the profile goes to the comparison.
+// one of them directly: back from the profile goes to the comparison. The job's confirmation
+// sheet and its photos open over the job screen.
 export const unstable_settings = { anchor: "index" };
 
 export default function RequestLayout() {
@@ -13,6 +14,8 @@ export default function RequestLayout() {
       <Stack.Screen name="job" />
       <Stack.Screen name="quotes/[quoteId]/pro" />
       <Stack.Screen name="accept" options={sheetOptions("fitToContents")} />
+      <Stack.Screen name="confirm" options={sheetOptions("fitToContents")} />
+      <Stack.Screen name="photos" options={{ presentation: "fullScreenModal" }} />
     </Stack>
   );
 }

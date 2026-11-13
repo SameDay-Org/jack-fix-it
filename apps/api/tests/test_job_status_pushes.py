@@ -45,7 +45,7 @@ from app.modules.webhooks.service import process_job_id
 from app.modules.webhooks.tasks import process_stripe_event
 from app.observability import JsonFormatter
 from app.queue import get_job_queue
-from tests.conftest import make_settings
+from tests.conftest import InMemoryJobLocationStore, make_settings
 from tests.helpers import as_status_writer
 from tests.job_world import JobWorld, build_world, make_job, record_pushes
 from tests.test_job_photos_api import FakeStorage, photo_row, safe_key
@@ -298,7 +298,10 @@ async def test_no_push_when_the_commit_fails(
     pro = await _pro_account(db_session, world)
     recorder = RecordingQueue()
     service = JobExecutionService(
-        db_session, JobExecutionConfig.from_settings(settings), no_storage
+        db_session,
+        JobExecutionConfig.from_settings(settings),
+        no_storage,
+        InMemoryJobLocationStore(),  # the check-in and the start end the live position (#350)
     )
     actions = {
         "job_on_the_way": lambda: service.on_the_way(pro, job.id, 15, recorder),

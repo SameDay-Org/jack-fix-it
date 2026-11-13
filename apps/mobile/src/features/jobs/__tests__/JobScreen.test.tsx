@@ -1,34 +1,41 @@
 import i18n from "@/i18n";
 
+import type { QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import { router } from "expo-router";
 import {
   AccessibilityInfo,
   AppState,
   RefreshControl,
+  ScrollView,
   type AppStateStatus,
   type NativeEventSubscription,
   type RefreshControlProps,
 } from "react-native";
-import { useReducedMotion } from "react-native-reanimated";
+import { useReducedMotion, withTiming } from "react-native-reanimated";
 
-import { ApiError, apiGet, NetworkError } from "@/api";
+import { ApiError, apiGet, apiPost, NetworkError } from "@/api";
 import { dismissToast } from "@/components/ui/toast";
+import { tokens } from "@/theme";
 
 import { deferred, settle } from "../../../api/__tests__/helpers";
 import {
   fakeClock,
   freezeClock,
   navigation,
+  newQueryClient,
   NOW,
   quote,
   renderWithQuery,
   REQUEST_ID,
 } from "../../quotes/__tests__/helpers";
 import type { CustomerQuoteList } from "../../quotes/useRequestQuotes";
+import { confirmJob, customerJobQueryKey, refreshCustomerJob } from "../api";
 import { jobsConfig } from "../config";
 import { JobScreen } from "../JobScreen";
 import { formatMoment, type CustomerJob, type JobStatus, type JobTimelineEntry } from "../phase";
+
+import { afterPhoto } from "./helpers";
 
 type MockStatus = "signedIn" | "signedOut";
 /** The session the mocked `@/api` hooks read; a test signs out by changing it and notifying. */
@@ -51,6 +58,8 @@ jest.mock("@/api", () => {
   return {
     ...jest.requireActual("../../../api/errors"),
     apiGet: jest.fn(),
+    apiPost: jest.fn(),
+    isCurrentGeneration: (generation: number) => generation === mockSession.generation,
     useSession: () => ({
       status: useSyncExternalStore(subscribe, () => mockSession.status),
       user: null,
@@ -76,7 +85,12 @@ jest.mock("expo-router", () => {
 jest.mock("react-native-reanimated", () => {
   const actual =
     jest.requireActual<typeof import("react-native-reanimated")>("react-native-reanimated");
-  return { __esModule: true, ...actual, useReducedMotion: jest.fn(() => false) };
+  return {
+    __esModule: true,
+    ...actual,
+    useReducedMotion: jest.fn(() => false),
+    withTiming: jest.fn(actual.withTiming),
+  };
 });
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
@@ -90,6 +104,7 @@ const MINUTE_MS = 60_000;
 const HIDDEN = { includeHiddenElements: true };
 const NBSP = " ";
 const CODE = "0427";
+const { stepSlideMs } = tokens.motion;
 
 const at = (minutes: number) => new Date(NOW + minutes * MINUTE_MS).toISOString();
 const entry = (
@@ -204,6 +219,10 @@ const holdJob = () => {
   api.job = () => held.promise;
   return held;
 };
+const post = apiPost as unknown as jest.MockedFunction<(...args: unknown[]) => Promise<unknown>>;
+/** What was said aloud, in order (queued announcements, `announce`). */
+const announced = () =>
+  jest.mocked(AccessibilityInfo.announceForAccessibilityWithOptions).mock.calls.map(([m]) => m);
 const jobCalls = () => get.mock.calls.filter(([path]) => path === JOB_PATH).length;
 
 /** AppState listeners currently subscribed: a removed one is never called again. */
@@ -281,7 +300,7 @@ beforeEach(() => {
     });
   jest.mocked(router.push).mockClear();
   jest.mocked(router.dismissTo).mockClear();
-  jest.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+  jest.mocked(AccessibilityInfo.announceForAccessibilityWithOptions).mockClear();
   jest.mocked(useReducedMotion).mockReturnValue(false);
 });
 
@@ -312,15 +331,6 @@ describe("JobScreen", () => {
     ],
     ["arrived", ARRIVED, "Dan has arrived", `Checked in at ${clock(CHECKED_IN.at)}`, 2, false],
     ["in_progress", WORKING, "Dan is working", `Started at ${clock(STARTED.at)}`, 2, false],
-    [
-      "completed",
-      COMPLETED,
-      "Job's done",
-      "Dan marked the job as done. Take a look at the work.",
-      3,
-      false,
-    ],
-    ["confirmed", CONFIRMED, "Job's done", "Thanks for booking with Jack Fix It.", 3, false],
     [
       "disputed",
       DISPUTED,
@@ -443,13 +453,13 @@ describe("JobScreen", () => {
   });
 
   it.each([
-    ["completed", COMPLETED],
-    ["confirmed", CONFIRMED],
-  ] as const)("a %s job is not polled", async (_name, item) => {
+    ["completed", COMPLETED, "Dan marked the job done"],
+    ["confirmed", CONFIRMED, "Job confirmed"],
+  ] as const)("a %s job is not polled", async (_name, item, title) => {
     fakeClock();
     answerJob(item);
     await renderWithQuery(<JobScreen />);
-    await loaded("Job's done");
+    await headline(title);
 
     await advance(jobsConfig.pollMs * 4);
     expect(jobCalls()).toBe(1);
@@ -626,17 +636,16 @@ describe("JobScreen", () => {
     fakeClock();
     await renderWithQuery(<JobScreen />);
     await loaded("Dan is on the way");
-    expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+    expect(announced()).toEqual([]);
 
     answerJob(ARRIVED);
     await advance(jobsConfig.pollMs);
     expect(await loaded("Dan has arrived")).toBeTruthy();
-    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledTimes(1);
-    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith("Dan has arrived");
+    expect(announced()).toEqual(["Dan has arrived"]);
 
     await advance(jobsConfig.pollMs);
     await waitFor(() => expect(jobCalls()).toBe(3));
-    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledTimes(1);
+    expect(announced()).toEqual(["Dan has arrived"]);
   });
 
   it.each([
@@ -704,6 +713,422 @@ describe("JobScreen", () => {
 
     expect(screen.getByTestId("job-map-marker", HIDDEN)).toBeTruthy();
     expect(screen.queryByTestId("job-map-pulse", HIDDEN) !== null).toBe(pulses);
+  });
+});
+
+describe("JobScreen, the finished job (#66)", () => {
+  const FINISHED_JOB = job({
+    status: "completed",
+    confirm_by: at(20),
+    timeline: COMPLETED.timeline,
+    photos: { before: [], after: [afterPhoto(1), afterPhoto(2)], pending: 0 },
+  });
+  const CONFIRMED_JOB = job({
+    status: "confirmed",
+    timeline: CONFIRMED.timeline,
+    photos: FINISHED_JOB.photos,
+  });
+  const time = (iso: string) =>
+    new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(iso));
+  const photoNames = () =>
+    screen.getAllByRole("imagebutton").map((photo) => photo.props.accessibilityLabel as string);
+  const grows = () =>
+    jest
+      .mocked(withTiming)
+      .mock.calls.filter(([to, config]) => to === 1 && config?.duration === stepSlideMs);
+
+  beforeEach(() => jest.mocked(withTiming).mockClear());
+
+  it("leads with the pro's word and the after photos, and docks the confirmation with its deadline", async () => {
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+
+    expect(await headline("Dan marked the job done")).toBeTruthy();
+    expect(screen.getByTestId("job-support").props.children).toBe(
+      "Take a look at the work, then confirm it's done.",
+    );
+    expect(photoNames()).toEqual([
+      "Photo of the finished work, 1 of 2",
+      "Photo of the finished work, 2 of 2",
+    ]);
+    expect(screen.getByTestId("job-photo-hero-0").props.accessibilityHint).toBe(
+      "Opens it full screen",
+    );
+    expect(within(screen.getByTestId("job-photo-hero-count", HIDDEN)).getByText("1 of 2", HIDDEN));
+    expect(screen.getByTestId("job-paid")).toBeTruthy();
+    // A screen of its own: no steps, no code, no map behind the photos.
+    expect(screen.queryByTestId("job-milestones")).toBeNull();
+    expect(screen.queryByTestId("arrival-code")).toBeNull();
+    expect(screen.queryByTestId("job-map", HIDDEN)).toBeNull();
+    expect(screen.getByTestId("job-confirm-deadline").props.children).toBe(
+      `Confirms automatically today at ${time(at(20))} if you don't answer.`,
+    );
+
+    await act(async () =>
+      fireEvent.press(screen.getByRole("button", { name: "Confirm the job is done" })),
+    );
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/requests/[id]/confirm",
+      params: { id: REQUEST_ID },
+    });
+  });
+
+  it("Problems? Message Dan opens the job's chat, its unread count said with it", async () => {
+    answerJob({ ...FINISHED_JOB, unread_messages: 2 });
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+
+    const line = screen.getByRole("button", {
+      name: "Problems? Message Dan, 2 unread messages",
+    });
+    await act(async () => fireEvent.press(line));
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/jobs/[id]/chat",
+      params: { id: FINISHED_JOB.id, request: REQUEST_ID },
+    });
+  });
+
+  it("the confirmed job keeps its conversation readable", async () => {
+    answerJob(CONFIRMED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Job confirmed");
+
+    expect(screen.getByRole("button", { name: "View messages" })).toBeTruthy();
+    expect(screen.queryByTestId("job-problems")).toBeNull();
+  });
+
+  it("a photo opens full screen at that photo", async () => {
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+
+    await act(async () => fireEvent.press(screen.getByTestId("job-photo-hero-1")));
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/requests/[id]/photos",
+      params: { id: REQUEST_ID, index: "1" },
+    });
+  });
+
+  it("with no photo listed yet, the drawn map stands in and the dock still confirms", async () => {
+    answerJob({ ...FINISHED_JOB, photos: { before: [], after: [], pending: 1 } });
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+
+    expect(screen.queryByTestId("job-photo-hero")).toBeNull();
+    expect(screen.getByTestId("job-map", HIDDEN)).toBeTruthy();
+    expect(screen.getByTestId("job-confirm")).toBeTruthy();
+  });
+
+  it("when the full confirm words would wrap at this size, the button says Confirm and keeps them as its name", async () => {
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+    const button = () => screen.getByRole("button", { name: "Confirm the job is done" });
+    expect(within(button()).getByText("Confirm the job is done")).toBeTruthy();
+
+    const measure = screen.getByTestId("job-confirm-measure", HIDDEN);
+    await act(async () => measure.props.onTextLayout({ nativeEvent: { lines: [{}, {}] } }));
+
+    expect(within(button()).getByText("Confirm")).toBeTruthy();
+    expect(within(button()).queryByText("Confirm the job is done")).toBeNull();
+  });
+
+  it("a photo whose link expires turns to a quiet frame, and the job is asked for again", async () => {
+    fakeClock();
+    const expiring = afterPhoto(1, { expires_at: at(5) });
+    answerJob({ ...FINISHED_JOB, photos: { ...FINISHED_JOB.photos, after: [expiring] } });
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+    expect(screen.getByTestId("job-photo-hero-0-image")).toBeTruthy();
+
+    const held = holdJob();
+    // The photos' clock moves a minute at a time (`useExpiryClock`).
+    for (let minute = 0; minute < 5; minute += 1) await advance(MINUTE_MS);
+
+    expect(screen.getByTestId("job-photo-hero-0-frame")).toBeTruthy();
+    expect(screen.queryByTestId("job-photo-hero-0-image")).toBeNull();
+    expect(jobCalls()).toBe(2);
+    await act(async () => held.resolve(FINISHED_JOB));
+    expect(await screen.findByTestId("job-photo-hero-0-image")).toBeTruthy();
+  });
+
+  it("an image that fails to load shows the frame, never a broken picture", async () => {
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+
+    await act(async () => screen.getByTestId("job-photo-hero-0-image").props.onError());
+    expect(screen.getByTestId("job-photo-hero-0-frame")).toBeTruthy();
+  });
+
+  /** The customer confirms from the sheet over the screen, which is blurred meanwhile. */
+  async function confirmHere(client: QueryClient) {
+    post.mockResolvedValue(CONFIRMED_JOB);
+    // The server holds the confirmed job from then on: a refetch on focus answers it.
+    answerJob(CONFIRMED_JOB);
+    await setFocused(false);
+    await act(async () => {
+      await confirmJob(client, REQUEST_ID, 1);
+    });
+  }
+
+  it("the confirmed job opens at its top, wherever the finished one was scrolled to", async () => {
+    answerJob(FINISHED_JOB);
+    const client = newQueryClient();
+    await renderWithQuery(<JobScreen />, client);
+    await headline("Dan marked the job done");
+    // The React Native mock's own function, which earlier screens called too.
+    const scrollTo = jest.spyOn(ScrollView.prototype, "scrollTo");
+    scrollTo.mockClear();
+
+    await confirmHere(client);
+    await headline("Thanks! Job confirmed");
+
+    expect(scrollTo.mock.calls).toEqual([[{ y: 0, animated: false }]]);
+    scrollTo.mockRestore();
+  });
+
+  it("confirmed here: thanks, said once the screen is back in focus, the seal grows, the dock leaves", async () => {
+    answerJob(FINISHED_JOB);
+    const client = newQueryClient();
+    await renderWithQuery(<JobScreen />, client);
+    await headline("Dan marked the job done");
+
+    await confirmHere(client);
+
+    expect(await headline("Thanks! Job confirmed")).toBeTruthy();
+    // Under the sheet nothing is said: the sheet closing would cut it short.
+    expect(announced()).toEqual([]);
+    await setFocused(true);
+    expect(announced()).toEqual(["Thanks! Job confirmed"]);
+    expect(screen.getByTestId("job-support").props.children).toBe("Payment is released to Dan.");
+    expect(screen.queryByTestId("job-confirm-dock")).toBeNull();
+    expect(grows()).toHaveLength(1);
+
+    // The work stays to look at: the photos as tiles under a title, each opening full screen.
+    expect(screen.getByRole("header", { name: "The finished work" })).toBeTruthy();
+    expect(photoNames()).toEqual([
+      "Photo of the finished work, 1 of 2",
+      "Photo of the finished work, 2 of 2",
+    ]);
+    await act(async () => fireEvent.press(screen.getByTestId("job-photo-thumb-0")));
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/requests/[id]/photos",
+      params: { id: REQUEST_ID, index: "0" },
+    });
+  });
+
+  it("under Reduce Motion the seal simply stands", async () => {
+    jest.mocked(useReducedMotion).mockReturnValue(true);
+    answerJob(FINISHED_JOB);
+    const client = newQueryClient();
+    await renderWithQuery(<JobScreen />, client);
+    await headline("Dan marked the job done");
+
+    await confirmHere(client);
+
+    expect(await headline("Thanks! Job confirmed")).toBeTruthy();
+    expect(grows()).toHaveLength(0);
+  });
+
+  it("the automatic confirmation landing under the customer's eyes is just 'Job confirmed'", async () => {
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+
+    answerJob(CONFIRMED_JOB);
+    await act(async () => pullToRefresh());
+
+    expect(await headline("Job confirmed")).toBeTruthy();
+    expect(screen.queryByText("Thanks! Job confirmed")).toBeNull();
+    expect(announced()).toEqual(["Job confirmed"]);
+    expect(grows()).toHaveLength(0);
+  });
+
+  it("once the confirmation is due it is asked for, then polled until the worker confirms it", async () => {
+    fakeClock();
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+
+    await advance(10 * MINUTE_MS);
+    expect(jobCalls()).toBe(1);
+    // The clock reaches confirm_by (20 min): the words say so and the job is asked for again.
+    for (let minute = 0; minute < 10; minute += 1) await advance(MINUTE_MS);
+    expect(screen.getByTestId("job-confirm-deadline").props.children).toBe(
+      "Confirms automatically any moment now.",
+    );
+    await waitFor(() => expect(jobCalls()).toBe(2));
+
+    answerJob(CONFIRMED_JOB);
+    await advance(jobsConfig.pollMs);
+    await waitFor(() => expect(jobCalls()).toBe(3));
+    expect(await headline("Job confirmed")).toBeTruthy();
+    expect(screen.queryByTestId("job-confirm-dock")).toBeNull();
+
+    await advance(jobsConfig.pollMs * 3);
+    expect(jobCalls()).toBe(3);
+  });
+
+  it("a finished job found gone (404) stays to look at, with nothing left to confirm", async () => {
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+
+    failJob(new ApiError(404, "not_found"));
+    await act(async () => pullToRefresh());
+
+    await waitFor(() => expect(screen.queryByTestId("job-confirm-dock")).toBeNull());
+    expect(screen.getByTestId("job-finished")).toBeTruthy();
+  });
+
+  describe("round 1 (#347): a stale read or a refusal never offers Confirm again", () => {
+    const KEY = customerJobQueryKey(REQUEST_ID, 1);
+    const dock = () => screen.queryByTestId("job-confirm-dock");
+
+    /** Pulls to refresh with the next answer and waits until the screen has drawn it. */
+    async function refreshTo(client: QueryClient, answer: CustomerJob | Error) {
+      if (answer instanceof Error) failJob(answer);
+      else answerJob(answer);
+      const before = jobCalls();
+      await act(async () => pullToRefresh());
+      await waitFor(() => expect(jobCalls()).toBe(before + 1));
+      await waitFor(() => expect(client.getQueryState(KEY)?.fetchStatus).toBe("idle"));
+      await act(settle);
+    }
+
+    async function finishedOnScreen() {
+      answerJob(FINISHED_JOB);
+      const client = newQueryClient();
+      await renderWithQuery(<JobScreen />, client);
+      await headline("Dan marked the job done");
+      expect(dock()).toBeTruthy();
+      return client;
+    }
+
+    it("a read in flight when the confirmation lands never undoes it: no dock, no deadline, even after a failed refresh", async () => {
+      const client = await finishedOnScreen();
+
+      // A refresh started over the finished job is still out when the confirmation answers.
+      const held = holdJob();
+      await act(async () => pullToRefresh());
+      await waitFor(() => expect(jobCalls()).toBe(2));
+      post.mockResolvedValue(CONFIRMED_JOB);
+      await act(async () => {
+        await confirmJob(client, REQUEST_ID, 1);
+      });
+      await act(async () => held.resolve(FINISHED_JOB));
+      await act(settle);
+
+      expect(client.getQueryData<CustomerJob>(KEY)?.status).toBe("confirmed");
+      expect(await headline("Thanks! Job confirmed")).toBeTruthy();
+      expect(dock()).toBeNull();
+      expect(screen.queryByTestId("job-confirm-deadline")).toBeNull();
+
+      await refreshTo(client, new NetworkError(false));
+
+      expect(client.getQueryState(KEY)?.error).toBeInstanceOf(NetworkError);
+      expect(client.getQueryData<CustomerJob>(KEY)?.status).toBe("confirmed");
+      expect(screen.getByRole("header", { name: "Thanks! Job confirmed" })).toBeTruthy();
+      expect(dock()).toBeNull();
+      expect(screen.queryByTestId("job-confirm-deadline")).toBeNull();
+    });
+
+    it.each([
+      ["gone (404)", new ApiError(404, "not_found")],
+      ["refused (403)", new ApiError(403, "forbidden")],
+    ])(
+      "a finished job read as %s keeps the dock away through offline and server-error retries, until a read answers the job",
+      async (_name, refusal) => {
+        const client = await finishedOnScreen();
+
+        await refreshTo(client, refusal);
+        expect(dock()).toBeNull();
+
+        // Each failure replaces the refusal as the query's error; the job stays refused.
+        for (const failure of [new NetworkError(false), new ApiError(500, "internal_error")]) {
+          await refreshTo(client, failure);
+          expect(client.getQueryState(KEY)?.error).toBe(failure);
+          expect(dock()).toBeNull();
+        }
+        expect(screen.getByTestId("job-finished")).toBeTruthy();
+
+        await refreshTo(client, FINISHED_JOB);
+        expect(dock()).toBeTruthy();
+      },
+    );
+
+    it.each([
+      ["gone (404)", new ApiError(404, "not_found")],
+      ["refused (403)", new ApiError(403, "forbidden")],
+    ])(
+      "a confirmation %s keeps the dock away though the read after it fails",
+      async (_name, refusal) => {
+        const client = await finishedOnScreen();
+
+        post.mockRejectedValue(refusal);
+        failJob(new NetworkError(false));
+        await act(async () => {
+          await expect(confirmJob(client, REQUEST_ID, 1)).rejects.toBe(refusal);
+          refreshCustomerJob(client, REQUEST_ID, 1);
+        });
+        await waitFor(() => expect(client.getQueryState(KEY)?.error).toBeInstanceOf(NetworkError));
+        await act(settle);
+
+        expect(client.getQueryData<CustomerJob>(KEY)?.status).toBe("completed");
+        expect(dock()).toBeNull();
+        expect(screen.getByTestId("job-finished")).toBeTruthy();
+      },
+    );
+  });
+
+  it("a photo tap and Confirm in a row open only the first", async () => {
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+    navigation.setNavigating(true);
+
+    await act(async () => fireEvent.press(screen.getByTestId("job-photo-hero-0")));
+    await act(async () => fireEvent.press(screen.getByTestId("job-confirm")));
+
+    expect(router.push).toHaveBeenCalledTimes(1);
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/requests/[id]/photos",
+      params: { id: REQUEST_ID, index: "0" },
+    });
+  });
+
+  it("opened confirmed, it says Job confirmed, calmly: no thanks, no seal growing, no dock", async () => {
+    answerJob(CONFIRMED_JOB);
+    await renderWithQuery(<JobScreen />);
+
+    expect(await headline("Job confirmed")).toBeTruthy();
+    expect(screen.queryByText("Thanks! Job confirmed")).toBeNull();
+    expect(screen.queryByTestId("job-confirm-dock")).toBeNull();
+    expect(grows()).toHaveLength(0);
+  });
+
+  it("an answer after a sign-out never draws the finished job", async () => {
+    const held = holdJob();
+    await renderWithQuery(<JobScreen />);
+    await signOut();
+    await act(async () => held.resolve(FINISHED_JOB));
+
+    expect(screen.queryByTestId("job-finished")).toBeNull();
+    expect(screen.queryByTestId("job-confirm-dock")).toBeNull();
+  });
+
+  it("speaks Spanish", async () => {
+    await act(() => i18n.changeLanguage("es"));
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+
+    expect(await headline("Dan marcó el trabajo como terminado")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Confirmar que está terminado" })).toBeTruthy();
+    expect(screen.getByTestId("job-confirm-deadline").props.children).toMatch(
+      /^Se confirma automáticamente hoy a las? \d{1,2}:\d{2} si no respondes\.$/,
+    );
+    expect(photoNames()[0]).toBe("Foto del trabajo terminado, 1 de 2");
   });
 });
 
