@@ -25,6 +25,8 @@ from app.modules.pros.router import router as pros_router
 from app.modules.quotes.router import customer_router as customer_quotes_router
 from app.modules.quotes.router import router as quotes_router
 from app.modules.requests.router import router as requests_router
+from app.modules.reviews.router import rating_router as my_rating_router
+from app.modules.reviews.router import router as reviews_router
 from app.modules.service_areas.router import router as service_areas_router
 from app.modules.support.router import router as support_router
 from app.modules.support.router import staff_router as staff_support_router
@@ -65,3 +67,5 @@ v1_router.include_router(addresses_router)
 v1_router.include_router(notification_preferences_router)
 v1_router.include_router(support_router)
 v1_router.include_router(staff_support_router)
+v1_router.include_router(reviews_router)
+v1_router.include_router(my_rating_router)

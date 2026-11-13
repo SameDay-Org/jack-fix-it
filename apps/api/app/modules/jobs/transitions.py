@@ -56,6 +56,12 @@ CHAT_OPEN: Final = frozenset(
     {_S.SCHEDULED, _S.ON_THE_WAY, _S.IN_PROGRESS, _S.COMPLETED, _S.DISPUTED}
 )
 
+# While a job may be reviewed by both sides (#77): once it was confirmed, by the customer or by
+# the 48 h auto-confirm. A confirmed job only ever moves to paid_out, which keeps it
+# reviewable; paid_out is also where an admin's release of a dispute ends, and that job was
+# never confirmed (no confirmed_at): is_reviewable tells the two apart.
+REVIEWABLE: Final = frozenset({_S.CONFIRMED, _S.PAID_OUT})
+
 # What the customer sees: the i18n keys of docs/glossary.md "Customer-visible statuses".
 CUSTOMER_STATUS: Final[Mapping[JobStatus, str]] = MappingProxyType(
     {

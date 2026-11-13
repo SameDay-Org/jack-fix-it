@@ -38,7 +38,7 @@ from app.modules.jobs.errors import InvalidTransitionError
 from app.modules.jobs.location import JobLocationStore, forget_position
 from app.modules.jobs.models import Job, JobEvent, JobStatus
 from app.modules.jobs.repository import JobRepository
-from app.modules.jobs.transitions import CHAT_OPEN, TRANSITIONS, ActorKind
+from app.modules.jobs.transitions import CHAT_OPEN, REVIEWABLE, TRANSITIONS, ActorKind
 from app.modules.pros.service import ProService
 from app.modules.users.types import UserAccount, UserRole
 
@@ -240,13 +240,26 @@ class JobScheduler:
 
 @dataclass(frozen=True)
 class JobParties:
-    """Who takes part in a job, for the chat (#71): the customer's and the pro's user ids, and
-    whether the job still accepts messages (CHAT_OPEN)."""
+    """Who takes part in a job, for the chat (#71) and the reviews (#77): the customer's and
+    the pro's user ids, whether the job still accepts messages (CHAT_OPEN) and whether its
+    two sides may review each other (is_reviewable)."""
 
     job_id: uuid.UUID
     customer_id: uuid.UUID
     pro_user_id: uuid.UUID
     chat_open: bool
+    reviewable: bool
+
+
+def is_reviewable(job: Job) -> bool:
+    """Whether the job was confirmed, by the customer (#66) or by the 48 h auto-confirm (#67):
+    confirmed, or paid out after that confirmation. A job paid out by an admin's release of a
+    dispute was never confirmed (confirmed_at is set on entering confirmed only), and neither
+    was any earlier, disputed, refunded or cancelled one. Once true it stays true: confirmed
+    leads to paid_out alone, which is terminal, and confirmed_at is never cleared."""
+    if job.status is JobStatus.PAID_OUT:
+        return job.confirmed_at is not None
+    return job.status in REVIEWABLE
 
 
 class JobPartiesReader:
@@ -286,4 +299,5 @@ class JobPartiesReader:
             customer_id=job.customer_id,
             pro_user_id=pro_user_id,
             chat_open=job.status in CHAT_OPEN,
+            reviewable=is_reviewable(job),
         )
