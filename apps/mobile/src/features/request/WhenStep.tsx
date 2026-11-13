@@ -4,21 +4,22 @@ import { useTranslation } from "react-i18next";
 import { AccessibilityInfo, Pressable, ScrollView, Text, View } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
 
-import { Button, ChoiceCard, Notice, useFlag } from "@/components/ui";
+import { Button, Chip, ChoiceCard, Notice, useFlag } from "@/components/ui";
 import { cx } from "@/components/ui/cx";
 import { bubbleShadow, continuousCorners, pressedTransform } from "@/theme";
 
 import { requestConfig } from "./config";
 import { addDays, dayParts, formatLongDay, isPastDay, localToday, offeredDays } from "./dates";
-import { setPreferredDate, useRequestDraft } from "./requestDraft";
+import { periodLabel, PREFERRED_PERIODS } from "./period";
+import { setPreferredDate, setPreferredPeriod, useRequestDraft } from "./requestDraft";
 import { StepScreen } from "./StepScreen";
 import { nextStep, stepHref, type StepId } from "./steps";
 
 /**
  * When the customer would like the job done: "I'm flexible" (no date, the default) or a day from a
  * strip of the next `EXPO_PUBLIC_REQUEST_DATE_DAYS` days, today (as the API counts it) first. The
- * chosen day is spelled out under the strip in the app's language. The preferred period (morning,
- * afternoon...) will go under it once the API takes one (#237).
+ * chosen day is spelled out under the strip in the app's language, and the time of day it is
+ * wanted follows (#237): morning, afternoon, evening or flexible, flexible until the customer says.
  */
 export function WhenStep({ steps }: { steps: readonly StepId[] }) {
   const { t, i18n } = useTranslation();
@@ -107,7 +108,37 @@ export function WhenStep({ steps }: { steps: readonly StepId[] }) {
           </Text>
         ) : null}
       </View>
+      {date !== null && !stale ? <PeriodChoice /> : null}
     </StepScreen>
+  );
+}
+
+/** The time of the chosen day, one of a row of chips that wraps on a narrow phone. */
+function PeriodChoice() {
+  const { t } = useTranslation();
+  const period = useRequestDraft((draft) => draft.preferredPeriod);
+
+  return (
+    <View className="gap-3">
+      <Text className="text-headline text-navy-900">{t("request.when.period")}</Text>
+      <View
+        accessibilityRole="radiogroup"
+        accessibilityLabel={t("request.when.period")}
+        className="flex-row flex-wrap gap-2"
+        testID="when-period"
+      >
+        {PREFERRED_PERIODS.map((choice) => (
+          <Chip
+            key={choice}
+            label={periodLabel(t, choice)}
+            selected={choice === period}
+            selectionRole="radio"
+            onPress={() => setPreferredPeriod(choice)}
+            testID={`when-period-${choice}`}
+          />
+        ))}
+      </View>
+    </View>
   );
 }
 

@@ -138,7 +138,7 @@ describe("ProHomeScreen", () => {
     expect(fresh.getByText("New", HIDDEN)).toBeTruthy();
     expect(fresh.getByText(FRESH.description_excerpt, HIDDEN)).toBeTruthy();
     expect(fresh.getByText("Fort Lauderdale 33301", HIDDEN)).toBeTruthy();
-    expect(fresh.getByText("Preferred Fri, Oct 30", HIDDEN)).toBeTruthy();
+    expect(fresh.getByText("Preferred: Fri, Oct 30", HIDDEN)).toBeTruthy();
     expect(fresh.getByText("Sent 2 h ago", HIDDEN)).toBeTruthy();
 
     const opened = card(OPENED.dispatch_id);
