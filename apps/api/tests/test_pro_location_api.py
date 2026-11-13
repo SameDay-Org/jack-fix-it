@@ -52,7 +52,7 @@ from tests.conftest import (
     make_settings,
     wait_until_blocked,
 )
-from tests.helpers import log_fields, unclocked_fields
+from tests.helpers import log_fields, masked_fields
 from tests.job_world import JobWorld, Party, build_world, job_row, make_job, record_pushes
 from tests.test_arrival_code import CONFIG as EXECUTION_CONFIG
 from tests.test_arrival_code import CommittedJob, committed_job, no_storage
@@ -1039,8 +1039,9 @@ async def test_no_coordinate_reaches_sentry(
     assert any(
         event.get("logentry", {}).get("message") == "pro_location_unavailable" for event in events
     )
-    # Field by field, the clocks left out: an event's time can read 12:00:26.1234 (#387).
-    wire = [field for event in events for field in unclocked_fields(event)]
+    # Field by field, keys too, ids and clocks masked: an event's time can read 12:00:26.1234
+    # (#387).
+    wire = masked_fields(events)
     for needle in NEEDLES:
         assert [field for field in wire if needle in field] == [], needle
     for response in (crashed, unavailable):

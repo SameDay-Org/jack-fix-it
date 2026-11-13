@@ -5,6 +5,7 @@ must not trip."""
 
 import asyncio
 import gc
+import logging
 from collections.abc import Callable, Iterator
 from typing import Final
 
@@ -15,10 +16,12 @@ from tests.helpers import (
     async_best_seconds_without_gc,
     async_seconds_without_gc,
     best_seconds_without_gc,
-    json_leaves,
+    fields_holding,
+    json_fields,
+    log_fields,
+    masked_fields,
     mentions_number,
     seconds_without_gc,
-    unclocked_fields,
 )
 
 # The limit the best of three guards, a sample under it and a stalled one over it. Dyadic
@@ -222,26 +225,56 @@ def test_digits_inside_ids_and_clocks_are_not_a_number(text: str) -> None:
     assert not mentions_number(text, 98765)
 
 
-def test_json_leaves_are_every_scalar_at_any_depth() -> None:
+def test_json_fields_are_every_key_and_scalar_at_any_depth() -> None:
     value = {"a": 1, "b": [None, {"c": "x", "d": [True, 2.5]}], "e": ("y",)}
 
-    assert json_leaves(value) == [1, None, "x", True, 2.5, "y"]
+    assert json_fields(value) == ["a", "1", "b", "None", "c", "x", "d", "True", "2.5", "e", "y"]
 
 
-def test_unclocked_fields_leave_out_the_instants_only() -> None:
+def test_masked_fields_mask_the_ids_and_instants_inside_each_field() -> None:
     value = {
         "timestamp": "2026-11-13T08:10:26.123456+00:00",
-        "sent_at": "2026-11-13T08:10:26.123456Z",
         "at": "2026-11-13 08:10:26",
         "id": "5f398765-1a2b-4c3d-8e9f-0a1b2c3d4e5f",
+        "link": "jackfixit://jobs/5F398765-1A2B-4C3D-8E9F-0A1B2C3D4E5F/chat",
         "lat": 26.123457,
         "text": "seen at 26.123457 on 2026-11-13T08:10:26Z",
         "date": "2026-11-13",
     }
 
-    assert unclocked_fields(value) == [
-        "5f398765-1a2b-4c3d-8e9f-0a1b2c3d4e5f",
-        "26.123457",
-        "seen at 26.123457 on 2026-11-13T08:10:26Z",
-        "2026-11-13",
+    assert masked_fields(value) == [
+        *("timestamp", "<instant>", "at", "<instant>", "id", "<uuid>"),
+        *("link", "jackfixit://jobs/<uuid>/chat", "lat", "26.123457"),
+        *("text", "seen at 26.123457 on <instant>", "date", "2026-11-13"),
     ]
+
+
+# A coordinate as a key, where a reviewer's probe hid it from the scans (#389).
+NEEDLE: Final = "26.123457"
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [{NEEDLE: "present"}, {"review_regression": {NEEDLE: "present"}}],
+    ids=["depth_1", "depth_2"],
+)
+def test_a_needle_as_a_key_of_a_log_record_is_found(extra: dict[str, object]) -> None:
+    record = logging.LogRecord("app.probe", logging.INFO, __file__, 1, "probe_event", None, None)
+    record.__dict__.update(extra)
+
+    assert [field for field in log_fields([record]) if NEEDLE in field] == [NEEDLE]
+
+
+@pytest.mark.parametrize(
+    "found",
+    [
+        {NEEDLE: "present"},
+        {"extra": {NEEDLE: "present"}},
+        {"breadcrumbs": {"values": [{"data": {NEEDLE: "present"}}]}},
+    ],
+    ids=["depth_1", "depth_2", "in_a_list_item"],
+)
+def test_a_needle_as_a_key_of_a_sentry_event_is_found(found: dict[str, object]) -> None:
+    event = {"timestamp": "2026-11-13T08:10:26.123457Z", **found}
+
+    assert fields_holding(NEEDLE, [event]) == [NEEDLE]

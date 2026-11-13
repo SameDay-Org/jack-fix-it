@@ -16,7 +16,7 @@ from app.modules.jobs.models import Job, JobStatus
 from app.modules.requests.schemas import RequestCreate
 from app.modules.users.names import safe_first_name
 from app.redaction import MASK, KnownValues
-from tests.helpers import json_leaves
+from tests.helpers import fields_holding
 from tests.job_world import (
     CUSTOMER_EMAIL,
     CUSTOMER_FIRST,
@@ -41,7 +41,8 @@ NOT_FOUND = {"error": {"code": "not_found", "message": "Resource not found."}}
 FORBIDDEN = {"error": {"code": "forbidden", "message": "You do not have access to this resource."}}
 CODE = "0427"
 # A job id that spells the fee, the payout and the arrival code: a body's text holds them though
-# no field does, as a random id once made it (#387). Leak checks read the parsed fields.
+# no field does, as a random id once made it (#387). Leak checks read the parsed fields, ids and
+# clocks masked.
 SPELLING_ID = uuid.UUID(f"{FEE:08d}-{CODE}-4000-8000-{PAYOUT:012d}")
 CUSTOMER_KEYS = {
     "id",
@@ -138,7 +139,11 @@ async def test_customer_sees_own_job(
     )
     assert str(FEE) in response.text  # the id spells it, and the payout
     assert str(PAYOUT) in response.text
-    assert not {FEE, PAYOUT, str(FEE), str(PAYOUT)} & set(json_leaves(body))
+    assert fields_holding(str(FEE), body) == []
+    assert fields_holding(str(PAYOUT), body) == []
+    # The control: the fee written into a field's text is a leak.
+    leaked = {**body, "timeline": [{**body["timeline"][0], "status": f"scheduled fee={FEE}"}]}
+    assert fields_holding(str(FEE), leaked) == [f"scheduled fee={FEE}"]
     no_leaks(response.text)
 
 
@@ -253,7 +258,10 @@ async def test_pro_sees_own_job(
     assert body["pro_payout_cents"] == PAYOUT
     # Never the arrival code, the customer's last name or any contact.
     assert CODE in response.text  # the id spells it
-    assert CODE not in json_leaves(body)
+    assert fields_holding(CODE, body) == []
+    # The control: the code written into the description's text is a leak.
+    leaked = {**body, "description": f"{body['description']} arrival_code={CODE}"}
+    assert fields_holding(CODE, leaked) == [leaked["description"]]
     no_leaks(response.text)
 
 

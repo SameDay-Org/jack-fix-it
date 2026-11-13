@@ -28,39 +28,40 @@ _DIGITS_AS_LETTERS: Final = str.maketrans("0123456789", "ghijklmnop")
 _CLOCK: Final = re.compile(
     r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?"
 )
+# A uuid as str(uuid.UUID) writes it.
+_UUID: Final = re.compile(r"[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", re.IGNORECASE)
 
 
-def json_leaves(value: object) -> list[object]:
-    """Every scalar inside a parsed JSON value: dict values and list or tuple items, at any
-    depth. A leak check compares these, never searches the serialized text, where a random
-    uuid or a clock's digits spell a short needle by chance (#387)."""
+def json_fields(value: object) -> list[str]:
+    """Every key and every scalar of a parsed JSON value as text, at any depth: dict keys and
+    values, list and tuple items. A leak can sit in a key as well as in a value (#389)."""
     if isinstance(value, dict):
-        return [leaf for item in value.values() for leaf in json_leaves(item)]
+        return [field for key, item in value.items() for field in (str(key), *json_fields(item))]
     if isinstance(value, list | tuple):
-        return [leaf for item in value for leaf in json_leaves(item)]
-    return [value]
+        return [field for item in value for field in json_fields(item)]
+    return [str(value)]
 
 
-def unclocked_fields(value: object) -> list[str]:
-    """The leaves of a parsed JSON value as text, less the ISO instants: where a leak check may
-    search for a needle no uuid can spell (one with a "." in it), since a clock's digits read
-    12:00:26.1234 by chance (#387)."""
-    return [
-        str(leaf)
-        for leaf in json_leaves(value)
-        if not (isinstance(leaf, str) and _CLOCK.fullmatch(leaf))
-    ]
+def masked_fields(value: object) -> list[str]:
+    """json_fields with each uuid and ISO instant in them masked: where a leak check searches
+    for a short needle, a 4-digit code or a coordinate, that a random id's or a clock's digits
+    spell by chance (a job id holding 0427, a time reading 12:00:26.1234) (#387). The needle
+    written into any other text, or as a key, still shows."""
+    return [_CLOCK.sub("<instant>", _UUID.sub("<uuid>", field)) for field in json_fields(value)]
+
+
+def fields_holding(needle: str, value: object) -> list[str]:
+    """The masked fields of a parsed JSON value that hold `needle`: [] when it leaks nowhere."""
+    return [field for field in masked_fields(value) if needle in field]
 
 
 def log_fields(records: list[logging.LogRecord]) -> list[str]:
-    """Each record's fields as JsonFormatter ships them, and its message, less the clock: a log
-    line's time can read 12:00:26.1234, which spells a needle (#387)."""
+    """Each record as JsonFormatter ships it, keys and values, and its message, masked as
+    masked_fields does: a log line's time can read 12:00:26.1234, which spells a needle (#387)."""
     formatter = JsonFormatter()
-    return [
-        field
-        for record in records
-        for field in (*unclocked_fields(json.loads(formatter.format(record))), record.getMessage())
-    ]
+    return masked_fields(
+        [[json.loads(formatter.format(record)), record.getMessage()] for record in records]
+    )
 
 
 def mentions_number(text: str, number: int) -> bool:

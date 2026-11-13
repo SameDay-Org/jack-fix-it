@@ -65,7 +65,7 @@ from tests.conftest import (
     make_app,
     make_settings,
 )
-from tests.helpers import log_fields, unclocked_fields
+from tests.helpers import log_fields, masked_fields
 from tests.job_world import LINE1, LINE2, JobWorld, Party, build_world, make_job, record_pushes
 from tests.test_pro_location_api import (
     CODE,
@@ -1877,8 +1877,9 @@ async def test_nothing_reaches_sentry(
         assert all("http.query" not in c for c in calls)
     # The crash's event has the Redis calls too: the commands, their arguments filtered.
     assert any(c.get("category") == "redis" for c in crash["breadcrumbs"]["values"])
-    # Field by field, the clocks left out: an event's time can read 12:00:26.1234 (#387).
-    wire = [field for event in events for field in unclocked_fields(event)]
+    # Field by field, keys too, ids and clocks masked: an event's time can read 12:00:26.1234
+    # (#387).
+    wire = masked_fields(events)
     for needle in NEEDLES:
         assert [field for field in wire if needle in field] == [], needle
         assert needle not in refused.text, needle
