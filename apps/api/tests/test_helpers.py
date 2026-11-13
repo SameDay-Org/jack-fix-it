@@ -1,6 +1,7 @@
 """The timing helpers of tests/helpers.py (#196): the garbage collector is paused for the timed
 work only, and a best of three ignores one stalled run but not a slow one. And the leak check
-for numbers (#300), which random ids and clocks must not trip."""
+for numbers (#300), and the field-by-field leak checks (#387), which random ids and clocks
+must not trip."""
 
 import asyncio
 import gc
@@ -14,8 +15,10 @@ from tests.helpers import (
     async_best_seconds_without_gc,
     async_seconds_without_gc,
     best_seconds_without_gc,
+    json_leaves,
     mentions_number,
     seconds_without_gc,
+    unclocked_fields,
 )
 
 # The limit the best of three guards, a sample under it and a stalled one over it. Dyadic
@@ -217,3 +220,28 @@ def test_a_logged_number_is_found(text: str) -> None:
 )
 def test_digits_inside_ids_and_clocks_are_not_a_number(text: str) -> None:
     assert not mentions_number(text, 98765)
+
+
+def test_json_leaves_are_every_scalar_at_any_depth() -> None:
+    value = {"a": 1, "b": [None, {"c": "x", "d": [True, 2.5]}], "e": ("y",)}
+
+    assert json_leaves(value) == [1, None, "x", True, 2.5, "y"]
+
+
+def test_unclocked_fields_leave_out_the_instants_only() -> None:
+    value = {
+        "timestamp": "2026-11-13T08:10:26.123456+00:00",
+        "sent_at": "2026-11-13T08:10:26.123456Z",
+        "at": "2026-11-13 08:10:26",
+        "id": "5f398765-1a2b-4c3d-8e9f-0a1b2c3d4e5f",
+        "lat": 26.123457,
+        "text": "seen at 26.123457 on 2026-11-13T08:10:26Z",
+        "date": "2026-11-13",
+    }
+
+    assert unclocked_fields(value) == [
+        "5f398765-1a2b-4c3d-8e9f-0a1b2c3d4e5f",
+        "26.123457",
+        "seen at 26.123457 on 2026-11-13T08:10:26Z",
+        "2026-11-13",
+    ]

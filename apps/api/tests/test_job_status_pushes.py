@@ -46,7 +46,7 @@ from app.modules.webhooks.tasks import process_stripe_event
 from app.observability import JsonFormatter
 from app.queue import get_job_queue
 from tests.conftest import InMemoryJobLocationStore, make_settings
-from tests.helpers import as_status_writer
+from tests.helpers import as_status_writer, json_leaves
 from tests.job_world import JobWorld, build_world, make_job, record_pushes
 from tests.test_job_photos_api import FakeStorage, photo_row, safe_key
 from tests.test_payment_webhooks import (
@@ -396,9 +396,10 @@ async def test_the_arrival_code_and_eta_are_in_no_job_push(
     )
     eta = moved.json()["eta_at"]
     for _, args in queue.jobs.values():
-        payload = json.dumps(args)
-        assert issued not in payload
-        assert eta[:16] not in payload  # not even the minute
+        # Field by field: the ids in the args can spell a 4-digit code (#387).
+        fields = [str(leaf) for leaf in json_leaves(args)]
+        assert issued not in fields
+        assert [field for field in fields if eta[:16] in field] == []  # not even the minute
         _, _, title_key, body_key, params, _ = args
         assert isinstance(params, dict)
         for locale in ("en", "es"):

@@ -56,6 +56,7 @@ from tests.test_pro_location_api import (
     clock,
     dead_redis,
     fix,
+    log_fields,
     on_the_way_job,
     ping,
     plant,
@@ -539,9 +540,9 @@ async def test_missing_or_refused_store_answers_503_and_keeps_nothing(
         ("ERROR", "pro_location_refused", ids["job_id"], None, reason),
     ]
     # Ids, the event and the reason only: no coordinate in any log line or answer.
-    logs = "\n".join(JsonFormatter().format(r) + r.getMessage() for r in caplog.records)
+    logs = log_fields(caplog.records)
     for needle in NEEDLES:
-        assert needle not in logs, needle
+        assert [field for field in logs if needle in field] == [], needle
         for response in (sent, got, foreign, late, untracked):
             assert needle not in response.text, needle
     for record in caplog.records:

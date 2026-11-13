@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.jobs import execution
 from app.modules.jobs.errors import ATTEMPTS_REMAINING_HEADER
 from app.modules.jobs.models import Job, JobStatus
+from tests.helpers import unclocked_fields
 from tests.job_world import JobWorld, build_world, events, job_row, make_job, record_pushes
 from tests.test_requests_api import RecordingQueue
 
@@ -245,7 +246,8 @@ async def test_check_in_with_the_right_code_records_location(
     view = await customer_view(db_client, world, job)
     assert view["arrival_code"] is None
     assert sorted(e["type"] for e in view["timeline"]) == ["checked_in", "created"]
-    assert "28.53" not in str(view)
+    # Field by field, the clocks left out: a time like 12:00:28.531 spells "28.53" (#387).
+    assert [field for field in unclocked_fields(view) if "28.53" in field] == []
 
 
 async def test_check_in_is_idempotent_afterwards(

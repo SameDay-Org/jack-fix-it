@@ -20,6 +20,32 @@ _IN_FAILED_TRANSACTION: Final = "25P02"
 # Hex digits as letters: a fixture slug stays unique with no digit in it that a leak check
 # could read as part of the number it looks for (#283).
 _DIGITS_AS_LETTERS: Final = str.maketrans("0123456789", "ghijklmnop")
+# An ISO-8601 instant as the API, the logs and Sentry write it.
+_CLOCK: Final = re.compile(
+    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?"
+)
+
+
+def json_leaves(value: object) -> list[object]:
+    """Every scalar inside a parsed JSON value: dict values and list or tuple items, at any
+    depth. A leak check compares these, never searches the serialized text, where a random
+    uuid or a clock's digits spell a short needle by chance (#387)."""
+    if isinstance(value, dict):
+        return [leaf for item in value.values() for leaf in json_leaves(item)]
+    if isinstance(value, list | tuple):
+        return [leaf for item in value for leaf in json_leaves(item)]
+    return [value]
+
+
+def unclocked_fields(value: object) -> list[str]:
+    """The leaves of a parsed JSON value as text, less the ISO instants: where a leak check may
+    search for a needle no uuid can spell (one with a "." in it), since a clock's digits read
+    12:00:26.1234 by chance (#387)."""
+    return [
+        str(leaf)
+        for leaf in json_leaves(value)
+        if not (isinstance(leaf, str) and _CLOCK.fullmatch(leaf))
+    ]
 
 
 def mentions_number(text: str, number: int) -> bool:
