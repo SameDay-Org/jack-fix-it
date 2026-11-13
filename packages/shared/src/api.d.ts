@@ -1402,6 +1402,81 @@ export interface paths {
         patch: operations["staff_set_ticket_status_v1_admin_support_tickets__ticket_id__patch"];
         trace?: never;
     };
+    "/v1/jobs/{job_id}/reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Review the other side of my job
+         * @description The caller's review of the other side of a job they took part in: the customer reviews
+         *     the pro, the pro reviews the customer. One review per side per job, only once the job was
+         *     confirmed, never edited. Who is reviewed comes from the job, not from the body.
+         *
+         *     The customer may rate communication, quality, punctuality and value next to `overall`; the
+         *     pro may rate communication and punctuality only (quality or value from the pro is a 422).
+         *
+         *     Contact details in the comment are masked before it is stored, and only the masked text is
+         *     kept; `comment_redacted` says so.
+         */
+        post: operations["create_review_v1_jobs__job_id__reviews_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/jobs/{job_id}/reviews/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read my review of a job
+         * @description The caller's own review of the job, or null, and whether they may still write one. It
+         *     never returns the other side's review, whether or not the caller wrote theirs.
+         */
+        get: operations["read_my_review_v1_jobs__job_id__reviews_mine_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users/me/rating": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read my rating
+         * @description The caller's own rating, as a customer or as a pro: the average of the overall ratings
+         *     they received, to one decimal, and how many; null and 0 with none.
+         *
+         *     It counts published reviews only. A review is published once its target reviewed the same
+         *     job too, or 14 days (REVIEW_PUBLISH_AFTER_DAYS) after the job's confirmation, whichever
+         *     comes first: until then it is not in the average or the count, so nobody reads the other
+         *     side's score of a job before writing their own.
+         */
+        get: operations["read_my_rating_v1_users_me_rating_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2302,6 +2377,16 @@ export interface components {
              */
             max_selected?: number | null;
         };
+        /** MyReviewOut */
+        MyReviewOut: {
+            /** @description The caller's own review of this job; null when they wrote none. Never the other side's. */
+            review: components["schemas"]["ReviewOut"] | null;
+            /**
+             * Can Review
+             * @description True while the caller may still review this job: it was confirmed and they wrote no review yet.
+             */
+            can_review: boolean;
+        };
         /**
          * MySupportTicketOut
          * @description One of the caller's tickets in their list: no free text, so never the message.
@@ -3152,6 +3237,19 @@ export interface components {
          * @enum {string}
          */
         QuoteStatus: "pending" | "accepted" | "rejected" | "expired" | "withdrawn";
+        /** RatingOut */
+        RatingOut: {
+            /**
+             * Average
+             * @description The average of the overall ratings of the caller's published reviews, to one decimal; null with none (No ratings yet).
+             */
+            average: number | null;
+            /**
+             * Count
+             * @description How many published reviews the caller received. A review the caller has not answered yet is not counted until it is published.
+             */
+            count: number;
+        };
         /** ReadinessResponse */
         ReadinessResponse: {
             /**
@@ -3372,6 +3470,88 @@ export interface components {
              * @description Longitude, degrees.
              */
             lng: number;
+        };
+        /** ReviewCreatedOut */
+        ReviewCreatedOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Comment Redacted
+             * @description True when something in the comment was masked: the app tells the author that contact details are not shared in reviews. False otherwise, and with no comment.
+             */
+            comment_redacted: boolean;
+        };
+        /** ReviewIn */
+        ReviewIn: {
+            /**
+             * Overall
+             * @description The overall rating, 1 (worst) to 5 (best).
+             */
+            overall: number;
+            /**
+             * Communication
+             * @description Optional, 1 to 5.
+             */
+            communication?: number | null;
+            /**
+             * Quality
+             * @description Optional, 1 to 5. From the job's customer only: refused (422) from the pro.
+             */
+            quality?: number | null;
+            /**
+             * Punctuality
+             * @description Optional, 1 to 5.
+             */
+            punctuality?: number | null;
+            /**
+             * Value
+             * @description Optional, 1 to 5. From the job's customer only: refused (422) from the pro.
+             */
+            value?: number | null;
+            /**
+             * Comment
+             * @description Optional text, trimmed. Contact details in it (phones, emails, links, handles, addresses) are replaced by ••• before it is stored; only the masked text is kept.
+             */
+            comment?: string | null;
+        };
+        /**
+         * ReviewOut
+         * @description The caller's own review, as stored.
+         */
+        ReviewOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Overall */
+            overall: number;
+            /** Communication */
+            communication: number | null;
+            /** Quality */
+            quality: number | null;
+            /** Punctuality */
+            punctuality: number | null;
+            /** Value */
+            value: number | null;
+            /**
+             * Comment
+             * @description The text as stored: contact details were replaced by ••• when it was written.
+             */
+            comment: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /**
          * SavedAddressIn
@@ -8208,6 +8388,193 @@ export interface operations {
                 };
             };
             /** @description validation_error: an unknown status, a field other than status, or a ticket_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_review_v1_jobs__job_id__reviews_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewCreatedOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job with this id of which the caller is the customer or the pro. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description job_not_reviewable: the job was not confirmed (by the customer or automatically): it is scheduled, on the way, in progress, completed, disputed, refunded or cancelled, or was paid out without a confirmation; already_reviewed: the caller already reviewed this job. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a rating missing, not an integer or outside 1 to 5; quality or value sent by the job's pro (the customer alone rates them); a comment blank, longer than 1000 characters as typed or once its contact details are masked, or empty once invisible characters (zero-width and the like) are dropped; an unknown field; a job_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many reviews; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_my_review_v1_jobs__job_id__reviews_mine_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyReviewOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job with this id of which the caller is the customer or the pro. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a job_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_my_rating_v1_users_me_rating_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RatingOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
             422: {
                 headers: {
                     [name: string]: unknown;
