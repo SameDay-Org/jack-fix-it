@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react-native";
+import { router } from "expo-router";
 import type { ReactElement } from "react";
 import * as ReactNative from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -52,17 +53,26 @@ describe("HelpScreen", () => {
     expect(screen.getByText(en.help.intro)).toBeOnTheScreen();
   });
 
-  it("lists every question as a collapsed button, top to bottom, and nothing else to press", async () => {
+  it("opens the message form from the row under the last section", async () => {
+    await renderScreen();
+
+    await fireEvent.press(screen.getByRole("button", { name: "Still need help?, Talk to Jack" }));
+
+    expect(router.push).toHaveBeenCalledWith("/help/contact");
+  });
+
+  it("lists every question as a collapsed button, top to bottom, then the way to the team", async () => {
     await renderScreen();
 
     const buttons = screen.getAllByRole("button");
     expect(buttons.map((button) => button.props.accessibilityLabel)).toEqual([
       "Back",
       ...FAQ.map(({ id }) => faq[id].question),
+      "Still need help?, Talk to Jack",
     ]);
-    // Part 2 brings the way to reach the team: until then there is no link and no closing block.
+    // The team is reached inside the app: no link leads out of it.
     expect(screen.queryAllByRole("link")).toHaveLength(0);
-    for (const button of buttons.slice(1)) {
+    for (const button of buttons.slice(1, -1)) {
       expect(button.props.accessibilityState).toEqual({ expanded: false });
     }
     // A shut question's answer is not in the tree at all, hidden elements included.
