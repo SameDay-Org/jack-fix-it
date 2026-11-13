@@ -215,6 +215,8 @@ class Settings(BaseSettings):
     request_media_max_items: int = Field(default=10, gt=0)
     request_create_limit: int = Field(default=10, gt=0)
     request_create_window_seconds: int = Field(default=3_600, gt=0)
+    # How long a create's Idempotency-Key answers its retries with the request it made (#264).
+    request_idempotency_window_seconds: int = Field(default=86_400, gt=0)
     request_list_default_limit: int = Field(default=20, gt=0)
     request_list_max_limit: int = Field(default=50, gt=0)
     # Reverse geocoding through Google (D8.2, #215): the device position becomes an address.

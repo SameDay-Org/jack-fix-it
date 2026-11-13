@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Header, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_app_settings
@@ -79,8 +79,22 @@ _RATE_LIMITED: dict[int | str, dict[str, Any]] = {
     summary="Create a service request",
     dependencies=[Depends(limit_request_create)],
     responses={
+        status.HTTP_200_OK: {
+            "model": RequestOut,
+            "description": (
+                "A retry: the caller already made a request with this Idempotency-Key and "
+                "this body within the window. The replay returns the existing request with "
+                "its current status and fresh media URLs (status, customer_status and each "
+                "media url and expires_at may differ from the 201; every other field is the "
+                "same); nothing is created or sent to pros again."
+            ),
+        },
         status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
         status.HTTP_403_FORBIDDEN: _FORBIDDEN,
+        status.HTTP_409_CONFLICT: _error(
+            "idempotency_key_reused: the caller already used this Idempotency-Key with a "
+            "different body; nothing was changed."
+        ),
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
             "zip_not_served: the address ZIP is outside the active service areas (offer the "
             "waitlist); "
@@ -92,7 +106,8 @@ _RATE_LIMITED: dict[int | str, dict[str, Any]] = {
             "invalid_media: a media key that "
             "is not the caller's own request_media upload, a duplicate, a key already used, "
             "or too many; validation_error: any other invalid field (past date, intake "
-            "answers too large, address format, unknown fields such as urgency)."
+            "answers too large, address format, unknown fields such as urgency, an "
+            "Idempotency-Key that is not a UUID)."
         ),
         **_RATE_LIMITED,
     },
@@ -101,6 +116,20 @@ async def create_request(
     data: RequestCreate,
     user: CustomerUser,
     requests: Annotated[ServiceRequestService, Depends(get_request_service)],
+    response: Response,
+    idempotency_key: Annotated[
+        uuid.UUID | None,
+        Header(
+            alias="Idempotency-Key",
+            description=(
+                "A UUID the client makes once per draft and sends again with every retry of "
+                "it. Within the server's window (24 hours by default) a retry answers 200 "
+                "with the request the first call made, as it is now (current status, fresh "
+                "media URLs), and the same key with another body "
+                "answers 409 idempotency_key_reused. Without it every call creates a request."
+            ),
+        ),
+    ] = None,
 ) -> RequestOut:
     """Creates a request for the signed-in customer, with a new service address and media.
 
@@ -108,7 +137,10 @@ async def create_request(
     request_media) and listing their keys. The server sets the origin (app), the language
     (the account's) and the status (received).
     """
-    return await requests.create(user, data)
+    created = await requests.create(user, data, idempotency_key)
+    if not created.created:
+        response.status_code = status.HTTP_200_OK
+    return created.request
 
 
 @router.get(

@@ -9,6 +9,12 @@ After the commit, create queues dispatch (#48) for the worker, then, when the re
 media, the privacy-safe copy of its photos and videos (#173); a failed or slow enqueue is
 logged and never fails the request (the BDC can dispatch it again).
 
+A create may carry an Idempotency-Key (#264), a UUID the app makes once per draft. Within
+REQUEST_IDEMPOTENCY_WINDOW_SECONDS a repeat of the customer's key answers the request it made
+(200, not 201) and does nothing else; the same key with another body is a 409. Two creates
+racing with one key insert one request: the unique index makes the second wait for the first,
+then answer its request. Keys are per customer.
+
 Customers read only their own requests: another customer's id answers 404 (ensure_owner).
 Logs carry the request id, the user id and counts: never the description, the address, media
 keys or URLs.
@@ -16,6 +22,8 @@ keys or URLs.
 
 import base64
 import binascii
+import hashlib
+import hmac
 import json
 import logging
 import uuid
@@ -31,6 +39,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.db import violated_constraint
 from app.errors import NotFoundError
 from app.integrations.storage import Storage
 from app.modules.addresses.schemas import AddressArea, AddressOut
@@ -41,6 +50,7 @@ from app.modules.categories.service import BrokenIntakeQuestionsError, CategoryS
 from app.modules.dispatch.service import enqueue_dispatch
 from app.modules.requests.customer_status import REQUEST_CUSTOMER_STATUS
 from app.modules.requests.errors import (
+    IdempotencyKeyReusedError,
     InvalidCategoryError,
     InvalidIntakeAnswersError,
     InvalidMediaError,
@@ -49,6 +59,7 @@ from app.modules.requests.errors import (
 )
 from app.modules.requests.media_copies import enqueue_sanitize
 from app.modules.requests.models import (
+    IDEMPOTENCY_KEY_INDEX,
     MediaSafeStatus,
     RequestMedia,
     RequestOrigin,
@@ -91,6 +102,7 @@ class RequestConfig:
     list_max_limit: int
     media_url_ttl_seconds: int
     enqueue_timeout_seconds: float
+    idempotency_window_seconds: int
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "RequestConfig":
@@ -101,7 +113,23 @@ class RequestConfig:
             list_max_limit=settings.request_list_max_limit,
             media_url_ttl_seconds=settings.download_url_ttl_seconds,
             enqueue_timeout_seconds=settings.job_enqueue_timeout_seconds,
+            idempotency_window_seconds=settings.request_idempotency_window_seconds,
         )
+
+
+@dataclass(frozen=True)
+class CreatedRequest:
+    """What a create answers: the request, and whether this call made it (False when an
+    earlier create with the same Idempotency-Key did)."""
+
+    request: RequestOut
+    created: bool
+
+
+@dataclass(frozen=True)
+class _Idempotency:
+    key: uuid.UUID
+    fingerprint: str
 
 
 class ServiceRequestService:
@@ -124,7 +152,28 @@ class ServiceRequestService:
         self._config = config
         self._queue = queue
 
-    async def create(self, user: UserAccount, data: RequestCreate) -> RequestOut:
+    async def create(
+        self, user: UserAccount, data: RequestCreate, idempotency_key: uuid.UUID | None = None
+    ) -> CreatedRequest:
+        """Without a key, every call makes a request. With one, a request the customer made
+        with it within the window is answered before anything else is checked (a retry the
+        next day must not fail on a date that has since passed, or on media it already
+        attached), and nothing is written or queued. The answer is that same request with
+        its current status and freshly signed media URLs, never a stored copy of the first
+        answer: a retry must not hand back a stale status or an expired URL."""
+        idempotency = (
+            None
+            if idempotency_key is None
+            else _Idempotency(key=idempotency_key, fingerprint=_fingerprint(data))
+        )
+        expired: ServiceRequest | None = None
+        if idempotency is not None:
+            earlier = await self._requests.by_idempotency_key(user.id, idempotency.key)
+            if earlier is not None:
+                window = timedelta(seconds=self._config.idempotency_window_seconds)
+                if earlier.created_at > datetime.now(UTC) - window:
+                    return await self._replay(user, earlier, idempotency.fingerprint)
+                expired = earlier
         if data.preferred_date is not None and data.preferred_date < datetime.now(UTC).date():
             raise InvalidRequestError
         preferred_period = _stored_period(data.preferred_date, data.preferred_period)
@@ -137,6 +186,10 @@ class ServiceRequestService:
 
         savepoint = await self._session.begin_nested()
         try:
+            if expired is not None:
+                # The key's request is older than the window: the key no longer answers with
+                # it, and the unique index would refuse it to the new request.
+                await self._requests.release_idempotency_key(expired)
             address_id = await self._addresses.create(user.id, data.address)
             request = await self._requests.add(
                 ServiceRequest(
@@ -150,6 +203,8 @@ class ServiceRequestService:
                     language=user.locale,
                     origin=RequestOrigin.APP,
                     utm=data.utm.model_dump(exclude_none=True) if data.utm else None,
+                    idempotency_key=idempotency and idempotency.key,
+                    idempotency_fingerprint=idempotency and idempotency.fingerprint,
                 )
             )
             await self._requests.add_media(
@@ -158,9 +213,16 @@ class ServiceRequestService:
                     for key, kind in media_kinds
                 ]
             )
-        except IntegrityError:
+        except IntegrityError as error:
+            await savepoint.rollback()  # nothing of this call stays: no address, no media
+            if idempotency is not None and violated_constraint(error) == IDEMPOTENCY_KEY_INDEX:
+                # A create with the same key got there first: the index held this insert until
+                # that one committed. Its request is the answer, whatever its age (it is new).
+                winner = await self._requests.by_idempotency_key(user.id, idempotency.key)
+                if winner is None:  # pragma: no cover - requests are never deleted
+                    raise
+                return await self._replay(user, winner, idempotency.fingerprint)
             # A media key already attached to another request (uq_request_media_file_key).
-            await savepoint.rollback()
             raise InvalidMediaError from None
         await savepoint.commit()
         await self._session.commit()
@@ -176,7 +238,21 @@ class ServiceRequestService:
         await self._queue_dispatch(request.id)
         if media_kinds:
             await self._queue_sanitize(request.id)
-        return await self._detail(request)
+        return CreatedRequest(request=await self._detail(request), created=True)
+
+    async def _replay(
+        self, user: UserAccount, earlier: ServiceRequest, fingerprint: str
+    ) -> CreatedRequest:
+        """The request an earlier create with the same key made, when the body is the same
+        (fingerprints compared in constant time); 409 when it is not. Logs never carry the key."""
+        if not hmac.compare_digest(earlier.idempotency_fingerprint or "", fingerprint):
+            logger.info("request_idempotency_key_reused", extra={"user_id": str(user.id)})
+            raise IdempotencyKeyReusedError
+        logger.info(
+            "request_replayed",
+            extra={"service_request_id": str(earlier.id), "user_id": str(user.id)},
+        )
+        return CreatedRequest(request=await self._detail(earlier), created=False)
 
     async def _queue_dispatch(self, request_id: uuid.UUID) -> None:
         """Hands the committed request to dispatch. Never fails the create: the request is
@@ -303,6 +379,22 @@ class ServiceRequestService:
             media=media,
             created_at=request.created_at,
         )
+
+
+def _fingerprint(data: RequestCreate) -> str:
+    """SHA-256 (hex) of the body as validated (trimmed, defaults filled in), its keys sorted:
+    two bodies that differ in any field differ here, and the same body is the same however
+    its JSON was laid out. Text with no UTF-8 form (a lone surrogate, which the schema lets
+    through in intake answers and media keys) is the validation error a create without a
+    key answers too, raised before the key is looked up, so the key stays unused."""
+    canonical = json.dumps(
+        data.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    try:
+        encoded = canonical.encode()
+    except UnicodeEncodeError:
+        raise InvalidRequestError from None
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _encode_cursor(request: ServiceRequest) -> str:

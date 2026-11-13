@@ -4741,7 +4741,10 @@ export interface operations {
     create_request_v1_requests_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description A UUID the client makes once per draft and sends again with every retry of it. Within the server's window (24 hours by default) a retry answers 200 with the request the first call made, as it is now (current status, fresh media URLs), and the same key with another body answers 409 idempotency_key_reused. Without it every call creates a request. */
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -4751,6 +4754,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description A retry: the caller already made a request with this Idempotency-Key and this body within the window. The replay returns the existing request with its current status and fresh media URLs (status, customer_status and each media url and expires_at may differ from the 201; every other field is the same); nothing is created or sent to pros again. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestOut"];
+                };
+            };
             /** @description Successful Response */
             201: {
                 headers: {
@@ -4778,7 +4790,16 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description zip_not_served: the address ZIP is outside the active service areas (offer the waitlist); invalid_category: unknown or inactive category, or one whose questions cannot be read right now (send the request without a category); invalid_intake_answers: intake_answers do not fit the category's intake_questions (an unknown key, a missing required one, a value of the wrong type or out of range), or are not empty without a category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency). */
+            /** @description idempotency_key_reused: the caller already used this Idempotency-Key with a different body; nothing was changed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description zip_not_served: the address ZIP is outside the active service areas (offer the waitlist); invalid_category: unknown or inactive category, or one whose questions cannot be read right now (send the request without a category); invalid_intake_answers: intake_answers do not fit the category's intake_questions (an unknown key, a missing required one, a value of the wrong type or out of range), or are not empty without a category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency, an Idempotency-Key that is not a UUID). */
             422: {
                 headers: {
                     [name: string]: unknown;

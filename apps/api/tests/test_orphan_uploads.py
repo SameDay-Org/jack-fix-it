@@ -69,8 +69,13 @@ NOW = datetime(2026, 10, 24, 12, 0, tzinfo=UTC)
 MIN_AGE = timedelta(hours=24)
 OLD = NOW - MIN_AGE - timedelta(minutes=1)
 YOUNG = NOW - MIN_AGE + timedelta(minutes=1)
-# Upload key columns that are not uploads: the opaque safe copies (#173), never swept.
-NOT_UPLOAD_KEYS = {"request_media.safe_key", "job_photos.safe_key"}
+# `_key` columns that hold no upload: the opaque safe copies (#173), never swept, and the
+# client's Idempotency-Key of a request (#264), a UUID.
+NOT_UPLOAD_KEYS = {
+    "request_media.safe_key",
+    "job_photos.safe_key",
+    "service_requests.idempotency_key",
+}
 
 
 @dataclass
