@@ -67,6 +67,25 @@ describe("the FAQ", () => {
     );
   });
 
+  // The language is chosen in Account > Settings > Language and saved to the account (#218): the
+  // answer names that path by the labels on screen, and no longer says the phone decides.
+  it.each([
+    ["en", en, /saved to your account/, /phone/i],
+    ["es", es, /se guarda en tu cuenta/, /tel[eé]fono/i],
+  ] as const)("%s sends people to the language choice in Settings", (_, catalog, saved, phone) => {
+    const { answer } = catalog.help.faq.language;
+
+    for (const label of [
+      catalog.tabs.account,
+      catalog.settings.title,
+      catalog.settings.sections.language,
+    ]) {
+      expect(answer).toContain(label);
+    }
+    expect(answer).toMatch(saved);
+    expect(answer).not.toMatch(phone);
+  });
+
   it("sends people to the job's chat, never to a contact outside the app", () => {
     expect(en.help.faq.chat.answer).toMatch(/chat on your job page.*as soon as you've booked/);
     expect(es.help.faq.chat.answer).toMatch(/chat de la página de tu trabajo.*en cuanto reservas/);

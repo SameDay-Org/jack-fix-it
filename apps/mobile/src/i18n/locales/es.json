@@ -1037,7 +1037,7 @@
       },
       "language": {
         "question": "¿En qué idiomas está la app?",
-        "answer": "En inglés y en español. Jack Fix It usa el idioma de tu teléfono; con cualquier otro idioma, se muestra en inglés."
+        "answer": "En inglés y en español. En Cuenta, abre Configuración y elige uno en Idioma. Tu elección se guarda en tu cuenta, así que la app la usa la próxima vez que inicies sesión en otro dispositivo."
       }
     }
   },

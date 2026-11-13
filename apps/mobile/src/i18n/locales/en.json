@@ -1037,7 +1037,7 @@
       },
       "language": {
         "question": "Which languages is the app in?",
-        "answer": "English and Spanish. Jack Fix It follows your phone's language; with any other language, it shows in English."
+        "answer": "English and Spanish. In Account, open Settings and choose one under Language. Your choice is saved to your account, so the app uses it the next time you log in on another device."
       }
     }
   },
