@@ -124,10 +124,17 @@ there are all `{"route": null}`; Mapbox failing or without `MAPBOX_ACCESS_TOKEN`
   that outlived its turn never ends the next one's. After a failure Mapbox is not asked again
   for that job for `ROUTE_RETRY_SECONDS`; polls meanwhile get the 503 without a call.
   Directions is a POST: positions travel in the body, not the URL.
-- **Geocoding is temporary.** A request's address row has no coordinates today, so each
-  computed route places the address with Mapbox's forward geocoding first. That answer is used
-  and dropped: Mapbox's terms forbid caching or storing a temporary result. Keeping
-  coordinates on an address needs `permanent=true` and a decision.
+- **Geocoding: once, when the switch is on (#384).** With `GEOCODE_ON_SAVE` the worker task
+  `geocode_address` (`addresses/geocode.py`), queued after POST /v1/requests commits, places
+  the request's address once with Mapbox's permanent geocoding (`permanent=true`, the only
+  kind that may be stored) and keeps the point in `addresses.lat/lng`, only when Mapbox puts
+  it in the address's own state and ZIP. The route reads that point and makes no geocoding
+  call. A row without a point (the switch off, or a geocode that kept nothing) is placed by
+  the route itself with temporary geocoding, each time: that answer is used and dropped,
+  since Mapbox's terms forbid caching or storing it. A request's address is never edited; if
+  that changes, the edit clears the point in the same write
+  (`tests/test_address_geocode_guard.py` fails until it is looked at). The point is for the
+  server's own use: no response carries it, and no log either.
 - **Logs.** The job's id and the event name only: no coordinate, address, street name, token,
   URL or text of Mapbox's. Sentry's breadcrumb of a call to Mapbox says `[mapbox]` where its
   URL would be (`app/observability.py`).
@@ -195,6 +202,7 @@ uv run arq app.worker.WorkerSettings --custom-log-dict app.observability.WORKER_
 uv run alembic upgrade head
 uv run python -m scripts.seed_categories          # inserts missing launch categories (seed_data.json); never updates a row
 uv run python -m scripts.seed_service_areas       # inserts missing served ZIPs (service_areas/seed_data.json: South Florida, Broward active, #9); never updates a row
+uv run python -m scripts.backfill_address_geocodes # gives the addresses without a point theirs (#384): a dry run that counts; --apply asks Mapbox (billed, needs GEOCODE_ON_SAVE=true)
 uv run python -m scripts.create_staff_user        # creates an admin or agent (asks; password via getpass), or --promote an account; --help
 uv run python -m scripts.resolve_payout_account   # staff settle a 409 payouts_needs_review: --pro <profile id> --adopt <acct_...> or --allow-new, --operator <admin email> [--reason ...] (asks; --yes); --help
 uv run python -m scripts.resolve_payment_intent   # staff settle a 409 payment_needs_review: --payment <payment id> --adopt <pi_...> or --allow-new, --operator <admin email> [--reason ...] (asks; --yes); --help

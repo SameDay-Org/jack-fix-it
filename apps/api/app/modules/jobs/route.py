@@ -7,11 +7,12 @@ way, and draws the line. The route comes from Mapbox (app/integrations/mapbox.py
   position. Otherwise the answer is "no route", the very answer before the first position:
   like the position's read, it says nothing about the job that the job's own view does not.
 - From and to: from the pro's latest position to the address of the job's request. An address
-  row without coordinates (every one, until addresses are geocoded when they are made) is
-  placed by Mapbox's forward geocoding, once per computed route. That answer is used and
-  dropped: never written to the address, never cached on its own (Mapbox's terms for its
-  temporary geocoding), never logged. An address Mapbox cannot place, or one no road leads to,
-  is "no route" plus a warning with the job's id.
+  row that has its point (GEOCODE_ON_SAVE, addresses/geocode.py, #384) is routed to as it
+  is: no geocoding call. A row without one (every one while that switch is off, and one
+  whose geocoding kept nothing) is placed by Mapbox's forward geocoding, once per computed
+  route. That answer is used and dropped: never written to the address, never cached on its
+  own (Mapbox's terms for its temporary geocoding), never logged. An address Mapbox cannot
+  place, or one no road leads to, is "no route" plus a warning with the job's id.
 - The cache: a job's computed route is kept for ROUTE_CACHE_SECONDS and answered again while
   the pro is within ROUTE_REFRESH_DISTANCE_M of where it starts, so a customer's polls do not
   become as many Mapbox calls. One request at a time asks Mapbox for a job: another arriving
