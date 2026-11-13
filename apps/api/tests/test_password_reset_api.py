@@ -271,11 +271,12 @@ async def test_code_is_six_digits_and_stored_hashed_with_ttl(
     assert await stored(redis, prefix) == {"code": code_digest(email.code), "tries": "0"}
     ttl = await redis.ttl(key(prefix, EMAIL))
     assert TTL_SECONDS - 5 < ttl <= TTL_SECONDS
-    # Neither the code nor the address in any key or value.
-    for found in [k.decode() async for k in redis.scan_iter(match=f"{prefix}:*")]:
-        assert EMAIL not in found
-        assert email.code not in found
-    assert email.code not in json.dumps(await stored(redis, prefix))
+    # Neither the code nor the address in any key or value: the one key is the address's HMAC,
+    # whose hex digits can spell a 6-digit code by chance (#387).
+    found = [k.decode() async for k in redis.scan_iter(match=f"{prefix}:*")]
+    assert found == [key(prefix, EMAIL)]
+    assert EMAIL not in found[0]
+    assert email.code not in (await stored(redis, prefix)).values()
 
 
 def test_new_code_is_zero_padded_six_digits(monkeypatch: pytest.MonkeyPatch) -> None:

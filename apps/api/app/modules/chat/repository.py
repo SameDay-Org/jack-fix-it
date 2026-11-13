@@ -228,17 +228,24 @@ class ChatRepository:
 
     async def clear_expired_originals(self, now: datetime, limit: int) -> int:
         """Clears the originals of at most `limit` messages whose original_expires_at is at or
-        before `now`, skipping rows another transaction holds; how many it cleared."""
+        before `now`, skipping rows another transaction holds; how many it cleared.
+
+        The due ids are a MATERIALIZED CTE, run once. As `id IN (subquery)` the planner may
+        rescan the subquery once per row (a nested-loop semi join, e.g. on a freshly analyzed
+        small table), and each rescan skips the rows this UPDATE already changed and locks the
+        next ones, so one batch cleared every due row (#386)."""
         due = (
             select(JobMessage.id)
             .where(JobMessage.original_expires_at <= now)
             .order_by(JobMessage.original_expires_at)
             .limit(limit)
             .with_for_update(skip_locked=True)
+            .cte("due")
+            .prefix_with("MATERIALIZED")
         )
         statement = (
             update(JobMessage)
-            .where(JobMessage.id.in_(due.scalar_subquery()))
+            .where(JobMessage.id.in_(select(due.c.id)))
             .values(
                 original_ciphertext=None,
                 original_key_id=None,
