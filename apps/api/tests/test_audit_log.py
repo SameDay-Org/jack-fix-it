@@ -1,6 +1,7 @@
 """audit_log (#58, Vault round 1 B2): append-only rows written by AuditService.record, and the
 staff operator lookup. The scripts' own audit tests are in test_resolve_payment_intent.py and
-test_resolve_payout_account.py."""
+test_resolve_payout_account.py. Staff actions the BDC takes too (#274) go through
+record_staff_action."""
 
 import uuid
 
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.audit.service import AuditService
 from app.modules.audit.types import (
+    ActorNotStaffError,
     AuditAction,
     AuditEntity,
     AuditEntityType,
@@ -53,6 +55,62 @@ async def test_record_refuses_an_operator_who_is_no_longer_an_active_admin(
     with pytest.raises(OperatorNotAdminError):
         await AuditService(db_session).record(
             Operator(user_id), AuditAction.PAYMENT_INTENT_ALLOW_NEW, ENTITY, BEFORE, AFTER
+        )
+
+    assert await audit_rows(db_session) == []
+
+
+TICKET = AuditEntity(
+    AuditEntityType.SUPPORT_TICKET, uuid.UUID("9b1d4c7e-2222-4333-8444-555566667777")
+)
+
+
+@pytest.mark.parametrize("role", [UserRole.AGENT, UserRole.ADMIN])
+async def test_record_staff_action_takes_an_agent_or_an_admin(
+    db_session: AsyncSession, role: UserRole
+) -> None:
+    staff = await make_staff(db_session, role=role)
+
+    await AuditService(db_session).record_staff_action(
+        staff,
+        AuditAction.SUPPORT_TICKET_SET_STATUS,
+        TICKET,
+        {"status": "open"},
+        {"status": "closed"},
+    )
+
+    assert await audit_rows(db_session) == [
+        AuditRow(
+            staff,
+            "support_ticket.set_status",
+            "support_ticket",
+            TICKET.id,
+            {"status": "open"},
+            {"status": "closed"},
+            None,
+        )
+    ]
+
+
+@pytest.mark.parametrize("who", ["unknown", "customer", "pro", "suspended agent"])
+async def test_record_staff_action_refuses_anyone_who_is_not_active_staff(
+    db_session: AsyncSession, who: str
+) -> None:
+    """Checked again at the write: an account demoted or suspended since the route's check."""
+    if who == "unknown":
+        user_id = uuid.uuid4()
+    elif who == "suspended agent":
+        user_id = await make_staff(db_session, role=UserRole.AGENT, status=UserStatus.SUSPENDED)
+    else:
+        user_id = await make_staff(db_session, role=UserRole(who))
+
+    with pytest.raises(ActorNotStaffError):
+        await AuditService(db_session).record_staff_action(
+            user_id,
+            AuditAction.SUPPORT_TICKET_SET_STATUS,
+            TICKET,
+            {"status": "open"},
+            {"status": "closed"},
         )
 
     assert await audit_rows(db_session) == []

@@ -106,6 +106,7 @@ describe("theme tokens", () => {
       "danger",
       "success",
       "warning",
+      "receipt-seen",
     ]);
     expect(tokens.radius).toEqual({ sm: 12, md: 16, lg: 24, xl: 32, pill: 9999 });
     expect(Object.keys(tokens.fontSize)).toEqual([

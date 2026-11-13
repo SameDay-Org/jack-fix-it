@@ -383,7 +383,7 @@
           "auth"
         ],
         "summary": "Update the current user",
-        "description": "Sets the caller's own first and last name (#165), home city and state and ID photo\n(#250). Both names are required together while they are not stored; afterwards either may\nchange alone. The city and the state are set together, or both cleared with null. The\nphoto is the caller's own profile_photo upload key; for a pro without a public profile\nphoto it becomes that photo too. Nothing changes when any field is refused.",
+        "description": "Sets the caller's own first and last name (#165), home city and state, ID photo (#250)\nand app language (#218). Both names are required together while they are not stored;\nafterwards either may change alone. The city and the state are set together, or both\ncleared with null. The photo is the caller's own profile_photo upload key; for a pro\nwithout a public profile photo it becomes that photo too. The locale (en or es) is also\nthe language of later pushes and emails. Nothing changes when any field is refused.",
         "operationId": "update_me_v1_auth_me_patch",
         "requestBody": {
           "content": {
@@ -407,7 +407,7 @@
             }
           },
           "422": {
-            "description": "validation_error: an invalid or null name, an unknown field, an empty body, one name while the other is not stored yet, or home_city without home_state (or the other way round). invalid_media: photo_key is not the caller's own profile_photo upload.",
+            "description": "validation_error: an invalid or null name, an unsupported or null locale (only en and es), an unknown field, an empty body, one name while the other is not stored yet, or home_city without home_state (or the other way round). invalid_media: photo_key is not the caller's own profile_photo upload.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2531,6 +2531,373 @@
         }
       }
     },
+    "/v1/me/payment-methods/setup-intent": {
+      "post": {
+        "tags": [
+          "payment-methods"
+        ],
+        "summary": "Start adding a card to my wallet",
+        "description": "What the Payment Sheet needs, in setup mode, to save a card: a new SetupIntent's client\nsecret, the caller's Stripe Customer (created on the first call, the same one ever after)\nand a new ephemeral key for it, and the publishable key. The card data goes from the app to\nStripe, never through this API. The body takes no field.",
+        "operationId": "create_setup_intent_v1_me_payment_methods_setup_intent_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupIntentOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers keep payment methods.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many payment-method changes; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not_configured: payments are not configured; payments_unavailable: Stripe is not reachable, asked to retry later or refused the call, the wallet holds more cards than the API reads, or a change of the wallet did not end in time (its wait for a database connection and for another change of the same wallet included); retry later.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/me/payment-methods": {
+      "get": {
+        "tags": [
+          "payment-methods"
+        ],
+        "summary": "List my saved cards",
+        "description": "The caller's saved cards, the most recently added first: the brand, the last four\ndigits, the expiry and whether it is the default. Empty until a card is saved. Always the\nwhole wallet, in one response: the API reads at most PAYMENT_METHOD_LIST_MAX_PAGES pages\nof 100 cards of one customer from Stripe (500 cards unless the setting is changed), and a\nwallet with more is 503 payments_unavailable, never a partial list.",
+        "operationId": "list_payment_methods_v1_me_payment_methods_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PaymentMethodOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Payment Methods V1 Me Payment Methods Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers keep payment methods.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not_configured: payments are not configured; payments_unavailable: Stripe is not reachable, asked to retry later or refused the call, the wallet holds more cards than the API reads, or a change of the wallet did not end in time (its wait for a database connection and for another change of the same wallet included); retry later.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/me/payment-methods/{payment_method_id}/default": {
+      "post": {
+        "tags": [
+          "payment-methods"
+        ],
+        "summary": "Make a saved card my default",
+        "description": "Makes the card the caller's default payment method and returns it. Asking again for\nthe card that is the default already changes nothing. Default changes and deletes of one\nwallet run one at a time: a call waits for the one before it, and is 503\npayments_unavailable when its waits (for a database connection, then for that call) and\nits own work together take longer than PAYMENT_METHOD_CHANGE_TIMEOUT_SECONDS.",
+        "operationId": "set_default_payment_method_v1_me_payment_methods__payment_method_id__default_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "payment_method_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^pm_[A-Za-z0-9_]{1,252}$",
+              "description": "The saved card's Stripe PaymentMethod id, as the list returns it.",
+              "title": "Payment Method Id"
+            },
+            "description": "The saved card's Stripe PaymentMethod id, as the list returns it."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentMethodOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: the id is not a PaymentMethod id (pm_ and letters, digits or _).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers keep payment methods.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "payment_method_not_found: no saved card of the caller with this id (an unknown id and another user's card answer the same).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many payment-method changes; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not_configured: payments are not configured; payments_unavailable: Stripe is not reachable, asked to retry later or refused the call, the wallet holds more cards than the API reads, or a change of the wallet did not end in time (its wait for a database connection and for another change of the same wallet included); retry later.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/payment-methods/{payment_method_id}": {
+      "delete": {
+        "tags": [
+          "payment-methods"
+        ],
+        "summary": "Delete a saved card",
+        "description": "Removes the card from the caller's wallet for good. Deleting the default makes the most\nrecently added of the other cards the default; with no other card, none is. A card deleted\nalready is a 404. Default changes and deletes of one wallet run one at a time, so two\ndeletes at once end as one after the other would: a call waits for the one before it, and\nis 503 payments_unavailable when its waits (for a database connection, then for that call)\nand its own work together take longer than PAYMENT_METHOD_CHANGE_TIMEOUT_SECONDS. A wallet\nwith more cards than the list reads cannot delete its default card (503): the next default\ncould not be chosen among all of them.",
+        "operationId": "delete_payment_method_v1_me_payment_methods__payment_method_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "payment_method_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^pm_[A-Za-z0-9_]{1,252}$",
+              "description": "The saved card's Stripe PaymentMethod id, as the list returns it.",
+              "title": "Payment Method Id"
+            },
+            "description": "The saved card's Stripe PaymentMethod id, as the list returns it."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "validation_error: the id is not a PaymentMethod id (pm_ and letters, digits or _).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers keep payment methods.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "payment_method_not_found: no saved card of the caller with this id (an unknown id and another user's card answer the same).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many payment-method changes; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not_configured: payments are not configured; payments_unavailable: Stripe is not reachable, asked to retry later or refused the call, the wallet holds more cards than the API reads, or a change of the wallet did not end in time (its wait for a database connection and for another change of the same wallet included); retry later.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/requests/{request_id}/job": {
       "get": {
         "tags": [
@@ -3370,6 +3737,205 @@
         }
       }
     },
+    "/v1/jobs/{job_id}/pro-location": {
+      "put": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Share my position while I am on my way (never stored in the database)",
+        "description": "The pro's app sends this every few seconds from On my way to the check-in. Only the\nlatest position of a job is kept, in memory, for a short time; it is deleted when the pro\nchecks in or the job leaves on the way, and no position is ever written to the database.\nOne sent too soon after the last, or older than it, is answered 204 and dropped.",
+        "operationId": "share_pro_location_v1_jobs__job_id__pro_location_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProLocationIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "validation_error: a coordinate, accuracy or heading out of range or not a finite number, an unknown field, or recorded_at too far from the server's time.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros share their position.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job of the caller with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "not_on_the_way: the pro is not on the way to this job: not yet, already checked in, or the job moved on. Stop sending.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: far too many positions from this pro; Retry-After has the wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "location_unavailable: the position could not be kept (the store is down, or must not hold positions); drop it and send the next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "See where my pro is while on the way (never stored in the database)",
+        "description": "The pro's latest position on the way to the customer's own job, to poll every few\nseconds. `position` is null whenever there is none to show: before the first one, once it\nis too old, and whenever the pro is not on the way (the job's own status says which).\nPositions are kept in memory for a short time only, never in the database, and every\nresponse says `Cache-Control: no-store`.",
+        "operationId": "get_pro_location_v1_jobs__job_id__pro_location_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProLocationOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers follow their pro.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job of the caller with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "location_unavailable: the store must not hold positions (a deploy problem); there is none to show until it is fixed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/jobs/{job_id}/messages": {
       "get": {
         "tags": [
@@ -4029,6 +4595,59 @@
         ]
       }
     },
+    "/v1/devices/unregister": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "summary": "Stop pushes to this device, without a session",
+        "description": "Removes the token's device for an app that has no session left: a sign-out whose\n`DELETE /v1/devices` did not get through is retried here, so the account that left stops\nreceiving pushes on that phone.\n\nNo sign-in: holding the exact token is the credential, and an `Authorization` header, if\nsent, is not read. Only that token's device can go. Limited per client IP.",
+        "operationId": "unregister_device_without_session_v1_devices_unregister_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceRemoval"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Always, whether or not the token was registered."
+          },
+          "422": {
+            "description": "validation_error: not an Expo push token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many requests from this client; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/waitlist": {
       "post": {
         "tags": [
@@ -4653,6 +5272,465 @@
             "HTTPBearer": []
           }
         ]
+      }
+    },
+    "/v1/support/tickets": {
+      "post": {
+        "tags": [
+          "support"
+        ],
+        "summary": "Write to the team (Talk to Jack)",
+        "description": "Opens a support ticket for the team. The message is kept as typed and read by the team\nonly. `job_id` ties the ticket to one of the caller's jobs.",
+        "operationId": "create_ticket_v1_support_tickets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportTicketIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportTicketCreatedOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_job: job_id is not a job of which the caller is the customer or the pro (an unknown job answers the same); validation_error: an unknown topic or platform, a message empty, blank or longer than 2000 characters, an app_version out of format.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers and pros write tickets.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many tickets; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/support/tickets/mine": {
+      "get": {
+        "tags": [
+          "support"
+        ],
+        "summary": "List my support tickets",
+        "description": "The caller's own tickets, newest first: the topic, the job, the status and the dates,\nwhat the app shows after a ticket was sent. Never the message, and never anyone else's.",
+        "operationId": "list_my_tickets_v1_support_tickets_mine_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size; capped.",
+              "title": "Limit"
+            },
+            "description": "Page size; capped."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MySupportTicketPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a bad cursor or limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers and pros write tickets.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/support/tickets": {
+      "get": {
+        "tags": [
+          "support"
+        ],
+        "summary": "List support tickets (staff)",
+        "description": "Every ticket, newest first, for the BDC and admins: the writer's first name and role,\nthe topic, the job and the status. The message is in the ticket's detail only.",
+        "operationId": "staff_list_tickets_v1_admin_support_tickets_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TicketStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tickets in this status; all when left out.",
+              "title": "Status"
+            },
+            "description": "Only tickets in this status; all when left out."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size; capped.",
+              "title": "Limit"
+            },
+            "description": "Page size; capped."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffSupportTicketPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: an unknown status, a bad cursor or limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/support/tickets/{ticket_id}": {
+      "get": {
+        "tags": [
+          "support"
+        ],
+        "summary": "Read a support ticket (staff)",
+        "description": "One ticket with its message as the writer typed it.",
+        "operationId": "staff_get_ticket_v1_admin_support_tickets__ticket_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Ticket Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffSupportTicketOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a ticket_id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ticket_not_found: no support ticket with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "support"
+        ],
+        "summary": "Change a support ticket's status (staff)",
+        "description": "Moves the ticket to open, in_progress or closed; any status may follow any other. Each\nchange is recorded in the audit log with the staff member who made it; the same status\nagain changes nothing.",
+        "operationId": "staff_set_ticket_status_v1_admin_support_tickets__ticket_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Ticket Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportTicketStatusIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffSupportTicketOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: an unknown status, a field other than status, or a ticket_id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ticket_not_found: no support ticket with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -6218,12 +7296,28 @@
             ],
             "title": "Photo Key",
             "description": "Key of the caller's own profile_photo upload (POST /v1/uploads); null clears."
+          },
+          "locale": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "en",
+                  "es"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locale",
+            "description": "The app language, as at sign-up: en or es. Never null."
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "MeUpdateRequest",
-        "description": "PATCH /v1/auth/me: the caller's own names (#165) and ID card fields (#250). Omit a field\nto keep it. A name is never null. home_city and home_state travel together: both set, or\nboth null to clear them. photo_key null clears the ID photo."
+        "description": "PATCH /v1/auth/me: the caller's own names (#165), ID card fields (#250) and app language\n(#218). Omit a field to keep it. A name or the locale is never null. home_city and\nhome_state travel together: both set, or both null to clear them. photo_key null clears\nthe ID photo."
       },
       "MediaOut": {
         "properties": {
@@ -6328,6 +7422,94 @@
           "type"
         ],
         "title": "MultiChoiceQuestion"
+      },
+      "MySupportTicketOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "topic": {
+            "$ref": "#/components/schemas/TicketTopic"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TicketStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At",
+            "description": "Set while the ticket is closed."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "topic",
+          "job_id",
+          "status",
+          "created_at",
+          "closed_at"
+        ],
+        "title": "MySupportTicketOut",
+        "description": "One of the caller's tickets in their list: no free text, so never the message."
+      },
+      "MySupportTicketPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MySupportTicketOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Newest first."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Pass as `cursor` for older tickets."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "MySupportTicketPage"
       },
       "NotificationPreferences": {
         "properties": {
@@ -6813,6 +7995,64 @@
         "title": "PaymentCreate",
         "description": "No input: every amount comes from the accepted quote and the platform's take rate, read\nfrom the database (AGENTS.md \"Money\"). A client sending any field, an amount above all,\ngets a 422; an empty body or none at all is fine."
       },
+      "PaymentMethodOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "The Stripe PaymentMethod id: the path id of the other routes."
+          },
+          "brand": {
+            "type": "string",
+            "title": "Brand",
+            "description": "Stripe's card brand: amex, diners, discover, eftpos_au, jcb, link, mastercard, unionpay, visa or unknown.",
+            "examples": [
+              "visa"
+            ]
+          },
+          "last4": {
+            "type": "string",
+            "title": "Last4",
+            "description": "The card number's last four digits.",
+            "examples": [
+              "4242"
+            ]
+          },
+          "exp_month": {
+            "type": "integer",
+            "title": "Exp Month",
+            "description": "The expiry month, 1 to 12.",
+            "examples": [
+              12
+            ]
+          },
+          "exp_year": {
+            "type": "integer",
+            "title": "Exp Year",
+            "description": "The expiry year, four digits.",
+            "examples": [
+              2028
+            ]
+          },
+          "is_default": {
+            "type": "boolean",
+            "title": "Is Default",
+            "description": "Whether this is the customer's default payment method."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "brand",
+          "last4",
+          "exp_month",
+          "exp_year",
+          "is_default"
+        ],
+        "title": "PaymentMethodOut",
+        "description": "A saved card as the wallet shows it: never the full number, the CVC, the fingerprint or\nthe billing details (the API never holds them)."
+      },
       "PaymentSheetOut": {
         "properties": {
           "payment_intent_client_secret": {
@@ -7269,6 +8509,141 @@
         ],
         "title": "ProJobPhotos",
         "description": "The pro's own photos of the job, oldest first: each as its privacy-safe copy once it is\nmade, else the pro's original."
+      },
+      "ProLocationIn": {
+        "properties": {
+          "lat": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Lat",
+            "description": "Latitude, in degrees."
+          },
+          "lng": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Lng",
+            "description": "Longitude, in degrees."
+          },
+          "accuracy_m": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy M",
+            "description": "The fix's accuracy radius in meters; null or left out when unknown."
+          },
+          "heading_deg": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 360.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading Deg",
+            "description": "Direction of travel, in degrees clockwise from north; null or left out when unknown."
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Recorded At",
+            "description": "When the device took the fix, with its UTC offset. Refused when too far from the server's time (ahead or behind)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "lat",
+          "lng",
+          "recorded_at"
+        ],
+        "title": "ProLocationIn",
+        "description": "One fix of the pro's device while on the way (#350). Numbers only: a string or a boolean\nis refused, not converted."
+      },
+      "ProLocationOut": {
+        "properties": {
+          "position": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProPosition"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The pro's latest position. null whenever there is none to show: the pro is not on the way (not yet, arrived, or the job moved on), has sent none yet, or the last one is too old."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "position"
+        ],
+        "title": "ProLocationOut"
+      },
+      "ProPosition": {
+        "properties": {
+          "lat": {
+            "type": "number",
+            "title": "Lat"
+          },
+          "lng": {
+            "type": "number",
+            "title": "Lng"
+          },
+          "accuracy_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy M",
+            "description": "Accuracy radius in meters, when known."
+          },
+          "heading_deg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading Deg",
+            "description": "Direction of travel, in degrees clockwise from north, when known."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "When the server received this position."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "lat",
+          "lng",
+          "accuracy_m",
+          "heading_deg",
+          "updated_at"
+        ],
+        "title": "ProPosition",
+        "description": "Where the pro was at `updated_at` (#350)."
       },
       "ProProfileOut": {
         "properties": {
@@ -8663,6 +10038,40 @@
         ],
         "title": "ServiceAreaOut"
       },
+      "SetupIntentOut": {
+        "properties": {
+          "client_secret": {
+            "type": "string",
+            "title": "Client Secret",
+            "description": "The SetupIntent's client secret: the sheet confirms the card with it. Shown once per call, never logged; a new SetupIntent on every call."
+          },
+          "ephemeral_key_secret": {
+            "type": "string",
+            "title": "Ephemeral Key Secret",
+            "description": "A short-lived key that lets the sheet act for the customer; new on each call."
+          },
+          "customer_id": {
+            "type": "string",
+            "title": "Customer Id",
+            "description": "The customer's Stripe Customer id, for the sheet."
+          },
+          "publishable_key": {
+            "type": "string",
+            "title": "Publishable Key",
+            "description": "The Stripe publishable key the sheet initializes with (pk_test_ until launch)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "client_secret",
+          "ephemeral_key_secret",
+          "customer_id",
+          "publishable_key"
+        ],
+        "title": "SetupIntentOut",
+        "description": "What the app's Payment Sheet needs, in setup mode, to save a card on the customer."
+      },
       "SingleChoiceQuestion": {
         "properties": {
           "key": {
@@ -8809,6 +10218,324 @@
         ],
         "title": "StaffChatPage"
       },
+      "StaffSupportTicketItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id",
+            "description": "Who wrote the ticket."
+          },
+          "user_first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User First Name",
+            "description": "The writer's first name alone; null when they have none or it shows a contact detail."
+          },
+          "role": {
+            "$ref": "#/components/schemas/TicketRole",
+            "description": "The writer's role when they wrote the ticket."
+          },
+          "topic": {
+            "$ref": "#/components/schemas/TicketTopic"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id",
+            "description": "The job the ticket is about, if any."
+          },
+          "status": {
+            "$ref": "#/components/schemas/TicketStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "user_first_name",
+          "role",
+          "topic",
+          "job_id",
+          "status",
+          "created_at"
+        ],
+        "title": "StaffSupportTicketItem"
+      },
+      "StaffSupportTicketOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id",
+            "description": "Who wrote the ticket."
+          },
+          "user_first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User First Name",
+            "description": "The writer's first name alone; null when they have none or it shows a contact detail."
+          },
+          "role": {
+            "$ref": "#/components/schemas/TicketRole",
+            "description": "The writer's role when they wrote the ticket."
+          },
+          "topic": {
+            "$ref": "#/components/schemas/TicketTopic"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id",
+            "description": "The job the ticket is about, if any."
+          },
+          "status": {
+            "$ref": "#/components/schemas/TicketStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "The writer's text, as typed: it may hold contact details."
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At",
+            "description": "Set while the ticket is closed."
+          },
+          "app_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Version"
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TicketPlatform"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "user_first_name",
+          "role",
+          "topic",
+          "job_id",
+          "status",
+          "created_at",
+          "message",
+          "closed_at",
+          "app_version",
+          "platform",
+          "updated_at"
+        ],
+        "title": "StaffSupportTicketOut"
+      },
+      "StaffSupportTicketPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StaffSupportTicketItem"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Newest first."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Pass as `cursor` for older tickets."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "StaffSupportTicketPage"
+      },
+      "SupportTicketCreatedOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TicketStatus",
+            "description": "open: a new ticket waits for the team."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "created_at"
+        ],
+        "title": "SupportTicketCreatedOut"
+      },
+      "SupportTicketIn": {
+        "properties": {
+          "topic": {
+            "$ref": "#/components/schemas/TicketTopic",
+            "description": "What the ticket is about."
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "pattern": "^[^\\x00]*$",
+            "title": "Message",
+            "description": "The text, trimmed. Stored as typed and read by the team only: a phone or an email written here is kept, so the team can reach the writer."
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id",
+            "description": "The job the ticket is about: one of which the caller is the customer or the pro. Leave out when the ticket is about no job."
+          },
+          "app_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32,
+                "minLength": 1,
+                "pattern": "^[0-9A-Za-z][0-9A-Za-z .()+_-]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Version",
+            "description": "The app's version, e.g. \"1.4.0 (52)\"."
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TicketPlatform"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The device the ticket was written on."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "topic",
+          "message"
+        ],
+        "title": "SupportTicketIn"
+      },
+      "SupportTicketStatusIn": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/TicketStatus",
+            "description": "The ticket's new status. Any status may follow any other (a closed ticket can be reopened); the same status again changes nothing."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "SupportTicketStatusIn"
+      },
       "TextQuestion": {
         "properties": {
           "key": {
@@ -8866,6 +10593,46 @@
           "max_length"
         ],
         "title": "TextQuestion"
+      },
+      "TicketPlatform": {
+        "type": "string",
+        "enum": [
+          "ios",
+          "android"
+        ],
+        "title": "TicketPlatform",
+        "description": "The device the ticket was written on, as the app reports it."
+      },
+      "TicketRole": {
+        "type": "string",
+        "enum": [
+          "customer",
+          "pro"
+        ],
+        "title": "TicketRole",
+        "description": "Who wrote the ticket, as they were when they wrote it: the app's users only (agents and\nadmins use the panel and write no tickets)."
+      },
+      "TicketStatus": {
+        "type": "string",
+        "enum": [
+          "open",
+          "in_progress",
+          "closed"
+        ],
+        "title": "TicketStatus"
+      },
+      "TicketTopic": {
+        "type": "string",
+        "enum": [
+          "account",
+          "payment",
+          "job",
+          "safety",
+          "app_problem",
+          "other"
+        ],
+        "title": "TicketTopic",
+        "description": "What the ticket is about, as the user picked it in the app."
       },
       "UploadPurpose": {
         "type": "string",

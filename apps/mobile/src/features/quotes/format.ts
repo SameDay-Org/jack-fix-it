@@ -60,8 +60,11 @@ const NO_BREAK_SPACE = "\u00A0";
 export const keepTogether = (text: string): string => text.replace(/ /g, NO_BREAK_SPACE);
 
 /** Short facts in one line, "★ 4.8 · 12 jobs": a line may break after a dot, never inside a fact. */
+/** What goes between two facts: a line breaks after the dot, never before it. */
+export const FACT_SEPARATOR = `${NO_BREAK_SPACE}· `;
+
 export const joinFacts = (facts: readonly string[]): string =>
-  facts.map(keepTogether).join(`${NO_BREAK_SPACE}· `);
+  facts.map(keepTogether).join(FACT_SEPARATOR);
 
 /** A span of minutes as "45 min", "2 h" or "1 h 30 min" (the units read the same in ES), unbroken. */
 export function formatMinutes(t: TFunction, minutes: number): string {

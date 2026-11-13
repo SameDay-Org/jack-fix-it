@@ -14,7 +14,7 @@ from app.config import PASSWORD_MAX_LENGTH
 from app.modules.users.locations import HomeCity, HomeState
 from app.modules.users.names import NAME_MAX_LENGTH, PersonName
 from app.modules.users.schemas import UserOut
-from app.modules.users.types import UserRole
+from app.modules.users.types import Locale, UserRole
 
 
 def _trim_and_lowercase(value: object) -> object:
@@ -50,7 +50,7 @@ class RegisterRequest(BaseModel):
     )
     # Staff accounts (agent, admin) are never self-registered.
     role: Literal[UserRole.CUSTOMER, UserRole.PRO]
-    locale: Literal["en", "es"] = "en"
+    locale: Locale = "en"
     # Optional for now, so the current app keeps working; required in a follow-up (#165).
     first_name: PersonName | None = Field(default=None, description=_NAME_RULES)
     last_name: PersonName | None = Field(default=None, description=_NAME_RULES)
@@ -63,9 +63,10 @@ class RegisterRequest(BaseModel):
 
 
 class MeUpdateRequest(BaseModel):
-    """PATCH /v1/auth/me: the caller's own names (#165) and ID card fields (#250). Omit a field
-    to keep it. A name is never null. home_city and home_state travel together: both set, or
-    both null to clear them. photo_key null clears the ID photo."""
+    """PATCH /v1/auth/me: the caller's own names (#165), ID card fields (#250) and app language
+    (#218). Omit a field to keep it. A name or the locale is never null. home_city and
+    home_state travel together: both set, or both null to clear them. photo_key null clears
+    the ID photo."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -82,6 +83,9 @@ class MeUpdateRequest(BaseModel):
         max_length=512,  # the column's width; a longer string can never be a key
         description="Key of the caller's own profile_photo upload (POST /v1/uploads); null clears.",
     )
+    locale: Locale | None = Field(
+        default=None, description="The app language, as at sign-up: en or es. Never null."
+    )
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
@@ -90,6 +94,8 @@ class MeUpdateRequest(BaseModel):
             raise ValueError("nothing to change")
         if any(getattr(self, name) is None for name in sent & {"first_name", "last_name"}):
             raise ValueError("a name cannot be null")
+        if "locale" in sent and self.locale is None:
+            raise ValueError("the locale cannot be null")
         if ("home_city" in sent) != ("home_state" in sent) or (self.home_city is None) != (
             self.home_state is None
         ):

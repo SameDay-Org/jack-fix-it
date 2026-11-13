@@ -69,6 +69,35 @@ rules apply.
   refusal or a dry run writes nothing. Append-only: a trigger refuses UPDATE, DELETE and
   TRUNCATE (SQLSTATE 42501). before/after hold ids, statuses, Stripe object ids and
   timestamps only, never PII or secrets; a new staff money action adds an `AuditAction`.
+  A staff action the BDC takes too goes through `AuditService.record_staff_action`, which
+  takes an active agent or admin: today a support ticket's status (#274,
+  `PATCH /v1/admin/support/tickets/{id}`), written in the change's transaction the same way.
+
+## Live position (#350)
+
+The pro's position while on the way (`jobs/location.py`) lives in Redis only: the latest one per
+job, for `PRO_LOCATION_TTL_SECONDS`, never in Postgres, never in a log or an error body (ids and
+the event name only).
+
+- **Tracking** is the time from On my way to the check-in. Outside it a ping is 409
+  `not_on_the_way` and the customer reads `{"position": null}`.
+- **Delete on leave.** `JobStateMachine.transition` (any move out of `on_the_way`) and
+  `JobExecutionService.check_in` delete the position under the job's row lock, before the
+  commit; a ping holds the row `FOR SHARE` until its Redis write, so none lands after the delete.
+- **Build with the store.** Whatever can move a job out of `on_the_way`, or check a pro in, passes
+  a `JobLocationStore` to the machine or the service. Without one that step raises
+  (`RuntimeError`, nothing written) instead of leaving a position behind. Tests use
+  `tests/conftest.py::InMemoryJobLocationStore` (`make_app` installs it).
+- **Its own Redis.** Positions go to `LOCATION_REDIS_URL`, a Redis that keeps nothing but its
+  live keys (no RDB, no AOF, slow log off); `jobs/location_guard.py` asks it (`CONFIG GET`)
+  and remembers the answer for `LOCATION_REDIS_RECHECK_SECONDS`. In staging and
+  production a Redis that is missing, keeps positions or will not say makes both routes
+  answer 503 `location_unavailable`; a delete is never refused. Development and test fall
+  back to `REDIS_URL`'s and only log. Never point a test at `CONFIG SET` on the shared Redis:
+  `tests/test_pro_location_retention.py` has a stand-in. Deploy contract: `docs/railway.md`.
+- **No HTTP cache.** `location_router` uses `NoStoreRoute` (`app/middleware.py`): every
+  response of these routes, errors included, says `Cache-Control: no-store`. Use the same
+  route class for any new route that returns a position.
 
 ## Worker
 

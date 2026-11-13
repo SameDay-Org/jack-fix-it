@@ -21,8 +21,11 @@ env:
   EXPO_NO_TELEMETRY: "1"
 
 jobs:
+  # Each job's timeout-minutes is about twice its slowest healthy green run (#364), so a
+  # stuck job fails instead of blocking reviews for an hour.
   api:
     runs-on: ubuntu-latest
+    timeout-minutes: 25 # green runs: median 7, slowest 12.3 min
     defaults:
       run:
         working-directory: apps/api
@@ -60,12 +63,44 @@ jobs:
       - name: Migrations upgrade, downgrade, upgrade
         run: uv run alembic upgrade head && uv run alembic downgrade base && uv run alembic upgrade head
       # The media copy tests run ffmpeg and ffprobe (#173); in CI they fail without them.
+      # When the runner's Ubuntu mirror stops resolving, apt crawls for up to an hour (#364).
+      # Each attempt's downloads get a time limit; a failed attempt is retried and reuses the
+      # .deb files it already downloaded.
       - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+        timeout-minutes: 10
+        env:
+          ATTEMPTS: "3"
+          ATTEMPT_TIMEOUT: 150s # update + download of one attempt; healthy runs take 10-180 s
+        run: |
+          fetch_packages() {
+            sudo DEBIAN_FRONTEND=noninteractive timeout --kill-after=10s "$ATTEMPT_TIMEOUT" bash -c '
+              apt-get -q -o Acquire::Retries=3 update &&
+              apt-get -q -y -o Acquire::Retries=3 --no-install-recommends --download-only install ffmpeg'
+          }
+          # Installs only what fetch_packages downloaded: no network, so no time limit.
+          install_from_cache() {
+            sudo DEBIAN_FRONTEND=noninteractive apt-get -q -y --no-install-recommends --no-download install ffmpeg
+          }
+          for attempt in $(seq 1 "$ATTEMPTS"); do
+            rc=0
+            { fetch_packages && install_from_cache; } || rc=$?
+            if [ "$rc" -eq 0 ]; then
+              dpkg-query -W ffmpeg
+              exit 0
+            fi
+            if [ "$attempt" -lt "$ATTEMPTS" ]; then
+              delay=$((attempt * 10))
+              echo "::warning::Install ffmpeg attempt $attempt of $ATTEMPTS failed (exit $rc; 124 = over $ATTEMPT_TIMEOUT). Retrying in ${delay}s."
+              sleep "$delay"
+            fi
+          done
+          echo "::error::Install ffmpeg failed $ATTEMPTS times (last exit $rc): the runner's apt mirror is unreachable or too slow. Re-run the job (#364)."
+          exit 1
       - run: uv run pytest
 
   js:
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # green runs: median 3.5, slowest 4.7 min
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -87,6 +122,9 @@ jobs:
 
   contract:
     runs-on: ubuntu-latest
+    # Green runs: median 0.5, slowest 0.8 min. Twice that is under 2 min, so 5 leaves room for
+    # cold pnpm and uv caches.
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0 (no moving major tag)

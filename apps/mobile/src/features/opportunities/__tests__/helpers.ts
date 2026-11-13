@@ -159,14 +159,18 @@ export const navigation = {
 
 const useIsNavigating = () => useSyncExternalStore(subscribe, () => nav.navigating);
 
+const router = {
+  push: jest.fn(),
+  back: jest.fn(),
+  replace: jest.fn(),
+  dismissTo: jest.fn(),
+  canGoBack: jest.fn(() => nav.canGoBack),
+};
+
 export const routerMock = {
-  router: {
-    push: jest.fn(),
-    back: jest.fn(),
-    replace: jest.fn(),
-    dismissTo: jest.fn(),
-    canGoBack: jest.fn(() => nav.canGoBack),
-  },
+  router,
+  // A screen's own router (`useRouter`, #344) is the same recorded one.
+  useRouter: () => router,
   useLocalSearchParams: () => useSyncExternalStore(subscribe, () => nav.params),
   unstable_useIsNavigating: useIsNavigating,
   useIsFocused: () => useSyncExternalStore(subscribe, () => nav.focused),

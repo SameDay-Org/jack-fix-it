@@ -60,6 +60,11 @@ _STRIPE_PUBLISHABLE_KEY = re.compile(r"pk_(test|live)_[A-Za-z0-9]+")
 # Where a missing chat original key is logged at startup (#72): the API still starts, and no
 # original is stored until the key is set (fail closed).
 CHAT_ORIGINAL_KEY_EXPECTED_IN = _JWT_SECRET_REQUIRED_IN
+# Where the pros' live positions need a Redis of their own, LOCATION_REDIS_URL (#350): the
+# API still starts without it, and the position routes answer 503. Elsewhere they use
+# REDIS_URL's.
+LOCATION_REDIS_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
+_REDIS_URL_SCHEMES = ("redis://", "rediss://", "unix://")
 
 
 def is_publishable_key(value: str) -> bool:
@@ -300,6 +305,19 @@ class Settings(BaseSettings):
     stripe_publishable_key: str | None = None
     stripe_timeout_seconds: float = Field(default=10.0, gt=0)
     stripe_max_network_retries: int = Field(default=0, ge=0)
+    # Saved cards (#253): how many setup intents, default changes and deletes together one
+    # customer may make per window. Each one is a call to Stripe.
+    payment_method_write_limit: int = Field(default=20, gt=0)
+    payment_method_write_window_seconds: int = Field(default=600, gt=0)
+    # The cards are read from Stripe 100 per page, at most this many pages: a customer with
+    # more cards gets 503 payments_unavailable, never a partial list.
+    payment_method_list_max_pages: int = Field(default=5, gt=0)
+    # Default changes and deletes of one customer's wallet run one at a time (a lock per
+    # customer, held across the change's Stripe calls). The longest one change may take once
+    # the caller is authenticated: its wait for a database connection for the lock, its wait
+    # for another one's lock and its own Stripe calls together. Past it, 503
+    # payments_unavailable, and the lock is released. Keep it below the app's request timeout.
+    payment_method_change_timeout_seconds: float = Field(default=10.0, gt=0)
     # A profile with no stored account whose first create was attempted at least this many
     # seconds ago looks its account up in Stripe instead of creating again: Stripe may forget an
     # idempotency key once it is 24 hours old, so the value stays below that. The lookup lists
@@ -341,9 +359,41 @@ class Settings(BaseSettings):
     job_auto_confirm_after_hours: int = Field(default=48, gt=0)
     job_auto_confirm_sweep_minutes: int = Field(default=15, ge=1, le=60)
     job_auto_confirm_sweep_timeout_seconds: int = Field(default=840, gt=0)
+    # The pro's live position while on the way (#350; Cesar 2026-11-10): only the latest one
+    # of a job is kept, in Redis only, for this many seconds after its write (it is deleted
+    # sooner, when the pro checks in or the job leaves on_the_way).
+    pro_location_ttl_seconds: int = Field(default=120, gt=0)
+    # A position arriving sooner than this after the job's stored one is answered and dropped
+    # (0 keeps every one); past the per-pro limit per window, positions get a 429.
+    pro_location_min_interval_seconds: float = Field(default=3.0, ge=0)
+    pro_location_rate_limit: int = Field(default=60, gt=0)
+    pro_location_rate_window_seconds: int = Field(default=60, gt=0)
+    # How far the device's time of a position may be ahead of, or behind, the server's.
+    pro_location_max_future_seconds: int = Field(default=300, ge=0)
+    pro_location_max_age_seconds: int = Field(default=600, gt=0)
+    # Longest wait on Redis for one position operation: past it the pro's position is refused
+    # (503), the customer reads none, and a check-in or status change goes on without the
+    # delete (the position expires on its own). A position is written under the job's row
+    # lock, so this also bounds how long one can hold a check-in off.
+    pro_location_timeout_seconds: float = Field(default=0.5, gt=0)
+    # The Redis the positions live in (#350, Vault round 1): one of their own that keeps
+    # nothing but its live keys (no RDB snapshot, no AOF, no slow log), so a position is gone
+    # once it is deleted or expires. Required in staging and production: without it the API
+    # starts and the position routes answer 503. Development and test use REDIS_URL's.
+    location_redis_url: str | None = None
+    # The API asks that Redis what it keeps (CONFIG GET) before a position goes in or out,
+    # and again once the answer is this many seconds old. In staging and production a Redis
+    # that keeps positions, or will not say, is refused (503); elsewhere it is only logged.
+    location_redis_recheck_seconds: float = Field(default=60.0, gt=0)
+    # For a managed Redis that refuses CONFIG GET: true takes the deployer's word that it
+    # keeps nothing. It never overrides an answer: a Redis that says it keeps is refused.
+    location_redis_assume_ephemeral: bool = False
     # Job chat (D14.1, #71): messages one user may send in one job's chat per window.
     chat_message_rate_limit: int = Field(default=20, gt=0)
     chat_message_rate_window_seconds: int = Field(default=60, gt=0)
+    # Support tickets ("Talk to Jack", #274): tickets one user may write per window.
+    support_ticket_create_limit: int = Field(default=5, gt=0)
+    support_ticket_create_window_seconds: int = Field(default=3_600, gt=0)
     # The original of a redacted chat message (#72, Cesar 2026-11-07): kept encrypted for staff
     # only (app.crypto), deleted after CHAT_ORIGINAL_RETENTION_DAYS. CHAT_ORIGINAL_KEYS is a JSON
     # object {key_id: base64 32-byte key}; CHAT_ORIGINAL_ACTIVE_KEY_ID names the key new originals
@@ -424,6 +474,7 @@ class Settings(BaseSettings):
         "stripe_secret_key",
         "stripe_publishable_key",
         "public_api_url",
+        "location_redis_url",
         mode="before",
     )
     @classmethod
@@ -439,6 +490,14 @@ class Settings(BaseSettings):
                 "STRIPE_PUBLISHABLE_KEY must be a Stripe publishable key (pk_test_... or "
                 "pk_live_...); a secret (sk_) or restricted (rk_) key is refused"
             )
+        return value
+
+    @field_validator("location_redis_url")
+    @classmethod
+    def _check_location_redis_url(cls, value: str | None) -> str | None:
+        # The message never repeats the value: the URL holds the Redis password.
+        if value is not None and not value.startswith(_REDIS_URL_SCHEMES):
+            raise ValueError("LOCATION_REDIS_URL must start with redis://, rediss:// or unix://")
         return value
 
     @field_validator("public_api_url")

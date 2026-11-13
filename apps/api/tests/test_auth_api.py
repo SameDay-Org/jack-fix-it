@@ -12,10 +12,12 @@ import httpx
 import jwt
 import pytest
 from argon2 import PasswordHasher
-from sqlalchemy import select
+from fastapi import FastAPI
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
+from app.modules.audit.models import AuditLog
 from app.modules.auth import security
 from app.modules.auth.models import RefreshToken
 from app.modules.users.errors import EmailAlreadyRegisteredError
@@ -486,3 +488,91 @@ async def test_responses_never_contain_password_hash(
         assert "argon2" not in response.text
         assert "password_hash" not in json.dumps(response.json())
         assert PASSWORD not in response.text
+
+
+# App language (#218): PATCH /v1/auth/me {"locale": ...}
+
+
+async def patch_me(client: httpx.AsyncClient, token: str, body: object) -> httpx.Response:
+    return await client.patch(
+        "/v1/auth/me", json=body, headers={"Authorization": f"Bearer {token}"}
+    )
+
+
+async def stored_user(session: AsyncSession) -> User:
+    user = await get_user(session)
+    await session.refresh(user)
+    return user
+
+
+async def audit_rows(session: AsyncSession) -> int:
+    return (await session.scalar(select(func.count()).select_from(AuditLog))) or 0
+
+
+async def test_patch_me_sets_the_locale_and_back(
+    db_client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    # No names stored: the locale changes alone all the same.
+    token = (await register(db_client)).json()["access_token"]
+    audits = await audit_rows(db_session)
+
+    to_es = await patch_me(db_client, token, {"locale": "es"})
+    es_stored = (await stored_user(db_session)).locale
+    es_me = await me(db_client, token)
+    to_en = await patch_me(db_client, token, {"locale": "en"})
+
+    assert to_es.status_code == to_en.status_code == 200
+    assert to_es.json()["locale"] == es_stored == es_me.json()["locale"] == "es"
+    en_user = await stored_user(db_session)
+    assert to_en.json()["locale"] == en_user.locale == "en"
+    assert (en_user.first_name, en_user.last_name) == (None, None)
+    assert await audit_rows(db_session) == audits
+
+
+async def test_patch_me_sets_the_locale_with_a_name(
+    db_client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    token = (await register(db_client, first_name="Ana", last_name="Pérez")).json()["access_token"]
+
+    response = await patch_me(db_client, token, {"first_name": "Bruna", "locale": "es"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["first_name"], body["last_name"], body["locale"]) == ("Bruna", "Pérez", "es")
+    user = await stored_user(db_session)
+    assert (user.first_name, user.last_name, user.locale) == ("Bruna", "Pérez", "es")
+
+
+@pytest.mark.parametrize("with_name", [False, True], ids=["alone", "with_a_name"])
+@pytest.mark.parametrize("locale", ["pt", None, ""], ids=["pt", "null", "empty"])
+async def test_patch_me_refuses_an_unsupported_or_null_locale_422(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, locale: str | None, with_name: bool
+) -> None:
+    registered = await register(db_client, locale="es", first_name="Ana", last_name="Pérez")
+    token = registered.json()["access_token"]
+    body: dict[str, str | None] = {"locale": locale}
+    if with_name:
+        body["first_name"] = "Bruna"
+
+    response = await patch_me(db_client, token, body)
+
+    assert response.status_code == 422
+    assert response.json() == VALIDATION_ERROR
+    user = await stored_user(db_session)
+    assert (user.locale, user.first_name) == ("es", "Ana")
+
+
+async def test_patch_me_locale_requires_bearer(
+    db_client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    await register(db_client)
+
+    assert_invalid_token(await db_client.patch("/v1/auth/me", json={"locale": "es"}))
+    assert (await stored_user(db_session)).locale == "en"
+
+
+def test_openapi_documents_the_locale_refusal(app: FastAPI) -> None:
+    patch = app.openapi()["paths"]["/v1/auth/me"]["patch"]
+    assert "unsupported or null locale" in patch["responses"]["422"]["description"]
+    schema = app.openapi()["components"]["schemas"]["MeUpdateRequest"]["properties"]["locale"]
+    assert {"enum": ["en", "es"], "type": "string"} in schema["anyOf"]

@@ -53,6 +53,22 @@ class JobRepository:
         )
         return (await self._session.scalars(statement)).one_or_none()
 
+    async def get_of_pro_for_share(self, job_id: uuid.UUID, pro_id: uuid.UUID) -> Job | None:
+        """The pro's own job, locked FOR SHARE until the transaction ends: no status change or
+        check-in (get_for_update), nor any other write of the row, can commit meanwhile, while
+        other readers holding it this way do not wait for each other. Another pro's job is no
+        row, like one that does not exist, so it is never locked.
+
+        populate_existing: a waiter gets the row as the transaction that held the lock left it.
+        """
+        statement = (
+            select(Job)
+            .where(Job.id == job_id, Job.pro_id == pro_id)
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
     async def completed_before(
         self, completed_before: datetime, after: uuid.UUID | None, limit: int
     ) -> list[uuid.UUID]:

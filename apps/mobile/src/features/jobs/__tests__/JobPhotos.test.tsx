@@ -350,11 +350,11 @@ describe("JobPhotos on the customer's JobScreen", () => {
     });
   });
 
-  it("shows the job's photos in the sheet and asks for the job again when one expires", async () => {
+  // The finished screen (#66) leads with the after photos: the section holds the rest.
+  it("shows the job's photos on the finished job and asks for the job again when one expires", async () => {
     fakeClock();
     await renderWithQuery(<JobScreen />);
-    await screen.findByRole("header", { name: "Job's done" });
-    await screen.findByRole("button", { name: /^Dan K\./ });
+    await screen.findByRole("header", { name: "Dan marked the job done" });
 
     const sheet = screen.getByTestId("job-sheet");
     const section = within(sheet).getByTestId("job-photos");
@@ -362,8 +362,9 @@ describe("JobPhotos on the customer's JobScreen", () => {
     expect(screen.getByTestId("job-photos-before-0").props.accessibilityLabel).toBe(
       "Before photo 1 of 1",
     );
-    expect(screen.getByTestId("job-photos-after-0").props.accessibilityLabel).toBe(
-      "After photo 1 of 1",
+    expect(screen.queryByTestId("job-photos-after")).toBeNull();
+    expect(screen.getByTestId("job-photo-hero-0").props.accessibilityLabel).toBe(
+      "Photo of the finished work, 1 of 1",
     );
     expect(screen.getByTestId("job-photos-pending").props.children).toBe(
       "1 more photo is being prepared.",
@@ -374,7 +375,7 @@ describe("JobPhotos on the customer's JobScreen", () => {
     await advanceMinutes(5);
     await waitFor(() => expect(jobCalls()).toBe(2));
     await waitFor(() =>
-      expect(image("job-photos-after-0")?.props.source).toEqual({
+      expect(image("job-photo-hero-0")?.props.source).toEqual({
         uri: FRESH.photos.after[0]?.url,
       }),
     );
@@ -383,5 +384,25 @@ describe("JobPhotos on the customer's JobScreen", () => {
 
     await advanceMinutes(2);
     expect(jobCalls()).toBe(2);
+  });
+
+  it("the confirmed job keeps its before photos under the after ones", async () => {
+    const confirmed: CustomerJob = {
+      ...COMPLETED,
+      status: "confirmed",
+      customer_status: "customerStatus.confirmed",
+    };
+    get.mockImplementation((path) =>
+      path === JOB_PATH
+        ? Promise.resolve(confirmed)
+        : Promise.reject(new Error(`unexpected GET ${path}`)),
+    );
+    await renderWithQuery(<JobScreen />);
+    await screen.findByRole("header", { name: "Job confirmed" });
+
+    const section = within(screen.getByTestId("job-sheet")).getByTestId("job-photos");
+    expect(within(section).getByTestId("job-photos-before-0")).toBeTruthy();
+    expect(screen.queryByTestId("job-photos-after")).toBeNull();
+    expect(screen.getByTestId("job-photo-thumb-0")).toBeTruthy();
   });
 });

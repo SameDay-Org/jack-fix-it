@@ -19,7 +19,8 @@ describe("the app's copy of the API's ALLOWED_DEEP_LINKS", () => {
   it("lists the same paths, in the same order", () => {
     const block = /ALLOWED_DEEP_LINKS: Final = \(([\s\S]*?)\n\)/.exec(source)?.[1];
     expect(block).toBeDefined();
-    const apiPaths = [...(block ?? "").matchAll(/re\.compile\(rf"([^"]*)"\)/g)].map(([, path]) =>
+    // `rf"..."` for a path with an id, `r"..."` for one without (Home, #338).
+    const apiPaths = [...(block ?? "").matchAll(/re\.compile\(rf?"([^"]*)"\)/g)].map(([, path]) =>
       path.replaceAll("{_UUID}", "{id}"),
     );
     expect(apiPaths.length).toBeGreaterThan(0);
@@ -46,8 +47,17 @@ describe("parsePushLink", () => {
     expect(parsePushLink(url)).toEqual({ path, id: ID });
   });
 
+  it("reads / as Home, which names no id (#338)", () => {
+    expect(parsePushLink("/")).toEqual({ path: "/", id: null });
+  });
+
   it.each([
     "/settings",
+    "//",
+    " /",
+    "/?x=1",
+    "/#top",
+    "/%2F",
     `/requests/${ID}/`,
     `requests/${ID}`,
     `//requests/${ID}`,
@@ -94,5 +104,10 @@ describe("pushRoute", () => {
     expect(pushRoute(parsePushLink(`/quotes/${ID}`), "customer")).toBeNull();
     expect(pushRoute(parsePushLink(`/quotes/${ID}`), "pro")).toBeNull();
     expect(pushRoute(null, "customer")).toBeNull();
+  });
+
+  it("opens nothing over the current screen for Home: the tap goes back to it", () => {
+    expect(pushRoute(parsePushLink("/"), "customer")).toBeNull();
+    expect(pushRoute(parsePushLink("/"), "pro")).toBeNull();
   });
 });
