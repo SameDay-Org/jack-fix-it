@@ -903,6 +903,7 @@
       "hint": "The customer pays exactly this.",
       "required": "Enter your price.",
       "invalid": "Enter a price like 120 or 120.50.",
+      "aboveMax": "The maximum quote is {{amount}}.",
       "aboveCap": "Above the most Jack allows for one quote."
     },
     "payout": {
@@ -929,6 +930,7 @@
       "lessMinutes": "{{count}} minutes less",
       "moreMinutes": "{{count}} minutes more",
       "required": "Add how long the job takes.",
+      "aboveMax": "The longest job you can quote is {{duration}}.",
       "aboveCap": "Above the most Jack allows for one quote."
     },
     "start": {

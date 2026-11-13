@@ -903,6 +903,7 @@
       "hint": "El cliente paga exactamente esto.",
       "required": "Escribe tu precio.",
       "invalid": "Escribe un precio como 120 o 120.50.",
+      "aboveMax": "La cotización máxima es de {{amount}}.",
       "aboveCap": "Supera lo máximo que Jack permite por cotización."
     },
     "payout": {
@@ -929,6 +930,7 @@
       "lessMinutes": "{{count}} minutos menos",
       "moreMinutes": "{{count}} minutos más",
       "required": "Indica cuánto tarda el trabajo.",
+      "aboveMax": "El trabajo más largo que puedes cotizar es de {{duration}}.",
       "aboveCap": "Supera lo máximo que Jack permite por cotización."
     },
     "start": {
