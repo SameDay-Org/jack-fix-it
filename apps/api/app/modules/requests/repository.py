@@ -43,6 +43,27 @@ class ServiceRequestRepository:
     async def get(self, request_id: uuid.UUID) -> ServiceRequest | None:
         return await self._session.get(ServiceRequest, request_id)
 
+    async def by_idempotency_key(
+        self, customer_id: uuid.UUID, key: uuid.UUID
+    ) -> ServiceRequest | None:
+        """The customer's request made with `key`, of any age (#264): the unique index allows
+        one. populate_existing: read again after a racing create committed it."""
+        statement = (
+            select(ServiceRequest)
+            .where(ServiceRequest.customer_id == customer_id, ServiceRequest.idempotency_key == key)
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def release_idempotency_key(self, request: ServiceRequest) -> None:
+        """Clears a key older than the window from the request it made (loaded by
+        by_idempotency_key), so a new request may take it. Through the row, not an UPDATE
+        statement: statements on service_requests belong to the state machine (#160). A racing
+        create that released it first leaves it cleared all the same."""
+        request.idempotency_key = None
+        request.idempotency_fingerprint = None
+        await self._session.flush()
+
     async def get_for_update(self, request_id: uuid.UUID) -> ServiceRequest | None:
         """The request, locked until the transaction ends, so transitions on it run one at a
         time. populate_existing: a waiter gets the row as the transaction that held the lock
