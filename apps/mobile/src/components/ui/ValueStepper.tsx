@@ -1,3 +1,4 @@
+import type { ComponentRef, Ref } from "react";
 import { Pressable, Text, View, type AccessibilityActionEvent } from "react-native";
 
 import { bubbleShadow, continuousCorners } from "@/theme";
@@ -21,6 +22,8 @@ export type ValueStepperProps = {
   error?: string;
   /** Danger ring only, when the message is shown once for a group of steppers. */
   invalid?: boolean;
+  /** The adjustable control, so a form can send screen-reader focus to it. */
+  ref?: Ref<ComponentRef<typeof View>>;
   testID: string;
 };
 
@@ -41,6 +44,7 @@ export function ValueStepper({
   incrementLabel,
   error,
   invalid = false,
+  ref,
   testID,
 }: ValueStepperProps) {
   const onAccessibilityAction = ({ nativeEvent }: AccessibilityActionEvent) => {
@@ -51,6 +55,7 @@ export function ValueStepper({
   return (
     <View>
       <View
+        ref={ref}
         accessible
         accessibilityRole="adjustable"
         accessibilityLabel={label}

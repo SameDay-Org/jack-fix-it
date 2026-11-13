@@ -1,10 +1,11 @@
 import type { ParseKeys, TFunction } from "i18next";
+import type { ComponentRef, RefObject } from "react";
 import { useTranslation } from "react-i18next";
-import { Text, View } from "react-native";
+import { Text, View, type ScrollView } from "react-native";
 
 import { Button, Input, ValueStepper } from "@/components/ui";
 import { BackButton } from "@/features/auth/components/BackButton";
-import { formatMoneyExact, formatRate } from "@/features/quotes/format";
+import { formatMinutes, formatMoney, formatMoneyExact, formatRate } from "@/features/quotes/format";
 
 import { formatDay, formatInstantDay, formatTimeOfDay } from "./format";
 import { MAX_AMOUNT_CENTS, parsePriceCents, split } from "./money";
@@ -12,9 +13,11 @@ import {
   APPROACH_MAX_LENGTH,
   SCOPE_MAX_LENGTH,
   type FieldProblem,
+  type QuoteCaps,
   type QuoteField,
 } from "./quoteDraft";
 import { DURATION_MINUTES_STEP, START_STEP_MINUTES, type QuoteDraftState } from "./useQuoteDraft";
+import { useRefusalReveal, type Refusal } from "./useRefusalReveal";
 
 const MINUTES_PER_HOUR = 60;
 const DAY = 1;
@@ -30,6 +33,10 @@ type QuoteFormStepProps = {
   takeRateBps: number;
   preferredDate: string | null;
   onReview: () => void;
+  /** The Review or Send just refused, if one brought the pro here: its first problem is shown. */
+  refusal?: Refusal;
+  /** The scroll view the form sits in. */
+  scrollRef: RefObject<ComponentRef<typeof ScrollView> | null>;
 };
 
 /** What each field says about each problem it can have. */
@@ -44,12 +51,26 @@ const MESSAGES: Record<QuoteField, Partial<Record<FieldProblem, ParseKeys>>> = {
   start: { past: "quoteForm.start.past" },
 };
 
+/** "The maximum quote is $2,500." or "The longest job you can quote is 8 h.": the cap itself. */
+function maxText(t: TFunction, field: QuoteField, caps: QuoteCaps): string | undefined {
+  const { quote_max_amount_cents: maxCents, quote_max_duration_minutes: maxMinutes } = caps;
+  if (field === "price" && maxCents !== null) {
+    return t("quoteForm.price.aboveMax", { amount: formatMoney(maxCents) });
+  }
+  if (field === "duration" && maxMinutes !== null) {
+    return t("quoteForm.duration.aboveMax", { duration: formatMinutes(t, maxMinutes) });
+  }
+  return undefined;
+}
+
 /** The message for a field's problem, or none. */
 function problemText(
   t: TFunction,
   field: QuoteField,
   problem: FieldProblem | undefined,
+  caps: QuoteCaps,
 ): string | undefined {
+  if (problem === "aboveMax") return maxText(t, field, caps);
   const key = problem ? MESSAGES[field][problem] : undefined;
   return key ? t(key) : undefined;
 }
@@ -58,11 +79,22 @@ function problemText(
  * The quote itself: the price with what the pro will receive under it, live; what is included;
  * how the pro will do the job; how long it takes; and when they propose to start.
  */
-export function QuoteFormStep({ quote, takeRateBps, preferredDate, onReview }: QuoteFormStepProps) {
+export function QuoteFormStep({
+  quote,
+  takeRateBps,
+  preferredDate,
+  onReview,
+  refusal,
+  scrollRef,
+}: QuoteFormStepProps) {
   const { t } = useTranslation();
-  const { draft, problems, now, duration } = quote;
-  const startError = problemText(t, "start", problems.start);
-  const durationError = problemText(t, "duration", problems.duration);
+  const { draft, problems, caps, now, duration } = quote;
+  const { priceRef, scopeRef, durationRef, startRef, onSectionLayout } = useRefusalReveal(
+    refusal,
+    scrollRef,
+  );
+  const startError = problemText(t, "start", problems.start, caps);
+  const durationError = problemText(t, "duration", problems.duration, caps);
   const anyProblem = Object.keys(problems).length > 0;
 
   return (
@@ -75,15 +107,16 @@ export function QuoteFormStep({ quote, takeRateBps, preferredDate, onReview }: Q
         <Text className="text-callout text-gray-500">{t("quoteForm.subtitle")}</Text>
       </View>
 
-      <View className="gap-3">
+      <View className="gap-3" onLayout={onSectionLayout("price")} testID="quote-price-section">
         <Input
+          ref={priceRef}
           label={t("quoteForm.price.label")}
           prefix="$"
           value={draft.price}
           onChangeText={quote.setPrice}
           onBlur={quote.tidyPrice}
           hint={t("quoteForm.price.hint")}
-          error={problemText(t, "price", problems.price)}
+          error={problemText(t, "price", problems.price, caps)}
           keyboardType="decimal-pad"
           inputMode="decimal"
           testID="quote-price"
@@ -91,18 +124,21 @@ export function QuoteFormStep({ quote, takeRateBps, preferredDate, onReview }: Q
         <PayoutPreview price={draft.price} takeRateBps={takeRateBps} />
       </View>
 
-      <Input
-        label={t("quoteForm.scope.label")}
-        value={draft.scope}
-        onChangeText={quote.setScope}
-        hint={t("quoteForm.scope.hint")}
-        error={problemText(t, "scope", problems.scope)}
-        multiline
-        maxLength={SCOPE_MAX_LENGTH}
-        counter={nearLimit(draft.scope, SCOPE_MAX_LENGTH)}
-        autoCapitalize="sentences"
-        testID="quote-scope"
-      />
+      <View onLayout={onSectionLayout("scope")} testID="quote-scope-section">
+        <Input
+          ref={scopeRef}
+          label={t("quoteForm.scope.label")}
+          value={draft.scope}
+          onChangeText={quote.setScope}
+          hint={t("quoteForm.scope.hint")}
+          error={problemText(t, "scope", problems.scope, caps)}
+          multiline
+          maxLength={SCOPE_MAX_LENGTH}
+          counter={nearLimit(draft.scope, SCOPE_MAX_LENGTH)}
+          autoCapitalize="sentences"
+          testID="quote-scope"
+        />
+      </View>
       <Input
         label={t("quoteForm.approach.label")}
         value={draft.approach}
@@ -115,7 +151,11 @@ export function QuoteFormStep({ quote, takeRateBps, preferredDate, onReview }: Q
         testID="quote-approach"
       />
 
-      <View className="gap-3">
+      <View
+        className="gap-3"
+        onLayout={onSectionLayout("duration")}
+        testID="quote-duration-section"
+      >
         <Text accessibilityRole="header" className="text-headline text-navy-900">
           {t("quoteForm.duration.title")}
         </Text>
@@ -131,6 +171,8 @@ export function QuoteFormStep({ quote, takeRateBps, preferredDate, onReview }: Q
           testID="quote-hours"
         />
         <ValueStepper
+          // The second stepper of each pair states the pair's problem: the one a refusal reads.
+          ref={durationRef}
           label={t("quoteForm.duration.minutes")}
           valueText={t("quoteForm.duration.minutesValue", { count: duration.minutes })}
           onDecrement={() => quote.stepMinutes(-1)}
@@ -144,7 +186,7 @@ export function QuoteFormStep({ quote, takeRateBps, preferredDate, onReview }: Q
         />
       </View>
 
-      <View className="gap-3">
+      <View className="gap-3" onLayout={onSectionLayout("start")} testID="quote-start-section">
         <Text accessibilityRole="header" className="text-headline text-navy-900">
           {t("quoteForm.start.title")}
         </Text>
@@ -165,6 +207,7 @@ export function QuoteFormStep({ quote, takeRateBps, preferredDate, onReview }: Q
           testID="quote-day"
         />
         <ValueStepper
+          ref={startRef}
           label={t("quoteForm.start.time")}
           valueText={formatTimeOfDay(draft.startAt)}
           onDecrement={() => quote.stepTime(-1)}

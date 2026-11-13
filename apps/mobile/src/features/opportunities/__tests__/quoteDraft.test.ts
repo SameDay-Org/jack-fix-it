@@ -2,8 +2,11 @@ import {
   defaultStartAt,
   draftProblems,
   emptyDraft,
+  firstProblem,
   isDirty,
   quoteBody,
+  recheckCaps,
+  type QuoteCaps,
   type QuoteDraft,
 } from "../quoteDraft";
 
@@ -12,6 +15,10 @@ const local = (month: number, day: number, hour: number, minute = 0) =>
   new Date(2026, month - 1, day, hour, minute).getTime();
 
 const NOW = local(10, 28, 10, 20);
+
+const NO_CAPS: QuoteCaps = { quote_max_amount_cents: null, quote_max_duration_minutes: null };
+/** $2,500 and 8 h, as the API's examples. */
+const CAPS: QuoteCaps = { quote_max_amount_cents: 250_000, quote_max_duration_minutes: 480 };
 
 const filled = (overrides: Partial<QuoteDraft> = {}): QuoteDraft => ({
   price: "100.50",
@@ -40,11 +47,11 @@ describe("defaultStartAt", () => {
 
 describe("draftProblems", () => {
   it("finds nothing in a complete draft", () => {
-    expect(draftProblems(filled(), NOW)).toEqual({});
+    expect(draftProblems(filled(), NOW, NO_CAPS)).toEqual({});
   });
 
   it("marks every empty field of a new draft", () => {
-    expect(draftProblems(emptyDraft(local(10, 28, 11)), NOW)).toEqual({
+    expect(draftProblems(emptyDraft(local(10, 28, 11)), NOW, NO_CAPS)).toEqual({
       price: "required",
       scope: "required",
       duration: "required",
@@ -58,16 +65,71 @@ describe("draftProblems", () => {
     ["   ", "required"],
     ["21,474,836.48", "aboveCap"],
   ])("price %p is %p", (price, problem) => {
-    expect(draftProblems(filled({ price }), NOW).price).toBe(problem);
+    expect(draftProblems(filled({ price }), NOW, NO_CAPS).price).toBe(problem);
   });
 
   it("accepts the largest amount the API takes", () => {
-    expect(draftProblems(filled({ price: "21,474,836.47" }), NOW)).toEqual({});
+    expect(draftProblems(filled({ price: "21,474,836.47" }), NOW, NO_CAPS)).toEqual({});
+  });
+
+  it("passes a price and a duration at the caps, the caps themselves included", () => {
+    expect(draftProblems(filled({ price: "2,500.00", durationMinutes: 480 }), NOW, CAPS)).toEqual(
+      {},
+    );
+  });
+
+  it("marks one cent and one minute above the caps with the opportunity's limit", () => {
+    expect(draftProblems(filled({ price: "2500.01" }), NOW, CAPS)).toEqual({ price: "aboveMax" });
+    expect(draftProblems(filled({ durationMinutes: 481 }), NOW, CAPS)).toEqual({
+      duration: "aboveMax",
+    });
+  });
+
+  it("names the cap over the API's largest amount when both are passed", () => {
+    expect(draftProblems(filled({ price: "21,474,836.48" }), NOW, CAPS).price).toBe("aboveMax");
+  });
+
+  it("checks each cap on its own, and a missing one never blocks", () => {
+    const amountOnly = { ...NO_CAPS, quote_max_amount_cents: 250_000 };
+    const durationOnly = { ...NO_CAPS, quote_max_duration_minutes: 480 };
+    const big = filled({ price: "2500.01", durationMinutes: 481 });
+    expect(draftProblems(big, NOW, amountOnly)).toEqual({ price: "aboveMax" });
+    expect(draftProblems(big, NOW, durationOnly)).toEqual({ duration: "aboveMax" });
+    expect(draftProblems(filled({ durationMinutes: 100_000 }), NOW, NO_CAPS)).toEqual({});
+  });
+
+  it("asks for a duration before it checks the cap", () => {
+    expect(draftProblems(filled({ durationMinutes: 0 }), NOW, CAPS).duration).toBe("required");
   });
 
   it("refuses a blank scope and a start that is not ahead", () => {
-    expect(draftProblems(filled({ scope: " \n " }), NOW)).toEqual({ scope: "required" });
-    expect(draftProblems(filled({ startAt: NOW }), NOW)).toEqual({ start: "past" });
+    expect(draftProblems(filled({ scope: " \n " }), NOW, NO_CAPS)).toEqual({ scope: "required" });
+    expect(draftProblems(filled({ startAt: NOW }), NOW, NO_CAPS)).toEqual({ start: "past" });
+  });
+});
+
+describe("recheckCaps", () => {
+  it("checks the price and the duration again and keeps the other marks as found", () => {
+    const draft = filled({ price: "2500.01", durationMinutes: 481 });
+    const found = { ...draftProblems(draft, NOW, CAPS), scope: "required" as const };
+    expect(recheckCaps(found, draft, NO_CAPS)).toEqual({ scope: "required" });
+    expect(recheckCaps({ start: "past" }, draft, CAPS)).toEqual({
+      price: "aboveMax",
+      duration: "aboveMax",
+      start: "past",
+    });
+  });
+});
+
+describe("firstProblem", () => {
+  it("is the first field down the form, whatever order the problems were found in", () => {
+    expect(firstProblem({})).toBeUndefined();
+    expect(firstProblem({ start: "past", duration: "aboveMax" })).toBe("duration");
+    expect(firstProblem({ duration: "required", scope: "required", price: "aboveMax" })).toBe(
+      "price",
+    );
+    expect(firstProblem({ start: "past", scope: "required" })).toBe("scope");
+    expect(firstProblem({ start: "past" })).toBe("start");
   });
 });
 

@@ -1,14 +1,18 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import { parsePriceCents, priceText } from "./money";
 import {
   defaultStartAt,
   draftProblems,
   emptyDraft,
-  hasProblems,
+  firstProblem,
   isDirty,
+  recheckCaps,
+  sameCaps,
   type DraftProblems,
+  type QuoteCaps,
   type QuoteDraft,
+  type QuoteField,
 } from "./quoteDraft";
 
 /** The day and time steppers move the start by these; the duration steppers by an hour and 15 min. */
@@ -30,8 +34,8 @@ export function shiftMinutes(at: number, minutes: number): number {
 }
 
 /**
- * The server refused the amount or the duration as above a cap (422); the mark stays on a
- * field until that field changes, whatever else the pro edits.
+ * The server refused the amount or the duration as above a cap the app could not name (422); the
+ * mark stays on a field until that field changes, whatever else the pro edits.
  */
 function keepCapMarks(
   previous: DraftProblems,
@@ -50,41 +54,66 @@ function keepCapMarks(
 
 /**
  * The quote the pro is writing, kept while the form, the review and a failed send come and go.
- * Problems show from the first "Review quote" on and then follow every change. `now` is the time
- * of the last change, for the steppers' lower bounds: the start can't be stepped into the past.
+ * Problems show from the first "Review quote" on and then follow every change, checked against
+ * the opportunity's `caps`, and against new caps when its detail refreshes meanwhile. `now` is
+ * the time of the last change, for the steppers' lower bounds: the start can't be stepped into
+ * the past.
  */
-export function useQuoteDraft(preferredDate: string | null) {
+export function useQuoteDraft(preferredDate: string | null, caps: QuoteCaps) {
   const [initial] = useState(() => emptyDraft(defaultStartAt(preferredDate, Date.now())));
   const [draft, setDraft] = useState(initial);
   const [now, setNow] = useState(Date.now);
   const [checking, setChecking] = useState(false);
   const [problems, setProblems] = useState<DraftProblems>({});
+  // Adjusted while rendering, so no mark ever names a cap that no longer holds, not even once.
+  const [checkedCaps, setCheckedCaps] = useState(caps);
+  if (!sameCaps(caps, checkedCaps)) {
+    setCheckedCaps(caps);
+    if (checking) {
+      setProblems((previous) => keepCapMarks(previous, recheckCaps(previous, draft, caps), {}));
+    }
+  }
+
+  // A send's answer lands in a callback made when Send was pressed: it reads the caps of now.
+  const capsNow = useRef(caps);
+  useLayoutEffect(() => {
+    capsNow.current = caps;
+  }, [caps]);
 
   const change = (patch: Partial<QuoteDraft>) => {
     const next = { ...draft, ...patch };
     const at = Date.now();
     setDraft(next);
     setNow(at);
-    if (checking) setProblems((previous) => keepCapMarks(previous, draftProblems(next, at), patch));
-  };
-
-  /** Checks everything the app can; true when the draft may go to the review. */
-  const check = (): boolean => {
-    const found = draftProblems(draft, Date.now());
-    setChecking(true);
-    setProblems(found);
-    return !hasProblems(found);
+    if (checking) {
+      setProblems((previous) => keepCapMarks(previous, draftProblems(next, at, caps), patch));
+    }
   };
 
   /**
-   * The server answered 422. A field that fails here now (a start that passed while the pro was
-   * reviewing) is the cause; otherwise it is a platform cap the app does not know (#258), on the
-   * amount or the duration.
+   * Checks everything the app can, under the caps the opportunity states now, and marks what it
+   * finds: the first field down the form that cannot be sent, or none when the draft may go on
+   * (to the review, and from the review out).
    */
-  const refused = () => {
-    const found = draftProblems(draft, Date.now());
+  const check = (): QuoteField | undefined => {
+    const found = draftProblems(draft, Date.now(), caps);
     setChecking(true);
-    setProblems(hasProblems(found) ? found : { price: "aboveCap", duration: "aboveCap" });
+    setProblems(found);
+    return firstProblem(found);
+  };
+
+  /**
+   * The server answered 422. A field that fails here now is the cause: the start went by, or the
+   * detail lowered a cap, while the quote was out. Otherwise the caps changed without the app
+   * learning it, and it cannot name them: the amount or the duration. Returns the first field it
+   * marked.
+   */
+  const refused = (): QuoteField => {
+    const found = draftProblems(draft, Date.now(), capsNow.current);
+    const first = firstProblem(found);
+    setChecking(true);
+    setProblems(first ? found : { price: "aboveCap", duration: "aboveCap" });
+    return first ?? "price";
   };
 
   /** The price field lost focus: a valid price is rewritten as "1000.00". */
@@ -99,6 +128,8 @@ export function useQuoteDraft(preferredDate: string | null) {
   return {
     draft,
     problems,
+    /** The caps the problems were found under, which a message names. */
+    caps,
     now,
     dirty: isDirty(draft, initial),
     check,
