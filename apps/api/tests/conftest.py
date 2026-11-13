@@ -20,6 +20,7 @@ from app.db import Base, get_session
 from app.main import create_app
 from app.modules.auth.models import RefreshToken
 from app.modules.jobs.location import Position, get_job_location_store
+from app.modules.jobs.route import CachedRoute, get_job_route_cache
 from app.modules.users.models import User
 from app.rate_limit import RateLimitResult, get_rate_limiter, window_position
 
@@ -118,14 +119,40 @@ class InMemoryJobLocationStore:
         self.positions.pop(job_id, None)
 
 
+class InMemoryJobRouteCache:
+    """Test-only JobRouteCache: a dict, with no expiry and no tie to the position."""
+
+    def __init__(self) -> None:
+        self.routes: dict[uuid.UUID, CachedRoute] = {}
+        self.claims: set[uuid.UUID] = set()
+
+    async def get(self, job_id: uuid.UUID) -> CachedRoute | None:
+        return self.routes.get(job_id)
+
+    async def put(self, job_id: uuid.UUID, entry: CachedRoute, *, ttl_seconds: int) -> bool:
+        self.routes[job_id] = entry
+        return True
+
+    async def claim(self, job_id: uuid.UUID, *, seconds: int) -> bool:
+        if job_id in self.claims:
+            return False
+        self.claims.add(job_id)
+        return True
+
+    async def release(self, job_id: uuid.UUID) -> None:
+        self.claims.discard(job_id)
+
+
 def make_app(settings: Settings) -> FastAPI:
-    """create_app with an in-memory rate limiter and location store: the lifespan, which
-    creates Redis, never runs."""
+    """create_app with an in-memory rate limiter, location store and route cache: the
+    lifespan, which creates Redis, never runs."""
     app = create_app(settings)
     limiter = InMemoryRateLimiter()
     app.dependency_overrides[get_rate_limiter] = lambda: limiter
     locations = InMemoryJobLocationStore()
     app.dependency_overrides[get_job_location_store] = lambda: locations
+    routes = InMemoryJobRouteCache()
+    app.dependency_overrides[get_job_route_cache] = lambda: routes
     return app
 
 

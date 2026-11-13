@@ -34,7 +34,7 @@ from app.config import Settings
 from app.errors import NotFoundError
 from app.integrations.storage import Storage
 from app.modules.addresses.schemas import AddressArea, AddressOut
-from app.modules.addresses.service import AddressService
+from app.modules.addresses.service import AddressPlace, AddressService
 from app.modules.auth.permissions import ensure_owner
 from app.modules.categories.intake import InvalidAnswersError, validate_answers
 from app.modules.categories.service import BrokenIntakeQuestionsError, CategoryService
@@ -359,10 +359,12 @@ def _has_nul(value: JsonValue) -> bool:
 
 class CustomerRequestReader:
     """A customer's own request for other modules (ADR 0003): its status, for the quotes the
-    customer compares (#188), and its public code, for the job pushes (#65)."""
+    customer compares (#188), its public code, for the job pushes (#65), and where it takes
+    place, for the route to it (#351)."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._requests = ServiceRequestRepository(session)
+        self._addresses = AddressService(session)
 
     async def own_status(self, user: UserAccount, request_id: uuid.UUID) -> RequestStatus:
         """The status of the caller's request. 404 for an unknown request and for another
@@ -380,6 +382,15 @@ class CustomerRequestReader:
         if request is None:  # pragma: no cover - jobs.request_id is a foreign key
             raise NotFoundError
         return request.public_code
+
+    async def place(self, request_id: uuid.UUID) -> AddressPlace:
+        """Where the request takes place, for the route of its job (#351). The caller already
+        holds the request's job and checked whose it is: this does not."""
+        request = await self._requests.get(request_id)
+        place = None if request is None else await self._addresses.place(request.address_id)
+        if place is None:  # pragma: no cover - both ids are foreign keys
+            raise NotFoundError
+        return place
 
 
 # What a pro sees before a job (#49): the work, the place coarsely, never the customer.
