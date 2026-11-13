@@ -180,6 +180,59 @@ describe("the book's edits keep the API's order, and say when they no longer can
   });
 });
 
+describe("an address added while another Add was unanswered", () => {
+  const office = savedAddress({ id: "office", label: "Office", is_default: false });
+  const lake = savedAddress({ id: "lake", label: "Lake", is_default: false });
+  /** Home, then Office and Lake added together: the server took them in an order it did not say. */
+  const both = withAdded(withAdded(listed([HOME]), office, true), lake, true);
+
+  it("is drawn last, in a book that is unplaced from then on", () => {
+    const one = withAdded(listed([HOME]), office, true);
+    expect(order(one)).toEqual(["home*", "office"]);
+    expect(one.unplaced).toBe(true);
+    // An Add asked alone leaves the book as it was.
+    expect(withAdded(listed([HOME]), office).unplaced).toBeUndefined();
+    // Every edit after it keeps the mark: only a list from the server lifts it.
+    expect(order(both)).toEqual(["home*", "office", "lake"]);
+    const studio = { label: "Studio" };
+    expect(withFields(both, { ...office, ...studio }, studio).unplaced).toBe(true);
+    expect(withDefault(both, "lake").unplaced).toBe(true);
+    expect(withoutAddress(both, "lake").unplaced).toBe(true);
+    expect(withoutAddress(both, "home").unplaced).toBe(true);
+    expect(withAdded(both, WORK).unplaced).toBe(true);
+  });
+
+  it("deleting the default draws no default: either of the two may be the older one", () => {
+    expect(order(withoutAddress(both, "home"))).toEqual(["office", "lake"]);
+    // The same book with the two added one after the other: Office is the older, and is next.
+    const inTurn = withAdded(withAdded(listed([HOME]), office), lake);
+    expect(order(withoutAddress(inTurn, "home"))).toEqual(["office*", "lake"]);
+  });
+
+  it("the only address drawn is not made the default: the server may have the other", () => {
+    // Home is deleted while Lake's Add is unanswered: Lake may be on the server, and the older.
+    expect(order(withoutAddress(withAdded(listed([HOME]), office, true), "home"))).toEqual([
+      "office",
+    ]);
+    // The delete was asked first: Office joins an empty book, with its answer saying "not the
+    // default" (the server took it before the delete).
+    expect(order(withAdded(withoutAddress(listed([HOME]), "home"), office, true))).toEqual([
+      "office",
+    ]);
+  });
+
+  it("is the default when the server's answer says so", () => {
+    const first = withAdded(listed([]), { ...office, is_default: true }, true);
+    expect(order(first)).toEqual(["office*"]);
+    expect(first.unplaced).toBe(true);
+  });
+
+  it("is placed by a list that already has it", () => {
+    const book = listed([HOME, office]);
+    expect(withAdded(book, office, true)).toBe(book);
+  });
+});
+
 describe("isLabelTaken", () => {
   it("compares as the API does: ignoring case and extra spaces", () => {
     expect(isLabelTaken(BOOK, "  home ")).toBe(true);

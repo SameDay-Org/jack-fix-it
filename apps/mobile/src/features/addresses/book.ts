@@ -10,17 +10,31 @@ type Addresses = readonly SavedAddress[];
  * them when the default is deleted. A list from the server is `ordered`. The device loses track
  * when a default stops being one: nothing tells where it falls among the others, since addresses
  * carry no creation date.
+ *
+ * `unplaced` marks a book with an address added while another Add was unanswered: the server
+ * takes the two in either order, their answers do not say which, and the other one may not be
+ * drawn yet. As long as the log replays that Add, the device vouches for no order of the others
+ * and works out no default by itself, however few addresses it draws. The log ends with a list
+ * from the server, or, when none comes, with both Adds answered and the book cached as `guessed`:
+ * every address is drawn by then, and only their order stays unknown.
  */
-export type Book = { readonly items: Addresses; readonly ordered: boolean };
+export type Book = {
+  readonly items: Addresses;
+  readonly ordered: boolean;
+  readonly unplaced?: true;
+};
 
 /** A change to the book: the book with it. The writes in flight are replayed as these. */
 export type BookEdit = (book: Book) => Book;
 
 const others = (items: Addresses) => items.filter((address) => !address.is_default);
 
-/** A book of one address: it is the default (the API keeps one while the book is not empty). */
+/**
+ * A book of one address: it is the default (the API keeps one while the book is not empty). Not
+ * in an `unplaced` book: the server may have another address the device does not draw yet.
+ */
 const withSoleDefault = (book: Book): Book =>
-  book.items.length === 1 && !book.items[0].is_default
+  !book.unplaced && book.items.length === 1 && !book.items[0].is_default
     ? { items: [{ ...book.items[0], is_default: true }], ordered: true }
     : book;
 
@@ -34,22 +48,23 @@ export function withDefault(book: Book, id: string): Book {
   const rest = book.items
     .filter((address) => address.id !== id)
     .map((address) => (address.is_default ? { ...address, is_default: false } : address));
-  return { items: [{ ...target, is_default: true }, ...rest], ordered: rest.length <= 1 };
+  return { ...book, items: [{ ...target, is_default: true }, ...rest], ordered: rest.length <= 1 };
 }
 
 /**
  * The book without `id`. When that was the default, the API makes the oldest remaining address the
- * default: the first of the others in an `ordered` book. In one that is not, the device cannot
- * tell which, and draws no default until the server lists the book.
+ * default: the first of the others in an `ordered` book. In one that is not, or is `unplaced`,
+ * the device cannot tell which, and draws no default until the server lists the book.
  */
 export function withoutAddress(book: Book, id: string): Book {
   const removed = book.items.find((address) => address.id === id);
   if (!removed) return book;
   const rest = book.items.filter((address) => address.id !== id);
-  if (removed.is_default && book.ordered && rest.length > 0) {
-    return { items: [{ ...rest[0], is_default: true }, ...rest.slice(1)], ordered: true };
+  if (removed.is_default && book.ordered && !book.unplaced && rest.length > 0) {
+    return { ...book, items: [{ ...rest[0], is_default: true }, ...rest.slice(1)], ordered: true };
   }
   return withSoleDefault({
+    ...book,
     items: rest,
     ordered: others(rest).length <= 1 || (!removed.is_default && book.ordered),
   });
@@ -59,11 +74,13 @@ export function withoutAddress(book: Book, id: string): Book {
  * The book with the server's copy of a new address: the newest, so the last of the others, or
  * the default when the server made it one (the first address of a book). A book that already has
  * it stays as it is: its list was read after the server added the address, so its copy is the
- * newer one.
+ * newer one, and its place the server's. `contested` is an Add asked while another was unanswered:
+ * its place among the others is not known, and the book it is drawn in is `unplaced`.
  */
-export function withAdded(book: Book, address: SavedAddress): Book {
+export function withAdded(book: Book, address: SavedAddress, contested = false): Book {
   if (book.items.some((saved) => saved.id === address.id)) return book;
-  const added = { ...book, items: [...book.items, { ...address, is_default: false }] };
+  const items = [...book.items, { ...address, is_default: false }];
+  const added: Book = contested ? { ...book, items, unplaced: true } : { ...book, items };
   return address.is_default ? withDefault(added, address.id) : withSoleDefault(added);
 }
 

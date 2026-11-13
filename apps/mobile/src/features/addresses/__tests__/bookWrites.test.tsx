@@ -1445,3 +1445,212 @@ describe("Gatekeeper r2: new interleavings", () => {
     }
   });
 });
+
+describe("two Adds in flight together", () => {
+  const OFFICE = savedAddress({ id: "office", label: "Office", is_default: false });
+  const LAKE = savedAddress({ id: "lake", label: "Lake", is_default: false });
+  const bodyOf = (address: SavedAddress) => ({
+    line1: address.line1,
+    city: address.city,
+    state: address.state,
+    zip_code: address.zip_code,
+    label: address.label,
+    is_default: false,
+  });
+  /** A book of one address, and the answers to the two Adds, in the order they are asked. */
+  const bookOfOne = async () => {
+    server = [HOME];
+    const answers = { office: deferred<SavedAddress>(), lake: deferred<SavedAddress>() };
+    jest
+      .mocked(apiPost)
+      .mockReturnValueOnce(answers.office.promise)
+      .mockReturnValueOnce(answers.lake.promise);
+    return { ...(await renderBook()), answers };
+  };
+  const getsFail = () => jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+
+  // The server takes the two in either order and neither answer says which: Office and Lake are
+  // drawn as asked, but which of them is the older one, the next default, the device cannot tell.
+  it.each(["office", "lake"] as const)(
+    "are drawn in a book the device does not vouch for: deleting the default crowns no one (%s answered first)",
+    async (first) => {
+      const { result, client, answers } = await bookOfOne();
+      getsFail();
+      jest.mocked(apiDelete).mockResolvedValue(undefined);
+
+      await act(async () => result.current.create.mutate({ body: bodyOf(OFFICE), generation: 1 }));
+      await act(async () => result.current.create.mutate({ body: bodyOf(LAKE), generation: 1 }));
+      const land = {
+        office: () => answers.office.resolve(OFFICE),
+        lake: () => answers.lake.resolve(LAKE),
+      };
+      await act(async () => land[first]());
+      await act(async () => land[first === "office" ? "lake" : "office"]());
+
+      // No list came after the answers: the book stays as drawn, and says it is a guess.
+      await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+      expect(cached(client)).toEqual(["home*", "office", "lake"]);
+      expect(guessed(client)).toBe(true);
+
+      await act(async () => result.current.remove(HOME));
+      await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(3));
+      expect(cached(client)).toEqual(["office", "lake"]);
+      expect(guessed(client)).toBe(true);
+    },
+  );
+
+  it("are placed by the list that comes after: the book is vouched for again", async () => {
+    const { result, client, answers } = await bookOfOne();
+    jest.mocked(apiDelete).mockResolvedValue(undefined);
+
+    await act(async () => result.current.create.mutate({ body: bodyOf(OFFICE), generation: 1 }));
+    await act(async () => result.current.create.mutate({ body: bodyOf(LAKE), generation: 1 }));
+    // The server took Lake first.
+    server = [HOME, LAKE, OFFICE];
+    await act(async () => answers.office.resolve(OFFICE));
+    await act(async () => answers.lake.resolve(LAKE));
+
+    await waitFor(() => expect(cached(client)).toEqual(["home*", "lake", "office"]));
+    expect(guessed(client)).toBe(false);
+
+    getsFail();
+    await act(async () => result.current.remove(HOME));
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(3));
+    expect(cached(client)).toEqual(["lake*", "office"]);
+  });
+
+  it("an Add asked once the other was answered knows its place, the newest", async () => {
+    const { result, client, answers } = await bookOfOne();
+    jest.mocked(apiDelete).mockResolvedValue(undefined);
+    // The list asked after the first answer is still on its way when the second Add is asked.
+    const listing = deferred<{ items: SavedAddress[] }>();
+    jest.mocked(apiGet).mockReturnValueOnce(listing.promise);
+
+    await act(async () => result.current.create.mutate({ body: bodyOf(OFFICE), generation: 1 }));
+    await act(async () => answers.office.resolve(OFFICE));
+    getsFail();
+    await act(async () => result.current.create.mutate({ body: bodyOf(LAKE), generation: 1 }));
+    await act(async () => answers.lake.resolve(LAKE));
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(3));
+    expect(cached(client)).toEqual(["home*", "office", "lake"]);
+    expect(guessed(client)).toBe(false);
+
+    await act(async () => result.current.remove(HOME));
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(4));
+    expect(cached(client)).toEqual(["office*", "lake"]);
+  });
+
+  it("deleting the default before any list comes crowns no one either", async () => {
+    const { result, client, answers } = await bookOfOne();
+    // The list asked after the two answers is still on its way, and so is the delete's answer.
+    const listing = deferred<{ items: SavedAddress[] }>();
+    jest.mocked(apiGet).mockReturnValue(listing.promise);
+    jest.mocked(apiDelete).mockReturnValue(deferred<undefined>().promise);
+
+    await act(async () => result.current.create.mutate({ body: bodyOf(OFFICE), generation: 1 }));
+    await act(async () => result.current.create.mutate({ body: bodyOf(LAKE), generation: 1 }));
+    await act(async () => answers.office.resolve(OFFICE));
+    await act(async () => answers.lake.resolve(LAKE));
+    expect(cached(client)).toEqual(["home*", "office", "lake"]);
+
+    await act(async () => result.current.remove(HOME));
+    expect(cached(client)).toEqual(["office", "lake"]);
+    await act(async () => listing.reject(new NetworkError(false)));
+  });
+
+  // The Add form opened by a link can be saved before the book loads: that Add has no place in a
+  // book on screen, and is in flight with the next one all the same.
+  it.each(["office", "lake"] as const)(
+    "an Add asked before the book was cached counts too (%s answered first)",
+    async (first) => {
+      server = [HOME];
+      jest.mocked(apiGet).mockRejectedValueOnce(new NetworkError(false));
+      const answers = { office: deferred<SavedAddress>(), lake: deferred<SavedAddress>() };
+      jest
+        .mocked(apiPost)
+        .mockReturnValueOnce(answers.office.promise)
+        .mockReturnValueOnce(answers.lake.promise);
+      jest.mocked(apiDelete).mockResolvedValue(undefined);
+      const client = newQueryClient();
+      const { result } = await renderHook(
+        () => ({
+          book: useSavedAddresses(),
+          create: useCreateAddress(),
+          remove: useDeleteAddress(),
+        }),
+        {
+          wrapper: ({ children }: { children: ReactNode }) =>
+            createElement(QueryClientProvider, { client }, children),
+        },
+      );
+      await waitFor(() => expect(result.current.book.isError).toBe(true));
+
+      await act(async () => result.current.create.mutate({ body: bodyOf(OFFICE), generation: 1 }));
+      // The book loads, read before the server took Office, and Lake is saved over it.
+      await act(async () => {
+        await result.current.book.refetch();
+      });
+      expect(cached(client)).toEqual(["home*"]);
+      await act(async () => result.current.create.mutate({ body: bodyOf(LAKE), generation: 1 }));
+      getsFail();
+      const land = {
+        office: () => answers.office.resolve(OFFICE),
+        lake: () => answers.lake.resolve(LAKE),
+      };
+      await act(async () => land[first]());
+      await act(async () => land[first === "office" ? "lake" : "office"]());
+
+      await waitFor(() => expect(cached(client)).toEqual(["home*", "lake", "office"]));
+      await act(() => settle());
+      expect(guessed(client)).toBe(true);
+
+      await act(async () => result.current.remove(HOME));
+      await act(() => settle());
+      expect(cached(client)).toEqual(["lake", "office"]);
+    },
+  );
+
+  it("an Add of the session before, still unanswered, is not in flight with this session's", async () => {
+    const { result, client, answers, unmount } = await bookOfOne();
+    await act(async () => result.current.create.mutate({ body: bodyOf(OFFICE), generation: 1 }));
+    await unmount();
+    // Another account signs in, and adds an address of its own.
+    mockGeneration = 2;
+    client.clear();
+    server = [savedAddress({ id: "theirs", label: "Theirs", is_default: true })];
+    const next = await renderBook(client);
+    getsFail();
+
+    await act(async () => next.result.current.create.mutate({ body: bodyOf(LAKE), generation: 2 }));
+    await act(async () => answers.lake.resolve(LAKE));
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(3));
+    expect(cached(client)).toEqual(["theirs*", "lake"]);
+    expect(guessed(client)).toBe(false);
+    // The first account's answer comes at last: it joins nothing.
+    await act(async () => answers.office.resolve(OFFICE));
+    expect(cached(client)).toEqual(["theirs*", "lake"]);
+  });
+
+  it("while one is unanswered, the other is not made the default as the only address drawn", async () => {
+    const { result, client, answers } = await bookOfOne();
+    getsFail();
+    jest.mocked(apiDelete).mockResolvedValue(undefined);
+
+    await act(async () => result.current.create.mutate({ body: bodyOf(OFFICE), generation: 1 }));
+    await act(async () => result.current.create.mutate({ body: bodyOf(LAKE), generation: 1 }));
+    await act(async () => answers.lake.resolve(LAKE));
+    expect(cached(client)).toEqual(["home*", "lake"]);
+    expect(guessed(client)).toBe(true);
+
+    // The server may already have Office, the older one then: Lake is drawn without the chip.
+    await act(async () => result.current.remove(HOME));
+    expect(cached(client)).toEqual(["lake"]);
+
+    await act(async () => answers.office.resolve(OFFICE));
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+    expect(cached(client)).toEqual(["office", "lake"]);
+    expect(guessed(client)).toBe(true);
+  });
+});

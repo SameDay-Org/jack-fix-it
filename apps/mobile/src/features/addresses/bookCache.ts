@@ -2,7 +2,7 @@ import { hashKey, type QueryClient } from "@tanstack/react-query";
 
 import { isCurrentGeneration, type GetResponse } from "@/api";
 
-import type { Book, BookEdit } from "./book";
+import { withAdded, type Book, type BookEdit } from "./book";
 
 export type SavedAddressList = GetResponse<"/v1/addresses">;
 export type SavedAddress = SavedAddressList["items"][number];
@@ -10,7 +10,8 @@ export type SavedAddress = SavedAddressList["items"][number];
 /**
  * The book as cached. `guessed` marks one whose other addresses (the ones that are not the
  * default) the device cannot vouch for: a change of its own is still unanswered, or it no longer
- * knows their order (see `Book`). Who the server would make the default next is then unknown.
+ * knows their order, or an address was added while another Add was unanswered (see `Book`). Who
+ * the server would make the default next is then unknown.
  */
 export type SavedBook = SavedAddressList & { guessed?: true };
 
@@ -70,7 +71,8 @@ function closeLog(client: QueryClient, log: WriteLog): void {
 /** Draws the book as the log has it: `confirmed`, then each write in the order asked. */
 function draw(client: QueryClient, log: WriteLog): void {
   const book = log.writes.reduce((drawn, write) => write.edit?.(drawn) ?? drawn, log.confirmed);
-  const guessed = !book.ordered || log.writes.some((write) => write.edit && !write.answered);
+  const guessed =
+    !book.ordered || book.unplaced || log.writes.some((write) => write.edit && !write.answered);
   client.setQueryData<SavedBook>(SAVED_ADDRESSES_QUERY_KEY, (cached) => {
     if (!cached) return cached;
     const { guessed: _guessed, ...list } = cached;
@@ -196,4 +198,45 @@ export function dropWrite(
   if (!log || index < 0) return;
   log.writes.splice(index, 1);
   settle(client, log);
+}
+
+/**
+ * An Add, from asked to answered: its place in the log (none when no book was cached to draw
+ * on), and whether another Add of its session was unanswered at any moment while it was.
+ */
+export type OpenAdd = { generation: number; write: OpenWrite | undefined; contested: boolean };
+
+/*
+ * The Adds the server has not answered, per cache. They are counted here and not in the log: an
+ * Add asked before the book was cached has no place in it, and is as much in flight as the others.
+ */
+const adding = new WeakMap<QueryClient, Set<OpenAdd>>();
+
+/**
+ * Records an Add as asked (`openWrite`: it draws nothing until the server answers). Two Adds of
+ * a session unanswered together are both `contested`, for good: the server takes them in either
+ * order and neither answer says which, so the device cannot know which of the two addresses is
+ * the older one, nor, while one is unanswered, whether the server already has it.
+ */
+export function openAdd(client: QueryClient, generation: number): OpenAdd {
+  const add: OpenAdd = { generation, write: openWrite(client, generation), contested: false };
+  // An Add of a session that is gone is never sent: it is in flight with no one.
+  if (!isCurrentGeneration(generation)) return add;
+  const unanswered = adding.get(client) ?? new Set<OpenAdd>();
+  adding.set(client, unanswered.add(add));
+  const together = [...unanswered].filter((asked) => asked.generation === generation);
+  if (together.length > 1) for (const asked of together) asked.contested = true;
+  return add;
+}
+
+/** The server answered an Add with the new `address`: the book reads with it (`answerWrite`). */
+export function answerAdd(client: QueryClient, add: OpenAdd, address: SavedAddress): void {
+  adding.get(client)?.delete(add);
+  answerWrite(client, add.generation, add.write, (book) => withAdded(book, address, add.contested));
+}
+
+/** The server refused an Add: the book reads without it (`dropWrite`). */
+export function dropAdd(client: QueryClient, generation: number, add: OpenAdd | undefined): void {
+  if (add) adding.get(client)?.delete(add);
+  dropWrite(client, generation, add?.write);
 }

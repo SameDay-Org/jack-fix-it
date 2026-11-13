@@ -1,15 +1,17 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { act, fireEvent, renderHook, screen, waitFor } from "@testing-library/react-native";
 import { router, useLocalSearchParams } from "expo-router";
+import { createElement, type ReactNode } from "react";
 import { Alert, type AlertButton, type AlertOptions } from "react-native";
 
-import { ApiError, apiDelete, apiGet, apiPatch, NetworkError, useSession } from "@/api";
+import { ApiError, apiDelete, apiGet, apiPatch, apiPost, NetworkError, useSession } from "@/api";
 import { dismissToast, toastStore } from "@/components/ui/toast";
 import i18n from "@/i18n";
 
 import { deferred, settle } from "../../../api/__tests__/helpers";
 import { signedIn } from "../../home/__tests__/helpers";
 import { AddressActionsSheet } from "../AddressActionsSheet";
-import { SAVED_ADDRESSES_QUERY_KEY } from "../api";
+import { SAVED_ADDRESSES_QUERY_KEY, useCreateAddress, type SavedAddress } from "../api";
 import {
   bookClient,
   cachedBook,
@@ -245,6 +247,42 @@ describe("AddressActionsSheet", () => {
     );
     await act(async () => deleted.reject(new ApiError(500, "internal_error")));
     expect(cachedBook(client)).toEqual(["home*", "work", "cabin"]);
+  });
+
+  it("after two addresses were added together, names neither as the next default", async () => {
+    // Work and Cabin were saved from two forms, the second before the first was answered. The
+    // server took them in an order their answers do not say, and no list came after.
+    jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+    const answers = [deferred<SavedAddress>(), deferred<SavedAddress>()];
+    jest
+      .mocked(apiPost)
+      .mockReturnValueOnce(answers[0].promise)
+      .mockReturnValueOnce(answers[1].promise);
+    const client = bookClient([HOME]);
+    const { result } = await renderHook(() => useCreateAddress(), {
+      wrapper: ({ children }: { children: ReactNode }) =>
+        createElement(QueryClientProvider, { client }, children),
+    });
+    const bodyOf = (address: SavedAddress) => ({
+      line1: address.line1,
+      city: address.city,
+      state: address.state,
+      zip_code: address.zip_code,
+      label: address.label,
+      is_default: false,
+    });
+    await act(async () => result.current.mutate({ body: bodyOf(WORK), generation: 1 }));
+    await act(async () => result.current.mutate({ body: bodyOf(CABIN), generation: 1 }));
+    await act(async () => answers[0].resolve(WORK));
+    await act(async () => answers[1].resolve(CABIN));
+    expect(cachedBook(client)).toEqual(["home*", "work", "cabin"]);
+
+    // Work is drawn next, but Cabin may be the older one: the device names no one.
+    await openFor("home", client).view;
+    await fireEvent.press(screen.getByRole("button", { name: "Delete address" }));
+    expect(alert.mock.calls[0][1]).toBe(
+      "Requests you already sent keep their address. Another address becomes your default.",
+    );
   });
 
   it("says in Spanish that another address becomes the default", async () => {

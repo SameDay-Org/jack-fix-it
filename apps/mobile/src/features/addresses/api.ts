@@ -16,19 +16,16 @@ import {
 } from "@/api";
 import { showToast } from "@/components/ui";
 
+import { addressFailure, withDefault, withFields, withoutAddress, type AddressEdit } from "./book";
 import {
-  addressFailure,
-  withAdded,
-  withDefault,
-  withFields,
-  withoutAddress,
-  type AddressEdit,
-} from "./book";
-import {
+  answerAdd,
   answerWrite,
+  dropAdd,
   dropWrite,
+  openAdd,
   openWrite,
   SAVED_ADDRESSES_QUERY_KEY,
+  type OpenAdd,
   type OpenWrite,
   type SavedAddress,
   type SavedBook,
@@ -77,10 +74,9 @@ export function useCreateAddress() {
   return useMutation({
     mutationFn: ({ body, generation }: CreateAddressVariables) =>
       apiPost("/v1/addresses", body, { auth: true, generation }),
-    onMutate: ({ generation }): WriteContext => ({ write: openWrite(client, generation) }),
-    onSuccess: (address, { generation }, context) =>
-      answerWrite(client, generation, context.write, (book) => withAdded(book, address)),
-    onError: (_error, { generation }, context) => dropWrite(client, generation, context?.write),
+    onMutate: ({ generation }): OpenAdd => openAdd(client, generation),
+    onSuccess: (address, _variables, add) => answerAdd(client, add, address),
+    onError: (_error, { generation }, add) => dropAdd(client, generation, add),
   });
 }
 
