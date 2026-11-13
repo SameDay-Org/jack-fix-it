@@ -1,6 +1,7 @@
 """Two-sided reviews (#77): POST /v1/jobs/{job_id}/reviews, GET .../reviews/mine and
 GET /v1/users/me/rating."""
 
+import json
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -408,8 +409,14 @@ def test_is_reviewable(status: JobStatus, confirmed: bool, expected: bool) -> No
 @pytest.mark.parametrize("side", ["customer", "pro"])
 @pytest.mark.parametrize(
     ("status", "confirmed"),
-    [*((status, False) for status in NEVER_CONFIRMED), (JobStatus.PAID_OUT, False)],
-    ids=lambda value: value.value if isinstance(value, JobStatus) else "",
+    [
+        *((status, False) for status in NEVER_CONFIRMED),
+        # Paid out by an admin's release of a dispute: never confirmed.
+        (JobStatus.PAID_OUT, False),
+        # A timestamp alone never makes a job reviewable.
+        *((status, True) for status in NEVER_CONFIRMED),
+    ],
+    ids=lambda value: value.value if isinstance(value, JobStatus) else f"confirmed_at={value}",
 )
 async def test_a_job_that_was_not_confirmed_is_not_reviewable(
     db_client: httpx.AsyncClient,
@@ -419,7 +426,8 @@ async def test_a_job_that_was_not_confirmed_is_not_reviewable(
     status: JobStatus,
     confirmed: bool,
 ) -> None:
-    job = await make_job(db_session, world, status)
+    confirmed_at = datetime.now(UTC) if confirmed else None
+    job = await make_job(db_session, world, status, confirmed_at=confirmed_at)
     party: Party = getattr(world, side)
 
     response = await post(db_client, party, job.id, comment=COMMENT)
@@ -587,7 +595,7 @@ async def test_each_side_reviews_once_and_another_job_is_another_review(
         {"comment": 5},
         {"comment": ["a"]},
         # Nothing visible: zero-width spaces only.
-        {"comment": "​​​"},
+        {"comment": chr(0x200B) * 3},
         {"rating": 5},
     ],
     ids=lambda bad: "+".join(f"{key}={str(value)[:10]!r}" for key, value in bad.items()),
@@ -648,6 +656,38 @@ async def test_the_longest_comment_is_accepted(
     response = await post(db_client, world.customer, job.id, comment="é" * 1000)
 
     assert response.status_code == 201, response.text
+    assert [len(r.comment or "") for r in await rows(db_session)] == [1000]
+
+
+async def test_text_with_no_utf8_form_is_422(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    job = await confirmed_job(db_session, world)
+    body = {"overall": 5, "comment": "lone " + chr(0xD83D)}
+
+    # Serialized here: httpx refuses lone surrogates, a raw client does not.
+    response = await db_client.post(
+        path(job.id),
+        content=json.dumps(body),
+        headers={**world.customer.headers, "Content-Type": "application/json"},
+    )
+
+    assert (response.status_code, response.json()) == (422, VALIDATION_ERROR)
+    assert await rows(db_session) == []
+
+
+async def test_a_comment_that_outgrows_the_limit_once_masked_is_422(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    job = await confirmed_job(db_session, world)
+    # 1000 characters as typed; the 2-character handle becomes the 3-character mask.
+    typed = "x" * 997 + " @a"
+
+    refused = await post(db_client, world.customer, job.id, comment=typed)
+    fits = await post(db_client, world.customer, job.id, comment=typed[1:])
+
+    assert (refused.status_code, refused.json()) == (422, VALIDATION_ERROR)
+    assert (fits.status_code, fits.json()["comment_redacted"]) == (201, True)
     assert [len(r.comment or "") for r in await rows(db_session)] == [1000]
 
 

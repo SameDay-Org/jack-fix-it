@@ -76,8 +76,9 @@ _JOB_NOT_FOUND = _error(
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
             "validation_error: a rating missing, not an integer or outside 1 to 5; quality or "
             "value sent by the job's pro (the customer alone rates them); a comment blank, "
-            f"longer than {COMMENT_MAX_LENGTH} characters or with nothing visible in it; an "
-            "unknown field; a job_id that is not a UUID."
+            f"longer than {COMMENT_MAX_LENGTH} characters as typed or once its contact details "
+            "are masked, or empty once invisible characters (zero-width and the like) are "
+            "dropped; an unknown field; a job_id that is not a UUID."
         ),
         status.HTTP_429_TOO_MANY_REQUESTS: {
             **_error("rate_limited: too many reviews; retry later."),
