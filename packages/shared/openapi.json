@@ -5862,6 +5862,259 @@
           }
         }
       }
+    },
+    "/v1/jobs/{job_id}/reviews": {
+      "post": {
+        "tags": [
+          "reviews"
+        ],
+        "summary": "Review the other side of my job",
+        "description": "The caller's review of the other side of a job they took part in: the customer reviews\nthe pro, the pro reviews the customer. One review per side per job, only once the job was\nconfirmed, never edited. Who is reviewed comes from the job, not from the body.\n\nThe customer may rate communication, quality, punctuality and value next to `overall`; the\npro may rate communication and punctuality only (quality or value from the pro is a 422).\n\nContact details in the comment are masked before it is stored, and only the masked text is\nkept; `comment_redacted` says so.",
+        "operationId": "create_review_v1_jobs__job_id__reviews_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewCreatedOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a rating missing, not an integer or outside 1 to 5; quality or value sent by the job's pro (the customer alone rates them); a comment blank, longer than 1000 characters or with nothing visible in it; an unknown field; a job_id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers and pros.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job with this id of which the caller is the customer or the pro.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "job_not_reviewable: the job was not confirmed (by the customer or automatically): it is scheduled, on the way, in progress, completed, disputed, refunded or cancelled, or was paid out without a confirmation; already_reviewed: the caller already reviewed this job.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many reviews; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jobs/{job_id}/reviews/mine": {
+      "get": {
+        "tags": [
+          "reviews"
+        ],
+        "summary": "Read my review of a job",
+        "description": "The caller's own review of the job, or null, and whether they may still write one. It\nnever returns the other side's review, whether or not the caller wrote theirs.",
+        "operationId": "read_my_review_v1_jobs__job_id__reviews_mine_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyReviewOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a job_id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers and pros.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job with this id of which the caller is the customer or the pro.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/users/me/rating": {
+      "get": {
+        "tags": [
+          "reviews"
+        ],
+        "summary": "Read my rating",
+        "description": "The caller's own rating, as a customer or as a pro: the average of the overall ratings\nthey received, to one decimal, and how many; null and 0 with none.",
+        "operationId": "read_my_rating_v1_users_me_rating_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RatingOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers and pros.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -7666,6 +7919,33 @@
         ],
         "title": "MultiChoiceQuestion"
       },
+      "MyReviewOut": {
+        "properties": {
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The caller's own review of this job; null when they wrote none. Never the other side's."
+          },
+          "can_review": {
+            "type": "boolean",
+            "title": "Can Review",
+            "description": "True while the caller may still review this job: it was confirmed and they wrote no review yet."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "review",
+          "can_review"
+        ],
+        "title": "MyReviewOut"
+      },
       "MySupportTicketOut": {
         "properties": {
           "id": {
@@ -9349,6 +9629,34 @@
         "title": "QuoteStatus",
         "description": "Internal states (docs/glossary.md). Transitions belong to the state machine (#60)."
       },
+      "RatingOut": {
+        "properties": {
+          "average": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average",
+            "description": "The average of the overall ratings the caller received, to one decimal; null with none (No ratings yet)."
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "How many reviews the caller received."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "average",
+          "count"
+        ],
+        "title": "RatingOut"
+      },
       "ReadinessResponse": {
         "properties": {
           "status": {
@@ -9830,6 +10138,209 @@
         ],
         "title": "ReversePositionIn",
         "description": "A device position. Strict: numbers only (no strings or booleans), finite, in range,\nand nothing but the two coordinates."
+      },
+      "ReviewCreatedOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "comment_redacted": {
+            "type": "boolean",
+            "title": "Comment Redacted",
+            "description": "True when something in the comment was masked: the app tells the author that contact details are not shared in reviews. False otherwise, and with no comment."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "comment_redacted"
+        ],
+        "title": "ReviewCreatedOut"
+      },
+      "ReviewIn": {
+        "properties": {
+          "overall": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Overall",
+            "description": "The overall rating, 1 (worst) to 5 (best)."
+          },
+          "communication": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Communication",
+            "description": "Optional, 1 to 5."
+          },
+          "quality": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quality",
+            "description": "Optional, 1 to 5. From the job's customer only: refused (422) from the pro."
+          },
+          "punctuality": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Punctuality",
+            "description": "Optional, 1 to 5."
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value",
+            "description": "Optional, 1 to 5. From the job's customer only: refused (422) from the pro."
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000,
+                "minLength": 1,
+                "pattern": "^[^\\x00]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment",
+            "description": "Optional text, trimmed. Contact details in it (phones, emails, links, handles, addresses) are replaced by \u2022\u2022\u2022 before it is stored; only the masked text is kept."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "overall"
+        ],
+        "title": "ReviewIn"
+      },
+      "ReviewOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "overall": {
+            "type": "integer",
+            "title": "Overall"
+          },
+          "communication": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Communication"
+          },
+          "quality": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quality"
+          },
+          "punctuality": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Punctuality"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment",
+            "description": "The text as stored: contact details were replaced by \u2022\u2022\u2022 when it was written."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "overall",
+          "communication",
+          "quality",
+          "punctuality",
+          "value",
+          "comment",
+          "created_at"
+        ],
+        "title": "ReviewOut",
+        "description": "The caller's own review, as stored."
       },
       "SavedAddressIn": {
         "properties": {
