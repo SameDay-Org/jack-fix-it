@@ -20,8 +20,11 @@ from app.config import Settings
 from app.integrations.storage import get_storage
 from app.modules.addresses.models import Address
 from app.modules.auth import security
-from app.modules.requests.models import RequestMedia, ServiceRequest
+from app.modules.jobs.service import SYSTEM
+from app.modules.requests import service as request_service
+from app.modules.requests.models import RequestMedia, RequestStatus, ServiceRequest
 from app.modules.requests.repository import ServiceRequestRepository
+from app.modules.requests.state_machine import RequestStateMachine
 from app.modules.service_areas.models import ServiceArea
 from app.modules.users.models import User
 from app.modules.users.types import UserRole
@@ -97,15 +100,29 @@ async def addresses_of(session: AsyncSession, user_id: uuid.UUID) -> int:
     return (await session.scalar(statement)) or 0
 
 
-def without_url_expiry(out: dict[str, Any]) -> dict[str, Any]:
-    """A request's body without its media URLs' expiry: presigned anew for every answer."""
-    return {
-        **out,
-        "media": sorted(
-            ({k: v for k, v in item.items() if k != "expires_at"} for item in out["media"]),
-            key=lambda item: str(item["url"]),
-        ),
-    }
+# What a replay answers as it is now (#385 r1): the request's current status, and its media
+# URLs signed anew. Exactly these, and nothing else of the 201's body, may differ.
+VOLATILE_FIELDS = ("status", "customer_status")
+VOLATILE_MEDIA_FIELDS = ("url", "expires_at")
+
+
+def without_volatile(out: dict[str, Any]) -> dict[str, Any]:
+    """A request's body without the volatile fields, the media kept in their order."""
+    stable = {name: value for name, value in out.items() if name not in VOLATILE_FIELDS}
+    stable["media"] = [
+        {name: value for name, value in item.items() if name not in VOLATILE_MEDIA_FIELDS}
+        for item in out["media"]
+    ]
+    return stable
+
+
+@dataclass
+class SigningStorage(FakeStorage):
+    """Signs every URL anew, as the real storage does: a URL handed out again would show."""
+
+    def presign_get(self, key: str, expires_in: int) -> str:
+        super().presign_get(key, expires_in)
+        return f"https://storage.example.invalid/get/{key}?sig={len(self.gets)}"
 
 
 # Criterion 1: the first create 201, a retry 200 with the same request, and nothing again
@@ -132,7 +149,7 @@ async def test_retry_answers_the_first_request_and_does_nothing_again(
     assert first.status_code == 201
     assert [retry.status_code for retry in retries] == [200, 200, 200]
     assert all(
-        without_url_expiry(retry.json()) == without_url_expiry(first.json()) for retry in retries
+        without_volatile(retry.json()) == without_volatile(first.json()) for retry in retries
     )
     [row] = await keyed_rows(db_session, ana.id)
     assert str(row.id) == first.json()["id"]
@@ -161,6 +178,80 @@ async def test_retry_body_is_the_first_create_body(
     assert (first.status_code, retry.status_code) == (201, 200)
     assert retry.json() == first.json()
     assert retry.headers["content-type"] == first.headers["content-type"]
+
+
+async def test_a_later_replay_answers_media_urls_signed_anew(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    signing = SigningStorage()
+    app.dependency_overrides[get_storage] = lambda: signing
+    start = datetime.now(UTC).replace(microsecond=0)
+
+    class Clock(datetime):
+        """The service's clock, moved by the test."""
+
+        at = start
+
+        @classmethod
+        def now(cls, tz: Any = None) -> "Clock":
+            return cls.fromtimestamp(cls.at.timestamp(), tz)
+
+    monkeypatch.setattr(request_service, "datetime", Clock)
+    ana = await make_caller(db_session)
+    photo, video = ana.media_key(".jpg"), ana.media_key(".mp4")
+    key = str(uuid.uuid4())
+
+    first = await post(db_client, ana, key, media_keys=[photo, video])
+    Clock.at = start + timedelta(minutes=1)
+    retry = await post(db_client, ana, key, media_keys=[photo, video])
+
+    assert (first.status_code, retry.status_code) == (201, 200)
+    assert without_volatile(retry.json()) == without_volatile(first.json())
+    # The media's volatile fields differ, and are the live ones: signed again at the retry,
+    # each for the configured lifetime from the retry's clock.
+    seconds = settings.download_url_ttl_seconds
+    ttl = timedelta(seconds=seconds)
+    signed = "https://storage.example.invalid/get/{}?sig={}"
+
+    def volatile(out: dict[str, Any]) -> list[tuple[str, datetime]]:
+        return [(item["url"], datetime.fromisoformat(item["expires_at"])) for item in out["media"]]
+
+    # The body's media order (both rows share a created_at), the same in both answers.
+    files = [photo if item["kind"] == "photo" else video for item in first.json()["media"]]
+    assert volatile(first.json()) == [
+        (signed.format(file, n), start + ttl) for n, file in enumerate(files, start=1)
+    ]
+    assert volatile(retry.json()) == [
+        (signed.format(file, n), Clock.at + ttl) for n, file in enumerate(files, start=3)
+    ]
+    assert signing.gets == [(file, seconds) for file in files] * 2
+
+
+async def test_a_replay_after_a_transition_answers_the_current_status(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    ana = await make_caller(db_session)
+    key = str(uuid.uuid4())
+    first = await post(db_client, ana, key)
+    request_id = uuid.UUID(first.json()["id"])
+    await RequestStateMachine(db_session).transition(request_id, RequestStatus.FINDING_PRO, SYSTEM)
+    await db_session.commit()
+
+    retry = await post(db_client, ana, key)
+    live = await db_client.get(f"/v1/requests/{request_id}", headers=ana.headers)
+
+    assert (first.status_code, retry.status_code, live.status_code) == (201, 200, 200)
+    assert without_volatile(retry.json()) == without_volatile(first.json())
+    # The status fields differ from the 201's, and are the request's live ones.
+    for name in VOLATILE_FIELDS:
+        assert retry.json()[name] != first.json()[name]
+        assert retry.json()[name] == live.json()[name]
+    assert retry.json()["status"] == RequestStatus.FINDING_PRO.value
 
 
 async def test_same_body_laid_out_differently_is_a_retry(
@@ -291,6 +382,76 @@ async def test_a_key_that_is_not_a_uuid_is_422(
     assert (response.status_code, response.json()) == (422, VALIDATION_ERROR)
     assert await keyed_rows(db_session, ana.id) == []
     assert queue.before == []
+
+
+LONE_SURROGATE = "\ud800"  # valid in JSON text ("\ud800"), with no UTF-8 form
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        lambda _: {"description": f"Leak{LONE_SURROGATE}"},
+        lambda _: {"address": {**ADDRESS, "line1": f"742{LONE_SURROGATE}"}},
+        lambda _: {"address": {**ADDRESS, "line2": f"Apt{LONE_SURROGATE}"}},
+        lambda _: {"address": {**ADDRESS, "city": f"Or{LONE_SURROGATE}"}},
+        lambda _: {"address": {**ADDRESS, "state": f"F{LONE_SURROGATE}"}},
+        lambda _: {"address": {**ADDRESS, "zip_code": f"3280{LONE_SURROGATE}"}},
+        lambda _: {"utm": {"source": f"ig{LONE_SURROGATE}"}},
+        lambda _: {"utm": {"medium": f"social{LONE_SURROGATE}"}},
+        lambda _: {"utm": {"campaign": f"fall{LONE_SURROGATE}"}},
+        lambda _: {"utm": {"term": f"plumber{LONE_SURROGATE}"}},
+        lambda _: {"utm": {"content": f"ad{LONE_SURROGATE}"}},
+        lambda _: {"intake_answers": {"notes": LONE_SURROGATE}},
+        lambda _: {"intake_answers": {f"no{LONE_SURROGATE}tes": "x"}},
+        lambda _: {"intake_answers": {"nested": [{"deep": LONE_SURROGATE}]}},
+        lambda caller: {"media_keys": [caller.media_key(f"{LONE_SURROGATE}.jpg")]},
+    ],
+    ids=[
+        "description",
+        "line1",
+        "line2",
+        "city",
+        "state",
+        "zip_code",
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_term",
+        "utm_content",
+        "intake_value",
+        "intake_key",
+        "intake_nested",
+        "media_key",
+    ],
+)
+async def test_text_with_no_utf8_form_is_422_with_a_key_and_leaves_the_key_unused(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    queue: RecordingQueue,
+    malformed: Callable[[Caller], dict[str, Any]],
+) -> None:
+    ana = await make_caller(db_session)
+    key = str(uuid.uuid4())
+
+    # Serialized here: httpx refuses lone surrogates, a raw client does not.
+    refused = await db_client.post(
+        "/v1/requests",
+        content=json.dumps(body(**malformed(ana))),
+        headers={**ana.headers, "Idempotency-Key": key, "Content-Type": "application/json"},
+    )
+
+    assert (refused.status_code, refused.json()) == (422, VALIDATION_ERROR)
+    assert await keyed_rows(db_session, ana.id) == []
+    assert await addresses_of(db_session, ana.id) == 0
+    assert queue.before == []
+    # The refused attempt did not take the key: a valid body with it creates the request.
+    created = await post(db_client, ana, key)
+    retry = await post(db_client, ana, key)
+    assert (created.status_code, retry.status_code) == (201, 200)
+    [row] = await keyed_rows(db_session, ana.id)
+    assert str(row.id) == created.json()["id"] == retry.json()["id"]
+    assert len(queue.before) == 1
 
 
 async def test_the_key_and_the_body_never_reach_the_logs(

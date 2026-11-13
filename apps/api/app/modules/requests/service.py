@@ -156,9 +156,11 @@ class ServiceRequestService:
         self, user: UserAccount, data: RequestCreate, idempotency_key: uuid.UUID | None = None
     ) -> CreatedRequest:
         """Without a key, every call makes a request. With one, a request the customer made
-        with it within the window is answered as it is now, before anything else is checked
-        (a retry the next day must not fail on a date that has since passed, or on media it
-        already attached), and nothing is written or queued."""
+        with it within the window is answered before anything else is checked (a retry the
+        next day must not fail on a date that has since passed, or on media it already
+        attached), and nothing is written or queued. The answer is that same request with
+        its current status and freshly signed media URLs, never a stored copy of the first
+        answer: a retry must not hand back a stale status or an expired URL."""
         idempotency = (
             None
             if idempotency_key is None
@@ -382,11 +384,17 @@ class ServiceRequestService:
 def _fingerprint(data: RequestCreate) -> str:
     """SHA-256 (hex) of the body as validated (trimmed, defaults filled in), its keys sorted:
     two bodies that differ in any field differ here, and the same body is the same however
-    its JSON was laid out."""
+    its JSON was laid out. Text with no UTF-8 form (a lone surrogate, which the schema lets
+    through in intake answers and media keys) is the validation error a create without a
+    key answers too, raised before the key is looked up, so the key stays unused."""
     canonical = json.dumps(
         data.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
     )
-    return hashlib.sha256(canonical.encode()).hexdigest()
+    try:
+        encoded = canonical.encode()
+    except UnicodeEncodeError:
+        raise InvalidRequestError from None
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _encode_cursor(request: ServiceRequest) -> str:
