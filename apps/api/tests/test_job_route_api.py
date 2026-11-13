@@ -34,6 +34,7 @@ from app.integrations.mapbox import (
     get_route_provider,
 )
 from app.modules.addresses.models import Address
+from app.modules.addresses.service import AddressPlace
 from app.modules.jobs.location import (
     LocationBackend,
     NoJobLocationStore,
@@ -46,12 +47,14 @@ from app.modules.jobs.location_guard import LocationStoreRefusedError
 from app.modules.jobs.models import JobStatus
 from app.modules.jobs.route import (
     CachedRoute,
+    JobRouteConfig,
     NoJobRouteCache,
     RedisJobRouteCache,
     get_job_route_cache,
     meters_between,
     thinned,
 )
+from app.modules.requests.service import CustomerRequestReader
 from app.observability import MAPBOX_URL_LABEL, JsonFormatter
 from tests.conftest import _rolled_back_session, make_app, make_settings
 from tests.job_world import LINE1, LINE2, JobWorld, Party, build_world, make_job, record_pushes
@@ -472,7 +475,8 @@ async def test_one_request_at_a_time_asks_mapbox(
     await mapbox.asked_for_a_route()
     async with asyncio.timeout(5):  # a poll that asked Mapbox too would wait for good
         meanwhile = [await shown(db_client, job.id, world) for _ in range(3)]
-    # The turn is held for both calls and the write, plus a margin, and names no position.
+    # The turn is held for the second look at the cache, both calls and the write, plus a
+    # margin, and names no position.
     assert settings.mapbox_timeout_seconds == 5.0
     assert 7 <= await redis.ttl(cache.claim_key(job.id)) <= 12
     assert await redis.get(cache.claim_key(job.id)) == b"asking"
@@ -499,6 +503,213 @@ async def test_one_request_at_a_time_asks_mapbox(
     assert second["computed_at"] == "2026-11-10T15:00:10Z"
     assert len(mapbox.routes) == 2
     assert await redis.exists(cache.claim_key(job.id)) == 0
+
+
+# The second look at the cache, with the turn held (#383 round 1)
+
+
+class HeldAtTheAddress:
+    """Holds the next `polls` route requests where they read the job's address: each has looked
+    at the cache and found nothing to answer with, and has not asked for the job's turn yet.
+    `arrived[n]` says the nth is there and `go[n]` lets it on: no sleep, no expiry."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, polls: int = 1) -> None:
+        self.arrived = [asyncio.Event() for _ in range(polls)]
+        self.go = [asyncio.Event() for _ in range(polls)]
+        read = CustomerRequestReader.place
+        seen = 0
+
+        async def place(reader: CustomerRequestReader, request_id: uuid.UUID) -> AddressPlace:
+            nonlocal seen
+            index, seen = seen, seen + 1
+            if index < polls:
+                self.arrived[index].set()
+                await self.go[index].wait()
+            return await read(reader, request_id)
+
+        monkeypatch.setattr(CustomerRequestReader, "place", place)
+
+    async def reached_by(self, index: int = 0) -> None:
+        async with asyncio.timeout(5):
+            await self.arrived[index].wait()
+
+    def open(self) -> None:
+        for go in self.go:
+            go.set()
+
+
+async def ended(*polls: "asyncio.Task[httpx.Response] | None") -> None:
+    """Leaves no held poll behind a failed test."""
+    tasks = [poll for poll in polls if poll is not None]
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@pytest.mark.parametrize(
+    "stored_coordinates", [True, False], ids=["stored_coordinates", "geocoded"]
+)
+async def test_overlapping_polls_ask_mapbox_once(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    store: RedisJobLocationStore,
+    cache: RedisJobRouteCache,
+    mapbox: FakeMapbox,
+    redis: Redis,
+    monkeypatch: pytest.MonkeyPatch,
+    stored_coordinates: bool,
+) -> None:
+    """The Gatekeeper's interleaving: a poll finds no route in the cache and is still reading
+    the address when another finds none either, takes the turn, asks Mapbox, keeps the route
+    and gives the turn back. The first poll then gets the free turn. The pro has not moved and
+    the kept route is good: it is the answer, and Mapbox is asked nothing more."""
+    job = await on_the_way_job(db_session, world)
+    if stored_coordinates:
+        await locate(db_session, world)
+    await plant(store, job.id)
+    held = HeldAtTheAddress(monkeypatch)
+    early = asyncio.create_task(ask(db_client, job.id, world.customer))
+    try:
+        await held.reached_by()
+        async with asyncio.timeout(5):
+            route = await shown(db_client, job.id, world)
+        assert route is not None
+        assert await cache.get(job.id) is not None
+        geocodes, routes = list(mapbox.geocodes), list(mapbox.routes)
+        assert (len(geocodes), len(routes)) == (0 if stored_coordinates else 1, 1)
+        held.open()
+        async with asyncio.timeout(5):
+            answer = await early
+    finally:
+        held.open()
+        await ended(early)
+
+    assert (answer.status_code, answer.json()) == (200, {"route": route})
+    assert answer.headers["cache-control"] == "no-store"
+    assert (mapbox.geocodes, mapbox.routes) == (geocodes, routes)  # nothing asked twice
+    assert await redis.exists(cache.claim_key(job.id)) == 0  # the turn was given back
+
+
+async def test_route_kept_meanwhile_from_elsewhere_does_not_answer(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    store: RedisJobLocationStore,
+    cache: RedisJobRouteCache,
+    mapbox: FakeMapbox,
+    clock: list[datetime],
+    redis: Redis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The second look decides as the first does: a route kept meanwhile is the answer only
+    while the pro is within the refresh distance of where it starts."""
+    job = await on_the_way_job(db_session, world)
+    await locate(db_session, world)
+    await plant(store, job.id)
+    held = HeldAtTheAddress(monkeypatch, polls=2)
+    # One poll saw the pro at the first position and the other 120 m on; neither found a route.
+    early = asyncio.create_task(ask(db_client, job.id, world.customer))
+    late: asyncio.Task[httpx.Response] | None = None
+    try:
+        await held.reached_by(0)
+        clock[0] = NOW + timedelta(seconds=5)
+        here = await move(store, job.id, clock[0], NORTH_120_M)
+        late = asyncio.create_task(ask(db_client, job.id, world.customer))
+        await held.reached_by(1)
+        async with asyncio.timeout(5):
+            held.go[0].set()
+            first = (await early).json()["route"]
+            between = await cache.get(job.id)
+            held.go[1].set()
+            second = (await late).json()["route"]
+    finally:
+        held.open()
+        await ended(early, late)
+
+    # The route kept from the first position starts 120 m from the second poll's pro: that
+    # poll asks Mapbox from where it saw the pro, and its route is the one kept now.
+    assert between is not None
+    assert between.origin == ORIGIN
+    assert mapbox.routes == [(ORIGIN, DESTINATION), (here, DESTINATION)]
+    assert (first["computed_at"], second["computed_at"]) == (
+        "2026-11-10T15:00:05Z",
+        "2026-11-10T15:00:05Z",
+    )
+    kept = await cache.get(job.id)
+    assert kept is not None
+    assert kept.origin == here
+    assert await redis.exists(cache.claim_key(job.id)) == 0
+
+
+class GoneAtTheSecondLook(RedisJobRouteCache):
+    """Answers a poll's first `get` from Redis and fails its second, the one it makes with the
+    job's turn held, as the cache going away or being refused between the two would."""
+
+    error: Exception = RedisConnectionError("probe: gone")
+    looks = 0
+
+    async def get(self, job_id: uuid.UUID) -> CachedRoute | None:
+        self.looks += 1
+        if self.looks == 2:
+            raise self.error
+        return await super().get(job_id)
+
+
+@pytest.mark.parametrize(
+    ("error", "answer", "event"),
+    [
+        (RedisConnectionError("probe: gone"), ROUTE_UNAVAILABLE, "job_route_cache_unavailable"),
+        (TimeoutError(), ROUTE_UNAVAILABLE, "job_route_cache_unavailable"),
+        (
+            LocationStoreRefusedError("not_ephemeral"),
+            LOCATION_UNAVAILABLE,
+            "job_route_store_refused",
+        ),
+    ],
+    ids=["gone", "slow", "refused"],
+)
+async def test_cache_lost_with_the_turn_held_asks_nobody_and_gives_the_turn_back(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    store: RedisJobLocationStore,
+    mapbox: FakeMapbox,
+    redis: Redis,
+    prefix: str,
+    caplog: pytest.LogCaptureFixture,
+    error: Exception,
+    answer: dict[str, Any],
+    event: str,
+) -> None:
+    job = await on_the_way_job(db_session, world)
+    await locate(db_session, world)
+    await plant(store, job.id)
+    flaky = GoneAtTheSecondLook(redis, None, timeout_seconds=STORE_TIMEOUT, prefix=prefix)
+    flaky.error = error
+    app.dependency_overrides[get_job_route_cache] = lambda: flaky
+
+    with caplog.at_level(logging.DEBUG):
+        response = await ask(db_client, job.id, world.customer)
+
+    # As when the first look fails: the cache's answer, and no call to Mapbox.
+    assert (response.status_code, response.json()) == (503, answer)
+    assert mapbox.calls == 0
+    assert route_events(caplog) == [("ERROR", event, str(job.id))]
+    assert not any(r.exc_info for r in caplog.records)
+    # The turn went back to anybody: Mapbox did not fail, so nobody is held off. The next poll
+    # (the cache answers it) asks Mapbox and gets its route.
+    assert await redis.exists(flaky.claim_key(job.id)) == 0
+    assert await shown(db_client, job.id, world) is not None
+    assert len(mapbox.routes) == 1
+
+
+def test_turn_lasts_for_all_that_is_done_in_it() -> None:
+    """The second look at the cache, both Mapbox calls and the write of the route, plus a
+    margin: a turn that ended sooner would let a second request ask Mapbox meanwhile."""
+    settings = make_settings(mapbox_timeout_seconds=2.0, pro_location_timeout_seconds=1.5)
+    assert JobRouteConfig.from_settings(settings).claim_seconds == 8  # 2 x 2.0 + 2 x 1.5, + 1
 
 
 async def test_turn_to_ask_ends_by_itself(redis: Redis, prefix: str) -> None:
