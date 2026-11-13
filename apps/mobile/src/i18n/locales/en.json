@@ -153,6 +153,10 @@
     },
     "menu": {
       "settings": "Settings",
+      "addresses": "Addresses",
+      "addressesNone": "None saved yet",
+      "addressesCount_one": "{{count}} saved",
+      "addressesCount_other": "{{count}} saved",
       "help": "Help",
       "legal": "Legal",
       "logOut": "Log out"
@@ -326,6 +330,68 @@
       "state": "Use the two-letter code, like FL.",
       "zip": "Enter a 5-digit ZIP code.",
       "tooLong": "Keep it to {{max}} characters or fewer."
+    }
+  },
+  "addresses": {
+    "title": "Addresses",
+    "support": "Your default is picked first when you request a job.",
+    "default": "Default",
+    "notServed": "We don't serve this ZIP code yet.",
+    "add": "Add address",
+    "retry": "Try again",
+    "loadFailed": "We couldn't load your addresses.",
+    "saved": "{{label}} saved",
+    "deleted": "{{label}} deleted",
+    "madeDefault": "{{label}} is now your default",
+    "empty": {
+      "title": "No saved addresses yet",
+      "body": "Save your home or any place you often need help, then pick it in a tap when you request a job."
+    },
+    "row": {
+      "editHint": "Opens it to edit.",
+      "more": "Options for {{label}}"
+    },
+    "actions": {
+      "makeDefault": "Make default",
+      "delete": "Delete address",
+      "deleteHint": "Asks before it deletes.",
+      "isDefault": "This is your default address."
+    },
+    "delete": {
+      "title": "Delete {{label}}?",
+      "body": "Requests you already sent keep their address.",
+      "bodyNextDefault": "Requests you already sent keep their address. {{label}} becomes your default.",
+      "bodyNewDefault": "Requests you already sent keep their address. Another address becomes your default.",
+      "cancel": "Cancel",
+      "confirm": "Delete"
+    },
+    "failed": {
+      "delete": "We couldn't delete {{label}}. Try again in a moment.",
+      "makeDefault": "We couldn't make {{label}} your default. Try again in a moment.",
+      "offline": "You're offline, so nothing changed. Try again once you're connected.",
+      "rateLimited": "That's a lot of changes at once. Try again in a moment.",
+      "gone": "That address isn't in your address book anymore."
+    },
+    "form": {
+      "newTitle": "Add an address",
+      "editTitle": "Edit address",
+      "newSupport": "Give it a name you'll recognize, like Home or Work.",
+      "editSupport": "Changes apply to new requests. Requests you already sent keep their address.",
+      "label": "Name",
+      "save": "Save address",
+      "check": "Some fields need a look.",
+      "backToBook": "Back to addresses",
+      "labelErrors": {
+        "taken": "You already have an address with this name.",
+        "invalid": "Use a simple name, like Home or Work. Leave out streets, units and contact details."
+      },
+      "failed": {
+        "offline": "You're offline. Check your connection and try again.",
+        "rateLimited": "That's a lot of changes at once. Try again in a moment.",
+        "full": "Your address book is full. Delete an address to add this one.",
+        "gone": "This address isn't in your address book anymore.",
+        "generic": "We couldn't save this address. Try again."
+      }
     }
   },
   "phone": {

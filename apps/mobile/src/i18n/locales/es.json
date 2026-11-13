@@ -153,6 +153,10 @@
     },
     "menu": {
       "settings": "Configuración",
+      "addresses": "Direcciones",
+      "addressesNone": "Ninguna guardada todavía",
+      "addressesCount_one": "{{count}} guardada",
+      "addressesCount_other": "{{count}} guardadas",
       "help": "Ayuda",
       "legal": "Legal",
       "logOut": "Cerrar sesión"
@@ -326,6 +330,68 @@
       "state": "Usa el código de dos letras, como FL.",
       "zip": "Escribe un código postal de 5 dígitos.",
       "tooLong": "Usa {{max}} caracteres como máximo."
+    }
+  },
+  "addresses": {
+    "title": "Direcciones",
+    "support": "Tu dirección principal se elige primero cuando pides un trabajo.",
+    "default": "Principal",
+    "notServed": "Todavía no damos servicio en este código postal.",
+    "add": "Agregar dirección",
+    "retry": "Intentar de nuevo",
+    "loadFailed": "No pudimos cargar tus direcciones.",
+    "saved": "{{label}} guardada",
+    "deleted": "{{label}} eliminada",
+    "madeDefault": "{{label}} ahora es tu dirección principal",
+    "empty": {
+      "title": "Aún no tienes direcciones guardadas",
+      "body": "Guarda tu casa o cualquier lugar donde sueles necesitar ayuda, y elígelo con un toque cuando pidas un trabajo."
+    },
+    "row": {
+      "editHint": "La abre para editarla.",
+      "more": "Opciones de {{label}}"
+    },
+    "actions": {
+      "makeDefault": "Hacer principal",
+      "delete": "Eliminar dirección",
+      "deleteHint": "Pregunta antes de eliminarla.",
+      "isDefault": "Esta es tu dirección principal."
+    },
+    "delete": {
+      "title": "¿Eliminar {{label}}?",
+      "body": "Las solicitudes que ya enviaste conservan su dirección.",
+      "bodyNextDefault": "Las solicitudes que ya enviaste conservan su dirección. {{label}} pasa a ser tu dirección principal.",
+      "bodyNewDefault": "Las solicitudes que ya enviaste conservan su dirección. Otra de tus direcciones pasa a ser la principal.",
+      "cancel": "Cancelar",
+      "confirm": "Eliminar"
+    },
+    "failed": {
+      "delete": "No pudimos eliminar {{label}}. Intenta de nuevo en un momento.",
+      "makeDefault": "No pudimos hacer {{label}} tu dirección principal. Intenta de nuevo en un momento.",
+      "offline": "Estás sin conexión, así que nada cambió. Intenta de nuevo cuando te conectes.",
+      "rateLimited": "Son muchos cambios a la vez. Intenta de nuevo en un momento.",
+      "gone": "Esa dirección ya no está en tu libreta de direcciones."
+    },
+    "form": {
+      "newTitle": "Agregar una dirección",
+      "editTitle": "Editar dirección",
+      "newSupport": "Ponle un nombre que reconozcas, como Casa o Trabajo.",
+      "editSupport": "Los cambios se aplican a solicitudes nuevas. Las que ya enviaste conservan su dirección.",
+      "label": "Nombre",
+      "save": "Guardar dirección",
+      "check": "Algunos campos necesitan revisión.",
+      "backToBook": "Volver a direcciones",
+      "labelErrors": {
+        "taken": "Ya tienes una dirección con este nombre.",
+        "invalid": "Usa un nombre simple, como Casa o Trabajo, sin calles, unidades ni datos de contacto."
+      },
+      "failed": {
+        "offline": "Estás sin conexión. Revisa tu conexión e intenta de nuevo.",
+        "rateLimited": "Son muchos cambios a la vez. Intenta de nuevo en un momento.",
+        "full": "Tu libreta de direcciones está llena. Elimina una dirección para agregar esta.",
+        "gone": "Esta dirección ya no está en tu libreta de direcciones.",
+        "generic": "No pudimos guardar esta dirección. Intenta de nuevo."
+      }
     }
   },
   "phone": {

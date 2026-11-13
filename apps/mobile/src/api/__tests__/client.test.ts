@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from "../client";
+import { apiDelete, apiGet, apiPost } from "../client";
 import { ApiError, NetworkError, SessionExpiredError } from "../errors";
 import { login, sessionGeneration, sessionStore } from "../session";
 import {
@@ -241,6 +241,21 @@ describe("path parameters", () => {
     const call = fetchMock.mock.calls[0];
     expect(call[0]).toBe(`${API_ORIGIN}/v1/requests/r-1/quotes/q-1/accept`);
     expect(call[1]?.method).toBe("POST");
+    expect(call[1]?.body).toBeUndefined();
+    expect(callHeader(call, "Content-Type")).toBeUndefined();
+  });
+
+  it("deletes with no body, and a 204 answers undefined", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(204));
+
+    const answer = await apiDelete("/v1/addresses/{address_id}", undefined, {
+      params: { address_id: "a/1" },
+    });
+
+    const call = fetchMock.mock.calls[0];
+    expect(answer).toBeUndefined();
+    expect(call[0]).toBe(`${API_ORIGIN}/v1/addresses/a%2F1`);
+    expect(call[1]?.method).toBe("DELETE");
     expect(call[1]?.body).toBeUndefined();
     expect(callHeader(call, "Content-Type")).toBeUndefined();
   });
