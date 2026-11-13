@@ -9,7 +9,16 @@ import i18n from "@/i18n";
 import { deferred, settle } from "../../../api/__tests__/helpers";
 import { signedIn } from "../../home/__tests__/helpers";
 import { AddressActionsSheet } from "../AddressActionsSheet";
-import { bookClient, cachedBook, HOME, newQueryClient, renderAddresses, WORK } from "./helpers";
+import { SAVED_ADDRESSES_QUERY_KEY } from "../api";
+import {
+  bookClient,
+  cachedBook,
+  CABIN,
+  HOME,
+  newQueryClient,
+  renderAddresses,
+  WORK,
+} from "./helpers";
 
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../../api/errors"),
@@ -143,6 +152,82 @@ describe("AddressActionsSheet", () => {
 
     expect(alert.mock.calls[0][1]).toBe(
       "Requests you already sent keep their address. Work becomes your default.",
+    );
+  });
+
+  // The Gatekeeper's round 1 sequence (PR #354). Its probe expected "Home becomes your default"
+  // from the redrawn book alone, which the device cannot know: addresses carry no creation date.
+  it("after a default change the server has not listed yet, promises no particular new default", async () => {
+    // Created oldest to newest: Home, Work, Mom. Mom is the default, so the API lists Mom, Home, Work.
+    const mom = { ...CABIN, id: "mom", label: "Mom", is_default: true };
+    const home = { ...HOME, is_default: false };
+    const answer = deferred<typeof WORK>();
+    jest.mocked(apiPatch).mockReturnValue(answer.promise);
+    const client = bookClient([mom, home, WORK]);
+    const first = await openFor("work", client).view;
+    await fireEvent.press(screen.getByRole("button", { name: "Make default" }));
+    await first.unmount();
+    expect(cachedBook(client)).toEqual(["work*", "mom", "home"]);
+
+    // Work's menu again, before the server lists the book. The device draws Mom next, but the API
+    // promotes the oldest address left, Home: the device cannot tell, so it names no one.
+    const second = await openFor("work", client).view;
+    await fireEvent.press(screen.getByRole("button", { name: "Delete address" }));
+    expect(alert.mock.calls[0][1]).toBe(
+      "Requests you already sent keep their address. Another address becomes your default.",
+    );
+
+    // The server answers, then lists the book: Work, and the others oldest first.
+    await act(async () => answer.resolve({ ...WORK, is_default: true }));
+    await act(async () => {
+      await client.fetchQuery({
+        queryKey: SAVED_ADDRESSES_QUERY_KEY,
+        queryFn: async () => ({
+          items: [{ ...WORK, is_default: true }, home, { ...mom, is_default: false }],
+        }),
+      });
+    });
+    // The sheet already open keeps the book it was opened with: it still names no one.
+    await act(async () => buttons()[0].onPress?.());
+    await fireEvent.press(screen.getByRole("button", { name: "Delete address" }));
+    expect(alert.mock.calls[1][1]).toBe(
+      "Requests you already sent keep their address. Another address becomes your default.",
+    );
+    await second.unmount();
+
+    // One opened now reads the server's list, and names Home as the server will.
+    await openFor("work", client).view;
+    await fireEvent.press(screen.getByRole("button", { name: "Delete address" }));
+    expect(alert.mock.calls[2][1]).toBe(
+      "Requests you already sent keep their address. Home becomes your default.",
+    );
+  });
+
+  it("names the only other address even in a book the device redrew", async () => {
+    jest.mocked(apiPatch).mockReturnValue(new Promise(() => undefined));
+    const client = bookClient([HOME, WORK]);
+    const first = await openFor("work", client).view;
+    await fireEvent.press(screen.getByRole("button", { name: "Make default" }));
+    await first.unmount();
+
+    await openFor("work", client).view;
+    await fireEvent.press(screen.getByRole("button", { name: "Delete address" }));
+
+    expect(alert.mock.calls[0][1]).toBe(
+      "Requests you already sent keep their address. Home becomes your default.",
+    );
+  });
+
+  it("says in Spanish that another address becomes the default", async () => {
+    await i18n.changeLanguage("es");
+    const client = newQueryClient();
+    client.setQueryData(SAVED_ADDRESSES_QUERY_KEY, { items: [HOME, WORK, CABIN], redrawn: true });
+    await openFor("home", client).view;
+
+    await fireEvent.press(screen.getByRole("button", { name: "Eliminar dirección" }));
+
+    expect(alert.mock.calls[0][1]).toBe(
+      "Las solicitudes que ya enviaste conservan su dirección. Otra de tus direcciones pasa a ser la principal.",
     );
   });
 

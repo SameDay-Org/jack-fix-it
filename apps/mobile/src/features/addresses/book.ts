@@ -6,7 +6,9 @@ type Book = readonly SavedAddress[];
 
 /*
  * The book as the API lists it (`SavedAddressList`): the default first, then the oldest first. The
- * edits below keep that order on the device, so an optimistic change shows what the next GET will.
+ * edits below keep that order on the device as far as it can tell, so an optimistic change shows
+ * what the next GET most likely will. What it cannot tell is where a default that stops being one
+ * falls among the others: addresses carry no creation date (see `nextDefaultAfter`).
  */
 
 /** `address` as the default, first; every other address after it, in its order, not the default. */
@@ -30,62 +32,22 @@ export function withoutAddress(book: Book, id: string): SavedAddress[] {
   return withDefault(rest, rest[0].id);
 }
 
-/**
- * Takes one optimistic change back from the book as it is when the write fails: whatever other
- * writes drew since then stays.
- */
-export type BookUndo = (book: Book) => SavedAddress[];
-
-/** An optimistic change: the book with it, and how to take it back later. */
-export type PlannedChange = { book: SavedAddress[]; undo: BookUndo };
-
-/** Inserts an address as a non-default at `index`, never above the default listed first. */
-function insertAt(book: Book, address: SavedAddress, index: number): SavedAddress[] {
-  const at = Math.max(Math.min(index, book.length), book[0]?.is_default ? 1 : 0);
-  return [...book.slice(0, at), { ...address, is_default: false }, ...book.slice(at)];
-}
+/** A change to the book: the book with it. The writes in flight are replayed as these. */
+export type BookEdit = (book: Book) => SavedAddress[];
 
 /**
- * Deleting `id`. Taken back, the address returns to its place; it is the default again only if
- * the default is still the one its deletion promoted (another write may have moved it since).
+ * The address that becomes the default once the default `id` is deleted, when the device can tell.
+ * The API promotes the oldest remaining one: the only other address, or the first of the others
+ * in a book as the server `listed` it (they come oldest first). In a book this device redrew
+ * since, their order is a guess, as addresses carry no creation date: undefined.
  */
-export function planDelete(book: Book, id: string): PlannedChange {
-  const index = book.findIndex((address) => address.id === id);
-  if (index < 0) return { book: [...book], undo: (current) => [...current] };
-  const removed = book[index];
-  const next = withoutAddress(book, id);
-  const promotedId = removed.is_default ? next[0]?.id : undefined;
-  return {
-    book: next,
-    undo: (current) => {
-      if (current.some((address) => address.id === id)) return [...current];
-      const restored = insertAt(current, removed, index);
-      const currentDefault = current.find((address) => address.is_default);
-      const stillPromoted = !currentDefault || currentDefault.id === promotedId;
-      return removed.is_default && stillPromoted ? withDefault(restored, id) : restored;
-    },
-  };
-}
-
-/**
- * Making `id` the default. Taken back while it is still the default and the old one is still in
- * the book, the old default returns to the top and this address to its place.
- */
-export function planDefault(book: Book, id: string): PlannedChange {
-  const index = book.findIndex((address) => address.id === id);
-  const previousId = book.find((address) => address.is_default)?.id;
-  return {
-    book: withDefault(book, id),
-    undo: (current) => {
-      const target = current.find((address) => address.id === id);
-      const previousThere = current.some((address) => address.id === previousId);
-      if (index < 0 || !target?.is_default || !previousId || previousId === id || !previousThere) {
-        return [...current];
-      }
-      const reverted = withDefault(current, previousId).filter((address) => address.id !== id);
-      return insertAt(reverted, target, index);
-    },
-  };
+export function nextDefaultAfter(
+  book: Book,
+  id: string,
+  listed: boolean,
+): SavedAddress | undefined {
+  const others = book.filter((address) => address.id !== id);
+  return listed || others.length === 1 ? others[0] : undefined;
 }
 
 /** The book with the server's copy of a new address: first when it is the default, else last. */

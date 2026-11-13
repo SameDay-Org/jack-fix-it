@@ -354,6 +354,7 @@
       "title": "¿Eliminar {{label}}?",
       "body": "Las solicitudes que ya enviaste conservan su dirección.",
       "bodyNextDefault": "Las solicitudes que ya enviaste conservan su dirección. {{label}} pasa a ser tu dirección principal.",
+      "bodyNewDefault": "Las solicitudes que ya enviaste conservan su dirección. Otra de tus direcciones pasa a ser la principal.",
       "cancel": "Cancelar",
       "confirm": "Eliminar"
     },

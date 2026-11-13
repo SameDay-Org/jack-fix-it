@@ -354,6 +354,7 @@
       "title": "Delete {{label}}?",
       "body": "Requests you already sent keep their address.",
       "bodyNextDefault": "Requests you already sent keep their address. {{label}} becomes your default.",
+      "bodyNewDefault": "Requests you already sent keep their address. Another address becomes your default.",
       "cancel": "Cancel",
       "confirm": "Delete"
     },

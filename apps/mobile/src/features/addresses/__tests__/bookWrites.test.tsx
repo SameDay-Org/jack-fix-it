@@ -17,6 +17,7 @@ import {
   useSavedAddresses,
   useUpdateAddress,
   type SavedAddress,
+  type SavedBook,
 } from "../api";
 
 // The session the test is in; a sign-out or another sign-in moves it on.
@@ -95,6 +96,16 @@ const cached = (client: QueryClient) =>
   client
     .getQueryData<{ items: SavedAddress[] }>(SAVED_ADDRESSES_QUERY_KEY)
     ?.items.map((address) => (address.is_default ? `${address.id}*` : address.id));
+
+/** Whether the cached book is one the device redrew since the server last listed it. */
+const redrawn = (client: QueryClient) =>
+  client.getQueryData<SavedBook>(SAVED_ADDRESSES_QUERY_KEY)?.redrawn ?? false;
+
+/** An address's label in the cached book. */
+const labelOf = (client: QueryClient, id: string) =>
+  client
+    .getQueryData<SavedBook>(SAVED_ADDRESSES_QUERY_KEY)
+    ?.items.find((address) => address.id === id)?.label;
 
 const toast = () => toastStore.getState().current;
 
@@ -229,7 +240,8 @@ describe("two writes in flight", () => {
     expect(cached(client)).toEqual(["mom*", "home"]);
 
     await act(async () => deleted.reject(new ApiError(500, "internal_error")));
-    expect(cached(client)).toEqual(["mom*", "work", "home"]);
+    // Work is back in its place, under the write still in flight.
+    expect(cached(client)).toEqual(["mom*", "home", "work"]);
     expect(toast()?.message).toBe("We couldn't delete Work. Try again in a moment.");
     // Only the last write answered refetches.
     expect(apiGet).toHaveBeenCalledTimes(1);
@@ -255,10 +267,9 @@ describe("two writes in flight", () => {
     await act(async () => madeDefault.reject(new NetworkError(false)));
 
     await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
-    // Every address is back and Home is the default again. The order of the others is the
-    // server's to settle: the device has no creation dates.
-    expect(cached(client)?.[0]).toBe("home*");
-    expect([...(cached(client) ?? [])].sort()).toEqual(["home*", "mom", "work"]);
+    // The book as the server last listed it, in its order: neither write happened.
+    expect(cached(client)).toEqual(["home*", "work", "mom"]);
+    expect(redrawn(client)).toBe(false);
   });
 
   it("an earlier failure never undoes a later success", async () => {
@@ -355,6 +366,29 @@ describe("a write belongs to the session it was asked in", () => {
 
     expect(cached(client)).toEqual(["cabin*"]);
   });
+
+  it("the next session's writes never read the writes or the book of the one before", async () => {
+    const old = deferred<undefined>();
+    const next = deferred<SavedAddress>();
+    jest.mocked(apiDelete).mockReturnValue(old.promise);
+    jest.mocked(apiPatch).mockReturnValue(next.promise);
+    const { result, client } = await renderBook();
+    const LAKE = savedAddress({ id: "lake", label: "Lake", is_default: false });
+
+    await act(async () => result.current.remove(WORK));
+    await switchSession(client, [CABIN, LAKE]);
+    // The first account's writes in flight went with its cached book, at the sign-out.
+    expect(client.getQueryCache().hasListeners()).toBe(false);
+    await act(async () => result.current.makeDefault(LAKE));
+    expect(cached(client)).toEqual(["lake*", "cabin"]);
+    // The first account's delete is refused: nothing of it is drawn, nor of its book.
+    await act(async () => old.reject(new ApiError(500, "internal_error")));
+    expect(cached(client)).toEqual(["lake*", "cabin"]);
+    expect(toast()).toBeNull();
+    await act(async () => next.reject(new ApiError(500, "internal_error")));
+
+    expect(cached(client)).toEqual(["cabin*", "lake"]);
+  });
 });
 
 describe("Add and Edit", () => {
@@ -401,5 +435,382 @@ describe("Add and Edit", () => {
     );
     const items = client.getQueryData<{ items: SavedAddress[] }>(SAVED_ADDRESSES_QUERY_KEY)?.items;
     expect(items?.[1]).toMatchObject({ id: "work", label: "Office" });
+  });
+});
+
+describe("overlapping writes, with no GET to repair them", () => {
+  const offline = () => new NetworkError(false);
+  /** From here on the book cannot be fetched again: what the device draws is all it has. */
+  const getsFail = () => jest.mocked(apiGet).mockRejectedValue(offline());
+  /** Two answers to PATCH, in the order the writes are asked. */
+  const twoPatches = () => {
+    const answers = [deferred<SavedAddress>(), deferred<SavedAddress>()] as const;
+    jest
+      .mocked(apiPatch)
+      .mockReturnValueOnce(answers[0].promise)
+      .mockReturnValueOnce(answers[1].promise);
+    return answers;
+  };
+
+  // The Gatekeeper's three probes of round 1 (PR #354), as it wrote them.
+  it("two failed default changes restore the original default in either failure order", async () => {
+    const first = deferred<SavedAddress>();
+    const second = deferred<SavedAddress>();
+    jest.mocked(apiPatch).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const { result, client } = await renderBook();
+    jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+
+    await act(async () => result.current.makeDefault(WORK));
+    await act(async () => result.current.makeDefault(MOM));
+    expect(cached(client)?.[0]).toBe("mom*");
+    await act(async () => first.reject(new NetworkError(false)));
+    await act(async () => second.reject(new NetworkError(false)));
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+    expect(cached(client)?.[0]).toBe("home*");
+  });
+
+  it("two failed deletes restore the original default when the first fails first", async () => {
+    const first = deferred<undefined>();
+    const second = deferred<undefined>();
+    jest.mocked(apiDelete).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const { result, client } = await renderBook();
+    jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+
+    await act(async () => result.current.remove(HOME));
+    await act(async () => result.current.remove(WORK));
+    expect(cached(client)).toEqual(["mom*"]);
+    await act(async () => first.reject(new NetworkError(false)));
+    await act(async () => second.reject(new NetworkError(false)));
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+    expect(cached(client)?.[0]).toBe("home*");
+    expect(cached(client)).toHaveLength(3);
+  });
+
+  it("an earlier default success preserves a later optimistic default while it is pending", async () => {
+    const first = deferred<SavedAddress>();
+    const second = deferred<SavedAddress>();
+    jest.mocked(apiPatch).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const { result, client } = await renderBook();
+
+    await act(async () => result.current.makeDefault(WORK));
+    await act(async () => result.current.makeDefault(MOM));
+    expect(cached(client)?.[0]).toBe("mom*");
+    await act(async () => first.resolve({ ...WORK, is_default: true }));
+    expect(apiGet).toHaveBeenCalledTimes(1);
+    expect(cached(client)?.[0]).toBe("mom*");
+  });
+
+  // The same rule in the other orders, and to the address.
+  it("two failed default changes leave the book as listed when the later one fails first", async () => {
+    const [first, second] = twoPatches();
+    const { result, client } = await renderBook();
+    getsFail();
+
+    await act(async () => result.current.makeDefault(WORK));
+    await act(async () => result.current.makeDefault(MOM));
+    await act(async () => second.reject(offline()));
+    // Mom's change is gone; Work's, still in flight, shows again.
+    expect(cached(client)).toEqual(["work*", "home", "mom"]);
+    await act(async () => first.reject(offline()));
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+    expect(cached(client)).toEqual(["home*", "work", "mom"]);
+    expect(redrawn(client)).toBe(false);
+  });
+
+  it.each([
+    ["the first fails first", [0, 1]],
+    ["the later one fails first", [1, 0]],
+  ])(
+    "two failed deletes bring both addresses back in their place when %s",
+    async (_name, order) => {
+      const answers = [deferred<undefined>(), deferred<undefined>()];
+      jest
+        .mocked(apiDelete)
+        .mockReturnValueOnce(answers[0].promise)
+        .mockReturnValueOnce(answers[1].promise);
+      const { result, client } = await renderBook();
+      getsFail();
+
+      await act(async () => result.current.remove(HOME));
+      await act(async () => result.current.remove(WORK));
+      for (const index of order) await act(async () => answers[index].reject(offline()));
+
+      await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+      expect(cached(client)).toEqual(["home*", "work", "mom"]);
+    },
+  );
+
+  it("a later success keeps its choice when the earlier change is answered after it", async () => {
+    const [first, second] = twoPatches();
+    const { result, client } = await renderBook();
+    getsFail();
+
+    await act(async () => result.current.makeDefault(WORK));
+    await act(async () => result.current.makeDefault(MOM));
+    await act(async () => second.resolve({ ...MOM, is_default: true }));
+    // Mom was asked last: Work's change, still in flight, is not drawn over her answer.
+    expect(cached(client)).toEqual(["mom*", "work", "home"]);
+    expect(apiGet).toHaveBeenCalledTimes(1);
+    await act(async () => first.resolve({ ...WORK, is_default: true }));
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+    expect(cached(client)).toEqual(["mom*", "work", "home"]);
+    // Both are the server's now, but in the device's order until a GET lists the book.
+    expect(redrawn(client)).toBe(true);
+  });
+
+  it("a later success stays when the earlier change is refused after it", async () => {
+    const [first, second] = twoPatches();
+    const { result, client } = await renderBook();
+    getsFail();
+
+    await act(async () => result.current.makeDefault(WORK));
+    await act(async () => result.current.makeDefault(MOM));
+    await act(async () => second.resolve({ ...MOM, is_default: true }));
+    await act(async () => first.reject(offline()));
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+    // As if Work's change had never been asked.
+    expect(cached(client)).toEqual(["mom*", "home", "work"]);
+  });
+
+  it("an earlier success stays when the later change is refused", async () => {
+    const [first, second] = twoPatches();
+    const { result, client } = await renderBook();
+    getsFail();
+
+    await act(async () => result.current.makeDefault(WORK));
+    await act(async () => result.current.makeDefault(MOM));
+    await act(async () => first.resolve({ ...WORK, is_default: true }));
+    await act(async () => second.reject(offline()));
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+    expect(cached(client)).toEqual(["work*", "home", "mom"]);
+    expect(toast()?.message).toBe(
+      "You're offline, so nothing changed. Try again once you're connected.",
+    );
+  });
+
+  it.each([
+    ["before", true],
+    ["after", false],
+  ])(
+    "a delete the server confirmed stays out when a default change is refused %s it",
+    async (_name, refusedFirst) => {
+      const deleted = deferred<undefined>();
+      const madeDefault = deferred<SavedAddress>();
+      jest.mocked(apiDelete).mockReturnValue(deleted.promise);
+      jest.mocked(apiPatch).mockReturnValue(madeDefault.promise);
+      const { result, client } = await renderBook();
+      getsFail();
+
+      await act(async () => result.current.remove(WORK));
+      await act(async () => result.current.makeDefault(MOM));
+      const answers = [() => madeDefault.reject(offline()), () => deleted.resolve(undefined)];
+      if (!refusedFirst) answers.reverse();
+      for (const answer of answers) await act(async () => answer());
+
+      await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+      expect(cached(client)).toEqual(["home*", "mom"]);
+    },
+  );
+
+  it("an edit answered while a later default change is in flight leaves that choice drawn", async () => {
+    const [edited] = twoPatches();
+    const { result, client } = await renderBook();
+
+    // The default address is renamed; before the server answers, Mom is made the default.
+    let saving: Promise<unknown> = Promise.resolve();
+    await act(async () => {
+      saving = result.current.update.mutateAsync({
+        id: "home",
+        body: { label: "House" },
+        generation: 1,
+      });
+    });
+    await act(async () => result.current.makeDefault(MOM));
+    await act(async () => {
+      // Its answer still has Home as the default: it was, when the server answered.
+      edited.resolve({ ...HOME, label: "House" });
+      await saving;
+    });
+
+    expect(cached(client)).toEqual(["mom*", "home", "work"]);
+    expect(labelOf(client, "home")).toBe("House");
+    expect(apiGet).toHaveBeenCalledTimes(1);
+  });
+
+  it("a refused edit changes nothing, under a default change still in flight", async () => {
+    const [edited] = twoPatches();
+    const { result, client } = await renderBook();
+
+    let saving: Promise<unknown> = Promise.resolve();
+    await act(async () => {
+      saving = result.current.update
+        .mutateAsync({ id: "work", body: { label: "Home" }, generation: 1 })
+        .catch((error: unknown) => error);
+    });
+    await act(async () => result.current.makeDefault(MOM));
+    await act(async () => {
+      edited.reject(new ApiError(409, "address_label_taken"));
+      await saving;
+      // The hooks hear of it on the next tick: inside act, like the answer.
+      await settle();
+    });
+
+    expect(cached(client)).toEqual(["mom*", "home", "work"]);
+    expect(labelOf(client, "work")).toBe("Work");
+  });
+});
+
+describe("a GET that lands while a write is in flight", () => {
+  // Another screen opened or the app came back: the book is fetched again before the answer.
+  it("is drawn under the write, and is what a refusal goes back to", async () => {
+    const answer = deferred<SavedAddress>();
+    jest.mocked(apiPatch).mockReturnValue(answer.promise);
+    const { result, client } = await renderBook();
+
+    await act(async () => result.current.makeDefault(MOM));
+    // Another device renamed Work meanwhile; the server has not seen Mom's change yet.
+    server = [HOME, { ...WORK, label: "Office" }, MOM];
+    await act(async () => {
+      await result.current.book.refetch();
+    });
+
+    expect(cached(client)).toEqual(["mom*", "home", "work"]);
+    expect(labelOf(client, "work")).toBe("Office");
+    expect(redrawn(client)).toBe(true);
+    jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+    await act(async () => answer.reject(new ApiError(500, "internal_error")));
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(3));
+    // The list that GET brought, not the older one the write was first drawn on.
+    expect(cached(client)).toEqual(["home*", "work", "mom"]);
+    expect(labelOf(client, "work")).toBe("Office");
+    expect(redrawn(client)).toBe(false);
+  });
+
+  it("is what the write's answer is drawn on", async () => {
+    const answer = deferred<SavedAddress>();
+    jest.mocked(apiPatch).mockReturnValue(answer.promise);
+    const { result, client } = await renderBook();
+
+    await act(async () => result.current.makeDefault(MOM));
+    server = [HOME, { ...WORK, label: "Office" }, MOM];
+    await act(async () => {
+      await result.current.book.refetch();
+    });
+    jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+    await act(async () => answer.resolve({ ...MOM, is_default: true }));
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(3));
+    expect(cached(client)).toEqual(["mom*", "home", "work"]);
+    expect(labelOf(client, "work")).toBe("Office");
+  });
+});
+
+describe("the cached book says whether the device redrew it", () => {
+  it("from the first write in flight until the server lists the book again", async () => {
+    const answer = deferred<SavedAddress>();
+    jest.mocked(apiPatch).mockReturnValue(answer.promise);
+    const { result, client } = await renderBook();
+    expect(redrawn(client)).toBe(false);
+    expect(client.getQueryCache().hasListeners()).toBe(false);
+
+    await act(async () => result.current.makeDefault(MOM));
+    expect(redrawn(client)).toBe(true);
+    // While a write is in flight the book's GETs are watched, and no longer.
+    expect(client.getQueryCache().hasListeners()).toBe(true);
+    server = [{ ...MOM, is_default: true }, { ...HOME, is_default: false }, WORK];
+    await act(async () => answer.resolve({ ...MOM, is_default: true }));
+
+    expect(client.getQueryCache().hasListeners()).toBe(false);
+    await waitFor(() => expect(redrawn(client)).toBe(false));
+    expect(apiGet).toHaveBeenCalledTimes(2);
+    expect(cached(client)).toEqual(["mom*", "home", "work"]);
+  });
+
+  it("not while a form's write waits for the server: it draws nothing", async () => {
+    const answer = deferred<SavedAddress>();
+    jest.mocked(apiPatch).mockReturnValue(answer.promise);
+    const { result, client } = await renderBook();
+
+    let saving: Promise<unknown> = Promise.resolve();
+    await act(async () => {
+      saving = result.current.update.mutateAsync({
+        id: "work",
+        body: { label: "Office" },
+        generation: 1,
+      });
+    });
+    expect(redrawn(client)).toBe(false);
+    jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+    await act(async () => {
+      answer.resolve({ ...WORK, label: "Office" });
+      await saving;
+    });
+
+    expect(labelOf(client, "work")).toBe("Office");
+    expect(redrawn(client)).toBe(true);
+  });
+});
+
+describe("a write asked before the book was cached", () => {
+  const office = savedAddress({ id: "office", label: "Office", is_default: false });
+
+  /** Asks to add Office over a cache with no book yet. Returns how to land the server's answer. */
+  async function addOffice(client: QueryClient) {
+    const answer = deferred<SavedAddress>();
+    jest.mocked(apiPost).mockReturnValue(answer.promise);
+    const { result } = await renderHook(() => useCreateAddress(), {
+      wrapper: ({ children }: { children: ReactNode }) =>
+        createElement(QueryClientProvider, { client }, children),
+    });
+    let saving: Promise<unknown> = Promise.resolve();
+    await act(async () => {
+      saving = result.current.mutateAsync({
+        body: {
+          line1: office.line1,
+          city: office.city,
+          state: office.state,
+          zip_code: office.zip_code,
+          label: "Office",
+          is_default: false,
+        },
+        generation: 1,
+      });
+    });
+    return () =>
+      act(async () => {
+        answer.resolve(office);
+        await saving;
+        // The hook hears of it on the next tick: inside act, like the answer.
+        await settle();
+      });
+  }
+
+  it("joins the book that arrived since, once the server answers", async () => {
+    const client = newQueryClient();
+    const answered = await addOffice(client);
+    client.setQueryData(SAVED_ADDRESSES_QUERY_KEY, { items: [HOME, WORK, MOM] });
+
+    await answered();
+
+    expect(cached(client)).toEqual(["home*", "work", "mom", "office"]);
+  });
+
+  it("joins no book once its session is gone", async () => {
+    const client = newQueryClient();
+    const answered = await addOffice(client);
+    // Another account signed in meanwhile, and its book is cached.
+    mockGeneration = 2;
+    client.setQueryData(SAVED_ADDRESSES_QUERY_KEY, { items: [HOME] });
+
+    await answered();
+
+    expect(cached(client)).toEqual(["home*"]);
   });
 });

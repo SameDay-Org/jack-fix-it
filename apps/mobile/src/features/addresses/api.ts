@@ -12,26 +12,24 @@ import {
   apiPost,
   isCurrentGeneration,
   sessionGeneration,
-  type GetResponse,
   type PatchBody,
   type PostBody,
 } from "@/api";
 import { showToast } from "@/components/ui";
 
+import { addressFailure, withAdded, withDefault, withoutAddress, withUpdated } from "./book";
 import {
-  addressFailure,
-  planDefault,
-  planDelete,
-  withAdded,
-  withUpdated,
-  type BookUndo,
-  type PlannedChange,
-} from "./book";
+  answerWrite,
+  dropWrite,
+  openWrite,
+  SAVED_ADDRESSES_QUERY_KEY,
+  type OpenWrite,
+  type SavedAddress,
+  type SavedBook,
+} from "./bookCache";
 
-type SavedAddressList = GetResponse<"/v1/addresses">;
-export type SavedAddress = SavedAddressList["items"][number];
-
-export const SAVED_ADDRESSES_QUERY_KEY = ["addresses"] as const;
+export { SAVED_ADDRESSES_QUERY_KEY };
+export type { SavedAddress, SavedBook };
 
 /**
  * The customer's saved addresses (D8.2, #214): at most four, one of them the default, each saying
@@ -41,62 +39,31 @@ export const SAVED_ADDRESSES_QUERY_KEY = ["addresses"] as const;
 export const useSavedAddresses = ({ enabled = true }: { enabled?: boolean } = {}) =>
   useQuery({
     queryKey: SAVED_ADDRESSES_QUERY_KEY,
-    queryFn: ({ signal }) => apiGet("/v1/addresses", { auth: true, signal }),
+    queryFn: ({ signal }): Promise<SavedBook> => apiGet("/v1/addresses", { auth: true, signal }),
     retry: false,
     enabled,
   });
 
 /*
  * The address book's own writes (Account > Addresses). Each belongs to the session it was asked in
- * (`generation`): its request is never sent for another one, and neither its answer nor its
- * rollback touches the cache once that session is gone (the cache key has no session in it, and a
- * sign-out clears the cache). Delete and Make default draw on the cached book at once and put it
- * back if the server refuses; Add and Edit wait for the server, whose refusals (a label taken, a
- * contact detail in a label) belong in the form the customer is still looking at.
+ * (`generation`): its request is never sent for another one, and its answer touches nothing once
+ * that session is gone (the cache key has no session in it, and a sign-out clears the cache).
+ * Delete and Make default show on the book at once and leave it if the server refuses; Add and
+ * Edit wait for the server, whose refusals (a label taken, a contact detail in a label) belong in
+ * the form the customer is still looking at. Two of them can be in flight at once, so none
+ * patches the cached book itself: each is asked, then answered or dropped, in `bookCache`, which
+ * draws the book from what the server confirmed and the writes still in flight.
  */
 
 /** Every write to the book, so the last one answered refetches it. */
 const ADDRESS_WRITE_KEY = ["addresses", "write"] as const;
 
-/** Applies `edit` to the cached book for the session that asked, if the book is cached. */
-function drawBook(
-  client: QueryClient,
-  generation: number,
-  edit: (book: SavedAddress[]) => SavedAddress[],
-): void {
-  if (!isCurrentGeneration(generation)) return;
-  client.setQueryData<SavedAddressList>(SAVED_ADDRESSES_QUERY_KEY, (list) =>
-    list ? { ...list, items: edit(list.items) } : list,
-  );
-}
-
-/** Draws a change at once and returns how to take it back if the write fails. */
-async function drawOptimistic(
-  client: QueryClient,
-  generation: number,
-  plan: (book: SavedAddress[]) => PlannedChange,
-): Promise<BookUndo | undefined> {
-  if (!isCurrentGeneration(generation)) return undefined;
-  // A GET in flight answers with the book from before this write: it would draw over it.
-  await client.cancelQueries({ queryKey: SAVED_ADDRESSES_QUERY_KEY, exact: true });
-  const list = client.getQueryData<SavedAddressList>(SAVED_ADDRESSES_QUERY_KEY);
-  if (!list || !isCurrentGeneration(generation)) return undefined;
-  const { book, undo } = plan(list.items);
-  client.setQueryData<SavedAddressList>(SAVED_ADDRESSES_QUERY_KEY, { ...list, items: book });
-  return undo;
-}
+/** A write's place among the ones in flight; none when the book was not cached to draw on. */
+type WriteContext = { write: OpenWrite | undefined };
 
 /** Only this write is in flight: no other one is still to be answered. */
 const lastWrite = (client: QueryClient) =>
   client.isMutating({ mutationKey: ADDRESS_WRITE_KEY }) <= 1;
-
-/**
- * Takes a failed write's own change back from the book as it is now, never a snapshot: a write
- * that drew or landed in between keeps its change (two writes can be in flight at once).
- */
-function rollBack(client: QueryClient, generation: number, undo: BookUndo | undefined): void {
-  if (undo) drawBook(client, generation, undo);
-}
 
 /** Fetches the book again once the last write in flight is answered, for the session that asked. */
 function refetchAfterLastWrite(client: QueryClient, generation: number): void {
@@ -118,8 +85,10 @@ export function useCreateAddress() {
     mutationKey: ADDRESS_WRITE_KEY,
     mutationFn: ({ body, generation }: CreateAddressVariables) =>
       apiPost("/v1/addresses", body, { auth: true, generation }),
-    onSuccess: (address, { generation }) =>
-      drawBook(client, generation, (book) => withAdded(book, address)),
+    onMutate: ({ generation }): WriteContext => ({ write: openWrite(client, generation) }),
+    onSuccess: (address, { generation }, context) =>
+      answerWrite(client, generation, context.write, (book) => withAdded(book, address)),
+    onError: (_error, _variables, context) => dropWrite(client, context?.write),
     onSettled: (_address, _error, { generation }) => refetchAfterLastWrite(client, generation),
   });
 }
@@ -142,15 +111,16 @@ export function useUpdateAddress() {
         generation,
         params: { address_id: id },
       }),
-    onSuccess: (address, { generation }) =>
-      drawBook(client, generation, (book) => withUpdated(book, address)),
+    onMutate: ({ generation }): WriteContext => ({ write: openWrite(client, generation) }),
+    onSuccess: (address, { generation }, context) =>
+      answerWrite(client, generation, context.write, (book) => withUpdated(book, address)),
+    onError: (_error, _variables, context) => dropWrite(client, context?.write),
     onSettled: (_address, _error, { generation }) => refetchAfterLastWrite(client, generation),
   });
 }
 
 /** One address of the book to act on, for the session the action was asked in. */
 type AddressActionVariables = { address: SavedAddress; generation: number };
-type ActionContext = { undo: BookUndo | undefined };
 type BookAction = "delete" | "makeDefault";
 
 /**
@@ -180,7 +150,7 @@ function toastFailure(
 export function useDeleteAddress() {
   const { t } = useTranslation();
   const client = useQueryClient();
-  const { mutate } = useMutation<undefined, unknown, AddressActionVariables, ActionContext>({
+  const { mutate } = useMutation<undefined, unknown, AddressActionVariables, WriteContext>({
     mutationKey: ADDRESS_WRITE_KEY,
     mutationFn: async ({ address, generation }) => {
       try {
@@ -194,15 +164,16 @@ export function useDeleteAddress() {
       }
       return undefined;
     },
-    onMutate: async ({ address, generation }) => ({
-      undo: await drawOptimistic(client, generation, (book) => planDelete(book, address.id)),
+    onMutate: ({ address, generation }) => ({
+      write: openWrite(client, generation, (book) => withoutAddress(book, address.id)),
     }),
-    onSuccess: (_answer, { address, generation }) => {
+    onSuccess: (_answer, { address, generation }, context) => {
+      answerWrite(client, generation, context.write, (book) => withoutAddress(book, address.id));
       if (!isCurrentGeneration(generation)) return;
       AccessibilityInfo.announceForAccessibility(t("addresses.deleted", { label: address.label }));
     },
     onError: (error, variables, context) => {
-      rollBack(client, variables.generation, context?.undo);
+      dropWrite(client, context?.write);
       toastFailure(t, error, "delete", variables);
     },
     onSettled: (_answer, _error, { generation }) => refetchAfterLastWrite(client, generation),
@@ -220,7 +191,7 @@ export function useDeleteAddress() {
 export function useMakeDefaultAddress() {
   const { t } = useTranslation();
   const client = useQueryClient();
-  const { mutate } = useMutation<SavedAddress, unknown, AddressActionVariables, ActionContext>({
+  const { mutate } = useMutation<SavedAddress, unknown, AddressActionVariables, WriteContext>({
     mutationKey: ADDRESS_WRITE_KEY,
     mutationFn: ({ address, generation }) =>
       apiPatch(
@@ -228,18 +199,18 @@ export function useMakeDefaultAddress() {
         { is_default: true },
         { auth: true, generation, params: { address_id: address.id } },
       ),
-    onMutate: async ({ address, generation }) => ({
-      undo: await drawOptimistic(client, generation, (book) => planDefault(book, address.id)),
+    onMutate: ({ address, generation }) => ({
+      write: openWrite(client, generation, (book) => withDefault(book, address.id)),
     }),
-    onSuccess: (saved, { generation }) => {
-      drawBook(client, generation, (book) => withUpdated(book, saved));
+    onSuccess: (saved, { generation }, context) => {
+      answerWrite(client, generation, context.write, (book) => withUpdated(book, saved));
       if (!isCurrentGeneration(generation)) return;
       AccessibilityInfo.announceForAccessibility(
         t("addresses.madeDefault", { label: saved.label }),
       );
     },
     onError: (error, variables, context) => {
-      rollBack(client, variables.generation, context?.undo);
+      dropWrite(client, context?.write);
       toastFailure(t, error, "makeDefault", variables);
     },
     onSettled: (_saved, _error, { generation }) => refetchAfterLastWrite(client, generation),

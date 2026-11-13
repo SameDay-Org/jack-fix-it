@@ -4,8 +4,7 @@ import { savedAddress } from "../../request/__tests__/helpers";
 import {
   addressFailure,
   isLabelTaken,
-  planDefault,
-  planDelete,
+  nextDefaultAfter,
   withAdded,
   withDefault,
   withoutAddress,
@@ -55,38 +54,26 @@ describe("the book's edits keep the API's order", () => {
   });
 });
 
-describe("an optimistic change taken back from the book as it is later", () => {
-  it("a delete taken back at once leaves the book as it was", () => {
-    for (const id of ["home", "work", "mom"]) {
-      const { book, undo } = planDelete(BOOK, id);
-      expect(order(undo(book))).toEqual(["home*", "work", "mom"]);
-    }
+describe("nextDefaultAfter: who becomes the default when the default is deleted", () => {
+  it("is the first of the others in a book as the server listed it: the oldest", () => {
+    expect(nextDefaultAfter(BOOK, "home", true)?.id).toBe("work");
   });
 
-  it("a deleted default returns as the default only while the one it promoted still is", () => {
-    const { book, undo } = planDelete(BOOK, "home");
-    expect(order(book)).toEqual(["work*", "mom"]);
-    // Mom was made the default meanwhile: Home comes back under her chip, not over it.
-    expect(order(undo(withDefault(book, "mom")))).toEqual(["mom*", "home", "work"]);
+  it("is unknown in a book the device redrew: the others are no longer oldest first", () => {
+    // Mom was the default (the API lists Mom, Home, Work) and Work was made it on the device:
+    // Mom is drawn next, but Home may be the older one.
+    const redrawn = withDefault([{ ...MOM, is_default: true }, HOME, WORK], "work");
+    expect(order(redrawn)).toEqual(["work*", "mom", "home"]);
+    expect(nextDefaultAfter(redrawn, "work", false)).toBeUndefined();
   });
 
-  it("a delete taken back after a refetch already brought the address back changes nothing", () => {
-    const { undo } = planDelete(BOOK, "work");
-    expect(order(undo(BOOK))).toEqual(["home*", "work", "mom"]);
+  it("is the only other address, whatever the order is worth", () => {
+    expect(nextDefaultAfter(withDefault([HOME, WORK], "work"), "work", false)?.id).toBe("home");
   });
 
-  it("a new default taken back returns the old default and the address to its place", () => {
-    const { book, undo } = planDefault(BOOK, "mom");
-    expect(order(book)).toEqual(["mom*", "home", "work"]);
-    expect(order(undo(book))).toEqual(["home*", "work", "mom"]);
-  });
-
-  it("a new default is not taken back once another write moved the default or removed the old one", () => {
-    const { book, undo } = planDefault(BOOK, "mom");
-    const movedOn = withDefault(book, "work");
-    expect(order(undo(movedOn))).toEqual(order(movedOn));
-    const oldGone = withoutAddress(book, "home");
-    expect(order(undo(oldGone))).toEqual(["mom*", "work"]);
+  it("is no one when the book has no other address", () => {
+    expect(nextDefaultAfter([HOME], "home", true)).toBeUndefined();
+    expect(nextDefaultAfter([HOME], "home", false)).toBeUndefined();
   });
 });
 

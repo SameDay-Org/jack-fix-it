@@ -13,7 +13,7 @@ import {
   useSavedAddresses,
 } from "./api";
 import { addressLine } from "./addressFields";
-import { withoutAddress } from "./book";
+import { nextDefaultAfter } from "./book";
 
 /**
  * An address's menu, rendered by a sheet route presented with `sheetOptions("fitToContents")`:
@@ -29,10 +29,10 @@ export function AddressActionsSheet() {
   const client = useQueryClient();
   const [cachedAtOpen] = useState(() => !!client.getQueryData(SAVED_ADDRESSES_QUERY_KEY));
   const saved = useSavedAddresses({ enabled: !cachedAtOpen });
-  const [book, setBook] = useState(saved.data?.items);
-  if (book === undefined && saved.data) setBook(saved.data.items);
-  const address = book?.find((item) => item.id === id);
-  const missing = book === undefined ? saved.isError : !address;
+  const [list, setList] = useState(saved.data);
+  if (list === undefined && saved.data) setList(saved.data);
+  const address = list?.items.find((item) => item.id === id);
+  const missing = list === undefined ? saved.isError : !address;
   const deleteAddress = useDeleteAddress();
   const makeDefault = useMakeDefaultAddress();
   // One question at a time: a second quick tap would stack a second dialog on Android.
@@ -43,9 +43,18 @@ export function AddressActionsSheet() {
     if (missing) router.back();
   }, [missing]);
 
-  if (!book || !address) return null;
-  // Deleting the default moves it to the oldest other address, the next one listed.
-  const nextDefault = address.is_default ? withoutAddress(book, address.id)[0] : undefined;
+  if (!list || !address) return null;
+  // Deleting the default moves it to the oldest other address. It is named only when the device
+  // can tell which one that is: a wrong name would be a promise the server does not keep.
+  const movesDefault = address.is_default && list.items.length > 1;
+  const nextDefault = movesDefault
+    ? nextDefaultAfter(list.items, address.id, !list.redrawn)
+    : undefined;
+  const deleteBody = !movesDefault
+    ? t("addresses.delete.body")
+    : nextDefault
+      ? t("addresses.delete.bodyNextDefault", { label: nextDefault.label })
+      : t("addresses.delete.bodyNewDefault");
 
   const confirmDelete = () => {
     if (asking.current) return;
@@ -55,9 +64,7 @@ export function AddressActionsSheet() {
     };
     Alert.alert(
       t("addresses.delete.title", { label: address.label }),
-      nextDefault
-        ? t("addresses.delete.bodyNextDefault", { label: nextDefault.label })
-        : t("addresses.delete.body"),
+      deleteBody,
       [
         { text: t("addresses.delete.cancel"), style: "cancel", onPress: answered },
         {
