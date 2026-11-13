@@ -13,7 +13,6 @@ import {
   useSavedAddresses,
 } from "./api";
 import { addressLine } from "./addressFields";
-import { nextDefaultAfter } from "./book";
 
 /**
  * An address's menu, rendered by a sheet route presented with `sheetOptions("fitToContents")`:
@@ -44,17 +43,16 @@ export function AddressActionsSheet() {
   }, [missing]);
 
   if (!list || !address) return null;
-  // Deleting the default moves it to the oldest other address. It is named only when the device
-  // can tell which one that is: a wrong name would be a promise the server does not keep.
-  const movesDefault = address.is_default && list.items.length > 1;
-  const nextDefault = movesDefault
-    ? nextDefaultAfter(list.items, address.id, !list.redrawn)
-    : undefined;
+  // Deleting the default moves it to the oldest other address: the first of the others, in a book
+  // the device can vouch for. In one it cannot (`guessed`), no one is named: a wrong name would be
+  // a promise the server does not keep.
+  const others = list.items.filter((item) => item.id !== address.id);
+  const movesDefault = address.is_default && others.length > 0;
   const deleteBody = !movesDefault
     ? t("addresses.delete.body")
-    : nextDefault
-      ? t("addresses.delete.bodyNextDefault", { label: nextDefault.label })
-      : t("addresses.delete.bodyNewDefault");
+    : list.guessed
+      ? t("addresses.delete.bodyNewDefault")
+      : t("addresses.delete.bodyNextDefault", { label: others[0].label });
 
   const confirmDelete = () => {
     if (asking.current) return;

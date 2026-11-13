@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient, useQuery, type QueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
@@ -17,7 +17,7 @@ import {
 } from "@/api";
 import { showToast } from "@/components/ui";
 
-import { addressFailure, withAdded, withDefault, withoutAddress, withUpdated } from "./book";
+import { addressFailure, withAdded, withDefault, withFields, withoutAddress } from "./book";
 import {
   answerWrite,
   dropWrite,
@@ -52,25 +52,12 @@ export const useSavedAddresses = ({ enabled = true }: { enabled?: boolean } = {}
  * Edit wait for the server, whose refusals (a label taken, a contact detail in a label) belong in
  * the form the customer is still looking at. Two of them can be in flight at once, so none
  * patches the cached book itself: each is asked, then answered or dropped, in `bookCache`, which
- * draws the book from what the server confirmed and the writes still in flight.
+ * draws the book from what the server listed and the writes asked since, and fetches it again
+ * once the last one is answered.
  */
-
-/** Every write to the book, so the last one answered refetches it. */
-const ADDRESS_WRITE_KEY = ["addresses", "write"] as const;
 
 /** A write's place among the ones in flight; none when the book was not cached to draw on. */
 type WriteContext = { write: OpenWrite | undefined };
-
-/** Only this write is in flight: no other one is still to be answered. */
-const lastWrite = (client: QueryClient) =>
-  client.isMutating({ mutationKey: ADDRESS_WRITE_KEY }) <= 1;
-
-/** Fetches the book again once the last write in flight is answered, for the session that asked. */
-function refetchAfterLastWrite(client: QueryClient, generation: number): void {
-  if (!isCurrentGeneration(generation) || !lastWrite(client)) return;
-  // Not awaited: the mutation would hold its answer (and the busy button) until the refetch lands.
-  void client.invalidateQueries({ queryKey: SAVED_ADDRESSES_QUERY_KEY, exact: true });
-}
 
 /** A new address for the book, for the session the form was sent in. */
 export type CreateAddressVariables = { body: PostBody<"/v1/addresses">; generation: number };
@@ -82,14 +69,12 @@ export type CreateAddressVariables = { body: PostBody<"/v1/addresses">; generati
 export function useCreateAddress() {
   const client = useQueryClient();
   return useMutation({
-    mutationKey: ADDRESS_WRITE_KEY,
     mutationFn: ({ body, generation }: CreateAddressVariables) =>
       apiPost("/v1/addresses", body, { auth: true, generation }),
     onMutate: ({ generation }): WriteContext => ({ write: openWrite(client, generation) }),
     onSuccess: (address, { generation }, context) =>
       answerWrite(client, generation, context.write, (book) => withAdded(book, address)),
-    onError: (_error, _variables, context) => dropWrite(client, context?.write),
-    onSettled: (_address, _error, { generation }) => refetchAfterLastWrite(client, generation),
+    onError: (_error, { generation }, context) => dropWrite(client, generation, context?.write),
   });
 }
 
@@ -104,7 +89,6 @@ export type UpdateAddressVariables = {
 export function useUpdateAddress() {
   const client = useQueryClient();
   return useMutation({
-    mutationKey: ADDRESS_WRITE_KEY,
     mutationFn: ({ id, body, generation }: UpdateAddressVariables) =>
       apiPatch("/v1/addresses/{address_id}", body, {
         auth: true,
@@ -113,9 +97,8 @@ export function useUpdateAddress() {
       }),
     onMutate: ({ generation }): WriteContext => ({ write: openWrite(client, generation) }),
     onSuccess: (address, { generation }, context) =>
-      answerWrite(client, generation, context.write, (book) => withUpdated(book, address)),
-    onError: (_error, _variables, context) => dropWrite(client, context?.write),
-    onSettled: (_address, _error, { generation }) => refetchAfterLastWrite(client, generation),
+      answerWrite(client, generation, context.write, (book) => withFields(book, address)),
+    onError: (_error, { generation }, context) => dropWrite(client, generation, context?.write),
   });
 }
 
@@ -151,7 +134,6 @@ export function useDeleteAddress() {
   const { t } = useTranslation();
   const client = useQueryClient();
   const { mutate } = useMutation<undefined, unknown, AddressActionVariables, WriteContext>({
-    mutationKey: ADDRESS_WRITE_KEY,
     mutationFn: async ({ address, generation }) => {
       try {
         await apiDelete("/v1/addresses/{address_id}", undefined, {
@@ -173,10 +155,9 @@ export function useDeleteAddress() {
       AccessibilityInfo.announceForAccessibility(t("addresses.deleted", { label: address.label }));
     },
     onError: (error, variables, context) => {
-      dropWrite(client, context?.write);
+      dropWrite(client, variables.generation, context?.write);
       toastFailure(t, error, "delete", variables);
     },
-    onSettled: (_answer, _error, { generation }) => refetchAfterLastWrite(client, generation),
   });
   return (address: SavedAddress) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -192,7 +173,6 @@ export function useMakeDefaultAddress() {
   const { t } = useTranslation();
   const client = useQueryClient();
   const { mutate } = useMutation<SavedAddress, unknown, AddressActionVariables, WriteContext>({
-    mutationKey: ADDRESS_WRITE_KEY,
     mutationFn: ({ address, generation }) =>
       apiPatch(
         "/v1/addresses/{address_id}",
@@ -203,17 +183,19 @@ export function useMakeDefaultAddress() {
       write: openWrite(client, generation, (book) => withDefault(book, address.id)),
     }),
     onSuccess: (saved, { generation }, context) => {
-      answerWrite(client, generation, context.write, (book) => withUpdated(book, saved));
+      // The server's copy of it, and the chip: its answer says nothing of the others.
+      answerWrite(client, generation, context.write, (book) =>
+        withDefault(withFields(book, saved), saved.id),
+      );
       if (!isCurrentGeneration(generation)) return;
       AccessibilityInfo.announceForAccessibility(
         t("addresses.madeDefault", { label: saved.label }),
       );
     },
     onError: (error, variables, context) => {
-      dropWrite(client, context?.write);
+      dropWrite(client, variables.generation, context?.write);
       toastFailure(t, error, "makeDefault", variables);
     },
-    onSettled: (_saved, _error, { generation }) => refetchAfterLastWrite(client, generation),
   });
   return (address: SavedAddress) => {
     void Haptics.selectionAsync();

@@ -2,64 +2,80 @@ import { ApiError, NetworkError } from "@/api";
 
 import type { SavedAddress } from "./api";
 
-type Book = readonly SavedAddress[];
+type Addresses = readonly SavedAddress[];
 
-/*
- * The book as the API lists it (`SavedAddressList`): the default first, then the oldest first. The
- * edits below keep that order on the device as far as it can tell, so an optimistic change shows
- * what the next GET most likely will. What it cannot tell is where a default that stops being one
- * falls among the others: addresses carry no creation date (see `nextDefaultAfter`).
+/**
+ * The book as the device draws it: its addresses, the default first, and whether the device can
+ * vouch for the order of the others. The API lists them oldest first, and promotes the first of
+ * them when the default is deleted. A list from the server is `ordered`. The device loses track
+ * when a default stops being one: nothing tells where it falls among the others, since addresses
+ * carry no creation date.
  */
+export type Book = { readonly items: Addresses; readonly ordered: boolean };
 
-/** `address` as the default, first; every other address after it, in its order, not the default. */
-export function withDefault(book: Book, id: string): SavedAddress[] {
-  const target = book.find((address) => address.id === id);
-  if (!target) return [...book];
-  const rest = book
+/** A change to the book: the book with it. The writes in flight are replayed as these. */
+export type BookEdit = (book: Book) => Book;
+
+const others = (items: Addresses) => items.filter((address) => !address.is_default);
+
+/**
+ * `id` as the default, first. The old default joins the others in front, which is a guess: the
+ * book stays `ordered` only when it is then the only other address.
+ */
+export function withDefault(book: Book, id: string): Book {
+  const target = book.items.find((address) => address.id === id);
+  if (!target || target.is_default) return book;
+  const hadDefault = book.items.some((address) => address.is_default);
+  const rest = book.items
     .filter((address) => address.id !== id)
     .map((address) => (address.is_default ? { ...address, is_default: false } : address));
-  return [{ ...target, is_default: true }, ...rest];
+  return {
+    items: [{ ...target, is_default: true }, ...rest],
+    ordered: rest.length <= 1 || (book.ordered && !hadDefault),
+  };
 }
 
 /**
  * The book without `id`. When that was the default, the API makes the oldest remaining address the
- * default: the first one left, since the others are listed oldest first.
+ * default: the first of the others in an `ordered` book. In one that is not, the device cannot
+ * tell which, and draws no default until the server lists the book. The only address left is the
+ * default either way.
  */
-export function withoutAddress(book: Book, id: string): SavedAddress[] {
-  const removed = book.find((address) => address.id === id);
-  const rest = book.filter((address) => address.id !== id);
-  if (!removed?.is_default || rest.length === 0) return rest;
-  return withDefault(rest, rest[0].id);
+export function withoutAddress(book: Book, id: string): Book {
+  const removed = book.items.find((address) => address.id === id);
+  if (!removed) return book;
+  const rest = book.items.filter((address) => address.id !== id);
+  const promoted = rest.length === 1 || (removed.is_default && book.ordered);
+  if (!promoted || rest.length === 0) {
+    return {
+      items: rest,
+      ordered: others(rest).length <= 1 || (!removed.is_default && book.ordered),
+    };
+  }
+  return { items: [{ ...rest[0], is_default: true }, ...rest.slice(1)], ordered: true };
 }
-
-/** A change to the book: the book with it. The writes in flight are replayed as these. */
-export type BookEdit = (book: Book) => SavedAddress[];
 
 /**
- * The address that becomes the default once the default `id` is deleted, when the device can tell.
- * The API promotes the oldest remaining one: the only other address, or the first of the others
- * in a book as the server `listed` it (they come oldest first). In a book this device redrew
- * since, their order is a guess, as addresses carry no creation date: undefined.
+ * The book with the server's copy of a new address: the newest, so the last of the others, or
+ * the default when the server made it one (the first address of a book).
  */
-export function nextDefaultAfter(
-  book: Book,
-  id: string,
-  listed: boolean,
-): SavedAddress | undefined {
-  const others = book.filter((address) => address.id !== id);
-  return listed || others.length === 1 ? others[0] : undefined;
+export function withAdded(book: Book, address: SavedAddress): Book {
+  if (book.items.some((saved) => saved.id === address.id)) return withFields(book, address);
+  const added = { ...book, items: [...book.items, { ...address, is_default: false }] };
+  return address.is_default ? withDefault(added, address.id) : added;
 }
 
-/** The book with the server's copy of a new address: first when it is the default, else last. */
-export function withAdded(book: Book, address: SavedAddress): SavedAddress[] {
-  const rest = book.filter((saved) => saved.id !== address.id);
-  return address.is_default ? withDefault([address, ...rest], address.id) : [...rest, address];
-}
-
-/** The book with the server's copy of an edited address, in its place. */
-export function withUpdated(book: Book, address: SavedAddress): SavedAddress[] {
-  const updated = book.map((saved) => (saved.id === address.id ? address : saved));
-  return address.is_default ? withDefault(updated, address.id) : updated;
+/**
+ * The book with the server's copy of an address's fields, in its place. Who is the default stays
+ * as drawn: an edit never moves it, and its answer may be older than a change drawn since.
+ */
+export function withFields(book: Book, address: SavedAddress): Book {
+  return {
+    ...book,
+    items: book.items.map((saved) =>
+      saved.id === address.id ? { ...address, is_default: saved.is_default } : saved,
+    ),
+  };
 }
 
 /**
@@ -70,7 +86,7 @@ export const labelKey = (label: string): string =>
   label.normalize("NFC").split(/\s+/).filter(Boolean).join(" ").toLowerCase();
 
 /** Whether another address of the book (not `exceptId`) already has this label. */
-export const isLabelTaken = (book: Book, label: string, exceptId?: string): boolean =>
+export const isLabelTaken = (book: Addresses, label: string, exceptId?: string): boolean =>
   book.some((address) => address.id !== exceptId && labelKey(address.label) === labelKey(label));
 
 /** Why a write to the book failed, as the screens word it (`addresses.failed.*`). */

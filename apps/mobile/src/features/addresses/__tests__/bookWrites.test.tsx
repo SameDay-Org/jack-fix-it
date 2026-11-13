@@ -97,9 +97,9 @@ const cached = (client: QueryClient) =>
     .getQueryData<{ items: SavedAddress[] }>(SAVED_ADDRESSES_QUERY_KEY)
     ?.items.map((address) => (address.is_default ? `${address.id}*` : address.id));
 
-/** Whether the cached book is one the device redrew since the server last listed it. */
-const redrawn = (client: QueryClient) =>
-  client.getQueryData<SavedBook>(SAVED_ADDRESSES_QUERY_KEY)?.redrawn ?? false;
+/** Whether the cached book is one whose other addresses the device cannot vouch for. */
+const guessed = (client: QueryClient) =>
+  client.getQueryData<SavedBook>(SAVED_ADDRESSES_QUERY_KEY)?.guessed ?? false;
 
 /** An address's label in the cached book. */
 const labelOf = (client: QueryClient, id: string) =>
@@ -269,7 +269,7 @@ describe("two writes in flight", () => {
     await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
     // The book as the server last listed it, in its order: neither write happened.
     expect(cached(client)).toEqual(["home*", "work", "mom"]);
-    expect(redrawn(client)).toBe(false);
+    expect(guessed(client)).toBe(false);
   });
 
   it("an earlier failure never undoes a later success", async () => {
@@ -517,7 +517,7 @@ describe("overlapping writes, with no GET to repair them", () => {
 
     await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
     expect(cached(client)).toEqual(["home*", "work", "mom"]);
-    expect(redrawn(client)).toBe(false);
+    expect(guessed(client)).toBe(false);
   });
 
   it.each([
@@ -558,8 +558,8 @@ describe("overlapping writes, with no GET to repair them", () => {
 
     await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
     expect(cached(client)).toEqual(["mom*", "work", "home"]);
-    // Both are the server's now, but in the device's order until a GET lists the book.
-    expect(redrawn(client)).toBe(true);
+    // Both are the server's now, but where Home and Work fall is the device's guess.
+    expect(guessed(client)).toBe(true);
   });
 
   it("a later success stays when the earlier change is refused after it", async () => {
@@ -618,6 +618,23 @@ describe("overlapping writes, with no GET to repair them", () => {
     },
   );
 
+  it("two answers in the same tick fetch the book again, once", async () => {
+    const [first, second] = twoPatches();
+    const { result, client } = await renderBook();
+    server = [{ ...MOM, is_default: true }, { ...HOME, is_default: false }, WORK];
+
+    await act(async () => result.current.makeDefault(WORK));
+    await act(async () => result.current.makeDefault(MOM));
+    await act(async () => {
+      first.resolve({ ...WORK, is_default: true });
+      second.resolve({ ...MOM, is_default: true });
+    });
+
+    await waitFor(() => expect(guessed(client)).toBe(false));
+    expect(apiGet).toHaveBeenCalledTimes(2);
+    expect(cached(client)).toEqual(["mom*", "home", "work"]);
+  });
+
   it("an edit answered while a later default change is in flight leaves that choice drawn", async () => {
     const [edited] = twoPatches();
     const { result, client } = await renderBook();
@@ -641,6 +658,32 @@ describe("overlapping writes, with no GET to repair them", () => {
     expect(cached(client)).toEqual(["mom*", "home", "work"]);
     expect(labelOf(client, "home")).toBe("House");
     expect(apiGet).toHaveBeenCalledTimes(1);
+  });
+
+  it("two edits of an address answered out of order keep the fields asked last", async () => {
+    const [first, second] = twoPatches();
+    const { result, client } = await renderBook();
+    getsFail();
+
+    const savings: Promise<unknown>[] = [];
+    for (const label of ["Office", "Studio"]) {
+      await act(async () => {
+        savings.push(
+          result.current.update.mutateAsync({ id: "work", body: { label }, generation: 1 }),
+        );
+      });
+    }
+    await act(async () => {
+      second.resolve({ ...WORK, label: "Studio" });
+      await savings[1];
+    });
+    await act(async () => {
+      first.resolve({ ...WORK, label: "Office" });
+      await savings[0];
+    });
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+    expect(labelOf(client, "work")).toBe("Studio");
   });
 
   it("a refused edit changes nothing, under a default change still in flight", async () => {
@@ -682,7 +725,7 @@ describe("a GET that lands while a write is in flight", () => {
 
     expect(cached(client)).toEqual(["mom*", "home", "work"]);
     expect(labelOf(client, "work")).toBe("Office");
-    expect(redrawn(client)).toBe(true);
+    expect(guessed(client)).toBe(true);
     jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
     await act(async () => answer.reject(new ApiError(500, "internal_error")));
 
@@ -690,7 +733,56 @@ describe("a GET that lands while a write is in flight", () => {
     // The list that GET brought, not the older one the write was first drawn on.
     expect(cached(client)).toEqual(["home*", "work", "mom"]);
     expect(labelOf(client, "work")).toBe("Office");
-    expect(redrawn(client)).toBe(false);
+    expect(guessed(client)).toBe(false);
+  });
+
+  it("asked before two writes and landing between their answers, takes neither back", async () => {
+    const stale = deferred<{ items: SavedAddress[] }>();
+    const madeDefault = deferred<SavedAddress>();
+    const deleted = deferred<undefined>();
+    jest.mocked(apiPatch).mockReturnValue(madeDefault.promise);
+    jest.mocked(apiDelete).mockReturnValue(deleted.promise);
+    const { result, client } = await renderBook();
+
+    // The book is being fetched again (its screen just opened) when both writes are asked.
+    jest.mocked(apiGet).mockReturnValueOnce(stale.promise);
+    let refetching: Promise<unknown> = Promise.resolve();
+    await act(async () => {
+      refetching = result.current.book.refetch();
+    });
+    await act(async () => result.current.makeDefault(MOM));
+    await act(async () => result.current.remove(WORK));
+    await act(async () => madeDefault.resolve({ ...MOM, is_default: true }));
+    jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+    // That GET's list is from before both: Mom's change, answered, is still drawn over it.
+    await act(async () => {
+      stale.resolve({ items: [HOME, WORK, MOM] });
+      await refetching;
+    });
+    expect(cached(client)).toEqual(["mom*", "home"]);
+
+    await act(async () => deleted.reject(new NetworkError(false)));
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(3));
+    expect(cached(client)).toEqual(["mom*", "home", "work"]);
+    expect(guessed(client)).toBe(true);
+  });
+
+  it("asked before a write and still in flight at its answer, never lands over it", async () => {
+    const stale = deferred<{ items: SavedAddress[] }>();
+    jest.mocked(apiPatch).mockResolvedValue({ ...MOM, is_default: true });
+    const { result, client } = await renderBook();
+
+    jest.mocked(apiGet).mockReturnValueOnce(stale.promise);
+    await act(async () => {
+      void result.current.book.refetch();
+    });
+    jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+    await act(async () => result.current.makeDefault(MOM));
+    // The GET asked after the answer replaced it, and failed.
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(3));
+    await act(async () => stale.resolve({ items: [HOME, WORK, MOM] }));
+
+    expect(cached(client)).toEqual(["mom*", "home", "work"]);
   });
 
   it("is what the write's answer is drawn on", async () => {
@@ -712,28 +804,66 @@ describe("a GET that lands while a write is in flight", () => {
   });
 });
 
-describe("the cached book says whether the device redrew it", () => {
-  it("from the first write in flight until the server lists the book again", async () => {
+describe("the cached book says when the device cannot vouch for its other addresses", () => {
+  it("from the first change in flight until the server lists the book again", async () => {
+    // Created oldest to newest: Home, Work, Mom, with Mom the default.
+    server = [{ ...MOM, is_default: true }, { ...HOME, is_default: false }, WORK];
     const answer = deferred<SavedAddress>();
     jest.mocked(apiPatch).mockReturnValue(answer.promise);
     const { result, client } = await renderBook();
-    expect(redrawn(client)).toBe(false);
+    expect(guessed(client)).toBe(false);
     expect(client.getQueryCache().hasListeners()).toBe(false);
 
-    await act(async () => result.current.makeDefault(MOM));
-    expect(redrawn(client)).toBe(true);
-    // While a write is in flight the book's GETs are watched, and no longer.
+    await act(async () => result.current.makeDefault(WORK));
+    // The device draws Mom next; the server will list Home first, the older one.
+    expect(cached(client)).toEqual(["work*", "mom", "home"]);
+    expect(guessed(client)).toBe(true);
+    // The book's GETs are watched from the first write asked.
     expect(client.getQueryCache().hasListeners()).toBe(true);
-    server = [{ ...MOM, is_default: true }, { ...HOME, is_default: false }, WORK];
-    await act(async () => answer.resolve({ ...MOM, is_default: true }));
+    server = [{ ...WORK, is_default: true }, { ...HOME, is_default: false }, MOM];
+    const listedAgain = deferred<{ items: SavedAddress[] }>();
+    jest.mocked(apiGet).mockReturnValue(listedAgain.promise);
+    await act(async () => answer.resolve({ ...WORK, is_default: true }));
 
-    expect(client.getQueryCache().hasListeners()).toBe(false);
-    await waitFor(() => expect(redrawn(client)).toBe(false));
+    // Answered, and still the device's order: only the GET asked after the answer settles it.
+    expect(cached(client)).toEqual(["work*", "mom", "home"]);
+    expect(guessed(client)).toBe(true);
+    expect(client.getQueryCache().hasListeners()).toBe(true);
+    await act(async () => listedAgain.resolve({ items: server }));
+
     expect(apiGet).toHaveBeenCalledTimes(2);
-    expect(cached(client)).toEqual(["mom*", "home", "work"]);
+    expect(cached(client)).toEqual(["work*", "home", "mom"]);
+    expect(guessed(client)).toBe(false);
+    expect(client.getQueryCache().hasListeners()).toBe(false);
   });
 
-  it("not while a form's write waits for the server: it draws nothing", async () => {
+  it("the list asked after the last answer stands alone: no write is replayed over it", async () => {
+    jest.mocked(apiPatch).mockResolvedValue({ ...WORK, is_default: true });
+    const { result, client } = await renderBook();
+    // By the time the book is listed again, another device has made Mom the default.
+    server = [{ ...MOM, is_default: true }, { ...HOME, is_default: false }, WORK];
+
+    await act(async () => result.current.makeDefault(WORK));
+
+    await waitFor(() => expect(cached(client)).toEqual(["mom*", "home", "work"]));
+    expect(guessed(client)).toBe(false);
+  });
+
+  it("not for a change that leaves one other address: its place is known", async () => {
+    server = [HOME, WORK];
+    jest.mocked(apiPatch).mockResolvedValue({ ...WORK, is_default: true });
+    const { result, client } = await renderBook();
+    jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+
+    await act(async () => result.current.makeDefault(WORK));
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+    expect(cached(client)).toEqual(["work*", "home"]);
+    expect(guessed(client)).toBe(false);
+    expect(client.getQueryCache().hasListeners()).toBe(false);
+  });
+
+  it("not for a form's write: it moves no one", async () => {
     const answer = deferred<SavedAddress>();
     jest.mocked(apiPatch).mockReturnValue(answer.promise);
     const { result, client } = await renderBook();
@@ -746,7 +876,7 @@ describe("the cached book says whether the device redrew it", () => {
         generation: 1,
       });
     });
-    expect(redrawn(client)).toBe(false);
+    expect(guessed(client)).toBe(false);
     jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
     await act(async () => {
       answer.resolve({ ...WORK, label: "Office" });
@@ -754,7 +884,39 @@ describe("the cached book says whether the device redrew it", () => {
     });
 
     expect(labelOf(client, "work")).toBe("Office");
-    expect(redrawn(client)).toBe(true);
+    expect(guessed(client)).toBe(false);
+  });
+
+  it("deleting the default of a book in the device's order draws no default until it is listed", async () => {
+    // Created oldest to newest: Work, Mom, Home, with Home the default.
+    const listedBook = [HOME, WORK, MOM];
+    jest.mocked(apiPatch).mockResolvedValue({ ...MOM, is_default: true });
+    jest.mocked(apiDelete).mockResolvedValue(undefined);
+    const { result, client } = await renderBook();
+    expect(cached(client)).toEqual(listedBook.map((a) => (a.is_default ? `${a.id}*` : a.id)));
+    jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+
+    // Mom is the default now, for the server too; the book could not be listed again.
+    await act(async () => result.current.makeDefault(MOM));
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+    expect(cached(client)).toEqual(["mom*", "home", "work"]);
+
+    // Deleted, the server promotes the older of Home and Work: Work. The device cannot tell.
+    await act(async () => result.current.remove({ ...MOM, is_default: true }));
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(3));
+    expect(cached(client)).toEqual(["home", "work"]);
+    expect(guessed(client)).toBe(true);
+
+    server = [
+      { ...WORK, is_default: true },
+      { ...HOME, is_default: false },
+    ];
+    jest.mocked(apiGet).mockImplementation(async () => ({ items: server }));
+    await act(async () => {
+      await result.current.book.refetch();
+    });
+    expect(cached(client)).toEqual(["work*", "home"]);
+    expect(guessed(client)).toBe(false);
   });
 });
 
@@ -812,5 +974,38 @@ describe("a write asked before the book was cached", () => {
     await answered();
 
     expect(cached(client)).toEqual(["home*"]);
+  });
+
+  it("answered with no book cached, has the book fetched", async () => {
+    // The book could not load; its screen is still asking for it.
+    jest.mocked(apiGet).mockRejectedValueOnce(new NetworkError(false));
+    jest.mocked(apiPost).mockResolvedValue(office);
+    const client = newQueryClient();
+    const { result } = await renderHook(
+      () => ({ book: useSavedAddresses(), create: useCreateAddress() }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) =>
+          createElement(QueryClientProvider, { client }, children),
+      },
+    );
+    await waitFor(() => expect(result.current.book.isError).toBe(true));
+    server = [HOME, office];
+
+    await act(async () => {
+      await result.current.create.mutateAsync({
+        body: {
+          line1: office.line1,
+          city: office.city,
+          state: office.state,
+          zip_code: office.zip_code,
+          label: "Office",
+          is_default: false,
+        },
+        generation: 1,
+      });
+    });
+
+    await waitFor(() => expect(cached(client)).toEqual(["home*", "office"]));
+    expect(apiGet).toHaveBeenCalledTimes(2);
   });
 });

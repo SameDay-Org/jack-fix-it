@@ -2,17 +2,17 @@ import { hashKey, type QueryClient } from "@tanstack/react-query";
 
 import { isCurrentGeneration, type GetResponse } from "@/api";
 
-import type { BookEdit } from "./book";
+import type { Book, BookEdit } from "./book";
 
 export type SavedAddressList = GetResponse<"/v1/addresses">;
 export type SavedAddress = SavedAddressList["items"][number];
 
 /**
- * The book as cached. `redrawn` marks one this device changed since the server last listed it: its
- * addresses and its default are the best the device knows, but the order of the others is no
- * longer the server's (oldest first), which the device cannot rebuild: addresses carry no date.
+ * The book as cached. `guessed` marks one whose other addresses (the ones that are not the
+ * default) the device cannot vouch for: a change of its own is still unanswered, or it no longer
+ * knows their order (see `Book`). Who the server would make the default next is then unknown.
  */
-export type SavedBook = SavedAddressList & { redrawn?: true };
+export type SavedBook = SavedAddressList & { guessed?: true };
 
 export const SAVED_ADDRESSES_QUERY_KEY = ["addresses"] as const;
 const BOOK_HASH = hashKey(SAVED_ADDRESSES_QUERY_KEY);
@@ -26,31 +26,39 @@ export type OpenWrite = { edit?: BookEdit; answered: boolean };
 
 /*
  * Two writes can be in flight at once (a sheet closes at once and the customer acts again), and
- * their answers come in any order. So the book on screen is never patched answer by answer. While
- * a write is in flight it is always `confirmed`, the book as the server last listed or confirmed
- * it, with every write of the log replayed in the order it was asked:
+ * their answers, like the book's own GETs, come in any order. So the book on screen is never
+ * patched answer by answer. From the first write asked it is always derived: `confirmed`, the
+ * book as the server last listed it, with every write of the log replayed in the order asked.
  *
- * - a refused write leaves the log, and the book reads as if it had never been asked, whatever
- *   the others drew meanwhile;
- * - an answered write keeps its place until the ones asked before it are answered too, then joins
- *   `confirmed`: its answer never draws over a write asked after it;
- * - a GET that lands meanwhile is the new `confirmed`, under the same writes.
+ * - A refused write leaves the log: the book reads as if it had never been asked, whatever the
+ *   others drew meanwhile.
+ * - An answered write stays in its place, with the server's answer as its edit: the answer never
+ *   draws over a write asked after it.
+ * - A GET that lands is the new `confirmed`, and every write is replayed over it, the answered
+ *   ones too: that list may have been read before the server took them (it was in flight when
+ *   they were asked, or passed them on the way). Replaying one the list already has changes
+ *   nothing.
  *
- * The log lasts as long as its writes and the cached book they are drawn on. When the cache drops
- * the book (a sign-out clears it) the log goes with it, and what its writes answer later is drawn
- * nowhere.
+ * Once the last write is answered the book is fetched again, and the log closes when that GET
+ * settles: only a list asked after every answer can stand alone. The log also goes with the
+ * cached book when the cache drops it (a sign-out clears it); what its writes answer later is
+ * drawn nowhere.
  */
 type WriteLog = {
-  confirmed: SavedAddress[];
-  /** Whether `confirmed` is still a list as the server sent it. */
-  listed: boolean;
-  /** The writes not yet part of `confirmed`, oldest first. */
+  confirmed: Book;
+  /** Every write asked since the log opened and not refused, oldest first. */
   writes: OpenWrite[];
+  /** The GET asked when the last write was answered; a later one replaces it. */
+  refetch?: Promise<unknown>;
+  /** Whether a GET landed since `refetch` was asked. */
+  landed: boolean;
   /** Stops watching the cached book. */
   stop: () => void;
 };
 
 const logs = new WeakMap<QueryClient, WriteLog>();
+
+const inFlight = (log: WriteLog) => log.writes.some((write) => !write.answered);
 
 function closeLog(client: QueryClient, log: WriteLog): void {
   log.stop();
@@ -59,15 +67,13 @@ function closeLog(client: QueryClient, log: WriteLog): void {
 
 /** Draws the book as the log has it: `confirmed`, then each write in the order asked. */
 function draw(client: QueryClient, log: WriteLog): void {
-  const items = log.writes.reduce<SavedAddress[]>(
-    (book, write) => write.edit?.(book) ?? book,
-    log.confirmed,
-  );
-  const listed = log.listed && log.writes.every((write) => !write.edit);
+  const book = log.writes.reduce((drawn, write) => write.edit?.(drawn) ?? drawn, log.confirmed);
+  const guessed = !book.ordered || log.writes.some((write) => write.edit && !write.answered);
   client.setQueryData<SavedBook>(SAVED_ADDRESSES_QUERY_KEY, (cached) => {
     if (!cached) return cached;
-    const { redrawn: _redrawn, ...list } = cached;
-    return listed ? { ...list, items } : { ...list, items, redrawn: true };
+    const { guessed: _guessed, ...list } = cached;
+    const items = [...book.items];
+    return guessed ? { ...list, items, guessed } : { ...list, items };
   });
 }
 
@@ -76,23 +82,22 @@ function startLog(client: QueryClient): WriteLog | undefined {
   const cached = client.getQueryData<SavedBook>(SAVED_ADDRESSES_QUERY_KEY);
   if (!cached) return undefined;
   const log: WriteLog = {
-    confirmed: cached.items,
-    listed: !cached.redrawn,
+    confirmed: { items: cached.items, ordered: !cached.guessed },
     writes: [],
+    landed: false,
     stop: client.getQueryCache().subscribe((event) => {
       if (event.query.queryHash !== BOOK_HASH) return;
       if (event.type === "removed") {
         closeLog(client, log);
         return;
       }
+      // A GET's own answer, not a drawing of this log (`manual`).
       if (event.type !== "updated" || event.action.type !== "success" || event.action.manual)
         return;
-      // A GET landed while writes are in flight (another screen opened, the app came back). It
-      // was answered without some of them: its list is the server's word, and they go on top.
       const list = event.query.state.data as SavedAddressList | undefined;
       if (!list) return;
-      log.confirmed = list.items;
-      log.listed = true;
+      log.confirmed = { items: list.items, ordered: true };
+      log.landed = true;
       draw(client, log);
     }),
   };
@@ -100,17 +105,40 @@ function startLog(client: QueryClient): WriteLog | undefined {
   return log;
 }
 
-/** Moves the answered writes no unanswered one precedes into `confirmed`, and draws the book. */
+/**
+ * Draws the book after an answer. With the last write answered, fetches the book again, then
+ * closes the log: on the server's list alone if it came, else on the book as drawn.
+ */
 function settle(client: QueryClient, log: WriteLog): void {
-  while (log.writes[0]?.answered) {
-    const edit = log.writes.shift()?.edit;
-    if (edit) {
-      log.confirmed = edit(log.confirmed);
-      log.listed = false;
-    }
-  }
   draw(client, log);
-  if (log.writes.length === 0) closeLog(client, log);
+  if (inFlight(log)) return;
+  log.landed = false;
+  // Not awaited by the write: it would hold its answer (and a busy button) until the GET lands.
+  // A GET already in flight is replaced: it was asked before this answer.
+  const refetch = client.invalidateQueries(
+    { queryKey: SAVED_ADDRESSES_QUERY_KEY, exact: true },
+    { throwOnError: true },
+  );
+  log.refetch = refetch;
+  const close = (listed: boolean) => {
+    // A write asked meanwhile keeps the log, and the GET after its answer closes it.
+    if (logs.get(client) !== log || log.refetch !== refetch || inFlight(log)) return;
+    if (listed && log.landed) {
+      log.writes = [];
+      draw(client, log);
+    }
+    closeLog(client, log);
+  };
+  refetch.then(
+    () => close(true),
+    () => close(false),
+  );
+}
+
+/** A write with no place in a book on screen was answered: fetch the book, for its session. */
+function fetchBook(client: QueryClient, generation: number): void {
+  if (!isCurrentGeneration(generation)) return;
+  void client.invalidateQueries({ queryKey: SAVED_ADDRESSES_QUERY_KEY, exact: true });
 }
 
 /**
@@ -134,8 +162,8 @@ export function openWrite(
 
 /**
  * The server answered `write`: the book reads with `edit`, the answer, in the place the write was
- * asked. A write that had no place yet (the book was cached since) takes the last one. One whose
- * log is gone draws nothing.
+ * asked. A write that had no place yet takes the last one, if the book was cached since. One
+ * whose log is gone (its session ended) draws nothing.
  */
 export function answerWrite(
   client: QueryClient,
@@ -145,6 +173,7 @@ export function answerWrite(
 ): void {
   const answered = write ?? openWrite(client, generation);
   const log = logs.get(client);
+  if (!answered) fetchBook(client, generation);
   if (!answered || !log?.writes.includes(answered)) return;
   answered.edit = edit;
   answered.answered = true;
@@ -152,8 +181,13 @@ export function answerWrite(
 }
 
 /** The server refused `write`: the book reads without it. */
-export function dropWrite(client: QueryClient, write: OpenWrite | undefined): void {
+export function dropWrite(
+  client: QueryClient,
+  generation: number,
+  write: OpenWrite | undefined,
+): void {
   const log = logs.get(client);
+  if (!write) fetchBook(client, generation);
   const index = write && log ? log.writes.indexOf(write) : -1;
   if (!log || index < 0) return;
   log.writes.splice(index, 1);

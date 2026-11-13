@@ -156,7 +156,7 @@ describe("AddressActionsSheet", () => {
   });
 
   // The Gatekeeper's round 1 sequence (PR #354). Its probe expected "Home becomes your default"
-  // from the redrawn book alone, which the device cannot know: addresses carry no creation date.
+  // from the book as the device drew it, which it cannot know: addresses carry no creation date.
   it("after a default change the server has not listed yet, promises no particular new default", async () => {
     // Created oldest to newest: Home, Work, Mom. Mom is the default, so the API lists Mom, Home, Work.
     const mom = { ...CABIN, id: "mom", label: "Mom", is_default: true };
@@ -203,25 +203,54 @@ describe("AddressActionsSheet", () => {
     );
   });
 
-  it("names the only other address even in a book the device redrew", async () => {
-    jest.mocked(apiPatch).mockReturnValue(new Promise(() => undefined));
+  it("with one other address, names it once the change that left it there is answered", async () => {
+    const answer = deferred<typeof WORK>();
+    jest.mocked(apiPatch).mockReturnValue(answer.promise);
     const client = bookClient([HOME, WORK]);
     const first = await openFor("work", client).view;
     await fireEvent.press(screen.getByRole("button", { name: "Make default" }));
     await first.unmount();
 
+    // Unanswered: refused, Work would not be the default, and deleting it would move no one.
+    const second = await openFor("work", client).view;
+    await fireEvent.press(screen.getByRole("button", { name: "Delete address" }));
+    expect(alert.mock.calls[0][1]).toBe(
+      "Requests you already sent keep their address. Another address becomes your default.",
+    );
+    await second.unmount();
+
+    await act(async () => answer.resolve({ ...WORK, is_default: true }));
     await openFor("work", client).view;
     await fireEvent.press(screen.getByRole("button", { name: "Delete address" }));
-
-    expect(alert.mock.calls[0][1]).toBe(
+    expect(alert.mock.calls[1][1]).toBe(
       "Requests you already sent keep their address. Home becomes your default.",
     );
+  });
+
+  it("names no one while a delete that left one other address is unanswered", async () => {
+    const deleted = deferred<undefined>();
+    jest.mocked(apiDelete).mockReturnValue(deleted.promise);
+    const client = bookClient([HOME, WORK, CABIN]);
+    const first = await openFor("work", client).view;
+    await fireEvent.press(screen.getByRole("button", { name: "Delete address" }));
+    await act(async () => buttons()[1].onPress?.());
+    await first.unmount();
+    expect(cachedBook(client)).toEqual(["home*", "cabin"]);
+
+    // Refused, Work comes back, and the API would promote it (the oldest), not Cabin.
+    await openFor("home", client).view;
+    await fireEvent.press(screen.getByRole("button", { name: "Delete address" }));
+    expect(alert.mock.calls[1][1]).toBe(
+      "Requests you already sent keep their address. Another address becomes your default.",
+    );
+    await act(async () => deleted.reject(new ApiError(500, "internal_error")));
+    expect(cachedBook(client)).toEqual(["home*", "work", "cabin"]);
   });
 
   it("says in Spanish that another address becomes the default", async () => {
     await i18n.changeLanguage("es");
     const client = newQueryClient();
-    client.setQueryData(SAVED_ADDRESSES_QUERY_KEY, { items: [HOME, WORK, CABIN], redrawn: true });
+    client.setQueryData(SAVED_ADDRESSES_QUERY_KEY, { items: [HOME, WORK, CABIN], guessed: true });
     await openFor("home", client).view;
 
     await fireEvent.press(screen.getByRole("button", { name: "Eliminar dirección" }));
