@@ -1091,6 +1091,47 @@ describe("a write asked before the book was cached", () => {
     await waitFor(() => expect(cached(client)).toEqual(["home*", "office"]));
     expect(apiGet).toHaveBeenCalledTimes(2);
   });
+
+  it("answered while the book's first GET is in flight, has the book asked again", async () => {
+    // The book is loading: the server read it without Office, and its list is on the way.
+    server = [HOME];
+    const first = deferred<{ items: SavedAddress[] }>();
+    jest.mocked(apiGet).mockReturnValueOnce(first.promise);
+    jest.mocked(apiPost).mockResolvedValue(office);
+    const client = newQueryClient();
+    const { result } = await renderHook(
+      () => ({ book: useSavedAddresses(), create: useCreateAddress() }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) =>
+          createElement(QueryClientProvider, { client }, children),
+      },
+    );
+    expect(apiGet).toHaveBeenCalledTimes(1);
+    // The server takes Office, and its answer overtakes that list.
+    server = [HOME, office];
+
+    await act(async () => {
+      await result.current.create.mutateAsync({
+        body: {
+          line1: office.line1,
+          city: office.city,
+          state: office.state,
+          zip_code: office.zip_code,
+          label: "Office",
+          is_default: false,
+        },
+        generation: 1,
+      });
+    });
+
+    // A list asked after the answer has the address; the one asked before it is drawn nowhere.
+    await waitFor(() => expect(cached(client)).toEqual(["home*", "office"]));
+    expect(apiGet).toHaveBeenCalledTimes(2);
+    await act(async () => first.resolve({ items: [HOME] }));
+    await act(() => settle());
+    expect(cached(client)).toEqual(["home*", "office"]);
+    expect(result.current.book.isSuccess).toBe(true);
+  });
 });
 
 describe("an answer changes only what its request sent", () => {

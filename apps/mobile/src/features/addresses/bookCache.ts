@@ -157,10 +157,16 @@ function settle(client: QueryClient, log: WriteLog): void {
   );
 }
 
-/** A write with no place in a book on screen was answered: fetch the book, for its session. */
+/**
+ * A write with no place in a book on screen was answered: fetch the book, for its session. A book
+ * on its first GET would keep that one (only the GET of a book that has a list is replaced), and
+ * it was asked before this answer: it is cancelled first.
+ */
 function fetchBook(client: QueryClient, generation: number): void {
   if (!isCurrentGeneration(generation)) return;
-  void client.invalidateQueries({ queryKey: SAVED_ADDRESSES_QUERY_KEY, exact: true });
+  const book = { queryKey: SAVED_ADDRESSES_QUERY_KEY, exact: true };
+  if (!client.getQueryData(SAVED_ADDRESSES_QUERY_KEY)) void client.cancelQueries(book);
+  void client.invalidateQueries(book);
 }
 
 /**
