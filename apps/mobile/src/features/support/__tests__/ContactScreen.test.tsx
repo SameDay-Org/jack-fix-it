@@ -62,13 +62,12 @@ let mine: ServerTicket[] | "down";
 /** Whether the customer has a job under way. */
 let hasJob: boolean;
 
-// A ticket as the API may answer it, text included: the app must keep none of it.
+// A ticket as `GET /v1/support/tickets/mine` answers it: no text, since #363.
 type ServerTicket = ApiSchema<"MySupportTicketOut">;
 
 const ticket = (overrides: Partial<ServerTicket> = {}): ServerTicket => ({
   id: "0f8fad5b-d9cb-469f-a165-70867728950e",
   topic: "payment",
-  message: MESSAGE,
   job_id: null,
   status: "open",
   created_at: new Date().toISOString(),
@@ -538,8 +537,8 @@ describe("Talk to Jack: privacy", () => {
     }
   });
 
-  it("keeps no text of a sent message: not from the list's answer, not from the one just sent", async () => {
-    mine = [ticket({ id: "a", message: "an older zanahoria message" })];
+  it("keeps no text of the message just sent: not on screen, not in the cache", async () => {
+    mine = [ticket({ id: "a" })];
     await renderForm();
     await write();
     await fireEvent.press(sendButton());
