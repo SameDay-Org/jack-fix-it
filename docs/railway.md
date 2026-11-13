@@ -92,6 +92,7 @@ environment as **shared variables** referenced from both services, so the two ne
 | `LOCATION_REDIS_URL`               | `redis-location`'s private URL (see below); unset, positions give 503       | yes (reference) | #350       |
 | `LOCATION_REDIS_RECHECK_SECONDS`   | optional; `60` by default                                                   | no              | #350       |
 | `LOCATION_REDIS_ASSUME_EPHEMERAL`  | optional; only for a Redis that refuses `CONFIG GET` (see below)            | no              | #350       |
+| `MAPBOX_ACCESS_TOKEN`              | a secret server token; unset, `GET /v1/jobs/{job_id}/route` answers 503     | yes             | #351       |
 
 "Required" means the API refuses to start in staging and production without it (the settings
 validators in `apps/api/app/config.py`). Every other setting has a working default; the
@@ -162,6 +163,13 @@ findings are only logged (WARNING).
 the deployer vouches that it keeps nothing (WARNING `location_redis_assume_ephemeral_set` at
 startup, `location_redis_assumed_ephemeral` at the check). It never overrides a Redis that
 answers that it keeps positions. Leave it unset on Railway.
+
+The pro's route to the job's address (#351, `GET /v1/jobs/{job_id}/route`) is computed by
+Mapbox with `MAPBOX_ACCESS_TOKEN` and kept for `ROUTE_CACHE_SECONDS` in `redis-location` too,
+never in `Redis`: a route starts at the pro's position and ends at the customer's address.
+Without the token that route answers 503 `route_unavailable` (WARNING `mapbox_not_configured`)
+and nothing else changes; in the three refused states above it answers 503
+`location_unavailable` (ERROR `job_route_store_refused`).
 
 Verify after the first deploy, from a shell in `redis-location` (`railway ssh --service
 redis-location`; the image has `redis-cli`, and the shell has the service's `REDIS_PASSWORD`):

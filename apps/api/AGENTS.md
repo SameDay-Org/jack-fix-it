@@ -8,8 +8,8 @@ rules apply.
 - Domain code lives in `app/modules/<domain>/`: `router.py` (HTTP only), `service.py` (business
   rules, transactions), `repository.py` (SQLAlchemy queries), `models.py` (ORM), `schemas.py`
   (Pydantic in/out). A module calls another module's service, never its repository.
-- Vendor SDKs (Stripe, Twilio, Resend, Expo Push, S3, Google) are wrapped in `app/integrations/`;
-  services call the wrapper, and tests replace it there.
+- Vendor SDKs (Stripe, Twilio, Resend, Expo Push, S3, Google, Mapbox) are wrapped in
+  `app/integrations/`; services call the wrapper, and tests replace it there.
 - Public routes go under `/v1`: include the domain router in `app/api.py`.
 - `app/config.py` `Settings` is the only reader of env vars (env name = field name in upper
   case). Add new names to `.env.example`; secrets stay commented, with their task ID.
@@ -95,6 +95,31 @@ the event name only).
 - **No HTTP cache.** `location_router` uses `NoStoreRoute` (`app/middleware.py`): every
   response of these routes, errors included, says `Cache-Control: no-store`. Use the same
   route class for any new route that returns a position.
+
+## Route to the address (#351)
+
+`GET /v1/jobs/{job_id}/route` (`jobs/route.py`) answers the pro's driving route to the job's
+address while the job is tracked, computed by Mapbox (`app/integrations/mapbox.py`; tests
+replace `get_route_provider`). No position yet, an address Mapbox cannot place and no road
+there are all `{"route": null}`; Mapbox failing or without `MAPBOX_ACCESS_TOKEN` is 503
+`route_unavailable`.
+
+- **It follows the position's rules.** A route starts at the pro's position and ends at the
+  customer's address. The computed route is cached in the positions' Redis only
+  (`get_job_route_cache`), written only while the job's position is there and for no longer
+  than that position has left (at most `ROUTE_CACHE_SECONDS`), and deleted with it
+  (`RedisJobLocationStore.delete`). Never Postgres, never `REDIS_URL`'s Redis in staging or
+  production. `route_router` is a `NoStoreRoute`.
+- **Mapbox is asked sparingly.** The cached route is answered until the pro is more than
+  `ROUTE_REFRESH_DISTANCE_M` from where it starts, and one request at a time asks for a job
+  (`JobRouteCache.claim`). Directions is a POST: positions travel in the body, not the URL.
+- **Geocoding is temporary.** A request's address row has no coordinates today, so each
+  computed route places the address with Mapbox's forward geocoding first. That answer is used
+  and dropped: Mapbox's terms forbid caching or storing a temporary result. Keeping
+  coordinates on an address needs `permanent=true` and a decision.
+- **Logs.** The job's id and the event name only: no coordinate, address, street name, token,
+  URL or text of Mapbox's. Sentry's breadcrumb of a call to Mapbox says `[mapbox]` where its
+  URL would be (`app/observability.py`).
 
 ## Worker
 
