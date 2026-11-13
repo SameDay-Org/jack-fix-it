@@ -12,8 +12,9 @@ from app.api import v1_router
 from app.config import CHAT_ORIGINAL_KEY_EXPECTED_IN, Settings, get_settings
 from app.db import create_engine, create_session_factory
 from app.errors import register_error_handlers
-from app.middleware import REQUEST_ID_HEADER, RequestIdMiddleware
+from app.middleware import REQUEST_ID_HEADER, NoStoreMiddleware, RequestIdMiddleware
 from app.modules.health.router import router as health_router
+from app.modules.jobs.location import location_backend
 from app.observability import configure_logging, init_sentry
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.engine = engine
         app.state.session_factory = create_session_factory(engine)
         app.state.redis = redis
+        # The pros' live positions (#350) get a Redis of their own; see jobs/location_guard.py.
+        locations = location_backend(settings, redis)
+        app.state.location_backend = locations
+        if locations is None:
+            # Fail closed: the position routes answer 503 until LOCATION_REDIS_URL is set.
+            logger.warning("location_redis_not_configured", extra={"app_env": settings.app_env})
+        elif settings.location_redis_assume_ephemeral:
+            # The deployer's word stands in for a CONFIG GET the Redis refuses.
+            logger.warning(
+                "location_redis_assume_ephemeral_set", extra={"app_env": settings.app_env}
+            )
         if (
             settings.app_env in CHAT_ORIGINAL_KEY_EXPECTED_IN
             and settings.chat_original_cipher() is None
@@ -44,12 +56,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            if locations is not None and locations.redis is not redis:
+                await locations.redis.aclose()
             await redis.aclose()
             await engine.dispose()
 
     app = FastAPI(title="Jack Fix It API", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
 
+    # Added first so it is the innermost: it only needs the route the router matched.
+    app.add_middleware(NoStoreMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

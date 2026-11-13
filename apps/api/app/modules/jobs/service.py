@@ -8,6 +8,11 @@ in the same transaction, and answers:
 - 403 for an actor kind the edge does not allow.
 A rejected transition changes nothing and writes no event.
 
+A job that leaves on_the_way loses the pro's live position (#350, location.py): the machine
+deletes it under the row lock, before the caller commits. So it is built with the location
+store wherever a job can leave on_the_way; one built without it refuses that move
+(RuntimeError, nothing written) instead of leaving a position behind.
+
 The caller owns the transaction: transition() flushes and never commits, so a feature can
 change a job together with its own rows (payments, photos, disputes) atomically.
 
@@ -30,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.errors import ForbiddenError, NotFoundError
 from app.modules.jobs.errors import InvalidTransitionError
+from app.modules.jobs.location import JobLocationStore, forget_position
 from app.modules.jobs.models import Job, JobEvent, JobStatus
 from app.modules.jobs.repository import JobRepository
 from app.modules.jobs.transitions import CHAT_OPEN, TRANSITIONS, ActorKind
@@ -105,10 +111,16 @@ _ENTRY_TIMESTAMPS: Final = {
 
 
 class JobStateMachine:
-    def __init__(self, session: AsyncSession, pros: ProService) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        pros: ProService,
+        locations: JobLocationStore | None = None,
+    ) -> None:
         self._session = session
         self._jobs = JobRepository(session)
         self._pros = pros
+        self._locations = locations
 
     async def transition(
         self,
@@ -137,6 +149,10 @@ class JobStateMachine:
             raise ForbiddenError
 
         from_status = job.status
+        if from_status is JobStatus.ON_THE_WAY:
+            # The pro's live position ends with on_the_way (#350): deleted under the row lock,
+            # which holds every ping off until the caller commits.
+            await forget_position(self._locations, job.id)
         now = datetime.now(UTC)
         timestamp = _ENTRY_TIMESTAMPS.get(to)
         if timestamp is not None and getattr(job, timestamp) is None:
