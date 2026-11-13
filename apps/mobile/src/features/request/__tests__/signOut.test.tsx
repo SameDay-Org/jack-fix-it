@@ -21,7 +21,7 @@ import {
 import AppLayout, { unstable_settings as appSettings } from "../../../app/(app)/_layout";
 import SentRoute from "../../../app/(app)/request/sent";
 import { METRICS } from "../../auth/__tests__/helpers";
-import { EMPTY_ADDRESS, requestDraftStore } from "../requestDraft";
+import { EMPTY_ADDRESS, requestDraftStore, type RequestDraft } from "../requestDraft";
 import { rememberSent, sentRequest } from "../sent";
 import { created, PAINTING } from "./helpers";
 
@@ -52,13 +52,14 @@ const ACCOUNT_B: SessionUser = {
 };
 const SENT = created();
 
-const EMPTY = {
+const EMPTY: RequestDraft = {
   categorySlug: null,
   answers: {},
   description: "",
   address: null,
   typedAddress: EMPTY_ADDRESS,
   preferredDate: null,
+  preferredPeriod: "flexible",
   refusal: null,
 };
 

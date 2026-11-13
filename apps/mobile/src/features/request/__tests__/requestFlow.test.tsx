@@ -309,11 +309,21 @@ describe("the request flow", () => {
     await waitFor(() => expect(result.getPathname()).toBe("/request/when"));
     expect(screen.getByRole("header", { name: "Step 4 of 5. When works for you?" })).toBeTruthy();
     expect(screen.getByRole("radio", { name: "I'm flexible" })).toBeChecked();
+    // The time of day belongs to a day: no day, no choice of it.
+    expect(screen.queryByTestId("when-period")).toBeNull();
     const day = offeredDays(2)[1];
     await fireEvent.press(screen.getByTestId(`when-day-${day}`));
     expect(screen.getByTestId(`when-day-${day}`)).toBeChecked();
     expect(screen.getByRole("radio", { name: "I'm flexible" })).not.toBeChecked();
     expect(screen.getByTestId("when-chosen")).toHaveTextContent(formatLongDay(day, "en"));
+    expect(screen.getByTestId("when-period").props).toMatchObject({
+      accessibilityRole: "radiogroup",
+      accessibilityLabel: "Time of day",
+    });
+    expect(screen.getByRole("radio", { name: "Flexible" })).toBeChecked();
+    await fireEvent.press(screen.getByRole("radio", { name: "Morning" }));
+    expect(screen.getByRole("radio", { name: "Morning" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Flexible" })).not.toBeChecked();
     await press("Continue");
 
     await waitFor(() => expect(result.getPathname()).toBe("/request/review"));
@@ -323,7 +333,7 @@ describe("the request flow", () => {
     expect(screen.getByLabelText("1 file attached")).toBeTruthy();
     expect(screen.getByTestId("review-address")).toHaveTextContent(/12 Main St, Newark, NJ 07102/);
     expect(screen.getByTestId("review-when")).toHaveTextContent(
-      new RegExp(formatLongDay(day, "en")),
+      new RegExp(`${formatLongDay(day, "en")} · Morning$`),
     );
 
     await press("Send request");
@@ -349,6 +359,7 @@ describe("the request flow", () => {
             zip_code: "07102",
           },
           preferred_date: day,
+          preferred_period: "morning",
           intake_answers: { surface: "ceiling", furnished: false },
           media_keys: ["uploads/1.jpg"],
         },
@@ -589,6 +600,7 @@ describe("the request flow", () => {
     expect(screen.getByText("That day has passed")).toBeTruthy();
     await waitFor(() => expect(spoken("That day has passed")).toBe(1));
     expect(screen.queryByTestId("when-chosen")).toBeNull();
+    expect(screen.queryByTestId("when-period")).toBeNull();
 
     await fireEvent.press(screen.getByRole("radio", { name: "I'm flexible" }));
     expect(screen.queryByText("That day has passed")).toBeNull();
@@ -598,6 +610,7 @@ describe("the request flow", () => {
     await press("Send request");
     await waitFor(() => expect(result.getPathname()).toBe("/request/sent"));
     expect(posted()[0].body).not.toHaveProperty("preferred_date");
+    expect(posted()[0].body).not.toHaveProperty("preferred_period");
   });
 
   it("edits the day from Review and keeps it across Back", async () => {
