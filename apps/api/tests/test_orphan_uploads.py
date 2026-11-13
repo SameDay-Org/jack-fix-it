@@ -75,6 +75,7 @@ NOT_UPLOAD_KEYS = {
     "request_media.safe_key",
     "job_photos.safe_key",
     "service_requests.idempotency_key",
+    "support_tickets.idempotency_key",
 }
 
 

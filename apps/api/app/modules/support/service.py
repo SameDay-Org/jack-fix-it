@@ -3,6 +3,12 @@ team from the app's Help page, and the team works the tickets in the panel.
 
 - Who writes: the app's users (customer, pro). The ticket keeps the writer's role as it was.
   Rate-limited per user (the router).
+- A create may carry an Idempotency-Key (#380), a UUID the app makes once per draft. Within
+  SUPPORT_TICKET_IDEMPOTENCY_WINDOW_SECONDS a repeat of the writer's key answers the ticket it
+  made (200, not 201) and writes nothing; the same key with another body is a 409. Two creates
+  racing with one key write one ticket: the unique index makes the second wait for the first,
+  then answer its ticket. Keys are per user. The body's fingerprint is a hash: the message is
+  never stored a second time in clear.
 - The message is stored as typed, not redacted: only staff read it, and the writer may need to
   give a phone or an email to be reached. It leaves the API in the staff ticket detail alone:
   no list carries it, not even the writer's own, which shows the topic, the job, the status
@@ -30,10 +36,13 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.db import violated_constraint
 from app.errors import ForbiddenError
+from app.idempotency import body_fingerprint, same_body
 from app.modules.audit.service import AuditService
 from app.modules.audit.types import (
     ActorNotStaffError,
@@ -44,11 +53,17 @@ from app.modules.audit.types import (
 from app.modules.jobs.service import JobPartiesReader
 from app.modules.pros.service import ProService
 from app.modules.support.errors import (
+    IdempotencyKeyReusedError,
     InvalidTicketInputError,
     InvalidTicketJobError,
     TicketNotFoundError,
 )
-from app.modules.support.models import SupportTicket, TicketRole, TicketStatus
+from app.modules.support.models import (
+    IDEMPOTENCY_KEY_INDEX,
+    SupportTicket,
+    TicketRole,
+    TicketStatus,
+)
 from app.modules.support.repository import Before, SupportTicketRepository
 from app.modules.support.schemas import (
     MySupportTicketOut,
@@ -72,13 +87,30 @@ _WRITER_ROLES = {UserRole.CUSTOMER: TicketRole.CUSTOMER, UserRole.PRO: TicketRol
 class SupportConfig:
     list_default_limit: int
     list_max_limit: int
+    idempotency_window_seconds: int
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "SupportConfig":
         return cls(
             list_default_limit=settings.request_list_default_limit,
             list_max_limit=settings.request_list_max_limit,
+            idempotency_window_seconds=settings.support_ticket_idempotency_window_seconds,
         )
+
+
+@dataclass(frozen=True)
+class CreatedTicket:
+    """What a create answers: the ticket, and whether this call wrote it (False when an
+    earlier create with the same Idempotency-Key did)."""
+
+    ticket: SupportTicketCreatedOut
+    created: bool
+
+
+@dataclass(frozen=True)
+class _Idempotency:
+    key: uuid.UUID
+    fingerprint: str
 
 
 class SupportTicketService:
@@ -90,25 +122,73 @@ class SupportTicketService:
         self._users = UserService(session)
         self._audit = AuditService(session)
 
-    async def create(self, user: UserAccount, data: SupportTicketIn) -> SupportTicketCreatedOut:
-        """Stores the ticket, open, and commits."""
+    async def is_retry(self, user: UserAccount, key: uuid.UUID) -> bool:
+        """Whether `key` made one of the user's tickets within the window: a create with it
+        then writes nothing, whatever its body (a retry, or a 409)."""
+        found = await self._tickets.by_idempotency_key(
+            user.id, key, window_seconds=self._config.idempotency_window_seconds
+        )
+        return found is not None and found.fresh
+
+    async def create(
+        self, user: UserAccount, data: SupportTicketIn, idempotency_key: uuid.UUID | None = None
+    ) -> CreatedTicket:
+        """Stores the ticket, open, and commits. Without a key, every call writes a ticket.
+        With one, a ticket the user wrote with it within the window is answered before
+        anything else is checked, and nothing is written: that same ticket with its current
+        status, never a stored copy of the first answer."""
         role = _WRITER_ROLES.get(user.role)
         if role is None:  # the route takes customers and pros only
             raise ForbiddenError
+        idempotency = (
+            None
+            if idempotency_key is None
+            else _Idempotency(key=idempotency_key, fingerprint=_fingerprint(data))
+        )
+        expired: SupportTicket | None = None
+        if idempotency is not None:
+            earlier = await self._tickets.by_idempotency_key(
+                user.id, idempotency.key, window_seconds=self._config.idempotency_window_seconds
+            )
+            if earlier is not None:
+                if earlier.fresh:
+                    return _replay(user, earlier.ticket, idempotency.fingerprint)
+                expired = earlier.ticket
         # One statement scoped to the caller: a job of others costs what an unknown id costs.
         if data.job_id is not None and await self._jobs.parties_for(user.id, data.job_id) is None:
             raise InvalidTicketJobError
-        ticket = await self._tickets.add(
-            SupportTicket(
-                user_id=user.id,
-                role=role,
-                topic=data.topic,
-                message=data.message,
-                job_id=data.job_id,
-                app_version=data.app_version,
-                platform=data.platform,
+        savepoint = await self._session.begin_nested()
+        try:
+            if expired is not None:
+                # The key's ticket is older than the window: the key no longer answers with it,
+                # and the unique index would refuse it to the new ticket.
+                await self._tickets.release_idempotency_key(expired)
+            ticket = await self._tickets.add(
+                SupportTicket(
+                    user_id=user.id,
+                    role=role,
+                    topic=data.topic,
+                    message=data.message,
+                    job_id=data.job_id,
+                    app_version=data.app_version,
+                    platform=data.platform,
+                    idempotency_key=idempotency and idempotency.key,
+                    idempotency_fingerprint=idempotency and idempotency.fingerprint,
+                )
             )
-        )
+        except IntegrityError as error:
+            await savepoint.rollback()
+            if idempotency is None or violated_constraint(error) != IDEMPOTENCY_KEY_INDEX:
+                raise
+            # A create with the same key got there first: the index held this insert until
+            # that one committed. Its ticket is the answer, whatever its age (it is new).
+            winner = await self._tickets.by_idempotency_key(
+                user.id, idempotency.key, window_seconds=self._config.idempotency_window_seconds
+            )
+            if winner is None:  # pragma: no cover - tickets are never deleted
+                raise
+            return _replay(user, winner.ticket, idempotency.fingerprint)
+        await savepoint.commit()
         await self._session.commit()
         logger.info(
             "support_ticket_created",
@@ -120,9 +200,7 @@ class SupportTicketService:
                 "job_id": str(ticket.job_id) if ticket.job_id else None,
             },
         )
-        return SupportTicketCreatedOut(
-            id=ticket.id, status=ticket.status, created_at=ticket.created_at
-        )
+        return CreatedTicket(ticket=_created_out(ticket), created=True)
 
     async def mine(
         self, user: UserAccount, *, limit: int | None, cursor: str | None
@@ -242,6 +320,33 @@ def _item(ticket: SupportTicket, first_name: str | None) -> StaffSupportTicketIt
 def _encode_cursor(ticket: SupportTicket) -> str:
     raw = f"{ticket.created_at.isoformat()}|{ticket.id}".encode()
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _replay(user: UserAccount, earlier: SupportTicket, fingerprint: str) -> CreatedTicket:
+    """The ticket an earlier create with the same key wrote, when the body is the same
+    (fingerprints compared in constant time); 409 when it is not. Logs never carry the key."""
+    if not same_body(earlier.idempotency_fingerprint, fingerprint):
+        logger.info("support_ticket_idempotency_key_reused", extra={"user_id": str(user.id)})
+        raise IdempotencyKeyReusedError
+    logger.info(
+        "support_ticket_replayed", extra={"ticket_id": str(earlier.id), "user_id": str(user.id)}
+    )
+    return CreatedTicket(ticket=_created_out(earlier), created=False)
+
+
+def _created_out(ticket: SupportTicket) -> SupportTicketCreatedOut:
+    """What a create answers, and its replays: never the message."""
+    return SupportTicketCreatedOut(id=ticket.id, status=ticket.status, created_at=ticket.created_at)
+
+
+def _fingerprint(data: SupportTicketIn) -> str:
+    """The body's fingerprint (app.idempotency). Text with no UTF-8 form is the validation
+    error a create without a key answers too, raised before the key is looked up, so the key
+    stays unused."""
+    try:
+        return body_fingerprint(data)
+    except UnicodeEncodeError:
+        raise InvalidTicketInputError from None
 
 
 def _decode_cursor(cursor: str) -> Before:

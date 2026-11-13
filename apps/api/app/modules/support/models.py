@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Final
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, IdTimestampsMixin, str_enum
@@ -12,6 +12,9 @@ from app.db import Base, IdTimestampsMixin, str_enum
 MESSAGE_MAX_LENGTH: Final = 2000
 # The longest app version the app may report, e.g. "1.4.0 (52)".
 APP_VERSION_MAX_LENGTH: Final = 32
+# One ticket per user and Idempotency-Key (#380): the index decides between two creates racing
+# with the same key. Keys are per user, so another user's never collides.
+IDEMPOTENCY_KEY_INDEX: Final = "uq_support_tickets_user_id_idempotency_key"
 
 
 class TicketTopic(StrEnum):
@@ -75,6 +78,13 @@ class SupportTicket(IdTimestampsMixin, Base):
         # The staff list, newest first: one status, or all of them.
         Index("ix_support_tickets_status_created_at", "status", "created_at", "id"),
         Index("ix_support_tickets_created_at", "created_at", "id"),
+        Index(
+            IDEMPOTENCY_KEY_INDEX,
+            "user_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+        ),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
@@ -88,3 +98,9 @@ class SupportTicket(IdTimestampsMixin, Base):
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     app_version: Mapped[str | None] = mapped_column(String(APP_VERSION_MAX_LENGTH))
     platform: Mapped[TicketPlatform | None] = mapped_column(str_enum(TicketPlatform, "platform"))
+    # The create's Idempotency-Key (#380), NULL without one, and the SHA-256 (hex) of the body
+    # it came with, so a retry with another body is refused; the message is never stored a
+    # second time in clear. A key older than the window stays here until the same user sends
+    # it again, which clears it from this ticket.
+    idempotency_key: Mapped[uuid.UUID | None]
+    idempotency_fingerprint: Mapped[str | None] = mapped_column(String(64))
