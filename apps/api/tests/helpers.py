@@ -1,6 +1,8 @@
 """Shared test helpers."""
 
 import gc
+import json
+import logging
 import re
 import time
 import uuid
@@ -11,6 +13,8 @@ from typing import Final
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, PendingRollbackError
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.observability import JsonFormatter
 
 _SET_STATUS_WRITER: Final = text("SELECT set_config('app.status_writer', :value, true)")
 # The fixtures' wildcard token: the trigger accepts it only in a database whose setting
@@ -45,6 +49,17 @@ def unclocked_fields(value: object) -> list[str]:
         str(leaf)
         for leaf in json_leaves(value)
         if not (isinstance(leaf, str) and _CLOCK.fullmatch(leaf))
+    ]
+
+
+def log_fields(records: list[logging.LogRecord]) -> list[str]:
+    """Each record's fields as JsonFormatter ships them, and its message, less the clock: a log
+    line's time can read 12:00:26.1234, which spells a needle (#387)."""
+    formatter = JsonFormatter()
+    return [
+        field
+        for record in records
+        for field in (*unclocked_fields(json.loads(formatter.format(record))), record.getMessage())
     ]
 
 

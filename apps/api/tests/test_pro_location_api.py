@@ -42,7 +42,6 @@ from app.modules.jobs.service import JobStateMachine
 from app.modules.pros.service import ProService
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount
-from app.observability import JsonFormatter
 from app.rate_limit import get_rate_limiter
 from tests.conftest import (
     InMemoryJobLocationStore,
@@ -53,7 +52,7 @@ from tests.conftest import (
     make_settings,
     wait_until_blocked,
 )
-from tests.helpers import unclocked_fields
+from tests.helpers import log_fields, unclocked_fields
 from tests.job_world import JobWorld, Party, build_world, job_row, make_job, record_pushes
 from tests.test_arrival_code import CONFIG as EXECUTION_CONFIG
 from tests.test_arrival_code import CommittedJob, committed_job, no_storage
@@ -973,17 +972,6 @@ async def test_no_coordinate_in_logs(
         if record.name == "app.modules.jobs.location":
             extras = set(vars(record)) - set(vars(logging.makeLogRecord({})))
             assert extras <= {"job_id", "pro_id", "request_id", "message", "asctime"}, extras
-
-
-def log_fields(records: list[logging.LogRecord]) -> list[str]:
-    """Each record's fields as JsonFormatter ships them, and its message, less the clock: a log
-    line's time can read 12:00:26.1234, which spells a needle (#387)."""
-    formatter = JsonFormatter()
-    return [
-        field
-        for record in records
-        for field in (*unclocked_fields(json.loads(formatter.format(record))), record.getMessage())
-    ]
 
 
 class FailsAfterWriting(RedisJobLocationStore):

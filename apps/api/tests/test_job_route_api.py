@@ -58,13 +58,14 @@ from app.modules.jobs.route import (
     thinned,
 )
 from app.modules.requests.service import CustomerRequestReader
-from app.observability import MAPBOX_URL_LABEL, JsonFormatter
+from app.observability import MAPBOX_URL_LABEL
 from tests.conftest import (
     InMemoryJobRouteCache,
     _rolled_back_session,
     make_app,
     make_settings,
 )
+from tests.helpers import log_fields, unclocked_fields
 from tests.job_world import LINE1, LINE2, JobWorld, Party, build_world, make_job, record_pushes
 from tests.test_pro_location_api import (
     CODE,
@@ -1773,8 +1774,7 @@ async def test_no_secret_or_coordinate_in_logs(
         503,
     ]
     assert (real.asked.count("GET"), real.asked.count("POST")) == (7, 5)
-    formatter = JsonFormatter()
-    logs = "\n".join(formatter.format(r) + r.getMessage() for r in caplog.records)
+    logs = log_fields(caplog.records)
     assert {r.getMessage() for r in caplog.records if r.name == ROUTE_LOGGER} == {
         "job_route_computed",
         "job_route_not_found",
@@ -1788,7 +1788,7 @@ async def test_no_secret_or_coordinate_in_logs(
     }
     assert not any(r.name.startswith(("httpx", "httpcore")) for r in caplog.records)
     for needle in NEEDLES:
-        assert needle not in logs, needle
+        assert [field for field in logs if needle in field] == [], needle
         for response in errors:  # none of them carries a route
             assert needle not in response.text, needle
     assert not any(r.exc_info for r in caplog.records)
@@ -1877,9 +1877,10 @@ async def test_nothing_reaches_sentry(
         assert all("http.query" not in c for c in calls)
     # The crash's event has the Redis calls too: the commands, their arguments filtered.
     assert any(c.get("category") == "redis" for c in crash["breadcrumbs"]["values"])
-    wire = "\n".join(payloads)
+    # Field by field, the clocks left out: an event's time can read 12:00:26.1234 (#387).
+    wire = [field for event in events for field in unclocked_fields(event)]
     for needle in NEEDLES:
-        assert needle not in wire, needle
+        assert [field for field in wire if needle in field] == [], needle
         assert needle not in refused.text, needle
         assert needle not in crashed.text, needle
 

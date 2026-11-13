@@ -42,6 +42,7 @@ from app.modules.jobs.location_guard import (
 from app.modules.jobs.models import JobStatus
 from app.observability import JsonFormatter
 from tests.conftest import make_settings
+from tests.helpers import log_fields
 from tests.job_world import JobWorld, make_job
 from tests.test_pro_location_api import (
     CODE,
@@ -56,7 +57,6 @@ from tests.test_pro_location_api import (
     clock,
     dead_redis,
     fix,
-    log_fields,
     on_the_way_job,
     ping,
     plant,
