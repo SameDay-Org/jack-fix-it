@@ -384,8 +384,10 @@ class Settings(BaseSettings):
     # A job's computed route is kept this long, in the positions' Redis only, and reused
     # until the pro is farther than ROUTE_REFRESH_DISTANCE_M from where it started (0: any
     # move asks Mapbox again). The answer carries at most ROUTE_MAX_POINTS points of the
-    # line and the first ROUTE_MAX_STEPS streets.
+    # line and the first ROUTE_MAX_STEPS streets. After Mapbox failed for a job it is not
+    # asked again for that job for ROUTE_RETRY_SECONDS (the route answers 503 meanwhile).
     route_cache_seconds: int = Field(default=30, gt=0)
+    route_retry_seconds: int = Field(default=10, gt=0)
     route_refresh_distance_m: float = Field(default=100.0, ge=0)
     route_max_points: int = Field(default=500, ge=2)
     route_max_steps: int = Field(default=30, gt=0)

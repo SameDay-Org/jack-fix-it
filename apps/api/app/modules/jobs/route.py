@@ -15,7 +15,10 @@ way, and draws the line. The route comes from Mapbox (app/integrations/mapbox.py
 - The cache: a job's computed route is kept for ROUTE_CACHE_SECONDS and answered again while
   the pro is within ROUTE_REFRESH_DISTANCE_M of where it starts, so a customer's polls do not
   become as many Mapbox calls. One request at a time asks Mapbox for a job: another arriving
-  meanwhile gets the route being replaced, or "no route" when there is none yet.
+  meanwhile gets the route being replaced, or "no route" when there is none yet. After a
+  failure Mapbox is not asked again for that job for ROUTE_RETRY_SECONDS: polls meanwhile get
+  the same 503, so an app that tries again at once, or a rate limit, is not answered with
+  more calls.
 - Where the cache lives: a route starts at the pro's position and ends at the customer's
   address, so it follows the position's rules. It goes to the positions' own Redis only (the
   one location_guard.py checks, never the queue's, which keeps what it is given), is written
@@ -35,7 +38,7 @@ import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Final, Protocol
+from typing import Annotated, Final, Literal, Protocol
 
 from fastapi import Depends
 from pydantic import BaseModel, ValidationError
@@ -53,6 +56,7 @@ from app.integrations.mapbox import (
     RouteProvider,
     StreetAddress,
 )
+from app.modules.addresses.service import AddressPlace
 from app.modules.jobs.errors import ProLocationUnavailableError, RouteUnavailableError
 from app.modules.jobs.location import (
     KEY_PREFIX,
@@ -91,6 +95,13 @@ return 1
 """
 
 
+# A job's turn to ask the provider, as `claim` finds it: the caller's own now, another
+# request's, or nobody's for a while after the provider failed.
+Turn = Literal["mine", "taken", "held_off"]
+_ASKING: Final = b"asking"
+_HELD_OFF: Final = b"held-off"
+
+
 @dataclass(frozen=True)
 class CachedRoute:
     """What was computed for a job from `origin`, the pro's position then: the route, or None
@@ -119,12 +130,16 @@ class JobRouteCache(Protocol):
         stored. False when it was not kept."""
         ...
 
-    async def claim(self, job_id: uuid.UUID, *, seconds: int) -> bool:
-        """True for one caller per job at a time: the one that may ask the provider. The claim
-        ends with `release`, or by itself after `seconds`."""
+    async def claim(self, job_id: uuid.UUID, *, seconds: int) -> Turn:
+        """`mine` for one caller per job at a time: the one that may ask the provider. Its
+        turn ends with `release` or `hold_off`, or by itself after `seconds`."""
         ...
 
     async def release(self, job_id: uuid.UUID) -> None: ...
+
+    async def hold_off(self, job_id: uuid.UUID, *, seconds: int) -> None:
+        """Ends the caller's turn and gives nobody the next one for `seconds`."""
+        ...
 
 
 class RedisJobRouteCache:
@@ -167,14 +182,22 @@ class RedisJobRouteCache:
                 await self._guard.require()
             return bool(await self._put(keys=keys, args=args))
 
-    async def claim(self, job_id: uuid.UUID, *, seconds: int) -> bool:
+    async def claim(self, job_id: uuid.UUID, *, seconds: int) -> Turn:
         # The claim holds no position: it needs no check of what the Redis keeps.
+        key = self.claim_key(job_id)
         async with asyncio.timeout(self._timeout):
-            return bool(await self._redis.set(self.claim_key(job_id), "1", nx=True, ex=seconds))
+            if await self._redis.set(key, _ASKING, nx=True, ex=seconds):
+                return "mine"
+            holder = await self._redis.get(key)
+        return "held_off" if holder == _HELD_OFF else "taken"
 
     async def release(self, job_id: uuid.UUID) -> None:
         async with asyncio.timeout(self._timeout):
             await self._redis.delete(self.claim_key(job_id))
+
+    async def hold_off(self, job_id: uuid.UUID, *, seconds: int) -> None:
+        async with asyncio.timeout(self._timeout):
+            await self._redis.set(self.claim_key(job_id), _HELD_OFF, ex=seconds)
 
 
 class NoJobRouteCache:
@@ -187,10 +210,13 @@ class NoJobRouteCache:
     async def put(self, job_id: uuid.UUID, entry: CachedRoute, *, ttl_seconds: int) -> bool:
         raise LocationStoreRefusedError("not_configured")
 
-    async def claim(self, job_id: uuid.UUID, *, seconds: int) -> bool:
-        return False
+    async def claim(self, job_id: uuid.UUID, *, seconds: int) -> Turn:
+        return "taken"
 
     async def release(self, job_id: uuid.UUID) -> None:
+        return None
+
+    async def hold_off(self, job_id: uuid.UUID, *, seconds: int) -> None:
         return None
 
 
@@ -243,8 +269,11 @@ class JobRouteConfig:
     refresh_distance_m: float
     max_points: int
     max_steps: int
-    # How long one request may hold a job's turn to ask Mapbox: both calls, and a margin.
+    # How long one request may hold a job's turn to ask Mapbox: both calls, the write of
+    # the route, and a margin.
     claim_seconds: int
+    # How long nobody asks Mapbox for a job after it failed.
+    retry_seconds: int
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "JobRouteConfig":
@@ -253,7 +282,11 @@ class JobRouteConfig:
             refresh_distance_m=settings.route_refresh_distance_m,
             max_points=settings.route_max_points,
             max_steps=settings.route_max_steps,
-            claim_seconds=math.ceil(2 * settings.mapbox_timeout_seconds) + 1,
+            claim_seconds=math.ceil(
+                2 * settings.mapbox_timeout_seconds + settings.pro_location_timeout_seconds
+            )
+            + 1,
+            retry_seconds=settings.route_retry_seconds,
         )
 
 
@@ -308,7 +341,10 @@ class JobRouteService:
                 meters_between(cached.origin, origin) <= self._config.refresh_distance_m
             ):
                 return JobRouteOut(route=cached.route)
-            claimed = await self._cache.claim(job_id, seconds=self._config.claim_seconds)
+            # Read before the turn is taken: the turn's time is Mapbox's and the cache's only.
+            place = await self._requests.place(request_id)
+            await self._session.commit()  # as above: nothing is held while Mapbox answers
+            turn = await self._cache.claim(job_id, seconds=self._config.claim_seconds)
         except LocationStoreRefusedError as refused:
             logger.error("job_route_store_refused", extra={**ids, "reason": refused.reason})
             raise ProLocationUnavailableError from None
@@ -316,22 +352,27 @@ class JobRouteService:
             # Without the cache every poll would be a Mapbox call: none is made.
             logger.error("job_route_cache_unavailable", extra=ids)
             raise RouteUnavailableError from None
-        if not claimed:
+        if turn == "held_off":
+            # Mapbox failed for this job a moment ago: it is not asked again yet.
+            raise RouteUnavailableError
+        if turn == "taken":
             # Another request is asking Mapbox for this job right now.
             return NO_ROUTE if cached is None else JobRouteOut(route=cached.route)
+        failed = False
         try:
-            route = await self._compute(job_id, request_id, origin)
+            route = await self._compute(job_id, place, origin)
             await self._keep(job_id, CachedRoute(origin=origin, route=route))
+        except RouteUnavailableError:
+            failed = True
+            raise
         finally:
-            await self._release(job_id)
+            await self._end_turn(job_id, failed=failed)
         return JobRouteOut(route=route)
 
     async def _compute(
-        self, job_id: uuid.UUID, request_id: uuid.UUID, origin: Coordinate
+        self, job_id: uuid.UUID, place: AddressPlace, origin: Coordinate
     ) -> JobRoute | None:
         ids = {"job_id": str(job_id)}
-        place = await self._requests.place(request_id)
-        await self._session.commit()  # as above: nothing is held while Mapbox answers
         geocoded = place.lat is None or place.lng is None
         try:
             if place.lat is not None and place.lng is not None:
@@ -388,9 +429,13 @@ class JobRouteService:
         except (RedisError, OSError):
             logger.error("job_route_cache_unavailable", extra={"job_id": str(job_id)})
 
-    async def _release(self, job_id: uuid.UUID) -> None:
-        """A claim that cannot be released ends by itself (JobRouteConfig.claim_seconds)."""
+    async def _end_turn(self, job_id: uuid.UUID, *, failed: bool) -> None:
+        """Gives the job's turn back, or, after Mapbox failed, to nobody for a while. A turn
+        that cannot be ended ends by itself (JobRouteConfig.claim_seconds)."""
         try:
-            await self._cache.release(job_id)
+            if failed:
+                await self._cache.hold_off(job_id, seconds=self._config.retry_seconds)
+            else:
+                await self._cache.release(job_id)
         except (RedisError, OSError):
             logger.error("job_route_cache_unavailable", extra={"job_id": str(job_id)})

@@ -244,7 +244,10 @@ DIRECTIONS_FAILURES: dict[str, Handler] = {
     **COMMON_FAILURES,
     "no_code": lambda _: directions({"routes": [route_body()["routes"][0]]}),
     "unknown_code": lambda _: directions({"code": "Probe Road", "message": VENDOR_TEXT}),
+    "code_is_a_list": lambda _: directions({"code": ["NoRoute"], "routes": []}),
+    "code_is_an_object": lambda _: directions({"code": {"NoRoute": 1}, "routes": []}),
     "routes_not_a_list": lambda _: directions({"code": "Ok", "routes": {}}),
+    "distance_too_large_for_a_float": lambda _: directions(route_body(distance=10**400)),
     "route_not_an_object": lambda _: directions({"code": "Ok", "routes": ["Probe Road"]}),
     "no_distance": lambda _: directions(route_body(distance=None)),
     "negative_distance": lambda _: directions(route_body(distance=-1)),
@@ -448,6 +451,7 @@ def test_route_settings_defaults() -> None:
     assert settings.mapbox_access_token is None
     assert settings.mapbox_timeout_seconds == 5.0
     assert settings.route_cache_seconds == 30
+    assert settings.route_retry_seconds == 10
     assert settings.route_refresh_distance_m == 100.0
     assert settings.route_max_points == 500
     assert settings.route_max_steps == 30
@@ -468,6 +472,7 @@ def test_token_is_a_secret_and_empty_means_unset() -> None:
     [
         {"mapbox_timeout_seconds": 0},
         {"route_cache_seconds": 0},
+        {"route_retry_seconds": 0},
         {"route_refresh_distance_m": -1},
         {"route_max_points": 1},
         {"route_max_steps": 0},
@@ -482,6 +487,7 @@ def test_route_settings_come_from_the_environment(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("MAPBOX_ACCESS_TOKEN", TOKEN)
     monkeypatch.setenv("MAPBOX_TIMEOUT_SECONDS", "1.5")
     monkeypatch.setenv("ROUTE_CACHE_SECONDS", "45")
+    monkeypatch.setenv("ROUTE_RETRY_SECONDS", "20")
     monkeypatch.setenv("ROUTE_REFRESH_DISTANCE_M", "250")
     monkeypatch.setenv("ROUTE_MAX_POINTS", "50")
     monkeypatch.setenv("ROUTE_MAX_STEPS", "5")
@@ -493,7 +499,8 @@ def test_route_settings_come_from_the_environment(monkeypatch: pytest.MonkeyPatc
     assert (
         settings.mapbox_timeout_seconds,
         settings.route_cache_seconds,
+        settings.route_retry_seconds,
         settings.route_refresh_distance_m,
         settings.route_max_points,
         settings.route_max_steps,
-    ) == (1.5, 45, 250.0, 50, 5)
+    ) == (1.5, 45, 20, 250.0, 50, 5)

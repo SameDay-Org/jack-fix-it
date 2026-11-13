@@ -176,7 +176,7 @@ class MapboxRouteProvider:
             form=form,
         )
         code = body.get("code")
-        if code in NO_ROUTE_CODES:
+        if isinstance(code, str) and code in NO_ROUTE_CODES:
             return None
         routes = body.get("routes")
         if code != CODE_OK or not isinstance(routes, list):
@@ -233,7 +233,10 @@ def _number(value: object) -> float | None:
     """A finite JSON number (never a bool), as a float."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError:  # an integer too large for a float
+        return None
     return number if math.isfinite(number) else None
 
 

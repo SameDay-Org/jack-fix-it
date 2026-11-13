@@ -12,13 +12,14 @@ import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any, cast
+from typing import Any
 
 import httpx
 import pytest
 import sentry_sdk
 from fastapi import FastAPI
 from redis.asyncio import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
@@ -41,6 +42,7 @@ from app.modules.jobs.location import (
     get_location_clock,
     location_backend,
 )
+from app.modules.jobs.location_guard import LocationStoreRefusedError
 from app.modules.jobs.models import JobStatus
 from app.modules.jobs.route import (
     CachedRoute,
@@ -457,6 +459,7 @@ async def test_one_request_at_a_time_asks_mapbox(
     mapbox: FakeMapbox,
     clock: list[datetime],
     redis: Redis,
+    settings: Settings,
 ) -> None:
     job = await on_the_way_job(db_session, world)
     await locate(db_session, world)
@@ -467,7 +470,12 @@ async def test_one_request_at_a_time_asks_mapbox(
     mapbox.hold = asyncio.Event()
     waiting = asyncio.create_task(ask(db_client, job.id, world.customer))
     await mapbox.asked_for_a_route()
-    meanwhile = [await shown(db_client, job.id, world) for _ in range(3)]
+    async with asyncio.timeout(5):  # a poll that asked Mapbox too would wait for good
+        meanwhile = [await shown(db_client, job.id, world) for _ in range(3)]
+    # The turn is held for both calls and the write, plus a margin, and names no position.
+    assert settings.mapbox_timeout_seconds == 5.0
+    assert 7 <= await redis.ttl(cache.claim_key(job.id)) <= 12
+    assert await redis.get(cache.claim_key(job.id)) == b"asking"
     mapbox.hold.set()
     first = (await waiting).json()["route"]
 
@@ -482,7 +490,8 @@ async def test_one_request_at_a_time_asks_mapbox(
     mapbox.hold = asyncio.Event()
     waiting = asyncio.create_task(ask(db_client, job.id, world.customer))
     await mapbox.asked_for_a_route()
-    meanwhile = [await shown(db_client, job.id, world) for _ in range(3)]
+    async with asyncio.timeout(5):
+        meanwhile = [await shown(db_client, job.id, world) for _ in range(3)]
     mapbox.hold.set()
     second = (await waiting).json()["route"]
 
@@ -493,16 +502,23 @@ async def test_one_request_at_a_time_asks_mapbox(
 
 
 async def test_turn_to_ask_ends_by_itself(redis: Redis, prefix: str) -> None:
-    """A request that died holding a job's turn does not hold it for good."""
+    """A request that died holding a job's turn does not hold it for good, and neither does
+    the wait after a failure."""
     cache = RedisJobRouteCache(redis, None, timeout_seconds=STORE_TIMEOUT, prefix=prefix)
     job_id = uuid.uuid4()
 
-    assert await cache.claim(job_id, seconds=11) is True
-    assert await cache.claim(job_id, seconds=11) is False
+    assert await cache.claim(job_id, seconds=11) == "mine"
+    assert await cache.claim(job_id, seconds=11) == "taken"
     assert 6 <= await redis.ttl(cache.claim_key(job_id)) <= 11
-    assert await redis.get(cache.claim_key(job_id)) == b"1"  # no position in it
     await cache.release(job_id)
-    assert await cache.claim(job_id, seconds=11) is True
+    assert await cache.claim(job_id, seconds=11) == "mine"
+    # After a failure: nobody's turn for the seconds given, then anybody's again.
+    await cache.hold_off(job_id, seconds=7)
+    assert await cache.claim(job_id, seconds=11) == "held_off"
+    assert 2 <= await redis.ttl(cache.claim_key(job_id)) <= 7  # the claim did not extend it
+    assert await redis.get(cache.claim_key(job_id)) == b"held-off"  # no position in it
+    assert await redis.pexpireat(cache.claim_key(job_id), 1)
+    assert await cache.claim(job_id, seconds=11) == "mine"
 
 
 # The cached route follows the position: same Redis, never longer, deleted with it
@@ -894,6 +910,7 @@ async def test_vendor_failures_are_503_without_vendor_text(
     cache: RedisJobRouteCache,
     redis: Redis,
     prefix: str,
+    settings: Settings,
     failure: str,
     failing: str,
 ) -> None:
@@ -901,21 +918,116 @@ async def test_vendor_failures_are_503_without_vendor_text(
     await plant(store, job.id)
     real = Mapbox(app)
     setattr(real, failing, FAILURES[failure])
+    per_poll = ["GET"] if failing == "geocoding" else ["GET", "POST"]
 
-    answers = [await ask(db_client, job.id, world.customer) for _ in range(2)]
+    answers = [await ask(db_client, job.id, world.customer) for _ in range(4)]
     dot = await db_client.get(position_url(job.id), headers=world.customer.headers)
 
     for response in answers:
         assert (response.status_code, response.json()) == (503, ROUTE_UNAVAILABLE)
         assert response.headers["cache-control"] == "no-store"
         assert not any(needle in response.text for needle in NEEDLES)
-    # The failure is not kept, and the turn to ask is given back: each poll asked again.
-    per_poll = ["GET"] if failing == "geocoding" else ["GET", "POST"]
+    # Mapbox was asked by the first poll only: after a failure it is left alone for
+    # ROUTE_RETRY_SECONDS, whatever the app does with its 503.
+    assert real.asked == per_poll
+    assert await keys(redis, prefix) == {store.key(job.id), cache.claim_key(job.id)}
+    assert await redis.get(cache.claim_key(job.id)) == b"held-off"  # no position, no route
+    left = await redis.ttl(cache.claim_key(job.id))
+    assert settings.route_retry_seconds - 5 <= left <= settings.route_retry_seconds == 10, left
+    # The wait over (an expiry time already past), the next poll asks again.
+    assert await redis.pexpireat(cache.claim_key(job.id), 1)
+    again = await ask(db_client, job.id, world.customer)
+    assert (again.status_code, again.json()) == (503, ROUTE_UNAVAILABLE)
     assert real.asked == per_poll * 2
-    assert await keys(redis, prefix) == {store.key(job.id)}
     # The app can still show the pro's dot.
     assert dot.status_code == 200, dot.text
     assert (dot.json()["position"]["lat"], dot.json()["position"]["lng"]) == (LAT, LNG)
+
+
+@pytest.mark.parametrize("settings", [{"route_retry_seconds": 25}], indirect=True)
+async def test_wait_after_a_failure_comes_from_settings_and_ends_with_a_route(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    store: RedisJobLocationStore,
+    cache: RedisJobRouteCache,
+    redis: Redis,
+    prefix: str,
+) -> None:
+    job = await on_the_way_job(db_session, world)
+    await plant(store, job.id)
+    real = Mapbox(app)
+    real.directions = _status(429)
+
+    assert (await ask(db_client, job.id, world.customer)).status_code == 503
+    assert 20 <= await redis.ttl(cache.claim_key(job.id)) <= 25  # not the default's 10
+    # Mapbox is back and the wait is over: the route, and no wait is left behind.
+    real.directions = lambda _: DIRECTIONS_OK
+    assert await redis.pexpireat(cache.claim_key(job.id), 1)
+    assert await shown(db_client, job.id, world) is not None
+    assert await keys(redis, prefix) == {store.key(job.id), cache.key(job.id)}
+
+
+class Flaky(RedisJobRouteCache):
+    """Reads and claims in Redis; fails where `failing` says, as Redis going away would."""
+
+    failing: tuple[str, ...] = ()
+    refused: bool = False
+
+    async def put(self, job_id: uuid.UUID, entry: CachedRoute, *, ttl_seconds: int) -> bool:
+        if self.refused:
+            raise LocationStoreRefusedError("not_ephemeral")
+        if "put" in self.failing:
+            raise RedisConnectionError("probe: gone")
+        return await super().put(job_id, entry, ttl_seconds=ttl_seconds)
+
+    async def release(self, job_id: uuid.UUID) -> None:
+        if "release" in self.failing:
+            raise TimeoutError
+        await super().release(job_id)
+
+
+@pytest.mark.parametrize(
+    ("failing", "refused", "logged"),
+    [
+        (("put",), False, ["job_route_computed", "job_route_cache_unavailable"]),
+        (("release",), False, ["job_route_computed", "job_route_cache_unavailable"]),
+        ((), True, ["job_route_computed", "job_route_store_refused"]),
+    ],
+    ids=["put_fails", "release_fails", "put_refused"],
+)
+async def test_route_that_cannot_be_kept_is_still_answered(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    store: RedisJobLocationStore,
+    mapbox: FakeMapbox,
+    redis: Redis,
+    prefix: str,
+    caplog: pytest.LogCaptureFixture,
+    failing: tuple[str, ...],
+    refused: bool,
+    logged: list[str],
+) -> None:
+    job = await on_the_way_job(db_session, world)
+    await locate(db_session, world)
+    await plant(store, job.id)
+    flaky = Flaky(redis, None, timeout_seconds=STORE_TIMEOUT, prefix=prefix)
+    flaky.failing, flaky.refused = failing, refused
+    app.dependency_overrides[get_job_route_cache] = lambda: flaky
+
+    with caplog.at_level(logging.DEBUG):
+        route = await shown(db_client, job.id, world)
+
+    # The route was paid for: it is answered, and what Redis refused is only logged.
+    assert route is not None
+    assert len(mapbox.routes) == 1
+    assert [event for _, event, _ in route_events(caplog)] == logged
+    assert not any(r.exc_info for r in caplog.records)
+    kept = (await redis.exists(flaky.key(job.id))) == 1
+    assert kept is (failing == ("release",))
 
 
 # Criterion 8: no token
@@ -1043,34 +1155,43 @@ async def test_refused_store_is_503_location_unavailable(
     ]
 
 
-def test_cache_dependency_uses_the_positions_redis(app: FastAPI, settings: Settings) -> None:
-    """The app's own dependency, as startup leaves it: the cache goes to the positions' Redis
-    and asks the same check of what that Redis keeps; without that Redis there is no cache."""
+async def test_cache_dependency_uses_the_positions_redis(app: FastAPI) -> None:
+    """The app's own dependency, as startup leaves it with LOCATION_REDIS_URL set: the cache
+    goes to the positions' Redis, never the app's own (the queue's), and asks the same check
+    of what that Redis keeps; without the positions' Redis there is no cache."""
     request = Request({"type": "http", "app": app})
-    shared = cast(Redis, object())
-    positions = Redis.from_url("redis://positions.invalid:6380/3")
-    backend = location_backend(settings, positions)
+    settings = make_settings(
+        location_redis_url="redis://positions.invalid:6380/3", pro_location_timeout_seconds=0.7
+    )
+    shared = Redis.from_url("redis://queue.invalid:6379/0")
+    backend = location_backend(settings, shared)
     assert isinstance(backend, LocationBackend)
 
-    app.state.location_backend = backend
-    cache = get_job_route_cache(request, settings)
-    app.state.location_backend = None
-    without = get_job_route_cache(request, settings)
+    try:
+        app.state.location_backend = backend
+        cache = get_job_route_cache(request, settings)
+        app.state.location_backend = None
+        without = get_job_route_cache(request, settings)
 
-    assert isinstance(cache, RedisJobRouteCache)
-    assert cache._redis is positions
-    assert cache._redis is not shared
-    assert cache._guard is backend.guard
-    assert cache._timeout == settings.pro_location_timeout_seconds
-    assert isinstance(without, NoJobRouteCache)
+        assert isinstance(cache, RedisJobRouteCache)
+        assert cache._redis is backend.redis
+        assert cache._redis is not shared
+        assert cache._redis.connection_pool.connection_kwargs["host"] == "positions.invalid"
+        assert cache._guard is backend.guard
+        assert cache._timeout == 0.7
+        assert isinstance(without, NoJobRouteCache)
+    finally:
+        await backend.redis.aclose()
+        await shared.aclose()
 
 
 async def test_no_cache_keeps_and_gives_nothing() -> None:
     cache = NoJobRouteCache()
     job_id = uuid.uuid4()
 
-    assert await cache.claim(job_id, seconds=5) is False
+    assert await cache.claim(job_id, seconds=5) == "taken"
     await cache.release(job_id)
+    await cache.hold_off(job_id, seconds=5)
     for call in (cache.get(job_id), cache.put(job_id, CachedRoute(ORIGIN, None), ttl_seconds=5)):
         with pytest.raises(Exception, match="not_configured"):
             await call
@@ -1086,6 +1207,7 @@ async def test_no_secret_or_coordinate_in_logs(
     world: JobWorld,
     store: RedisJobLocationStore,
     cache: RedisJobRouteCache,
+    redis: Redis,
     dead_redis: Redis,
     clock: list[datetime],
     caplog: pytest.LogCaptureFixture,
@@ -1101,6 +1223,10 @@ async def test_no_secret_or_coordinate_in_logs(
         clock[0] = NOW + timedelta(seconds=seconds)
         await move(store, job.id, clock[0], NORTH_120_M * seconds)
 
+    async def waited() -> None:
+        """The wait after a failure, before Mapbox is asked again for the job, is over."""
+        assert await redis.delete(cache.claim_key(job.id)) == 1
+
     # LOG_LEVEL=DEBUG, as the app applies it: httpx would name each request's URL at INFO.
     with caplog.at_level(logging.DEBUG):
         assert await shown(db_client, job.id, world) is not None  # geocoded and routed
@@ -1108,15 +1234,20 @@ async def test_no_secret_or_coordinate_in_logs(
         await moved_on(1)
         real.directions = _status(429)
         errors.append(await ask(db_client, job.id, world.customer))  # 503
+        errors.append(await ask(db_client, job.id, world.customer))  # 503: Mapbox left alone
+        await waited()
         real.directions = _raise(httpx.ReadTimeout)
         errors.append(await ask(db_client, job.id, world.customer))  # 503
+        await waited()
         real.directions = FAILURES["malformed"]
         errors.append(await ask(db_client, job.id, world.customer))  # 503
+        await waited()
         real.directions = lambda _: httpx.Response(200, json={"code": "NoRoute", "routes": []})
         errors.append(await ask(db_client, job.id, world.customer))  # no road
         await moved_on(2)
         real.geocoding = _status(401)
         errors.append(await ask(db_client, job.id, world.customer))  # 503
+        await waited()
         real.geocoding = lambda _: httpx.Response(200, json={"features": []})
         errors.append(await ask(db_client, job.id, world.customer))  # no such address
         errors.append(await ask(db_client, done.id, world.customer))  # not on the way
@@ -1125,7 +1256,19 @@ async def test_no_secret_or_coordinate_in_logs(
         app.dependency_overrides[get_job_route_cache] = lambda: down
         errors.append(await ask(db_client, job.id, world.customer))  # 503
 
-    assert [r.status_code for r in errors] == [503, 503, 503, 200, 503, 200, 200, 404, 403, 503]
+    assert [r.status_code for r in errors] == [
+        503,
+        503,
+        503,
+        503,
+        200,
+        503,
+        200,
+        200,
+        404,
+        403,
+        503,
+    ]
     assert (real.asked.count("GET"), real.asked.count("POST")) == (7, 5)
     formatter = JsonFormatter()
     logs = "\n".join(formatter.format(r) + r.getMessage() for r in caplog.records)
@@ -1202,6 +1345,7 @@ async def test_nothing_reaches_sentry(
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         real.directions = _status(429)
         refused = await ask(client, job.id, world.customer)
+        assert await redis.delete(cache.claim_key(job.id)) == 1  # the wait is over
         real.directions = lambda _: DIRECTIONS_OK
         app.dependency_overrides[get_route_provider] = lambda: crashing
         crashed = await ask(client, job.id, world.customer)
