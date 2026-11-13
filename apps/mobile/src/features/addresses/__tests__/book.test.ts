@@ -139,8 +139,8 @@ describe("the book's edits keep the API's order, and say when they no longer can
       label: "Office",
       line1: "250 Changed St",
     });
-    // A request that sent no field of the address (the default alone) changes none.
-    expect(withFields(drawn, stale, { is_default: true })).toEqual(drawn);
+    // A request that sent no field changes none.
+    expect(withFields(drawn, stale, {})).toEqual(drawn);
   });
 
   it("whether the ZIP is served goes with the ZIP, and the coordinates go together", () => {
@@ -160,11 +160,10 @@ describe("the book's edits keep the API's order, and say when they no longer can
     });
     // Another field alone: the ZIP of that answer and what the server read from it stay out.
     expect(withFields(listed(BOOK), answer, { line1: WORK.line1 }).items[1]).toEqual(WORK);
-    expect(withFields(listed(BOOK), answer, { lat: 40.5, lng: -74.25 }).items[1]).toEqual({
-      ...WORK,
-      lat: 40.5,
-      lng: -74.25,
-    });
+    // The API stores the two coordinates when the latitude is sent: both are the answer's.
+    const located = { ...WORK, lat: 40.5, lng: -74.25 };
+    expect(withFields(listed(BOOK), answer, { lat: 40.5, lng: -74.25 }).items[1]).toEqual(located);
+    expect(withFields(listed(BOOK), answer, { lat: 40.5 }).items[1]).toEqual(located);
   });
 
   it("a field sent as null is changed only where null clears it", () => {

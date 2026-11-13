@@ -12,12 +12,18 @@ import {
   apiPost,
   isCurrentGeneration,
   sessionGeneration,
-  type PatchBody,
   type PostBody,
 } from "@/api";
 import { showToast } from "@/components/ui";
 
-import { addressFailure, withAdded, withDefault, withFields, withoutAddress } from "./book";
+import {
+  addressFailure,
+  withAdded,
+  withDefault,
+  withFields,
+  withoutAddress,
+  type AddressEdit,
+} from "./book";
 import {
   answerWrite,
   dropWrite,
@@ -78,16 +84,15 @@ export function useCreateAddress() {
   });
 }
 
-/** The fields of one address to change, for the session the form was sent in. */
-export type UpdateAddressVariables = {
-  id: string;
-  body: PatchBody<"/v1/addresses/{address_id}">;
-  generation: number;
-};
+/**
+ * The fields of one address to change, for the session the form was sent in. Never who is the
+ * default: that is `useMakeDefaultAddress`.
+ */
+export type UpdateAddressVariables = { id: string; body: AddressEdit; generation: number };
 
 /**
- * Changes an address of the book (PATCH); requests already sent from it keep their own copy. The
- * book takes from the answer the fields `body` sent, no other (`withFields`).
+ * Changes an address of the book (PATCH); requests already sent from it keep their own copy. Of
+ * the answer, the book takes what the fields of `body` set, nothing else (`withFields`).
  */
 export function useUpdateAddress() {
   const client = useQueryClient();

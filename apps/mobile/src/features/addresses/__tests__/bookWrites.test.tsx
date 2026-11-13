@@ -1125,7 +1125,8 @@ describe("an answer changes only what its request sent", () => {
       };
       const land = {
         edit: () => answers.edit.resolve({ ...OFFICE, is_default: taken === "default" }),
-        default: () => answers.default.resolve(taken === "edit" ? OFFICE : { ...OFFICE, ...WORK }),
+        default: () =>
+          answers.default.resolve(taken === "edit" ? OFFICE : { ...WORK, is_default: true }),
       };
 
       await act(async () => ask[asked]());
@@ -1182,6 +1183,31 @@ describe("an answer changes only what its request sent", () => {
       expect(items(client)).toEqual([HOME, both, MOM]);
     },
   );
+
+  it("an edit that got no answer is drawn as not made, whatever a later answer shows of it", async () => {
+    // The server took the edit, but its answer was lost; the default change's answer then has the
+    // new name. The device was told the edit failed and draws no field a request of its own did
+    // not set with an answer: the same copy, read before the edit, would be the older one. The
+    // next list says what the server has.
+    const edited = deferred<SavedAddress>();
+    const madeDefault = deferred<SavedAddress>();
+    jest
+      .mocked(apiPatch)
+      .mockReturnValueOnce(edited.promise)
+      .mockReturnValueOnce(madeDefault.promise);
+    const { result, client } = await renderBook();
+    jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+
+    await act(async () =>
+      result.current.update.mutate({ id: "work", body: CHANGES, generation: 1 }),
+    );
+    await act(async () => result.current.makeDefault(WORK));
+    await act(async () => edited.reject(new NetworkError(false)));
+    await act(async () => madeDefault.resolve(OFFICE));
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+    expect(items(client)?.[0]).toEqual({ ...WORK, is_default: true });
+  });
 
   it("a new address the list already has stays as listed under its own answer", async () => {
     // The add's answer is still to come when a list that has the address lands: read after the
