@@ -53,13 +53,17 @@ TYPED: Final = f"{SECRET}, call me at 305-555-0199"
 STORED: Final = f"{SECRET}, call me at {MASK}"
 WARNING: Final = "contact_details_hidden"
 # Planner settings that leave a nested-loop semi join running its inner side again for every
-# outer row: the plan an `ANALYZE` of a near-empty job_messages gave the purge (#386).
+# outer row: the plan an `ANALYZE` of a near-empty job_messages gave the purge (#386). With no
+# seq scan, the outer side reads the table by its primary key, in id order, whatever its
+# statistics: a seq scan read it in heap order until an autovacuum of the test table turned
+# the plan to that index on its own (#389).
 RESCANNING_PLAN: Final = (
     "enable_hashjoin",
     "enable_mergejoin",
     "enable_material",
     "enable_hashagg",
     "enable_sort",
+    "enable_seqscan",
 )
 
 
@@ -521,13 +525,21 @@ async def test_startup_warns_once_without_a_key_where_deployed(
 async def _seed_originals(
     session: AsyncSession, world: JobWorld, count: int, *, tied: bool = False
 ) -> list[JobMessage]:
-    """`count` originals due a day ago, one second apart, or all at the same instant if tied."""
+    """`count` originals due a day ago, one second apart, or all at the same instant if tied.
+    Their ids ascend in the same order: read by id, the rows come oldest first (#389)."""
     job = await make_job(session, world)
     now = await ChatRepository(session).now()
     sealing = cipher()
+    first_id = uuid.uuid4().int & ~0xFFFF
     messages = []
     for index in range(count):
-        message = JobMessage(job_id=job.id, sender_id=world.pro.id, body=MASK, redacted=True)
+        message = JobMessage(
+            id=uuid.UUID(int=first_id + index),
+            job_id=job.id,
+            sender_id=world.pro.id,
+            body=MASK,
+            redacted=True,
+        )
         session.add(message)
         await session.flush()
         sealed = sealing.encrypt(TYPED, original_associated_data(message.id))
@@ -661,24 +673,35 @@ async def test_the_rescanning_plan_overruns_the_limit_of_an_in_subquery(
     db_session: AsyncSession, world: JobWorld
 ) -> None:
     """Guards the rescanning cases above: under RESCANNING_PLAN the purge's old form, `id IN
-    (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)`, clears more than n rows. If a Postgres upgrade
-    ends this, those cases prove nothing until another way forces the plan."""
-    await _seed_originals(db_session, world, 5)
+    (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)`, clears every due row, however small n is. If
+    a Postgres upgrade ends this, those cases prove nothing until another way forces the plan.
+
+    The plan reads the table in id order and runs the subquery again for each row it reaches;
+    the subquery reads the due rows oldest first, which is their id order too, so each row is
+    the first one not yet cleared when the scan reaches it. In heap order, or with tied expiries,
+    the count rests on where the rows lie: as few as 2 of 5 were cleared then (#389)."""
+    messages = await _seed_originals(db_session, world, 5)
     now = await ChatRepository(db_session).now()
     await _plan_rescanning(db_session)
     connection = await db_session.connection()
-
-    result = await connection.execute(
-        text(
-            "UPDATE job_messages SET original_ciphertext = NULL, original_key_id = NULL,"
-            " original_expires_at = NULL WHERE id IN (SELECT id FROM job_messages"
-            " WHERE original_expires_at <= :now ORDER BY original_expires_at"
-            " LIMIT 2 FOR UPDATE SKIP LOCKED)"
-        ),
-        {"now": now},
+    old_form = (
+        "UPDATE job_messages SET original_ciphertext = NULL, original_key_id = NULL,"
+        " original_expires_at = NULL WHERE id IN (SELECT id FROM job_messages"
+        " WHERE original_expires_at <= :now ORDER BY original_expires_at"
+        " LIMIT 2 FOR UPDATE SKIP LOCKED)"
+    )
+    plan = await connection.scalar(text(f"EXPLAIN (FORMAT JSON) {old_form}"), {"now": now})
+    [join] = plan[0]["Plan"]["Plans"]
+    [table, _] = join["Plans"]
+    assert (join["Node Type"], join["Join Type"], table.get("Index Name")) == (
+        "Nested Loop",
+        "Semi",
+        "pk_job_messages",
     )
 
-    assert result.rowcount > 2
+    result = await connection.execute(text(old_form), {"now": now})
+
+    assert result.rowcount == len(messages)
 
 
 # --- Helpers ---------------------------------------------------------------------------------
