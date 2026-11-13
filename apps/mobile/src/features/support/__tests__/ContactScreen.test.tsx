@@ -287,7 +287,7 @@ describe("Talk to Jack: sending", () => {
     expect(postCalls()).toHaveLength(1);
 
     // Another message starts from an empty form.
-    await fireEvent.press(screen.getByRole("button", { name: "Write another message" }));
+    await fireEvent.press(screen.getByRole("button", { name: "New message" }));
     expect(field().props.value).toBe("");
     expect(sendButton()).toBeDisabled();
   });
