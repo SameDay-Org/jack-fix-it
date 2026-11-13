@@ -16,6 +16,7 @@ import {
   opportunityQueryOptions,
   type OpportunityDetail,
 } from "../useOpportunity";
+import { REVEAL_SETTLE_MS } from "../useRefusalReveal";
 import type { SentQuote } from "../useSendQuote";
 import {
   detail,
@@ -177,6 +178,13 @@ const focusedIds = () =>
     const host = target as { props?: { testID?: string }; testID?: string } | null;
     return String(host?.props?.testID ?? host?.testID ?? typeof host);
   });
+
+/** Screen-reader focus went, in order, to these controls: it follows the scroll by a settle. */
+const expectFocused = (...ids: string[]) => waitFor(() => expect(focusedIds()).toEqual(ids));
+
+/** Long enough for a focus move that was coming to have come. */
+const settle = () =>
+  act(() => new Promise<void>((resolve) => setTimeout(resolve, REVEAL_SETTLE_MS + 100)));
 
 /** The form laid out: each field's section at its top, as the native side reports it. */
 const SECTION_TOPS = { price: 120, scope: 300, duration: 700, start: 950 };
@@ -456,6 +464,8 @@ describe("QuoteFormScreen: review and send", () => {
 
     expect(await screen.findByText("Pick a start that is still ahead.")).toBeTruthy();
     expect(screen.queryByText(CAP)).toBeNull();
+    await layOut();
+    await expectFocused("quote-time");
   });
 
   it("does not send a quote whose start went by on the review: back to the form, start marked", async () => {
@@ -467,6 +477,9 @@ describe("QuoteFormScreen: review and send", () => {
     expect(await screen.findByText("Pick a start that is still ahead.")).toBeTruthy();
     expect(screen.getByTestId("quote-form")).toBeTruthy();
     expect(apiPost).not.toHaveBeenCalled();
+    await layOut();
+    await expectFocused("quote-time");
+    expect(scrollTo.mock.calls).toEqual([[{ y: SECTION_TOPS.start, animated: true }]]);
   });
 
   it.each([
@@ -608,6 +621,26 @@ describe("QuoteFormScreen: the opportunity's caps", () => {
     expect(apiPost).toHaveBeenCalledTimes(1);
   });
 
+  it("on a 422 after the detail lowered a cap while the quote was out, names that cap", async () => {
+    const post = deferredPost();
+    const client = await renderWithCaps({
+      quote_max_amount_cents: 10_000,
+      quote_max_duration_minutes: 75,
+    });
+    await fillAndReview();
+    await press("quote-send");
+    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
+    await refreshCaps(client, { quote_max_amount_cents: 10_000, quote_max_duration_minutes: 74 });
+    await act(async () => post.fail(new ApiError(422, "validation_error")));
+
+    // The answer's callback dates from the press: it still reads the caps as they are now.
+    expect(await screen.findByText(DURATION_MAX)).toBeTruthy();
+    expect(screen.queryByText(CAP)).toBeNull();
+    expect(apiPost).toHaveBeenCalledTimes(1);
+    await layOut();
+    await expectFocused("quote-minutes");
+  });
+
   it.each<[string, string, string]>([
     ["en", "The maximum quote is $123.45.", "The longest job you can quote is 1 h 14 min."],
     [
@@ -683,15 +716,17 @@ describe("QuoteFormScreen: a refused Review or Send shows and reads its first pr
     await fill({ price: "100.01" });
     await press("quote-review");
 
-    // Both caps are exceeded: the price comes first down the form.
+    // Both caps are exceeded: the price comes first down the form. The scroll starts at once;
+    // focus follows it, since a screen reader takes focus only on what is on screen.
     expectAnnounced("quote-price", PRICE_MAX);
-    expect(focusedIds()).toEqual(["quote-price"]);
     expect(scrollTo.mock.calls).toEqual([[{ y: SECTION_TOPS.price, animated: true }]]);
+    expect(moveAccessibilityFocus).not.toHaveBeenCalled();
+    await expectFocused("quote-price");
     expect(apiPost).not.toHaveBeenCalled();
 
     // A second refusal over the same field reads it again.
     await press("quote-review");
-    expect(focusedIds()).toEqual(["quote-price", "quote-price"]);
+    await expectFocused("quote-price", "quote-price");
     expect(scrollTo).toHaveBeenCalledTimes(2);
   });
 
@@ -702,8 +737,8 @@ describe("QuoteFormScreen: a refused Review or Send shows and reads its first pr
     await press("quote-review");
 
     expectAnnounced("quote-minutes", DURATION_MAX);
-    expect(focusedIds()).toEqual(["quote-minutes"]);
     expect(scrollTo.mock.calls).toEqual([[{ y: SECTION_TOPS.duration, animated: true }]]);
+    await expectFocused("quote-minutes");
   });
 
   it.each<[string, string, string]>([
@@ -718,10 +753,10 @@ describe("QuoteFormScreen: a refused Review or Send shows and reads its first pr
     await press("quote-review");
 
     expect(screen.getByTestId(controlId).props.accessibilityHint).toBe(message);
-    expect(focusedIds()).toEqual([controlId]);
     expect(scrollTo.mock.calls).toEqual([
       [{ y: SECTION_TOPS[field as keyof typeof SECTION_TOPS], animated: true }],
     ]);
+    await expectFocused(controlId);
   });
 
   it.each<[string, Partial<OpportunityDetail>, string, string]>([
@@ -737,14 +772,17 @@ describe("QuoteFormScreen: a refused Review or Send shows and reads its first pr
 
       await screen.findByTestId("quote-form");
       expectAnnounced(controlId, message);
-      expect(focusedIds()).toEqual([controlId]);
-      // The form mounted anew: the scroll waits for the section's place, and goes there once.
+      // The form mounted anew: the scroll waits for the section's place and goes there once,
+      // and focus follows the scroll.
+      await settle();
       expect(scrollTo).not.toHaveBeenCalled();
+      expect(moveAccessibilityFocus).not.toHaveBeenCalled();
       await layOut();
       await layOut();
       expect(scrollTo.mock.calls).toEqual([
         [{ y: SECTION_TOPS[field as keyof typeof SECTION_TOPS], animated: true }],
       ]);
+      await expectFocused(controlId);
       expect(apiPost).not.toHaveBeenCalled();
     },
   );
@@ -757,19 +795,42 @@ describe("QuoteFormScreen: a refused Review or Send shows and reads its first pr
 
     await screen.findByTestId("quote-form");
     expectAnnounced("quote-price", CAP);
-    expect(focusedIds()).toEqual(["quote-price"]);
+    await layOut();
+    await expectFocused("quote-price");
   });
 
-  it("moves nothing when the Review passes or the pro comes back by Edit", async () => {
-    await renderForm();
+  it("moves nothing when the Review passes or the pro comes back by Edit, a refusal before or not", async () => {
+    await renderWithCaps({ quote_max_amount_cents: 10_000 });
     await layOut();
-    await fillAndReview();
+    await fill({ price: "100.01" });
+    await press("quote-review");
+    await expectFocused("quote-price");
+
+    // Corrected, the Review passes; Edit brings the form back with no refusal to show.
+    await typeInto("quote-price", "100");
+    await press("quote-review");
+    await screen.findByTestId("quote-review-step");
     await press("quote-edit");
     await screen.findByTestId("quote-form");
     await layOut();
+    await settle();
+
+    expect(focusedIds()).toEqual(["quote-price"]);
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a focus move still to come when the form goes", async () => {
+    await renderWithCaps({ quote_max_amount_cents: 10_000 });
+    await layOut();
+    await fill({ price: "100.01" });
+    await press("quote-review");
+    // Corrected and reviewed before the scroll landed: the form is gone, nothing is focused.
+    await typeInto("quote-price", "100");
+    await press("quote-review");
+    await screen.findByTestId("quote-review-step");
+    await settle();
 
     expect(moveAccessibilityFocus).not.toHaveBeenCalled();
-    expect(scrollTo).not.toHaveBeenCalled();
   });
 });
 

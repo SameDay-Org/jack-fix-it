@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import { parsePriceCents, priceText } from "./money";
 import {
@@ -74,6 +74,12 @@ export function useQuoteDraft(preferredDate: string | null, caps: QuoteCaps) {
     }
   }
 
+  // A send's answer lands in a callback made when Send was pressed: it reads the caps of now.
+  const capsNow = useRef(caps);
+  useLayoutEffect(() => {
+    capsNow.current = caps;
+  }, [caps]);
+
   const change = (patch: Partial<QuoteDraft>) => {
     const next = { ...draft, ...patch };
     const at = Date.now();
@@ -97,13 +103,13 @@ export function useQuoteDraft(preferredDate: string | null, caps: QuoteCaps) {
   };
 
   /**
-   * The server answered 422. A field that fails here now (a start that passed while the pro was
-   * reviewing, or a cap the detail lowered before the send) is the cause; otherwise the caps
-   * changed after that, and the app cannot name them: the amount or the duration. Returns the
-   * first field it marked.
+   * The server answered 422. A field that fails here now is the cause: the start went by, or the
+   * detail lowered a cap, while the quote was out. Otherwise the caps changed without the app
+   * learning it, and it cannot name them: the amount or the duration. Returns the first field it
+   * marked.
    */
   const refused = (): QuoteField => {
-    const found = draftProblems(draft, Date.now(), caps);
+    const found = draftProblems(draft, Date.now(), capsNow.current);
     const first = firstProblem(found);
     setChecking(true);
     setProblems(first ? found : { price: "aboveCap", duration: "aboveCap" });
