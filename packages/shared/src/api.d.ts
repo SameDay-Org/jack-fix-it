@@ -917,6 +917,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/jobs/{job_id}/route": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * See my pro's route to the job's address while on the way (never stored in the database)
+         * @description The driving route from the pro's latest position to the address of the customer's own
+         *     job, to poll next to the pro's position. `route` is null whenever there is none to show:
+         *     whenever the position is (the pro is not on the way, or has sent none yet), when the
+         *     address cannot be placed on the map, and when no road leads there. The same route is
+         *     answered for a short while, until the pro has moved away from where it starts. It is kept
+         *     in memory for that short time only, never in the database, and every response says
+         *     `Cache-Control: no-store`.
+         */
+        get: operations["get_job_route_v1_jobs__job_id__route_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/jobs/{job_id}/messages": {
         parameters: {
             query?: never;
@@ -1886,6 +1912,67 @@ export interface components {
              * @description Keys of the caller's own job_photo uploads (POST /v1/uploads), in the order to show them.
              */
             upload_keys: string[];
+        };
+        /**
+         * JobRoute
+         * @description The pro's driving route to the job's address, as computed at `computed_at` (#351).
+         */
+        JobRoute: {
+            /**
+             * Geometry
+             * @description The line to draw, from the pro to the address: `[lng, lat]` pairs in order (GeoJSON's order), thinned to a few hundred points at most.
+             */
+            geometry: [
+                number,
+                number
+            ][];
+            /**
+             * Distance M
+             * @description Meters left to drive.
+             */
+            distance_m: number;
+            /**
+             * Duration S
+             * @description Seconds left, as estimated when computed.
+             */
+            duration_s: number;
+            /**
+             * Steps
+             * @description The next streets of the route, in order: the first few dozen at most.
+             */
+            steps: components["schemas"]["JobRouteStep"][];
+            /**
+             * Computed At
+             * Format: date-time
+             * @description When the route was computed. The same route is answered for a short while, until the pro has moved away from where it starts.
+             */
+            computed_at: string;
+        };
+        /** JobRouteOut */
+        JobRouteOut: {
+            /** @description The pro's route to the job's address. null whenever there is none to show: the pro is not on the way (not yet, arrived, or the job moved on), has sent no position yet, the address cannot be placed on the map, no road leads there, or the route is being computed right now (ask again). */
+            route: components["schemas"]["JobRoute"] | null;
+        };
+        /**
+         * JobRouteStep
+         * @description One stretch of the route on one street. No instruction text.
+         */
+        JobRouteStep: {
+            /**
+             * Street Name
+             * @description The street's name; null on an unnamed road.
+             */
+            street_name: string | null;
+            /**
+             * Distance M
+             * @description Meters driven on it.
+             */
+            distance_m: number;
+            /**
+             * Duration S
+             * @description Seconds it takes, as estimated.
+             */
+            duration_s: number;
         };
         /**
          * JobStatus
@@ -6082,6 +6169,73 @@ export interface operations {
                 };
             };
             /** @description location_unavailable: the position could not be kept (the store is down, or must not hold positions); drop it and send the next. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_job_route_v1_jobs__job_id__route_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobRouteOut"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers follow their pro. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job of the caller with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description route_unavailable: the route cannot be computed right now (the route provider is down, slow or not configured); the pro's position is still there to show. location_unavailable: the store must not hold positions (a deploy problem), as on the position's own route. */
             503: {
                 headers: {
                     [name: string]: unknown;

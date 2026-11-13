@@ -3569,6 +3569,95 @@
         }
       }
     },
+    "/v1/jobs/{job_id}/route": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "See my pro's route to the job's address while on the way (never stored in the database)",
+        "description": "The driving route from the pro's latest position to the address of the customer's own\njob, to poll next to the pro's position. `route` is null whenever there is none to show:\nwhenever the position is (the pro is not on the way, or has sent none yet), when the\naddress cannot be placed on the map, and when no road leads there. The same route is\nanswered for a short while, until the pro has moved away from where it starts. It is kept\nin memory for that short time only, never in the database, and every response says\n`Cache-Control: no-store`.",
+        "operationId": "get_job_route_v1_jobs__job_id__route_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobRouteOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers follow their pro.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job of the caller with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "route_unavailable: the route cannot be computed right now (the route provider is down, slow or not configured); the pro's position is still there to show. location_unavailable: the store must not hold positions (a deploy problem), as on the position's own route.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/jobs/{job_id}/messages": {
       "get": {
         "tags": [
@@ -6311,6 +6400,119 @@
           "upload_keys"
         ],
         "title": "JobPhotosIn"
+      },
+      "JobRoute": {
+        "properties": {
+          "geometry": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Geometry",
+            "description": "The line to draw, from the pro to the address: `[lng, lat]` pairs in order (GeoJSON's order), thinned to a few hundred points at most."
+          },
+          "distance_m": {
+            "type": "number",
+            "title": "Distance M",
+            "description": "Meters left to drive."
+          },
+          "duration_s": {
+            "type": "number",
+            "title": "Duration S",
+            "description": "Seconds left, as estimated when computed."
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/JobRouteStep"
+            },
+            "type": "array",
+            "title": "Steps",
+            "description": "The next streets of the route, in order: the first few dozen at most."
+          },
+          "computed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Computed At",
+            "description": "When the route was computed. The same route is answered for a short while, until the pro has moved away from where it starts."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "geometry",
+          "distance_m",
+          "duration_s",
+          "steps",
+          "computed_at"
+        ],
+        "title": "JobRoute",
+        "description": "The pro's driving route to the job's address, as computed at `computed_at` (#351)."
+      },
+      "JobRouteOut": {
+        "properties": {
+          "route": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobRoute"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The pro's route to the job's address. null whenever there is none to show: the pro is not on the way (not yet, arrived, or the job moved on), has sent no position yet, the address cannot be placed on the map, no road leads there, or the route is being computed right now (ask again)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "route"
+        ],
+        "title": "JobRouteOut"
+      },
+      "JobRouteStep": {
+        "properties": {
+          "street_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Street Name",
+            "description": "The street's name; null on an unnamed road."
+          },
+          "distance_m": {
+            "type": "number",
+            "title": "Distance M",
+            "description": "Meters driven on it."
+          },
+          "duration_s": {
+            "type": "number",
+            "title": "Duration S",
+            "description": "Seconds it takes, as estimated."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "street_name",
+          "distance_m",
+          "duration_s"
+        ],
+        "title": "JobRouteStep",
+        "description": "One stretch of the route on one street. No instruction text."
       },
       "JobStatus": {
         "type": "string",
