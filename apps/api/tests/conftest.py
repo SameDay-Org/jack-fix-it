@@ -4,6 +4,7 @@ import uuid
 from collections import Counter
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 
 import httpx
@@ -18,6 +19,8 @@ from app.config import Settings
 from app.db import Base, get_session
 from app.main import create_app
 from app.modules.auth.models import RefreshToken
+from app.modules.jobs.location import Position, get_job_location_store
+from app.modules.jobs.route import CachedRoute, Turn, get_job_route_cache
 from app.modules.users.models import User
 from app.rate_limit import RateLimitResult, get_rate_limiter, window_position
 
@@ -91,11 +94,74 @@ class InMemoryRateLimiter:
         return RateLimitResult(allowed=self.counts[key] <= limit, retry_after_seconds=retry_after)
 
 
+class InMemoryJobLocationStore:
+    """Test-only JobLocationStore: RedisJobLocationStore's rules in a dict, with no expiry."""
+
+    def __init__(self) -> None:
+        self.positions: dict[uuid.UUID, Position] = {}
+
+    async def put(
+        self, job_id: uuid.UUID, position: Position, *, min_interval: timedelta, ttl_seconds: int
+    ) -> bool:
+        stored = self.positions.get(job_id)
+        if stored is not None and (
+            position.updated_at - stored.updated_at < min_interval
+            or position.recorded_at < stored.recorded_at
+        ):
+            return False
+        self.positions[job_id] = position
+        return True
+
+    async def get(self, job_id: uuid.UUID) -> Position | None:
+        return self.positions.get(job_id)
+
+    async def delete(self, job_id: uuid.UUID) -> None:
+        self.positions.pop(job_id, None)
+
+
+class InMemoryJobRouteCache:
+    """Test-only JobRouteCache: a dict, with no expiry and no tie to the position. A turn is
+    ended by the token it was taken with, as in Redis."""
+
+    HELD_OFF = "held-off"
+
+    def __init__(self) -> None:
+        self.routes: dict[uuid.UUID, CachedRoute] = {}
+        # A job's turn: the token of the request that holds it, or HELD_OFF for nobody's.
+        self.claims: dict[uuid.UUID, str] = {}
+
+    async def get(self, job_id: uuid.UUID) -> CachedRoute | None:
+        return self.routes.get(job_id)
+
+    async def put(self, job_id: uuid.UUID, entry: CachedRoute, *, ttl_seconds: int) -> bool:
+        self.routes[job_id] = entry
+        return True
+
+    async def claim(self, job_id: uuid.UUID, *, token: str, seconds: int) -> Turn:
+        if job_id not in self.claims:
+            self.claims[job_id] = token
+            return "mine"
+        return "held_off" if self.claims[job_id] == self.HELD_OFF else "taken"
+
+    async def release(self, job_id: uuid.UUID, *, token: str) -> None:
+        if self.claims.get(job_id) == token:
+            del self.claims[job_id]
+
+    async def hold_off(self, job_id: uuid.UUID, *, token: str, seconds: int) -> None:
+        if self.claims.get(job_id, token) == token:
+            self.claims[job_id] = self.HELD_OFF
+
+
 def make_app(settings: Settings) -> FastAPI:
-    """create_app with an in-memory rate limiter: the lifespan, which creates Redis, never runs."""
+    """create_app with an in-memory rate limiter, location store and route cache: the
+    lifespan, which creates Redis, never runs."""
     app = create_app(settings)
     limiter = InMemoryRateLimiter()
     app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    locations = InMemoryJobLocationStore()
+    app.dependency_overrides[get_job_location_store] = lambda: locations
+    routes = InMemoryJobRouteCache()
+    app.dependency_overrides[get_job_route_cache] = lambda: routes
     return app
 
 

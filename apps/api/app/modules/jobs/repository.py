@@ -15,6 +15,12 @@ class JobRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    @staticmethod
+    def confirmations() -> Subquery:
+        """Every job's id (`job_id`) and confirmation time (`confirmed_at`, NULL when it was
+        never confirmed) only, as a subquery for another module's query."""
+        return select(Job.id.label("job_id"), Job.confirmed_at.label("confirmed_at")).subquery()
+
     async def get_for_update(self, job_id: uuid.UUID) -> Job | None:
         """The job, locked until the transaction ends, so transitions on it run one at a time.
 
@@ -49,6 +55,22 @@ class JobRepository:
             select(Job)
             .where(Job.id == job_id)
             .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def get_of_pro_for_share(self, job_id: uuid.UUID, pro_id: uuid.UUID) -> Job | None:
+        """The pro's own job, locked FOR SHARE until the transaction ends: no status change or
+        check-in (get_for_update), nor any other write of the row, can commit meanwhile, while
+        other readers holding it this way do not wait for each other. Another pro's job is no
+        row, like one that does not exist, so it is never locked.
+
+        populate_existing: a waiter gets the row as the transaction that held the lock left it.
+        """
+        statement = (
+            select(Job)
+            .where(Job.id == job_id, Job.pro_id == pro_id)
+            .with_for_update(read=True)
             .execution_options(populate_existing=True)
         )
         return (await self._session.scalars(statement)).one_or_none()

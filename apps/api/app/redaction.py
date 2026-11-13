@@ -15,7 +15,8 @@ first. It masks, with the language-neutral MASK:
 - URLs and domains: http(s)://, www., a known TLD, any TLD followed by a path ("linktr.ee/x"),
   a spaced ". com" and a spelled "dot com";
 - social and payment handles: "@handle", "$cashtag", and a platform word (instagram, ig,
-  snap, whatsapp, venmo, gmail, ...) followed by an id;
+  snap, whatsapp, venmo, gmail, ...) followed by an id; what these rules mask runs to the end
+  of its token, however long it is (#241);
 - addresses: US street addresses (a house number, a street name, a suffix such as St or Avenue,
   in either order, with directions and units), the Miami grid ("8800 SW 72nd"), US-1 style
   highways, PO boxes, apartment and suite numbers, and the Spanish forms (Calle, Avenida, Av.,
@@ -697,6 +698,7 @@ def redact_contacts(text: str) -> RedactionResult:
     the number (_cut). A mask that took another of its words was another contact's: "site.com/2
     new drive belts" keeps "new drive belts", "2 Amazon.com Key pads" keeps "Key pads". A phone
     that took its number leaves it as the rules in order read it ("APT" before a phone's mask).
+    A handle longer than a platform allows is masked to the end of its token (#241).
     Last, every character the filter before #240 masks is masked too (_floor_masks), so the
     text never shows more than that filter showed, whatever the rules above miss (#240, until
     #267)."""
@@ -707,15 +709,16 @@ def redact_contacts(text: str) -> RedactionResult:
 
 def _hidden(text: str, *, addresses: bool = True) -> list[tuple[int, int]]:
     """Where redact_contacts masks `text` (cleaned): the rules in order with the contacts they
-    cut, and the floor. Without `addresses`, no address rule runs (redact_address_contacts)."""
-    masked, cutting = _masks_in_order(text, _STEPS if addresses else _CONTACT_STEPS)
+    cut, the rest of each handle longer than its rule reads (_TOKEN_RESTS, #241), and the
+    floor. Without `addresses`, no address rule runs (redact_address_contacts)."""
+    masked, cutting, rest = _masks_in_order(text, _STEPS if addresses else _CONTACT_STEPS)
     if masked:
         found = [span for search, rule in _PHONE_STEPS for span in _spans(search, rule, text)]
         if cutting:
             cut_steps = _CUT_STEPS if addresses else (_REVERSE_HANDLE_STEP,)
             found += _cut_spans(text, _Apart.of(cutting), _Apart.of(masked), cut_steps)
         masked = _joined(masked, found)
-    return masked + _floor_masks(text, addresses=addresses)
+    return masked + rest + _floor_masks(text, addresses=addresses)
 
 
 def _floor_masks(text: str, *, addresses: bool = True) -> list[tuple[int, int]]:
@@ -833,24 +836,53 @@ def _last_word(match: re.Match[str]) -> int:
 
 def _masks_in_order(
     text: str, steps: tuple[tuple["_Search", "_Rule"], ...]
-) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+) -> tuple[list[tuple[int, int]], list[tuple[int, int]], list[tuple[int, int]]]:
     """Each rule of `steps` (they start with the email and URL rules) on the text the rules
     before it masked (a mask is no word, so "unit 5B youtu.be/abc123" reads as a unit once the
-    URL is masked): where the masks are in `text`, and which of them the email and URL rules
-    made."""
+    URL is masked): where the masks are in `text`, which of them the email and URL rules made,
+    and where the token of a handle goes on past its rule's mask (_TOKEN_RESTS). The rules
+    after it read that rest unmasked, as before #241; it is no mask of theirs."""
     current = text
     origin = [(index, index + 1) for index in range(len(text))]  # each character's span in text
     masked: list[tuple[int, int]] = []
+    rest: list[tuple[int, int]] = []
     by_emails_and_urls = 0
     for step, (search, rule) in enumerate(steps):
         runs = [_unmarked_spans, _spans] if search in _UNMARKED_FIRST else [_spans]
         for run in runs:
             spans = list(run(search, rule, current))
+            if (more := _TOKEN_RESTS.get(search)) is not None:
+                rest += _token_rests(more, text, current, origin, spans)
             if spans:
                 current, origin = _masked_with_origin(current, origin, spans, masked)
         if step < len(_EMAIL_AND_URL_STEPS):
             by_emails_and_urls = len(masked)
-    return masked, masked[:by_emails_and_urls]
+    return masked, masked[:by_emails_and_urls], rest
+
+
+def _token_rests(
+    more: re.Pattern[str],
+    text: str,
+    current: str,
+    origin: list[tuple[int, int]],
+    handles: list[tuple[int, int]],
+) -> Iterator[tuple[int, int]]:
+    """Where, in `text` (cleaned), the token of each handle in `handles` goes on (`more`) past
+    what its rule masks; `handles` are in `current`, the text the rule read, and `origin` is
+    each of its characters' span in `text`. Only a handle the count stopped has a rest: one
+    that ends at its token's end, or at a mask of a rule before it, was read as far as it goes.
+    The rest itself is read in `text`, through those masks: a long token may hold what a rule
+    before reads ("ig-" and a name deep inside it), and it is one handle to its end. A handle
+    found inside the rest before it is a piece of the same token ("ig-" and a name, again and
+    again, is a platform handle every 30 characters): that rest covers its own, so each token
+    is read once."""
+    covered = 0
+    for _, end in handles:
+        if end == len(current) or origin[end][0] < covered or more.match(current, end) is None:
+            continue
+        if (rest := more.match(text, origin[end][0])) is not None:
+            covered = rest.end()
+            yield rest.span()
 
 
 def _masked_with_origin(
@@ -1339,6 +1371,26 @@ _FLOOR_CONTACT_STEPS: Final = tuple(
 _UNMARKED_FIRST: Final[frozenset[_Search]] = frozenset(
     {PLAIN_EMAIL, SPACED_EMAIL, _SPELLED_EMAILS, PROVIDER_EMAIL, URL, _SPELLED_URLS}
 )
+# The rest of a handle longer than its rule reads (#241). The handle rules count characters, up
+# to a platform's maximum: 30 after "@" or a platform word, 20 in a cashtag. That is where a
+# valid handle ends, but the token goes on and is the same handle: "@" and 40 letters showed the
+# last 10, "ig @" or "$" and a long dotted or dashed chain showed all but its first pieces. So
+# the mask of each of these rules runs on to the end of its token, in the rule's own characters
+# and ending as its body ends (a platform id may end on "." or "-", the other two end on a word
+# character and the marks glued to it). The rules in order still read the text with the counted
+# mask, as before, so they hide what they hid: the rest is masked on top of them (_hidden), and
+# a text never shows what was hidden before. Only what a rule masks has a rest: a long token
+# its rule does not mask is still no contact, so the same texts are flagged. The platform rule
+# judges the piece inside its count alone ("venmo jackfixit-" and a long word leaves
+# "jackfixit", no handle shape; "ig " and 31 letters has no "." or "-" to stop at), and a
+# cashtag over 20 characters with no "-" to stop at is no cashtag.
+# Each rest is one run of a single class: the engine walks back from the run's end once and
+# keeps no state per character, so a handle of a million characters costs one pass.
+_TOKEN_RESTS: Final[dict[_Search, re.Pattern[str]]] = {
+    PLATFORM_HANDLE: re.compile(rf"[\w.\-{_MARKS}]+"),
+    AT_HANDLE: re.compile(rf"[\w{_SEPARATORS}{_MARKS}]*\w{_MARKED}"),
+    CASHTAG: re.compile(rf"[\w\-{_MARKS}]*\w{_MARKED}"),
+}
 
 
 # --- Known values ----------------------------------------------------------------------------

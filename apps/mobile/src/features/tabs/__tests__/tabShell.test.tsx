@@ -21,6 +21,7 @@ import { TabsLayout } from "../TabsLayout";
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../../api/errors"),
   onSignOut: jest.fn(),
+  beforeSignOut: jest.fn(() => () => undefined),
   apiConfig: { timeoutMs: 15_000 },
   apiGet: jest.fn(),
   isCurrentGeneration: jest.fn(() => true),
@@ -96,14 +97,17 @@ const scrollTo = ScrollView.prototype.scrollTo as jest.Mock;
 beforeEach(() => {
   client = newQueryClient();
   jest.mocked(useSession).mockReturnValue(signedIn({ role: "customer" }));
-  // The customer's History asks for their requests (#47): none yet, so its empty state shows.
+  // The customer's History asks for their requests (#47) and Account counts their saved
+  // addresses: none of either yet.
   jest
     .mocked(apiGet)
     .mockReset()
     .mockImplementation((async (path: string) =>
       path === "/v1/requests"
         ? { items: [], next_cursor: null }
-        : CATEGORIES) as unknown as typeof apiGet);
+        : path === "/v1/addresses"
+          ? { items: [] }
+          : CATEGORIES) as unknown as typeof apiGet);
   scrollTo.mockClear();
 });
 

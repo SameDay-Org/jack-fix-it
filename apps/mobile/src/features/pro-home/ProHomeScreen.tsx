@@ -4,6 +4,7 @@ import { Text, View } from "react-native";
 
 import { useSession } from "@/api";
 import { Screen, useTabBarInset } from "@/components/ui";
+import { NotificationsPrompt } from "@/features/notifications/NotificationsPrompt";
 import { useProJobs, YourJobs } from "@/features/pro-jobs";
 
 import { OpportunityList } from "./OpportunityList";
@@ -11,7 +12,8 @@ import { OpportunityList } from "./OpportunityList";
 /**
  * The pro's home (#219), the Home tab: a greeting, the pro's active jobs (#63), then the new
  * opportunities, which scroll the header along. A pull refreshes the jobs with the
- * opportunities. The wallet (#70) comes later.
+ * opportunities. Under the greeting, the notifications pre-prompt while it applies (#334). The
+ * wallet (#70) comes later.
  */
 export function ProHomeScreen() {
   const { t } = useTranslation();
@@ -42,6 +44,7 @@ export function ProHomeScreen() {
                   ? t("opportunities.greeting", { name: firstName })
                   : t("opportunities.greetingNoName")}
               </Text>
+              <NotificationsPrompt audience="pro" testID="pro-home-notifications" />
               <YourJobs />
               <Text accessibilityRole="header" className="text-headline text-navy-900">
                 {t("opportunities.title")}

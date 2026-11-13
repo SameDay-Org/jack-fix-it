@@ -1,5 +1,4 @@
-import { House, LogOut } from "lucide-react";
-import Link from "next/link";
+import { House, LifeBuoy, LogOut } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +8,8 @@ import { getT } from "@/i18n/server";
 import { requireStaff } from "@/lib/session";
 
 import { logout } from "../logout/actions";
+import { NavLink } from "./nav-link";
+import { SUPPORT_PATH } from "./support/tickets";
 
 /**
  * The panel shell: every page under it requires a staff session (requireStaff, checked against
@@ -22,19 +23,19 @@ export default async function PanelLayout({ children }: { children: ReactNode })
 
   return (
     <div lang={locale} className="min-h-dvh bg-gray-50 md:flex">
-      <aside className="flex items-center gap-4 bg-navy-900 px-4 py-3 text-white md:min-h-dvh md:w-64 md:shrink-0 md:flex-col md:items-stretch md:gap-8 md:px-5 md:py-8">
-        <p className="text-lg font-bold">
+      <aside className="flex flex-wrap items-center gap-x-4 gap-y-2 bg-navy-900 px-4 py-3 text-white md:min-h-dvh md:w-64 md:shrink-0 md:flex-col md:flex-nowrap md:items-stretch md:gap-8 md:px-5 md:py-8">
+        <p className="text-lg font-bold whitespace-nowrap md:whitespace-normal">
           {t("brand.name")} <span className="text-green-500">{t("admin.title")}</span>
         </p>
         <nav aria-label={t("admin.nav.label")} className="flex gap-2 md:flex-col">
-          <Link
-            href="/admin"
-            aria-current="page"
-            className="inline-flex items-center gap-2 rounded-pill bg-navy-700 px-4 py-2 text-sm font-semibold text-white"
-          >
+          <NavLink href="/admin" exact>
             <House aria-hidden className="size-4" />
             {t("admin.nav.home")}
-          </Link>
+          </NavLink>
+          <NavLink href={SUPPORT_PATH}>
+            <LifeBuoy aria-hidden className="size-4" />
+            {t("admin.nav.support")}
+          </NavLink>
         </nav>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">

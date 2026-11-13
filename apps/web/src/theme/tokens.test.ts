@@ -70,4 +70,11 @@ describe("web theme mirrors the mobile tokens", () => {
 
     expect(webColors.filter((name) => !(name in tokens.colors))).toEqual([]);
   });
+
+  // The chat read-receipt "seen" blue (#333): a graphic on navy, so the parity checks alone
+  // would pass a wrong value written to both files.
+  it("the read-receipt seen blue is #7cc6ff on both sides", () => {
+    expect(theme.get("color-receipt-seen")).toBe("#7cc6ff");
+    expect(tokens.colors["receipt-seen"]?.toLowerCase()).toBe("#7cc6ff");
+  });
 });

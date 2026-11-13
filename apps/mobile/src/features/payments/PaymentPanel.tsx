@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { ActivityIndicator, Text, View } from "react-native";
 
 import { Button, Notice, Skeleton, StatusBadge } from "@/components/ui";
+import { NotificationsPrompt } from "@/features/notifications/NotificationsPrompt";
 import { formatMoney } from "@/features/quotes/format";
 import { continuousCorners, tokens } from "@/theme";
 
@@ -88,17 +89,23 @@ export function PaymentPanel({ requestId, quoteId, amountCents, pro, testID }: P
   );
 
   if (phase === "booked" && job) {
+    // No updates to promise on a cancelled or refunded job: no badge, and no pre-prompt either.
     if (!SHOWS_PAID[job.status]) return null;
+    // Once booked, the job's updates are what notifications bring: the pre-prompt asks here, under
+    // the badge (#334), on its own terms (the system can still ask, the card was not closed).
     return (
-      <View
-        accessible
-        accessibilityRole="text"
-        accessibilityLabel={t("payment.paid")}
-        // Around the pill only, so the reader's focus box is the badge and not the card's width.
-        className="self-start"
-        testID={`${testID}-paid`}
-      >
-        <StatusBadge label={t("payment.paid")} tone="success" />
+      <View className="gap-3">
+        <View
+          accessible
+          accessibilityRole="text"
+          accessibilityLabel={t("payment.paid")}
+          // Around the pill only, so the reader's focus box is the badge and not the card's width.
+          className="self-start"
+          testID={`${testID}-paid`}
+        >
+          <StatusBadge label={t("payment.paid")} tone="success" />
+        </View>
+        <NotificationsPrompt audience="customer" testID={`${testID}-notifications`} />
       </View>
     );
   }

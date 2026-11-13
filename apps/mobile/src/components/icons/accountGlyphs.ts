@@ -22,6 +22,14 @@ export const ACCOUNT_GLYPHS = {
       "M8 14.75a2.25 2.25 0 1 0 0 4.5a2.25 2.25 0 1 0 0-4.5",
     ],
   },
+  // A map pin with its round hole: a saved address.
+  addresses: {
+    accent: "M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11Z",
+    strokes: [
+      "M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11Z",
+      "M12 7.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5",
+    ],
+  },
   // A round speech bubble asking a question.
   help: {
     accent: "M12 3.5a8.5 8.5 0 0 0-7.4 12.7L3.5 20.5l4.3-1.1A8.5 8.5 0 1 0 12 3.5Z",

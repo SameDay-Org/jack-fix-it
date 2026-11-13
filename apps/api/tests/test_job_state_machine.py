@@ -22,6 +22,7 @@ from app.modules.quotes.models import Quote
 from app.modules.requests.models import RequestOrigin, ServiceRequest
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole, UserStatus
+from tests.conftest import InMemoryJobLocationStore
 from tests.helpers import as_status_writer
 
 GLOSSARY = Path(__file__).resolve().parents[3] / "docs" / "glossary.md"
@@ -165,7 +166,8 @@ async def make_job(session: AsyncSession, world: World, status: JobStatus, **fie
 
 
 def machine(session: AsyncSession) -> JobStateMachine:
-    return JobStateMachine(session, ProService(session))
+    # With a location store: the table has edges out of on_the_way (#350).
+    return JobStateMachine(session, ProService(session), InMemoryJobLocationStore())
 
 
 async def events_of(session: AsyncSession, job_id: uuid.UUID) -> list[JobEvent]:

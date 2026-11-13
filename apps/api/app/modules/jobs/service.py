@@ -8,6 +8,11 @@ in the same transaction, and answers:
 - 403 for an actor kind the edge does not allow.
 A rejected transition changes nothing and writes no event.
 
+A job that leaves on_the_way loses the pro's live position (#350, location.py): the machine
+deletes it under the row lock, before the caller commits. So it is built with the location
+store wherever a job can leave on_the_way; one built without it refuses that move
+(RuntimeError, nothing written) instead of leaving a position behind.
+
 The caller owns the transaction: transition() flushes and never commits, so a feature can
 change a job together with its own rows (payments, photos, disputes) atomically.
 
@@ -24,15 +29,16 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Final
 
-from sqlalchemy import text
+from sqlalchemy import Subquery, text
 from sqlalchemy.exc import DBAPIError, PendingRollbackError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.errors import ForbiddenError, NotFoundError
 from app.modules.jobs.errors import InvalidTransitionError
+from app.modules.jobs.location import JobLocationStore, forget_position
 from app.modules.jobs.models import Job, JobEvent, JobStatus
 from app.modules.jobs.repository import JobRepository
-from app.modules.jobs.transitions import CHAT_OPEN, TRANSITIONS, ActorKind
+from app.modules.jobs.transitions import CHAT_OPEN, REVIEWABLE, TRANSITIONS, ActorKind
 from app.modules.pros.service import ProService
 from app.modules.users.types import UserAccount, UserRole
 
@@ -105,10 +111,16 @@ _ENTRY_TIMESTAMPS: Final = {
 
 
 class JobStateMachine:
-    def __init__(self, session: AsyncSession, pros: ProService) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        pros: ProService,
+        locations: JobLocationStore | None = None,
+    ) -> None:
         self._session = session
         self._jobs = JobRepository(session)
         self._pros = pros
+        self._locations = locations
 
     async def transition(
         self,
@@ -137,6 +149,10 @@ class JobStateMachine:
             raise ForbiddenError
 
         from_status = job.status
+        if from_status is JobStatus.ON_THE_WAY:
+            # The pro's live position ends with on_the_way (#350): deleted under the row lock,
+            # which holds every ping off until the caller commits.
+            await forget_position(self._locations, job.id)
         now = datetime.now(UTC)
         timestamp = _ENTRY_TIMESTAMPS.get(to)
         if timestamp is not None and getattr(job, timestamp) is None:
@@ -224,21 +240,40 @@ class JobScheduler:
 
 @dataclass(frozen=True)
 class JobParties:
-    """Who takes part in a job, for the chat (#71): the customer's and the pro's user ids, and
-    whether the job still accepts messages (CHAT_OPEN)."""
+    """Who takes part in a job, for the chat (#71) and the reviews (#77): the customer's and
+    the pro's user ids, whether the job still accepts messages (CHAT_OPEN) and whether its
+    two sides may review each other (is_reviewable)."""
 
     job_id: uuid.UUID
     customer_id: uuid.UUID
     pro_user_id: uuid.UUID
     chat_open: bool
+    reviewable: bool
+
+
+def is_reviewable(job: Job) -> bool:
+    """Whether the job was confirmed, by the customer (#66) or by the 48 h auto-confirm (#67):
+    confirmed, or paid out after that confirmation. A job paid out by an admin's release of a
+    dispute was never confirmed (confirmed_at is set on entering confirmed only), and neither
+    was any earlier, disputed, refunded or cancelled one. Once true it stays true: confirmed
+    leads to paid_out alone, which is terminal, and confirmed_at is never cleared."""
+    if job.status is JobStatus.PAID_OUT:
+        return job.confirmed_at is not None
+    return job.status in REVIEWABLE
 
 
 class JobPartiesReader:
-    """The parties of a job, for another module (the chat). Reads only."""
+    """The parties of a job, for another module (the chat, the reviews). Reads only."""
 
     def __init__(self, session: AsyncSession, pros: ProService) -> None:
         self._jobs = JobRepository(session)
         self._pros = pros
+
+    @staticmethod
+    def confirmations() -> Subquery:
+        """Each job's id (`job_id`) and confirmation time (`confirmed_at`), as a subquery: a
+        review's publication window is read in the reviews' own query (#77)."""
+        return JobRepository.confirmations()
 
     async def parties(self, job_id: uuid.UUID, *, lock: bool = False) -> JobParties | None:
         """The job's parties, or None for an unknown job: for staff, who may read any job.
@@ -270,4 +305,5 @@ class JobPartiesReader:
             customer_id=job.customer_id,
             pro_user_id=pro_user_id,
             chat_open=job.status in CHAT_OPEN,
+            reviewable=is_reviewable(job),
         )

@@ -5,7 +5,8 @@ const CENT_DIGITS = 2;
 
 /**
  * The largest amount the API accepts (`amount_cents` is a 32-bit column, `le=INT4_MAX` in
- * `QuoteCreate`). The platform may set a lower cap; the server enforces it (422).
+ * `QuoteCreate`). The platform may set a lower cap, which the opportunity states
+ * (`quote_max_amount_cents`) and the server enforces (422).
  */
 export const MAX_AMOUNT_CENTS = 2_147_483_647;
 

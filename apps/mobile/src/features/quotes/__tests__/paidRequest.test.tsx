@@ -7,6 +7,10 @@ import { AccessibilityInfo } from "react-native";
 import { ApiError, apiGet } from "@/api";
 import { dismissToast } from "@/components/ui/toast";
 
+import { resetSecureStore, secureStoreMock } from "../../../api/__tests__/helpers";
+import { refreshPermission, resetPermissionForTests } from "../../notifications/permission";
+import { resetPromptDismissalForTests } from "../../notifications/promptDismissal";
+
 import {
   ACCEPTED,
   api,
@@ -57,8 +61,15 @@ jest.mock(
 // One instance for the component and the test (root __mocks__, see jest-root-mocks note).
 jest.mock("@stripe/stripe-react-native");
 jest.mock("expo-haptics");
+jest.mock("expo-notifications");
+jest.mock(
+  "expo-secure-store",
+  () => jest.requireActual("../../../api/__tests__/helpers").secureStoreMock,
+);
 
 const session = jest.requireMock<{ mockSession: SessionDouble }>("@/api").mockSession;
+const notifications =
+  jest.requireMock<typeof import("../../../../__mocks__/expo-notifications")>("expo-notifications");
 // The whole screen and a payment walked through it: the room the payment suite takes.
 jest.setTimeout(30_000);
 
@@ -68,6 +79,14 @@ const JOB_HREF = { pathname: "/requests/[id]/job", params: { id: REQUEST_ID } };
 const paidState = () => screen.queryAllByTestId(`${payTestId(ACCEPTED)}-paid`);
 /** Every text on the screen that says the job is booked, in either language. */
 const bookedTexts = () => screen.queryAllByText(/booked|reserva/i);
+const PROMPT = `${payTestId(ACCEPTED)}-notifications`;
+const PROMPT_BODY = "Get updates when your pro is on the way.";
+const DISMISSED_KEY = "jackfixit.notifications.promptDismissed";
+/** The system prompt can still be shown: the pre-prompt's own condition (#334). */
+const askable = () =>
+  act(async () => {
+    await refreshPermission();
+  });
 const cardButtons = () =>
   card(ACCEPTED)
     .getAllByRole("button")
@@ -84,6 +103,11 @@ beforeEach(() => {
   routeApi();
   jest.mocked(router.push).mockClear();
   jest.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+  // Until a test reads it, the permission is unknown and the pre-prompt stays away.
+  notifications.resetNotificationsMock();
+  resetPermissionForTests();
+  resetPromptDismissalForTests();
+  resetSecureStore();
 });
 
 afterEach(async () => {
@@ -214,7 +238,7 @@ describe("a paid request says it is booked once (#324)", () => {
   it.each([
     ["cancelled", "This job was cancelled", false],
     ["refunded", "This job was cancelled", false],
-    ["confirmed", "Job's done", true],
+    ["confirmed", "Job confirmed", true],
   ] as const)(
     "once the job is %s nothing says booked: the notice says where it ended",
     async (status, title, paid) => {
@@ -247,4 +271,96 @@ describe("a paid request says it is booked once (#324)", () => {
       expect(screen.queryByRole("button", { name: PAY_NAME })).toBeNull();
     },
   );
+});
+
+describe("the notifications pre-prompt sits under Paid, and says nothing about booking (#334)", () => {
+  it("a paid request: one notice, Paid, and the pre-prompt under it, which asks nothing yet", async () => {
+    await askable();
+    await renderWithQuery(<App />);
+
+    expect(await screen.findByRole("header", { name: "Your job is booked" })).toBeTruthy();
+    const prompt = await screen.findByTestId(PROMPT);
+    expect(within(prompt).getByText(PROMPT_BODY)).toBeTruthy();
+    // On the accepted card, right under the badge.
+    expect(
+      card(ACCEPTED)
+        .getAllByTestId(/-(paid|notifications)$/)
+        .map((node) => node.props.testID),
+    ).toEqual([`${payTestId(ACCEPTED)}-paid`, PROMPT]);
+    // Still one booked line on the screen and one way to the job: the notice's.
+    expect(bookedTexts()).toHaveLength(1);
+    expect(screen.getAllByTestId("job-booked")).toHaveLength(1);
+    expect(screen.getAllByText("Paid")).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: FOLLOW })).toHaveLength(1);
+    expect(cardButtons()).toEqual(["View María P.'s profile", "Turn on", "Not now"]);
+    expect(notifications.requestPermissionsAsync).not.toHaveBeenCalled();
+
+    // Not now: the card closes for good; Paid and the notice stay.
+    await act(async () => fireEvent.press(within(prompt).getByRole("button", { name: "Not now" })));
+    expect(screen.queryByTestId(PROMPT)).toBeNull();
+    expect(paidState()).toHaveLength(1);
+    expect(screen.getAllByTestId("job-booked")).toHaveLength(1);
+    expect(cardButtons()).toEqual(["View María P.'s profile"]);
+    expect(secureStoreMock.setItemAsync).toHaveBeenCalledWith(
+      DISMISSED_KEY,
+      "1",
+      expect.anything(),
+    );
+  });
+
+  it("closed before on this device: Paid and the notice, no pre-prompt", async () => {
+    await secureStoreMock.setItemAsync(DISMISSED_KEY, "1");
+    await askable();
+    await renderWithQuery(<App />);
+
+    await screen.findByTestId(`${payTestId(ACCEPTED)}-paid`);
+    await waitFor(() => expect(secureStoreMock.getItemAsync).toHaveBeenCalledWith(DISMISSED_KEY));
+    await act(async () => {});
+    expect(screen.queryByTestId(PROMPT)).toBeNull();
+    expect(screen.getAllByTestId("job-booked")).toHaveLength(1);
+    expect(cardButtons()).toEqual(["View María P.'s profile"]);
+  });
+
+  it("not before the payment, nor while it is confirmed: it comes with Paid", async () => {
+    fakeClock();
+    await askable();
+    api.job = () => Promise.reject(notFound());
+    await renderWithQuery(<App />);
+
+    await act(async () => fireEvent.press(await screen.findByRole("button", { name: PAY_NAME })));
+    await screen.findByTestId(`${payTestId(ACCEPTED)}-confirming`);
+    expect(screen.queryByTestId(PROMPT)).toBeNull();
+    expect(screen.queryByText(PROMPT_BODY)).toBeNull();
+
+    api.job = () => Promise.resolve(JOB);
+    await act(async () => jest.advanceTimersByTime(2_000));
+    await screen.findByTestId(`${payTestId(ACCEPTED)}-paid`);
+    expect(await screen.findByTestId(PROMPT)).toBeTruthy();
+    expect(bookedTexts()).toHaveLength(1);
+  });
+
+  it.each([
+    ["cancelled", "This job was cancelled", false],
+    ["refunded", "This job was cancelled", false],
+    ["confirmed", "Job confirmed", true],
+  ] as const)("once the job is %s, the pre-prompt goes with Paid", async (status, title, shown) => {
+    await askable();
+    await renderWithQuery(<App />);
+    await screen.findByTestId(PROMPT);
+
+    const answers: Promise<unknown>[] = [];
+    api.job = () => {
+      const answer = Promise.resolve({ ...JOB, status });
+      answers.push(answer);
+      return answer;
+    };
+    await act(async () => navigation.setFocused(false));
+    await act(async () => navigation.setFocused(true));
+    expect(await screen.findByRole("header", { name: title })).toBeTruthy();
+    await waitFor(() => expect(answers).toHaveLength(2));
+    await act(async () => void (await Promise.all(answers)));
+
+    await waitFor(() => expect(paidState()).toHaveLength(shown ? 1 : 0));
+    expect(screen.queryAllByTestId(PROMPT)).toHaveLength(shown ? 1 : 0);
+  });
 });

@@ -8,6 +8,7 @@ import { Button, Card, IconTile, Screen, Skeleton, TextSkeleton } from "@/compon
 import { BackButton } from "@/features/auth/components/BackButton";
 import { markOpportunityViewed } from "@/features/pro-home/useOpportunities";
 import { useSettledError } from "@/features/quotes/useRequestQuotes";
+import { withPeriod } from "@/features/request/period";
 
 import { categoryLabel, categoryTileProps, formatDay, locationLabel, sentAgo } from "./format";
 import { OpportunityMedia } from "./OpportunityMedia";
@@ -168,7 +169,11 @@ function OpportunityBody({ opportunity, now, refresh }: OpportunityBodyProps) {
         {opportunity.preferred_date ? (
           <Fact
             label={t("opportunities.detail.when")}
-            value={formatDay(opportunity.preferred_date)}
+            value={withPeriod(
+              t,
+              formatDay(opportunity.preferred_date),
+              opportunity.preferred_period,
+            )}
             testID="opportunity-date"
           />
         ) : null}

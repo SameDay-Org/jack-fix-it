@@ -26,7 +26,7 @@ from app.modules.jobs.tasks import sanitize_job_photos
 from app.modules.media.safe_status import MediaSafeStatus
 from app.modules.pros.service import ProService
 from app.modules.requests.tasks import SANITIZE_SPARE_TRIES
-from tests.conftest import make_settings
+from tests.conftest import InMemoryJobLocationStore, make_settings
 from tests.test_arrival_code import CONFIG, CommittedJob, committed_job
 from tests.test_job_photos_api import FakeStorage, RecordingQueue, key_of
 from tests.test_media_copies import MAX_TRIES, MemoryStorage, gps_jpeg
@@ -40,7 +40,8 @@ WAIT_SECONDS = 10
 async def working(committed_job: CommittedJob) -> AsyncIterator[CommittedJob]:
     """The committed job in progress; its photos deleted after."""
     async with committed_job.sessions() as session:
-        machine = JobStateMachine(session, ProService(session))
+        # With a location store: the job leaves on_the_way (#350).
+        machine = JobStateMachine(session, ProService(session), InMemoryJobLocationStore())
         await machine.transition(committed_job.job_id, JobStatus.IN_PROGRESS, committed_job.pro)
         await session.commit()
     try:

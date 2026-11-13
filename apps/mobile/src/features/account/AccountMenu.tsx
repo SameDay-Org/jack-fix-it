@@ -3,16 +3,21 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, View } from "react-native";
 
-import { logout } from "@/api";
+import { logout, useSession } from "@/api";
 import { ACCOUNT_GLYPHS } from "@/components/icons";
 import { ListGroup, ListRow } from "@/components/ui";
+import { useSavedAddresses } from "@/features/addresses";
 
 /**
- * The Account tab's short list: Settings, Help and Legal open their screens; Log out sits apart, has
- * no chevron (it opens nothing) and asks first.
+ * The Account tab's short list: Settings, Addresses (a customer's, with how many are saved), Help
+ * and Legal open their screens; Log out sits apart, has no chevron (it opens nothing) and asks
+ * first.
  */
 export function AccountMenu() {
   const { t } = useTranslation();
+  // Only customers keep addresses: a pro's menu has no such row, and asks nothing for it.
+  const isCustomer = useSession().user?.role === "customer";
+  const count = useSavedAddresses({ enabled: isCustomer }).data?.items.length;
   const [signingOut, setSigningOut] = useState(false);
   // One question at a time: a second quick tap would stack a second dialog on Android.
   const asking = useRef(false);
@@ -64,6 +69,22 @@ export function AccountMenu() {
           onPress={() => router.push("/settings")}
           testID="account-settings"
         />
+        {isCustomer ? (
+          <ListRow
+            label={t("account.menu.addresses")}
+            glyph={ACCOUNT_GLYPHS.addresses}
+            // The count once the book is known; nothing in its place while it loads or failed.
+            value={
+              count === undefined
+                ? undefined
+                : count === 0
+                  ? t("account.menu.addressesNone")
+                  : t("account.menu.addressesCount", { count })
+            }
+            onPress={() => router.push("/account/addresses")}
+            testID="account-addresses"
+          />
+        ) : null}
         <ListRow
           label={t("account.menu.help")}
           glyph={ACCOUNT_GLYPHS.help}

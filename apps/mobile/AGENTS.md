@@ -138,14 +138,20 @@ options={sheetOptions([0.5, 0.95])} />`, or `"fitToContents"`), rendering `Sheet
   and the position go into the one request and nowhere else (no state after submit, no cache, no
   log). The tries left after a wrong code come from `ApiError.header()`. A sheet closes once
   (`useSheetExit`), and only for the session it opened in.
-- Strings: `src/i18n/locales/{en,es}.json` through `useTranslation()`; the device language
-  picks the catalog, English is the fallback.
+- Strings: `src/i18n/locales/{en,es}.json` through `useTranslation()`. Signed out, the device
+  language picks the catalog (English is the fallback); signed in, the account's saved `locale`
+  does (`features/account/AccountLanguage.tsx`), and Settings changes it (`LanguageSection`).
 - Config: `app.config.ts` reads `APP_VARIANT` (development, preview, production) to suffix the
   name and bundle id. The EAS owner and project id are public constants there. The API URL is
   `EXPO_PUBLIC_API_URL` (https outside development), set per profile in `eas.json`; the request
   timeout is `EXPO_PUBLIC_API_TIMEOUT_MS`.
 - EAS profiles: `development` (dev client, device), `development-simulator` (iOS simulator,
   Android APK; used by the emulator portals), `preview`, `production`.
+- User-authored text shown to anyone (review comments first: the public pro profile, #78)
+  renders as plain text only: a `Text` child, never markdown, HTML or a WebView, and no
+  auto-linked URLs, emails or phones (no `dataDetectorType`, no link parsing). The API's contact
+  redaction is not HTML sanitization: `<svg onload=alert(390)>` is stored and returned verbatim
+  as a JSON string, so only the rendering keeps it inert (#392).
 - UI changes need screenshots from the Android emulator and the iOS simulator, including empty
   and error states.
 

@@ -31,6 +31,7 @@ import {
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../../api/errors"),
   onSignOut: jest.fn(),
+  beforeSignOut: jest.fn(() => () => undefined),
   apiConfig: { timeoutMs: 15_000 },
   apiGet: jest.fn(),
   isCurrentGeneration: jest.fn(() => true),
@@ -205,6 +206,8 @@ beforeEach(() => {
     .mockReset()
     .mockImplementation((async (path: string, options?: ApiOptions) => {
       if (path === REQUESTS_PATH) return { items: mockApi.requests, next_cursor: null };
+      // The Account tab counts a customer's saved addresses.
+      if (path === "/v1/addresses") return { items: [] };
       if (path === JOB_PATH) {
         const found = mockApi.jobs[options?.params?.request_id ?? ""];
         if (!found) throw new ApiError(404, "not_found");
@@ -225,7 +228,7 @@ describe("the tabs' job banner (#64)", () => {
     ["on the way, close", ON_THE_WAY, `Dan is on the way · 12${NBSP}min`],
     ["arrived", ARRIVED, "Dan has arrived"],
     ["working", WORKING, "Dan is working"],
-    ["finished", FINISHED, "Dan finished the job"],
+    ["finished", FINISHED, "Dan finished the job · confirm"],
   ] as const)("shows on Home, History and Account while %s", async (_, active, line) => {
     mockApi.requests = [request(1, "accepted"), request(2, "quote_ready")];
     mockApi.jobs = { [requestId(1)]: active };

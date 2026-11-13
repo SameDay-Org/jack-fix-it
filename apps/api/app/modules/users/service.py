@@ -31,6 +31,7 @@ from app.modules.users.types import (
     KEEP,
     ContactPoints,
     Keep,
+    Locale,
     UserAccount,
     UserCredentials,
     UserRole,
@@ -183,10 +184,11 @@ class UserService:
         home_city: str | Keep | None = KEEP,
         home_state: str | Keep | None = KEEP,
         photo_key: str | Keep | None = KEEP,
+        locale: Locale | None = None,
     ) -> UserAccount:
-        """Sets the caller's own names, home city and state and ID photo (#165, #250); the
-        caller owns the commit. A name given as None keeps the stored one; a card field given
-        as KEEP does, and None clears it.
+        """Sets the caller's own names, home city and state, ID photo and app language (#165,
+        #250, #218); the caller owns the commit. A name or the locale given as None keeps the
+        stored one; a card field given as KEEP does, and None clears it.
 
         Every check runs before the row changes, so a refusal stores nothing:
         - `photo_key` must be a well-formed profile_photo upload key of this very user
@@ -221,6 +223,8 @@ class UserService:
             user.home_city, user.home_state = home_city, home_state
         if not isinstance(photo_key, Keep):
             user.photo_key = photo_key
+        if locale is not None:
+            user.locale = locale
         await self._session.flush()
         return _to_account(user)
 
@@ -230,6 +234,11 @@ class UserService:
     async def stripe_customer_id(self, user_id: uuid.UUID) -> str | None:
         """The user's Stripe Customer id (#58); None until a payment created one."""
         return await self._users.get_stripe_customer_id(user_id)
+
+    async def lock_stripe_customer_id(self, user_id: uuid.UUID) -> str | None:
+        """The user's Stripe Customer id, the user's row locked until the transaction ends: the
+        first saved card's create (#253) holds it, so a second call waits and reads the id."""
+        return await self._users.get_stripe_customer_id_for_update(user_id)
 
     async def set_stripe_customer_id_if_missing(self, user_id: uuid.UUID, customer_id: str) -> bool:
         """Stores the user's Stripe Customer id unless one is stored already (another

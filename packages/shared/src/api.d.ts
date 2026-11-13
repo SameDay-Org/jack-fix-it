@@ -152,11 +152,12 @@ export interface paths {
         head?: never;
         /**
          * Update the current user
-         * @description Sets the caller's own first and last name (#165), home city and state and ID photo
-         *     (#250). Both names are required together while they are not stored; afterwards either may
-         *     change alone. The city and the state are set together, or both cleared with null. The
-         *     photo is the caller's own profile_photo upload key; for a pro without a public profile
-         *     photo it becomes that photo too. Nothing changes when any field is refused.
+         * @description Sets the caller's own first and last name (#165), home city and state, ID photo (#250)
+         *     and app language (#218). Both names are required together while they are not stored;
+         *     afterwards either may change alone. The city and the state are set together, or both
+         *     cleared with null. The photo is the caller's own profile_photo upload key; for a pro
+         *     without a public profile photo it becomes that photo too. The locale (en or es) is also
+         *     the language of later pushes and emails. Nothing changes when any field is refused.
          */
         patch: operations["update_me_v1_auth_me_patch"];
         trace?: never;
@@ -693,6 +694,104 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/me/payment-methods/setup-intent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start adding a card to my wallet
+         * @description What the Payment Sheet needs, in setup mode, to save a card: a new SetupIntent's client
+         *     secret, the caller's Stripe Customer (created on the first call, the same one ever after)
+         *     and a new ephemeral key for it, and the publishable key. The card data goes from the app to
+         *     Stripe, never through this API. The body takes no field.
+         */
+        post: operations["create_setup_intent_v1_me_payment_methods_setup_intent_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/payment-methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List my saved cards
+         * @description The caller's saved cards, the most recently added first: the brand, the last four
+         *     digits, the expiry and whether it is the default. Empty until a card is saved. Always the
+         *     whole wallet, in one response: the API reads at most PAYMENT_METHOD_LIST_MAX_PAGES pages
+         *     of 100 cards of one customer from Stripe (500 cards unless the setting is changed), and a
+         *     wallet with more is 503 payments_unavailable, never a partial list.
+         */
+        get: operations["list_payment_methods_v1_me_payment_methods_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/payment-methods/{payment_method_id}/default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make a saved card my default
+         * @description Makes the card the caller's default payment method and returns it. Asking again for
+         *     the card that is the default already changes nothing. Default changes and deletes of one
+         *     wallet run one at a time: a call waits for the one before it, and is 503
+         *     payments_unavailable when its waits (for a database connection, then for that call) and
+         *     its own work together take longer than PAYMENT_METHOD_CHANGE_TIMEOUT_SECONDS.
+         */
+        post: operations["set_default_payment_method_v1_me_payment_methods__payment_method_id__default_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/payment-methods/{payment_method_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a saved card
+         * @description Removes the card from the caller's wallet for good. Deleting the default makes the most
+         *     recently added of the other cards the default; with no other card, none is. A card deleted
+         *     already is a 404. Default changes and deletes of one wallet run one at a time, so two
+         *     deletes at once end as one after the other would: a call waits for the one before it, and
+         *     is 503 payments_unavailable when its waits (for a database connection, then for that call)
+         *     and its own work together take longer than PAYMENT_METHOD_CHANGE_TIMEOUT_SECONDS. A wallet
+         *     with more cards than the list reads cannot delete its default card (503): the next default
+         *     could not be chosen among all of them.
+         */
+        delete: operations["delete_payment_method_v1_me_payment_methods__payment_method_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/requests/{request_id}/job": {
         parameters: {
             query?: never;
@@ -885,6 +984,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/jobs/{job_id}/pro-location": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * See where my pro is while on the way (never stored in the database)
+         * @description The pro's latest position on the way to the customer's own job, to poll every few
+         *     seconds. `position` is null whenever there is none to show: before the first one, once it
+         *     is too old, and whenever the pro is not on the way (the job's own status says which).
+         *     Positions are kept in memory for a short time only, never in the database, and every
+         *     response says `Cache-Control: no-store`.
+         */
+        get: operations["get_pro_location_v1_jobs__job_id__pro_location_get"];
+        /**
+         * Share my position while I am on my way (never stored in the database)
+         * @description The pro's app sends this every few seconds from On my way to the check-in. Only the
+         *     latest position of a job is kept, in memory, for a short time; it is deleted when the pro
+         *     checks in or the job leaves on the way, and no position is ever written to the database.
+         *     One sent too soon after the last, or older than it, is answered 204 and dropped.
+         */
+        put: operations["share_pro_location_v1_jobs__job_id__pro_location_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/jobs/{job_id}/route": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * See my pro's route to the job's address while on the way (never stored in the database)
+         * @description The driving route from the pro's latest position to the address of the customer's own
+         *     job, to poll next to the pro's position. `route` is null whenever there is none to show:
+         *     whenever the position is (the pro is not on the way, or has sent none yet), when the
+         *     address cannot be placed on the map, and when no road leads there. The same route is
+         *     answered for a short while, until the pro has moved away from where it starts. It is kept
+         *     in memory for that short time only, never in the database, and every response says
+         *     `Cache-Control: no-store`.
+         */
+        get: operations["get_job_route_v1_jobs__job_id__route_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/jobs/{job_id}/messages": {
         parameters: {
             query?: never;
@@ -1010,6 +1166,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/devices/unregister": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop pushes to this device, without a session
+         * @description Removes the token's device for an app that has no session left: a sign-out whose
+         *     `DELETE /v1/devices` did not get through is retried here, so the account that left stops
+         *     receiving pushes on that phone.
+         *
+         *     No sign-in: holding the exact token is the credential, and an `Authorization` header, if
+         *     sent, is not read. Only that token's device can go. Limited per client IP.
+         */
+        post: operations["unregister_device_without_session_v1_devices_unregister_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/waitlist": {
         parameters: {
             query?: never;
@@ -1130,6 +1311,170 @@ export interface paths {
          *     not sent when it is turned back on.
          */
         patch: operations["update_notification_preferences_v1_me_notification_preferences_patch"];
+        trace?: never;
+    };
+    "/v1/support/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write to the team (Talk to Jack)
+         * @description Opens a support ticket for the team. The message is kept as typed and read by the team
+         *     only. `job_id` ties the ticket to one of the caller's jobs.
+         */
+        post: operations["create_ticket_v1_support_tickets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/support/tickets/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List my support tickets
+         * @description The caller's own tickets, newest first: the topic, the job, the status and the dates,
+         *     what the app shows after a ticket was sent. Never the message, and never anyone else's.
+         */
+        get: operations["list_my_tickets_v1_support_tickets_mine_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/support/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List support tickets (staff)
+         * @description Every ticket, newest first, for the BDC and admins: the writer's first name and role,
+         *     the topic, the job and the status. The message is in the ticket's detail only.
+         */
+        get: operations["staff_list_tickets_v1_admin_support_tickets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/support/tickets/{ticket_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a support ticket (staff)
+         * @description One ticket with its message as the writer typed it.
+         */
+        get: operations["staff_get_ticket_v1_admin_support_tickets__ticket_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change a support ticket's status (staff)
+         * @description Moves the ticket to open, in_progress or closed; any status may follow any other. Each
+         *     change is recorded in the audit log with the staff member who made it; the same status
+         *     again changes nothing.
+         */
+        patch: operations["staff_set_ticket_status_v1_admin_support_tickets__ticket_id__patch"];
+        trace?: never;
+    };
+    "/v1/jobs/{job_id}/reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Review the other side of my job
+         * @description The caller's review of the other side of a job they took part in: the customer reviews
+         *     the pro, the pro reviews the customer. One review per side per job, only once the job was
+         *     confirmed, never edited. Who is reviewed comes from the job, not from the body.
+         *
+         *     The customer may rate communication, quality, punctuality and value next to `overall`; the
+         *     pro may rate communication and punctuality only (quality or value from the pro is a 422).
+         *
+         *     Contact details in the comment are masked before it is stored, and only the masked text is
+         *     kept; `comment_redacted` says so.
+         */
+        post: operations["create_review_v1_jobs__job_id__reviews_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/jobs/{job_id}/reviews/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read my review of a job
+         * @description The caller's own review of the job, or null, and whether they may still write one. It
+         *     never returns the other side's review, whether or not the caller wrote theirs.
+         */
+        get: operations["read_my_review_v1_jobs__job_id__reviews_mine_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users/me/rating": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read my rating
+         * @description The caller's own rating, as a customer or as a pro: the average of the overall ratings
+         *     they received, to one decimal, and how many; null and 0 with none.
+         *
+         *     It counts published reviews only. A review is published once its target reviewed the same
+         *     job too, or 14 days (REVIEW_PUBLISH_AFTER_DAYS) after the job's confirmation, whichever
+         *     comes first: until then it is not in the average or the count, so nobody reads the other
+         *     side's score of a job before writing their own.
+         */
+        get: operations["read_my_rating_v1_users_me_rating_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
 }
@@ -1831,6 +2176,67 @@ export interface components {
             upload_keys: string[];
         };
         /**
+         * JobRoute
+         * @description The pro's driving route to the job's address, as computed at `computed_at` (#351).
+         */
+        JobRoute: {
+            /**
+             * Geometry
+             * @description The line to draw, from the pro to the address: `[lng, lat]` pairs in order (GeoJSON's order), thinned to a few hundred points at most.
+             */
+            geometry: [
+                number,
+                number
+            ][];
+            /**
+             * Distance M
+             * @description Meters left to drive.
+             */
+            distance_m: number;
+            /**
+             * Duration S
+             * @description Seconds left, as estimated when computed.
+             */
+            duration_s: number;
+            /**
+             * Steps
+             * @description The next streets of the route, in order: the first few dozen at most.
+             */
+            steps: components["schemas"]["JobRouteStep"][];
+            /**
+             * Computed At
+             * Format: date-time
+             * @description When the route was computed. The same route is answered for a short while, until the pro has moved away from where it starts.
+             */
+            computed_at: string;
+        };
+        /** JobRouteOut */
+        JobRouteOut: {
+            /** @description The pro's route to the job's address. null whenever there is none to show: the pro is not on the way (not yet, arrived, or the job moved on), has sent no position yet, the address cannot be placed on the map, no road leads there, or the route is being computed right now (ask again). */
+            route: components["schemas"]["JobRoute"] | null;
+        };
+        /**
+         * JobRouteStep
+         * @description One stretch of the route on one street. No instruction text.
+         */
+        JobRouteStep: {
+            /**
+             * Street Name
+             * @description The street's name; null on an unnamed road.
+             */
+            street_name: string | null;
+            /**
+             * Distance M
+             * @description Meters driven on it.
+             */
+            distance_m: number;
+            /**
+             * Duration S
+             * @description Seconds it takes, as estimated.
+             */
+            duration_s: number;
+        };
+        /**
          * JobStatus
          * @description Internal states (docs/glossary.md). Transitions belong to the state machine (#60).
          *
@@ -1879,9 +2285,10 @@ export interface components {
         };
         /**
          * MeUpdateRequest
-         * @description PATCH /v1/auth/me: the caller's own names (#165) and ID card fields (#250). Omit a field
-         *     to keep it. A name is never null. home_city and home_state travel together: both set, or
-         *     both null to clear them. photo_key null clears the ID photo.
+         * @description PATCH /v1/auth/me: the caller's own names (#165), ID card fields (#250) and app language
+         *     (#218). Omit a field to keep it. A name or the locale is never null. home_city and
+         *     home_state travel together: both set, or both null to clear them. photo_key null clears
+         *     the ID photo.
          */
         MeUpdateRequest: {
             /**
@@ -1909,6 +2316,11 @@ export interface components {
              * @description Key of the caller's own profile_photo upload (POST /v1/uploads); null clears.
              */
             photo_key?: string | null;
+            /**
+             * Locale
+             * @description The app language, as at sign-up: en or es. Never null.
+             */
+            locale?: ("en" | "es") | null;
         };
         /** MediaOut */
         MediaOut: {
@@ -1964,6 +2376,54 @@ export interface components {
              * @description At most this many; all options when absent.
              */
             max_selected?: number | null;
+        };
+        /** MyReviewOut */
+        MyReviewOut: {
+            /** @description The caller's own review of this job; null when they wrote none. Never the other side's. */
+            review: components["schemas"]["ReviewOut"] | null;
+            /**
+             * Can Review
+             * @description True while the caller may still review this job: it was confirmed and they wrote no review yet.
+             */
+            can_review: boolean;
+        };
+        /**
+         * MySupportTicketOut
+         * @description One of the caller's tickets in their list: no free text, so never the message.
+         */
+        MySupportTicketOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            topic: components["schemas"]["TicketTopic"];
+            /** Job Id */
+            job_id: string | null;
+            status: components["schemas"]["TicketStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Closed At
+             * @description Set while the ticket is closed.
+             */
+            closed_at: string | null;
+        };
+        /** MySupportTicketPage */
+        MySupportTicketPage: {
+            /**
+             * Items
+             * @description Newest first.
+             */
+            items: components["schemas"]["MySupportTicketOut"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor` for older tickets.
+             */
+            next_cursor: string | null;
         };
         /**
          * NotificationPreferences
@@ -2212,6 +2672,47 @@ export interface components {
          */
         PaymentCreate: Record<string, never>;
         /**
+         * PaymentMethodOut
+         * @description A saved card as the wallet shows it: never the full number, the CVC, the fingerprint or
+         *     the billing details (the API never holds them).
+         */
+        PaymentMethodOut: {
+            /**
+             * Id
+             * @description The Stripe PaymentMethod id: the path id of the other routes.
+             */
+            id: string;
+            /**
+             * Brand
+             * @description Stripe's card brand: amex, diners, discover, eftpos_au, jcb, link, mastercard, unionpay, visa or unknown.
+             * @example visa
+             */
+            brand: string;
+            /**
+             * Last4
+             * @description The card number's last four digits.
+             * @example 4242
+             */
+            last4: string;
+            /**
+             * Exp Month
+             * @description The expiry month, 1 to 12.
+             * @example 12
+             */
+            exp_month: number;
+            /**
+             * Exp Year
+             * @description The expiry year, four digits.
+             * @example 2028
+             */
+            exp_year: number;
+            /**
+             * Is Default
+             * @description Whether this is the customer's default payment method.
+             */
+            is_default: boolean;
+        };
+        /**
          * PaymentSheetOut
          * @description What the app's Payment Sheet (#59) needs, plus what the customer sees before paying.
          *     Never the pro's payout or the platform's fee.
@@ -2444,6 +2945,70 @@ export interface components {
             /** @description Listed photos whose privacy-safe copy could not be made: the customer never sees them. */
             failed: components["schemas"]["PhotoKindCounts"];
         };
+        /**
+         * ProLocationIn
+         * @description One fix of the pro's device while on the way (#350). Numbers only: a string or a boolean
+         *     is refused, not converted.
+         */
+        ProLocationIn: {
+            /**
+             * Lat
+             * @description Latitude, in degrees.
+             */
+            lat: number;
+            /**
+             * Lng
+             * @description Longitude, in degrees.
+             */
+            lng: number;
+            /**
+             * Accuracy M
+             * @description The fix's accuracy radius in meters; null or left out when unknown.
+             */
+            accuracy_m?: number | null;
+            /**
+             * Heading Deg
+             * @description Direction of travel, in degrees clockwise from north; null or left out when unknown.
+             */
+            heading_deg?: number | null;
+            /**
+             * Recorded At
+             * Format: date-time
+             * @description When the device took the fix, with its UTC offset. Refused when too far from the server's time (ahead or behind).
+             */
+            recorded_at: string;
+        };
+        /** ProLocationOut */
+        ProLocationOut: {
+            /** @description The pro's latest position. null whenever there is none to show: the pro is not on the way (not yet, arrived, or the job moved on), has sent none yet, or the last one is too old. */
+            position: components["schemas"]["ProPosition"] | null;
+        };
+        /**
+         * ProPosition
+         * @description Where the pro was at `updated_at` (#350).
+         */
+        ProPosition: {
+            /** Lat */
+            lat: number;
+            /** Lng */
+            lng: number;
+            /**
+             * Accuracy M
+             * @description Accuracy radius in meters, when known.
+             */
+            accuracy_m: number | null;
+            /**
+             * Heading Deg
+             * @description Direction of travel, in degrees clockwise from north, when known.
+             */
+            heading_deg: number | null;
+            /**
+             * Updated At
+             * Format: date-time
+             * @description When the server received this position.
+             */
+            updated_at: string;
+        };
         /** ProProfileOut */
         ProProfileOut: {
             /** Bio */
@@ -2672,6 +3237,19 @@ export interface components {
          * @enum {string}
          */
         QuoteStatus: "pending" | "accepted" | "rejected" | "expired" | "withdrawn";
+        /** RatingOut */
+        RatingOut: {
+            /**
+             * Average
+             * @description The average of the overall ratings of the caller's published reviews, to one decimal; null with none (No ratings yet).
+             */
+            average: number | null;
+            /**
+             * Count
+             * @description How many published reviews the caller received. A review the caller has not answered yet is not counted until it is published.
+             */
+            count: number;
+        };
         /** ReadinessResponse */
         ReadinessResponse: {
             /**
@@ -2893,6 +3471,88 @@ export interface components {
              */
             lng: number;
         };
+        /** ReviewCreatedOut */
+        ReviewCreatedOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Comment Redacted
+             * @description True when something in the comment was masked: the app tells the author that contact details are not shared in reviews. False otherwise, and with no comment.
+             */
+            comment_redacted: boolean;
+        };
+        /** ReviewIn */
+        ReviewIn: {
+            /**
+             * Overall
+             * @description The overall rating, 1 (worst) to 5 (best).
+             */
+            overall: number;
+            /**
+             * Communication
+             * @description Optional, 1 to 5.
+             */
+            communication?: number | null;
+            /**
+             * Quality
+             * @description Optional, 1 to 5. From the job's customer only: refused (422) from the pro.
+             */
+            quality?: number | null;
+            /**
+             * Punctuality
+             * @description Optional, 1 to 5.
+             */
+            punctuality?: number | null;
+            /**
+             * Value
+             * @description Optional, 1 to 5. From the job's customer only: refused (422) from the pro.
+             */
+            value?: number | null;
+            /**
+             * Comment
+             * @description Optional text, trimmed. Contact details in it (phones, emails, links, handles, addresses) are replaced by ••• before it is stored; only the masked text is kept.
+             */
+            comment?: string | null;
+        };
+        /**
+         * ReviewOut
+         * @description The caller's own review, as stored.
+         */
+        ReviewOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Overall */
+            overall: number;
+            /** Communication */
+            communication: number | null;
+            /** Quality */
+            quality: number | null;
+            /** Punctuality */
+            punctuality: number | null;
+            /** Value */
+            value: number | null;
+            /**
+             * Comment
+             * @description The text as stored: contact details were replaced by ••• when it was written.
+             */
+            comment: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /**
          * SavedAddressIn
          * @description A saved address: the address fields, its label, optional coordinates (both or neither)
@@ -3055,6 +3715,32 @@ export interface components {
             /** Region */
             region: string;
         };
+        /**
+         * SetupIntentOut
+         * @description What the app's Payment Sheet needs, in setup mode, to save a card on the customer.
+         */
+        SetupIntentOut: {
+            /**
+             * Client Secret
+             * @description The SetupIntent's client secret: the sheet confirms the card with it. Shown once per call, never logged; a new SetupIntent on every call.
+             */
+            client_secret: string;
+            /**
+             * Ephemeral Key Secret
+             * @description A short-lived key that lets the sheet act for the customer; new on each call.
+             */
+            ephemeral_key_secret: string;
+            /**
+             * Customer Id
+             * @description The customer's Stripe Customer id, for the sheet.
+             */
+            customer_id: string;
+            /**
+             * Publishable Key
+             * @description The Stripe publishable key the sheet initializes with (pk_test_ until launch).
+             */
+            publishable_key: string;
+        };
         /** SingleChoiceQuestion */
         SingleChoiceQuestion: {
             /**
@@ -3125,6 +3811,145 @@ export interface components {
              */
             next_cursor: string | null;
         };
+        /** StaffSupportTicketItem */
+        StaffSupportTicketItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * User Id
+             * Format: uuid
+             * @description Who wrote the ticket.
+             */
+            user_id: string;
+            /**
+             * User First Name
+             * @description The writer's first name alone; null when they have none or it shows a contact detail.
+             */
+            user_first_name: string | null;
+            /** @description The writer's role when they wrote the ticket. */
+            role: components["schemas"]["TicketRole"];
+            topic: components["schemas"]["TicketTopic"];
+            /**
+             * Job Id
+             * @description The job the ticket is about, if any.
+             */
+            job_id: string | null;
+            status: components["schemas"]["TicketStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** StaffSupportTicketOut */
+        StaffSupportTicketOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * User Id
+             * Format: uuid
+             * @description Who wrote the ticket.
+             */
+            user_id: string;
+            /**
+             * User First Name
+             * @description The writer's first name alone; null when they have none or it shows a contact detail.
+             */
+            user_first_name: string | null;
+            /** @description The writer's role when they wrote the ticket. */
+            role: components["schemas"]["TicketRole"];
+            topic: components["schemas"]["TicketTopic"];
+            /**
+             * Job Id
+             * @description The job the ticket is about, if any.
+             */
+            job_id: string | null;
+            status: components["schemas"]["TicketStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Message
+             * @description The writer's text, as typed: it may hold contact details.
+             */
+            message: string;
+            /**
+             * Closed At
+             * @description Set while the ticket is closed.
+             */
+            closed_at: string | null;
+            /** App Version */
+            app_version: string | null;
+            platform: components["schemas"]["TicketPlatform"] | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** StaffSupportTicketPage */
+        StaffSupportTicketPage: {
+            /**
+             * Items
+             * @description Newest first.
+             */
+            items: components["schemas"]["StaffSupportTicketItem"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor` for older tickets.
+             */
+            next_cursor: string | null;
+        };
+        /** SupportTicketCreatedOut */
+        SupportTicketCreatedOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** @description open: a new ticket waits for the team. */
+            status: components["schemas"]["TicketStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** SupportTicketIn */
+        SupportTicketIn: {
+            /** @description What the ticket is about. */
+            topic: components["schemas"]["TicketTopic"];
+            /**
+             * Message
+             * @description The text, trimmed. Stored as typed and read by the team only: a phone or an email written here is kept, so the team can reach the writer.
+             */
+            message: string;
+            /**
+             * Job Id
+             * @description The job the ticket is about: one of which the caller is the customer or the pro. Leave out when the ticket is about no job.
+             */
+            job_id?: string | null;
+            /**
+             * App Version
+             * @description The app's version, e.g. "1.4.0 (52)".
+             */
+            app_version?: string | null;
+            /** @description The device the ticket was written on. */
+            platform?: components["schemas"]["TicketPlatform"] | null;
+        };
+        /** SupportTicketStatusIn */
+        SupportTicketStatusIn: {
+            /** @description The ticket's new status. Any status may follow any other (a closed ticket can be reopened); the same status again changes nothing. */
+            status: components["schemas"]["TicketStatus"];
+        };
         /** TextQuestion */
         TextQuestion: {
             /**
@@ -3156,6 +3981,30 @@ export interface components {
             /** Max Length */
             max_length: number;
         };
+        /**
+         * TicketPlatform
+         * @description The device the ticket was written on, as the app reports it.
+         * @enum {string}
+         */
+        TicketPlatform: "ios" | "android";
+        /**
+         * TicketRole
+         * @description Who wrote the ticket, as they were when they wrote it: the app's users only (agents and
+         *     admins use the panel and write no tickets).
+         * @enum {string}
+         */
+        TicketRole: "customer" | "pro";
+        /**
+         * TicketStatus
+         * @enum {string}
+         */
+        TicketStatus: "open" | "in_progress" | "closed";
+        /**
+         * TicketTopic
+         * @description What the ticket is about, as the user picked it in the app.
+         * @enum {string}
+         */
+        TicketTopic: "account" | "payment" | "job" | "safety" | "app_problem" | "other";
         /**
          * UploadPurpose
          * @enum {string}
@@ -3672,7 +4521,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description validation_error: an invalid or null name, an unknown field, an empty body, one name while the other is not stored yet, or home_city without home_state (or the other way round). invalid_media: photo_key is not the caller's own profile_photo upload. */
+            /** @description validation_error: an invalid or null name, an unsupported or null locale (only en and es), an unknown field, an empty body, one name while the other is not stored yet, or home_city without home_state (or the other way round). invalid_media: photo_key is not the caller's own profile_photo upload. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -4072,7 +4921,10 @@ export interface operations {
     create_request_v1_requests_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description A UUID the client makes once per draft and sends again with every retry of it. Within the server's window (24 hours by default) a retry answers 200 with the request the first call made, as it is now (current status, fresh media URLs), and the same key with another body answers 409 idempotency_key_reused. Without it every call creates a request. */
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -4082,6 +4934,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description A retry: the caller already made a request with this Idempotency-Key and this body within the window. The replay returns the existing request with its current status and fresh media URLs (status, customer_status and each media url and expires_at may differ from the 201; every other field is the same); nothing is created or sent to pros again. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestOut"];
+                };
+            };
             /** @description Successful Response */
             201: {
                 headers: {
@@ -4109,7 +4970,16 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description zip_not_served: the address ZIP is outside the active service areas (offer the waitlist); invalid_category: unknown or inactive category, or one whose questions cannot be read right now (send the request without a category); invalid_intake_answers: intake_answers do not fit the category's intake_questions (an unknown key, a missing required one, a value of the wrong type or out of range), or are not empty without a category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency). */
+            /** @description idempotency_key_reused: the caller already used this Idempotency-Key with a different body; nothing was changed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description zip_not_served: the address ZIP is outside the active service areas (offer the waitlist); invalid_category: unknown or inactive category, or one whose questions cannot be read right now (send the request without a category); invalid_intake_answers: intake_answers do not fit the category's intake_questions (an unknown key, a missing required one, a value of the wrong type or out of range), or are not empty without a category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency, an Idempotency-Key that is not a UUID). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -5219,6 +6089,285 @@ export interface operations {
             };
         };
     };
+    create_setup_intent_v1_me_payment_methods_setup_intent_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupIntentOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers keep payment methods. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many payment-method changes; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_configured: payments are not configured; payments_unavailable: Stripe is not reachable, asked to retry later or refused the call, the wallet holds more cards than the API reads, or a change of the wallet did not end in time (its wait for a database connection and for another change of the same wallet included); retry later. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_payment_methods_v1_me_payment_methods_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentMethodOut"][];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers keep payment methods. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_configured: payments are not configured; payments_unavailable: Stripe is not reachable, asked to retry later or refused the call, the wallet holds more cards than the API reads, or a change of the wallet did not end in time (its wait for a database connection and for another change of the same wallet included); retry later. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_default_payment_method_v1_me_payment_methods__payment_method_id__default_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The saved card's Stripe PaymentMethod id, as the list returns it. */
+                payment_method_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentMethodOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers keep payment methods. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description payment_method_not_found: no saved card of the caller with this id (an unknown id and another user's card answer the same). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: the id is not a PaymentMethod id (pm_ and letters, digits or _). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many payment-method changes; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_configured: payments are not configured; payments_unavailable: Stripe is not reachable, asked to retry later or refused the call, the wallet holds more cards than the API reads, or a change of the wallet did not end in time (its wait for a database connection and for another change of the same wallet included); retry later. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_payment_method_v1_me_payment_methods__payment_method_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The saved card's Stripe PaymentMethod id, as the list returns it. */
+                payment_method_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers keep payment methods. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description payment_method_not_found: no saved card of the caller with this id (an unknown id and another user's card answer the same). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: the id is not a PaymentMethod id (pm_ and letters, digits or _). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many payment-method changes; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_configured: payments are not configured; payments_unavailable: Stripe is not reachable, asked to retry later or refused the call, the wallet holds more cards than the API reads, or a change of the wallet did not end in time (its wait for a database connection and for another change of the same wallet included); retry later. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_request_job_v1_requests__request_id__job_get: {
         parameters: {
             query?: never;
@@ -5811,6 +6960,227 @@ export interface operations {
             };
         };
     };
+    get_pro_location_v1_jobs__job_id__pro_location_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProLocationOut"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers follow their pro. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job of the caller with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description location_unavailable: the store must not hold positions (a deploy problem); there is none to show until it is fixed. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    share_pro_location_v1_jobs__job_id__pro_location_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProLocationIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros share their position. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job of the caller with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_on_the_way: the pro is not on the way to this job: not yet, already checked in, or the job moved on. Stop sending. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a coordinate, accuracy or heading out of range or not a finite number, an unknown field, or recorded_at too far from the server's time. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: far too many positions from this pro; Retry-After has the wait. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description location_unavailable: the position could not be kept (the store is down, or must not hold positions); drop it and send the next. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_job_route_v1_jobs__job_id__route_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobRouteOut"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers follow their pro. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job of the caller with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description route_unavailable: the route cannot be computed right now (the route provider is down, slow or not configured); the pro's position is still there to show. location_unavailable: the store must not hold positions (a deploy problem), as on the position's own route. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_messages_v1_jobs__job_id__messages_get: {
         parameters: {
             query?: {
@@ -6222,6 +7592,48 @@ export interface operations {
             /** @description validation_error: not an Expo push token, or an unknown platform. */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    unregister_device_without_session_v1_devices_unregister_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceRemoval"];
+            };
+        };
+        responses: {
+            /** @description Always, whether or not the token was registered. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description validation_error: not an Expo push token. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many requests from this client; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -6690,6 +8102,479 @@ export interface operations {
                 };
             };
             /** @description preference_locked: a change turns off a locked channel; validation_error: an unknown group or channel, a channel its group does not have, a group and channel twice, no change or more than 20. Either way nothing is stored. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_ticket_v1_support_tickets_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupportTicketIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportTicketCreatedOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros write tickets. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description invalid_job: job_id is not a job of which the caller is the customer or the pro (an unknown job answers the same); validation_error: an unknown topic or platform, a message empty, blank or longer than 2000 characters, an app_version out of format. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many tickets; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_my_tickets_v1_support_tickets_mine_get: {
+        parameters: {
+            query?: {
+                /** @description Page size; capped. */
+                limit?: number | null;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MySupportTicketPage"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros write tickets. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a bad cursor or limit. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_list_tickets_v1_admin_support_tickets_get: {
+        parameters: {
+            query?: {
+                /** @description Only tickets in this status; all when left out. */
+                status?: components["schemas"]["TicketStatus"] | null;
+                /** @description Page size; capped. */
+                limit?: number | null;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffSupportTicketPage"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: an unknown status, a bad cursor or limit. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_get_ticket_v1_admin_support_tickets__ticket_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffSupportTicketOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description ticket_not_found: no support ticket with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a ticket_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_set_ticket_status_v1_admin_support_tickets__ticket_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupportTicketStatusIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffSupportTicketOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description ticket_not_found: no support ticket with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: an unknown status, a field other than status, or a ticket_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_review_v1_jobs__job_id__reviews_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewCreatedOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job with this id of which the caller is the customer or the pro. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description job_not_reviewable: the job was not confirmed (by the customer or automatically): it is scheduled, on the way, in progress, completed, disputed, refunded or cancelled, or was paid out without a confirmation; already_reviewed: the caller already reviewed this job. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a rating missing, not an integer or outside 1 to 5; quality or value sent by the job's pro (the customer alone rates them); a comment blank, longer than 1000 characters as typed or once its contact details are masked, or empty once invisible characters (zero-width and the like) are dropped; an unknown field; a job_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many reviews; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_my_review_v1_jobs__job_id__reviews_mine_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyReviewOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job with this id of which the caller is the customer or the pro. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a job_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_my_rating_v1_users_me_rating_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RatingOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
             422: {
                 headers: {
                     [name: string]: unknown;

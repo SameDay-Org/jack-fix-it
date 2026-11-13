@@ -1,4 +1,6 @@
 import uuid
+from collections.abc import Callable
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, status
@@ -7,24 +9,52 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_app_settings
 from app.db import get_session
 from app.errors import ErrorResponse
+from app.integrations.mapbox import RouteProvider, get_route_provider
 from app.integrations.storage import StorageProvider, get_storage_provider
+from app.middleware import NoStoreRoute
 from app.modules.auth.permissions import CustomerUser, ProUser
 from app.modules.jobs.errors import ATTEMPTS_REMAINING_HEADER
 from app.modules.jobs.execution import JobExecutionConfig, JobExecutionService
+from app.modules.jobs.location import (
+    JobLocationStore,
+    ProLocationConfig,
+    ProLocationService,
+    get_job_location_store,
+    get_location_clock,
+)
+from app.modules.jobs.route import (
+    JobRouteCache,
+    JobRouteConfig,
+    JobRouteService,
+    get_job_route_cache,
+)
 from app.modules.jobs.schemas import (
     CheckInIn,
     CustomerJob,
     JobPhotosIn,
+    JobRouteOut,
     OnTheWayIn,
     ProJob,
     ProJobPage,
+    ProLocationIn,
+    ProLocationOut,
 )
 from app.queue import JobQueue, get_job_queue
+from app.rate_limit import RateLimiter, enforce_limit, get_rate_limiter
 
 # The customer's side: the job of their own request (#63).
 customer_router = APIRouter(prefix="/requests", tags=["jobs"])
 # The pro's side: their own jobs and the steps they take on them (#63).
 router = APIRouter(prefix="/pros/me/jobs", tags=["jobs"])
+# The pro's live position while on the way (#350): the pro's app writes it, the customer's
+# reads it. No HTTP cache may keep a response of these routes: a stored position would
+# outlive its expiry and its delete.
+location_router = APIRouter(
+    prefix="/jobs/{job_id}/pro-location", tags=["jobs"], route_class=NoStoreRoute
+)
+# The pro's route to the job's address (#351): it starts at the pro's position and ends at
+# the customer's address, so no HTTP cache may keep it either.
+route_router = APIRouter(prefix="/jobs/{job_id}/route", tags=["jobs"], route_class=NoStoreRoute)
 
 _UNAUTHORIZED = {"model": ErrorResponse, "description": "invalid_token: missing or expired."}
 
@@ -37,12 +67,63 @@ def get_job_execution_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[Settings, Depends(get_app_settings)],
     storage: Annotated[StorageProvider, Depends(get_storage_provider)],
+    locations: Annotated[JobLocationStore, Depends(get_job_location_store)],
 ) -> JobExecutionService:
-    # The storage is reached only when a job has photos to sign.
-    return JobExecutionService(session, JobExecutionConfig.from_settings(settings), storage)
+    # The storage is reached only when a job has photos to sign; the location store only when
+    # the pro checks in or the job leaves on_the_way.
+    return JobExecutionService(
+        session, JobExecutionConfig.from_settings(settings), storage, locations
+    )
 
 
 Jobs = Annotated[JobExecutionService, Depends(get_job_execution_service)]
+
+
+def get_pro_location_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    store: Annotated[JobLocationStore, Depends(get_job_location_store)],
+    clock: Annotated[Callable[[], datetime], Depends(get_location_clock)],
+) -> ProLocationService:
+    return ProLocationService(session, ProLocationConfig.from_settings(settings), store, clock)
+
+
+Locations = Annotated[ProLocationService, Depends(get_pro_location_service)]
+
+
+def get_job_route_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    store: Annotated[JobLocationStore, Depends(get_job_location_store)],
+    cache: Annotated[JobRouteCache, Depends(get_job_route_cache)],
+    provider: Annotated[RouteProvider, Depends(get_route_provider)],
+    clock: Annotated[Callable[[], datetime], Depends(get_location_clock)],
+) -> JobRouteService:
+    return JobRouteService(
+        session, JobRouteConfig.from_settings(settings), store, cache, provider, clock
+    )
+
+
+Routes = Annotated[JobRouteService, Depends(get_job_route_service)]
+
+
+async def limit_pro_pings(
+    user: ProUser,
+    limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> None:
+    """PRO_LOCATION_RATE_LIMIT positions per pro per PRO_LOCATION_RATE_WINDOW_SECONDS, over
+    all their jobs, counted before the position or the job is looked at (a body that is not
+    JSON at all is refused first, as on every route)."""
+    await enforce_limit(
+        limiter,
+        "pro_location",
+        str(user.id),
+        limit=settings.pro_location_rate_limit,
+        window_seconds=settings.pro_location_rate_window_seconds,
+        timeout_seconds=settings.rate_limit_timeout_seconds,
+    )
+
 
 _PRO_JOB_ERRORS: dict[int | str, dict[str, Any]] = {
     status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
@@ -262,3 +343,91 @@ async def complete_job(
     copy is ready. The customer then has a window to confirm. Again once completed: the job
     unchanged."""
     return await jobs.complete(user, job_id, queue)
+
+
+@location_router.put(
+    "",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Share my position while I am on my way (never stored in the database)",
+    dependencies=[Depends(limit_pro_pings)],
+    responses={
+        **_PRO_JOB_ERRORS,
+        status.HTTP_403_FORBIDDEN: _error("forbidden: only pros share their position."),
+        status.HTTP_409_CONFLICT: _error(
+            "not_on_the_way: the pro is not on the way to this job: not yet, already checked "
+            "in, or the job moved on. Stop sending."
+        ),
+        status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
+            "validation_error: a coordinate, accuracy or heading out of range or not a finite "
+            "number, an unknown field, or recorded_at too far from the server's time."
+        ),
+        status.HTTP_429_TOO_MANY_REQUESTS: _error(
+            "rate_limited: far too many positions from this pro; Retry-After has the wait."
+        ),
+        status.HTTP_503_SERVICE_UNAVAILABLE: _error(
+            "location_unavailable: the position could not be kept (the store is down, or "
+            "must not hold positions); drop it and send the next."
+        ),
+    },
+)
+async def share_pro_location(
+    job_id: uuid.UUID, data: ProLocationIn, user: ProUser, locations: Locations
+) -> None:
+    """The pro's app sends this every few seconds from On my way to the check-in. Only the
+    latest position of a job is kept, in memory, for a short time; it is deleted when the pro
+    checks in or the job leaves on the way, and no position is ever written to the database.
+    One sent too soon after the last, or older than it, is answered 204 and dropped."""
+    await locations.ping(user, job_id, data)
+
+
+@location_router.get(
+    "",
+    response_model=ProLocationOut,
+    summary="See where my pro is while on the way (never stored in the database)",
+    responses={
+        status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN: _error("forbidden: only customers follow their pro."),
+        status.HTTP_404_NOT_FOUND: _error("not_found: no job of the caller with this id."),
+        status.HTTP_503_SERVICE_UNAVAILABLE: _error(
+            "location_unavailable: the store must not hold positions (a deploy problem); "
+            "there is none to show until it is fixed."
+        ),
+    },
+)
+async def get_pro_location(
+    job_id: uuid.UUID, user: CustomerUser, locations: Locations
+) -> ProLocationOut:
+    """The pro's latest position on the way to the customer's own job, to poll every few
+    seconds. `position` is null whenever there is none to show: before the first one, once it
+    is too old, and whenever the pro is not on the way (the job's own status says which).
+    Positions are kept in memory for a short time only, never in the database, and every
+    response says `Cache-Control: no-store`."""
+    return await locations.last_position(user, job_id)
+
+
+@route_router.get(
+    "",
+    response_model=JobRouteOut,
+    summary="See my pro's route to the job's address while on the way (never stored in the "
+    "database)",
+    responses={
+        status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN: _error("forbidden: only customers follow their pro."),
+        status.HTTP_404_NOT_FOUND: _error("not_found: no job of the caller with this id."),
+        status.HTTP_503_SERVICE_UNAVAILABLE: _error(
+            "route_unavailable: the route cannot be computed right now (the route provider "
+            "is down, slow or not configured); the pro's position is still there to show. "
+            "location_unavailable: the store must not hold positions (a deploy problem), as "
+            "on the position's own route."
+        ),
+    },
+)
+async def get_job_route(job_id: uuid.UUID, user: CustomerUser, routes: Routes) -> JobRouteOut:
+    """The driving route from the pro's latest position to the address of the customer's own
+    job, to poll next to the pro's position. `route` is null whenever there is none to show:
+    whenever the position is (the pro is not on the way, or has sent none yet), when the
+    address cannot be placed on the map, and when no road leads there. The same route is
+    answered for a short while, until the pro has moved away from where it starts. It is kept
+    in memory for that short time only, never in the database, and every response says
+    `Cache-Control: no-store`."""
+    return await routes.route(user, job_id)

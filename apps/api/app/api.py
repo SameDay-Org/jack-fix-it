@@ -13,8 +13,11 @@ from app.modules.devices.router import router as devices_router
 from app.modules.dispatch.router import router as opportunities_router
 from app.modules.geo.router import router as geo_router
 from app.modules.jobs.router import customer_router as customer_jobs_router
+from app.modules.jobs.router import location_router as job_location_router
+from app.modules.jobs.router import route_router as job_route_router
 from app.modules.jobs.router import router as jobs_router
 from app.modules.notifications.router import router as notification_preferences_router
+from app.modules.payment_methods.router import router as payment_methods_router
 from app.modules.payments.router import router as payments_router
 from app.modules.payouts.router import pages_router as payout_pages_router
 from app.modules.payouts.router import router as payouts_router
@@ -22,7 +25,11 @@ from app.modules.pros.router import router as pros_router
 from app.modules.quotes.router import customer_router as customer_quotes_router
 from app.modules.quotes.router import router as quotes_router
 from app.modules.requests.router import router as requests_router
+from app.modules.reviews.router import rating_router as my_rating_router
+from app.modules.reviews.router import router as reviews_router
 from app.modules.service_areas.router import router as service_areas_router
+from app.modules.support.router import router as support_router
+from app.modules.support.router import staff_router as staff_support_router
 from app.modules.uploads.router import router as uploads_router
 from app.modules.waitlist.router import router as waitlist_router
 from app.modules.webhooks.router import router as webhooks_router
@@ -45,8 +52,11 @@ v1_router.include_router(opportunities_router)
 v1_router.include_router(quotes_router)
 v1_router.include_router(customer_quotes_router)
 v1_router.include_router(payments_router)
+v1_router.include_router(payment_methods_router)
 v1_router.include_router(customer_jobs_router)
 v1_router.include_router(jobs_router)
+v1_router.include_router(job_location_router)
+v1_router.include_router(job_route_router)
 v1_router.include_router(chat_router)
 v1_router.include_router(staff_chat_router)
 v1_router.include_router(chat_flags_router)
@@ -55,3 +65,7 @@ v1_router.include_router(waitlist_router)
 v1_router.include_router(webhooks_router)
 v1_router.include_router(addresses_router)
 v1_router.include_router(notification_preferences_router)
+v1_router.include_router(support_router)
+v1_router.include_router(staff_support_router)
+v1_router.include_router(reviews_router)
+v1_router.include_router(my_rating_router)

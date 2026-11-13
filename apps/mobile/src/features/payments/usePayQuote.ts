@@ -56,7 +56,7 @@ function refreshQuotes(queryClient: QueryClient, requestId: string): void {
   void queryClient.invalidateQueries({ queryKey: quotesQueryKey(requestId) });
   void queryClient.invalidateQueries({ queryKey: jobQueryKey(requestId) });
   // The quote may have been paid elsewhere: the request's notice (#64) looks for the job as well.
-  void refreshCustomerJob(queryClient, requestId);
+  refreshCustomerJob(queryClient, requestId, sessionGeneration());
   void invalidateMyRequests(queryClient);
 }
 

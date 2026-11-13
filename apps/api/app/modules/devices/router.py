@@ -9,6 +9,7 @@ from app.errors import ErrorResponse
 from app.modules.auth.permissions import AppUser
 from app.modules.devices.schemas import DeviceRegistration, DeviceRemoval
 from app.modules.devices.service import DeviceService
+from app.rate_limit import limit_per_ip
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
@@ -30,6 +31,19 @@ _ACCESS: dict[int | str, dict[str, Any]] = {
     status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
         "validation_error: not an Expo push token, or an unknown platform."
     ),
+}
+
+_RATE_LIMITED: dict[int | str, dict[str, Any]] = {
+    status.HTTP_429_TOO_MANY_REQUESTS: {
+        "model": ErrorResponse,
+        "description": "rate_limited: too many requests from this client; retry later.",
+        "headers": {
+            "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {"type": "integer"},
+            }
+        },
+    },
 }
 
 
@@ -73,3 +87,31 @@ async def unregister_device(
     """Removes the caller's token; the app calls it on logout. The token travels in the body,
     never in the path, because paths are logged."""
     await devices.unregister(user, data.expo_push_token)
+
+
+@router.post(
+    "/unregister",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    summary="Stop pushes to this device, without a session",
+    dependencies=[Depends(limit_per_ip("devices_unregister"))],
+    responses={
+        status.HTTP_204_NO_CONTENT: {
+            "description": "Always, whether or not the token was registered."
+        },
+        status.HTTP_422_UNPROCESSABLE_CONTENT: _error("validation_error: not an Expo push token."),
+        **_RATE_LIMITED,
+    },
+)
+async def unregister_device_without_session(
+    data: DeviceRemoval,
+    devices: Annotated[DeviceService, Depends(get_device_service)],
+) -> None:
+    """Removes the token's device for an app that has no session left: a sign-out whose
+    `DELETE /v1/devices` did not get through is retried here, so the account that left stops
+    receiving pushes on that phone.
+
+    No sign-in: holding the exact token is the credential, and an `Authorization` header, if
+    sent, is not read. Only that token's device can go. Limited per client IP.
+    """
+    await devices.unregister_by_token(data.expo_push_token)

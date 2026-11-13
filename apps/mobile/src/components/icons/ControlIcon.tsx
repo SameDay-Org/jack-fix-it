@@ -6,6 +6,13 @@ import { GLYPH_STROKE_WIDTH, GLYPH_VIEW_BOX } from "./glyphs";
 const CONTROL_GLYPHS = {
   plus: ["M12 6v12", "M6 12h12"],
   minus: ["M6 12h12"],
+  // A cross, for closing a full-screen view.
+  close: ["M7 7l10 10", "M17 7L7 17"],
+  // A picture frame with hills, where a photo cannot be shown.
+  photo: [
+    "M6.5 5h11A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-9A2.5 2.5 0 0 1 6.5 5Z",
+    "M5 17l4.5-4.5 3 3 2.5-2.5L19 17",
+  ],
   // A play triangle, for a video's thumbnail.
   play: ["M9 6.5v11l8.5-5.5Z"],
   // A check mark, for a request that went through.
@@ -18,6 +25,12 @@ const CONTROL_GLYPHS = {
   share: ["M12 14.5V4", "M8 8l4-4 4 4", "M6 11.5v7.5a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-7.5"],
   // An arrow rising, for sending a message.
   send: ["M12 19V5.5", "M6 11.5l6-6 6 6"],
+  // Three dots in a row, for a menu of more actions (draw it filled).
+  more: [
+    "M4.75 12a1.25 1.25 0 1 0 2.5 0a1.25 1.25 0 1 0-2.5 0",
+    "M10.75 12a1.25 1.25 0 1 0 2.5 0a1.25 1.25 0 1 0-2.5 0",
+    "M16.75 12a1.25 1.25 0 1 0 2.5 0a1.25 1.25 0 1 0-2.5 0",
+  ],
 } as const satisfies Record<string, readonly string[]>;
 
 export type ControlGlyphName = keyof typeof CONTROL_GLYPHS;

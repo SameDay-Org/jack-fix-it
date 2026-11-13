@@ -153,6 +153,10 @@
     },
     "menu": {
       "settings": "Settings",
+      "addresses": "Addresses",
+      "addressesNone": "None saved yet",
+      "addressesCount_one": "{{count}} saved",
+      "addressesCount_other": "{{count}} saved",
       "help": "Help",
       "legal": "Legal",
       "logOut": "Log out"
@@ -269,10 +273,17 @@
       "flexible": "I'm flexible",
       "flexibleHint": "Any day works for me",
       "pickDay": "Or pick a day",
+      "period": "Time of day",
       "today": "Today",
       "tomorrow": "Tomorrow",
       "staleTitle": "That day has passed",
       "staleBody": "Pick another day, or stay flexible."
+    },
+    "period": {
+      "morning": "Morning",
+      "afternoon": "Afternoon",
+      "evening": "Evening",
+      "flexible": "Flexible"
     },
     "review": {
       "title": "Check your request",
@@ -319,6 +330,68 @@
       "state": "Use the two-letter code, like FL.",
       "zip": "Enter a 5-digit ZIP code.",
       "tooLong": "Keep it to {{max}} characters or fewer."
+    }
+  },
+  "addresses": {
+    "title": "Addresses",
+    "support": "Your default is picked first when you request a job.",
+    "default": "Default",
+    "notServed": "We don't serve this ZIP code yet.",
+    "add": "Add address",
+    "retry": "Try again",
+    "loadFailed": "We couldn't load your addresses.",
+    "saved": "{{label}} saved",
+    "deleted": "{{label}} deleted",
+    "madeDefault": "{{label}} is now your default",
+    "empty": {
+      "title": "No saved addresses yet",
+      "body": "Save your home or any place you often need help, then pick it in a tap when you request a job."
+    },
+    "row": {
+      "editHint": "Opens it to edit.",
+      "more": "Options for {{label}}"
+    },
+    "actions": {
+      "makeDefault": "Make default",
+      "delete": "Delete address",
+      "deleteHint": "Asks before it deletes.",
+      "isDefault": "This is your default address."
+    },
+    "delete": {
+      "title": "Delete {{label}}?",
+      "body": "Requests you already sent keep their address.",
+      "bodyNextDefault": "Requests you already sent keep their address. {{label}} becomes your default.",
+      "bodyNewDefault": "Requests you already sent keep their address. Another address becomes your default.",
+      "cancel": "Cancel",
+      "confirm": "Delete"
+    },
+    "failed": {
+      "delete": "We couldn't delete {{label}}. Try again in a moment.",
+      "makeDefault": "We couldn't make {{label}} your default. Try again in a moment.",
+      "offline": "You're offline, so nothing changed. Try again once you're connected.",
+      "rateLimited": "That's a lot of changes at once. Try again in a moment.",
+      "gone": "That address isn't in your address book anymore."
+    },
+    "form": {
+      "newTitle": "Add an address",
+      "editTitle": "Edit address",
+      "newSupport": "Give it a name you'll recognize, like Home or Work.",
+      "editSupport": "Changes apply to new requests. Requests you already sent keep their address.",
+      "label": "Name",
+      "save": "Save address",
+      "check": "Some fields need a look.",
+      "backToBook": "Back to addresses",
+      "labelErrors": {
+        "taken": "You already have an address with this name.",
+        "invalid": "Use a simple name, like Home or Work. Leave out streets, units and contact details."
+      },
+      "failed": {
+        "offline": "You're offline. Check your connection and try again.",
+        "rateLimited": "That's a lot of changes at once. Try again in a moment.",
+        "full": "Your address book is full. Delete an address to add this one.",
+        "gone": "This address isn't in your address book anymore.",
+        "generic": "We couldn't save this address. Try again."
+      }
     }
   },
   "phone": {
@@ -405,6 +478,7 @@
   "quotes": {
     "title": "Your quotes",
     "subtitle": "Compare them and accept the one that fits.",
+    "preferred": "Preferred: {{date}}",
     "loading": "Loading quotes",
     "span": {
       "minutes": "{{minutes}} min",
@@ -561,7 +635,7 @@
     "loading": "Loading opportunities",
     "new": "New",
     "otherCategory": "Other request",
-    "preferred": "Preferred {{date}}",
+    "preferred": "Preferred: {{date}}",
     "sentAgo": "Sent {{ago}}",
     "ago": {
       "justNow": "just now",
@@ -590,7 +664,7 @@
     "detail": {
       "loading": "Loading request",
       "where": "Where",
-      "when": "Preferred date",
+      "when": "Preferred",
       "sent": "Sent",
       "description": "What's going on",
       "redacted": "Contact details were hidden.",
@@ -828,6 +902,7 @@
       "hint": "The customer pays exactly this.",
       "required": "Enter your price.",
       "invalid": "Enter a price like 120 or 120.50.",
+      "aboveMax": "The maximum quote is {{amount}}.",
       "aboveCap": "Above the most Jack allows for one quote."
     },
     "payout": {
@@ -854,6 +929,7 @@
       "lessMinutes": "{{count}} minutes less",
       "moreMinutes": "{{count}} minutes more",
       "required": "Add how long the job takes.",
+      "aboveMax": "The longest job you can quote is {{duration}}.",
       "aboveCap": "Above the most Jack allows for one quote."
     },
     "start": {
@@ -921,15 +997,116 @@
   "settings": {
     "title": "Settings",
     "sections": {
-      "account": "Your account"
+      "account": "Your account",
+      "language": "Language",
+      "notifications": "Notifications"
     },
     "email": "Email",
     "phone": "Phone",
-    "phoneNotVerified": "Not verified yet"
+    "phoneNotVerified": "Not verified yet",
+    "language": {
+      "en": "English",
+      "es": "Español",
+      "unsaved": {
+        "title": "Not saved to your account yet",
+        "body": "This device stays in English. You can try again in a moment.",
+        "retry": "Try again"
+      }
+    }
+  },
+  "notifications": {
+    "channel": "Updates",
+    "prompt": {
+      "title": "Turn on notifications",
+      "customer": "Get updates when your pro is on the way.",
+      "pro": "Hear about new jobs near you, and when a customer hires you.",
+      "turnOn": "Turn on",
+      "notNow": "Not now"
+    },
+    "settings": {
+      "label": "Notifications",
+      "on": "On",
+      "off": "Off",
+      "blocked": "Off in your phone's settings",
+      "askHint": "Asks your phone to turn on notifications",
+      "openHint": "Opens your phone's settings"
+    }
   },
   "help": {
     "title": "Support when you need it",
-    "body": "Answers to common questions and a way to reach the Jack Fix It team will live here. We're still putting them together."
+    "intro": "Answers to common questions about requests, payments and jobs.",
+    "sections": {
+      "booking": "Booking and quotes",
+      "payments": "Payments",
+      "job": "During the job",
+      "account": "Account and safety"
+    },
+    "faq": {
+      "request": {
+        "question": "How do I request a service?",
+        "answer": "On Home, pick a category and tell us what's going on. Add photos or a video if they help, then your address and the day that suits you. We send your request to pros near you, and they reply with quotes."
+      },
+      "quote": {
+        "question": "What's in a quote?",
+        "answer": "A quote is one pro's price for your job. It shows what's included, about how long the work takes and when the pro can start. You can open the pro's profile from the quote before you decide."
+      },
+      "quoteExpiry": {
+        "question": "How long is a quote good for?",
+        "answer": "Each quote shows when it expires. After that it can't be accepted, so book the one you want while it's still open."
+      },
+      "cancel": {
+        "question": "Can I cancel after I've booked?",
+        "answer": "Plans change. For now, the Jack Fix It team reviews every cancellation individually, and what happens with your payment is decided case by case."
+      },
+      "whenPay": {
+        "question": "When do I pay?",
+        "answer": "Only when you accept a quote: sending a request and getting quotes is free. Your payment books the pro, and you see the total, with any tax, before you confirm it."
+      },
+      "payMethods": {
+        "question": "How can I pay?",
+        "answer": "By card, or with Apple Pay or Google Pay where your phone offers them. The payment runs on Stripe's secure checkout, so Jack Fix It never stores your card number."
+      },
+      "payFailed": {
+        "question": "What if my payment doesn't go through?",
+        "answer": "Your job isn't booked until the payment succeeds. Try again from the same quote, with the same card or another payment method, while the quote is still open."
+      },
+      "proPaid": {
+        "question": "When does the pro get paid?",
+        "answer": "When the job is confirmed, not when you pay. Once the pro marks the work as done, a confirmation period starts; if no problem is reported before it ends, the job is confirmed automatically and the pro is paid."
+      },
+      "follow": {
+        "question": "How do I follow my job?",
+        "answer": "Your job page shows each step as it happens: on the way, arrived, working, done. A banner on every tab takes you there, and you get a notification at each step if notifications are on."
+      },
+      "arrivalCode": {
+        "question": "What is the arrival code?",
+        "answer": "A short code that appears on your job page once your pro is on the way. Give it to them when they arrive: they enter it in their app to check in. Share it only in person, at the door."
+      },
+      "chat": {
+        "question": "How do I contact my pro?",
+        "answer": "Through the chat on your job page, which opens as soon as you've booked. Phone numbers, emails and links are hidden in messages, so the whole conversation stays in one place: Jack Fix It."
+      },
+      "problem": {
+        "question": "What if something isn't right with the job?",
+        "answer": "Tell your pro in the chat first: it's the fastest way to sort things out. If that doesn't settle it, the Jack Fix It team reviews what happened and decides case by case, including whether any money is returned. While a reported problem is open, the pro isn't paid."
+      },
+      "verified": {
+        "question": "How are pros verified?",
+        "answer": "Before a pro can send you a quote, our team reviews the information and documents they provide and approves their profile. You'll see the green seal next to a verified pro's name."
+      },
+      "privacy": {
+        "question": "Who can see my contact details and address?",
+        "answer": "Pros never see your phone number or email. Before you book, they see only your city and ZIP code; the pro you book gets the full address to do the job. To talk, you both use the chat."
+      },
+      "verifyPhone": {
+        "question": "How do I verify my phone number?",
+        "answer": "In Account, open Settings and tap Verify your phone. We text you a code to confirm the number is yours. Your number stays private: pros never see it."
+      },
+      "language": {
+        "question": "Which languages is the app in?",
+        "answer": "English and Spanish. In Account, open Settings and choose one under Language. Your choice is saved to your account, so the app uses it the next time you log in on another device."
+      }
+    }
   },
   "legal": {
     "title": "Legal",
@@ -956,9 +1133,11 @@
       "onTheWay": "{{name}} is on the way",
       "arrived": "{{name}} has arrived",
       "working": "{{name}} is working",
-      "done": "Job's done",
+      "done": "Job confirmed",
       "attention": "This job needs attention",
-      "cancelled": "This job was cancelled"
+      "cancelled": "This job was cancelled",
+      "finished": "{{name}} marked the job done",
+      "thanks": "Thanks! Job confirmed"
     },
     "support": {
       "scheduled": "Scheduled for {{date}}",
@@ -966,8 +1145,8 @@
       "arrivedNow": "Checked in with your code",
       "working": "Started at {{time}}",
       "workingNow": "The work is under way",
-      "finished": "{{name}} marked the job as done. Take a look at the work.",
-      "done": "Thanks for booking with Jack Fix It.",
+      "finished": "Take a look at the work, then confirm it's done.",
+      "done": "Payment is released to {{inline}}.",
       "attention": "A problem was reported on this job.",
       "cancelled": "Nothing more is needed from you."
     },
@@ -1024,6 +1203,8 @@
       "working": "{{name}} is working",
       "finished": "{{name}} finished the job",
       "hint": "Opens your job",
+      "finishedConfirm": "{{name}} finished the job · confirm",
+      "confirm": "confirm",
       "unread_one": "{{count}} unread message",
       "unread_other": "{{count}} unread messages"
     },
@@ -1045,6 +1226,37 @@
       "title": "We couldn't load your job",
       "body": "Check your connection and try again.",
       "retry": "Try again"
+    },
+    "finished": {
+      "confirm": "Confirm the job is done",
+      "confirmShort": "Confirm",
+      "problems": "Problems?",
+      "deadline": {
+        "today_one": "Confirms automatically today at {{time}} if you don't answer.",
+        "today_other": "Confirms automatically today at {{time}} if you don't answer.",
+        "tomorrow_one": "Confirms automatically tomorrow at {{time}} if you don't answer.",
+        "tomorrow_other": "Confirms automatically tomorrow at {{time}} if you don't answer.",
+        "day_one": "Confirms automatically on {{day}} at {{time}} if you don't answer.",
+        "day_other": "Confirms automatically on {{day}} at {{time}} if you don't answer.",
+        "due": "Confirms automatically any moment now."
+      }
+    },
+    "confirmSheet": {
+      "title": "Confirm the job is done?",
+      "body": "Payment is released to {{name}}.",
+      "confirm": "Confirm",
+      "notYet": "Not yet",
+      "offline": "We couldn't reach Jack Fix It. Check your connection and try again.",
+      "failed": "We couldn't confirm the job. Please try again.",
+      "changed": "This job changed. Here's where it stands now.",
+      "gone": "This job is no longer available."
+    },
+    "afterPhotos": {
+      "title": "The finished work",
+      "photo": "Photo of the finished work, {{number}} of {{total}}",
+      "page": "{{number}} of {{total}}",
+      "openHint": "Opens it full screen",
+      "close": "Close photos"
     },
     "photos": {
       "title": "Photos",

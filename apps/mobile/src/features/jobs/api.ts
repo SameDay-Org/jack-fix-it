@@ -1,10 +1,23 @@
-import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import {
+  queryOptions,
+  skipToken,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { useIsFocused } from "expo-router";
 import { useCallback, useSyncExternalStore } from "react";
 import { AppState } from "react-native";
 
-import { apiGet, ApiError, useSession, useSessionGeneration } from "@/api";
-import { MY_REQUESTS_PAGE_SIZE } from "@/features/history/useMyRequests";
+import {
+  apiGet,
+  ApiError,
+  apiPost,
+  isCurrentGeneration,
+  useSession,
+  useSessionGeneration,
+} from "@/api";
+import { invalidateMyRequests, MY_REQUESTS_PAGE_SIZE } from "@/features/history/useMyRequests";
 import { useRefetchOnReturn } from "@/features/quotes/useRequestQuotes";
 
 import { jobsConfig } from "./config";
@@ -20,6 +33,14 @@ export const jobHref = (requestId: string): Href => ({
   params: { id: requestId },
 });
 
+/** The confirmation sheet over a finished job (#66). */
+export const confirmJobHref = (requestId: string) =>
+  ({ pathname: "/requests/[id]/confirm", params: { id: requestId } }) as const;
+
+/** The job's after photos full screen, starting at the `index`th one. */
+export const jobPhotosHref = (requestId: string, index: number) =>
+  ({ pathname: "/requests/[id]/photos", params: { id: requestId, index: String(index) } }) as const;
+
 /**
  * One request's job, as the session that asked for it sees it: the generation is part of the key
  * and pins every call (`RequestOptions.generation`), so an answer for a session that is gone can
@@ -28,32 +49,81 @@ export const jobHref = (requestId: string): Href => ({
 export const customerJobQueryKey = (requestId: string, generation: number) =>
   [JOB_KEY, requestId, generation] as const;
 
-/**
- * Asks again for one request's job wherever it is on screen, each observer under its own session:
- * for a caller that learned the job may exist now and does not hold it (a payment refused because
- * the quote was paid elsewhere, `features/payments`). The request's notice is never polled.
- */
-export const refreshCustomerJob = (client: QueryClient, requestId: string): Promise<void> =>
-  client.invalidateQueries({ queryKey: [JOB_KEY, requestId] });
-
 /** No job on the request yet: the payment has not created it (404, as for anyone else's request). */
 export const isNoJobYet = (error: unknown): boolean =>
   error instanceof ApiError && error.status === 404;
 
+/** The job refused to this session: not theirs or gone (404), or not for this role (403). */
+export const isJobRefusal = (error: unknown): boolean =>
+  error instanceof ApiError && (error.status === 404 || error.status === 403);
+
+/**
+ * A job refused to this session (#66): its read or its confirmation answered 404 or 403, and no
+ * read answered the job since. A failed retry (offline, a server error) replaces the query's
+ * error but never this record, so nothing offers to confirm a job the API last refused; only an
+ * answered job lifts it. Kept in the QueryClient under the session's generation, never fetched
+ * and never collected, so a sign-out's `clear()` takes it and the next session never reads it.
+ */
+const jobDeniedKey = (requestId: string, generation: number) =>
+  ["job-denied", requestId, generation] as const;
+
+export const isJobDenied = (client: QueryClient, requestId: string, generation: number): boolean =>
+  client.getQueryData<boolean>(jobDeniedKey(requestId, generation)) === true;
+
+/** Records a refusal, or lifts one. The caller makes sure the answer is this session's. */
+function setJobDenied(
+  client: QueryClient,
+  requestId: string,
+  generation: number,
+  denied: boolean,
+): void {
+  if (denied === isJobDenied(client, requestId, generation)) return;
+  const queryKey = jobDeniedKey(requestId, generation);
+  // Built with its gcTime first: `setQueryData` alone would make a query that is collected.
+  client.getQueryCache().build<boolean>(client, { queryKey, gcTime: Infinity });
+  client.setQueryData<boolean>(queryKey, denied);
+}
+
+/** The job was refused to this session and no read answered it since (`isJobDenied`). */
+export function useJobDenied(requestId: string): boolean {
+  const generation = useSessionGeneration();
+  const { data } = useQuery<boolean>({
+    queryKey: jobDeniedKey(requestId, generation),
+    queryFn: skipToken,
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+  return data === true;
+}
+
 /**
  * The customer's job on one of their requests (#63). A 404 means the payment has not created it
- * yet; it is shown as such and asked again like a moving job, not retried in a burst.
+ * yet; it is shown as such and asked again like a moving job, not retried in a burst. The answer
+ * itself records a refusal and lifts it (`isJobDenied`): a screen learns of a 404 even when a
+ * later answer replaced it before the screen drew again.
  */
 export const customerJobQueryOptions = (requestId: string, generation: number) =>
   queryOptions({
     queryKey: customerJobQueryKey(requestId, generation),
-    queryFn: ({ signal }) =>
-      apiGet("/v1/requests/{request_id}/job", {
-        auth: true,
-        signal,
-        generation,
-        params: { request_id: requestId },
-      }),
+    queryFn: async ({ signal, client }) => {
+      try {
+        const job = await apiGet("/v1/requests/{request_id}/job", {
+          auth: true,
+          signal,
+          generation,
+          params: { request_id: requestId },
+        });
+        if (!signal.aborted) setJobDenied(client, requestId, generation, false);
+        return job;
+      } catch (error) {
+        // A cancelled read (a sign-out cleared the cache, a confirmation superseded it) says
+        // nothing about the job as it is now.
+        if (isJobRefusal(error) && !signal.aborted) {
+          setJobDenied(client, requestId, generation, true);
+        }
+        throw error;
+      }
+    },
     retry: false,
   });
 
@@ -89,7 +159,15 @@ export function useCustomerJob(requestId: string, { enabled = true, poll = true 
       if (!polling) return false;
       const job = current.state.data;
       const waiting = job ? isMoving(job) : isNoJobYet(current.state.error);
-      return waiting ? jobsConfig.pollMs : false;
+      if (waiting) return jobsConfig.pollMs;
+      // A finished job is asked for again when its automatic confirmation is due, then polled
+      // until the worker confirms it: "any moment now" turns into the confirmed job by itself.
+      if (job?.status !== "completed" || job.confirm_by === null) return false;
+      const left = Date.parse(job.confirm_by) - Date.now();
+      if (!Number.isFinite(left)) return false;
+      return left <= 0
+        ? jobsConfig.pollMs
+        : Math.min(MAX_TIMER_MS, Math.max(jobsConfig.pollMs, left));
     },
   });
   useRefetchOnReturn(query.refetch, live);
@@ -172,4 +250,68 @@ export function useActiveJob(): ActiveJobState {
   // `refetch` runs even on a disabled query: a pro (no requests) would be refused each time.
   const refresh = useCallback(() => (enabled ? refetch() : Promise.resolve()), [enabled, refetch]);
   return { active, updatedAt: Math.max(listedAt, jobAt), refetch: refresh };
+}
+
+// setTimeout's ceiling (about 24.8 days).
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+/**
+ * A mark that this session confirmed the job from this phone, so the confirmed screen thanks the
+ * customer for their own confirmation only (the automatic one landing under their eyes reads "Job
+ * confirmed"). It lives in the session's cache, keyed by its generation, and goes with it.
+ */
+const confirmedHereKey = (requestId: string, generation: number) =>
+  ["job-confirmed-here", requestId, generation] as const;
+export const wasConfirmedHere = (
+  client: QueryClient,
+  requestId: string,
+  generation: number,
+): boolean => client.getQueryData<boolean>(confirmedHereKey(requestId, generation)) === true;
+
+/**
+ * The customer confirms the finished job is done (#66): completed -> confirmed, or the job as it
+ * is when it was confirmed already. The answer replaces the job on screen at once (the screen
+ * under the sheet turns to "confirmed" as the sheet closes, and the banner, which reads the same
+ * query, lets it go), and the banner's list and History are asked again. A read still in flight
+ * was answered before the confirmation: it is cancelled first (its state put back), or it would
+ * land after and draw the finished job, its dock and deadline, over the confirmed one. A refusal
+ * (404, 403) is recorded (`isJobDenied`) before it is thrown. Every step is pinned to the session
+ * the confirmation started in: after a sign-out the answer goes nowhere.
+ */
+export async function confirmJob(
+  client: QueryClient,
+  requestId: string,
+  generation: number,
+): Promise<CustomerJob> {
+  const job = await apiPost("/v1/requests/{request_id}/job/confirm", undefined, {
+    auth: true,
+    generation,
+    params: { request_id: requestId },
+  }).catch((error: unknown) => {
+    if (isJobRefusal(error) && isCurrentGeneration(generation)) {
+      setJobDenied(client, requestId, generation, true);
+    }
+    throw error;
+  });
+  if (!isCurrentGeneration(generation)) return job;
+  await client.cancelQueries({ queryKey: customerJobQueryKey(requestId, generation), exact: true });
+  if (isCurrentGeneration(generation)) {
+    setJobDenied(client, requestId, generation, false);
+    client.setQueryData(confirmedHereKey(requestId, generation), true);
+    client.setQueryData(customerJobQueryKey(requestId, generation), job);
+    void client.invalidateQueries({ queryKey: activeJobQueryKey(generation) });
+    void invalidateMyRequests(client);
+  }
+  return job;
+}
+
+/**
+ * The job and the banner's list asked again, for a caller that learned the job moved on or may
+ * exist now: a confirmation found it moved on or gone (#66), or a payment was refused because the
+ * quote was paid elsewhere (`features/payments`). The request's notice is never polled.
+ */
+export function refreshCustomerJob(client: QueryClient, requestId: string, generation: number) {
+  if (!isCurrentGeneration(generation)) return;
+  void client.invalidateQueries({ queryKey: customerJobQueryKey(requestId, generation) });
+  void client.invalidateQueries({ queryKey: activeJobQueryKey(generation) });
 }

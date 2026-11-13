@@ -12,7 +12,10 @@ jest.mock("@/api", () => ({
   onSignOut: jest.fn(() => () => undefined),
 }));
 // Tapped pushes (#323) have their own suite; this one renders the layout without a router.
-jest.mock("@/features/notifications", () => ({ useOpenPushTaps: jest.fn() }));
+jest.mock("@/features/notifications", () => ({
+  useOpenPushTaps: jest.fn(),
+  usePushRegistration: jest.fn(),
+}));
 jest.mock("expo-router", () => {
   const Stack = ({ children }: { children?: unknown }) => children ?? null;
   Stack.Screen = jest.fn(() => null);

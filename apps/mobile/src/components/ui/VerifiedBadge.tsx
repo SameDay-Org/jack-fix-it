@@ -4,10 +4,12 @@ import Svg, { Path } from "react-native-svg";
 import { VERIFIED_SEAL_PATH, VERIFIED_SEAL_VIEW_BOX } from "@/components/icons";
 import { tokens } from "@/theme";
 
+import { scaledFontSize, type TextPlatform } from "./fontScale";
+
 type TypeStyle = keyof typeof tokens.fontSize;
 
 export type VerifiedBadgeProps = {
-  /** The type style of the name it follows: the seal is that font size tall, times the font scale. */
+  /** The type style of the name it follows: the seal is as tall as that text's font size as drawn. */
   type: TypeStyle;
   testID?: string;
 };
@@ -22,9 +24,18 @@ const CAP_CENTER_DROP = 0.18;
 // takes its last word along and the seal never starts a line on its own.
 const WORD_JOINER = "\u2060";
 
-/** The seal's side in dp: the name's font size times the font scale, in whole dp. */
-export function verifiedBadgeSize(type: TypeStyle, fontScale: number): number {
-  return Math.round(tokens.fontSize[type].size * fontScale);
+/**
+ * The seal's side in whole dp: the font size the name is drawn at for this font scale, so the seal
+ * keeps its proportion to the letters (about 1.4 times their cap height) at every scale. That is
+ * not the size times the font scale on Android 14 and later, where large text grows less than
+ * small text (`scaledFontSize`): a seal sized by the multiplication outgrew a display name.
+ */
+export function verifiedBadgeSize(
+  type: TypeStyle,
+  fontScale: number,
+  platform?: TextPlatform,
+): number {
+  return Math.round(scaledFontSize(tokens.fontSize[type].size, fontScale, platform));
 }
 
 /**
