@@ -37,6 +37,16 @@ class ProLocationUnavailableError(AppError):
     message = "Location sharing is unavailable right now. Try again later."
 
 
+class RouteUnavailableError(AppError):
+    """The route to the job's address cannot be computed right now (#351): the provider
+    (Mapbox) is down, slow, refusing or not configured, or the route cache is. The pro's
+    position is unaffected: the app still shows it. Never the provider's own text."""
+
+    status_code = 503
+    code = "route_unavailable"
+    message = "The route is unavailable right now. Try again later."
+
+
 class CheckInRequiredError(ConflictError):
     """Work starts only after the pro checked in with the customer's arrival code (#63)."""
 

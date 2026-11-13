@@ -9,6 +9,7 @@ import traceback
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any, Final
+from urllib.parse import urlsplit
 
 import sentry_sdk
 from sentry_sdk.types import Breadcrumb, BreadcrumbHint, Event, Hint
@@ -146,6 +147,20 @@ _CREDENTIAL_HEADERS: Final = frozenset({"stripe-signature"})
 # named.
 _STRIPE_OBJECT_ID: Final = re.compile(r"\b(acct|cus|pi|ek|pm|seti)_\w+", re.ASCII)
 
+# Mapbox (#351) is asked about a pro's position and a customer's address, and its GET APIs
+# carry what they are asked about in the URL's path, the token in its query. A breadcrumb of
+# a call to it names the vendor and never a URL, so no change of endpoint can put either into
+# Sentry; the method and the status stay.
+MAPBOX_HOST: Final = "api.mapbox.com"
+MAPBOX_URL_LABEL: Final = "[mapbox]"
+
+
+def _is_mapbox(url: str) -> bool:
+    try:
+        return urlsplit(url).hostname == MAPBOX_HOST
+    except ValueError:  # not a URL urlsplit can read: not Mapbox's
+        return False
+
 
 def _without_stripe_ids(text: str) -> str:
     return _STRIPE_OBJECT_ID.sub(lambda match: f"{match.group(1)}_[Filtered]", text)
@@ -262,7 +277,7 @@ def before_send(event: Event, hint: Hint) -> Event:
 def before_breadcrumb(crumb: Breadcrumb, hint: BreadcrumbHint) -> Breadcrumb:
     """Sentry hook: drops the query string from HTTP and navigation breadcrumbs, and Stripe
     object ids (an outgoing Stripe call's URL; a client secret or an ephemeral key in a log
-    line, which must never happen, would go too).
+    line, which must never happen, would go too). The URL of a call to Mapbox goes whole.
 
     Also from URLs in a breadcrumb's message and in the text values of its data, e.g. a
     library's log line, or its `extra`, naming a request URL. The SQL breadcrumbs the
@@ -292,5 +307,5 @@ def before_breadcrumb(crumb: Breadcrumb, hint: BreadcrumbHint) -> Breadcrumb:
                 data[name] = _without_stripe_ids(_without_url_queries(value))
         url = data.get("url")
         if crumb.get("type") in ("http", "navigation") and isinstance(url, str):
-            data["url"] = _without_query(url)
+            data["url"] = MAPBOX_URL_LABEL if _is_mapbox(url) else _without_query(url)
     return crumb
