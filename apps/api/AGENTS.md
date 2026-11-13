@@ -117,9 +117,13 @@ there are all `{"route": null}`; Mapbox failing or without `MAPBOX_ACCESS_TOKEN`
   `ROUTE_REFRESH_DISTANCE_M` from where it starts, and one request at a time asks for a job
   (`JobRouteCache.claim`). That request reads the cache again once the turn is its own, inside
   the `try` whose `finally` ends the turn: a request that had the turn since its first look may
-  have kept the route already. After a failure Mapbox is not asked again for that job for
-  `ROUTE_RETRY_SECONDS`; polls meanwhile get the 503 without a call. Directions is a POST:
-  positions travel in the body, not the URL.
+  have kept the route already. The turn lasts `turn_seconds`: Redis counts from the moment it
+  takes the claim, so it covers the claim's answer, the second read, both Mapbox calls, the
+  write and the end of the turn, each at its deadline; a step added to a turn is counted
+  there. The claim holds its request's token and is ended by compare-and-delete, so a request
+  that outlived its turn never ends the next one's. After a failure Mapbox is not asked again
+  for that job for `ROUTE_RETRY_SECONDS`; polls meanwhile get the 503 without a call.
+  Directions is a POST: positions travel in the body, not the URL.
 - **Geocoding is temporary.** A request's address row has no coordinates today, so each
   computed route places the address with Mapbox's forward geocoding first. That answer is used
   and dropped: Mapbox's terms forbid caching or storing a temporary result. Keeping

@@ -17,7 +17,9 @@ way, and draws the line. The route comes from Mapbox (app/integrations/mapbox.py
   become as many Mapbox calls. One request at a time asks Mapbox for a job: another arriving
   meanwhile gets the route being replaced, or "no route" when there is none yet. The request
   whose turn it is looks at the cache once more before it asks: one that had the turn since
-  its first look may have kept the very route it was about to pay for. After a failure Mapbox
+  its first look may have kept the very route it was about to pay for. A turn is held for as
+  long as every step made in it may take (turn_seconds) and carries its request's own token:
+  a request ends its own turn only, never one that passed to another. After a failure Mapbox
   is not asked again for that job for ROUTE_RETRY_SECONDS: polls meanwhile get the same 503,
   so an app that tries again at once, or a rate limit, is not answered with more calls.
 - Where the cache lives: a route starts at the pro's position and ends at the customer's
@@ -97,11 +99,54 @@ return 1
 """
 
 
+# Ends a turn: deletes the job's claim (KEYS[1]) only while it holds ARGV[1], the token of the
+# request ending it. A turn that ended by itself and is another request's now is left alone.
+_RELEASE_SCRIPT: Final = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
+
+# After the provider failed: the job's claim (KEYS[1]) becomes ARGV[2], nobody's turn, for
+# ARGV[3] seconds. Not while it holds anything but ARGV[1], the token of the request that
+# failed: another request's turn, or a wait already begun, stays as it is. 1 when written.
+_HOLD_OFF_SCRIPT: Final = """
+local holder = redis.call('GET', KEYS[1])
+if holder and holder ~= ARGV[1] then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+return 1
+"""
+
+
 # A job's turn to ask the provider, as `claim` finds it: the caller's own now, another
 # request's, or nobody's for a while after the provider failed.
 Turn = Literal["mine", "taken", "held_off"]
-_ASKING: Final = b"asking"
-_HELD_OFF: Final = b"held-off"
+# What the claim holds instead of a request's token while nobody may ask (never a token: those
+# are 32 hex digits).
+_HELD_OFF: Final = "held-off"
+
+# What a request does with a job's turn held, each step under its own deadline: the cache
+# answers the claim, is looked at again, keeps the route and ends the turn (the cache's
+# deadline each); Mapbox places the address and gives the directions (Mapbox's deadline each).
+_CACHE_STEPS_IN_A_TURN: Final = 4
+_MAPBOX_CALLS_IN_A_TURN: Final = 2
+# For what runs between those steps.
+_TURN_MARGIN_SECONDS: Final = 1
+
+
+def turn_seconds(*, mapbox_timeout_seconds: float, cache_timeout_seconds: float) -> int:
+    """How long Redis holds a job's turn for one request. Redis counts from the moment it
+    takes the claim, before its answer is back, so the time covers every step from there to
+    the end of the turn, each as slow as its deadline lets it be: a turn that ended sooner
+    would let a second request ask Mapbox while the first still works."""
+    steps = (
+        _MAPBOX_CALLS_IN_A_TURN * mapbox_timeout_seconds
+        + _CACHE_STEPS_IN_A_TURN * cache_timeout_seconds
+    )
+    return math.ceil(steps) + _TURN_MARGIN_SECONDS
 
 
 @dataclass(frozen=True)
@@ -132,15 +177,20 @@ class JobRouteCache(Protocol):
         stored. False when it was not kept."""
         ...
 
-    async def claim(self, job_id: uuid.UUID, *, seconds: int) -> Turn:
-        """`mine` for one caller per job at a time: the one that may ask the provider. Its
-        turn ends with `release` or `hold_off`, or by itself after `seconds`."""
+    async def claim(self, job_id: uuid.UUID, *, token: str, seconds: int) -> Turn:
+        """`mine` for one caller per job at a time: the one that may ask the provider. `token`
+        names that caller's turn and no other's. The turn ends with `release` or `hold_off`,
+        or by itself after `seconds`."""
         ...
 
-    async def release(self, job_id: uuid.UUID) -> None: ...
+    async def release(self, job_id: uuid.UUID, *, token: str) -> None:
+        """Ends the turn taken with `token`, and only that one: a turn that ended by itself
+        and is another caller's now stays."""
+        ...
 
-    async def hold_off(self, job_id: uuid.UUID, *, seconds: int) -> None:
-        """Ends the caller's turn and gives nobody the next one for `seconds`."""
+    async def hold_off(self, job_id: uuid.UUID, *, token: str, seconds: int) -> None:
+        """Ends the turn taken with `token` and gives nobody the next one for `seconds`. A
+        turn that is another caller's now stays as it is."""
         ...
 
 
@@ -162,6 +212,8 @@ class RedisJobRouteCache:
         self._timeout = timeout_seconds
         self._prefix = prefix
         self._put = redis.register_script(_PUT_SCRIPT)
+        self._release = redis.register_script(_RELEASE_SCRIPT)
+        self._hold_off = redis.register_script(_HOLD_OFF_SCRIPT)
 
     def key(self, job_id: uuid.UUID) -> str:
         return route_key(self._prefix, job_id)
@@ -184,22 +236,24 @@ class RedisJobRouteCache:
                 await self._guard.require()
             return bool(await self._put(keys=keys, args=args))
 
-    async def claim(self, job_id: uuid.UUID, *, seconds: int) -> Turn:
-        # The claim holds no position: it needs no check of what the Redis keeps.
+    async def claim(self, job_id: uuid.UUID, *, token: str, seconds: int) -> Turn:
+        # The claim holds the caller's token, no position: it needs no check of what the
+        # Redis keeps.
         key = self.claim_key(job_id)
         async with asyncio.timeout(self._timeout):
-            if await self._redis.set(key, _ASKING, nx=True, ex=seconds):
+            if await self._redis.set(key, token, nx=True, ex=seconds):
                 return "mine"
             holder = await self._redis.get(key)
-        return "held_off" if holder == _HELD_OFF else "taken"
+        return "held_off" if holder == _HELD_OFF.encode() else "taken"
 
-    async def release(self, job_id: uuid.UUID) -> None:
+    async def release(self, job_id: uuid.UUID, *, token: str) -> None:
         async with asyncio.timeout(self._timeout):
-            await self._redis.delete(self.claim_key(job_id))
+            await self._release(keys=[self.claim_key(job_id)], args=[token])
 
-    async def hold_off(self, job_id: uuid.UUID, *, seconds: int) -> None:
+    async def hold_off(self, job_id: uuid.UUID, *, token: str, seconds: int) -> None:
+        args: list[str | int] = [token, _HELD_OFF, seconds]
         async with asyncio.timeout(self._timeout):
-            await self._redis.set(self.claim_key(job_id), _HELD_OFF, ex=seconds)
+            await self._hold_off(keys=[self.claim_key(job_id)], args=args)
 
 
 class NoJobRouteCache:
@@ -212,13 +266,13 @@ class NoJobRouteCache:
     async def put(self, job_id: uuid.UUID, entry: CachedRoute, *, ttl_seconds: int) -> bool:
         raise LocationStoreRefusedError("not_configured")
 
-    async def claim(self, job_id: uuid.UUID, *, seconds: int) -> Turn:
+    async def claim(self, job_id: uuid.UUID, *, token: str, seconds: int) -> Turn:
         return "taken"
 
-    async def release(self, job_id: uuid.UUID) -> None:
+    async def release(self, job_id: uuid.UUID, *, token: str) -> None:
         return None
 
-    async def hold_off(self, job_id: uuid.UUID, *, seconds: int) -> None:
+    async def hold_off(self, job_id: uuid.UUID, *, token: str, seconds: int) -> None:
         return None
 
 
@@ -271,8 +325,7 @@ class JobRouteConfig:
     refresh_distance_m: float
     max_points: int
     max_steps: int
-    # How long one request may hold a job's turn to ask Mapbox: its second look at the
-    # cache, both calls, the write of the route, and a margin.
+    # How long one request may hold a job's turn to ask Mapbox (turn_seconds).
     claim_seconds: int
     # How long nobody asks Mapbox for a job after it failed.
     retry_seconds: int
@@ -284,10 +337,12 @@ class JobRouteConfig:
             refresh_distance_m=settings.route_refresh_distance_m,
             max_points=settings.route_max_points,
             max_steps=settings.route_max_steps,
-            claim_seconds=math.ceil(
-                2 * settings.mapbox_timeout_seconds + 2 * settings.pro_location_timeout_seconds
-            )
-            + 1,
+            # The deadlines the provider and the cache are built with (get_route_provider,
+            # get_job_route_cache).
+            claim_seconds=turn_seconds(
+                mapbox_timeout_seconds=settings.mapbox_timeout_seconds,
+                cache_timeout_seconds=settings.pro_location_timeout_seconds,
+            ),
             retry_seconds=settings.route_retry_seconds,
         )
 
@@ -352,6 +407,9 @@ class JobRouteService:
         if position is None:
             return NO_ROUTE
         origin = Coordinate(lat=position.lat, lng=position.lng)
+        # This request's turn, should it get one: no other request ends it, and it ends no
+        # other's (a turn that outlived its time is the next request's by then).
+        token = uuid.uuid4().hex
         with _cache_failures(ids):
             cached = await self._cache.get(job_id)
             if (answer := self._kept_answer(cached, origin)) is not None:
@@ -359,7 +417,7 @@ class JobRouteService:
             # Read before the turn is taken: the turn's time is Mapbox's and the cache's only.
             place = await self._requests.place(request_id)
             await self._session.commit()  # as above: nothing is held while Mapbox answers
-            turn = await self._cache.claim(job_id, seconds=self._config.claim_seconds)
+            turn = await self._cache.claim(job_id, token=token, seconds=self._config.claim_seconds)
         if turn == "held_off":
             # Mapbox failed for this job a moment ago: it is not asked again yet.
             raise RouteUnavailableError
@@ -383,7 +441,7 @@ class JobRouteService:
                 raise
             await self._keep(job_id, CachedRoute(origin=origin, route=route))
         finally:
-            await self._end_turn(job_id, failed=failed)
+            await self._end_turn(job_id, token, failed=failed)
         return JobRouteOut(route=route)
 
     def _kept_answer(self, kept: CachedRoute | None, origin: Coordinate) -> JobRouteOut | None:
@@ -455,13 +513,13 @@ class JobRouteService:
         except (RedisError, OSError):
             logger.error("job_route_cache_unavailable", extra={"job_id": str(job_id)})
 
-    async def _end_turn(self, job_id: uuid.UUID, *, failed: bool) -> None:
-        """Gives the job's turn back, or, after Mapbox failed, to nobody for a while. A turn
-        that cannot be ended ends by itself (JobRouteConfig.claim_seconds)."""
+    async def _end_turn(self, job_id: uuid.UUID, token: str, *, failed: bool) -> None:
+        """Gives the turn taken with `token` back, or, after Mapbox failed, to nobody for a
+        while. A turn that cannot be ended ends by itself (JobRouteConfig.claim_seconds)."""
         try:
             if failed:
-                await self._cache.hold_off(job_id, seconds=self._config.retry_seconds)
+                await self._cache.hold_off(job_id, token=token, seconds=self._config.retry_seconds)
             else:
-                await self._cache.release(job_id)
+                await self._cache.release(job_id, token=token)
         except (RedisError, OSError):
             logger.error("job_route_cache_unavailable", extra={"job_id": str(job_id)})

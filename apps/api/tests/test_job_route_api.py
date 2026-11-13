@@ -8,6 +8,7 @@ test's own, deleted afterwards; the server's clock is fixed (`clock`), and a tes
 import asyncio
 import json
 import logging
+import re
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -29,6 +30,7 @@ from app.integrations.mapbox import (
     Coordinate,
     DrivingRoute,
     MapboxRouteProvider,
+    MapboxUnavailableError,
     RouteStep,
     StreetAddress,
     get_route_provider,
@@ -50,13 +52,19 @@ from app.modules.jobs.route import (
     JobRouteConfig,
     NoJobRouteCache,
     RedisJobRouteCache,
+    Turn,
     get_job_route_cache,
     meters_between,
     thinned,
 )
 from app.modules.requests.service import CustomerRequestReader
 from app.observability import MAPBOX_URL_LABEL, JsonFormatter
-from tests.conftest import _rolled_back_session, make_app, make_settings
+from tests.conftest import (
+    InMemoryJobRouteCache,
+    _rolled_back_session,
+    make_app,
+    make_settings,
+)
 from tests.job_world import LINE1, LINE2, JobWorld, Party, build_world, make_job, record_pushes
 from tests.test_pro_location_api import (
     CODE,
@@ -155,7 +163,8 @@ def drive(points: int = 3, steps: int = 3) -> DrivingRoute:
 
 
 class FakeMapbox:
-    """A RouteProvider that records what it is asked. `hold` keeps a route waiting."""
+    """A RouteProvider that records what it is asked. `hold` keeps a route waiting; a route
+    asked for while `failing` is set ends as Mapbox being unavailable."""
 
     def __init__(self) -> None:
         self.geocodes: list[StreetAddress] = []
@@ -163,6 +172,7 @@ class FakeMapbox:
         self.place: Coordinate | None = GEOCODED
         self.found: DrivingRoute | None = drive()
         self.hold: asyncio.Event | None = None
+        self.failing = False
         self.entered = asyncio.Event()
 
     async def asked_for_a_route(self) -> None:
@@ -182,8 +192,11 @@ class FakeMapbox:
     async def route(self, origin: Coordinate, destination: Coordinate) -> DrivingRoute | None:
         self.routes.append((origin, destination))
         self.entered.set()
+        failing = self.failing
         if self.hold is not None:
             await self.hold.wait()
+        if failing:
+            raise MapboxUnavailableError
         return self.found
 
 
@@ -475,11 +488,13 @@ async def test_one_request_at_a_time_asks_mapbox(
     await mapbox.asked_for_a_route()
     async with asyncio.timeout(5):  # a poll that asked Mapbox too would wait for good
         meanwhile = [await shown(db_client, job.id, world) for _ in range(3)]
-    # The turn is held for the second look at the cache, both calls and the write, plus a
-    # margin, and names no position.
-    assert settings.mapbox_timeout_seconds == 5.0
-    assert 7 <= await redis.ttl(cache.claim_key(job.id)) <= 12
-    assert await redis.get(cache.claim_key(job.id)) == b"asking"
+    # The turn is held for every step made in it (the defaults: 2 x 5 s and 4 x 0.5 s, + 1)
+    # under its request's token, which names no position.
+    assert (settings.mapbox_timeout_seconds, settings.pro_location_timeout_seconds) == (5.0, 0.5)
+    assert 8 <= await redis.ttl(cache.claim_key(job.id)) <= 13
+    holder = await redis.get(cache.claim_key(job.id))
+    assert holder is not None
+    assert re.fullmatch(rb"[0-9a-f]{32}", holder)
     mapbox.hold.set()
     first = (await waiting).json()["route"]
 
@@ -705,11 +720,86 @@ async def test_cache_lost_with_the_turn_held_asks_nobody_and_gives_the_turn_back
     assert len(mapbox.routes) == 1
 
 
-def test_turn_lasts_for_all_that_is_done_in_it() -> None:
-    """The second look at the cache, both Mapbox calls and the write of the route, plus a
-    margin: a turn that ended sooner would let a second request ask Mapbox meanwhile."""
-    settings = make_settings(mapbox_timeout_seconds=2.0, pro_location_timeout_seconds=1.5)
-    assert JobRouteConfig.from_settings(settings).claim_seconds == 8  # 2 x 2.0 + 2 x 1.5, + 1
+# How long a turn lasts and who may end it (#383 round 2)
+
+
+class StepsOfATurn(InMemoryJobRouteCache):
+    """Lists what a request asks of the cache from the claim that gives it a job's turn to the
+    end of that turn."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.steps: list[str] = []
+        self._held = False
+
+    def _step(self, name: str) -> None:
+        if self._held:
+            self.steps.append(name)
+
+    async def claim(self, job_id: uuid.UUID, *, token: str, seconds: int) -> Turn:
+        turn = await super().claim(job_id, token=token, seconds=seconds)
+        self._held = turn == "mine"
+        self._step("claim")
+        return turn
+
+    async def get(self, job_id: uuid.UUID) -> CachedRoute | None:
+        self._step("get")
+        return await super().get(job_id)
+
+    async def put(self, job_id: uuid.UUID, entry: CachedRoute, *, ttl_seconds: int) -> bool:
+        self._step("put")
+        return await super().put(job_id, entry, ttl_seconds=ttl_seconds)
+
+    async def release(self, job_id: uuid.UUID, *, token: str) -> None:
+        self._step("release")
+        self._held = False
+        await super().release(job_id, token=token)
+
+
+@pytest.mark.parametrize(
+    ("settings", "seconds"),
+    [
+        # 2 x Mapbox's deadline and 4 x the cache's, rounded up, and one second.
+        ({"mapbox_timeout_seconds": 5.0, "pro_location_timeout_seconds": 0.5}, 13),  # defaults
+        ({"mapbox_timeout_seconds": 2.0, "pro_location_timeout_seconds": 1.5}, 11),
+        ({"mapbox_timeout_seconds": 0.1, "pro_location_timeout_seconds": 4.0}, 18),
+        ({"mapbox_timeout_seconds": 0.25, "pro_location_timeout_seconds": 0.3}, 3),
+        ({"mapbox_timeout_seconds": 3.0, "pro_location_timeout_seconds": 2.5}, 17),
+    ],
+    indirect=["settings"],
+)
+async def test_turn_lasts_for_all_that_is_done_in_it(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    store: RedisJobLocationStore,
+    mapbox: FakeMapbox,
+    settings: Settings,
+    seconds: int,
+) -> None:
+    """Redis counts a turn's time from the moment it takes the claim, so the turn outlasts
+    every step its request makes from there, each as slow as its deadline lets it be: the
+    claim's own answer, the second look at the cache, both Mapbox calls, the write of the
+    route and the end of the turn. One that ended sooner would let a second request ask Mapbox
+    meanwhile."""
+    config = JobRouteConfig.from_settings(settings)
+    assert config.claim_seconds == seconds
+
+    # The steps are counted on a turn as it is made, one that needs both of Mapbox's calls.
+    job = await on_the_way_job(db_session, world)  # no lat/lng: geocoded, then routed
+    await plant(store, job.id)
+    turn = StepsOfATurn()
+    app.dependency_overrides[get_job_route_cache] = lambda: turn
+    assert await shown(db_client, job.id, world) is not None
+
+    assert turn.steps == ["claim", "get", "put", "release"]
+    assert (len(mapbox.geocodes), len(mapbox.routes)) == (1, 1)
+    slowest = (
+        len(turn.steps) * settings.pro_location_timeout_seconds
+        + mapbox.calls * settings.mapbox_timeout_seconds
+    )
+    assert slowest + 1 <= config.claim_seconds < slowest + 2
 
 
 async def test_turn_to_ask_ends_by_itself(redis: Redis, prefix: str) -> None:
@@ -718,18 +808,220 @@ async def test_turn_to_ask_ends_by_itself(redis: Redis, prefix: str) -> None:
     cache = RedisJobRouteCache(redis, None, timeout_seconds=STORE_TIMEOUT, prefix=prefix)
     job_id = uuid.uuid4()
 
-    assert await cache.claim(job_id, seconds=11) == "mine"
-    assert await cache.claim(job_id, seconds=11) == "taken"
+    assert await cache.claim(job_id, token="first", seconds=11) == "mine"
+    assert await cache.claim(job_id, token="second", seconds=11) == "taken"
     assert 6 <= await redis.ttl(cache.claim_key(job_id)) <= 11
-    await cache.release(job_id)
-    assert await cache.claim(job_id, seconds=11) == "mine"
+    await cache.release(job_id, token="first")
+    assert await cache.claim(job_id, token="third", seconds=11) == "mine"
     # After a failure: nobody's turn for the seconds given, then anybody's again.
-    await cache.hold_off(job_id, seconds=7)
-    assert await cache.claim(job_id, seconds=11) == "held_off"
+    await cache.hold_off(job_id, token="third", seconds=7)
+    assert await cache.claim(job_id, token="fourth", seconds=11) == "held_off"
     assert 2 <= await redis.ttl(cache.claim_key(job_id)) <= 7  # the claim did not extend it
     assert await redis.get(cache.claim_key(job_id)) == b"held-off"  # no position in it
     assert await redis.pexpireat(cache.claim_key(job_id), 1)
-    assert await cache.claim(job_id, seconds=11) == "mine"
+    assert await cache.claim(job_id, token="fifth", seconds=11) == "mine"
+
+
+async def test_turn_is_ended_by_its_own_request_only(redis: Redis, prefix: str) -> None:
+    """A request that outlived its turn finds it another request's when it is done. Whatever
+    it does then, give the turn back or hold the job off after Mapbox failed, leaves that turn
+    with the request that has it, for the time it has left."""
+    cache = RedisJobRouteCache(redis, None, timeout_seconds=STORE_TIMEOUT, prefix=prefix)
+    job_id = uuid.uuid4()
+    key = cache.claim_key(job_id)
+
+    assert await cache.claim(job_id, token="old", seconds=30) == "mine"
+    assert await redis.pexpireat(key, 1)  # the old request's turn ran out
+    assert await cache.claim(job_id, token="next", seconds=30) == "mine"
+
+    await cache.release(job_id, token="old")
+    assert await redis.get(key) == b"next"
+    await cache.hold_off(job_id, token="old", seconds=7)
+    assert await redis.get(key) == b"next"
+    assert 25 <= await redis.ttl(key) <= 30  # not the wait's 7
+    assert await cache.claim(job_id, token="third", seconds=30) == "taken"
+
+    # The request whose turn it is ends it.
+    await cache.release(job_id, token="next")
+    assert await redis.exists(key) == 0
+
+
+async def test_wait_after_a_failure_is_nobodys_to_end(redis: Redis, prefix: str) -> None:
+    """The wait after Mapbox failed starts whether the failed request's turn was still its own
+    or had run out with nobody after it, and no request done meanwhile ends or renews it."""
+    cache = RedisJobRouteCache(redis, None, timeout_seconds=STORE_TIMEOUT, prefix=prefix)
+    job_id = uuid.uuid4()
+    key = cache.claim_key(job_id)
+
+    assert await cache.claim(job_id, token="failed", seconds=30) == "mine"
+    await cache.hold_off(job_id, token="failed", seconds=7)
+    assert await redis.get(key) == b"held-off"
+    # An older request done now, well or not: the wait is as it was.
+    await cache.release(job_id, token="old")
+    await cache.hold_off(job_id, token="old", seconds=30)
+    assert await redis.get(key) == b"held-off"
+    assert 2 <= await redis.ttl(key) <= 7
+    assert await cache.claim(job_id, token="next", seconds=30) == "held_off"
+
+    # A turn that ran out and that nobody took since: its failure still holds the job off.
+    assert await redis.pexpireat(key, 1)
+    assert await cache.claim(job_id, token="slow", seconds=30) == "mine"
+    assert await redis.pexpireat(key, 1)
+    await cache.hold_off(job_id, token="slow", seconds=7)
+    assert await redis.get(key) == b"held-off"
+    assert 2 <= await redis.ttl(key) <= 7
+
+
+@pytest.mark.parametrize("fails", [False, True], ids=["answered", "mapbox_failed"])
+async def test_request_that_outlived_its_turn_leaves_the_next_requests(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    store: RedisJobLocationStore,
+    cache: RedisJobRouteCache,
+    mapbox: FakeMapbox,
+    redis: Redis,
+    fails: bool,
+) -> None:
+    """A request is still waiting for Mapbox when its turn runs out: the next request takes
+    the turn and asks too. When the first is done at last, with its route or with Mapbox's
+    failure, the turn is the second's still: it is neither given away (a third request would
+    ask Mapbox as well) nor made the wait after a failure."""
+    job = await on_the_way_job(db_session, world)
+    await locate(db_session, world)
+    await plant(store, job.id)
+    key = cache.claim_key(job.id)
+    first_hold, second_hold = asyncio.Event(), asyncio.Event()
+    mapbox.hold, mapbox.failing = first_hold, fails
+    old = asyncio.create_task(ask(db_client, job.id, world.customer))
+    following: asyncio.Task[httpx.Response] | None = None
+    try:
+        await mapbox.asked_for_a_route()
+        olds = await redis.get(key)
+        assert await redis.pexpireat(key, 1)  # the first request's turn ran out
+        mapbox.hold, mapbox.failing = second_hold, False
+        following = asyncio.create_task(ask(db_client, job.id, world.customer))
+        await mapbox.asked_for_a_route()
+        theirs = await redis.get(key)
+        assert theirs is not None
+        assert theirs != olds  # each request's turn has its own token
+
+        async with asyncio.timeout(5):
+            first_hold.set()
+            first = await old
+            assert first.status_code == (503 if fails else 200)
+            # The turn is the second request's still, and a poll now asks nobody: it gets the
+            # route the first one kept, or "no route yet" when Mapbox failed it.
+            assert await redis.get(key) == theirs
+            meanwhile = await ask(db_client, job.id, world.customer)
+            assert meanwhile.status_code == 200
+            assert meanwhile.json() == (NO_ROUTE if fails else first.json())
+            assert len(mapbox.routes) == 2
+            second_hold.set()
+            second = await following
+    finally:
+        first_hold.set()
+        second_hold.set()
+        await ended(old, following)
+
+    assert second.status_code == 200
+    assert second.json()["route"] is not None
+    assert len(mapbox.routes) == 2  # the first request's, and the one its lost turn cost
+    assert await redis.exists(key) == 0  # ended by the request whose turn it was
+
+
+class SlowAnswers(RedisJobRouteCache):
+    """Redis does at once what the first request with a job's turn asks of it, and its answers
+    are slow to arrive: the claim's takes CLAIM_ANSWER_S, the second look SECOND_LOOK_S, and the
+    write of the route starts (`writing`) and waits for the test (`write`)."""
+
+    CLAIM_ANSWER_S = 3.5
+    SECOND_LOOK_S = 3.5
+
+    def __init__(self, redis: Redis, *, timeout_seconds: float, prefix: str) -> None:
+        super().__init__(redis, None, timeout_seconds=timeout_seconds, prefix=prefix)
+        self.claims = self.looks = self.writes = 0
+        self.writing = asyncio.Event()
+        self.write = asyncio.Event()
+
+    async def claim(self, job_id: uuid.UUID, *, token: str, seconds: int) -> Turn:
+        turn = await super().claim(job_id, token=token, seconds=seconds)
+        self.claims += 1
+        if self.claims == 1:
+            # Redis has the claim and counts its time; the answer is on its way.
+            await asyncio.sleep(self.CLAIM_ANSWER_S)
+        return turn
+
+    async def get(self, job_id: uuid.UUID) -> CachedRoute | None:
+        self.looks += 1
+        if self.looks == 2:
+            await asyncio.sleep(self.SECOND_LOOK_S)
+        return await super().get(job_id)
+
+    async def put(self, job_id: uuid.UUID, entry: CachedRoute, *, ttl_seconds: int) -> bool:
+        self.writes += 1
+        if self.writes == 1:
+            self.writing.set()
+            await self.write.wait()
+        return await super().put(job_id, entry, ttl_seconds=ttl_seconds)
+
+
+WRITE_S = 3.1
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [{"mapbox_timeout_seconds": 0.1, "pro_location_timeout_seconds": 4.0}],
+    indirect=True,
+)
+async def test_turn_outlasts_slow_answers_from_the_cache(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    store: RedisJobLocationStore,
+    mapbox: FakeMapbox,
+    redis: Redis,
+    prefix: str,
+    settings: Settings,
+) -> None:
+    """The Gatekeeper's probe of the turn's time (#383 round 2), in real time against Redis.
+    Redis takes the first poll's claim at once and its answer is 3.5 s on its way; the second
+    look takes 3.5 s and the write of the route 3.1 s: each within the cache's 4 s deadline,
+    10.1 s in all. A turn of ceil(2 x 0.1 + 2 x 4) + 1 = 10 s had run out by then: a second
+    poll took it and asked Mapbox too, and the first poll's end of turn deleted the second's
+    claim. Nothing here moves Redis's clock or the claim's expiry, so this takes ten seconds."""
+    slowest = max(SlowAnswers.CLAIM_ANSWER_S, SlowAnswers.SECOND_LOOK_S, WRITE_S)
+    assert slowest < settings.pro_location_timeout_seconds
+    job = await on_the_way_job(db_session, world)
+    await locate(db_session, world)
+    await plant(store, job.id)
+    slow = SlowAnswers(redis, timeout_seconds=settings.pro_location_timeout_seconds, prefix=prefix)
+    app.dependency_overrides[get_job_route_cache] = lambda: slow
+    key = slow.claim_key(job.id)
+    first = asyncio.create_task(ask(db_client, job.id, world.customer))
+    try:
+        async with asyncio.timeout(30):
+            await slow.writing.wait()
+            assert len(mapbox.routes) == 1
+            await asyncio.sleep(WRITE_S)
+            # The write is still on its way and the turn is the first poll's still: a poll
+            # now finds it taken, gets "no route yet" and asks Mapbox nothing.
+            holder = await redis.get(key)
+            assert holder is not None
+            assert await shown(db_client, job.id, world) is None
+            assert len(mapbox.routes) == 1
+            assert await redis.get(key) == holder
+            slow.write.set()
+            answer = await first
+    finally:
+        slow.write.set()
+        await ended(first)
+
+    assert answer.status_code == 200
+    assert answer.json()["route"] is not None
+    assert len(mapbox.routes) == 1
+    assert await redis.exists(key) == 0  # given back by the poll whose turn it was
 
 
 # The cached route follows the position: same Redis, never longer, deleted with it
@@ -1193,10 +1485,10 @@ class Flaky(RedisJobRouteCache):
             raise RedisConnectionError("probe: gone")
         return await super().put(job_id, entry, ttl_seconds=ttl_seconds)
 
-    async def release(self, job_id: uuid.UUID) -> None:
+    async def release(self, job_id: uuid.UUID, *, token: str) -> None:
         if "release" in self.failing:
             raise TimeoutError
-        await super().release(job_id)
+        await super().release(job_id, token=token)
 
 
 @pytest.mark.parametrize(
@@ -1400,9 +1692,9 @@ async def test_no_cache_keeps_and_gives_nothing() -> None:
     cache = NoJobRouteCache()
     job_id = uuid.uuid4()
 
-    assert await cache.claim(job_id, seconds=5) == "taken"
-    await cache.release(job_id)
-    await cache.hold_off(job_id, seconds=5)
+    assert await cache.claim(job_id, token="any", seconds=5) == "taken"
+    await cache.release(job_id, token="any")
+    await cache.hold_off(job_id, token="any", seconds=5)
     for call in (cache.get(job_id), cache.put(job_id, CachedRoute(ORIGIN, None), ttl_seconds=5)):
         with pytest.raises(Exception, match="not_configured"):
             await call

@@ -120,11 +120,15 @@ class InMemoryJobLocationStore:
 
 
 class InMemoryJobRouteCache:
-    """Test-only JobRouteCache: a dict, with no expiry and no tie to the position."""
+    """Test-only JobRouteCache: a dict, with no expiry and no tie to the position. A turn is
+    ended by the token it was taken with, as in Redis."""
+
+    HELD_OFF = "held-off"
 
     def __init__(self) -> None:
         self.routes: dict[uuid.UUID, CachedRoute] = {}
-        self.claims: dict[uuid.UUID, Turn] = {}
+        # A job's turn: the token of the request that holds it, or HELD_OFF for nobody's.
+        self.claims: dict[uuid.UUID, str] = {}
 
     async def get(self, job_id: uuid.UUID) -> CachedRoute | None:
         return self.routes.get(job_id)
@@ -133,17 +137,19 @@ class InMemoryJobRouteCache:
         self.routes[job_id] = entry
         return True
 
-    async def claim(self, job_id: uuid.UUID, *, seconds: int) -> Turn:
-        if job_id in self.claims:
-            return self.claims[job_id]
-        self.claims[job_id] = "taken"
-        return "mine"
+    async def claim(self, job_id: uuid.UUID, *, token: str, seconds: int) -> Turn:
+        if job_id not in self.claims:
+            self.claims[job_id] = token
+            return "mine"
+        return "held_off" if self.claims[job_id] == self.HELD_OFF else "taken"
 
-    async def release(self, job_id: uuid.UUID) -> None:
-        self.claims.pop(job_id, None)
+    async def release(self, job_id: uuid.UUID, *, token: str) -> None:
+        if self.claims.get(job_id) == token:
+            del self.claims[job_id]
 
-    async def hold_off(self, job_id: uuid.UUID, *, seconds: int) -> None:
-        self.claims[job_id] = "held_off"
+    async def hold_off(self, job_id: uuid.UUID, *, token: str, seconds: int) -> None:
+        if self.claims.get(job_id, token) == token:
+            self.claims[job_id] = self.HELD_OFF
 
 
 def make_app(settings: Settings) -> FastAPI:
