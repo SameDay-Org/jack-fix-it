@@ -18,41 +18,41 @@ export type BookEdit = (book: Book) => Book;
 
 const others = (items: Addresses) => items.filter((address) => !address.is_default);
 
+/** A book of one address: it is the default (the API keeps one while the book is not empty). */
+const withSoleDefault = (book: Book): Book =>
+  book.items.length === 1 && !book.items[0].is_default
+    ? { items: [{ ...book.items[0], is_default: true }], ordered: true }
+    : book;
+
 /**
  * `id` as the default, first. The old default joins the others in front, which is a guess: the
- * book stays `ordered` only when it is then the only other address.
+ * book is `ordered` only when it is then the only other address.
  */
 export function withDefault(book: Book, id: string): Book {
   const target = book.items.find((address) => address.id === id);
   if (!target || target.is_default) return book;
-  const hadDefault = book.items.some((address) => address.is_default);
   const rest = book.items
     .filter((address) => address.id !== id)
     .map((address) => (address.is_default ? { ...address, is_default: false } : address));
-  return {
-    items: [{ ...target, is_default: true }, ...rest],
-    ordered: rest.length <= 1 || (book.ordered && !hadDefault),
-  };
+  return { items: [{ ...target, is_default: true }, ...rest], ordered: rest.length <= 1 };
 }
 
 /**
  * The book without `id`. When that was the default, the API makes the oldest remaining address the
  * default: the first of the others in an `ordered` book. In one that is not, the device cannot
- * tell which, and draws no default until the server lists the book. The only address left is the
- * default either way.
+ * tell which, and draws no default until the server lists the book.
  */
 export function withoutAddress(book: Book, id: string): Book {
   const removed = book.items.find((address) => address.id === id);
   if (!removed) return book;
   const rest = book.items.filter((address) => address.id !== id);
-  const promoted = rest.length === 1 || (removed.is_default && book.ordered);
-  if (!promoted || rest.length === 0) {
-    return {
-      items: rest,
-      ordered: others(rest).length <= 1 || (!removed.is_default && book.ordered),
-    };
+  if (removed.is_default && book.ordered && rest.length > 0) {
+    return { items: [{ ...rest[0], is_default: true }, ...rest.slice(1)], ordered: true };
   }
-  return { items: [{ ...rest[0], is_default: true }, ...rest.slice(1)], ordered: true };
+  return withSoleDefault({
+    items: rest,
+    ordered: others(rest).length <= 1 || (!removed.is_default && book.ordered),
+  });
 }
 
 /**
@@ -62,7 +62,7 @@ export function withoutAddress(book: Book, id: string): Book {
 export function withAdded(book: Book, address: SavedAddress): Book {
   if (book.items.some((saved) => saved.id === address.id)) return withFields(book, address);
   const added = { ...book, items: [...book.items, { ...address, is_default: false }] };
-  return address.is_default ? withDefault(added, address.id) : added;
+  return address.is_default ? withDefault(added, address.id) : withSoleDefault(added);
 }
 
 /**

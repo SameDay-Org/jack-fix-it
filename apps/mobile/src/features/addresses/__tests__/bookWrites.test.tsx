@@ -101,6 +101,9 @@ const cached = (client: QueryClient) =>
 const guessed = (client: QueryClient) =>
   client.getQueryData<SavedBook>(SAVED_ADDRESSES_QUERY_KEY)?.guessed ?? false;
 
+/** Home once another address is the default. */
+const HOME_OTHER = { ...HOME, is_default: false };
+
 /** An address's label in the cached book. */
 const labelOf = (client: QueryClient, id: string) =>
   client
@@ -785,6 +788,67 @@ describe("a GET that lands while a write is in flight", () => {
     expect(cached(client)).toEqual(["mom*", "home", "work"]);
   });
 
+  it("asked after two answers, replaces them: a write asked meanwhile is drawn on its list", async () => {
+    const [first, second] = [deferred<SavedAddress>(), deferred<SavedAddress>()];
+    const deleted = deferred<undefined>();
+    jest.mocked(apiPatch).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    jest.mocked(apiDelete).mockReturnValue(deleted.promise);
+    const { result, client } = await renderBook();
+
+    // Work, then Mom, made the default, both answered: the book is fetched again.
+    const listedAgain = deferred<{ items: SavedAddress[] }>();
+    jest.mocked(apiGet).mockReturnValue(listedAgain.promise);
+    await act(async () => result.current.makeDefault(WORK));
+    await act(async () => result.current.makeDefault(MOM));
+    await act(async () => first.resolve({ ...WORK, is_default: true }));
+    await act(async () => second.resolve({ ...MOM, is_default: true }));
+    expect(apiGet).toHaveBeenCalledTimes(2);
+    // Mom is deleted before that GET lands.
+    await act(async () => result.current.remove({ ...MOM, is_default: true }));
+    await act(async () =>
+      listedAgain.resolve({ items: [{ ...MOM, is_default: true }, HOME_OTHER, WORK] }),
+    );
+
+    // The list has both answers and its own order: Home, the oldest, takes Mom's place.
+    expect(cached(client)).toEqual(["home*", "work"]);
+    jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+    await act(async () => deleted.resolve(undefined));
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(3));
+    expect(cached(client)).toEqual(["home*", "work"]);
+    expect(guessed(client)).toBe(false);
+    expect(client.getQueryCache().hasListeners()).toBe(false);
+  });
+
+  it("asked after an answer, is what a write asked meanwhile and refused goes back to", async () => {
+    const madeDefault = deferred<SavedAddress>();
+    const deleted = deferred<undefined>();
+    jest.mocked(apiPatch).mockReturnValue(madeDefault.promise);
+    jest.mocked(apiDelete).mockReturnValue(deleted.promise);
+    const { result, client } = await renderBook();
+
+    const listedAgain = deferred<{ items: SavedAddress[] }>();
+    jest.mocked(apiGet).mockReturnValue(listedAgain.promise);
+    await act(async () => result.current.makeDefault(MOM));
+    await act(async () => madeDefault.resolve({ ...MOM, is_default: true }));
+    await act(async () => result.current.remove(WORK));
+    // Another device renamed Work meanwhile.
+    await act(async () =>
+      listedAgain.resolve({
+        items: [{ ...MOM, is_default: true }, HOME_OTHER, { ...WORK, label: "Office" }],
+      }),
+    );
+    expect(cached(client)).toEqual(["mom*", "home"]);
+    // Still open: the delete is unanswered.
+    expect(client.getQueryCache().hasListeners()).toBe(true);
+
+    jest.mocked(apiGet).mockRejectedValue(new NetworkError(false));
+    await act(async () => deleted.reject(new ApiError(500, "internal_error")));
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(3));
+    expect(cached(client)).toEqual(["mom*", "home", "work"]);
+    expect(labelOf(client, "work")).toBe("Office");
+    expect(guessed(client)).toBe(false);
+  });
+
   it("is what the write's answer is drawn on", async () => {
     const answer = deferred<SavedAddress>();
     jest.mocked(apiPatch).mockReturnValue(answer.promise);
@@ -860,6 +924,24 @@ describe("the cached book says when the device cannot vouch for its other addres
     await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
     expect(cached(client)).toEqual(["work*", "home"]);
     expect(guessed(client)).toBe(false);
+    expect(client.getQueryCache().hasListeners()).toBe(false);
+  });
+
+  it("with no screen reading the book, an answered change stays as drawn: no list comes", async () => {
+    jest.mocked(apiPatch).mockResolvedValue({ ...MOM, is_default: true });
+    const client = newQueryClient();
+    client.setQueryData(SAVED_ADDRESSES_QUERY_KEY, { items: [HOME, WORK, MOM] });
+    const { result } = await renderHook(() => useMakeDefaultAddress(), {
+      wrapper: ({ children }: { children: ReactNode }) =>
+        createElement(QueryClientProvider, { client }, children),
+    });
+
+    await act(async () => result.current(MOM));
+    await act(() => settle());
+
+    expect(apiGet).not.toHaveBeenCalled();
+    expect(cached(client)).toEqual(["mom*", "home", "work"]);
+    expect(guessed(client)).toBe(true);
     expect(client.getQueryCache().hasListeners()).toBe(false);
   });
 

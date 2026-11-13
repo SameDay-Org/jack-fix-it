@@ -36,13 +36,12 @@ export type OpenWrite = { edit?: BookEdit; answered: boolean };
  *   draws over a write asked after it.
  * - A GET that lands is the new `confirmed`, and every write is replayed over it, the answered
  *   ones too: that list may have been read before the server took them (it was in flight when
- *   they were asked, or passed them on the way). Replaying one the list already has changes
- *   nothing.
+ *   they were asked, or passed them on the way).
  *
- * Once the last write is answered the book is fetched again, and the log closes when that GET
- * settles: only a list asked after every answer can stand alone. The log also goes with the
- * cached book when the cache drops it (a sign-out clears it); what its writes answer later is
- * drawn nowhere.
+ * Once the last write is answered the book is fetched again. That GET was asked after every
+ * answer so far, so its list has them: when it lands those writes leave the log, and the log
+ * closes unless a write was asked meanwhile. The log also goes with the cached book when the
+ * cache drops it (a sign-out clears it); what its writes answer later is drawn nowhere.
  */
 type WriteLog = {
   confirmed: Book;
@@ -106,12 +105,14 @@ function startLog(client: QueryClient): WriteLog | undefined {
 }
 
 /**
- * Draws the book after an answer. With the last write answered, fetches the book again, then
- * closes the log: on the server's list alone if it came, else on the book as drawn.
+ * Draws the book after an answer. With the last write answered, fetches the book again: the list
+ * that comes back replaces the writes answered by now, and the log closes if none was asked since.
+ * If no list comes (offline, or no screen is reading the book) it closes on the book as drawn.
  */
 function settle(client: QueryClient, log: WriteLog): void {
   draw(client, log);
   if (inFlight(log)) return;
+  const answered = [...log.writes];
   log.landed = false;
   // Not awaited by the write: it would hold its answer (and a busy button) until the GET lands.
   // A GET already in flight is replaced: it was asked before this answer.
@@ -120,18 +121,18 @@ function settle(client: QueryClient, log: WriteLog): void {
     { throwOnError: true },
   );
   log.refetch = refetch;
-  const close = (listed: boolean) => {
-    // A write asked meanwhile keeps the log, and the GET after its answer closes it.
-    if (logs.get(client) !== log || log.refetch !== refetch || inFlight(log)) return;
+  const settled = (listed: boolean) => {
+    // Not this log's last word: it is gone, or a later answer asked for a newer list.
+    if (logs.get(client) !== log || log.refetch !== refetch) return;
     if (listed && log.landed) {
-      log.writes = [];
+      log.writes = log.writes.filter((write) => !answered.includes(write));
       draw(client, log);
     }
-    closeLog(client, log);
+    if (!inFlight(log)) closeLog(client, log);
   };
   refetch.then(
-    () => close(true),
-    () => close(false),
+    () => settled(true),
+    () => settled(false),
   );
 }
 

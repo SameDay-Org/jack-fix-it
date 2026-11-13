@@ -98,6 +98,15 @@ describe("the book's edits keep the API's order, and say when they no longer can
     expect(crowned.ordered).toBe(false);
   });
 
+  it("a new address alone in the book is its default, whatever its answer said", () => {
+    // Added while the delete of the only address was unanswered: the server answered "not the
+    // default", then deleted the other one.
+    const office = savedAddress({ id: "office", label: "Office", is_default: false });
+    const alone = withAdded(withoutAddress(listed([HOME]), "home"), office);
+    expect(order(alone)).toEqual(["office*"]);
+    expect(alone.ordered).toBe(true);
+  });
+
   it("a new address the book already lists keeps its place", () => {
     // Its answer replayed over a GET that already has it, and a newer address after it.
     const lake = savedAddress({ id: "lake", label: "Lake", is_default: false });
