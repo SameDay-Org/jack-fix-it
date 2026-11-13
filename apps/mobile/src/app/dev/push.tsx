@@ -22,6 +22,7 @@ const LINKS: { label: string; url: (id: string) => string; needsId: boolean }[] 
   { label: "Pro job", url: (id) => `/jobs/${id}`, needsId: true },
   { label: "Opportunity", url: (id) => `/opportunities/${id}`, needsId: true },
   { label: "Quote (no screen yet)", url: (id) => `/quotes/${id}`, needsId: true },
+  { label: "Home", url: () => "/", needsId: false },
   { label: "Unknown path", url: () => "/settings", needsId: false },
 ];
 

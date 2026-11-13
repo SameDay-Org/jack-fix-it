@@ -21,14 +21,22 @@ export const ALLOWED_PUSH_PATHS = [
   "/jobs/{id}",
   "/quotes/{id}",
   "/opportunities/{id}",
+  "/",
 ] as const;
 
 export type PushPath = (typeof ALLOWED_PUSH_PATHS)[number];
 
-/** One allowed path and the id it names. */
-export type PushLink = { path: PushPath; id: string };
+/** The signed-in account's Home (#338): the one allowed path that names no id. */
+export const HOME_PUSH_PATH = "/";
 
-const MATCHERS = ALLOWED_PUSH_PATHS.map((path) => ({
+type IdPushPath = Exclude<PushPath, typeof HOME_PUSH_PATH>;
+
+/** One allowed path and the id it names; Home names none. */
+export type PushLink = { path: IdPushPath; id: string } | { path: typeof HOME_PUSH_PATH; id: null };
+
+const MATCHERS = ALLOWED_PUSH_PATHS.filter(
+  (path): path is IdPushPath => path !== HOME_PUSH_PATH,
+).map((path) => ({
   path,
   pattern: new RegExp(`^${path.replace("{id}", `(${PUSH_ID_PATTERN})`)}$`),
 }));
@@ -40,6 +48,7 @@ const MATCHERS = ALLOWED_PUSH_PATHS.map((path) => ({
  */
 export function parsePushLink(url: unknown): PushLink | null {
   if (typeof url !== "string") return null;
+  if (url === HOME_PUSH_PATH) return { path: HOME_PUSH_PATH, id: null };
   for (const { path, pattern } of MATCHERS) {
     const id = pattern.exec(url)?.[1];
     if (id !== undefined) return { path, id };
@@ -65,7 +74,7 @@ const requestHref = (id: string): Href => ({ pathname: "/requests/[id]", params:
 const opportunityHref = (id: string): Href => ({ pathname: "/opportunities/[id]", params: { id } });
 
 /** Null where no screen opens that path yet: the push opens nothing. */
-const ROUTES: Record<PushPath, PushRoute | null> = {
+const ROUTES: Record<IdPushPath, PushRoute | null> = {
   // A new quote, a canceled booking: the request's comparison (#52).
   "/requests/{id}": {
     role: "customer",
@@ -103,8 +112,11 @@ const ROUTES: Record<PushPath, PushRoute | null> = {
   },
 };
 
-/** The screen a push opens for an account of `role`; null when it opens none. */
+/**
+ * The screen a push opens over the current one for an account of `role`; null when it opens none.
+ * Home is not opened over anything: `openPushTap` goes back to it.
+ */
 export function pushRoute(link: PushLink | null, role: Role): PushRoute | null {
-  const route = link ? ROUTES[link.path] : null;
+  const route = link && link.path !== HOME_PUSH_PATH ? ROUTES[link.path] : null;
   return route !== null && route.role === role ? route : null;
 }
