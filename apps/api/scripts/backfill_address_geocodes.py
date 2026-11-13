@@ -10,16 +10,20 @@ GEOCODE_ON_SAVE is on. This fills the rows made before, and those whose geocodin
 happen, with the very same step: one permanent geocoding call per address without a point, the
 point kept only when Mapbox puts it in the address's own state and ZIP.
 
+- Which rows: every address without a point, whatever became of its request (open,
+  cancelled, expired or done). The dry run's count is the number of calls --apply makes.
 - A dry run unless --apply is given: it counts the addresses without a point and asks Mapbox
   nothing.
 - --apply needs GEOCODE_ON_SAVE=true and MAPBOX_ACCESS_TOKEN: each address asked about is a
-  billed call. It reads GEOCODE_BACKFILL_BATCH_SIZE ids at a time, asks about at most
-  GEOCODE_BACKFILL_PER_MINUTE addresses a minute, and stops at the first answer that says
-  Mapbox is unavailable (a refused token, no billing, a rate limit, an outage): the rest
-  waits for the next run.
-- Idempotent: an address that has its point is never asked about again, so a second run
-  after a complete one asks nothing for those. An address Mapbox could not place, or placed
-  in another state or ZIP, stays without a point: a later run asks about it once more.
+  billed call. It reads GEOCODE_BACKFILL_BATCH_SIZE ids at a time and asks about at most
+  GEOCODE_BACKFILL_PER_MINUTE addresses a minute.
+- When Mapbox is unavailable: one such answer can be about its own address (a text Mapbox
+  refuses), so the run goes on to the next row. STOP_AFTER_UNAVAILABLE of them in a row are
+  Mapbox itself (a refused token, no billing, a rate limit, an outage): the run stops, and
+  the rest waits for the next run.
+- Idempotent: an address that has its point is never asked about again. An address that kept
+  nothing (not found, found in another state or ZIP, or unavailable) stays without a point,
+  and each later run asks about it once more: one more billed call each time.
 - Prints counts only: never an address, an id or a coordinate. The log lines carry the
   address id and the outcome.
 """
@@ -44,6 +48,9 @@ SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 Sleep = Callable[[float], Awaitable[None]]
 
 _SECONDS_PER_MINUTE: Final = 60
+# Answers in a row saying Mapbox is unavailable that end a run: fewer can be about the
+# addresses themselves, and the next row is still worth asking about.
+STOP_AFTER_UNAVAILABLE: Final = 3
 # The report's lines, in order. OFF and MISSING cannot happen here: the run needs the switch
 # on, and reads ids of rows that exist (an address is never deleted).
 _LINES: Final = (
@@ -79,14 +86,15 @@ async def run(
     out: TextIO,
     sleep: Sleep = asyncio.sleep,
 ) -> int:
-    """0 when the run got to its end; 1 when it was refused or Mapbox became unavailable."""
+    """0 when the run got to its end; 1 when it was refused, or stopped because Mapbox was
+    unavailable."""
     args = parse_args(argv)
     if not args.apply:
         async with sessions() as session:
             pending = await _service(session, geocoder).pending_count()
         print(
-            f"Dry run: {pending} addresses without a point. Mapbox was not asked. With "
-            "--apply each of them is one billed call.",
+            f"Dry run: {pending} addresses without a point, of every request, open or not. "
+            "Mapbox was not asked. With --apply each of them is one billed call.",
             file=out,
         )
         return 0
@@ -104,6 +112,7 @@ async def run(
     counts: Counter[GeocodeOutcome] = Counter()
     pause = _SECONDS_PER_MINUTE / settings.geocode_backfill_per_minute
     after = None
+    unavailable_in_a_row = 0
     stopped = False
     while not stopped:
         async with sessions() as session:
@@ -118,8 +127,12 @@ async def run(
                 outcome = await _service(session, geocoder).geocode(address_id)
             counts[outcome] += 1
             if outcome is GeocodeOutcome.UNAVAILABLE:
-                stopped = True
-                break
+                unavailable_in_a_row += 1
+                if unavailable_in_a_row >= STOP_AFTER_UNAVAILABLE:
+                    stopped = True
+                    break
+            elif outcome.asked:
+                unavailable_in_a_row = 0  # Mapbox answered: the ones before were their own
             if outcome.asked:
                 await sleep(pause)
         after = ids[-1]
@@ -128,7 +141,11 @@ async def run(
     for outcome, label in _LINES:
         print(f"  {label}: {counts[outcome]}", file=out)
     if stopped:
-        print("Stopped: Mapbox is unavailable. Run it again later for the rest.", file=out)
+        print(
+            f"Stopped: Mapbox was unavailable {STOP_AFTER_UNAVAILABLE} times in a row. Run it "
+            "again later for the rest.",
+            file=out,
+        )
         return 1
     return 0
 

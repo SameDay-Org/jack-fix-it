@@ -50,7 +50,7 @@ class ByStreet(FakeGeocoder):
 
     def __init__(self) -> None:
         super().__init__()
-        self.answers: dict[str, KeptGeocode | None] = {}
+        self.answers: dict[str, KeptGeocode | Exception | None] = {}
         self.down = False
 
     async def geocode_to_keep(self, address: StreetAddress) -> KeptGeocode | None:
@@ -124,8 +124,8 @@ async def test_a_dry_run_counts_and_asks_nothing(
     assert run.pauses == []
     assert pending >= len(mine)
     assert output == (
-        f"Dry run: {pending} addresses without a point. Mapbox was not asked. With --apply "
-        "each of them is one billed call.\n"
+        f"Dry run: {pending} addresses without a point, of every request, open or not. "
+        "Mapbox was not asked. With --apply each of them is one billed call.\n"
     )
     for address in mine:
         assert await point_of(db_session, address.id) == (None, None)
@@ -223,19 +223,21 @@ async def test_apply_stops_when_mapbox_is_unavailable(
     db_session: AsyncSession, run: Run, geocoder: ByStreet
 ) -> None:
     """A refused token, no billing, a rate limit, an outage: the next rows would fail the
-    same way, each a call. The run stops, and a later run takes up the rest."""
-    addresses = [await make_address(db_session) for _ in range(4)]
+    same way, each a call. Three such answers in a row stop the run, and a later run takes
+    up the rest."""
+    addresses = [await make_address(db_session) for _ in range(6)]
     geocoder.down = True
 
     code, output = await run("--apply")
 
+    assert backfill.STOP_AFTER_UNAVAILABLE == 3
     assert code == 1
-    assert len(geocoder.asked) == 1  # one call, not one per address
-    assert run.pauses == []
-    assert line(output, "Addresses looked at") == 1
-    assert line(output, "Mapbox unavailable") == 1
+    assert len(geocoder.asked) == 3  # three calls, not one per address
+    assert run.pauses == [60 / PER_MINUTE] * 2  # paced between them
+    assert line(output, "Addresses looked at") == 3
+    assert line(output, "Mapbox unavailable") == 3
     assert output.splitlines()[-1] == (
-        "Stopped: Mapbox is unavailable. Run it again later for the rest."
+        "Stopped: Mapbox was unavailable 3 times in a row. Run it again later for the rest."
     )
     for address in addresses:
         assert await point_of(db_session, address.id) == (None, None)
@@ -247,6 +249,27 @@ async def test_apply_stops_when_mapbox_is_unavailable(
     assert code == 0
     for address in addresses:
         assert await point_of(db_session, address.id) == (KEPT_LAT, KEPT_LNG)
+
+
+async def test_an_address_mapbox_refuses_does_not_end_the_run(
+    db_session: AsyncSession, run: Run, geocoder: ByStreet
+) -> None:
+    """The wrapper says "unavailable" for a refusal of one request too (a text Mapbox will
+    not take). Were that row the end of every run, no row after it would ever get a point."""
+    addresses = [await make_address(db_session, line1=f"{n} Zephyrquill Lane") for n in range(6)]
+    in_id_order = sorted(addresses, key=lambda address: address.id)
+    # Two refused, one placed, two refused: never three in a row, as the run reads them.
+    refused = [in_id_order[n] for n in (0, 1, 3, 4)]
+    geocoder.answers = {address.line1: MapboxUnavailableError() for address in refused}
+
+    code, output = await run("--apply")
+
+    assert code == 0
+    assert "Stopped" not in output
+    assert line(output, "Mapbox unavailable") == 4
+    for address in addresses:
+        expected = (None, None) if address in refused else (KEPT_LAT, KEPT_LNG)
+        assert await point_of(db_session, address.id) == expected
 
 
 async def test_an_unknown_flag_is_refused(run: Run, geocoder: ByStreet) -> None:

@@ -11,9 +11,9 @@ point goes to `addresses.lat/lng`; the route reads it and asks for no geocoding.
   customer's save waits for the queue at the most (JOB_ENQUEUE_TIMEOUT_SECONDS), never for
   Mapbox, and no transaction is open while Mapbox answers.
 - Once: a request keeps the address it was made with, and nothing edits one (a static test
-  holds that: tests/test_address_geocode_guard.py), so there is no second geocode of a row. A
-  row that has its point is left alone, and the task is registered with one try: another run
-  would be another billed call.
+  holds that: tests/test_address_geocode_guard.py), so a row that has its point is never
+  placed again. The task is registered with one try: another run would be another billed
+  call. Only the backfill script asks again about a row that kept nothing, once per run.
 - What is kept: the point, to POINT_PLACES decimals, and only when Mapbox places it in the
   address's own state and ZIP. Anything else (no such address, another state or ZIP, Mapbox
   failing or slow, no token) keeps nothing: the row stays without a point, and its route

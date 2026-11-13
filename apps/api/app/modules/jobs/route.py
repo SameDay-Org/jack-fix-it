@@ -8,8 +8,8 @@ way, and draws the line. The route comes from Mapbox (app/integrations/mapbox.py
   like the position's read, it says nothing about the job that the job's own view does not.
 - From and to: from the pro's latest position to the address of the job's request. An address
   row that has its point (GEOCODE_ON_SAVE, addresses/geocode.py, #384) is routed to as it
-  is: no geocoding call. A row without one (every one while that switch is off, and one
-  whose geocoding kept nothing) is placed by Mapbox's forward geocoding, once per computed
+  is: no geocoding call. A row without one (made while that switch was off, or one whose
+  geocoding kept nothing) is placed by Mapbox's forward geocoding, once per computed
   route. That answer is used and dropped: never written to the address, never cached on its
   own (Mapbox's terms for its temporary geocoding), never logged. An address Mapbox cannot
   place, or one no road leads to, is "no route" plus a warning with the job's id.

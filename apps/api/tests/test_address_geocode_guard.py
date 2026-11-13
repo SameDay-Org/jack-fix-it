@@ -7,17 +7,23 @@ today (POST /v1/requests makes the row; the address book is another table). This
 the day something does, so the edit is written to clear `lat`/`lng` in the same write (and
 queue a new geocode), and this file is updated with it.
 
-What it looks for in app/ and scripts/:
+What it looks for in app/, scripts/ and alembic/ (a data migration is code too):
 
-- an assignment to `.line1`, `.city`, `.state` or `.zip_code` of anything, outside
-  SavedAddressService.update (which edits an address book entry, a `saved_addresses` row);
+- an assignment to `.line1`, `.city`, `.state` or `.zip_code` of anything, outside the
+  functions listed in OTHER_ROWS (today SavedAddressService.update, which edits an address
+  book entry, a `saved_addresses` row). The scan cannot tell whose row an attribute is on, so
+  a new edit of another table's city or state lands here too: list it in OTHER_ROWS;
 - a `setattr` with one of those names, or with a name that is not a literal, in a file that
   names the Address model;
-- an UPDATE of `addresses` (the ORM's `update(Address)`, the table's `.update()`, or SQL
-  text), outside AddressRepository.set_point, which may set `lat` and `lng` and nothing else.
+- a statement that changes `addresses` rows: the ORM's `update(Address)`, the table's
+  `.update()`, an upsert (`on_conflict_do_update`), `merge`, `bulk_update_mappings`, a
+  lightweight `table("addresses")`, or SQL text; outside AddressRepository.set_point, which
+  may set `lat` and `lng` and nothing else.
 
 A tripwire for accidents in this codebase, like the status guard's scan
 (tests/test_job_status_single_writer.py); not a boundary against code written to dodge it.
+What it cannot see: a generic helper in another file (`for name, value in changes.items():
+setattr(row, name, value)`) handed an address row, and SQL assembled at run time.
 """
 
 import ast
@@ -27,15 +33,20 @@ from pathlib import Path
 import pytest
 
 API_DIR = Path(__file__).resolve().parents[1]
-SCANNED = (API_DIR / "app", API_DIR / "scripts")
+SCANNED = (API_DIR / "app", API_DIR / "scripts", API_DIR / "alembic")
 ADDRESSES = "app/modules/addresses"
 PLACE_FIELDS = frozenset({"line1", "city", "state", "zip_code"})
 POINT_FIELDS = frozenset({"lat", "lng"})
 MODEL = "Address"
-# (file, function): the only code that may assign a place field, and the only UPDATE.
 BOOK_EDIT = (f"{ADDRESSES}/service.py", "SavedAddressService.update")
+# (file, function) -> the other table whose row it edits: code that may assign a place field.
+OTHER_ROWS = {BOOK_EDIT: "saved_addresses"}
+# (file, function): the only statement that may update `addresses`.
 POINT_WRITE = (f"{ADDRESSES}/repository.py", "AddressRepository.set_point")
-_SQL_UPDATE = re.compile(r"\bupdate\s+(?:only\s+)?\"?addresses\"?\b", re.IGNORECASE)
+# Calls that change existing rows of the model they are given or chained on.
+WRITING_CALLS = frozenset({"update", "merge", "bulk_update_mappings", "on_conflict_do_update"})
+# UPDATE addresses, UPDATE ONLY "addresses", UPDATE public.addresses.
+_SQL_UPDATE = re.compile(r"\bupdate\s+(?:only\s+)?(?:\"?\w+\"?\.)?\"?addresses\"?\b", re.IGNORECASE)
 
 
 def _qualified_names(tree: ast.Module) -> dict[ast.AST, str]:
@@ -126,7 +137,7 @@ def findings(relative: str, source: str) -> list[str]:
             if (
                 isinstance(target, ast.Attribute)
                 and target.attr in PLACE_FIELDS
-                and where != BOOK_EDIT
+                and where not in OTHER_ROWS
             ):
                 report(node, f"assigns .{target.attr}")
         if (
@@ -149,13 +160,17 @@ def findings(relative: str, source: str) -> list[str]:
         ):
             # sa.table("addresses", ...): a way to the table around the model.
             report(node, "a table over addresses, apart from the model")
-        if name != "update":
+        if name not in WRITING_CALLS:
             continue
-        # update(Address), update(models.Address), or Address.__table__.update().
+        # update(Address), update(models.Address), Address.__table__.update(),
+        # insert(Address).on_conflict_do_update(...), session.merge(Address(...)).
         on_the_model = any(_names_model(argument, aliases) for argument in node.args) or (
             isinstance(node.func, ast.Attribute) and _names_model(node.func, aliases)
         )
         if not on_the_model:
+            continue
+        if name != "update":
+            report(node, f"{name} on addresses")
             continue
         fields = _set_fields(node, tree)
         if where == POINT_WRITE and fields is not None and fields <= POINT_FIELDS:
@@ -179,9 +194,19 @@ def test_nothing_edits_the_place_of_a_request_address() -> None:
 
     assert writes == [], (
         "A request's address is never edited (#384). An edit of its street, city, state or ZIP "
-        "must clear lat/lng in the same write and queue a new geocode; then update this scan: "
-        f"{writes}"
+        "must clear lat/lng in the same write and queue a new geocode; then update this scan. "
+        "A write to another table's row (the scan cannot tell): list its function in "
+        f"OTHER_ROWS. Found: {writes}"
     )
+
+
+def test_every_exemption_is_still_a_real_function() -> None:
+    """No stale entry: each exempt function exists and still makes the write it is exempt
+    for (seen once the exemption is taken away)."""
+    sources = dict(scanned_files())
+    for relative, function in (*OTHER_ROWS, POINT_WRITE):
+        elsewhere = findings("app/elsewhere.py", sources[relative])
+        assert any(f" {function}: " in finding for finding in elsewhere), (relative, function)
 
 
 def test_the_scan_sees_the_two_writes_it_allows() -> None:
@@ -257,6 +282,29 @@ PLANTED = {
         "statement = text('UPDATE addresses SET line1 = :line1 WHERE id = :id')\n"
     ),
     "raw_sql_quoted": 'SQL = """\n  update "addresses" set city = :city\n"""\n',
+    "raw_sql_schema": "SQL = 'UPDATE public.addresses SET state = :state'\n",
+    "migration": (
+        "from alembic import op\n"
+        "def upgrade() -> None:\n"
+        '    op.execute("UPDATE ONLY addresses SET zip_code = left(zip_code, 5)")\n'
+    ),
+    "upsert": (
+        "from sqlalchemy.dialects.postgresql import insert\n"
+        + IMPORT
+        + "statement = insert(Address).values(id=1).on_conflict_do_update(\n"
+        + "    index_elements=['id'], set_={'line1': '1 Other Street'}\n"
+        + ")\n"
+    ),
+    "merge": (
+        IMPORT
+        + "async def edit(session, address_id) -> None:\n"
+        + "    await session.merge(Address(id=address_id, city='X'))\n"
+    ),
+    "bulk_update_mappings": (
+        IMPORT
+        + "def edit(session, rows) -> None:\n"
+        + "    session.bulk_update_mappings(Address, rows)\n"
+    ),
 }
 
 

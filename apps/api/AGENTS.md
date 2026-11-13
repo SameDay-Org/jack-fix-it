@@ -129,8 +129,8 @@ there are all `{"route": null}`; Mapbox failing or without `MAPBOX_ACCESS_TOKEN`
   the request's address once with Mapbox's permanent geocoding (`permanent=true`, the only
   kind that may be stored) and keeps the point in `addresses.lat/lng`, only when Mapbox puts
   it in the address's own state and ZIP. The route reads that point and makes no geocoding
-  call. A row without a point (the switch off, or a geocode that kept nothing) is placed by
-  the route itself with temporary geocoding, each time: that answer is used and dropped,
+  call. A row without a point (made with the switch off, or a geocode that kept nothing) is
+  placed by the route itself with temporary geocoding, each time: that answer is used and dropped,
   since Mapbox's terms forbid caching or storing it. A request's address is never edited; if
   that changes, the edit clears the point in the same write
   (`tests/test_address_geocode_guard.py` fails until it is looked at). The point is for the

@@ -204,18 +204,25 @@ variable is not a secret. Before setting it to `true`:
 1. Cesar adds a payment method to the Mapbox account. Permanent geocoding is billed per
    request, apart from the temporary kind, and Mapbox refuses it to an account without one.
 2. Set `GEOCODE_ON_SAVE=true` on api and worker (a shared variable), and give the worker
-   `MAPBOX_ACCESS_TOKEN`: the api only queues the job, the worker makes the call.
+   `MAPBOX_ACCESS_TOKEN`: the api only queues the job, the worker makes the call. The
+   customer's save waits for the queue at the most (`JOB_ENQUEUE_TIMEOUT_SECONDS`), never
+   for Mapbox; the worker's call takes `MAPBOX_TIMEOUT_SECONDS` at the most.
 3. Optional, once: fill the addresses made before, from a shell in the worker.
    `python -m scripts.backfill_address_geocodes` is a dry run that counts the addresses
-   without a point; with `--apply` each of them is one billed call
-   (`GEOCODE_BACKFILL_BATCH_SIZE` ids per step, at most `GEOCODE_BACKFILL_PER_MINUTE` calls a
-   minute; it stops when Mapbox is unavailable and can be run again).
+   without a point: every one, whatever became of its request (open, cancelled, expired or
+   done). With `--apply` each of them is one billed call (`GEOCODE_BACKFILL_BATCH_SIZE` ids
+   per step, at most `GEOCODE_BACKFILL_PER_MINUTE` calls a minute). It stops when Mapbox is
+   unavailable three times in a row and can be run again; a later run asks once more, and
+   is billed once more, for each address that kept nothing.
 
 A point is kept only when Mapbox places the address in its own state and ZIP. Anything else
 keeps nothing and the route places that address itself, as with the switch off: WARNING
 `address_geocode_not_kept` with the address id and the outcome (`no_result`, `mismatch`,
-`unavailable`, `changed`), never the address or a coordinate. `false` again stops the calls at
-once, jobs already queued included; the points kept so far stay in use.
+`unavailable`, `changed`), never the address or a coordinate. The job has one try, since
+each run that reaches Mapbox is billed: one that a worker deploy interrupts is not run again
+(ARQ logs it as cancelled, then as past its retries) and its address stays without a point.
+`false` again stops the calls at once, jobs already queued included; the points kept so far
+stay in use.
 
 ### worker
 
