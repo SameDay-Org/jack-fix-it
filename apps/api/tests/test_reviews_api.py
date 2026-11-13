@@ -1242,8 +1242,7 @@ def test_every_reviews_route_is_a_no_store_route() -> None:
     served = {
         (method, context.path): isinstance(context.original_route, NoStoreRoute)
         for context in iter_route_contexts(create_app(make_settings()).routes)
-        if isinstance(context.original_route, APIRoute)
-        and "reviews" in context.original_route.tags
+        if isinstance(context.original_route, APIRoute) and "reviews" in context.original_route.tags
         for method in context.methods or ()
     }
 
@@ -1281,7 +1280,9 @@ async def test_every_review_response_says_no_store(
         responses["write: invalid"] = await post(client, world.other_customer, job.id, overall=9)
         responses["mine: invalid id"] = await mine(client, world.customer, "not-a-uuid")
         responses["write: flood"] = await post(client, world.customer, other.id)
-        responses["wrong method"] = await client.delete(path(job.id), headers=world.customer.headers)
+        responses["wrong method"] = await client.delete(
+            path(job.id), headers=world.customer.headers
+        )
 
         def crash() -> datetime:
             raise RuntimeError("an unexpected bug")
