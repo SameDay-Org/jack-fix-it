@@ -1189,6 +1189,95 @@ export interface paths {
         patch: operations["update_notification_preferences_v1_me_notification_preferences_patch"];
         trace?: never;
     };
+    "/v1/support/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write to the team (Talk to Jack)
+         * @description Opens a support ticket for the team. The message is kept as typed and read by the team
+         *     only. `job_id` ties the ticket to one of the caller's jobs.
+         */
+        post: operations["create_ticket_v1_support_tickets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/support/tickets/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List my support tickets
+         * @description The caller's own tickets, newest first: the topic, the job, the status and the dates,
+         *     what the app shows after a ticket was sent. Never the message, and never anyone else's.
+         */
+        get: operations["list_my_tickets_v1_support_tickets_mine_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/support/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List support tickets (staff)
+         * @description Every ticket, newest first, for the BDC and admins: the writer's first name and role,
+         *     the topic, the job and the status. The message is in the ticket's detail only.
+         */
+        get: operations["staff_list_tickets_v1_admin_support_tickets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/support/tickets/{ticket_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a support ticket (staff)
+         * @description One ticket with its message as the writer typed it.
+         */
+        get: operations["staff_get_ticket_v1_admin_support_tickets__ticket_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change a support ticket's status (staff)
+         * @description Moves the ticket to open, in_progress or closed; any status may follow any other. Each
+         *     change is recorded in the audit log with the staff member who made it; the same status
+         *     again changes nothing.
+         */
+        patch: operations["staff_set_ticket_status_v1_admin_support_tickets__ticket_id__patch"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2027,6 +2116,44 @@ export interface components {
              * @description At most this many; all options when absent.
              */
             max_selected?: number | null;
+        };
+        /**
+         * MySupportTicketOut
+         * @description One of the caller's tickets in their list: no free text, so never the message.
+         */
+        MySupportTicketOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            topic: components["schemas"]["TicketTopic"];
+            /** Job Id */
+            job_id: string | null;
+            status: components["schemas"]["TicketStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Closed At
+             * @description Set while the ticket is closed.
+             */
+            closed_at: string | null;
+        };
+        /** MySupportTicketPage */
+        MySupportTicketPage: {
+            /**
+             * Items
+             * @description Newest first.
+             */
+            items: components["schemas"]["MySupportTicketOut"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor` for older tickets.
+             */
+            next_cursor: string | null;
         };
         /**
          * NotificationPreferences
@@ -3252,6 +3379,145 @@ export interface components {
              */
             next_cursor: string | null;
         };
+        /** StaffSupportTicketItem */
+        StaffSupportTicketItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * User Id
+             * Format: uuid
+             * @description Who wrote the ticket.
+             */
+            user_id: string;
+            /**
+             * User First Name
+             * @description The writer's first name alone; null when they have none or it shows a contact detail.
+             */
+            user_first_name: string | null;
+            /** @description The writer's role when they wrote the ticket. */
+            role: components["schemas"]["TicketRole"];
+            topic: components["schemas"]["TicketTopic"];
+            /**
+             * Job Id
+             * @description The job the ticket is about, if any.
+             */
+            job_id: string | null;
+            status: components["schemas"]["TicketStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** StaffSupportTicketOut */
+        StaffSupportTicketOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * User Id
+             * Format: uuid
+             * @description Who wrote the ticket.
+             */
+            user_id: string;
+            /**
+             * User First Name
+             * @description The writer's first name alone; null when they have none or it shows a contact detail.
+             */
+            user_first_name: string | null;
+            /** @description The writer's role when they wrote the ticket. */
+            role: components["schemas"]["TicketRole"];
+            topic: components["schemas"]["TicketTopic"];
+            /**
+             * Job Id
+             * @description The job the ticket is about, if any.
+             */
+            job_id: string | null;
+            status: components["schemas"]["TicketStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Message
+             * @description The writer's text, as typed: it may hold contact details.
+             */
+            message: string;
+            /**
+             * Closed At
+             * @description Set while the ticket is closed.
+             */
+            closed_at: string | null;
+            /** App Version */
+            app_version: string | null;
+            platform: components["schemas"]["TicketPlatform"] | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** StaffSupportTicketPage */
+        StaffSupportTicketPage: {
+            /**
+             * Items
+             * @description Newest first.
+             */
+            items: components["schemas"]["StaffSupportTicketItem"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor` for older tickets.
+             */
+            next_cursor: string | null;
+        };
+        /** SupportTicketCreatedOut */
+        SupportTicketCreatedOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** @description open: a new ticket waits for the team. */
+            status: components["schemas"]["TicketStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** SupportTicketIn */
+        SupportTicketIn: {
+            /** @description What the ticket is about. */
+            topic: components["schemas"]["TicketTopic"];
+            /**
+             * Message
+             * @description The text, trimmed. Stored as typed and read by the team only: a phone or an email written here is kept, so the team can reach the writer.
+             */
+            message: string;
+            /**
+             * Job Id
+             * @description The job the ticket is about: one of which the caller is the customer or the pro. Leave out when the ticket is about no job.
+             */
+            job_id?: string | null;
+            /**
+             * App Version
+             * @description The app's version, e.g. "1.4.0 (52)".
+             */
+            app_version?: string | null;
+            /** @description The device the ticket was written on. */
+            platform?: components["schemas"]["TicketPlatform"] | null;
+        };
+        /** SupportTicketStatusIn */
+        SupportTicketStatusIn: {
+            /** @description The ticket's new status. Any status may follow any other (a closed ticket can be reopened); the same status again changes nothing. */
+            status: components["schemas"]["TicketStatus"];
+        };
         /** TextQuestion */
         TextQuestion: {
             /**
@@ -3283,6 +3549,30 @@ export interface components {
             /** Max Length */
             max_length: number;
         };
+        /**
+         * TicketPlatform
+         * @description The device the ticket was written on, as the app reports it.
+         * @enum {string}
+         */
+        TicketPlatform: "ios" | "android";
+        /**
+         * TicketRole
+         * @description Who wrote the ticket, as they were when they wrote it: the app's users only (agents and
+         *     admins use the panel and write no tickets).
+         * @enum {string}
+         */
+        TicketRole: "customer" | "pro";
+        /**
+         * TicketStatus
+         * @enum {string}
+         */
+        TicketStatus: "open" | "in_progress" | "closed";
+        /**
+         * TicketTopic
+         * @description What the ticket is about, as the user picked it in the app.
+         * @enum {string}
+         */
+        TicketTopic: "account" | "payment" | "job" | "safety" | "app_problem" | "other";
         /**
          * UploadPurpose
          * @enum {string}
@@ -7013,6 +7303,292 @@ export interface operations {
                 };
             };
             /** @description preference_locked: a change turns off a locked channel; validation_error: an unknown group or channel, a channel its group does not have, a group and channel twice, no change or more than 20. Either way nothing is stored. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_ticket_v1_support_tickets_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupportTicketIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportTicketCreatedOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros write tickets. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description invalid_job: job_id is not a job of which the caller is the customer or the pro (an unknown job answers the same); validation_error: an unknown topic or platform, a message empty, blank or longer than 2000 characters, an app_version out of format. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many tickets; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_my_tickets_v1_support_tickets_mine_get: {
+        parameters: {
+            query?: {
+                /** @description Page size; capped. */
+                limit?: number | null;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MySupportTicketPage"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros write tickets. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a bad cursor or limit. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_list_tickets_v1_admin_support_tickets_get: {
+        parameters: {
+            query?: {
+                /** @description Only tickets in this status; all when left out. */
+                status?: components["schemas"]["TicketStatus"] | null;
+                /** @description Page size; capped. */
+                limit?: number | null;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffSupportTicketPage"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: an unknown status, a bad cursor or limit. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_get_ticket_v1_admin_support_tickets__ticket_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffSupportTicketOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description ticket_not_found: no support ticket with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a ticket_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_set_ticket_status_v1_admin_support_tickets__ticket_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupportTicketStatusIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffSupportTicketOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description ticket_not_found: no support ticket with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: an unknown status, a field other than status, or a ticket_id that is not a UUID. */
             422: {
                 headers: {
                     [name: string]: unknown;
