@@ -137,11 +137,14 @@ _URL_START_AFTER: Final = frozenset("\"'([<{=:,;")
 # matched whatever the header's casing.
 _CREDENTIAL_HEADERS: Final = frozenset({"stripe-signature"})
 # A Stripe object's id: a connected account's (a pro's, #39), a customer's or a PaymentIntent's
-# (a customer's payment, #58; its client secret starts with the id) and an ephemeral key's
-# secret. Sentry's httpx integration records every outgoing URL, and Stripe's are
-# /v1/accounts/acct_..., /v1/customers/cus_..., /v1/payment_intents/pi_..., so the id gives
-# way wherever a URL may be. The prefix stays, so a record still says which object it named.
-_STRIPE_OBJECT_ID: Final = re.compile(r"\b(acct|cus|pi|ek)_\w+", re.ASCII)
+# (a customer's payment, #58; its client secret starts with the id), an ephemeral key's
+# secret, and a saved card's PaymentMethod or a SetupIntent (#253; its client secret starts
+# with the id too). Sentry's httpx integration records every outgoing URL, and Stripe's are
+# /v1/accounts/acct_..., /v1/customers/cus_..., /v1/payment_intents/pi_...,
+# /v1/payment_methods/pm_..., as is the wallet's own /v1/me/payment-methods/pm_..., so the id
+# gives way wherever a URL may be. The prefix stays, so a record still says which object it
+# named.
+_STRIPE_OBJECT_ID: Final = re.compile(r"\b(acct|cus|pi|ek|pm|seti)_\w+", re.ASCII)
 
 
 def _without_stripe_ids(text: str) -> str:

@@ -9,7 +9,7 @@ import i18n from "@/i18n";
 
 import { METRICS } from "../../auth/__tests__/helpers";
 import { signedIn } from "../../home/__tests__/helpers";
-import { HelpScreen, LegalScreen } from "../InfoScreens";
+import { LegalScreen } from "../InfoScreens";
 import { refreshPermission, resetPermissionForTests } from "../../notifications/permission";
 import { SettingsScreen } from "../SettingsScreen";
 
@@ -110,14 +110,11 @@ describe("SettingsScreen", () => {
   });
 });
 
-describe.each([
-  ["Help", () => <HelpScreen />, "Support when you need it", "Apoyo cuando lo necesites"],
-  ["Legal", () => <LegalScreen />, "Legal", "Legal"],
-])("%sScreen", (_, screenOf, title, titleEs) => {
+describe("LegalScreen", () => {
   it("says plainly that its content is not ready, with nothing to press but Back", async () => {
-    await renderScreen(screenOf());
+    await renderScreen(<LegalScreen />);
 
-    expect(screen.getByRole("header", { name: title })).toBeOnTheScreen();
+    expect(screen.getByRole("header", { name: "Legal" })).toBeOnTheScreen();
     expect(screen.getAllByRole("button").map((button) => button.props.accessibilityLabel)).toEqual([
       "Back",
     ]);
@@ -126,9 +123,9 @@ describe.each([
   it("reads in Spanish", async () => {
     await i18n.changeLanguage("es");
 
-    await renderScreen(screenOf());
+    await renderScreen(<LegalScreen />);
 
-    expect(screen.getByRole("header", { name: titleEs })).toBeOnTheScreen();
+    expect(screen.getByRole("header", { name: "Legal" })).toBeOnTheScreen();
     expect(screen.getByRole("button", { name: "Atrás" })).toBeOnTheScreen();
   });
 });

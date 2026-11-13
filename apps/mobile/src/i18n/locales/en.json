@@ -1033,7 +1033,79 @@
   },
   "help": {
     "title": "Support when you need it",
-    "body": "Answers to common questions and a way to reach the Jack Fix It team will live here. We're still putting them together."
+    "intro": "Answers to common questions about requests, payments and jobs.",
+    "sections": {
+      "booking": "Booking and quotes",
+      "payments": "Payments",
+      "job": "During the job",
+      "account": "Account and safety"
+    },
+    "faq": {
+      "request": {
+        "question": "How do I request a service?",
+        "answer": "On Home, pick a category and tell us what's going on. Add photos or a video if they help, then your address and the day that suits you. We send your request to pros near you, and they reply with quotes."
+      },
+      "quote": {
+        "question": "What's in a quote?",
+        "answer": "A quote is one pro's price for your job. It shows what's included, about how long the work takes and when the pro can start. You can open the pro's profile from the quote before you decide."
+      },
+      "quoteExpiry": {
+        "question": "How long is a quote good for?",
+        "answer": "Each quote shows when it expires. After that it can't be accepted, so book the one you want while it's still open."
+      },
+      "cancel": {
+        "question": "Can I cancel after I've booked?",
+        "answer": "Plans change. For now, the Jack Fix It team reviews every cancellation individually, and what happens with your payment is decided case by case."
+      },
+      "whenPay": {
+        "question": "When do I pay?",
+        "answer": "Only when you accept a quote: sending a request and getting quotes is free. Your payment books the pro, and you see the total, with any tax, before you confirm it."
+      },
+      "payMethods": {
+        "question": "How can I pay?",
+        "answer": "By card, or with Apple Pay or Google Pay where your phone offers them. The payment runs on Stripe's secure checkout, so Jack Fix It never stores your card number."
+      },
+      "payFailed": {
+        "question": "What if my payment doesn't go through?",
+        "answer": "Your job isn't booked until the payment succeeds. Try again from the same quote, with the same card or another payment method, while the quote is still open."
+      },
+      "proPaid": {
+        "question": "When does the pro get paid?",
+        "answer": "When the job is confirmed, not when you pay. Once the pro marks the work as done, a confirmation period starts; if no problem is reported before it ends, the job is confirmed automatically and the pro is paid."
+      },
+      "follow": {
+        "question": "How do I follow my job?",
+        "answer": "Your job page shows each step as it happens: on the way, arrived, working, done. A banner on every tab takes you there, and you get a notification at each step if notifications are on."
+      },
+      "arrivalCode": {
+        "question": "What is the arrival code?",
+        "answer": "A short code that appears on your job page once your pro is on the way. Give it to them when they arrive: they enter it in their app to check in. Share it only in person, at the door."
+      },
+      "chat": {
+        "question": "How do I contact my pro?",
+        "answer": "Through the chat on your job page, which opens as soon as you've booked. Phone numbers, emails and links are hidden in messages, so the whole conversation stays in one place: Jack Fix It."
+      },
+      "problem": {
+        "question": "What if something isn't right with the job?",
+        "answer": "Tell your pro in the chat first: it's the fastest way to sort things out. If that doesn't settle it, the Jack Fix It team reviews what happened and decides case by case, including whether any money is returned. While a reported problem is open, the pro isn't paid."
+      },
+      "verified": {
+        "question": "How are pros verified?",
+        "answer": "Before a pro can send you a quote, our team reviews the information and documents they provide and approves their profile. You'll see the green seal next to a verified pro's name."
+      },
+      "privacy": {
+        "question": "Who can see my contact details and address?",
+        "answer": "Pros never see your phone number or email. Before you book, they see only your city and ZIP code; the pro you book gets the full address to do the job. To talk, you both use the chat."
+      },
+      "verifyPhone": {
+        "question": "How do I verify my phone number?",
+        "answer": "In Account, open Settings and tap Verify your phone. We text you a code to confirm the number is yours. Your number stays private: pros never see it."
+      },
+      "language": {
+        "question": "Which languages is the app in?",
+        "answer": "English and Spanish. In Account, open Settings and choose one under Language. Your choice is saved to your account, so the app uses it the next time you log in on another device."
+      }
+    }
   },
   "legal": {
     "title": "Legal",
