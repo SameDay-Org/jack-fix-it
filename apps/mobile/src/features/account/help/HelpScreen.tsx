@@ -1,9 +1,10 @@
+import { router } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
 import Animated from "react-native-reanimated";
 
 import { ACCOUNT_GLYPHS } from "@/components/icons";
-import { AccordionRow, IconTile, ListGroup, Screen, useAccordion } from "@/components/ui";
+import { AccordionRow, IconTile, ListGroup, ListRow, Screen, useAccordion } from "@/components/ui";
 import { BackButton } from "@/features/auth/components/BackButton";
 
 import { FAQ, FAQ_SECTIONS, faqIn } from "./faq";
@@ -11,9 +12,10 @@ import { FAQ, FAQ_SECTIONS, faqIn } from "./faq";
 const FAQ_ORDER = FAQ.map((item) => item.id);
 
 /**
- * Help (#274, part 1): the FAQ, grouped by the moment a question comes up. A question opens in
- * place, one at a time, so its neighbors stay in view and nothing navigates; the content is
- * `faq.ts` and the catalogs, never this file.
+ * Help (#274): the FAQ, grouped by the moment a question comes up, then the way to write to the
+ * team ("Talk to Jack", `features/support`). A question opens in place, one at a time, so its
+ * neighbors stay in view and nothing navigates; the content is `faq.ts` and the catalogs, never
+ * this file.
  */
 export function HelpScreen() {
   const { t } = useTranslation();
@@ -54,8 +56,15 @@ export function HelpScreen() {
               </ListGroup>
             </View>
           ))}
-          {/* Part 2 of #274 adds the "Still need help?" block here, under the last section, once
-              the support tickets API is in @jack/shared. Nothing stands in for it until then. */}
+          {/* Under the last section: for what the answers above did not settle (#274, part 2). */}
+          <ListGroup testID="help-contact-group">
+            <ListRow
+              label={t("help.contact.title")}
+              value={t("help.contact.action")}
+              onPress={() => router.push("/help/contact")}
+              testID="help-contact"
+            />
+          </ListGroup>
         </View>
       </Animated.ScrollView>
     </Screen>
