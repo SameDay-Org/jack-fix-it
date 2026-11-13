@@ -1,6 +1,8 @@
 """Shared test helpers."""
 
 import gc
+import json
+import logging
 import re
 import time
 import uuid
@@ -12,6 +14,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, PendingRollbackError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.observability import JsonFormatter
+
 _SET_STATUS_WRITER: Final = text("SELECT set_config('app.status_writer', :value, true)")
 # The fixtures' wildcard token: the trigger accepts it only in a database whose setting
 # app.status_writer_fixtures is 'on', which conftest sets on the test database alone.
@@ -20,6 +24,44 @@ _IN_FAILED_TRANSACTION: Final = "25P02"
 # Hex digits as letters: a fixture slug stays unique with no digit in it that a leak check
 # could read as part of the number it looks for (#283).
 _DIGITS_AS_LETTERS: Final = str.maketrans("0123456789", "ghijklmnop")
+# An ISO-8601 instant as the API, the logs and Sentry write it.
+_CLOCK: Final = re.compile(
+    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?"
+)
+# A uuid as str(uuid.UUID) writes it.
+_UUID: Final = re.compile(r"[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", re.IGNORECASE)
+
+
+def json_fields(value: object) -> list[str]:
+    """Every key and every scalar of a parsed JSON value as text, at any depth: dict keys and
+    values, list and tuple items. A leak can sit in a key as well as in a value (#389)."""
+    if isinstance(value, dict):
+        return [field for key, item in value.items() for field in (str(key), *json_fields(item))]
+    if isinstance(value, list | tuple):
+        return [field for item in value for field in json_fields(item)]
+    return [str(value)]
+
+
+def masked_fields(value: object) -> list[str]:
+    """json_fields with each uuid and ISO instant in them masked: where a leak check searches
+    for a short needle, a 4-digit code or a coordinate, that a random id's or a clock's digits
+    spell by chance (a job id holding 0427, a time reading 12:00:26.1234) (#387). The needle
+    written into any other text, or as a key, still shows."""
+    return [_CLOCK.sub("<instant>", _UUID.sub("<uuid>", field)) for field in json_fields(value)]
+
+
+def fields_holding(needle: str, value: object) -> list[str]:
+    """The masked fields of a parsed JSON value that hold `needle`: [] when it leaks nowhere."""
+    return [field for field in masked_fields(value) if needle in field]
+
+
+def log_fields(records: list[logging.LogRecord]) -> list[str]:
+    """Each record as JsonFormatter ships it, keys and values, and its message, masked as
+    masked_fields does: a log line's time can read 12:00:26.1234, which spells a needle (#387)."""
+    formatter = JsonFormatter()
+    return masked_fields(
+        [[json.loads(formatter.format(record)), record.getMessage()] for record in records]
+    )
 
 
 def mentions_number(text: str, number: int) -> bool:

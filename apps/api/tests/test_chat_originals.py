@@ -16,7 +16,7 @@ import pytest
 import sentry_sdk
 from fastapi import FastAPI
 from pydantic import ValidationError
-from sqlalchemy import func, inspect, select
+from sqlalchemy import func, inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -52,6 +52,19 @@ SECRET: Final = "the spare key is under the blue flowerpot"
 TYPED: Final = f"{SECRET}, call me at 305-555-0199"
 STORED: Final = f"{SECRET}, call me at {MASK}"
 WARNING: Final = "contact_details_hidden"
+# Planner settings that leave a nested-loop semi join running its inner side again for every
+# outer row: the plan an `ANALYZE` of a near-empty job_messages gave the purge (#386). With no
+# seq scan, the outer side reads the table by its primary key, in id order, whatever its
+# statistics: a seq scan read it in heap order until an autovacuum of the test table turned
+# the plan to that index on its own (#389).
+RESCANNING_PLAN: Final = (
+    "enable_hashjoin",
+    "enable_mergejoin",
+    "enable_material",
+    "enable_hashagg",
+    "enable_sort",
+    "enable_seqscan",
+)
 
 
 def keyed_settings(**overrides: object) -> Settings:
@@ -509,22 +522,40 @@ async def test_startup_warns_once_without_a_key_where_deployed(
 # --- Purge -----------------------------------------------------------------------------------
 
 
-async def _seed_originals(session: AsyncSession, world: JobWorld, count: int) -> list[JobMessage]:
+async def _seed_originals(
+    session: AsyncSession, world: JobWorld, count: int, *, tied: bool = False
+) -> list[JobMessage]:
+    """`count` originals due a day ago, one second apart, or all at the same instant if tied.
+    Their ids ascend in the same order: read by id, the rows come oldest first (#389)."""
     job = await make_job(session, world)
     now = await ChatRepository(session).now()
     sealing = cipher()
+    first_id = uuid.uuid4().int & ~0xFFFF
     messages = []
     for index in range(count):
-        message = JobMessage(job_id=job.id, sender_id=world.pro.id, body=MASK, redacted=True)
+        message = JobMessage(
+            id=uuid.UUID(int=first_id + index),
+            job_id=job.id,
+            sender_id=world.pro.id,
+            body=MASK,
+            redacted=True,
+        )
         session.add(message)
         await session.flush()
         sealed = sealing.encrypt(TYPED, original_associated_data(message.id))
         message.original_ciphertext = sealed.ciphertext
         message.original_key_id = sealed.key_id
-        message.original_expires_at = now - timedelta(days=1) + timedelta(seconds=index)
+        offset = timedelta(seconds=0 if tied else index)
+        message.original_expires_at = now - timedelta(days=1) + offset
         messages.append(message)
     await session.flush()
     return messages
+
+
+async def _plan_rescanning(session: AsyncSession) -> None:
+    """Until the test's transaction ends: SET LOCAL, and db_session rolls back."""
+    for setting in RESCANNING_PLAN:
+        await session.execute(text(f"SET LOCAL {setting} = off"))
 
 
 def _sessions(session: AsyncSession) -> Any:
@@ -619,6 +650,58 @@ async def test_the_purge_works_in_batches_each_committed_on_its_own(
     monkeypatch.setattr(ChatRepository, "clear_expired_originals", real)
     assert await purge_expired_originals(_sessions(db_session), now, 2) == 3
     assert await _kept(db_session, messages) == [False] * 5
+
+
+@pytest.mark.parametrize("tied", [False, True], ids=["distinct", "tied"])
+@pytest.mark.parametrize("rescanning", [False, True], ids=["default_plan", "rescanning_plan"])
+async def test_a_purge_batch_never_clears_more_than_its_limit(
+    db_session: AsyncSession, world: JobWorld, tied: bool, rescanning: bool
+) -> None:
+    messages = await _seed_originals(db_session, world, 5, tied=tied)
+    now = await ChatRepository(db_session).now()
+    if rescanning:
+        await _plan_rescanning(db_session)
+    repository = ChatRepository(db_session)
+
+    cleared = [await repository.clear_expired_originals(now, 2) for _ in range(4)]
+
+    assert cleared == [2, 2, 1, 0]
+    assert await _kept(db_session, messages) == [False] * 5
+
+
+async def test_the_rescanning_plan_overruns_the_limit_of_an_in_subquery(
+    db_session: AsyncSession, world: JobWorld
+) -> None:
+    """Guards the rescanning cases above: under RESCANNING_PLAN the purge's old form, `id IN
+    (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)`, clears every due row, however small n is. If
+    a Postgres upgrade ends this, those cases prove nothing until another way forces the plan.
+
+    The plan reads the table in id order and runs the subquery again for each row it reaches;
+    the subquery reads the due rows oldest first, which is their id order too, so each row is
+    the first one not yet cleared when the scan reaches it. In heap order, or with tied expiries,
+    the count rests on where the rows lie: as few as 2 of 5 were cleared then (#389)."""
+    messages = await _seed_originals(db_session, world, 5)
+    now = await ChatRepository(db_session).now()
+    await _plan_rescanning(db_session)
+    connection = await db_session.connection()
+    old_form = (
+        "UPDATE job_messages SET original_ciphertext = NULL, original_key_id = NULL,"
+        " original_expires_at = NULL WHERE id IN (SELECT id FROM job_messages"
+        " WHERE original_expires_at <= :now ORDER BY original_expires_at"
+        " LIMIT 2 FOR UPDATE SKIP LOCKED)"
+    )
+    plan = await connection.scalar(text(f"EXPLAIN (FORMAT JSON) {old_form}"), {"now": now})
+    [join] = plan[0]["Plan"]["Plans"]
+    [table, _] = join["Plans"]
+    assert (join["Node Type"], join["Join Type"], table.get("Index Name")) == (
+        "Nested Loop",
+        "Semi",
+        "pk_job_messages",
+    )
+
+    result = await connection.execute(text(old_form), {"now": now})
+
+    assert result.rowcount == len(messages)
 
 
 # --- Helpers ---------------------------------------------------------------------------------

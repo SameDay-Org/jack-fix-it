@@ -32,8 +32,10 @@ from tests.helpers import seconds_without_gc
 
 # A dummy DSN: the in-memory transport below means nothing leaves the process.
 TEST_DSN = "https://public@example.invalid/1"
-QUERY = "email=probe@example.com&token=abc123"
-LEAKS = ("probe@example.com", "probe%40example.com", "abc123", "email=")
+# The token has letters no hex id can spell: an event or request id read "abc123" by chance
+# (#387).
+QUERY = "email=probe@example.com&token=zqx731"
+LEAKS = ("probe@example.com", "probe%40example.com", "zqx731", "email=")
 
 
 class MemoryTransport(Transport):

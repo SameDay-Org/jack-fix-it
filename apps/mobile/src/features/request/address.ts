@@ -8,6 +8,8 @@ type AddressIn = PostBody<"/v1/requests">["address"];
 // The typed fields' rules are the shared address form's (the sign-up's Home step uses them too).
 export { ADDRESS_MAX, addressErrors } from "@/features/addresses/addressFields";
 export type { AddressError } from "@/features/addresses/addressFields";
+// One line for an address, the same in the request flow as in the address book.
+export { addressLine } from "@/features/addresses/addressFields";
 
 /** The typed address as `RequestCreate.address`: trimmed, the state in capitals. */
 export function typedAddressBody(fields: AddressFields): AddressIn {
@@ -49,10 +51,4 @@ export function resolveAddress(
   const fallback = served.find((address) => address.is_default) ?? served[0];
   const address = picked ?? (choice ? undefined : fallback);
   return address ? { kind: "saved", address } : { kind: "typed" };
-}
-
-/** One line for a saved address: "120 Main St, Apt 4, Miami, FL 33101". */
-export function addressLine(address: AddressIn | SavedAddress): string {
-  const street = [address.line1, address.line2].filter(Boolean).join(", ");
-  return `${street}, ${address.city}, ${address.state} ${address.zip_code}`;
 }

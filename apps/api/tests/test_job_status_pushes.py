@@ -46,7 +46,7 @@ from app.modules.webhooks.tasks import process_stripe_event
 from app.observability import JsonFormatter
 from app.queue import get_job_queue
 from tests.conftest import InMemoryJobLocationStore, make_settings
-from tests.helpers import as_status_writer
+from tests.helpers import as_status_writer, fields_holding, json_fields
 from tests.job_world import JobWorld, build_world, make_job, record_pushes
 from tests.test_job_photos_api import FakeStorage, photo_row, safe_key
 from tests.test_payment_webhooks import (
@@ -396,11 +396,15 @@ async def test_the_arrival_code_and_eta_are_in_no_job_push(
     )
     eta = moved.json()["eta_at"]
     for _, args in queue.jobs.values():
-        payload = json.dumps(args)
-        assert issued not in payload
-        assert eta[:16] not in payload  # not even the minute
+        # Field by field, ids and clocks masked: the ids in the args can spell a 4-digit code
+        # (#387).
+        assert fields_holding(issued, args) == []
+        assert [field for field in json_fields(args) if eta[:16] in field] == []  # not the minute
         _, _, title_key, body_key, params, _ = args
         assert isinstance(params, dict)
+        # The control: the code inside a parameter the templates ignore is a leak.
+        leaked = (*args[:4], {**params, "arrival_code": f"arrival_code={issued}"}, args[5])
+        assert fields_holding(issued, leaked) == [f"arrival_code={issued}"]
         for locale in ("en", "es"):
             for key in (title_key, body_key):
                 assert isinstance(key, str)

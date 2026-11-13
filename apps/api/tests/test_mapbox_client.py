@@ -29,11 +29,11 @@ from app.integrations.mapbox import (
 from app.observability import (
     MAPBOX_HOST,
     MAPBOX_URL_LABEL,
-    JsonFormatter,
     before_breadcrumb,
     configure_logging,
 )
 from tests.conftest import make_app, make_settings
+from tests.helpers import log_fields
 
 # Fixture values only: no real token, no real place. The ZIP is no needle: five digits can
 # turn up in a log line's own timestamp.
@@ -293,10 +293,10 @@ def assert_unavailable_without_leak(
     # The exception, its cause and its context, as a traceback would print them.
     rendered = "".join(traceback.format_exception(info.value))
     assert "MapboxUnavailableError" in rendered
-    output = "\n".join(JsonFormatter().format(record) for record in caplog.records)
+    output = log_fields(caplog.records)
     for secret in PII:
         assert secret not in rendered, secret
-        assert secret not in output, secret
+        assert [field for field in output if secret in field] == [], secret
     [record] = [r for r in caplog.records if r.name == "app.integrations.mapbox"]
     assert record.levelno == logging.ERROR, "a real failure is an incident"
     assert record.message.startswith("mapbox_")

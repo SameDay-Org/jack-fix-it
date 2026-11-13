@@ -42,7 +42,6 @@ from app.modules.jobs.service import JobStateMachine
 from app.modules.pros.service import ProService
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount
-from app.observability import JsonFormatter
 from app.rate_limit import get_rate_limiter
 from tests.conftest import (
     InMemoryJobLocationStore,
@@ -53,6 +52,7 @@ from tests.conftest import (
     make_settings,
     wait_until_blocked,
 )
+from tests.helpers import log_fields, masked_fields
 from tests.job_world import JobWorld, Party, build_world, job_row, make_job, record_pushes
 from tests.test_arrival_code import CONFIG as EXECUTION_CONFIG
 from tests.test_arrival_code import CommittedJob, committed_job, no_storage
@@ -955,8 +955,7 @@ async def test_no_coordinate_in_logs(
         )  # the delete fails
 
     assert [r.status_code for r in errors] == [204, 422, 422, 409, 404, 403, 503, 200, 200]
-    formatter = JsonFormatter()
-    logs = "\n".join(formatter.format(r) + r.getMessage() for r in caplog.records)
+    logs = log_fields(caplog.records)
     events = {r.getMessage() for r in caplog.records if r.name == "app.modules.jobs.location"}
     assert events == {
         "pro_location_updated",
@@ -965,7 +964,7 @@ async def test_no_coordinate_in_logs(
         "pro_location_delete_failed",
     }
     for needle in NEEDLES:
-        assert needle not in logs, needle
+        assert [field for field in logs if needle in field] == [], needle
         for response in errors[:-1]:  # the check-in answers the job, which has no position
             assert needle not in response.text, needle
     # Ids and the event name only.
@@ -1040,9 +1039,11 @@ async def test_no_coordinate_reaches_sentry(
     assert any(
         event.get("logentry", {}).get("message") == "pro_location_unavailable" for event in events
     )
-    wire = "\n".join(payloads)
+    # Field by field, keys too, ids and clocks masked: an event's time can read 12:00:26.1234
+    # (#387).
+    wire = masked_fields(events)
     for needle in NEEDLES:
-        assert needle not in wire, needle
+        assert [field for field in wire if needle in field] == [], needle
     for response in (crashed, unavailable):
         for needle in NEEDLES:
             assert needle not in response.text, needle
