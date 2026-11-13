@@ -4655,7 +4655,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description A UUID the client makes once per draft and sends again with every retry of it. Within the server's window (24 hours by default) a retry answers 200 with the request the first call made, and the same key with another body answers 409 idempotency_key_reused. Without it every call creates a request. */
+                /** @description A UUID the client makes once per draft and sends again with every retry of it. Within the server's window (24 hours by default) a retry answers 200 with the request the first call made, as it is now (current status, fresh media URLs), and the same key with another body answers 409 idempotency_key_reused. Without it every call creates a request. */
                 "Idempotency-Key"?: string | null;
             };
             path?: never;
@@ -4667,7 +4667,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description A retry: the caller already made a request with this Idempotency-Key and this body within the window. The same body as its create, as the request is now; nothing is created or sent to pros again. */
+            /** @description A retry: the caller already made a request with this Idempotency-Key and this body within the window. The replay returns the existing request with its current status and fresh media URLs (status, customer_status and each media url and expires_at may differ from the 201; every other field is the same); nothing is created or sent to pros again. */
             200: {
                 headers: {
                     [name: string]: unknown;
