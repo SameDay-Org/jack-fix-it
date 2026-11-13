@@ -235,6 +235,11 @@ class UserService:
         """The user's Stripe Customer id (#58); None until a payment created one."""
         return await self._users.get_stripe_customer_id(user_id)
 
+    async def lock_stripe_customer_id(self, user_id: uuid.UUID) -> str | None:
+        """The user's Stripe Customer id, the user's row locked until the transaction ends: the
+        first saved card's create (#253) holds it, so a second call waits and reads the id."""
+        return await self._users.get_stripe_customer_id_for_update(user_id)
+
     async def set_stripe_customer_id_if_missing(self, user_id: uuid.UUID, customer_id: str) -> bool:
         """Stores the user's Stripe Customer id unless one is stored already (another
         payment's call got there first): False then, and the stored one is the user's."""
