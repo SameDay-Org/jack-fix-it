@@ -8453,7 +8453,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description validation_error: a rating missing, not an integer or outside 1 to 5; quality or value sent by the job's pro (the customer alone rates them); a comment blank, longer than 1000 characters or with nothing visible in it; an unknown field; a job_id that is not a UUID. */
+            /** @description validation_error: a rating missing, not an integer or outside 1 to 5; quality or value sent by the job's pro (the customer alone rates them); a comment blank, longer than 1000 characters as typed or once its contact details are masked, or empty once invisible characters (zero-width and the like) are dropped; an unknown field; a job_id that is not a UUID. */
             422: {
                 headers: {
                     [name: string]: unknown;
