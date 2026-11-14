@@ -105,6 +105,8 @@ export type SendOptions = {
   /** Values for the path's `{name}` segments. */
   params?: Readonly<Record<string, string>>;
   query?: QueryParams;
+  /** Sent as the `Idempotency-Key` header: a create the server answers once per key. */
+  idempotencyKey?: string;
 };
 
 const PATH_PARAM = /\{(\w+)\}/g;
@@ -172,6 +174,7 @@ export async function sendRequest<T>(
   const headers: Record<string, string> = { Accept: "application/json" };
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
   if (options.accessToken) headers.Authorization = `Bearer ${options.accessToken}`;
+  if (options.idempotencyKey !== undefined) headers["Idempotency-Key"] = options.idempotencyKey;
 
   const controller = new AbortController();
   let timedOut = false;

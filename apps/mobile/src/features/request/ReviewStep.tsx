@@ -24,6 +24,7 @@ import { withPeriod } from "./period";
 import { refuseStep, useRequestDraft, type RequestDraft, type StepRefusal } from "./requestDraft";
 import { useRequestFlowContext } from "./RequestFlowLayout";
 import { requestBody } from "./send";
+import { holdsSendKey } from "./sendKey";
 import { StepScreen } from "./StepScreen";
 import { stepHref, type StepId } from "./steps";
 
@@ -68,10 +69,13 @@ export function ReviewStep({ category, steps }: ReviewStepProps) {
   const dateStale = () => draft.preferredDate !== null && isPastDay(draft.preferredDate);
 
   const onSend = () => {
-    // A day chosen before midnight has passed meanwhile: the API would refuse it.
-    if (dateStale()) return backTo(DATE_STALE);
+    const body = requestBody({ draft, category, address, mediaKeys: media.keys });
+    // A day chosen before midnight has passed meanwhile: the API would refuse it. A retry of a send
+    // that may have gone through still goes (#388): the server answers the request its key made
+    // before it looks at the day, and refuses the day only if there is none.
+    if (dateStale() && !holdsSendKey(body)) return backTo(DATE_STALE);
     setFailure(null);
-    void send(requestBody({ draft, category, address, mediaKeys: media.keys }), {
+    void send(body, {
       onSent: finish,
       onFailed: (outcome) => {
         if (outcome.kind === "signedOut") return; // the session's own screens take over
