@@ -88,12 +88,15 @@ export function overviewStop(
   const world = points.map(toWorld);
   const xs = world.map(([x]) => x);
   const ys = world.map(([, y]) => y);
-  // Large text makes the cards tall: the paddings then shrink together, so the fit keeps room.
-  const vertical = OVERVIEW_TOP + covered + OVERVIEW_BOTTOM_GAP;
-  const shrink = Math.min(1, (size.height * (1 - OVERVIEW_MIN_ROOM)) / vertical);
+  // Large text makes the cards tall. The paddings never take more than (1 - OVERVIEW_MIN_ROOM) of
+  // the map: the top gives way first, then the gap above the cards, the cards' own height last,
+  // so the pins stay clear of the cards as long as anything can.
+  const most = size.height * (1 - OVERVIEW_MIN_ROOM);
+  const spare = Math.max(0, most - covered);
+  const gap = Math.min(OVERVIEW_BOTTOM_GAP, spare);
   const padding = {
-    paddingTop: OVERVIEW_TOP * shrink,
-    paddingBottom: (covered + OVERVIEW_BOTTOM_GAP) * shrink,
+    paddingTop: Math.min(OVERVIEW_TOP, spare - gap),
+    paddingBottom: Math.min(covered, most) + gap,
     paddingLeft: OVERVIEW_SIDE,
     paddingRight: OVERVIEW_SIDE,
   };

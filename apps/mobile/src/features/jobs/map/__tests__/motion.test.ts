@@ -211,10 +211,17 @@ describe("overviewStop", () => {
 
   it("keeps 40% of a short map to fit into when large text makes the cards tall", () => {
     const stop = overviewStop([at(0, 0), DOOR], SIZE, 200, 0);
-    const padding = stop.padding!;
-    expect(padding.paddingTop! + padding.paddingBottom!).toBeCloseTo(SIZE.height * 0.6, 5);
-    expect(padding.paddingBottom).toBeGreaterThan(padding.paddingTop!);
+    expect(stop.padding).toMatchObject({ paddingTop: 0, paddingBottom: SIZE.height * 0.6 });
     expect(stop.zoomLevel).toBeGreaterThan(13);
+    // Cards a little shorter: the top gives way first, the gap above the cards keeps the pins clear.
+    expect(overviewStop([at(0, 0), DOOR], SIZE, 166, 0).padding).toMatchObject({
+      paddingTop: 0,
+      paddingBottom: 192,
+    });
+    expect(overviewStop([at(0, 0), DOOR], SIZE, 114, 0).padding).toMatchObject({
+      paddingTop: 34,
+      paddingBottom: 158,
+    });
   });
 
   it("zooms out further for a pro farther away, and never in past street level", () => {

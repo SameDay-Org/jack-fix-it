@@ -265,6 +265,18 @@ describe("LiveMap's follow camera", () => {
     expect(cameraCalls().some((stop) => stop?.pitch === OVERVIEW_PITCH)).toBe(false);
   });
 
+  it("keeps the van where it is drawn in the overview, not only the fix it glides to", async () => {
+    const far = props({ route: route(5000) });
+    await render(<LiveMap {...far} />);
+    await loadMap();
+    await advance(OVERVIEW_HOLD_MS);
+    // A fix right by the door: on its own with the door it would zoom in to street level.
+    await screen.rerender(<LiveMap {...far} fix={fix(at(380, 400), POLL_MS, 90)} />);
+    await advance(FRAME_MS);
+    expect(lastCamera()?.pitch).toBe(OVERVIEW_PITCH);
+    expect(lastCamera()?.zoomLevel).toBeLessThan(15);
+  });
+
   it("keeps the overview while the route of a far pro is briefly unavailable", async () => {
     const far = props({ route: route(5000) });
     await render(<LiveMap {...far} />);

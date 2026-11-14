@@ -188,12 +188,12 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
     heading.current = normalizeDeg(next);
     camera.current?.setCamera(followStop(point, next, padding, duration, animation));
   };
-  const showOverview = (point: LngLat, duration: number) => {
+  // The overview fits where the van is drawn, the newest fix it glides to, and the address.
+  const showOverview = (duration: number) => {
     if (trail.destination === null) return;
+    const points = [fix.point, trail.destination, ...(pose.current ? [pose.current.point] : [])];
     heading.current = 0;
-    camera.current?.setCamera(
-      overviewStop([point, trail.destination], { width, height }, covered, duration),
-    );
+    camera.current?.setCamera(overviewStop(points, { width, height }, covered, duration));
   };
 
   // Each frame draws the van; while following, the camera moves on to where the van will be.
@@ -229,7 +229,7 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
       followed.current = gliding.current;
       nextStep.current = Date.now() + duration;
     } else if (next === "overview") {
-      showOverview(at.point, duration);
+      showOverview(duration);
     }
   });
   const placedFor = useRef<CameraMode | null>(null);
@@ -242,7 +242,7 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
 
   // The overview follows each new fix.
   const refitOverview = useEffectEvent(() => {
-    if (loaded && mode === "overview") showOverview(fix.point, CAMERA_TRANSITION_MS);
+    if (loaded && mode === "overview") showOverview(CAMERA_TRANSITION_MS);
   });
   useEffect(() => refitOverview(), [fix.at]);
 

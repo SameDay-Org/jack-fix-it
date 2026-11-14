@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { Text, useWindowDimensions, View } from "react-native";
 import Animated, {
   Easing,
-  FadeOut,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
@@ -48,8 +47,10 @@ type JobHeroProps = {
 
 /**
  * The top of the ongoing job: the live map while the pro is on the way, the drawn map in every
- * other phase. The box eases between the two heights, and the live map fades out as it leaves
- * (taking its polling and its map view with it), so the sheet below never jumps.
+ * other phase. The box eases between the two heights, so the sheet below never jumps. Leaving the
+ * phase, the live map stops asking at once and the drawn map fades in over it; then the live map
+ * and its map view unmount. (The map draws on its own surface on Android, which no parent's
+ * opacity reaches: fading the drawn map in over it is what reads as a fade.)
  */
 export function JobHero({ jobId, etaAt, phase, travel, name, now, refetch }: JobHeroProps) {
   const { width, height: windowHeight } = useWindowDimensions();
@@ -66,27 +67,52 @@ export function JobHero({ jobId, etaAt, phase, travel, name, now, refetch }: Job
   }, [box, reduceMotion, target]);
   const boxStyle = useAnimatedStyle(() => ({ height: box.value }));
 
+  // The live map stays mounted under the drawn map's fade-in, then goes.
+  const [mapped, setMapped] = useState(live);
+  if (live && !mapped) setMapped(true);
+  useEffect(() => {
+    if (live || !mapped) return;
+    const timer = setTimeout(() => setMapped(false), reduceMotion ? 0 : transitionMs);
+    return () => clearTimeout(timer);
+  }, [live, mapped, reduceMotion]);
+  const cover = useSharedValue(1);
+  useEffect(() => {
+    if (live) cover.value = 0;
+    else cover.value = reduceMotion ? 1 : withTiming(1, { duration: transitionMs });
+  }, [cover, live, reduceMotion]);
+  const coverStyle = useAnimatedStyle(() => ({ opacity: cover.value }));
+
   return (
     <Animated.View className="overflow-hidden bg-navy-900" style={boxStyle} testID="job-hero">
-      {live ? (
-        <Animated.View exiting={reduceMotion ? undefined : FadeOut.duration(transitionMs)}>
-          <LiveMapSection
-            jobId={jobId}
-            etaAt={etaAt}
-            height={liveHeight}
-            name={name}
-            now={now}
-            refetch={refetch}
-          />
+      {mapped ? (
+        <LiveMapSection
+          jobId={jobId}
+          etaAt={etaAt}
+          height={liveHeight}
+          name={name}
+          now={now}
+          refetch={refetch}
+          leaving={!live}
+        />
+      ) : null}
+      {live ? null : (
+        <Animated.View
+          pointerEvents="none"
+          className="absolute inset-0 bg-navy-900"
+          style={coverStyle}
+        >
+          <JobMap phase={phase} travel={travel} />
         </Animated.View>
-      ) : (
-        <JobMap phase={phase} travel={travel} />
       )}
     </Animated.View>
   );
 }
 
-type LiveMapSectionProps = Omit<JobHeroProps, "phase" | "travel"> & { height: number };
+type LiveMapSectionProps = Omit<JobHeroProps, "phase" | "travel"> & {
+  height: number;
+  /** The phase is over: nothing more is asked for while the drawn map covers this one. */
+  leaving: boolean;
+};
 
 /**
  * The pro's live position on the map, or a calm card saying why it is not there: loading, no
@@ -94,14 +120,22 @@ type LiveMapSectionProps = Omit<JobHeroProps, "phase" | "travel"> & { height: nu
  * position stays on the map, dimmed, once it is older than `liveMapConfig.staleMs` or the API
  * stops sending one; the latter also asks for the job again.
  */
-function LiveMapSection({ jobId, etaAt, height, name, now, refetch }: LiveMapSectionProps) {
+function LiveMapSection({
+  jobId,
+  etaAt,
+  height,
+  name,
+  now,
+  refetch,
+  leaving,
+}: LiveMapSectionProps) {
   const { t } = useTranslation();
   const [failed, setFailed] = useState(false);
   const usable = liveMapConfig.accessToken !== null && !failed;
   // A map that could not load is tried again when the screen or the app comes back.
   const retry = useCallback(async () => setFailed(false), []);
   useRefetchOnReturn(retry, failed);
-  const { position, route } = useLiveTracking(jobId, usable);
+  const { position, route } = useLiveTracking(jobId, usable && !leaving);
   const latest = position.data ?? null;
 
   const [fix, setFix] = useState<Fix | null>(null);
@@ -185,7 +219,7 @@ function MapCards({ text }: { text: TrackingText }) {
       {text.waiting ? (
         <View className="mt-1 flex-row items-center gap-2" testID="live-map-waiting">
           <View className="h-2 w-2 rounded-pill bg-warning" />
-          <Text className="flex-1 text-footnote text-navy-900">{t("jobs.liveMap.waiting")}</Text>
+          <Text className="shrink text-footnote text-navy-900">{t("jobs.liveMap.waiting")}</Text>
         </View>
       ) : null}
     </View>

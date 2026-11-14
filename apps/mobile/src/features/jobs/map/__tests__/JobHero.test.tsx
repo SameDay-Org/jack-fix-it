@@ -155,10 +155,17 @@ describe("JobHero's live map", () => {
     await screen.findByTestId("live-map");
 
     await screen.rerender(hero("arrived"));
+    const keys = [proLocationQueryKey(JOB_ID, 1), jobRouteQueryKey(JOB_ID, 1)];
+    // At once: nothing more is asked for, and the drawn map covers the live one.
+    for (const queryKey of keys) {
+      expect(client.getQueryCache().find({ queryKey })?.isDisabled()).toBe(true);
+    }
+    expect(screen.getByTestId("job-map", { includeHiddenElements: true })).toBeTruthy();
+    // Once covered, the live map and its map view are gone.
+    await advance(0);
     expect(screen.queryByTestId("live-map")).toBeNull();
     expect(screen.queryByTestId("live-map-view")).toBeNull();
-    expect(screen.getByTestId("job-map", { includeHiddenElements: true })).toBeTruthy();
-    for (const queryKey of [proLocationQueryKey(JOB_ID, 1), jobRouteQueryKey(JOB_ID, 1)]) {
+    for (const queryKey of keys) {
       expect(client.getQueryCache().find({ queryKey })?.getObserversCount()).toBe(0);
     }
     const before = calls(POSITION_PATH);
