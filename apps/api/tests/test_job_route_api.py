@@ -68,7 +68,7 @@ from tests.conftest import (
 )
 from tests.helpers import log_fields, masked_fields
 from tests.job_world import LINE1, LINE2, JobWorld, Party, build_world, make_job, record_pushes
-from tests.test_address_geocode import FakeGeocoder, kept
+from tests.test_address_geocode import FakeGeocoder, MemoryGeocodeClaims, kept
 from tests.test_pro_location_api import (
     CODE,
     FORBIDDEN,
@@ -1924,7 +1924,8 @@ async def geocode_on_save(
     """The worker's step for the job's address, Mapbox answering `found` in ZIP `postcode`."""
     geocoder = FakeGeocoder()
     geocoder.answer = kept(region="FL", postcode=postcode, point=found)
-    outcome = await AddressGeocodeService(session, geocoder, enabled=True).geocode(world.address_id)
+    service = AddressGeocodeService(session, geocoder, MemoryGeocodeClaims(), enabled=True)
+    outcome = await service.geocode(world.address_id)
     # The worker has its own session; this test's remembers the row from before.
     address = await session.get(Address, world.address_id)
     assert address is not None

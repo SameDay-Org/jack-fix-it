@@ -14,6 +14,11 @@ point goes to `addresses.lat/lng`; the route reads it and asks for no geocoding.
   holds that: tests/test_address_geocode_guard.py), so a row that has its point is never
   placed again. The task is registered with one try: another run would be another billed
   call. Only the backfill script asks again about a row that kept nothing, once per run.
+- One caller at a time: the worker's task and the backfill script both run this step, so it
+  takes the address's claim (addresses/geocode_claim.py) before it asks, and looks at the row
+  again once it holds it. A caller that finds the claim taken asks nothing (BUSY): the
+  address is being handled. The holder's turn has one deadline, shorter than the claim, for
+  the look, Mapbox and the write; a turn that runs out keeps nothing.
 - What is kept: the point, to POINT_PLACES decimals, and only when Mapbox places it in the
   address's own state and ZIP. Anything else (no such address, another state or ZIP, Mapbox
   failing or slow, no token) keeps nothing: the row stays without a point, and its route
@@ -24,7 +29,9 @@ point goes to `addresses.lat/lng`; the route reads it and asks for no geocoding.
   own text.
 """
 
+import asyncio
 import logging
+import secrets
 import uuid
 from collections.abc import Mapping
 from decimal import ROUND_HALF_UP, Decimal
@@ -40,6 +47,7 @@ from app.integrations.mapbox import (
     MapboxUnavailableError,
     StreetAddress,
 )
+from app.modules.addresses.geocode_claim import GeocodeClaims, GeocodeClaimUnavailableError
 from app.modules.addresses.repository import AddressRepository
 from app.queue import JobQueue, enqueue
 
@@ -58,11 +66,14 @@ class GeocodeOutcome(StrEnum):
     OFF = "off"  # GEOCODE_ON_SAVE is false
     MISSING = "missing"  # no such address
     ALREADY = "already"  # the row has its point
+    BUSY = "busy"  # another caller holds the address's claim: it is being handled
     # Mapbox was asked:
     STORED = "stored"
     NO_RESULT = "no_result"  # it finds no such address
     MISMATCH = "mismatch"  # its answer is in another state or ZIP
-    UNAVAILABLE = "unavailable"  # it failed, was slow, or there is no token
+    # It failed, was slow, or there is no token. Also a turn that ran out before the point
+    # was kept: counted as asked, whichever step was the slow one.
+    UNAVAILABLE = "unavailable"
     CHANGED = "changed"  # the row got a point, or another text, while it answered
 
     @property
@@ -71,7 +82,9 @@ class GeocodeOutcome(StrEnum):
         return self not in _NOT_ASKED
 
 
-_NOT_ASKED: Final = frozenset({GeocodeOutcome.OFF, GeocodeOutcome.MISSING, GeocodeOutcome.ALREADY})
+_NOT_ASKED: Final = frozenset(
+    {GeocodeOutcome.OFF, GeocodeOutcome.MISSING, GeocodeOutcome.ALREADY, GeocodeOutcome.BUSY}
+)
 _SKIPPED: Final = (logging.INFO, "address_geocode_skipped")
 _NOT_KEPT: Final = (logging.WARNING, "address_geocode_not_kept")
 _EVENTS: Final[Mapping[GeocodeOutcome, tuple[int, str]]] = MappingProxyType(
@@ -79,6 +92,7 @@ _EVENTS: Final[Mapping[GeocodeOutcome, tuple[int, str]]] = MappingProxyType(
         GeocodeOutcome.OFF: _SKIPPED,
         GeocodeOutcome.MISSING: _SKIPPED,
         GeocodeOutcome.ALREADY: _SKIPPED,
+        GeocodeOutcome.BUSY: _SKIPPED,
         GeocodeOutcome.STORED: (logging.INFO, "address_geocoded"),
         GeocodeOutcome.NO_RESULT: _NOT_KEPT,
         GeocodeOutcome.MISMATCH: _NOT_KEPT,
@@ -123,18 +137,28 @@ def rounded(degrees: float) -> Decimal:
 
 
 class AddressGeocodeService:
-    """Owns its transactions: it commits before Mapbox is asked (nothing waits on Mapbox with
-    a connection held) and again after the write."""
+    """Owns its transactions: it commits before Redis or Mapbox is asked (nothing waits on
+    them with a connection held) and again after the write."""
 
-    def __init__(self, session: AsyncSession, geocoder: AddressGeocoder, *, enabled: bool) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        geocoder: AddressGeocoder,
+        claims: GeocodeClaims,
+        *,
+        enabled: bool,
+    ) -> None:
         self._session = session
         self._addresses = AddressRepository(session)
         self._geocoder = geocoder
+        self._claims = claims
         self._enabled = enabled
 
     async def geocode(self, address_id: uuid.UUID) -> GeocodeOutcome:
         """Gives the address its point when it has none and Mapbox places it in its own state
-        and ZIP. Never raises for Mapbox: every outcome but STORED leaves the row as it was."""
+        and ZIP. Never raises for Mapbox: every outcome but STORED leaves the row as it was.
+        Raises GeocodeClaimUnavailableError, Mapbox not asked, when the claim cannot be
+        taken."""
         outcome = await self._geocode(address_id)
         level, event = _EVENTS[outcome]
         logger.log(level, event, extra={"address_id": str(address_id), "outcome": outcome.value})
@@ -143,16 +167,33 @@ class AddressGeocodeService:
     async def _geocode(self, address_id: uuid.UUID) -> GeocodeOutcome:
         if not self._enabled:
             return GeocodeOutcome.OFF
-        place = await self._addresses.place_to_geocode(address_id)
-        if place is None:
-            return GeocodeOutcome.MISSING
-        line1, city, state, zip_code, without_point = place
-        if not without_point:
-            return GeocodeOutcome.ALREADY
-        # The street line and the place: the unit line places nothing, and is not even read.
-        asked = StreetAddress(line1=line1, city=city, state=state, zip_code=zip_code)
-        # Ends the read transaction: no pooled connection waits on Mapbox.
-        await self._session.commit()
+        # Before the claim: a row that needs no call takes none.
+        place = await self._place_without_point(address_id)
+        if isinstance(place, GeocodeOutcome):
+            return place
+        token = secrets.token_hex()
+        # Counted from before Redis is asked: Redis counts the claim's time from when it
+        # takes it, which is later, so this turn ends before the claim does.
+        turn_ends = asyncio.get_running_loop().time() + self._claims.work_seconds
+        if not await self._claims.claim(address_id, token=token):
+            return GeocodeOutcome.BUSY
+        try:
+            async with asyncio.timeout_at(turn_ends) as turn:
+                return await self._ask_and_keep(address_id)
+        except TimeoutError:
+            if not turn.expired():
+                raise  # not the turn's deadline: a failure of its own, as before
+            logger.warning("address_geocode_turn_ended", extra={"address_id": str(address_id)})
+            return GeocodeOutcome.UNAVAILABLE
+        finally:
+            await self._release(address_id, token)
+
+    async def _ask_and_keep(self, address_id: uuid.UUID) -> GeocodeOutcome:
+        """The holder's turn. The look before the claim is old by now: a caller that held the
+        claim since may have kept the point, so the row is read again, and this look decides."""
+        asked = await self._place_without_point(address_id)
+        if isinstance(asked, GeocodeOutcome):
+            return asked
         try:
             found = await self._geocoder.geocode_to_keep(asked)
         except MapboxUnavailableError:
@@ -173,6 +214,28 @@ class AddressGeocodeService:
         )
         await self._session.commit()
         return GeocodeOutcome.STORED if kept else GeocodeOutcome.CHANGED
+
+    async def _place_without_point(self, address_id: uuid.UUID) -> StreetAddress | GeocodeOutcome:
+        """The address as Mapbox is asked about it, or why it is not asked. Ends the read
+        transaction: no pooled connection waits on Redis or on Mapbox."""
+        place = await self._addresses.place_to_geocode(address_id)
+        await self._session.commit()
+        if place is None:
+            return GeocodeOutcome.MISSING
+        line1, city, state, zip_code, without_point = place
+        if not without_point:
+            return GeocodeOutcome.ALREADY
+        # The street line and the place: the unit line places nothing, and is not even read.
+        return StreetAddress(line1=line1, city=city, state=state, zip_code=zip_code)
+
+    async def _release(self, address_id: uuid.UUID, token: str) -> None:
+        try:
+            await self._claims.release(address_id, token=token)
+        except GeocodeClaimUnavailableError:
+            # The claim ends by itself (geocode_claim.claim_seconds).
+            logger.error(
+                "address_geocode_claim_not_released", extra={"address_id": str(address_id)}
+            )
 
     async def pending_count(self) -> int:
         """How many addresses have no point (the backfill's dry run)."""

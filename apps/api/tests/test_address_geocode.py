@@ -1,6 +1,7 @@
 """Geocode on save (#384): a request's address gets its point once, from the worker, with
 Mapbox's permanent geocoding, behind GEOCODE_ON_SAVE. Never calls Mapbox."""
 
+import asyncio
 import dataclasses
 import json
 import logging
@@ -14,6 +15,7 @@ import httpx
 import pytest
 import sentry_sdk
 from arq.worker import Function
+from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +40,7 @@ from app.modules.addresses.geocode import (
     rounded,
     same_area,
 )
+from app.modules.addresses.geocode_claim import GeocodeClaimUnavailableError
 from app.modules.addresses.models import Address
 from app.modules.addresses.tasks import geocode_address
 from app.modules.requests.models import ServiceRequest
@@ -159,10 +162,53 @@ async def point_of(session: AsyncSession, address_id: uuid.UUID) -> tuple[Any, A
     return row[0], row[1]
 
 
+class MemoryGeocodeClaims:
+    """GeocodeClaims in memory: who holds each address, and each call made (the real one, in
+    Redis: tests/test_address_geocode_claim.py). `on_claim` runs once a claim is taken, before
+    its caller hears of it; `down` and `stuck` are Redis failing at the claim and at the
+    release."""
+
+    def __init__(self, session: AsyncSession | None = None, *, work_seconds: float = 5.0) -> None:
+        self.work_seconds = work_seconds
+        self.held: dict[uuid.UUID, str] = {}
+        self.calls: list[tuple[str, uuid.UUID]] = []
+        self.in_transaction: list[bool] = []
+        self.on_claim: Callable[[], Awaitable[None]] | None = None
+        self.down = False
+        self.stuck = False
+        self._session = session
+
+    async def claim(self, address_id: uuid.UUID, *, token: str) -> bool:
+        self.calls.append(("claim", address_id))
+        if self._session is not None:
+            self.in_transaction.append(self._session.in_transaction())
+        if self.down:
+            raise GeocodeClaimUnavailableError
+        if address_id in self.held:
+            return False
+        self.held[address_id] = token
+        if self.on_claim is not None:
+            await self.on_claim()
+        return True
+
+    async def release(self, address_id: uuid.UUID, *, token: str) -> None:
+        self.calls.append(("release", address_id))
+        if self.stuck:
+            raise GeocodeClaimUnavailableError
+        if self.held.get(address_id) == token:
+            del self.held[address_id]
+
+
 def service(
-    session: AsyncSession, geocoder: FakeGeocoder, *, enabled: bool = True
+    session: AsyncSession,
+    geocoder: FakeGeocoder,
+    claims: MemoryGeocodeClaims | None = None,
+    *,
+    enabled: bool = True,
 ) -> AddressGeocodeService:
-    return AddressGeocodeService(session, geocoder, enabled=enabled)
+    return AddressGeocodeService(
+        session, geocoder, claims or MemoryGeocodeClaims(), enabled=enabled
+    )
 
 
 @pytest.fixture
@@ -348,21 +394,206 @@ async def test_a_point_kept_meanwhile_is_not_replaced(db_session: AsyncSession) 
     assert await point_of(db_session, address.id) == theirs
 
 
+# One caller at a time (Vault round 1): the claim
+
+
+async def test_an_address_claimed_elsewhere_is_not_asked_about(db_session: AsyncSession) -> None:
+    address = await make_address(db_session)
+    geocoder = FakeGeocoder()
+    claims = MemoryGeocodeClaims()
+    claims.held[address.id] = "another caller's token"
+
+    outcome = await service(db_session, geocoder, claims).geocode(address.id)
+
+    assert outcome is GeocodeOutcome.BUSY
+    assert not outcome.asked
+    assert geocoder.asked == []
+    assert await point_of(db_session, address.id) == (None, None)
+    # It took nothing, so it gives nothing back: the holder's claim stands.
+    assert claims.calls == [("claim", address.id)]
+    assert claims.held == {address.id: "another caller's token"}
+
+
+async def test_the_row_is_read_again_once_the_claim_is_held(db_session: AsyncSession) -> None:
+    """Between the first look and the claim another caller kept the point and gave its claim
+    back. The claim is free, the first look is old: asking now would be a second bill."""
+    address = await make_address(db_session)
+    geocoder = FakeGeocoder()
+    claims = MemoryGeocodeClaims()
+    theirs = (Decimal("28.10000"), Decimal("-81.20000"))
+
+    async def the_holder_before_kept_its_point() -> None:
+        await db_session.execute(
+            update(Address).where(Address.id == address.id).values(lat=theirs[0], lng=theirs[1])
+        )
+
+    claims.on_claim = the_holder_before_kept_its_point
+
+    outcome = await service(db_session, geocoder, claims).geocode(address.id)
+
+    assert outcome is GeocodeOutcome.ALREADY
+    assert geocoder.asked == []
+    assert await point_of(db_session, address.id) == theirs
+    assert claims.held == {}
+
+
+@pytest.mark.parametrize(
+    ("answer", "outcome"),
+    [
+        (kept(), GeocodeOutcome.STORED),
+        (None, GeocodeOutcome.NO_RESULT),
+        (kept(postcode="32899"), GeocodeOutcome.MISMATCH),
+        (MapboxUnavailableError(), GeocodeOutcome.UNAVAILABLE),
+        (RuntimeError("probe"), None),
+    ],
+    ids=["stored", "no_result", "mismatch", "unavailable", "raises"],
+)
+async def test_the_claim_is_taken_before_mapbox_and_given_back_after(
+    db_session: AsyncSession, answer: KeptGeocode | Exception | None, outcome: GeocodeOutcome | None
+) -> None:
+    address = await make_address(db_session)
+    geocoder = FakeGeocoder()
+    geocoder.answer = answer
+    claims = MemoryGeocodeClaims(db_session)
+    held_while_asked: list[bool] = []
+
+    async def look() -> None:
+        held_while_asked.append(address.id in claims.held)
+
+    geocoder.meanwhile = look
+
+    if outcome is None:
+        with pytest.raises(RuntimeError):
+            await service(db_session, geocoder, claims).geocode(address.id)
+    else:
+        assert await service(db_session, geocoder, claims).geocode(address.id) is outcome
+
+    assert held_while_asked == [True]
+    assert claims.calls == [("claim", address.id), ("release", address.id)]
+    assert claims.held == {}
+    # No transaction of ours is open while Redis answers either.
+    assert claims.in_transaction == [False]
+
+
+@pytest.mark.parametrize("row", ["off", "missing", "already"])
+async def test_a_row_that_needs_no_call_takes_no_claim(db_session: AsyncSession, row: str) -> None:
+    address = await make_address(
+        db_session, **({"lat": KEPT_LAT, "lng": KEPT_LNG} if row == "already" else {})
+    )
+    claims = MemoryGeocodeClaims()
+    address_id = uuid.uuid4() if row == "missing" else address.id
+
+    outcome = await service(db_session, FakeGeocoder(), claims, enabled=row != "off").geocode(
+        address_id
+    )
+
+    assert outcome.value == row
+    assert claims.calls == []
+
+
+async def test_without_the_claim_mapbox_is_not_asked(
+    db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Redis failing: nobody can tell whether another caller is asking, so nobody asks."""
+    address = await make_address(db_session)
+    geocoder = FakeGeocoder()
+    claims = MemoryGeocodeClaims()
+    claims.down = True
+
+    with (
+        caplog.at_level(logging.DEBUG, logger=GEOCODE_LOGGER),
+        pytest.raises(GeocodeClaimUnavailableError),
+    ):
+        await service(db_session, geocoder, claims).geocode(address.id)
+
+    assert geocoder.asked == []
+    assert await point_of(db_session, address.id) == (None, None)
+    assert caplog.records == []  # no outcome: the caller reports the failure
+
+
+async def test_a_turn_that_runs_out_keeps_nothing(
+    db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The holder's turn ends before its claim does: a step slower than that is given up, so
+    the next holder never asks while this one could still keep a point."""
+    address = await make_address(db_session)
+    geocoder = FakeGeocoder()
+    claims = MemoryGeocodeClaims(work_seconds=0.05)
+    gave_up: list[bool] = []
+
+    async def slower_than_the_turn() -> None:
+        try:
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            gave_up.append(address.id in claims.held)  # still the holder when it stops
+            raise
+
+    geocoder.meanwhile = slower_than_the_turn
+
+    with caplog.at_level(logging.DEBUG, logger=GEOCODE_LOGGER):
+        outcome = await service(db_session, geocoder, claims).geocode(address.id)
+
+    assert outcome is GeocodeOutcome.UNAVAILABLE
+    assert outcome.asked  # Mapbox may have been asked: the backfill paces and counts it
+    assert gave_up == [True]
+    assert await point_of(db_session, address.id) == (None, None)
+    assert claims.held == {}
+    assert [(r.levelno, r.message) for r in caplog.records] == [
+        (logging.WARNING, "address_geocode_turn_ended"),
+        (logging.WARNING, "address_geocode_not_kept"),
+    ]
+    for record in caplog.records:  # the id and the outcome, as every line of the step
+        extras = set(vars(record)) - set(vars(logging.makeLogRecord({})))
+        assert extras <= {"address_id", "outcome", "message", "asctime"}, extras
+
+
+async def test_a_claim_that_cannot_be_given_back_does_not_undo_the_point(
+    db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    address = await make_address(db_session)
+    claims = MemoryGeocodeClaims()
+    claims.stuck = True
+
+    with caplog.at_level(logging.DEBUG, logger=GEOCODE_LOGGER):
+        outcome = await service(db_session, FakeGeocoder(), claims).geocode(address.id)
+
+    assert outcome is GeocodeOutcome.STORED
+    assert await point_of(db_session, address.id) == (KEPT_LAT, KEPT_LNG)
+    assert [(r.levelno, r.message) for r in caplog.records] == [
+        (logging.ERROR, "address_geocode_claim_not_released"),
+        (logging.INFO, "address_geocoded"),
+    ]
+
+
 # The worker task
 
 
-def task_ctx(session: AsyncSession, geocoder: object, **settings: object) -> dict[str, object]:
+@pytest.fixture
+async def queue_redis() -> AsyncIterator[Redis]:
+    """The real Redis of REDIS_URL, as ARQ's ctx["redis"]: the task takes its claims there. A
+    claim is one key by the address's id, deleted by its holder."""
+    client = Redis.from_url(Settings().redis_url)
+    try:
+        yield client
+    finally:
+        await client.aclose()
+
+
+def task_ctx(
+    session: AsyncSession, geocoder: object, redis: Redis, **settings: object
+) -> dict[str, object]:
     return {
         "session_factory": sessions_of(session),
         "address_geocoder": geocoder,
+        "redis": redis,
         "settings": make_settings(**settings),
     }
 
 
-async def test_the_task_keeps_the_point(db_session: AsyncSession) -> None:
+async def test_the_task_keeps_the_point(db_session: AsyncSession, queue_redis: Redis) -> None:
     address = await make_address(db_session)
     geocoder = FakeGeocoder()
-    ctx = task_ctx(db_session, geocoder, geocode_on_save=True)
+    ctx = task_ctx(db_session, geocoder, queue_redis, geocode_on_save=True)
 
     assert await geocode_address(ctx, str(address.id)) == "stored"
     # ARQ may run a job twice: the second run asks Mapbox nothing.
@@ -373,12 +604,12 @@ async def test_the_task_keeps_the_point(db_session: AsyncSession) -> None:
 
 
 async def test_a_job_queued_before_the_switch_went_off_asks_nothing(
-    db_session: AsyncSession,
+    db_session: AsyncSession, queue_redis: Redis
 ) -> None:
     address = await make_address(db_session)
     geocoder = FakeGeocoder()
 
-    outcome = await geocode_address(task_ctx(db_session, geocoder), str(address.id))
+    outcome = await geocode_address(task_ctx(db_session, geocoder, queue_redis), str(address.id))
 
     assert outcome == "off"
     assert geocoder.asked == []
@@ -386,10 +617,10 @@ async def test_a_job_queued_before_the_switch_went_off_asks_nothing(
 
 
 async def test_without_a_token_the_task_keeps_nothing(
-    db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+    db_session: AsyncSession, queue_redis: Redis, caplog: pytest.LogCaptureFixture
 ) -> None:
     address = await make_address(db_session)
-    ctx = task_ctx(db_session, UnconfiguredRouteProvider(), geocode_on_save=True)
+    ctx = task_ctx(db_session, UnconfiguredRouteProvider(), queue_redis, geocode_on_save=True)
 
     with caplog.at_level(logging.DEBUG):
         assert await geocode_address(ctx, str(address.id)) == "unavailable"
@@ -587,7 +818,7 @@ def found_response(**area: str) -> httpx.Response:
 
 
 async def test_logs_carry_the_address_id_and_the_outcome_only(
-    db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+    db_session: AsyncSession, queue_redis: Redis, caplog: pytest.LogCaptureFixture
 ) -> None:
     """The real client against a fake wire, at LOG_LEVEL=DEBUG: a point kept, an answer in
     another ZIP, no such address, and Mapbox refusing with the address in its own text."""
@@ -599,7 +830,7 @@ async def test_logs_carry_the_address_id_and_the_outcome_only(
         httpx.Response(403, json={"message": f"{VENDOR_TEXT}: {STREET}, {CITY}"}),
     )
     addresses = [await make_address(db_session) for _ in range(4)]
-    ctx = task_ctx(db_session, mapbox.provider(), geocode_on_save=True)
+    ctx = task_ctx(db_session, mapbox.provider(), queue_redis, geocode_on_save=True)
 
     with caplog.at_level(logging.DEBUG):
         outcomes = [await geocode_address(ctx, str(address.id)) for address in addresses]
@@ -627,7 +858,7 @@ async def test_logs_carry_the_address_id_and_the_outcome_only(
 
 
 async def test_nothing_reaches_sentry(
-    sentry_transport: MemoryTransport, db_session: AsyncSession
+    sentry_transport: MemoryTransport, db_session: AsyncSession, queue_redis: Redis
 ) -> None:
     """Sentry on, sending to memory. A point kept, then Mapbox refusing the next address (its
     ERROR log is an event, with both calls among its breadcrumbs): no token, address,
@@ -639,7 +870,7 @@ async def test_nothing_reaches_sentry(
         httpx.Response(403, json={"message": f"{VENDOR_TEXT}: {STREET}, {CITY}"}),
     )
     first, second = await make_address(db_session), await make_address(db_session)
-    ctx = task_ctx(db_session, mapbox.provider(), geocode_on_save=True)
+    ctx = task_ctx(db_session, mapbox.provider(), queue_redis, geocode_on_save=True)
 
     outcomes = [await geocode_address(ctx, str(a.id)) for a in (first, second)]
     sentry_sdk.flush()

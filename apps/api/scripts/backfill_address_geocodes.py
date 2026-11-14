@@ -17,6 +17,17 @@ point kept only when Mapbox puts it in the address's own state and ZIP.
 - --apply needs GEOCODE_ON_SAVE=true and MAPBOX_ACCESS_TOKEN: each address asked about is a
   billed call. It reads GEOCODE_BACKFILL_BATCH_SIZE ids at a time and asks about at most
   GEOCODE_BACKFILL_PER_MINUTE addresses a minute.
+- --apply needs an operator: it never runs unattended. Before Mapbox is asked anything it
+  prints how many addresses it would send and that each is billed, and goes on only when
+  standard input is a terminal and the operator types that number. No terminal (a pipe, a
+  file, a scheduled job), the end of the input, an empty line or any other answer stops the
+  run, exit 1, Mapbox not asked. Nothing skips the question: there is no --yes flag and no
+  variable for it. The run then asks about that many addresses at the most.
+- One caller per address: the worker may be geocoding the same rows, and another run of this
+  script too. Each address is claimed in Redis (REDIS_URL, the queue's own;
+  app/modules/addresses/geocode_claim.py) before Mapbox is asked about it. An address
+  claimed elsewhere is skipped, not waited for. Redis unreachable stops the run, exit 1:
+  without its claim no address is asked about.
 - When Mapbox is unavailable: one such answer can be about its own address (a text Mapbox
   refuses), so the run goes on to the next row. STOP_AFTER_UNAVAILABLE of them in a row are
   Mapbox itself (a refused token, no billing, a rate limit, an outage): the run stops, and
@@ -36,12 +47,18 @@ from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from typing import Final, TextIO
 
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.db import create_engine, create_session_factory
 from app.integrations.mapbox import AddressGeocoder, provider_from_settings
 from app.modules.addresses.geocode import AddressGeocodeService, GeocodeOutcome
+from app.modules.addresses.geocode_claim import (
+    GeocodeClaims,
+    GeocodeClaimUnavailableError,
+    RedisGeocodeClaims,
+)
 from app.observability import configure_logging
 
 SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
@@ -59,6 +76,7 @@ _LINES: Final = (
     (GeocodeOutcome.MISMATCH, "Found in another state or ZIP (nothing kept)"),
     (GeocodeOutcome.CHANGED, "Changed meanwhile (nothing kept)"),
     (GeocodeOutcome.ALREADY, "Had a point by then"),
+    (GeocodeOutcome.BUSY, "Claimed by the worker or another run (skipped)"),
     (GeocodeOutcome.UNAVAILABLE, "Mapbox unavailable"),
 )
 
@@ -72,10 +90,35 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="Ask Mapbox (one billed call per address) and keep the points. Without it: a "
-        "dry run that only counts.",
+        help="Ask Mapbox (one billed call per address) and keep the points, after an operator "
+        "at a terminal types the number of addresses. Without it: a dry run that only counts.",
     )
     return parser.parse_args(argv)
+
+
+def confirmed(pending: int, stdin: TextIO, out: TextIO) -> bool:
+    """Whether an operator at a terminal typed `pending`, the number of addresses the run
+    would send to Mapbox. Anything else is a no, and says so on `out`."""
+    print(
+        f"{pending} addresses without a point, of every request, open or not, would be sent "
+        f"to Mapbox.\nPermanent geocoding is billed per address: up to {pending} billed calls.",
+        file=out,
+    )
+    if not stdin.isatty():
+        print(
+            "Error: --apply needs an operator at a terminal, and standard input is not one. "
+            "Nothing was asked.",
+            file=out,
+        )
+        return False
+    print(f"Type {pending} to go on (anything else stops): ", end="", file=out, flush=True)
+    answer = stdin.readline()  # the end of the input reads as an empty answer
+    if not answer.endswith("\n"):
+        print(file=out)  # the input ended on the question's own line
+    if answer.strip() != str(pending):
+        print("Not confirmed. Nothing was asked.", file=out)
+        return False
+    return True
 
 
 async def run(
@@ -85,13 +128,16 @@ async def run(
     geocoder: AddressGeocoder,
     out: TextIO,
     sleep: Sleep = asyncio.sleep,
+    *,
+    claims: GeocodeClaims,
+    stdin: TextIO,
 ) -> int:
-    """0 when the run got to its end; 1 when it was refused, or stopped because Mapbox was
-    unavailable."""
+    """0 when the run got to its end, or asked about as many addresses as were confirmed; 1
+    when it was refused or not confirmed, or stopped because Mapbox or Redis was unavailable."""
     args = parse_args(argv)
+    async with sessions() as session:
+        pending = await _service(session, geocoder, claims).pending_count()
     if not args.apply:
-        async with sessions() as session:
-            pending = await _service(session, geocoder).pending_count()
         print(
             f"Dry run: {pending} addresses without a point, of every request, open or not. "
             "Mapbox was not asked. With --apply each of them is one billed call.",
@@ -108,56 +154,83 @@ async def run(
     if settings.mapbox_access_token is None:
         print("Error: MAPBOX_ACCESS_TOKEN is not set. Nothing was asked.", file=out)
         return 1
+    if pending == 0:
+        print("No address without a point. Nothing was asked.", file=out)
+        return 0
+    if not confirmed(pending, stdin, out):
+        return 1
 
     counts: Counter[GeocodeOutcome] = Counter()
     pause = _SECONDS_PER_MINUTE / settings.geocode_backfill_per_minute
     after = None
+    asked = 0
     unavailable_in_a_row = 0
-    stopped = False
-    while not stopped:
+    stopped: tuple[int, str] | None = None  # the exit code, and why the run ended early
+    while stopped is None:
         async with sessions() as session:
-            ids = await _service(session, geocoder).pending(
+            ids = await _service(session, geocoder, claims).pending(
                 after=after, limit=settings.geocode_backfill_batch_size
             )
         if not ids:
             break
         for address_id in ids:
-            # A session per address: each geocode is its own short transactions.
-            async with sessions() as session:
-                outcome = await _service(session, geocoder).geocode(address_id)
+            if asked >= pending:
+                stopped = (
+                    0,
+                    f"Stopped: Mapbox was asked about {asked} addresses, the number confirmed, "
+                    "and more are without a point by now. Run it again for the rest.",
+                )
+                break
+            try:
+                # A session per address: each geocode is its own short transactions.
+                async with sessions() as session:
+                    outcome = await _service(session, geocoder, claims).geocode(address_id)
+            except GeocodeClaimUnavailableError:
+                stopped = (
+                    1,
+                    "Stopped: Redis (REDIS_URL) is unreachable, so no address can be claimed. "
+                    "Mapbox was not asked about this address or the rest.",
+                )
+                break
             counts[outcome] += 1
             if outcome is GeocodeOutcome.UNAVAILABLE:
                 unavailable_in_a_row += 1
                 if unavailable_in_a_row >= STOP_AFTER_UNAVAILABLE:
-                    stopped = True
+                    stopped = (
+                        1,
+                        f"Stopped: Mapbox was unavailable {STOP_AFTER_UNAVAILABLE} times in a "
+                        "row. Run it again later for the rest.",
+                    )
                     break
             elif outcome.asked:
                 unavailable_in_a_row = 0  # Mapbox answered: the ones before were their own
             if outcome.asked:
+                asked += 1
                 await sleep(pause)
         after = ids[-1]
 
     print(f"Addresses looked at: {sum(counts.values())}", file=out)
     for outcome, label in _LINES:
         print(f"  {label}: {counts[outcome]}", file=out)
-    if stopped:
-        print(
-            f"Stopped: Mapbox was unavailable {STOP_AFTER_UNAVAILABLE} times in a row. Run it "
-            "again later for the rest.",
-            file=out,
-        )
-        return 1
-    return 0
+    if stopped is None:
+        return 0
+    code, why = stopped
+    print(why, file=out)
+    return code
 
 
-def _service(session: AsyncSession, geocoder: AddressGeocoder) -> AddressGeocodeService:
-    return AddressGeocodeService(session, geocoder, enabled=True)
+def _service(
+    session: AsyncSession, geocoder: AddressGeocoder, claims: GeocodeClaims
+) -> AddressGeocodeService:
+    return AddressGeocodeService(session, geocoder, claims, enabled=True)
 
 
 async def _main(argv: Sequence[str]) -> int:
     settings = get_settings()
     configure_logging(settings.log_level)
     engine = create_engine(settings)
+    # The queue's own Redis, where the worker takes its claims too.
+    redis: Redis = Redis.from_url(settings.redis_url)
     try:
         return await run(
             argv,
@@ -165,8 +238,11 @@ async def _main(argv: Sequence[str]) -> int:
             settings,
             provider_from_settings(settings),
             sys.stdout,
+            claims=RedisGeocodeClaims.from_settings(redis, settings),
+            stdin=sys.stdin,
         )
     finally:
+        await redis.aclose()
         await engine.dispose()
 
 

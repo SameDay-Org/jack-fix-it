@@ -215,14 +215,38 @@ variable is not a secret. Before setting it to `true`:
    unavailable three times in a row and can be run again; a later run asks once more, and
    is billed once more, for each address that kept nothing.
 
+   `--apply` never runs unattended, because every call it makes is billed. Run it from an
+   interactive shell: `railway ssh --service worker`, or a local terminal with the service's
+   variables. Before Mapbox is asked anything it prints how many addresses it would send and
+   that each one is billed, then waits for the operator to type that number. Without a
+   terminal on standard input (a pipe, a file, a scheduled job), at the end of the input, on
+   an empty line or on any other answer it exits 1 and asks Mapbox nothing. There is no
+   `--yes` flag and no variable that skips the question. The run then asks about that many
+   addresses at the most.
+
+One caller at a time asks Mapbox about an address. The worker's job and the backfill both
+claim the address in the queue's Redis (`REDIS_URL`, never `redis-location`) before the
+call, and look at the row again once they hold the claim; a claim ends by itself a few
+seconds after `MAPBOX_TIMEOUT_SECONDS`, so a holder that died blocks nobody. An address
+claimed elsewhere is skipped (outcome `busy`): the worker leaves it to the holder and the
+backfill counts it and moves on. If that Redis is unreachable the backfill stops with exit 1
+before asking about the address, and the worker's job fails without asking.
+
 A point is kept only when Mapbox places the address in its own state and ZIP. Anything else
 keeps nothing and the route places that address itself, as with the switch off: WARNING
 `address_geocode_not_kept` with the address id and the outcome (`no_result`, `mismatch`,
 `unavailable`, `changed`), never the address or a coordinate. The job has one try, since
 each run that reaches Mapbox is billed: one that a worker deploy interrupts is not run again
 (ARQ logs it as cancelled, then as past its retries) and its address stays without a point.
-`false` again stops the calls at once, jobs already queued included; the points kept so far
-stay in use.
+
+Budget and abuse. One new request is one permanent geocoding call. What bounds the calls is
+the request limiter, a rate bound and not a spending cap: `REQUEST_CREATE_LIMIT` creations
+per customer per `REQUEST_CREATE_WINDOW_SECONDS` (10 an hour by default). It fails open when
+its Redis is down (the availability policy of every limiter here), and there is no global
+budget for the vendor across accounts and windows. So Cesar sets a spending alert in the
+Mapbox account before turning the switch on. Turning it off takes the variable change and
+the restart of api and worker that follows it: from then on no call is made, jobs already
+queued included. It cannot undo a call already sent; the points kept so far stay in use.
 
 ### worker
 
