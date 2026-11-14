@@ -148,6 +148,13 @@ describe("planGlide", () => {
     expect(glide.restBearing).toBeCloseTo(90, 0);
   });
 
+  it("points the way the route runs while it hops onto it, not sideways", () => {
+    const glide = planGlide(shownAt(at(10, 100), 0), fix(at(0, 150)), [ROUTE], NOW, SPAN);
+    expect(glide.path.points[0]).toEqual(at(10, 100));
+    expect(sampleGlide(glide, NOW + SPAN / 20).heading).toBeCloseTo(0, 0);
+    expect(sampleGlide(glide, NOW + SPAN / 2).heading).toBeCloseTo(0, 0);
+  });
+
   it("standing still off any route keeps the way the van pointed", () => {
     const glide = planGlide(shownAt(at(0, 0), 123), fix(at(0, 1), 200), [null], NOW, SPAN);
     expect(glide.restBearing).toBe(123);
@@ -188,18 +195,26 @@ describe("overviewStop", () => {
   const SIZE = { width: 320, height: 320 };
 
   it("centers between the pro and the address and fits both in the room left", () => {
-    const stop = overviewStop([at(0, 0), DOOR], SIZE, 100, 0);
+    const stop = overviewStop([at(0, 0), DOOR], SIZE, 80, 0);
     const center = stop.centerCoordinate as unknown as LngLat;
     expect(distanceM(center, at(200, 200))).toBeLessThan(2);
-    // 400 m by 400 m into 240 x 112 dp: the height decides, 3.6 m per dp (zoom 14.2) less the
+    // 400 m by 400 m into 240 x 132 dp: the height decides, 3 m per dp (zoom 14.45) less the
     // tilt's margin.
-    expect(stop.zoomLevel).toBeCloseTo(13.95, 1);
+    expect(stop.zoomLevel).toBeCloseTo(14.2, 1);
     expect(stop.padding).toEqual({
       paddingTop: 64,
-      paddingBottom: 144,
+      paddingBottom: 124,
       paddingLeft: 40,
       paddingRight: 40,
     });
+  });
+
+  it("keeps 40% of a short map to fit into when large text makes the cards tall", () => {
+    const stop = overviewStop([at(0, 0), DOOR], SIZE, 200, 0);
+    const padding = stop.padding!;
+    expect(padding.paddingTop! + padding.paddingBottom!).toBeCloseTo(SIZE.height * 0.6, 5);
+    expect(padding.paddingBottom).toBeGreaterThan(padding.paddingTop!);
+    expect(stop.zoomLevel).toBeGreaterThan(13);
   });
 
   it("zooms out further for a pro farther away, and never in past street level", () => {

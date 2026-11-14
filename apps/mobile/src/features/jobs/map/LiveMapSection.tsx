@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Text, useWindowDimensions, View } from "react-native";
 import Animated, {
@@ -10,6 +10,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
+import { useRefetchOnReturn } from "@/features/quotes/useRequestQuotes";
 import { bubbleShadow, continuousCorners, tokens } from "@/theme";
 
 import { jobsConfig } from "../config";
@@ -97,6 +98,9 @@ function LiveMapSection({ jobId, etaAt, height, name, now, refetch }: LiveMapSec
   const { t } = useTranslation();
   const [failed, setFailed] = useState(false);
   const usable = liveMapConfig.accessToken !== null && !failed;
+  // A map that could not load is tried again when the screen or the app comes back.
+  const retry = useCallback(async () => setFailed(false), []);
+  useRefetchOnReturn(retry, failed);
   const { position, route } = useLiveTracking(jobId, usable);
   const latest = position.data ?? null;
 
@@ -140,16 +144,19 @@ function LiveMapSection({ jobId, etaAt, height, name, now, refetch }: LiveMapSec
   );
 }
 
-/** True from `staleMs` after `at` (the device's clock against the server's time of the fix). */
+/**
+ * True once the same fix (`at`) has been on the map for `staleMs`, timed on the phone from its
+ * arrival: a phone clock set wrong never makes every fix look old. A fix older than the API's own
+ * limit is never sent.
+ */
 function useIsOld(at: string | null, staleMs: number): boolean {
-  const due = at === null ? NaN : Date.parse(at) + staleMs;
-  const [now, setNow] = useState(() => Date.now());
+  const [oldAt, setOldAt] = useState<string | null>(null);
   useEffect(() => {
-    if (!Number.isFinite(due)) return;
-    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, due - Date.now()));
+    if (at === null) return;
+    const timer = setTimeout(() => setOldAt(at), staleMs);
     return () => clearTimeout(timer);
-  }, [due]);
-  return Number.isFinite(due) && now >= due;
+  }, [at, staleMs]);
+  return at !== null && oldAt === at;
 }
 
 /** The time left, the distance and the street, one sentence for screen readers. */

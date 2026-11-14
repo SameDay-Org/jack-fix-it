@@ -43,6 +43,7 @@ import {
   followPadding,
   followStop,
   OVERVIEW_HOLD_MS,
+  OVERVIEW_WINDOW_MS,
   overviewStop,
   REDUCED_MOTION_MS,
 } from "./camera";
@@ -153,7 +154,9 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
   const pose = useRef<VanPose | null>(null);
   // The camera's heading, from the map's own reports and what was last asked of it.
   const heading = useRef<number | null>(null);
-  // The glide the camera follows and when its next step is due: a new glide re-aims at once.
+  // The glide the van is on, the one the camera follows, and when the camera's next step is due:
+  // a new glide re-aims at once.
+  const gliding = useRef<Glide | null>(null);
   const followed = useRef<Glide | null>(null);
   const nextStep = useRef(0);
   const [overlay, setOverlay] = useState(0);
@@ -162,11 +165,17 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
 
   const path = useMemo(() => (route ? measurePath(route.geometry) : null), [route]);
   const trail = useTrail(fix, path);
-  const far = route !== null && route.distance_m > FAR_M;
   const [loaded, setLoaded] = useState(false);
-  const [holding, setHolding] = useState(trail.destination !== null);
+  // The first overview: on once the address is known (at mount or soon after the map loads).
+  const [hold, setHold] = useState<"waiting" | "on" | "done">(
+    trail.destination !== null ? "on" : "waiting",
+  );
+  if (hold === "waiting" && trail.destination !== null) setHold("on");
+  // Far as the last route said: a route briefly unavailable (503, being computed) changes nothing.
+  const [far, setFar] = useState(route !== null && route.distance_m > FAR_M);
+  if (route !== null && route.distance_m > FAR_M !== far) setFar(!far);
   const [free, setFree] = useState(false);
-  const mode: CameraMode = free ? "free" : holding || far ? "overview" : "follow";
+  const mode: CameraMode = free ? "free" : hold === "on" || far ? "overview" : "follow";
 
   // The camera turns from where it points now to the van's heading the short way round.
   const moveTo = (
@@ -190,6 +199,7 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
   // Each frame draws the van; while following, the camera moves on to where the van will be.
   const onFrame = ({ pose: next, glide, now }: VanFrame) => {
     pose.current = next;
+    gliding.current = glide;
     van.current?.setNativeProps({ id: VAN_SOURCE, shape: vanShape(next, stale) });
     if (mode !== "follow" || (glide === followed.current && now < nextStep.current)) return;
     followed.current = glide;
@@ -215,6 +225,8 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
     const duration = first ? 0 : reduceMotion ? REDUCED_MOTION_MS : CAMERA_TRANSITION_MS;
     if (next === "follow") {
       moveTo(at.point, at.bearing, duration, first ? "none" : "easeTo");
+      // The frames take over once this move is done, even in the middle of a glide.
+      followed.current = gliding.current;
       nextStep.current = Date.now() + duration;
     } else if (next === "overview") {
       showOverview(at.point, duration);
@@ -234,12 +246,17 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
   });
   useEffect(() => refitOverview(), [fix.at]);
 
-  // The first overview is brief: it gives way to the follow camera once the map has loaded.
+  // The first overview is brief: it gives way to the follow camera after OVERVIEW_HOLD_MS. It is
+  // only for the first load: an address first known later than OVERVIEW_WINDOW_MS after it
+  // leaves the camera as it is.
   useEffect(() => {
-    if (!loaded || !holding) return;
-    const timer = setTimeout(() => setHolding(false), OVERVIEW_HOLD_MS);
+    if (!loaded || hold === "done") return;
+    const timer = setTimeout(
+      () => setHold("done"),
+      hold === "on" ? OVERVIEW_HOLD_MS : OVERVIEW_WINDOW_MS,
+    );
     return () => clearTimeout(timer);
-  }, [holding, loaded]);
+  }, [hold, loaded]);
 
   const restyle = useEffectEvent(() => {
     if (pose.current === null) return;
@@ -267,7 +284,8 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
         attributionPosition={{ bottom: covered + ORNAMENT_GAP, right: ORNAMENT_SIDE }}
         onDidFinishLoadingMap={() => setLoaded(true)}
         onMapLoadingError={(error) => {
-          if (error?.type === "style") onUnavailable();
+          // Once loaded the map keeps its style: a later report (offline tiles) changes nothing.
+          if (error?.type === "style" && !loaded) onUnavailable();
         }}
         testID="live-map-view"
       >

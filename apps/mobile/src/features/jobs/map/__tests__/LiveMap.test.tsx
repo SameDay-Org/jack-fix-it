@@ -10,6 +10,7 @@ import {
   FOLLOW_ZOOM,
   OVERVIEW_HOLD_MS,
   OVERVIEW_PITCH,
+  OVERVIEW_WINDOW_MS,
   REDUCED_MOTION_MS,
 } from "../camera";
 import { distanceM, type LngLat } from "../geo";
@@ -245,6 +246,51 @@ describe("LiveMap's follow camera", () => {
     expect(lastCamera()).toMatchObject({ pitch: FOLLOW_PITCH, animationMode: "easeTo" });
   });
 
+  it("gives the first overview to a route that lands just after the map loaded", async () => {
+    await render(<LiveMap {...props()} />);
+    await loadMap();
+    await screen.rerender(<LiveMap {...props({ route: route(1200) })} />);
+    expect(lastCamera()?.pitch).toBe(OVERVIEW_PITCH);
+    await advance(OVERVIEW_HOLD_MS);
+    expect(lastCamera()).toMatchObject({ pitch: FOLLOW_PITCH, animationMode: "easeTo" });
+  });
+
+  it("leaves the camera following when the route lands long after the map loaded", async () => {
+    await render(<LiveMap {...props()} />);
+    await loadMap();
+    await advance(OVERVIEW_WINDOW_MS);
+    mapbox.mockCamera.setCamera.mockClear();
+    await screen.rerender(<LiveMap {...props({ route: route(1200) })} />);
+    await advance(OVERVIEW_HOLD_MS);
+    expect(cameraCalls().some((stop) => stop?.pitch === OVERVIEW_PITCH)).toBe(false);
+  });
+
+  it("keeps the overview while the route of a far pro is briefly unavailable", async () => {
+    const far = props({ route: route(5000) });
+    await render(<LiveMap {...far} />);
+    await loadMap();
+    await advance(OVERVIEW_HOLD_MS);
+    mapbox.mockCamera.setCamera.mockClear();
+    await screen.rerender(<LiveMap {...far} route={null} fix={fix(at(0, 150), POLL_MS, 0)} />);
+    await advance(POLL_MS);
+    expect(cameraCalls().length).toBeGreaterThan(0);
+    expect(cameraCalls().every((stop) => stop?.pitch === OVERVIEW_PITCH)).toBe(true);
+  });
+
+  it("lets Recenter's eased move finish in the middle of a glide, then steps on", async () => {
+    await render(<LiveMap {...props()} />);
+    await loadMap();
+    await gesture(0, true);
+    await screen.rerender(<LiveMap {...props({ fix: fix(at(0, 200), POLL_MS, 0) })} />);
+    await advance(2000);
+    await act(async () => fireEvent.press(screen.getByTestId("live-map-recenter")));
+    expect(lastCamera()?.animationMode).toBe("easeTo");
+    await advance(FRAME_MS * 4);
+    expect(lastCamera()?.animationMode).toBe("easeTo");
+    await advance(1500);
+    expect(lastCamera()?.animationMode).toBe("linearTo");
+  });
+
   it("keeps the overview while the pro is more than 3 km away, then follows", async () => {
     const far = props({ route: route(5000) });
     await render(<LiveMap {...far} />);
@@ -316,5 +362,14 @@ describe("LiveMap's pro", () => {
     expect(onUnavailable).not.toHaveBeenCalled();
     await act(async () => map.props.onMapLoadingError({ error: "offline", type: "style" }));
     expect(onUnavailable).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a loaded map whatever it reports later", async () => {
+    const onUnavailable = jest.fn();
+    await render(<LiveMap {...props({ onUnavailable })} />);
+    await loadMap();
+    const map = screen.getByTestId("live-map-view");
+    await act(async () => map.props.onMapLoadingError({ error: "offline", type: "style" }));
+    expect(onUnavailable).not.toHaveBeenCalled();
   });
 });

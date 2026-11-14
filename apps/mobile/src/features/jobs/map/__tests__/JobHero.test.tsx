@@ -181,13 +181,25 @@ describe("JobHero's live map", () => {
     expect(screen.getByTestId("live-map-eta").props.children).toBe("12 min");
   });
 
-  it("says it is waiting once the position is a minute old", async () => {
+  it("says it is waiting once the same position has been shown for a minute", async () => {
+    const same = position();
+    api.position = () => Promise.resolve({ position: same });
     await renderWithQuery(hero("onTheWay"));
     await screen.findByTestId("live-map");
-    api.position = () => Promise.resolve({ position: position(POLL_MS / 1000) });
-    await advance(liveMapConfig.staleMs);
+    await advance(liveMapConfig.staleMs - POLL_MS);
+    expect(screen.queryByTestId("live-map-waiting")).toBeNull();
+    await advance(POLL_MS);
     expect(screen.getByTestId("live-map-waiting")).toBeTruthy();
     expect(screen.getByText("Waiting for location")).toBeTruthy();
+  });
+
+  it("never calls new positions old because of the phone's clock", async () => {
+    // The phone runs five minutes fast: every position looks five minutes old to its clock.
+    api.position = () => Promise.resolve({ position: position(300) });
+    await renderWithQuery(hero("onTheWay"));
+    await screen.findByTestId("live-map");
+    await advance(liveMapConfig.staleMs * 2);
+    expect(screen.queryByTestId("live-map-waiting")).toBeNull();
   });
 
   it("keeps the last position, dimmed, once the API stops sending one, and asks for the job again", async () => {
@@ -239,11 +251,16 @@ describe("JobHero's placeholders", () => {
     expect(screen.getByTestId("live-map")).toBeTruthy();
   });
 
-  it("when the map's style cannot load", async () => {
+  it("when the map's style cannot load, and the map is tried again on return", async () => {
     await renderWithQuery(hero("onTheWay"));
     const map = await screen.findByTestId("live-map-view");
     await act(async () => map.props.onMapLoadingError({ error: "offline", type: "style" }));
     expect(screen.getByTestId("live-map-placeholder-unavailable")).toBeTruthy();
     expect(screen.queryByTestId("live-map-view")).toBeNull();
+
+    await act(async () => navigation.setFocused(false));
+    await act(async () => navigation.setFocused(true));
+    await advance(0);
+    expect(await screen.findByTestId("live-map-view")).toBeTruthy();
   });
 });

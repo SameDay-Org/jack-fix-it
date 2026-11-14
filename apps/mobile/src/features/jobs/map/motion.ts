@@ -25,9 +25,16 @@ export type Fix = { point: LngLat; heading: number | null; at: string };
 /** Where the van is drawn and the way it points, in degrees clockwise from north. */
 export type VanPose = { point: LngLat; bearing: number };
 
+/**
+ * The first meters of a glide that hop from where the van is drawn onto the route: the van
+ * points the way the route runs there, not sideways along the hop.
+ */
+type LeadIn = { length: number; bearing: number };
+
 /** The van's drive from where it is drawn to the newest fix, at a constant speed. */
 export type Glide = {
   path: MeasuredPath;
+  leadIn: LeadIn | null;
   startedAt: number;
   durationMs: number;
   /** The way the van points once it is there. */
@@ -51,12 +58,17 @@ function alongARoute(
   from: LngLat,
   to: LngLat,
   routes: readonly (MeasuredPath | null)[],
-): LngLat[] | null {
+): { points: LngLat[]; leadIn: LeadIn | null } | null {
   for (const route of routes) {
     const start = onRoute(from, route);
     const end = onRoute(to, route);
     if (route && start && end && end.alongM >= start.alongM) {
-      return withoutRepeats([from, ...slicePath(route, start.alongM, end.alongM)]);
+      const leadIn =
+        start.offM >= SAME_POINT_M
+          ? { length: start.offM, bearing: pointAlong(route, start.alongM).bearing }
+          : null;
+      const points = withoutRepeats([from, ...slicePath(route, start.alongM, end.alongM)]);
+      return { points, leadIn };
     }
   }
   return null;
@@ -84,19 +96,25 @@ export function planGlide(
   if (shown === null) {
     return {
       path: measurePath([target]),
+      leadIn: null,
       startedAt: now,
       durationMs: 0,
       restBearing: fix.heading ?? routeBearing ?? 0,
     };
   }
-  const path = measurePath(
-    alongARoute(shown.point, target, routes) ?? withoutRepeats([shown.point, target]),
-  );
+  const road = alongARoute(shown.point, target, routes);
+  const path = measurePath(road?.points ?? withoutRepeats([shown.point, target]));
   const moved = path.length >= MIN_MOVE_M;
   const restBearing = moved
     ? (fix.heading ?? pointAlong(path, path.length).bearing)
     : (routeBearing ?? shown.bearing);
-  return { path, startedAt: now, durationMs: moved ? durationMs : 0, restBearing };
+  return {
+    path,
+    leadIn: road?.leadIn ?? null,
+    startedAt: now,
+    durationMs: moved ? durationMs : 0,
+    restBearing,
+  };
 }
 
 /**
@@ -112,7 +130,7 @@ export function routeAhead(
   const on = onRoute(from, route);
   if (on) return slicePath(route, on.alongM, route.length);
   const start = route.points[0];
-  const bridge = alongARoute(from, start, [previous]) ?? [from, start];
+  const bridge = alongARoute(from, start, [previous])?.points ?? [from, start];
   return withoutRepeats([...bridge, ...route.points.slice(1)]);
 }
 
@@ -123,9 +141,11 @@ export function sampleGlide(
 ): { point: LngLat; heading: number; done: boolean } {
   const elapsed = glide.durationMs > 0 ? (now - glide.startedAt) / glide.durationMs : 1;
   const share = Math.min(1, Math.max(0, elapsed));
-  const { point, bearing } = pointAlong(glide.path, glide.path.length * share);
+  const along = glide.path.length * share;
+  const { point, bearing } = pointAlong(glide.path, along);
   const moving = share < 1 && glide.path.length >= MIN_MOVE_M;
-  return { point, heading: moving ? bearing : glide.restBearing, done: share >= 1 };
+  const way = glide.leadIn && along < glide.leadIn.length ? glide.leadIn.bearing : bearing;
+  return { point, heading: moving ? way : glide.restBearing, done: share >= 1 };
 }
 
 /** The heading `dtMs` later, eased toward `target` the short way round, in [0, 360). */

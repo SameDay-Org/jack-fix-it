@@ -11,6 +11,8 @@ export const OVERVIEW_PITCH = 40;
 export const FAR_M = 3000;
 /** The overview shown first, before the camera starts to follow the van. */
 export const OVERVIEW_HOLD_MS = 1800;
+/** An address first known this long after the map loaded (a route that came late) gets none. */
+export const OVERVIEW_WINDOW_MS = 12_000;
 /** While following, the camera moves on to where the van will be this much later. */
 export const CAMERA_STEP_MS = 1000;
 /** A change of camera mode (to follow, to the overview) eases over this long. */
@@ -65,6 +67,8 @@ const fromWorld = (x: number, y: number): LngLat => {
   const n = Math.PI - (2 * Math.PI * y) / WORLD;
   return [(x / WORLD) * 360 - 180, (Math.atan(Math.sinh(n)) * 180) / Math.PI];
 };
+/** The overview's paddings never leave less than this share of the map's height to fit into. */
+const OVERVIEW_MIN_ROOM = 0.4;
 /** The overview zooms out this much more than a flat fit: the tilt brings the near edge closer. */
 const TILT_MARGIN = 0.25;
 /** Two points close together never zoom the overview in past this. */
@@ -84,9 +88,12 @@ export function overviewStop(
   const world = points.map(toWorld);
   const xs = world.map(([x]) => x);
   const ys = world.map(([, y]) => y);
+  // Large text makes the cards tall: the paddings then shrink together, so the fit keeps room.
+  const vertical = OVERVIEW_TOP + covered + OVERVIEW_BOTTOM_GAP;
+  const shrink = Math.min(1, (size.height * (1 - OVERVIEW_MIN_ROOM)) / vertical);
   const padding = {
-    paddingTop: OVERVIEW_TOP,
-    paddingBottom: covered + OVERVIEW_BOTTOM_GAP,
+    paddingTop: OVERVIEW_TOP * shrink,
+    paddingBottom: (covered + OVERVIEW_BOTTOM_GAP) * shrink,
     paddingLeft: OVERVIEW_SIDE,
     paddingRight: OVERVIEW_SIDE,
   };
