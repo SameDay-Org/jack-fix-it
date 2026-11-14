@@ -13,6 +13,7 @@ import {
 } from "@/api";
 import { showToast } from "@/components/ui";
 import { invalidateMyRequests } from "@/features/history/useMyRequests";
+import { refreshCustomerJob } from "@/features/jobs/api";
 import { formatMoney } from "@/features/quotes/format";
 import { quotesQueryKey } from "@/features/quotes/useRequestQuotes";
 
@@ -54,6 +55,8 @@ let sheetInUse = false;
 function refreshQuotes(queryClient: QueryClient, requestId: string): void {
   void queryClient.invalidateQueries({ queryKey: quotesQueryKey(requestId) });
   void queryClient.invalidateQueries({ queryKey: jobQueryKey(requestId) });
+  // The quote may have been paid elsewhere: the request's notice (#64) looks for the job as well.
+  refreshCustomerJob(queryClient, requestId, sessionGeneration());
   void invalidateMyRequests(queryClient);
 }
 
