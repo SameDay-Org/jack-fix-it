@@ -18,7 +18,8 @@ point goes to `addresses.lat/lng`; the route reads it and asks for no geocoding.
   takes the address's claim (addresses/geocode_claim.py) before it asks, and looks at the row
   again once it holds it. A caller that finds the claim taken asks nothing (BUSY): the
   address is being handled. The holder's turn has one deadline, shorter than the claim, for
-  the look, Mapbox and the write; a turn that runs out keeps nothing.
+  the look, Mapbox and the write; a turn that runs out keeps nothing. The turn also reads
+  the clock itself before it asks and before it keeps the point (_in_time).
 - What is kept: the point, to POINT_PLACES decimals, and only when Mapbox places it in the
   address's own state and ZIP. Anything else (no such address, another state or ZIP, Mapbox
   failing or slow, no token) keeps nothing: the row stays without a point, and its route
@@ -72,7 +73,8 @@ class GeocodeOutcome(StrEnum):
     NO_RESULT = "no_result"  # it finds no such address
     MISMATCH = "mismatch"  # its answer is in another state or ZIP
     # It failed, was slow, or there is no token. Also a turn that ran out before the point
-    # was kept: counted as asked, whichever step was the slow one.
+    # was kept: counted as asked, whichever step was the slow one. (A turn cut while its
+    # COMMIT was being answered may have kept the point: the next run reads ALREADY.)
     UNAVAILABLE = "unavailable"
     CHANGED = "changed"  # the row got a point, or another text, while it answered
 
@@ -131,6 +133,20 @@ def same_area(asked: StreetAddress, found: KeptGeocode) -> bool:
     )
 
 
+class _TurnEndedError(Exception):
+    """The holder's turn is over by the clock, and its deadline's timer has not run."""
+
+
+def _in_time(turn_ends: float) -> None:
+    """Ends a turn whose time is over. asyncio's deadline cuts a turn at an await, and only
+    once the loop runs its timer: a loop that was held up (a step that blocked, a process
+    that was paused) hands the turn its answer first, late. So the turn reads the clock
+    before each thing that must not happen late: starting, asking Mapbox, keeping the
+    point."""
+    if asyncio.get_running_loop().time() >= turn_ends:
+        raise _TurnEndedError
+
+
 def rounded(degrees: float) -> Decimal:
     """A coordinate as it is stored: POINT_PLACES decimals, ties away from zero."""
     return Decimal(str(degrees)).quantize(_QUANTUM, rounding=ROUND_HALF_UP)
@@ -179,21 +195,31 @@ class AddressGeocodeService:
             return GeocodeOutcome.BUSY
         try:
             async with asyncio.timeout_at(turn_ends) as turn:
-                return await self._ask_and_keep(address_id)
+                return await self._ask_and_keep(address_id, turn_ends)
+        except _TurnEndedError:
+            return await self._turn_ended(address_id)
         except TimeoutError:
             if not turn.expired():
                 raise  # not the turn's deadline: a failure of its own, as before
-            logger.warning("address_geocode_turn_ended", extra={"address_id": str(address_id)})
-            return GeocodeOutcome.UNAVAILABLE
+            return await self._turn_ended(address_id)
         finally:
             await self._release(address_id, token)
 
-    async def _ask_and_keep(self, address_id: uuid.UUID) -> GeocodeOutcome:
+    async def _turn_ended(self, address_id: uuid.UUID) -> GeocodeOutcome:
+        """The turn ran out. A point it wrote and did not commit is undone here, past the
+        deadline's scope: nothing cuts the rollback short."""
+        await self._session.rollback()
+        logger.warning("address_geocode_turn_ended", extra={"address_id": str(address_id)})
+        return GeocodeOutcome.UNAVAILABLE
+
+    async def _ask_and_keep(self, address_id: uuid.UUID, turn_ends: float) -> GeocodeOutcome:
         """The holder's turn. The look before the claim is old by now: a caller that held the
         claim since may have kept the point, so the row is read again, and this look decides."""
+        _in_time(turn_ends)  # the claim can come with the turn's time spent
         asked = await self._place_without_point(address_id)
         if isinstance(asked, GeocodeOutcome):
             return asked
+        _in_time(turn_ends)
         try:
             found = await self._geocoder.geocode_to_keep(asked)
         except MapboxUnavailableError:
@@ -212,6 +238,7 @@ class AddressGeocodeService:
             lat=rounded(found.coordinate.lat),
             lng=rounded(found.coordinate.lng),
         )
+        _in_time(turn_ends)
         await self._session.commit()
         return GeocodeOutcome.STORED if kept else GeocodeOutcome.CHANGED
 

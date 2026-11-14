@@ -12,7 +12,12 @@ the step takes the address's claim before it asks, and only its holder asks.
 - It ends by itself after `claim_seconds`: a holder that died keeps nobody out for longer.
 - Its holder works for `work_seconds` at the most, counted from before it asked Redis for
   the claim: it is done, or has given up, EARLY_END_SECONDS before Redis lets the claim go.
-  A slow step never asks Mapbox, or writes a point, past its claim.
+  A slow step does not ask Mapbox, or send the point's COMMIT, past that time by the
+  holder's own clock.
+- What a clock cannot hold: a COMMIT sent in time lands when Postgres gets to it, and a
+  holder stopped for longer than the margin with its clock stopped too (a suspended host)
+  goes on believing its claim. Each is one more call at the most, never a wrong point: the
+  write is conditional (AddressRepository.set_point).
 - Released by its holder only: the key is deleted while it holds the releasing caller's
   token, the look and the delete in one script. A claim that ended by itself and is another
   caller's now is left alone.

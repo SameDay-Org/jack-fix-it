@@ -42,6 +42,7 @@ from app.modules.addresses.geocode import (
 )
 from app.modules.addresses.geocode_claim import GeocodeClaimUnavailableError
 from app.modules.addresses.models import Address
+from app.modules.addresses.repository import AddressRepository
 from app.modules.addresses.tasks import geocode_address
 from app.modules.requests.models import ServiceRequest
 from app.modules.users.models import User
@@ -511,40 +512,127 @@ async def test_without_the_claim_mapbox_is_not_asked(
     assert caplog.records == []  # no outcome: the caller reports the failure
 
 
+def hold_the_loop(seconds: float) -> None:
+    """Time goes by and the loop does not run: no timer fires and nothing is cancelled before
+    the caller's next await. What a step that blocks, or a paused process, does to a turn."""
+    loop = asyncio.get_running_loop()
+    until = loop.time() + seconds
+    while loop.time() < until:  # no await
+        pass
+
+
+# A holder's turn in the tests below: short, and long enough for its database steps, which
+# are real ones.
+SHORT_TURN = 0.2
+TURN_ENDED_LOGS = [
+    (logging.WARNING, "address_geocode_turn_ended"),
+    (logging.WARNING, "address_geocode_not_kept"),
+]
+
+
+@pytest.mark.parametrize("slow", ["look", "mapbox", "write"])
 async def test_a_turn_that_runs_out_keeps_nothing(
-    db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+    db_session: AsyncSession,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    slow: str,
 ) -> None:
-    """The holder's turn ends before its claim does: a step slower than that is given up, so
-    the next holder never asks while this one could still keep a point."""
-    address = await make_address(db_session)
+    """The holder's turn ends before its claim does, and its one deadline covers each step:
+    the look once the claim is held, Mapbox, the write. A step slower than that is given up,
+    so the next holder never asks while this one could still keep a point."""
+    address_id = (await make_address(db_session)).id  # read now: a rollback expires the row
     geocoder = FakeGeocoder()
-    claims = MemoryGeocodeClaims(work_seconds=0.05)
+    claims = MemoryGeocodeClaims(work_seconds=SHORT_TURN)
     gave_up: list[bool] = []
+    look, write = AddressRepository.place_to_geocode, AddressRepository.set_point
 
     async def slower_than_the_turn() -> None:
         try:
             await asyncio.sleep(5)
         except asyncio.CancelledError:
-            gave_up.append(address.id in claims.held)  # still the holder when it stops
+            gave_up.append(address_id in claims.held)  # still the holder when it stops
             raise
 
-    geocoder.meanwhile = slower_than_the_turn
+    async def look_slowly_once_claimed(
+        self: AddressRepository, address_id: uuid.UUID
+    ) -> tuple[str, str, str, str, bool] | None:
+        if address_id in claims.held:
+            await slower_than_the_turn()
+        return await look(self, address_id)
+
+    async def write_slowly(self: AddressRepository, address_id: uuid.UUID, **point: Any) -> bool:
+        await slower_than_the_turn()
+        return await write(self, address_id, **point)
+
+    if slow == "look":
+        monkeypatch.setattr(AddressRepository, "place_to_geocode", look_slowly_once_claimed)
+    elif slow == "mapbox":
+        geocoder.meanwhile = slower_than_the_turn
+    else:
+        monkeypatch.setattr(AddressRepository, "set_point", write_slowly)
 
     with caplog.at_level(logging.DEBUG, logger=GEOCODE_LOGGER):
-        outcome = await service(db_session, geocoder, claims).geocode(address.id)
+        outcome = await service(db_session, geocoder, claims).geocode(address_id)
 
     assert outcome is GeocodeOutcome.UNAVAILABLE
     assert outcome.asked  # Mapbox may have been asked: the backfill paces and counts it
     assert gave_up == [True]
-    assert await point_of(db_session, address.id) == (None, None)
+    assert geocoder.asked == ([] if slow == "look" else [ASKED])
+    assert await point_of(db_session, address_id) == (None, None)
     assert claims.held == {}
-    assert [(r.levelno, r.message) for r in caplog.records] == [
-        (logging.WARNING, "address_geocode_turn_ended"),
-        (logging.WARNING, "address_geocode_not_kept"),
-    ]
+    assert [(r.levelno, r.message) for r in caplog.records] == TURN_ENDED_LOGS
     for record in caplog.records:  # the id and the outcome, as every line of the step
         extras = set(vars(record)) - set(vars(logging.makeLogRecord({})))
         assert extras <= {"address_id", "outcome", "message", "asctime"}, extras
+
+
+@pytest.mark.parametrize("late", ["claim", "look", "write"])
+async def test_a_turn_whose_time_went_by_unseen_asks_and_keeps_nothing(
+    db_session: AsyncSession,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    late: str,
+) -> None:
+    """asyncio cuts a turn at an await, once the loop runs the deadline's timer. Here the
+    turn's time goes by with the loop held up, and the step in hand comes back late with the
+    timer not run: unchecked, the turn would go on past its time, and so past its claim, to
+    ask Mapbox ("claim", "look") or to keep its point ("write"). "claim" is also the turn
+    counted from before the claim is asked for: a claim that comes with that time spent
+    starts no turn."""
+    address_id = (await make_address(db_session)).id  # read now: a rollback expires the row
+    geocoder = FakeGeocoder()
+    claims = MemoryGeocodeClaims(work_seconds=SHORT_TURN)
+    commit, write = db_session.commit, AddressRepository.set_point
+
+    async def claim_late() -> None:
+        hold_the_loop(claims.work_seconds)
+
+    async def look_late() -> None:
+        await commit()  # the look's own: it ends the read
+        if address_id in claims.held:
+            hold_the_loop(claims.work_seconds)
+
+    async def write_late(self: AddressRepository, address_id: uuid.UUID, **point: Any) -> bool:
+        written = await write(self, address_id, **point)
+        hold_the_loop(claims.work_seconds)
+        return written
+
+    if late == "claim":
+        claims.on_claim = claim_late
+    elif late == "look":
+        monkeypatch.setattr(db_session, "commit", look_late)
+    else:
+        monkeypatch.setattr(AddressRepository, "set_point", write_late)
+
+    with caplog.at_level(logging.DEBUG, logger=GEOCODE_LOGGER):
+        outcome = await service(db_session, geocoder, claims).geocode(address_id)
+
+    assert outcome is GeocodeOutcome.UNAVAILABLE
+    assert geocoder.asked == ([ASKED] if late == "write" else [])
+    # Read in the turn's own session: a point written and not committed would show here.
+    assert await point_of(db_session, address_id) == (None, None)
+    assert claims.held == {}
+    assert [(r.levelno, r.message) for r in caplog.records] == TURN_ENDED_LOGS
 
 
 async def test_a_claim_that_cannot_be_given_back_does_not_undo_the_point(
