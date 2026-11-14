@@ -1240,9 +1240,6 @@
       "value": "Step {{current}} of {{total}}, {{step}}",
       "none": "Not started yet"
     },
-    "map": {
-      "estimate": "The map is an estimate from the arrival time, not a live location."
-    },
     "paid": {
       "title": "Paid",
       "tax": "Includes {{tax}} in tax",
@@ -1337,6 +1334,37 @@
       "pending_other": "{{count}} more photos are being prepared.",
       "pendingOnly_one": "{{count}} photo is being prepared.",
       "pendingOnly_other": "{{count}} photos are being prepared."
+    },
+    "liveMap": {
+      "recenter": "Recenter the map",
+      "miles": "{{miles}} mi",
+      "onStreet": "On {{street}}",
+      "waiting": "Waiting for location",
+      "summary": {
+        "etaStreet": "{{name}} is {{span}} away, on {{street}}",
+        "eta": "{{name}} is {{span}} away",
+        "street": "{{name}} is on {{street}}",
+        "moving": "{{name}} is on the way",
+        "waiting": "Waiting for {{name}}'s location"
+      },
+      "placeholder": {
+        "loading": {
+          "title": "Loading the live map",
+          "body": "{{name}}'s location shows here in a moment."
+        },
+        "waiting": {
+          "title": "Waiting for {{name}}'s location",
+          "body": "The map shows {{name}} as soon as their phone shares where they are."
+        },
+        "offline": {
+          "title": "Can't load the live map",
+          "body": "Check your connection. We keep trying, and the arrival time is below."
+        },
+        "unavailable": {
+          "title": "The live map isn't available",
+          "body": "The arrival time {{name}} gave is below."
+        }
+      }
     }
   },
   "chat": {
