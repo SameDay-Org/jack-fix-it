@@ -29,9 +29,11 @@ import {
 import { ID_CARD_SHARE_DIR } from "@/components/ui";
 import { moveAccessibilityFocus } from "@/components/ui/focus";
 import { toastStore } from "@/components/ui/toast";
+import { joinFacts } from "@/features/quotes/format";
+import { myRatingKey, type MyRating } from "@/features/reviews/api";
 import i18n from "@/i18n";
 
-import { deferred } from "../../../api/__tests__/helpers";
+import { deferred, settle } from "../../../api/__tests__/helpers";
 import { METRICS } from "../../auth/__tests__/helpers";
 import { newQueryClient, signedIn } from "../../home/__tests__/helpers";
 import { savedAddress } from "../../request/__tests__/helpers";
@@ -45,6 +47,7 @@ jest.mock("@/api", () => ({
   sessionGeneration: jest.fn(() => 1),
   setSessionUser: jest.fn(),
   useSession: jest.fn(),
+  useSessionGeneration: jest.fn(() => 1),
   logout: jest.fn(),
 }));
 jest.mock("@/components/ui/focus", () => ({ moveAccessibilityFocus: jest.fn() }));
@@ -124,6 +127,15 @@ const tree = () => (
 );
 const renderAccount = () => render(tree());
 
+/**
+ * The rating already read, and fresh for the whole test: every test but the rating's own counts
+ * only the requests it is about (the photo refresh, the address book).
+ */
+const ratingRead = (rating: MyRating) => {
+  queryClient.setQueryDefaults(["rating"], { staleTime: Infinity });
+  queryClient.setQueryData(myRatingKey(1), rating);
+};
+
 /** How far the card's stage is translated down, from Reanimated's Jest style. */
 const stageShift = () => {
   const style = screen.getByTestId("account-card-stage").props.jestAnimatedStyle as {
@@ -160,6 +172,7 @@ const busyOf = (name: string) =>
 
 beforeEach(() => {
   queryClient = newQueryClient();
+  ratingRead({ average: null, count: 0 });
   jest.mocked(useSession).mockReturnValue(signedIn(ALEX));
   jest.mocked(useIsFocused).mockReturnValue(true);
   jest.mocked(useReducedMotion).mockReturnValue(false);
@@ -403,6 +416,101 @@ describe("AccountScreen", () => {
     await fireEvent.press(screen.getByRole("button", { name }));
 
     expect(router.push).toHaveBeenCalledWith(href);
+  });
+
+  describe("the rating (#77)", () => {
+    const RATING_PATH = "/v1/users/me/rating";
+    // A cache with no rating yet.
+    beforeEach(() => {
+      queryClient = newQueryClient();
+    });
+    /** The rating endpoint answers `answer`; nothing else is asked. */
+    const ratingAnswers = (answer: Promise<MyRating>) => {
+      jest
+        .mocked(apiGet)
+        .mockImplementation((path) =>
+          path === RATING_PATH ? answer : Promise.reject(new Error(`unexpected ${path}`)),
+        );
+    };
+    const value = () => screen.getByTestId("account-rating-value");
+
+    it.each([
+      [{ average: 4.8, count: 23 }, "4.8", "23 ratings"],
+      [{ average: 5, count: 1 }, "5.0", "1 rating"],
+      [{ average: 4.25, count: 1204 }, "4.3", "1,204 ratings"],
+    ])("shows %j as the average with one star and how many", async (rating, average, count) => {
+      ratingAnswers(Promise.resolve(rating));
+      await renderAccount();
+
+      await screen.findByLabelText(`Rating, ${average} out of 5, ${count}`);
+      expect(value()).toHaveTextContent(joinFacts([average, count]));
+      expect(screen.getByTestId("account-rating-star", HIDDEN)).toBeOnTheScreen();
+      expect(apiGet).toHaveBeenCalledWith(RATING_PATH, expect.objectContaining({ auth: true }));
+    });
+
+    it("says No ratings yet with no star and no number when nobody rated the person", async () => {
+      ratingAnswers(Promise.resolve({ average: null, count: 0 }));
+      await renderAccount();
+
+      await screen.findByLabelText("Rating, No ratings yet");
+      expect(value()).toHaveTextContent("No ratings yet");
+      expect(screen.queryByTestId("account-rating-star", HIDDEN)).toBeNull();
+    });
+
+    it("holds the row with a skeleton while the rating loads", async () => {
+      const answer = deferred<MyRating>();
+      ratingAnswers(answer.promise);
+      await renderAccount();
+
+      expect(screen.getByLabelText("Rating, Loading")).toBeOnTheScreen();
+      expect(screen.getByTestId("account-rating-loading")).toBeOnTheScreen();
+      expect(screen.queryByTestId("account-rating-value")).toBeNull();
+
+      await act(async () => answer.resolve({ average: 4.8, count: 23 }));
+      expect(await screen.findByTestId("account-rating-value")).toHaveTextContent(
+        joinFacts(["4.8", "23 ratings"]),
+      );
+      expect(screen.queryByTestId("account-rating-loading")).toBeNull();
+    });
+
+    it("says Unavailable quietly when the rating cannot be read: no number, no star", async () => {
+      ratingAnswers(Promise.reject(new Error("offline")));
+      await renderAccount();
+
+      await screen.findByLabelText("Rating, Unavailable");
+      expect(value()).toHaveTextContent("Unavailable");
+      expect(screen.queryByTestId("account-rating-star", HIDDEN)).toBeNull();
+      expect(within(screen.getByTestId("account-rating")).queryByText(/[0-9]/)).toBeNull();
+      // The rest of the screen is untouched: no alert, no error notice.
+      expect(screen.getByLabelText("Member since, March 2026")).toBeOnTheScreen();
+    });
+
+    it("reads the rating again each time the tab shows: a review can publish meanwhile", async () => {
+      ratingAnswers(Promise.resolve({ average: null, count: 0 }));
+      const view = await renderAccount();
+      await screen.findByLabelText("Rating, No ratings yet");
+
+      jest.mocked(useIsFocused).mockReturnValue(false);
+      jest.mocked(apiGet).mockClear();
+      ratingAnswers(Promise.resolve({ average: 5, count: 1 }));
+      await view.rerender(tree());
+      await act(settle);
+      expect(apiGet).not.toHaveBeenCalled(); // hidden: nothing asked
+
+      jest.mocked(useIsFocused).mockReturnValue(true);
+      await view.rerender(tree());
+      expect(await screen.findByLabelText("Rating, 5.0 out of 5, 1 rating")).toBeOnTheScreen();
+      expect(apiGet).toHaveBeenCalledTimes(1);
+    });
+
+    it("reads in Spanish", async () => {
+      await i18n.changeLanguage("es");
+      ratingAnswers(Promise.resolve({ average: 4.8, count: 23 }));
+      await renderAccount();
+
+      await screen.findByLabelText("Calificación, 4,8 de 5, 23 calificaciones");
+      expect(value()).toHaveTextContent(joinFacts(["4,8", "23 calificaciones"]));
+    });
   });
 
   describe("the Addresses row", () => {
