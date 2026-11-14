@@ -14,7 +14,7 @@ import { useRequestJob, type CustomerJob } from "./useRequestJob";
  * Where the accepted quote's payment stands: `loading` (first look at the job), `unpaid` (no job:
  * Pay; also when the look failed, since paying again is safe), `confirming` (the sheet reported a
  * payment and the job is not there yet), `delayed` (still no job when the wait ran out), `booked`
- * (the job exists: the webhook confirmed the payment).
+ * (the job exists: the webhook confirmed the payment; the card says "Paid").
  */
 export type PaymentPhase = "loading" | "unpaid" | "confirming" | "delayed" | "booked";
 
@@ -38,9 +38,11 @@ function useDeadlinePassed(deadline: number | null): boolean {
  * Follows the request's job for the accepted quote's card. After the sheet reports a payment it
  * asks for the job every `pollIntervalMs`, only while the screen is in front and for at most
  * `pollTimeoutMs`, with every call pinned to the payment's session; a sign-out forgets the wait
- * and the cache, which ends it. The job showing up ends the wait, is announced and felt (a
- * success haptic). The job is also asked for again whenever the screen comes back into focus or
- * the app returns to the foreground, so a delayed confirmation still lands.
+ * and the cache, which ends it. The job showing up ends the wait and is announced and felt (a
+ * success haptic): only for a payment confirmed in this session. Every job the card finds, this
+ * one or one found on opening the request, fills the request's own notice above the quotes (#64)
+ * when it has none (`jobQueryOptions`). The job is also asked for again whenever the screen comes
+ * back into focus or the app returns to the foreground, so a delayed confirmation still lands.
  */
 export function useJobConfirmation(
   requestId: string,

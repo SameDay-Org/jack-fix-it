@@ -3,9 +3,9 @@ import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { ActivityIndicator, Text, View } from "react-native";
 
-import { Button, Notice, Skeleton } from "@/components/ui";
+import { Button, Notice, Skeleton, StatusBadge } from "@/components/ui";
 import { NotificationsPrompt } from "@/features/notifications/NotificationsPrompt";
-import { formatDateTime, formatMoney } from "@/features/quotes/format";
+import { formatMoney } from "@/features/quotes/format";
 import { continuousCorners, tokens } from "@/theme";
 
 import {
@@ -23,7 +23,7 @@ export type PaymentPanelProps = {
   quoteId: string;
   /** The quote's price, shown on Pay until the API sends the total for the sheet. */
   amountCents: number;
-  /** The pro's name as the card shows it: Pay's spoken label and the booked line. */
+  /** The pro's name as the card shows it, for Pay's spoken label. */
   pro: string;
   testID: string;
 };
@@ -39,18 +39,22 @@ const PAY_PLACEHOLDER_HEIGHT = 56;
 /** About the note bubble's height (one callout line and its padding) while the job is looked up. */
 const NOTE_PLACEHOLDER_HEIGHT = 48;
 
-/** What the customer sees for a job past Scheduled (docs/glossary.md, the job mapping). */
-const JOB_STATUS_KEYS = {
-  scheduled: "customerStatus.scheduled",
-  on_the_way: "customerStatus.professionalOnTheWay",
-  in_progress: "customerStatus.inProgress",
-  completed: "customerStatus.waitingForConfirmation",
-  confirmed: "customerStatus.completed",
-  paid_out: "customerStatus.completed",
-  disputed: "customerStatus.needsAttention",
-  refunded: "customerStatus.cancelled",
-  cancelled: "customerStatus.cancelled",
-} as const satisfies Record<CustomerJob["status"], string>;
+/**
+ * Whether the card says "Paid" for a job in each status; a new status has to choose. A cancelled
+ * or refunded job gets no payment word here: the notice says the job was cancelled, and what
+ * became of the money is not the card's to claim (the refund rule is still open, #3).
+ */
+const SHOWS_PAID = {
+  scheduled: true,
+  on_the_way: true,
+  in_progress: true,
+  completed: true,
+  confirmed: true,
+  paid_out: true,
+  disputed: true,
+  refunded: false,
+  cancelled: false,
+} as const satisfies Record<CustomerJob["status"], boolean>;
 
 // Nothing for the customer to fix, so no alarm: the info tint. A failed payment is the danger one.
 const CALM_FAILURES: ReadonlySet<PayFailure> = new Set([
@@ -62,9 +66,10 @@ const CALM_FAILURES: ReadonlySet<PayFailure> = new Set([
 /**
  * The accepted quote's payment, at the foot of its card: Pay while there is no job (a customer
  * who closed the sheet pays later from here), then "Confirming your payment…" while the job is
- * on its way, then "You're booked". A quote accepted a moment ago opens the sheet as soon as the
- * request screen is back in front (`requestAutoPay`). The total shows above Pay once the API has
- * priced the sheet; a failure says what happened in a notice, and Pay stays.
+ * on its way, then a short "Paid": that the job is booked, where it stands and the way to it are
+ * the request's notice above the quotes (#64), said once. A quote accepted a moment ago opens the
+ * sheet as soon as the request screen is back in front (`requestAutoPay`). The total shows above
+ * Pay once the API has priced the sheet; a failure says what happened in a notice, and Pay stays.
  */
 export function PaymentPanel({ requestId, quoteId, amountCents, pro, testID }: PaymentPanelProps) {
   const { t } = useTranslation();
@@ -84,25 +89,21 @@ export function PaymentPanel({ requestId, quoteId, amountCents, pro, testID }: P
   );
 
   if (phase === "booked" && job) {
-    // Once booked, the job's updates are what notifications bring: the pre-prompt asks here (#334).
+    // No updates to promise on a cancelled or refunded job: no badge, and no pre-prompt either.
+    if (!SHOWS_PAID[job.status]) return null;
+    // Once booked, the job's updates are what notifications bring: the pre-prompt asks here, under
+    // the badge (#334), on its own terms (the system can still ask, the card was not closed).
     return (
       <View className="gap-3">
         <View
-          style={continuousCorners}
-          className="gap-1 rounded-md bg-green-500/10 p-3"
-          testID={`${testID}-booked`}
+          accessible
+          accessibilityRole="text"
+          accessibilityLabel={t("payment.paid")}
+          // Around the pill only, so the reader's focus box is the badge and not the card's width.
+          className="self-start"
+          testID={`${testID}-paid`}
         >
-          <Text accessibilityRole="header" className="text-headline text-navy-900">
-            {job.status === "scheduled"
-              ? t("payment.booked.title")
-              : t(JOB_STATUS_KEYS[job.status])}
-          </Text>
-          {/* The date is the plan only while the job is Scheduled; its own screens come with #64. */}
-          {job.status === "scheduled" ? (
-            <Text className="text-callout text-navy-900">
-              {t("payment.booked.body", { pro, date: formatDateTime(job.scheduled_start_at) })}
-            </Text>
-          ) : null}
+          <StatusBadge label={t("payment.paid")} tone="success" />
         </View>
         <NotificationsPrompt audience="customer" testID={`${testID}-notifications`} />
       </View>

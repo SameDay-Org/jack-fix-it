@@ -589,9 +589,8 @@
       "title": "We're confirming your payment",
       "body": "This can take a little longer. Check back here soon."
     },
+    "paid": "Paid",
     "booked": {
-      "title": "You're booked",
-      "body": "Your service with {{pro}} is set for {{date}}.",
       "announcement": "You're booked. Your payment is confirmed."
     },
     "failure": {

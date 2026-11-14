@@ -25,6 +25,8 @@ import { isActive, isMoving, pickActive, type ActiveJob, type CustomerJob } from
 
 type Href = { pathname: "/requests/[id]/job"; params: { id: string } };
 
+const JOB_KEY = "job";
+
 /** The ongoing job screen of one request. */
 export const jobHref = (requestId: string): Href => ({
   pathname: "/requests/[id]/job",
@@ -45,7 +47,7 @@ export const jobPhotosHref = (requestId: string, index: number) =>
  * never land where the next one reads.
  */
 export const customerJobQueryKey = (requestId: string, generation: number) =>
-  ["job", requestId, generation] as const;
+  [JOB_KEY, requestId, generation] as const;
 
 /** No job on the request yet: the payment has not created it (404, as for anyone else's request). */
 export const isNoJobYet = (error: unknown): boolean =>
@@ -303,7 +305,11 @@ export async function confirmJob(
   return job;
 }
 
-/** The job and the banner's list asked again: a confirmation found the job moved on or gone. */
+/**
+ * The job and the banner's list asked again, for a caller that learned the job moved on or may
+ * exist now: a confirmation found it moved on or gone (#66), or a payment was refused because the
+ * quote was paid elsewhere (`features/payments`). The request's notice is never polled.
+ */
 export function refreshCustomerJob(client: QueryClient, requestId: string, generation: number) {
   if (!isCurrentGeneration(generation)) return;
   void client.invalidateQueries({ queryKey: customerJobQueryKey(requestId, generation) });
