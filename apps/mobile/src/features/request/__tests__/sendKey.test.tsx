@@ -12,6 +12,7 @@ import {
   errorResponse,
   installFetchMock,
   jsonResponse,
+  deferred,
   neverAnswers,
   resetSecureStore,
   user,
@@ -74,7 +75,8 @@ const keyOf = (index: number) => {
   const call = posts()[index];
   return call ? callHeader(call, "Idempotency-Key") : undefined;
 };
-const heldKey = () => requestDraftStore.getState().sendKey?.key ?? null;
+/** The keys the draft holds, by no particular body. */
+const heldKeys = () => Object.values(requestDraftStore.getState().sendKeys);
 
 const wrapper = ({ children }: { children: ReactNode }) => (
   <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -141,14 +143,14 @@ describe("the request's Idempotency-Key (#388)", () => {
     answers = [ok(201)];
     const hook = await renderSend();
 
-    expect(heldKey()).toBeNull();
+    expect(heldKeys()).toEqual([]);
     const outcome = await send(hook);
 
     expect(outcome).toStrictEqual({ sent: created() });
     expect(posts()).toHaveLength(1);
     expect(keyOf(0)).toMatch(UUID_V4);
     expect(callBody(posts()[0]!)).toStrictEqual(BODY);
-    expect(heldKey()).toBeNull();
+    expect(heldKeys()).toEqual([]);
   });
 
   it("a retry after a timeout carries the same key, and the replay's 200 ends like a 201", async () => {
@@ -166,7 +168,7 @@ describe("the request's Idempotency-Key (#388)", () => {
     });
     expect(outcome).toStrictEqual({ failed: { kind: "retry", reason: "failed" } });
     // No answer: the request may exist, so the draft keeps its key.
-    expect(heldKey()).toBe(keyOf(0));
+    expect(heldKeys()).toEqual([keyOf(0)]);
     jest.useRealTimers();
 
     const onSent = jest.fn();
@@ -176,7 +178,7 @@ describe("the request's Idempotency-Key (#388)", () => {
     expect(keyOf(1)).toBe(keyOf(0));
     expect(onSent).toHaveBeenCalledTimes(1);
     expect(onSent).toHaveBeenCalledWith(created());
-    expect(heldKey()).toBeNull();
+    expect(heldKeys()).toEqual([]);
   });
 
   it("retries after a network error, a 5xx and quick Try again taps all carry the same key", async () => {
@@ -210,15 +212,50 @@ describe("the request's Idempotency-Key (#388)", () => {
     expect(callBody(posts()[1]!)).toStrictEqual(EDITED);
   });
 
+  it("an edit undone sends the first body with its first key again", async () => {
+    answers = [offline, refused(503), ok(200)];
+    const hook = await renderSend();
+
+    await send(hook);
+    await send(hook, EDITED);
+    // The customer puts the description back: that request may exist already.
+    expect(await send(hook)).toStrictEqual({ sent: created() });
+
+    expect(keyOf(1)).not.toBe(keyOf(0));
+    expect(keyOf(2)).toBe(keyOf(0));
+    expect(heldKeys()).toEqual([keyOf(1)]);
+  });
+
+  it("an answer for another draft's key leaves this draft's keys alone", async () => {
+    const late = deferred<Response>();
+    answers = [() => late.promise, refused(503)];
+    const before = await renderSend();
+    let first: Promise<void> = Promise.resolve();
+    await act(async () => {
+      first = before.current.send(BODY, { onSent: jest.fn(), onFailed: jest.fn() });
+    });
+
+    // That draft went (left mid-send); a new one is sent and gets no answer it can use.
+    resetDraft();
+    await send(await renderSend(), EDITED);
+    expect(heldKeys()).toEqual([keyOf(1)]);
+
+    await act(async () => {
+      late.resolve(jsonResponse(201, created()));
+      await first;
+    });
+    expect(heldKeys()).toEqual([keyOf(1)]);
+  });
+
   it("a new draft takes a new key, even for the same request", async () => {
     answers = [refused(503), refused(503)];
     const hook = await renderSend();
     await send(hook);
-    expect(heldKey()).toBe(keyOf(0));
+    expect(heldKeys()).toEqual([keyOf(0)]);
 
     // The flow was discarded (its layout forgets the draft) and the customer starts again.
     resetDraft();
-    expect(heldKey()).toBeNull();
+    expect(heldKeys()).toEqual([]);
     await send(hook);
 
     expect(keyOf(1)).toMatch(UUID_V4);
@@ -232,7 +269,7 @@ describe("the request's Idempotency-Key (#388)", () => {
     expect(await send(hook)).toStrictEqual({ failed: { kind: "retry", reason: "failed" } });
     await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
     expect(posts()).toHaveLength(1);
-    expect(heldKey()).toBeNull();
+    expect(heldKeys()).toEqual([]);
 
     // Try again: a fresh key (this call created nothing; see sendKey.ts).
     expect(await send(hook)).toStrictEqual({ sent: created() });
@@ -244,11 +281,11 @@ describe("the request's Idempotency-Key (#388)", () => {
     answers = [refused(503)];
     const hook = await renderSend();
     await send(hook);
-    expect(heldKey()).not.toBeNull();
+    expect(heldKeys()).toHaveLength(1);
 
     await act(() => logout());
 
-    expect(heldKey()).toBeNull();
+    expect(heldKeys()).toEqual([]);
   });
 
   it("a key that is not a UUID never goes out: one more is made, then the plain try-again", async () => {
@@ -271,7 +308,7 @@ describe("the request's Idempotency-Key (#388)", () => {
     });
     expect(v4).toHaveBeenCalledTimes(2);
     expect(posts()).toHaveLength(1);
-    expect(heldKey()).toBeNull();
+    expect(heldKeys()).toEqual([]);
   });
 
   it("keeps the key out of every log, every query key and the body", async () => {

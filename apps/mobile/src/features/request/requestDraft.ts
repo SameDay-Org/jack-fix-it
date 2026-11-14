@@ -30,10 +30,11 @@ export type RefusalReason =
 export type StepRefusal = { step: StepId; reason: RefusalReason };
 
 /**
- * The Idempotency-Key the draft is sent with (#388), and the exact body it was taken for (its
- * canonical JSON, see `sendKey.ts`). Memory only, like the draft.
+ * The Idempotency-Keys the draft was sent with (#388), by the exact body each was taken for (its
+ * canonical JSON, see `sendKey.ts`): a body sent again, an edit undone included, goes with its own
+ * key. Memory only, like the draft.
  */
-export type SendKey = { key: string; fingerprint: string };
+export type SendKeys = Readonly<Record<string, string>>;
 
 export type RequestDraft = {
   /** The category picked on home; every request starts from one (#232). */
@@ -49,8 +50,8 @@ export type RequestDraft = {
    * follows them from day to day, and "I'm flexible" sets it back. */
   preferredPeriod: PreferredPeriod;
   refusal: StepRefusal | null;
-  /** Null until the first send, and again once the request exists or the server refused the key. */
-  sendKey: SendKey | null;
+  /** Empty until the first send; a key leaves once its request exists or the server refused it. */
+  sendKeys: SendKeys;
 };
 
 export const EMPTY_ADDRESS: AddressFields = EMPTY_ADDRESS_FIELDS;
@@ -64,14 +65,14 @@ const EMPTY_DRAFT: RequestDraft = {
   preferredDate: null,
   preferredPeriod: FLEXIBLE_PERIOD,
   refusal: null,
-  sendKey: null,
+  sendKeys: {},
 };
 
 /**
  * The request being written, kept in memory for the flow's life: it survives Back between the
  * steps and the app going to the background, and goes when the flow does (sent, discarded, or a
  * sign-out). Media is not here: the flow's upload list holds it (see `RequestFlowLayout`). Nothing
- * of it is written to disk, so a restart starts a new draft, and its send key goes with it.
+ * of it is written to disk, so a restart starts a new draft, and its send keys go with it.
  */
 export const requestDraftStore = createStore<RequestDraft>()(() => EMPTY_DRAFT);
 

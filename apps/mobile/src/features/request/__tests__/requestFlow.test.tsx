@@ -601,6 +601,28 @@ describe("the request flow", () => {
     expect(sentKeys()[1]).toBe(sentKeys()[0]);
   });
 
+  it("retries a timed-out send after midnight with its key, though its day has passed", async () => {
+    const now = Date.now();
+    const result = await toReview();
+    const today = offeredDays(1)[0];
+    await act(async () => requestDraftStore.setState({ preferredDate: today }));
+    jest.mocked(apiPost).mockRejectedValueOnce(new NetworkError(true));
+    await press("Send request");
+    await waitFor(() => expect(screen.getByText("Your request didn't go through")).toBeTruthy());
+
+    // Midnight passes before Try again. The request may exist: its retry goes, with its key, and
+    // the server answers the request that key made.
+    jest.setSystemTime(now + 24 * 60 * 60 * 1000);
+    jest.mocked(apiPost).mockResolvedValueOnce(created() as never);
+    await press("Try again");
+
+    await waitFor(() => expect(result.getPathname()).toBe("/request/sent"));
+    expect(sentKeys()[0]).toMatch(UUID_V4);
+    expect(sentKeys()[1]).toBe(sentKeys()[0]);
+    expect(posted()[1]?.body).toMatchObject({ preferred_date: today });
+    jest.setSystemTime(now);
+  });
+
   it("sends an edited request with a new key, and on a 409 for the key says try again without sending", async () => {
     jest.mocked(apiPost).mockRejectedValueOnce(new NetworkError(true));
     const result = await toReview();

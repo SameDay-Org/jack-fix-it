@@ -38,27 +38,34 @@ function mintKey(): string | null {
 }
 
 /**
- * The key to send `body` with (#388). The draft's key while the body is the one it was taken for,
- * so a retry of the same request (after a timeout, the network, Try again) can only answer the
- * request it made. A new key once the body changed (an edit after a failed send): the server
- * refuses an old key with a new body. Null when no valid key could be made.
+ * The key to send `body` with (#388): the one this exact body went with before, so a retry of the
+ * same request (after a timeout, the network, Try again, or an edit undone) can only answer the
+ * request it made. A body never sent takes a new key: the server refuses an old key with a new
+ * body. Null when no valid key could be made.
  */
 export function sendKeyFor(body: RequestCreate): string | null {
   const fingerprint = bodyFingerprint(body);
-  const held = requestDraftStore.getState().sendKey;
-  if (held !== null && held.fingerprint === fingerprint) return held.key;
+  const keys = requestDraftStore.getState().sendKeys;
+  const held = keys[fingerprint];
+  if (held !== undefined) return held;
   const key = mintKey();
-  requestDraftStore.setState({ sendKey: key === null ? null : { key, fingerprint } });
+  if (key !== null) requestDraftStore.setState({ sendKeys: { ...keys, [fingerprint]: key } });
   return key;
 }
 
+/** Whether this exact body went out before with a key the draft still holds. */
+export const holdsSendKey = (body: RequestCreate): boolean =>
+  requestDraftStore.getState().sendKeys[bodyFingerprint(body)] !== undefined;
+
 /**
- * Lets go of `key` while the draft still holds it: its request exists (201, or 200 for a retry),
- * or the server holds it for another body (409). The next send takes a new one. A key the draft
- * no longer holds (a newer one, another draft's) is left alone.
+ * Lets go of `key` while the draft holds it: its request exists (201, or 200 for a retry), or the
+ * server holds it for another body (409). The next send of that body takes a new one. A key the
+ * draft does not hold (another draft's) is left alone, and so are the draft's other keys.
  */
 export function releaseSendKey(key: string): void {
-  if (requestDraftStore.getState().sendKey?.key === key) {
-    requestDraftStore.setState({ sendKey: null });
+  const keys = requestDraftStore.getState().sendKeys;
+  const kept = Object.entries(keys).filter(([, held]) => held !== key);
+  if (kept.length < Object.keys(keys).length) {
+    requestDraftStore.setState({ sendKeys: Object.fromEntries(kept) });
   }
 }
