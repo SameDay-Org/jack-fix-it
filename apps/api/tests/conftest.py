@@ -2,13 +2,14 @@ import asyncio
 import time
 import uuid
 from collections import Counter
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 
 import httpx
 import pytest
+import sentry_sdk
 from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI, Request
@@ -163,6 +164,29 @@ def make_app(settings: Settings) -> FastAPI:
     routes = InMemoryJobRouteCache()
     app.dependency_overrides[get_job_route_cache] = lambda: routes
     return app
+
+
+def _reset_sentry() -> None:
+    """No Sentry client and empty scopes, as in a fresh process. The SDK keeps its client,
+    breadcrumbs, tags and user on scopes that every test of the process shares (the global one,
+    and the isolation and current ones of the main context, which async tests inherit), so what
+    a test leaves there reaches the next test's events: the queries it ran, as breadcrumbs."""
+    sentry_sdk.get_client().close()
+    for scope in (
+        sentry_sdk.get_global_scope(),
+        sentry_sdk.get_isolation_scope(),
+        sentry_sdk.get_current_scope(),
+    ):
+        scope.set_client(None)
+        scope.clear()
+
+
+@pytest.fixture(autouse=True)
+def fresh_sentry() -> Iterator[None]:
+    """Every test starts and leaves Sentry as a fresh process has it (see _reset_sentry)."""
+    _reset_sentry()
+    yield
+    _reset_sentry()
 
 
 @pytest.fixture
