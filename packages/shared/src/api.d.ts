@@ -8115,7 +8115,10 @@ export interface operations {
     create_ticket_v1_support_tickets_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description A UUID the app makes once per draft and sends again with every retry of it. Within the server's window (24 hours by default) a retry answers 200 with the ticket the first call wrote, its status as it is now, writes nothing and takes no rate-limit slot; the same key with another body answers 409 idempotency_key_reused. Without it every call writes a ticket. */
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -8125,6 +8128,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description A retry: the caller already wrote a ticket with this Idempotency-Key and this body within the window. The replay returns that ticket (the same id and created_at; its status as it is now); nothing is written. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportTicketCreatedOut"];
+                };
+            };
             /** @description Successful Response */
             201: {
                 headers: {
@@ -8152,7 +8164,16 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description invalid_job: job_id is not a job of which the caller is the customer or the pro (an unknown job answers the same); validation_error: an unknown topic or platform, a message empty, blank or longer than 2000 characters, an app_version out of format. */
+            /** @description idempotency_key_reused: the caller already used this Idempotency-Key with a different body; nothing was changed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description invalid_job: job_id is not a job of which the caller is the customer or the pro (an unknown job answers the same); validation_error: an unknown topic or platform, a message empty, blank or longer than 2000 characters, an app_version out of format, an Idempotency-Key that is not a UUID. */
             422: {
                 headers: {
                     [name: string]: unknown;

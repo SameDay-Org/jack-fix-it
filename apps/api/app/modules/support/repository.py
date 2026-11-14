@@ -1,5 +1,6 @@
 import uuid
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 from sqlalchemy import Select, func, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +9,14 @@ from app.modules.support.models import SupportTicket, TicketStatus
 
 # Where a page starts: strictly before this (created_at, id).
 Before = tuple[datetime, uuid.UUID]
+
+
+@dataclass(frozen=True)
+class KeyedTicket:
+    """A ticket found by its Idempotency-Key, and whether it was made within the window."""
+
+    ticket: SupportTicket
+    fresh: bool
 
 
 class SupportTicketRepository:
@@ -22,6 +31,31 @@ class SupportTicketRepository:
         await self._session.flush()
         await self._session.refresh(ticket)
         return ticket
+
+    async def by_idempotency_key(
+        self, user_id: uuid.UUID, key: uuid.UUID, *, window_seconds: int
+    ) -> KeyedTicket | None:
+        """The user's ticket made with `key`, of any age (the unique index allows one), and
+        whether it was made within the last `window_seconds` by the clock that set its
+        created_at: the database's now(), which is one instant for a whole transaction, so the
+        rate limit's look and the create's agree. populate_existing: read again after a racing
+        create committed it."""
+        fresh = SupportTicket.created_at > func.now() - timedelta(seconds=window_seconds)
+        statement = (
+            select(SupportTicket, fresh.label("fresh"))
+            .where(SupportTicket.user_id == user_id, SupportTicket.idempotency_key == key)
+            .execution_options(populate_existing=True)
+        )
+        found = (await self._session.execute(statement)).one_or_none()
+        return None if found is None else KeyedTicket(ticket=found[0], fresh=found[1])
+
+    async def release_idempotency_key(self, ticket: SupportTicket) -> None:
+        """Clears a key older than the window from the ticket it made (loaded by
+        by_idempotency_key), so a new ticket may take it. A racing create that released it
+        first leaves it cleared all the same."""
+        ticket.idempotency_key = None
+        ticket.idempotency_fingerprint = None
+        await self._session.flush()
 
     async def set_status(self, ticket_id: uuid.UUID, status: TicketStatus) -> SupportTicket:
         """Moves the ticket to `status` in one statement, so status and closed_at reach the

@@ -1,4 +1,4 @@
-from app.errors import AppError, NotFoundError
+from app.errors import AppError, ConflictError, NotFoundError
 
 
 class TicketNotFoundError(NotFoundError):
@@ -24,3 +24,12 @@ class InvalidTicketInputError(AppError):
     status_code = 422
     code = "validation_error"
     message = "The request is invalid."
+
+
+class IdempotencyKeyReusedError(ConflictError):
+    """The writer's Idempotency-Key already made a ticket from another body (#380). Keys are
+    per user: another user's key is never a conflict, so this reveals nothing about anyone
+    else."""
+
+    code = "idempotency_key_reused"
+    message = "This Idempotency-Key was already used with a different ticket."
