@@ -20,8 +20,8 @@ export type JobBookedNoticeProps = {
  * "Your job is booked" with where it stands and the way to follow it; once the job is past
  * (done, cancelled, a problem), its own headline and the way to see it. Nothing before that (the
  * payment step is the quote's own), and nothing on a request with no accepted quote. Asked on
- * mount and again on return; never polled from here: a payment confirmed on this screen hands it
- * the new job (`features/payments`), so it is the one place that says "booked".
+ * mount and again on return; never polled from here: a job the accepted card finds fills it when
+ * it has none (`features/payments`), so it is the one place that says "booked".
  */
 export function JobBookedNotice({ requestId, accepted }: JobBookedNoticeProps) {
   const { t } = useTranslation();

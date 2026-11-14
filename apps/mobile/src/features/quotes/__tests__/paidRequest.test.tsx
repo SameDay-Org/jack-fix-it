@@ -1,11 +1,13 @@
 import i18n from "@/i18n";
 
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
+import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import { AccessibilityInfo } from "react-native";
 
 import { ApiError, apiGet } from "@/api";
 import { dismissToast } from "@/components/ui/toast";
+import { customerJobQueryKey } from "@/features/jobs/api";
 
 import { resetSecureStore, secureStoreMock } from "../../../api/__tests__/helpers";
 import { refreshPermission, resetPermissionForTests } from "../../notifications/permission";
@@ -26,9 +28,18 @@ import {
   resetPayments,
   routeApi,
   SHEET,
+  signOut,
   type SessionDouble,
 } from "../../payments/__tests__/helpers";
-import { fakeClock, freezeClock, navigation, renderWithQuery, REQUEST_ID } from "./helpers";
+import type { CustomerJob } from "../../payments/useRequestJob";
+import {
+  fakeClock,
+  freezeClock,
+  navigation,
+  newQueryClient,
+  renderWithQuery,
+  REQUEST_ID,
+} from "./helpers";
 
 // The request's screen whole (#324): the job's notice over the quotes (#64) and the accepted
 // card's payment (#59) are both real here, each with its own copy of the job.
@@ -362,5 +373,104 @@ describe("the notifications pre-prompt sits under Paid, and says nothing about b
 
     await waitFor(() => expect(paidState()).toHaveLength(shown ? 1 : 0));
     expect(screen.queryAllByTestId(PROMPT)).toHaveLength(shown ? 1 : 0);
+  });
+});
+
+/**
+ * The notice's look and the card's answered apart: the notice's is pinned to the session (#64),
+ * the card's is not while no payment is being confirmed.
+ */
+function answerApart(notice: () => Promise<CustomerJob>, cardLook: () => Promise<CustomerJob>) {
+  jest.mocked(apiGet).mockImplementation(((path: string, options?: { generation?: number }) => {
+    if (path !== JOB_PATH) return api.quotes();
+    return options?.generation === undefined ? cardLook() : notice();
+  }) as unknown as typeof apiGet);
+}
+
+const unavailable = () => Promise.reject(new ApiError(503, "unavailable"));
+
+/** One booked notice with its one link, Paid on the card, and nothing said or felt. */
+async function expectOneNotice() {
+  expect(await screen.findByRole("header", { name: "Your job is booked" })).toBeTruthy();
+  expect(bookedTexts()).toHaveLength(1);
+  expect(screen.getAllByTestId("job-booked")).toHaveLength(1);
+  expect(paidState()).toHaveLength(1);
+  expect(screen.getAllByRole("button", { name: FOLLOW })).toHaveLength(1);
+  await act(async () => fireEvent.press(screen.getByRole("button", { name: FOLLOW })));
+  expect(router.push).toHaveBeenCalledTimes(1);
+  expect(router.push).toHaveBeenCalledWith(JOB_HREF);
+  // Not a payment confirmed in this session: no "you're booked" and no success haptic.
+  expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+  expect(Haptics.notificationAsync).not.toHaveBeenCalled();
+}
+
+describe("a paid request opened cold: the card's job fills a notice that has none (#372)", () => {
+  beforeEach(() => jest.mocked(Haptics.notificationAsync).mockClear());
+
+  it.each([
+    ["failed (503)", unavailable],
+    ["came just before the webhook made the job (404)", () => Promise.reject(notFound())],
+  ])("the notice's own look %s, the card's found the job: one notice", async (_, notice) => {
+    answerApart(notice, () => Promise.resolve(JOB));
+    await renderWithQuery(<App />);
+
+    await screen.findByTestId(`${payTestId(ACCEPTED)}-paid`);
+    await expectOneNotice();
+    // One look each; the card's answer is handed over, and nothing asks again.
+    expect(callsTo(apiGet, JOB_PATH)).toHaveLength(2);
+  });
+
+  it("the notice's failure lands after the card's job: the notice keeps it", async () => {
+    let failNotice: () => void = () => undefined;
+    const notice = new Promise<CustomerJob>((_, reject) => {
+      failNotice = () => reject(new ApiError(503, "unavailable"));
+    });
+    answerApart(
+      () => notice,
+      () => Promise.resolve(JOB),
+    );
+    await renderWithQuery(<App />);
+    await screen.findByTestId(`${payTestId(ACCEPTED)}-paid`);
+    expect(await screen.findByRole("header", { name: "Your job is booked" })).toBeTruthy();
+
+    await act(async () => {
+      failNotice();
+      await notice.catch(() => undefined);
+    });
+    await expectOneNotice();
+  });
+
+  it("a look from a session that signed out never lands, in the next account or its notice", async () => {
+    const client = newQueryClient();
+    let answerCard: (job: CustomerJob) => void = () => undefined;
+    const held = new Promise<CustomerJob>((resolve) => {
+      answerCard = resolve;
+    });
+    answerApart(unavailable, () => held);
+    await renderWithQuery(<App />, client);
+    await waitFor(() => expect(callsTo(apiGet, JOB_PATH)).toHaveLength(2));
+
+    // Signed out, then another account: the request is not theirs (404 to both looks).
+    await signOut(session, client);
+    answerApart(
+      () => Promise.reject(notFound()),
+      () => Promise.reject(notFound()),
+    );
+    await act(async () => {
+      answerCard(JOB);
+      await held;
+    });
+    await act(async () => navigation.setFocused(false));
+    await act(async () => navigation.setFocused(true));
+    await screen.findByRole("button", { name: PAY_NAME });
+
+    expect(screen.queryByTestId("job-booked")).toBeNull();
+    expect(bookedTexts()).toHaveLength(0);
+    expect(paidState()).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: FOLLOW })).toBeNull();
+    expect(client.getQueryData(customerJobQueryKey(REQUEST_ID, 1))).toBeUndefined();
+    expect(client.getQueryData(customerJobQueryKey(REQUEST_ID, 2))).toBeUndefined();
+    expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+    expect(Haptics.notificationAsync).not.toHaveBeenCalled();
   });
 });
