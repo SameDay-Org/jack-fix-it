@@ -19,9 +19,15 @@ What it looks for in app/, scripts/ and alembic/ (a data migration is code too):
   the class behind it), the table's `.update()`, an upsert (`on_conflict_do_update`), `merge`,
   `bulk_update_mappings`, a lightweight `table("addresses")`, or SQL text; outside
   AddressRepository.set_point, which may set `lat` and `lng` and nothing else. The model
-  counts wherever the call names it: in what it is given, by position or by keyword, and in
-  what it is made on (`values.on_conflict_do_update(index_elements=[Address.id], ...)`, the
-  way this codebase writes an upsert).
+  counts where the call names the table it writes: in what it is made on
+  (`insert(Address).values(...).on_conflict_do_update(...)`), in what it is given by
+  position, and as a column of an upsert's conflict target, its `index_elements`,
+  `constraint` or `index_where` (`values.on_conflict_do_update(index_elements=[Address.id],
+  ...)`, the way this codebase writes an upsert). Not in an upsert's `set_` or `where`, nor
+  in the values of an insert kept in a variable first: an upsert of another table may read
+  addresses. Values chained on the upsert itself (`insert(Device).values(user_id=
+  select(Address.user_id)...).on_conflict_do_update(...)`) are part of what it is made on,
+  so a read of the model there is reported too: keep the insert in a variable.
 
 Names are followed inside each file before anything is matched, for the callables above
 (with `setattr`, `table` and `Table`) and for the model, so a write under another name is
@@ -57,7 +63,11 @@ A name is followed without scope or order: bound to `update` anywhere in a file,
   a call that names the model nowhere: `rows = session.query(Address)` then
   `rows.update(...)`, `Row = aliased(Address)` then `update(Row)`, `row = Address(...)` then
   `session.merge(row)`. `update` is a dict's and a set's method too, so a variable alone
-  does not tell.
+  does not tell;
+- the model handed by keyword to anything but an upsert's conflict target
+  (`session.merge(instance=Address(...))`), or a conflict target that names it only inside
+  a call (`index_elements=[func.lower(Address.city)]`) or by its text (`constraint=
+  "addresses_pkey"`, `index_elements=["id"]` alone).
 """
 
 import ast
@@ -83,6 +93,9 @@ WRITING_CALLS = frozenset({"update", "merge", "bulk_update_mappings", "on_confli
 SAME_CALL = {"Update": "update"}
 # Every callable matched by its name: a name bound to one of them is followed (`_aliases`).
 WATCHED_CALLS = WRITING_CALLS | {*SAME_CALL, "setattr", "table", "Table"}
+# The keywords of an upsert that name its conflict target, the table's own index: the only
+# keywords that tell which table the call writes (`set_` and `where` may read any table).
+CONFLICT_TARGET = frozenset({"index_elements", "constraint", "index_where"})
 # UPDATE addresses, UPDATE ONLY "addresses", UPDATE public.addresses.
 _SQL_UPDATE = re.compile(r"\bupdate\s+(?:only\s+)?(?:\"?\w+\"?\.)?\"?addresses\"?\b", re.IGNORECASE)
 
@@ -162,6 +175,31 @@ def _names_model(node: ast.AST, aliases: dict[str, tuple[str, ...]]) -> bool:
         or (isinstance(part, ast.Attribute) and part.attr == MODEL)
         for part in ast.walk(node)
     )
+
+
+def _column_references(node: ast.expr) -> list[ast.expr]:
+    """The plain dotted names a conflict target is made of: each one in
+    `index_elements=[Address.id]`, `constraint=Address.__table__.primary_key`, and the
+    columns `index_where=Address.city.is_(None)` compares or calls a method of. Never what a
+    call is given (`select(Address.id)`, `func.lower(Address.city)`), nor a dict, a lambda or
+    a subscript: those may read any table."""
+    if _path(node) is not None:
+        return [node]
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        parts = node.elts
+    elif isinstance(node, ast.BoolOp):
+        parts = node.values
+    elif isinstance(node, ast.BinOp):
+        parts = [node.left, node.right]
+    elif isinstance(node, ast.UnaryOp):
+        parts = [node.operand]
+    elif isinstance(node, ast.Compare):
+        parts = [node.left, *node.comparators]
+    elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        parts = [node.func.value]
+    else:
+        return []
+    return [found for part in parts for found in _column_references(part)]
 
 
 def _targets(node: ast.AST) -> list[ast.expr]:
@@ -253,9 +291,15 @@ def findings(relative: str, source: str) -> list[str]:
         # update(Address), update(models.Address), Address.__table__.update(),
         # insert(Address).on_conflict_do_update(...), session.merge(Address(...)), and
         # values.on_conflict_do_update(index_elements=[Address.id], ...): the model named in
-        # what the call is made on or in what it is given.
-        given = [*node.args, *(keyword.value for keyword in node.keywords)]
-        if not any(_names_model(part, aliases) for part in (node.func, *given)):
+        # what the call is made on, in what it is given by position, or as a column of its
+        # conflict target. Not in `set_=` or `where=`: an upsert of devices may read addresses.
+        columns = [
+            column
+            for keyword in node.keywords
+            if keyword.arg in CONFLICT_TARGET
+            for column in _column_references(keyword.value)
+        ]
+        if not any(_names_model(part, aliases) for part in (node.func, *node.args, *columns)):
             continue
         if name != "update":
             report(node, f"{name} on addresses")
@@ -439,6 +483,24 @@ PLANTED = {
         + "values = pg_insert(Address).values(id=1, line1='1 Other Street')\n"
         + "statement = values.on_conflict_do_update(\n"
         + "    index_elements=[Address.id], set_={'line1': values.excluded.line1}\n"
+        + ")\n"
+    ),
+    # The same upsert with its conflict target named by constraint, or as a partial index.
+    "upsert_on_its_constraint": (
+        "from sqlalchemy.dialects.postgresql import insert\n"
+        + IMPORT
+        + "values = insert(Address).values(id=1, city='X')\n"
+        + "statement = values.on_conflict_do_update(\n"
+        + "    constraint=Address.__table__.primary_key, set_={'city': values.excluded.city}\n"
+        + ")\n"
+    ),
+    "upsert_on_a_partial_index": (
+        "from sqlalchemy.dialects.postgresql import insert\n"
+        + IMPORT
+        + "values = insert(Address).values(id=1, state='GA')\n"
+        + "statement = values.on_conflict_do_update(\n"
+        + "    index_elements=['id'], index_where=Address.lat.is_(None),\n"
+        + "    set_={'state': values.excluded.state},\n"
         + ")\n"
     ),
     "raw_sql_renamed": (
@@ -724,6 +786,43 @@ def test_the_point_write_may_set_nothing_but_the_point(imported: str) -> None:
             "    index_elements=[Device.id], set_={'user_id': values.excluded.user_id}\n"
             ")\n"
         ),
+        # Another table's upsert that reads the model in its `set_`, its `where` or the values
+        # it inserts: only its conflict target says which table it writes (PR #395, round 2).
+        (
+            "from sqlalchemy import select\n"
+            "from sqlalchemy.dialects.postgresql import insert\n"
+            "from app.modules.addresses.models import Address\n"
+            "from app.modules.devices.models import Device\n"
+            "values = insert(Device).values(user_id=1)\n"
+            "statement = values.on_conflict_do_update(\n"
+            "    index_elements=[Device.id],\n"
+            "    set_={'user_id': select(Address.user_id).limit(1).scalar_subquery()},\n"
+            ")\n"
+        ),
+        (
+            "from sqlalchemy import select\n"
+            "from sqlalchemy.dialects.postgresql import insert\n"
+            "from app.modules.addresses.models import Address\n"
+            "from app.modules.devices.models import Device\n"
+            "values = insert(Device).values(user_id=1)\n"
+            "statement = values.on_conflict_do_update(\n"
+            "    index_elements=[Device.id],\n"
+            "    set_={'user_id': values.excluded.user_id},\n"
+            "    where=Device.user_id.in_(select(Address.user_id)),\n"
+            ")\n"
+        ),
+        (
+            "from sqlalchemy import select\n"
+            "from sqlalchemy.dialects.postgresql import insert\n"
+            "from app.modules.addresses.models import Address\n"
+            "from app.modules.devices.models import Device\n"
+            "values = insert(Device).values(\n"
+            "    user_id=select(Address.user_id).limit(1).scalar_subquery()\n"
+            ")\n"
+            "statement = values.on_conflict_do_update(\n"
+            "    index_elements=[Device.id], set_={'user_id': values.excluded.user_id}\n"
+            ")\n"
+        ),
         # A dict's update under another name, and a schema that is called Update here.
         (
             "seen: dict[str, str] = {}\n"
@@ -748,6 +847,9 @@ def test_the_point_write_may_set_nothing_but_the_point(imported: str) -> None:
         "rebound_on_other_model_beside_a_read",
         "renamed_only_read",
         "other_upsert_beside_a_read",
+        "other_upsert_reading_it_in_set",
+        "other_upsert_reading_it_in_where",
+        "other_upsert_reading_it_in_values",
         "dict_update_rebound",
         "schema_named_update",
     ],
