@@ -61,7 +61,10 @@ const EMPTY: RequestDraft = {
   preferredDate: null,
   preferredPeriod: "flexible",
   refusal: null,
+  sendKey: null,
 };
+
+const HELD_KEY = "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b";
 
 let client: QueryClient;
 let account: SessionUser;
@@ -87,6 +90,8 @@ function sendAndStartAnotherAsA(): void {
       zipCode: "07102",
     },
     preferredDate: "2026-11-03",
+    // Its first send got no answer: the draft holds its Idempotency-Key (#388).
+    sendKey: { key: HELD_KEY, fingerprint: "{}" },
   });
 }
 
@@ -185,5 +190,6 @@ describe("the request flow's session data", () => {
 
     expect(sentRequest(SENT.id, ACCOUNT_A.id)).toBe(SENT);
     expect(requestDraftStore.getState().description).toBe("Water stain on the ceiling");
+    expect(requestDraftStore.getState().sendKey?.key).toBe(HELD_KEY);
   });
 });

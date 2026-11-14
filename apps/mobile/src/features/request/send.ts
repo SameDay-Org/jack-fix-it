@@ -27,10 +27,21 @@ const STEP_CODES: Readonly<Record<string, StepRefusal>> = {
 
 const SERVER_ERROR = 500;
 
-/** Places a failed `POST /v1/requests` (its documented 422 codes, 429, 5xx, the network). */
+/**
+ * The server holds this Idempotency-Key for another body (409): this call created nothing. The
+ * app takes a new key for every new body, so this only happens when the server reads the same
+ * body differently (say a deploy between two tries).
+ */
+export const keyReused = (error: unknown): boolean =>
+  error instanceof ApiError && error.status === 409 && error.code === "idempotency_key_reused";
+
+/**
+ * Places a failed `POST /v1/requests` (its documented 422 codes, 429, 409, 5xx, the network). A
+ * reused key is a plain "try again": the next try carries a new key.
+ */
 export function sendFailureOf(error: unknown): SendFailure {
   if (error instanceof SessionExpiredError) return { kind: "signedOut" };
-  if (!(error instanceof ApiError)) return { kind: "retry", reason: "failed" };
+  if (!(error instanceof ApiError) || keyReused(error)) return { kind: "retry", reason: "failed" };
   const refusal = error.code ? STEP_CODES[error.code] : undefined;
   if (refusal) return { kind: "step", refusal };
   if (error.code === "rate_limited") return { kind: "retry", reason: "rateLimited" };
