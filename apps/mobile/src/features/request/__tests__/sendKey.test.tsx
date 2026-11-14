@@ -263,11 +263,14 @@ describe("the request's Idempotency-Key (#388)", () => {
   });
 
   it("a 409 idempotency_key_reused: the calm try-again, nothing sent by itself, then a new key", async () => {
+    jest.useFakeTimers();
     answers = [refused(409, "idempotency_key_reused"), ok(201)];
     const hook = await renderSend();
 
     expect(await send(hook)).toStrictEqual({ failed: { kind: "retry", reason: "failed" } });
-    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    // A minute on the fake clock runs every pending job and timer, a retry's backoff included
+    // (TanStack's longest default delay is 30 s): still the one POST.
+    await act(() => jest.advanceTimersByTimeAsync(60_000));
     expect(posts()).toHaveLength(1);
     expect(heldKeys()).toEqual([]);
 
