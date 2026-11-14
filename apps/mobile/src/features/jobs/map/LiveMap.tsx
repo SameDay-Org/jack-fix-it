@@ -47,16 +47,8 @@ import {
   REDUCED_MOTION_MS,
 } from "./camera";
 import { liveMapConfig } from "./config";
-import {
-  measurePath,
-  nearestOnPath,
-  normalizeDeg,
-  slicePath,
-  towardDeg,
-  type LngLat,
-  type MeasuredPath,
-} from "./geo";
-import { sampleGlide, type Fix, type Glide, type VanPose } from "./motion";
+import { measurePath, normalizeDeg, towardDeg, type LngLat, type MeasuredPath } from "./geo";
+import { routeAhead, sampleGlide, type Fix, type Glide, type VanPose } from "./motion";
 import { useVanMotion, type VanFrame } from "./useVanMotion";
 
 if (liveMapConfig.accessToken) void setAccessToken(liveMapConfig.accessToken);
@@ -374,14 +366,14 @@ function useTrail(fix: Fix, path: MeasuredPath | null) {
       destination: path?.points.at(-1) ?? trail.destination,
     });
   }
-  return useMemo(() => {
-    const start = trail.path ? nearestOnPath(trail.path, trail.from) : null;
-    return {
+  return useMemo(
+    () => ({
       routes: [trail.path, trail.previous] as const,
-      ahead: trail.path && start ? slicePath(trail.path, start.alongM, trail.path.length) : null,
+      ahead: trail.path ? routeAhead(trail.path, trail.previous, trail.from) : null,
       destination: trail.destination,
-    };
-  }, [trail]);
+    }),
+    [trail],
+  );
 }
 
 /** The van, drawn from the native source `useVanMotion` writes to; React never redraws it. */
@@ -411,12 +403,16 @@ const VanLayer = memo(function VanLayer({
   );
 });
 
-/** The map's own pictures, drawn from views: the pro's arrow and the address's pin. */
+/**
+ * The map's own pictures, drawn from views: the pro's arrow and the address's pin. Each image
+ * takes exactly one view: its root must not be flattened into its children.
+ */
 const MapGlyphs = memo(function MapGlyphs() {
   return (
     <Images>
       <MapImage name="jack-van-arrow">
         <View
+          collapsable={false}
           className="items-center justify-center rounded-pill bg-green-500"
           style={{ width: ARROW, height: ARROW }}
         >
@@ -432,6 +428,7 @@ const MapGlyphs = memo(function MapGlyphs() {
       </MapImage>
       <MapImage name="jack-destination">
         <View
+          collapsable={false}
           className="items-center justify-center rounded-pill bg-white"
           style={{ width: PIN, height: PIN }}
         >

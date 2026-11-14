@@ -99,6 +99,23 @@ export function planGlide(
   return { path, startedAt: now, durationMs: moved ? durationMs : 0, restBearing };
 }
 
+/**
+ * The line still to drive from `from` (where the van starts its glide): the route from where
+ * `from` lies on it; or, when the route was recomputed from a newer fix ahead of the van, the way
+ * from `from` to its start (along the route before it, straight without one) and then the route.
+ */
+export function routeAhead(
+  route: MeasuredPath,
+  previous: MeasuredPath | null,
+  from: LngLat,
+): LngLat[] {
+  const on = onRoute(from, route);
+  if (on) return slicePath(route, on.alongM, route.length);
+  const start = route.points[0];
+  const bridge = alongARoute(from, start, [previous]) ?? [from, start];
+  return withoutRepeats([...bridge, ...route.points.slice(1)]);
+}
+
 /** Where the glide is at `now`, and the way the van should point there. */
 export function sampleGlide(
   glide: Glide,

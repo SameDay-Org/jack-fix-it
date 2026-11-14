@@ -18,10 +18,11 @@ export const CAMERA_TRANSITION_MS = 1200;
 /** Under Reduce Motion no glide or camera move lasts longer than this. */
 export const REDUCED_MOTION_MS = 300;
 
-// The overview keeps clear of the round way back above and of the map's edges.
-const OVERVIEW_TOP = 72;
-const OVERVIEW_SIDE = 48;
-const OVERVIEW_BOTTOM_GAP = 24;
+// The overview keeps the pins clear of the round way back above, the map's edges, and Mapbox's
+// wordmark and attribution just above the cards (a pin is drawn around its point).
+const OVERVIEW_TOP = 80;
+const OVERVIEW_SIDE = 56;
+const OVERVIEW_BOTTOM_GAP = 56;
 
 /**
  * Padding that puts the followed van two thirds of the way down the map's open part (above the

@@ -8,7 +8,15 @@ import {
   towardDeg,
   turnDeg,
 } from "../geo";
-import { MIN_MOVE_M, planGlide, sampleGlide, SNAP_M, smoothTurn, type Fix } from "../motion";
+import {
+  MIN_MOVE_M,
+  planGlide,
+  routeAhead,
+  sampleGlide,
+  SNAP_M,
+  smoothTurn,
+  type Fix,
+} from "../motion";
 
 import { at, DOOR, L_ROUTE } from "./helpers";
 
@@ -150,5 +158,26 @@ describe("planGlide", () => {
     });
     expect(planGlide(null, fix(at(200, 400)), [ROUTE], NOW, SPAN).restBearing).toBeCloseTo(90, 0);
     expect(planGlide(null, fix(at(200, 400)), [null], NOW, SPAN).restBearing).toBe(0);
+  });
+});
+
+describe("routeAhead", () => {
+  it("starts the line where the van starts its glide when that lies on the route", () => {
+    const ahead = routeAhead(ROUTE, null, at(3, 250));
+    expect(distanceM(ahead[0], at(0, 250))).toBeLessThan(0.5);
+    expect(ahead.at(-1)).toEqual(DOOR);
+  });
+
+  it("bridges to a route recomputed ahead of the van along the route before it", () => {
+    const recomputed = measurePath([at(100, 400), at(400, 400)]);
+    const ahead = routeAhead(recomputed, ROUTE, at(0, 300));
+    expect(ahead[0]).toEqual(at(0, 300));
+    expect(ahead.some((point) => distanceM(point, at(0, 400)) < 0.5)).toBe(true);
+    expect(measurePath(ahead).length).toBeCloseTo(500, 0);
+  });
+
+  it("bridges straight without a route before it", () => {
+    const recomputed = measurePath([at(0, 200), at(0, 400)]);
+    expect(routeAhead(recomputed, null, at(0, 100))).toEqual([at(0, 100), at(0, 200), at(0, 400)]);
   });
 });
