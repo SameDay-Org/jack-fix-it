@@ -5,6 +5,7 @@ import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } fr
 import Animated from "react-native-reanimated";
 
 import { apiConfig, useSession, type SessionUser } from "@/api";
+import { ControlIcon } from "@/components/icons";
 import {
   Button,
   IdCard,
@@ -12,11 +13,15 @@ import {
   moveAccessibilityFocus,
   placeOf,
   Screen,
+  TextSkeleton,
   useTabBarInset,
   type IdCardShareHandle,
 } from "@/components/ui";
+import { cx } from "@/components/ui/cx";
 import { formatMonth } from "@/features/quotes/format";
-import { pressedTransform } from "@/theme";
+// The stat alone: the rest of reviews (its drafts) loads with the rating screen.
+import { useRatingStat, type RatingStat } from "@/features/reviews/ratingStat";
+import { pressedTransform, tokens } from "@/theme";
 
 import { useFreshPhoto } from "./api";
 import { AccountMenu } from "./AccountMenu";
@@ -32,6 +37,8 @@ const MAX_CARD_WIDTH = 420;
 const HINT_ROOM = 56;
 /** Above this font scale the header has no room for "Compartir" beside the title. */
 const COMPACT_SHARE_SCALE = 1.3;
+/** The star before the average: the size of the headline's capitals, not following the font. */
+const STAT_STAR = 18;
 
 /**
  * The Account tab (#293), the same for a customer and a pro: the ID card on top, then how long the
@@ -237,9 +244,10 @@ function AccountContent({ user, focused }: { user: SessionUser; focused: boolean
 }
 
 /**
- * Member since and the rating, each one element for a reader, side by side while each value fits
- * on one line. A value that wraps (a long Spanish phrase, a large font) stacks them, so a word is
- * never broken across lines.
+ * Member since and the rating (`GET /v1/users/me/rating`, #77: "★ 4.8 · 23 ratings", "No ratings
+ * yet", a skeleton while it loads, a muted "Unavailable" when it cannot), each one element for a
+ * reader, side by side while each value fits on one line. A value that wraps (a long Spanish
+ * phrase, a large font) stacks them, so a word is never broken across lines.
  */
 function AccountStats({ memberSince }: { memberSince: string }) {
   const { width, fontScale } = useWindowDimensions();
@@ -251,10 +259,18 @@ function StatsLayout({ memberSince }: { memberSince: string }) {
   const { t } = useTranslation();
   // Once stacked it stays stacked: side by side again could only wrap again.
   const [stacked, setStacked] = useState(false);
-  const stats = [
-    { key: "since", label: t("account.memberSince"), value: formatMonth(memberSince) },
-    // Ratings come with reviews (#252): until then every account reads the same, quietly.
-    { key: "rating", label: t("account.rating"), value: t("account.noRatings") },
+  const rating = useRatingStat();
+  const since = formatMonth(memberSince);
+  const stats: (RatingStat & { key: string; label: string })[] = [
+    {
+      key: "since",
+      label: t("account.memberSince"),
+      value: since,
+      spoken: since,
+      star: false,
+      muted: false,
+    },
+    { key: "rating", label: t("account.rating"), ...rating },
   ];
   return (
     <View className={stacked ? "gap-3" : "flex-row"} testID="account-stats">
@@ -268,24 +284,43 @@ function StatsLayout({ memberSince }: { memberSince: string }) {
           ) : null}
           <View
             accessible
-            accessibilityLabel={`${stat.label}, ${stat.value}`}
+            accessibilityLabel={`${stat.label}, ${stat.spoken}`}
             className={stacked ? "gap-1" : "flex-1 gap-1"}
             testID={`account-${stat.key}`}
           >
             <Text className="text-footnote text-gray-500">{stat.label}</Text>
-            <Text
-              className="text-headline text-navy-900"
-              onTextLayout={
-                stacked
-                  ? undefined
-                  : (event) => {
-                      if (event.nativeEvent.lines.length > 1) setStacked(true);
-                    }
-              }
-              testID={`account-${stat.key}-value`}
-            >
-              {stat.value}
-            </Text>
+            {stat.value === null ? (
+              <TextSkeleton type="headline" width="70%" testID={`account-${stat.key}-loading`} />
+            ) : (
+              <View className="flex-row items-center gap-1.5">
+                {stat.star ? (
+                  <ControlIcon
+                    name="star"
+                    size={STAT_STAR}
+                    color={tokens.colors["green-700"]}
+                    filled
+                    fillColor={tokens.colors["green-500"]}
+                    testID={`account-${stat.key}-star`}
+                  />
+                ) : null}
+                <Text
+                  className={cx(
+                    "flex-1 text-headline",
+                    stat.muted ? "text-gray-500" : "text-navy-900",
+                  )}
+                  onTextLayout={
+                    stacked
+                      ? undefined
+                      : (event) => {
+                          if (event.nativeEvent.lines.length > 1) setStacked(true);
+                        }
+                  }
+                  testID={`account-${stat.key}-value`}
+                >
+                  {stat.value}
+                </Text>
+              </View>
+            )}
           </View>
         </View>
       ))}

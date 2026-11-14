@@ -12,6 +12,7 @@ import Animated, {
 
 import { ControlIcon } from "@/components/icons";
 import { ChatEntry } from "@/features/chat";
+import { RateEntry } from "@/features/reviews";
 import { tokens } from "@/theme";
 
 import { BeforePhotos, PhotoThumbs } from "./AfterPhotos";
@@ -51,8 +52,8 @@ type ConfirmedJobProps = {
  * The job is confirmed (#66; also once paid out): a calm screen. A navy hero holds a lime seal
  * with a check; the sheet says it in one headline ("Thanks! Job confirmed" right after the
  * customer's own confirmation, "Job confirmed" when they come back to it) and one line about the
- * payment, then the after photos, the way back into the chat, what was paid and what happened.
- * Nothing is asked of the customer any more, so there is no other action.
+ * payment, then the way to rate the pro (#77), the after photos, the way back into the chat, what
+ * was paid and what happened.
  */
 export function ConfirmedJob({
   job,
@@ -88,6 +89,8 @@ export function ConfirmedJob({
             {text.support}
           </Text>
         </View>
+        {/* The one thing still asked of the customer, and only once (#77). */}
+        <RateEntry jobId={job.id} requestId={requestId} side="customer" />
         <PhotoThumbs
           photos={job.photos.after}
           now={photosNow}
