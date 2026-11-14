@@ -128,7 +128,10 @@ function RateFormView({ jobId, side, form, fallback }: RateFormViewProps) {
             disabled={busy}
             testID="rate-overall"
           />
-          <Text className="text-center text-headline text-navy-900" testID="rate-overall-word">
+          <Text
+            className="self-stretch text-center text-headline text-navy-900"
+            testID="rate-overall-word"
+          >
             {ratings.overall ? t(`reviews.word.${ratings.overall}`) : t("reviews.overall.prompt")}
           </Text>
         </View>
@@ -203,13 +206,14 @@ function RateFormView({ jobId, side, form, fallback }: RateFormViewProps) {
 function DimensionTitle({ name, score }: { name: string; score: StarScore | undefined }) {
   const { t } = useTranslation();
   return (
-    // The row below says both to a screen reader.
+    // The row below says both to a screen reader. The name takes the row's width: sized to its
+    // own text, a long one wraps by a sub-pixel at 160 dpi and loses its last word.
     <View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      className="flex-row flex-wrap items-baseline justify-between gap-x-3"
+      className="flex-row items-baseline gap-x-3"
     >
-      <Text className="text-callout font-semibold text-navy-900">{name}</Text>
+      <Text className="flex-1 text-callout font-semibold text-navy-900">{name}</Text>
       {score ? (
         <Text className="text-footnote text-gray-500">{t(`reviews.word.${score}`)}</Text>
       ) : null}
@@ -244,11 +248,17 @@ function Thanks({ rated, fresh, redacted, fallback }: ThanksProps) {
       <BackButton fallbackHref={fallback} />
       <View className="flex-1 items-center justify-center gap-6">
         <StarsShown value={rated} glyph={THANKS_STARS} />
-        <View className="items-center gap-2">
-          <Text accessibilityRole="header" className="text-center text-title-1 text-navy-900">
+        <View className="items-center gap-2 self-stretch">
+          <Text
+            accessibilityRole="header"
+            className="self-stretch text-center text-title-1 text-navy-900"
+          >
             {title}
           </Text>
-          <Text className="text-center text-body text-gray-500" testID="rate-thanks-body">
+          <Text
+            className="self-stretch text-center text-body text-gray-500"
+            testID="rate-thanks-body"
+          >
             {body}
           </Text>
         </View>

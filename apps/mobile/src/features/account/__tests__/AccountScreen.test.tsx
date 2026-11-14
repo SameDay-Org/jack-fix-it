@@ -33,7 +33,7 @@ import { joinFacts } from "@/features/quotes/format";
 import { myRatingKey, type MyRating } from "@/features/reviews/api";
 import i18n from "@/i18n";
 
-import { deferred } from "../../../api/__tests__/helpers";
+import { deferred, settle } from "../../../api/__tests__/helpers";
 import { METRICS } from "../../auth/__tests__/helpers";
 import { newQueryClient, signedIn } from "../../home/__tests__/helpers";
 import { savedAddress } from "../../request/__tests__/helpers";
@@ -420,9 +420,12 @@ describe("AccountScreen", () => {
 
   describe("the rating (#77)", () => {
     const RATING_PATH = "/v1/users/me/rating";
-    /** A cache with no rating yet, and the rating endpoint answering `answer`. */
-    const ratingAnswers = (answer: Promise<MyRating>) => {
+    // A cache with no rating yet.
+    beforeEach(() => {
       queryClient = newQueryClient();
+    });
+    /** The rating endpoint answers `answer`; nothing else is asked. */
+    const ratingAnswers = (answer: Promise<MyRating>) => {
       jest
         .mocked(apiGet)
         .mockImplementation((path) =>
@@ -480,6 +483,24 @@ describe("AccountScreen", () => {
       expect(within(screen.getByTestId("account-rating")).queryByText(/[0-9]/)).toBeNull();
       // The rest of the screen is untouched: no alert, no error notice.
       expect(screen.getByLabelText("Member since, March 2026")).toBeOnTheScreen();
+    });
+
+    it("reads the rating again each time the tab shows: a review can publish meanwhile", async () => {
+      ratingAnswers(Promise.resolve({ average: null, count: 0 }));
+      const view = await renderAccount();
+      await screen.findByLabelText("Rating, No ratings yet");
+
+      jest.mocked(useIsFocused).mockReturnValue(false);
+      jest.mocked(apiGet).mockClear();
+      ratingAnswers(Promise.resolve({ average: 5, count: 1 }));
+      await view.rerender(tree());
+      await act(settle);
+      expect(apiGet).not.toHaveBeenCalled(); // hidden: nothing asked
+
+      jest.mocked(useIsFocused).mockReturnValue(true);
+      await view.rerender(tree());
+      expect(await screen.findByLabelText("Rating, 5.0 out of 5, 1 rating")).toBeOnTheScreen();
+      expect(apiGet).toHaveBeenCalledTimes(1);
     });
 
     it("reads in Spanish", async () => {

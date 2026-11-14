@@ -38,7 +38,7 @@ export function RateEntry({ jobId, requestId, side, enabled = true }: RateEntryP
       <View
         accessible
         accessibilityLabel={t("reviews.entry.rated", { count: data.rated })}
-        className="flex-row flex-wrap items-center gap-x-3 gap-y-1"
+        className="gap-2"
         testID="rate-entry-done"
       >
         <StarsShown value={data.rated} />

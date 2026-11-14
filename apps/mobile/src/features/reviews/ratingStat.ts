@@ -1,3 +1,4 @@
+import { useIsFocused } from "expo-router";
 import { useTranslation } from "react-i18next";
 
 import { formatLocale, formatRating, joinFacts } from "@/features/quotes/format";
@@ -20,7 +21,8 @@ export type RatingStat = {
 
 export function useRatingStat(): RatingStat {
   const { t } = useTranslation();
-  const { data, isError } = useMyRating();
+  // Read again each time the screen shows: a review can publish while it is hidden.
+  const { data, isError } = useMyRating(useIsFocused());
 
   if (data === undefined) {
     if (!isError) return { value: null, spoken: t("common.loading"), star: false, muted: false };

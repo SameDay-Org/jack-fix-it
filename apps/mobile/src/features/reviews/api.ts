@@ -72,14 +72,19 @@ export function useMyReview(jobId: string, enabled = true) {
   });
 }
 
-/** The signed-in person's rating (`GET /v1/users/me/rating`): the average and how many. */
-export function useMyRating() {
+/**
+ * The signed-in person's rating (`GET /v1/users/me/rating`): the average and how many. It changes
+ * when the other side's review publishes, not on this phone: a screen that stays mounted (a tab)
+ * passes `subscribed` false while hidden, and showing again reads it anew.
+ */
+export function useMyRating(subscribed = true) {
   const generation = useSessionGeneration();
   const { status } = useSession();
   return useQuery({
     queryKey: myRatingKey(generation),
     queryFn: ({ signal }) => apiGet("/v1/users/me/rating", { auth: true, signal, generation }),
     enabled: status === "signedIn",
+    subscribed,
     retry: false,
   });
 }

@@ -305,7 +305,7 @@ function StatsLayout({ memberSince }: { memberSince: string }) {
                 ) : null}
                 <Text
                   className={cx(
-                    "shrink text-headline",
+                    "flex-1 text-headline",
                     stat.muted ? "text-gray-500" : "text-navy-900",
                   )}
                   onTextLayout={
