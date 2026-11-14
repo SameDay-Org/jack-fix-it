@@ -245,6 +245,21 @@ describe("path parameters", () => {
     expect(callHeader(call, "Content-Type")).toBeUndefined();
   });
 
+  it("sends an Idempotency-Key only with a POST that carries one", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, {}));
+    const params = { request_id: "r-1", quote_id: "q-1" };
+    const key = "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b";
+
+    await apiPost("/v1/requests/{request_id}/quotes/{quote_id}/accept", undefined, {
+      params,
+      idempotencyKey: key,
+    });
+    await apiPost("/v1/requests/{request_id}/quotes/{quote_id}/accept", undefined, { params });
+
+    expect(callHeader(fetchMock.mock.calls[0], "Idempotency-Key")).toBe(key);
+    expect(callHeader(fetchMock.mock.calls[1], "Idempotency-Key")).toBeUndefined();
+  });
+
   it("deletes with no body, and a 204 answers undefined", async () => {
     fetchMock.mockResolvedValue(jsonResponse(204));
 

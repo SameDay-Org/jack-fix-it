@@ -40,13 +40,24 @@ export type RequestOptions = {
   generation?: number;
 };
 
+/** A POST's options: a create that takes one may carry an Idempotency-Key. */
+export type PostOptions = RequestOptions & {
+  /**
+   * Sent as the `Idempotency-Key` header (`POST /v1/requests`): the same key with the same body
+   * answers what the first call created instead of creating it again. Never logged.
+   */
+  idempotencyKey?: string;
+};
+
 /**
  * The options argument for a path: optional when the path has no `{name}` segments, required with
  * `params` when it has, e.g. `{ params: { request_id } }` for `/v1/requests/{request_id}/quotes`.
  */
-export type OptionsFor<Params> = [Params] extends [never]
-  ? [options?: RequestOptions]
-  : [options: RequestOptions & { params: Params }];
+export type OptionsFor<Params, Options extends RequestOptions = RequestOptions> = [Params] extends [
+  never,
+]
+  ? [options?: Options]
+  : [options: Options & { params: Params }];
 
 type SentOptions = RequestOptions & { params?: Readonly<Record<string, string>> };
 
@@ -72,9 +83,9 @@ export function apiGet<P extends GetPath>(
 export function apiPost<P extends PostPath>(
   path: P,
   body: PostBody<P>,
-  ...[options]: OptionsFor<PostParams<P>>
+  ...[options]: OptionsFor<PostParams<P>, PostOptions>
 ): Promise<PostResponse<P>> {
-  const { params, query, ...session }: SentOptions = options ?? {};
+  const { params, query, idempotencyKey, ...session }: SentOptions & PostOptions = options ?? {};
   return withSession(session, (accessToken) =>
     sendRequest<PostResponse<P>>("POST", path, {
       body,
@@ -82,6 +93,7 @@ export function apiPost<P extends PostPath>(
       signal: session.signal,
       params,
       query,
+      idempotencyKey,
     }),
   );
 }
