@@ -101,7 +101,7 @@ beforeEach(() => {
     );
   jest
     .spyOn(globalThis, "cancelAnimationFrame")
-    .mockImplementation((frame) => clearTimeout(frame as unknown as NodeJS.Timeout));
+    .mockImplementation((frame) => clearTimeout(frame as unknown as ReturnType<typeof setTimeout>));
   navigation.reset();
   Object.assign(liveMapConfig, { accessToken: "pk.test" });
   api.position = () => Promise.resolve({ position: position() });

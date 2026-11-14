@@ -94,7 +94,7 @@ beforeEach(() => {
     );
   jest
     .spyOn(globalThis, "cancelAnimationFrame")
-    .mockImplementation((frame) => clearTimeout(frame as unknown as NodeJS.Timeout));
+    .mockImplementation((frame) => clearTimeout(frame as unknown as ReturnType<typeof setTimeout>));
   mapbox.mockCamera.setCamera.mockClear();
   mapbox.mockSourceProps.mockClear();
   jest.mocked(useReducedMotion).mockReturnValue(false);
