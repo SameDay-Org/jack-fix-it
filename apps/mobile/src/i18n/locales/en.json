@@ -1475,7 +1475,7 @@
       },
       "alreadyReviewed": {
         "title": "You already rated this job",
-        "body": "Each job gets one rating, and it can't be changed."
+        "body": "We can't load your rating right now."
       }
     },
     "thanks": {

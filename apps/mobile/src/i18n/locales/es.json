@@ -1475,7 +1475,7 @@
       },
       "alreadyReviewed": {
         "title": "Ya calificaste este trabajo",
-        "body": "Cada trabajo recibe una sola calificación, y no se puede cambiar."
+        "body": "No podemos cargar tu calificación en este momento."
       }
     },
     "thanks": {

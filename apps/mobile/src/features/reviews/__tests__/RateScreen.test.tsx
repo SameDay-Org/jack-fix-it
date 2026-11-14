@@ -96,6 +96,7 @@ let mine: Mine | 404 | 500;
 
 const postCalls = () =>
   fetchMock.mock.calls.filter((call) => callPath(call) === REVIEWS && call[1]?.method === "POST");
+const readsOfMine = () => fetchMock.mock.calls.filter((call) => callPath(call) === MINE).length;
 const created = (redacted = false) =>
   jsonResponse(201, {
     id: "5d1b5a2e-2a8c-4b4e-9a53-7d1b5a2e2a8c",
@@ -442,6 +443,65 @@ describe("RateScreen: sending", () => {
     expect(screen.getByTestId("rate-thanks-body")).toHaveTextContent("You gave this job 5 stars.");
   });
 
+  it("already rated and 'mine' unreadable: nothing to edit or send; Try again only reads, then thanks with the saved stars", async () => {
+    const say = jest.spyOn(AccessibilityInfo, "announceForAccessibilityWithOptions");
+    await renderScreen();
+    await fillIn();
+    await fireEvent.press(sendButton());
+
+    mine = 500;
+    await answer(0, (post) => post.resolve(errorResponse(409, "already_reviewed")));
+
+    expect(await screen.findByTestId("rate-rated-unavailable")).toBeOnTheScreen();
+    expect(screen.getByText("You already rated this job")).toBeOnTheScreen();
+    expect(screen.getByText("We can't load your rating right now.")).toBeOnTheScreen();
+    expect(screen.queryByTestId("rate-form")).toBeNull();
+    expect(screen.queryByTestId("rate-send")).toBeNull();
+    expect(screen.queryByTestId("rate-comment")).toBeNull();
+    expect(stars("Overall rating")).toBeNull();
+    expect(say.mock.calls.filter(([message]) => message.startsWith("You already rated"))).toEqual([
+      ["You already rated this job. We can't load your rating right now.", expect.anything()],
+    ]);
+
+    const before = readsOfMine();
+    mine = rated(3);
+    await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
+
+    // The server's stars, not the refused draft's four.
+    expect(await screen.findByTestId("rate-thanks")).toBeOnTheScreen();
+    expect(screen.getByTestId("rate-thanks-body")).toHaveTextContent("You gave this job 3 stars.");
+    expect(readsOfMine()).toBe(before + 1);
+    expect(postCalls()).toHaveLength(1);
+    // The refused draft is gone from memory.
+    const { result } = await renderHook(() => useRateForm(JOB_ID, "customer"), { wrapper });
+    expect(result.current.ratings).toStrictEqual({});
+    expect(result.current.comment).toBe("");
+  });
+
+  it("already rated and 'mine' still unreadable: Try again reads once and stays calm, also on the next visit", async () => {
+    const view = await renderScreen();
+    await fillIn();
+    await fireEvent.press(sendButton());
+    mine = 500;
+    await answer(0, (post) => post.resolve(errorResponse(409, "already_reviewed")));
+    await screen.findByTestId("rate-rated-unavailable");
+
+    const before = readsOfMine();
+    await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
+    await act(settle);
+
+    expect(readsOfMine()).toBe(before + 1);
+    expect(screen.getByTestId("rate-rated-unavailable")).toBeOnTheScreen();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled();
+
+    // Final for the session: opened again while "mine" still fails, the form does not come back.
+    await view.unmount();
+    await renderScreen("rate-rated-unavailable");
+    await act(settle);
+    expect(screen.queryByTestId("rate-send")).toBeNull();
+    expect(postCalls()).toHaveLength(1);
+  });
+
   it("a job that cannot be rated: 'You can rate after the job is confirmed'", async () => {
     await renderScreen();
     await fillIn();
@@ -452,6 +512,19 @@ describe("RateScreen: sending", () => {
 
     expect(await screen.findByTestId("rate-not-yet")).toBeOnTheScreen();
     expect(screen.getByText("You can rate after the job is confirmed.")).toBeOnTheScreen();
+  });
+
+  it("a job that cannot be rated and 'mine' unreadable: still 'not yet', nothing to send", async () => {
+    await renderScreen();
+    await fillIn();
+    await fireEvent.press(sendButton());
+
+    mine = 500;
+    await answer(0, (post) => post.resolve(errorResponse(409, "job_not_reviewable")));
+
+    expect(await screen.findByTestId("rate-not-yet")).toBeOnTheScreen();
+    expect(screen.queryByTestId("rate-send")).toBeNull();
+    expect(postCalls()).toHaveLength(1);
   });
 
   it("a job that is not this person's: the gone state", async () => {

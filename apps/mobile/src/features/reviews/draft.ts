@@ -19,11 +19,24 @@ export type ReviewForm = {
   sendingIn: number | null;
   /** The review went: its stars, and whether contact details were masked in its comment. */
   sent: { overall: number; redacted: boolean } | null;
-  /** Why the last try did not go; the draft is still there. */
+  /** Why the last try did not go; the draft is still there (unless the job was rated already). */
   failure: ReviewFailure | null;
+  /**
+   * The server refused a review because this person already rated the job (409 `already_reviewed`).
+   * Final for the job and the session, whatever the next read of "mine" answers: nothing more is
+   * sent, and the screen shows the saved stars once it can read them.
+   */
+  alreadyReviewed: boolean;
 };
 
-const EMPTY: ReviewForm = { ratings: {}, comment: "", sendingIn: null, sent: null, failure: null };
+const EMPTY: ReviewForm = {
+  ratings: {},
+  comment: "",
+  sendingIn: null,
+  sent: null,
+  failure: null,
+  alreadyReviewed: false,
+};
 
 /** By job id: two jobs' reviews never share a draft or a lock. */
 const formsStore = createStore<Record<string, ReviewForm>>()(() => ({}));
@@ -48,17 +61,20 @@ export function writeComment(jobId: string, comment: string): void {
 
 /**
  * Closes the job's lock for one send, at once. False while its review is already on its way in
- * this session: nothing more may go. A lock left by another session holds nobody back.
+ * this session, or once the server said the job was rated: nothing more may go. A lock left by
+ * another session holds nobody back.
  */
 export function beginSend(jobId: string, generation: number): boolean {
-  if (formOf(jobId).sendingIn === generation) return false;
+  const form = formOf(jobId);
+  if (form.sendingIn === generation || form.alreadyReviewed) return false;
   change(jobId, { sendingIn: generation, sent: null, failure: null });
   return true;
 }
 
 /**
  * Opens the lock and keeps how the send ended: a review that went takes its draft with it, one
- * that did not keeps it. Does nothing for a send of another session.
+ * that did not keeps it. A job rated already drops the refused draft too (its stars are never
+ * shown as the saved ones) and stays rated. Does nothing for a send of another session.
  */
 export function endSend(
   jobId: string,
@@ -67,6 +83,8 @@ export function endSend(
 ): void {
   if (formOf(jobId).sendingIn !== generation) return;
   if ("sent" in outcome) change(jobId, { ...EMPTY, sent: outcome.sent });
+  else if (outcome.failure === "alreadyReviewed")
+    change(jobId, { ...EMPTY, failure: outcome.failure, alreadyReviewed: true });
   else change(jobId, { sendingIn: null, failure: outcome.failure });
 }
 

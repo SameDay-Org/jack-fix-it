@@ -69,6 +69,16 @@ export function RateScreen() {
         fallback={fallback}
       />
     );
+  } else if (form.alreadyReviewed) {
+    // Rated already (the server's 409), its stars not read yet: never the form again.
+    content = (
+      <RatedUnavailable
+        fallback={fallback}
+        retry={() => void mine.refetch()}
+        busy={mine.isFetching}
+        fresh={form.failure === "alreadyReviewed"}
+      />
+    );
   } else if (mine.data === undefined) {
     content = shownError ? (
       <LoadFailed fallback={fallback} retry={() => void mine.refetch()} busy={mine.isFetching} />
@@ -206,14 +216,15 @@ function RateFormView({ jobId, side, form, fallback }: RateFormViewProps) {
 function DimensionTitle({ name, score }: { name: string; score: StarScore | undefined }) {
   const { t } = useTranslation();
   return (
-    // The row below says both to a screen reader. The name takes the row's width: sized to its
-    // own text, a long one wraps by a sub-pixel at 160 dpi and loses its last word.
+    // The row below says both to a screen reader. The name grows into the row's free width: sized
+    // to its own text, a long one wraps by a sub-pixel at 160 dpi and loses its last word. It never
+    // shrinks for the word: with large text the word goes under the name instead of cutting it.
     <View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      className="flex-row items-baseline gap-x-3"
+      className="flex-row flex-wrap items-baseline gap-x-3"
     >
-      <Text className="flex-1 text-callout font-semibold text-navy-900">{name}</Text>
+      <Text className="shrink-0 grow text-callout font-semibold text-navy-900">{name}</Text>
       {score ? (
         <Text className="text-footnote text-gray-500">{t(`reviews.word.${score}`)}</Text>
       ) : null}
@@ -332,6 +343,42 @@ function GoneState({ fallback }: { fallback: Href }) {
       action={t("reviews.gone.home")}
       onAction={() => router.dismissTo("/")}
       testID="rate-gone"
+    />
+  );
+}
+
+type RatedUnavailableProps = {
+  fallback: Href;
+  retry: () => void;
+  busy: boolean;
+  /** It just replaced the form (the review was refused on this visit): said once. */
+  fresh: boolean;
+};
+
+/**
+ * The job is rated already but its stars could not be read: nothing to edit or send, only a new
+ * read of "mine", and the thanks with the saved stars once one answers.
+ */
+function RatedUnavailable({ fallback, retry, busy, fresh }: RatedUnavailableProps) {
+  const { t } = useTranslation();
+  const title = t("reviews.failure.alreadyReviewed.title");
+  const body = t("reviews.failure.alreadyReviewed.body");
+  const said = useRef(false);
+  useEffect(() => {
+    if (!fresh || said.current) return;
+    said.current = true;
+    announce(`${title}. ${body}`);
+  }, [body, fresh, title]);
+
+  return (
+    <RateState
+      fallback={fallback}
+      title={title}
+      body={body}
+      action={t("reviews.retry")}
+      onAction={retry}
+      busy={busy}
+      testID="rate-rated-unavailable"
     />
   );
 }
