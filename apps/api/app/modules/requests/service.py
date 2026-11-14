@@ -24,8 +24,6 @@ keys or URLs.
 
 import base64
 import binascii
-import hashlib
-import hmac
 import json
 import logging
 import uuid
@@ -43,6 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.db import violated_constraint
 from app.errors import NotFoundError
+from app.idempotency import body_fingerprint, same_body
 from app.integrations.storage import Storage
 from app.modules.addresses.geocode import enqueue_geocode
 from app.modules.addresses.schemas import AddressArea, AddressOut
@@ -253,7 +252,7 @@ class ServiceRequestService:
     ) -> CreatedRequest:
         """The request an earlier create with the same key made, when the body is the same
         (fingerprints compared in constant time); 409 when it is not. Logs never carry the key."""
-        if not hmac.compare_digest(earlier.idempotency_fingerprint or "", fingerprint):
+        if not same_body(earlier.idempotency_fingerprint, fingerprint):
             logger.info("request_idempotency_key_reused", extra={"user_id": str(user.id)})
             raise IdempotencyKeyReusedError
         logger.info(
@@ -402,19 +401,14 @@ class ServiceRequestService:
 
 
 def _fingerprint(data: RequestCreate) -> str:
-    """SHA-256 (hex) of the body as validated (trimmed, defaults filled in), its keys sorted:
-    two bodies that differ in any field differ here, and the same body is the same however
-    its JSON was laid out. Text with no UTF-8 form (a lone surrogate, which the schema lets
-    through in intake answers and media keys) is the validation error a create without a
-    key answers too, raised before the key is looked up, so the key stays unused."""
-    canonical = json.dumps(
-        data.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    )
+    """The body's fingerprint (app.idempotency). Text with no UTF-8 form (a lone surrogate,
+    which the schema lets through in intake answers and media keys) is the validation error a
+    create without a key answers too, raised before the key is looked up, so the key stays
+    unused."""
     try:
-        encoded = canonical.encode()
+        return body_fingerprint(data)
     except UnicodeEncodeError:
         raise InvalidRequestError from None
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _encode_cursor(request: ServiceRequest) -> str:

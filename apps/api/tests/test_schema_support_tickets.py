@@ -21,9 +21,10 @@ from app.modules.support.models import SupportTicket, TicketPlatform, TicketStat
 from tests.audit_helpers import audit_rows
 from tests.job_world import JobWorld, build_world, make_job
 
-MIGRATION = (
-    Path(__file__).parents[1] / "alembic" / "versions" / "20261111_73c9a4e17b60_support_tickets.py"
-)
+VERSIONS = Path(__file__).parents[1] / "alembic" / "versions"
+MIGRATION = VERSIONS / "20261111_73c9a4e17b60_support_tickets.py"
+# A later migration that changes this table (#380): the round trip takes it off first.
+IDEMPOTENCY_MIGRATION = VERSIONS / "20261113_3f4b8f6a2cd8_support_ticket_idempotency_key.py"
 TABLE = "support_tickets"
 COLUMNS = (
     "user_id, role, topic, message, job_id, status, closed_at, app_version, platform, created_at"
@@ -48,11 +49,12 @@ NAMES = {
     "ix_support_tickets_status_created_at",
     "ix_support_tickets_created_at",
     "ix_support_tickets_job_id",
+    "uq_support_tickets_user_id_idempotency_key",  # #380
 }
 
 
-def migration() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("support_tickets", MIGRATION)
+def migration(path: Path = MIGRATION) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(path.stem, path)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -60,10 +62,10 @@ def migration() -> ModuleType:
     return module
 
 
-async def step(session: AsyncSession, name: str) -> None:
+async def step(session: AsyncSession, name: str, path: Path = MIGRATION) -> None:
     """Runs the migration's upgrade or downgrade on the test session's transaction, which is
     rolled back: Postgres DDL is transactional, so the shared test database keeps its head."""
-    module = migration()
+    module = migration(path)
 
     def run(connection: Connection) -> None:
         with Operations.context(MigrationContext.configure(connection)):
@@ -223,6 +225,9 @@ async def test_the_round_trip_touches_only_the_new_table(db_session: AsyncSessio
     connection = await db_session.connection()
     at_head = await connection.run_sync(schema)
     others = {name: shape for name, shape in at_head.items() if name != TABLE}
+    # The table as this migration makes it, without what #380 added later.
+    await step(db_session, "downgrade", IDEMPOTENCY_MIGRATION)
+    as_made = await connection.run_sync(schema)
 
     assert migration().down_revision == "5286e0060e55"
     for name in ("downgrade", "upgrade", "downgrade", "upgrade"):
@@ -233,6 +238,8 @@ async def test_the_round_trip_touches_only_the_new_table(db_session: AsyncSessio
         assert (TABLE in now) == (name == "upgrade")
         # The audit log outlives the table: it is append-only.
         assert await audit_rows(db_session) == audited
-    # Up again, the table is exactly the one at head, and empty: the tickets went with it.
-    assert (await connection.run_sync(schema))[TABLE] == at_head[TABLE]
+    # Up again, the table is exactly the one it made, and empty: the tickets went with it.
+    assert (await connection.run_sync(schema))[TABLE] == as_made[TABLE]
     assert await db_session.scalar(text("SELECT count(*) FROM support_tickets")) == 0
+    await step(db_session, "upgrade", IDEMPOTENCY_MIGRATION)
+    assert await connection.run_sync(schema) == at_head

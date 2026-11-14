@@ -1,7 +1,8 @@
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Header, Query, Response, status
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_app_settings
@@ -40,15 +41,36 @@ def get_support_ticket_service(
 Tickets = Annotated[SupportTicketService, Depends(get_support_ticket_service)]
 Limit = Annotated[int | None, Query(gt=0, description="Page size; capped.")]
 Cursor = Annotated[str | None, Query(max_length=200)]
+_IDEMPOTENCY_KEY = TypeAdapter(uuid.UUID)
+
+
+def _parsed_key(raw: str | None) -> uuid.UUID | None:
+    """The Idempotency-Key as the route reads it; None when absent or not a UUID (the route
+    answers that one 422)."""
+    if raw is None:
+        return None
+    try:
+        return _IDEMPOTENCY_KEY.validate_python(raw)
+    except ValidationError:
+        return None
 
 
 async def limit_ticket_creates(
     user: AppUser,
+    tickets: Tickets,
     limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
     settings: Annotated[Settings, Depends(get_app_settings)],
+    raw_key: Annotated[str | None, Header(alias="Idempotency-Key", include_in_schema=False)] = None,
 ) -> None:
     """SUPPORT_TICKET_CREATE_LIMIT tickets per user per SUPPORT_TICKET_CREATE_WINDOW_SECONDS.
-    A refused attempt (an invalid body) counts too."""
+    A refused attempt (an invalid body, a key that is not a UUID) counts too. A create whose
+    Idempotency-Key already wrote one of the user's tickets within the window takes no slot,
+    whatever its body: it writes nothing (a retry answers that ticket, another body is a 409),
+    and an app retrying after a timeout must not lock its user out. A retry that races its
+    first create before that one commits is not seen here, and counts once."""
+    key = _parsed_key(raw_key)
+    if key is not None and await tickets.is_retry(user, key):
+        return
     await enforce_limit(
         limiter,
         "support_ticket_create",
@@ -68,6 +90,19 @@ _STAFF_ACCESS: dict[int | str, dict[str, Any]] = {
     status.HTTP_403_FORBIDDEN: _error("forbidden: only agents and admins."),
 }
 _TICKET_NOT_FOUND = _error("ticket_not_found: no support ticket with this id.")
+IdempotencyKey = Annotated[
+    uuid.UUID | None,
+    Header(
+        alias="Idempotency-Key",
+        description=(
+            "A UUID the app makes once per draft and sends again with every retry of it. "
+            "Within the server's window (24 hours by default) a retry answers 200 with the "
+            "ticket the first call wrote, its status as it is now, writes nothing and takes no "
+            "rate-limit slot; the same key with another body answers 409 "
+            "idempotency_key_reused. Without it every call writes a ticket."
+        ),
+    ),
+]
 
 
 @router.post(
@@ -77,12 +112,24 @@ _TICKET_NOT_FOUND = _error("ticket_not_found: no support ticket with this id.")
     summary="Write to the team (Talk to Jack)",
     dependencies=[Depends(limit_ticket_creates)],
     responses={
+        status.HTTP_200_OK: {
+            "model": SupportTicketCreatedOut,
+            "description": (
+                "A retry: the caller already wrote a ticket with this Idempotency-Key and this "
+                "body within the window. The replay returns that ticket (the same id and "
+                "created_at; its status as it is now); nothing is written."
+            ),
+        },
         **_APP_ACCESS,
+        status.HTTP_409_CONFLICT: _error(
+            "idempotency_key_reused: the caller already used this Idempotency-Key with a "
+            "different body; nothing was changed."
+        ),
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
             "invalid_job: job_id is not a job of which the caller is the customer or the pro "
             "(an unknown job answers the same); validation_error: an unknown topic or "
             f"platform, a message empty, blank or longer than {MESSAGE_MAX_LENGTH} characters, "
-            "an app_version out of format."
+            "an app_version out of format, an Idempotency-Key that is not a UUID."
         ),
         status.HTTP_429_TOO_MANY_REQUESTS: {
             **_error("rate_limited: too many tickets; retry later."),
@@ -96,11 +143,18 @@ _TICKET_NOT_FOUND = _error("ticket_not_found: no support ticket with this id.")
     },
 )
 async def create_ticket(
-    data: SupportTicketIn, user: AppUser, tickets: Tickets
+    data: SupportTicketIn,
+    user: AppUser,
+    tickets: Tickets,
+    response: Response,
+    idempotency_key: IdempotencyKey = None,
 ) -> SupportTicketCreatedOut:
     """Opens a support ticket for the team. The message is kept as typed and read by the team
     only. `job_id` ties the ticket to one of the caller's jobs."""
-    return await tickets.create(user, data)
+    created = await tickets.create(user, data, idempotency_key)
+    if not created.created:
+        response.status_code = status.HTTP_200_OK
+    return created.ticket
 
 
 @router.get(
