@@ -412,6 +412,8 @@ class Settings(BaseSettings):
     # Support tickets ("Talk to Jack", #274): tickets one user may write per window.
     support_ticket_create_limit: int = Field(default=5, gt=0)
     support_ticket_create_window_seconds: int = Field(default=3_600, gt=0)
+    # How long a ticket create's Idempotency-Key answers its retries with the ticket (#380).
+    support_ticket_idempotency_window_seconds: int = Field(default=86_400, gt=0)
     # Reviews (#77): reviews one user may write per window, over all their jobs.
     review_create_limit: int = Field(default=20, gt=0)
     review_create_window_seconds: int = Field(default=3_600, gt=0)
