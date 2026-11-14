@@ -12,7 +12,11 @@
     "hidePassword": "Ocultar contraseña",
     "dismiss": "Cerrar",
     "notSet": "Sin elegir",
-    "optionalLabel": "{{label}} (opcional)"
+    "optionalLabel": "{{label}} (opcional)",
+    "stars": {
+      "value": "{{count}} de {{max}} estrellas",
+      "none": "Sin calificar"
+    }
   },
   "welcome": {
     "support": "Cuéntaselo a Jack. Nosotros nos encargamos del resto.",
@@ -1417,6 +1421,99 @@
       "unread_one": "{{count}} mensaje sin leer",
       "unread_other": "{{count}} mensajes sin leer",
       "label": "{{action}}, {{unread}}"
+    }
+  },
+  "reviews": {
+    "title": {
+      "customer": "Califica a tu profesional",
+      "pro": "Califica a tu cliente"
+    },
+    "intro": {
+      "customer": "¿Cómo te fue con el trabajo?",
+      "pro": "¿Cómo te fue con este trabajo?"
+    },
+    "overall": {
+      "label": "Calificación general",
+      "prompt": "Toca una estrella para calificar"
+    },
+    "word": {
+      "1": "Malo",
+      "2": "Regular",
+      "3": "Bueno",
+      "4": "Muy bueno",
+      "5": "Excelente"
+    },
+    "details": {
+      "title": "Más detalles",
+      "optional": "Opcional. Toca de nuevo una estrella para quitarla."
+    },
+    "dimension": {
+      "communication": "Comunicación",
+      "quality": "Calidad del trabajo",
+      "punctuality": "Puntualidad",
+      "value": "Relación calidad-precio"
+    },
+    "comment": {
+      "label": "Comentario",
+      "hint": "No compartas teléfonos ni correos: se eliminan.",
+      "tooLong_one": "A tu comentario le sobra {{count}} carácter.",
+      "tooLong_other": "A tu comentario le sobran {{count}} caracteres."
+    },
+    "send": "Enviar calificación",
+    "retry": "Intentar de nuevo",
+    "failure": {
+      "offline": {
+        "title": "No pudimos enviar tu calificación",
+        "body": "Sigue aquí. Revisa tu conexión e inténtalo de nuevo."
+      },
+      "failed": {
+        "title": "No pudimos enviar tu calificación",
+        "body": "Sigue aquí. Inténtalo de nuevo en un momento."
+      },
+      "rateLimited": {
+        "title": "Enviaste muchas calificaciones hace poco",
+        "body": "Tu calificación sigue aquí. Envíala un poco más tarde."
+      },
+      "alreadyReviewed": {
+        "title": "Ya calificaste este trabajo",
+        "body": "Cada trabajo recibe una sola calificación, y no se puede cambiar."
+      }
+    },
+    "thanks": {
+      "title": "Gracias por calificar",
+      "body_one": "Le diste {{count}} estrella a este trabajo.",
+      "body_other": "Le diste {{count}} estrellas a este trabajo.",
+      "done": "Listo"
+    },
+    "redacted": {
+      "title": "Los datos de contacto no se comparten en las reseñas",
+      "body": "Los quitamos de tu comentario. El resto quedó tal como lo escribiste."
+    },
+    "notYet": {
+      "title": "Aún no puedes calificar",
+      "body": "Podrás calificar cuando se confirme el trabajo.",
+      "back": "Volver al trabajo"
+    },
+    "gone": {
+      "title": "No encontramos este trabajo",
+      "body": "Puede ser de otra cuenta, o el enlace no funciona.",
+      "home": "Ir al inicio"
+    },
+    "loadFailed": {
+      "title": "No pudimos cargar esta calificación",
+      "body": "Revisa tu conexión e inténtalo de nuevo.",
+      "retry": "Intentar de nuevo"
+    },
+    "entry": {
+      "hint": "¿Cómo te fue? Toma un minuto.",
+      "rated_one": "Gracias, calificaste con {{count}} estrella",
+      "rated_other": "Gracias, calificaste con {{count}} estrellas"
+    },
+    "rating": {
+      "count_one": "{{total}} calificación",
+      "count_other": "{{total}} calificaciones",
+      "spoken": "{{average}} de 5, {{ratings}}",
+      "unavailable": "No disponible"
     }
   }
 }

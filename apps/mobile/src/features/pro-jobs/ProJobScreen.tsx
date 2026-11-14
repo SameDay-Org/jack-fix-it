@@ -30,6 +30,7 @@ import { useRefreshExpiredMedia } from "@/features/opportunities/useOpportunity"
 import { formatLocale, formatMoneyExact } from "@/features/quotes/format";
 import { useGuardedPush } from "@/features/quotes/navigation";
 import { useSettledError } from "@/features/quotes/useRequestQuotes";
+import { RateEntry } from "@/features/reviews";
 import { bubbleShadow, continuousCorners } from "@/theme";
 
 import { isJobGone, startJob, stepFailure, useProJob, useSingleFlight } from "./api";
@@ -44,6 +45,8 @@ import { useJobPhotos, type JobPhotos as KindPhotos } from "./useJobPhotos";
 const TILE_SIDE = 56;
 /** The steps with an action, held in the dock under the page. */
 const DOCKED_STEPS: readonly JobStep[] = ["scheduled", "onTheWay", "arrived", "working"];
+/** The statuses a job can be rated in: confirmed (by the customer or automatically), paid out. */
+const RATEABLE: readonly ProJob["status"][] = ["confirmed", "paid_out"];
 /** The steps that take before photos (the API: on the way or working); a locked check-in waits. */
 const BEFORE_PHOTO_STEPS: readonly JobStep[] = ["onTheWay", "arrived", "working"];
 /** The dock's padding under its last control, above the bottom safe area (Tailwind 4, 16 dp). */
@@ -175,6 +178,8 @@ export function ProJobScreen() {
               />
             ) : null}
             <JobHero job={data} now={dataUpdatedAt} />
+            {/* Rating the customer opens once the job is confirmed (#77). */}
+            <RateEntry jobId={data.id} side="pro" enabled={RATEABLE.includes(data.status)} />
             <JobFacts job={data} />
             <ChatEntry
               jobId={data.id}
