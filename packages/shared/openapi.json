@@ -5412,15 +5412,41 @@
         "summary": "Write to the team (Talk to Jack)",
         "description": "Opens a support ticket for the team. The message is kept as typed and read by the team\nonly. `job_id` ties the ticket to one of the caller's jobs.",
         "operationId": "create_ticket_v1_support_tickets_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A UUID the app makes once per draft and sends again with every retry of it. Within the server's window (24 hours by default) a retry answers 200 with the ticket the first call wrote, its status as it is now, writes nothing and takes no rate-limit slot; the same key with another body answers 409 idempotency_key_reused. Without it every call writes a ticket.",
+              "title": "Idempotency-Key"
+            },
+            "description": "A UUID the app makes once per draft and sends again with every retry of it. Within the server's window (24 hours by default) a retry answers 200 with the ticket the first call wrote, its status as it is now, writes nothing and takes no rate-limit slot; the same key with another body answers 409 idempotency_key_reused. Without it every call writes a ticket."
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SupportTicketIn"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -5434,11 +5460,21 @@
             }
           },
           "422": {
-            "description": "invalid_job: job_id is not a job of which the caller is the customer or the pro (an unknown job answers the same); validation_error: an unknown topic or platform, a message empty, blank or longer than 2000 characters, an app_version out of format.",
+            "description": "invalid_job: job_id is not a job of which the caller is the customer or the pro (an unknown job answers the same); validation_error: an unknown topic or platform, a message empty, blank or longer than 2000 characters, an app_version out of format, an Idempotency-Key that is not a UUID.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "A retry: the caller already wrote a ticket with this Idempotency-Key and this body within the window. The replay returns that ticket (the same id and created_at; its status as it is now); nothing is written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportTicketCreatedOut"
                 }
               }
             }
@@ -5455,6 +5491,16 @@
           },
           "403": {
             "description": "forbidden: only customers and pros write tickets.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "idempotency_key_reused: the caller already used this Idempotency-Key with a different body; nothing was changed.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5481,12 +5527,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
     "/v1/support/tickets/mine": {
