@@ -93,6 +93,7 @@ environment as **shared variables** referenced from both services, so the two ne
 | `LOCATION_REDIS_RECHECK_SECONDS`   | optional; `60` by default                                                   | no              | #350       |
 | `LOCATION_REDIS_ASSUME_EPHEMERAL`  | optional; only for a Redis that refuses `CONFIG GET` (see below)            | no              | #350       |
 | `MAPBOX_ACCESS_TOKEN`              | a secret server token; unset, `GET /v1/jobs/{job_id}/route` answers 503     | yes             | #351       |
+| `GEOCODE_ON_SAVE`                  | optional; `false` by default; see "Geocode on save" below before `true`     | no              | #384       |
 
 "Required" means the API refuses to start in staging and production without it (the settings
 validators in `apps/api/app/config.py`). Every other setting has a working default; the
@@ -190,6 +191,63 @@ position. Confirm the exact dashboard steps on the first setup and update this s
 Leave `HOST` unset: the default `::` listens on IPv6 (private network) and IPv4 (public proxy
 and healthcheck) on one socket.
 
+#### Geocode on save (#384)
+
+`GEOCODE_ON_SAVE` is `false` by default: each computed route then places the job's address
+itself, with Mapbox's temporary geocoding (one more call per computed route, and nothing
+kept). With `true`, the worker places each new request's address once, with Mapbox's
+**permanent** geocoding (`permanent=true`), and keeps the point on the address row; the route
+reads it and asks Mapbox for directions only. Setting it to `true` starts billed calls, so
+it is a billing change: Cesar's decision in every environment, never Sentinel's, although the
+variable is not a secret. Before setting it to `true`:
+
+1. Cesar adds a payment method to the Mapbox account. Permanent geocoding is billed per
+   request, apart from the temporary kind, and Mapbox refuses it to an account without one.
+2. Set `GEOCODE_ON_SAVE=true` on api and worker (a shared variable), and give the worker
+   `MAPBOX_ACCESS_TOKEN`: the api only queues the job, the worker makes the call. The
+   customer's save waits for the queue at the most (`JOB_ENQUEUE_TIMEOUT_SECONDS`), never
+   for Mapbox; the worker's call takes `MAPBOX_TIMEOUT_SECONDS` at the most.
+3. Optional, once: fill the addresses made before, from a shell in the worker.
+   `python -m scripts.backfill_address_geocodes` is a dry run that counts the addresses
+   without a point: every one, whatever became of its request (open, cancelled, expired or
+   done). With `--apply` each of them is one billed call (`GEOCODE_BACKFILL_BATCH_SIZE` ids
+   per step, at most `GEOCODE_BACKFILL_PER_MINUTE` calls a minute). It stops when Mapbox is
+   unavailable three times in a row and can be run again; a later run asks once more, and
+   is billed once more, for each address that kept nothing.
+
+   `--apply` never runs unattended, because every call it makes is billed. Run it from an
+   interactive shell: `railway ssh --service worker`, or a local terminal with the service's
+   variables. Before Mapbox is asked anything it prints how many addresses it would send and
+   that each one is billed, then waits for the operator to type that number. Without a
+   terminal on standard input (a pipe, a file, a scheduled job), at the end of the input, on
+   an empty line or on any other answer it exits 1 and asks Mapbox nothing. There is no
+   `--yes` flag and no variable that skips the question. The run then asks about that many
+   addresses at the most.
+
+One caller at a time asks Mapbox about an address. The worker's job and the backfill both
+claim the address in the queue's Redis (`REDIS_URL`, never `redis-location`) before the
+call, and look at the row again once they hold the claim; a claim ends by itself a few
+seconds after `MAPBOX_TIMEOUT_SECONDS`, so a holder that died blocks nobody. An address
+claimed elsewhere is skipped (outcome `busy`): the worker leaves it to the holder and the
+backfill counts it and moves on. If that Redis is unreachable the backfill stops with exit 1
+before asking about the address, and the worker's job fails without asking.
+
+A point is kept only when Mapbox places the address in its own state and ZIP. Anything else
+keeps nothing and the route places that address itself, as with the switch off: WARNING
+`address_geocode_not_kept` with the address id and the outcome (`no_result`, `mismatch`,
+`unavailable`, `changed`), never the address or a coordinate. The job has one try, since
+each run that reaches Mapbox is billed: one that a worker deploy interrupts is not run again
+(ARQ logs it as cancelled, then as past its retries) and its address stays without a point.
+
+Budget and abuse. One new request is one permanent geocoding call. What bounds the calls is
+the request limiter, a rate bound and not a spending cap: `REQUEST_CREATE_LIMIT` creations
+per customer per `REQUEST_CREATE_WINDOW_SECONDS` (10 an hour by default). It fails open when
+its Redis is down (the availability policy of every limiter here), and there is no global
+budget for the vendor across accounts and windows. So Cesar sets a spending alert in the
+Mapbox account before turning the switch on. Turning it off takes the variable change and
+the restart of api and worker that follows it: from then on no call is made, jobs already
+queued included. It cannot undo a call already sent; the points kept so far stay in use.
+
 ### worker
 
 The worker builds the same settings when `app/worker.py` is imported, so the same validators
@@ -220,6 +278,8 @@ never logs `worker_started`. Use the same values as api.
 | `EXPO_ACCESS_TOKEN`                | optional; set it only if Expo enhanced push security is on | yes             | D10.3 (#54) |
 | `ORPHAN_UPLOAD_MIN_AGE_HOURS`      | same as api (shared variable)                              | no              | #191, #298  |
 | `JOB_PHOTO_ATTACH_MAX_AGE_MINUTES` | same as api (shared variable)                              | no              | #298        |
+| `GEOCODE_ON_SAVE`                  | same as api (shared variable); see "Geocode on save"       | no              | #384        |
+| `MAPBOX_ACCESS_TOKEN`              | same as api; only needed with `GEOCODE_ON_SAVE=true`       | yes             | #384        |
 
 `ORPHAN_UPLOAD_MIN_AGE_HOURS` and `JOB_PHOTO_ATTACH_MAX_AGE_MINUTES` must hold the same values
 on api and worker: the api refuses job photo uploads older than the window, and the worker's

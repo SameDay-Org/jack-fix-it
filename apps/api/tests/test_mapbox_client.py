@@ -19,12 +19,14 @@ from app.integrations.mapbox import (
     GEOCODE_URL,
     Coordinate,
     DrivingRoute,
+    KeptGeocode,
     MapboxRouteProvider,
     MapboxUnavailableError,
     RouteStep,
     StreetAddress,
     UnconfiguredRouteProvider,
     get_route_provider,
+    provider_from_settings,
 )
 from app.observability import (
     MAPBOX_HOST,
@@ -504,3 +506,115 @@ def test_route_settings_come_from_the_environment(monkeypatch: pytest.MonkeyPatc
         settings.route_max_points,
         settings.route_max_steps,
     ) == (1.5, 45, 20, 250.0, 50, 5)
+
+
+# Permanent geocoding (#384): the only kind whose result may be stored
+
+
+def kept_feature(region: Any = "FL", postcode: Any = "00001") -> dict[str, Any]:
+    made = feature()
+    made["properties"]["context"] = {
+        "region": {"name": "Florida", "region_code": region, "region_code_full": "US-FL"},
+        "postcode": {"name": postcode},
+        "place": {"name": "Testville"},
+    }
+    return made
+
+
+def _without_context(properties: Any) -> dict[str, Any]:
+    return {**feature(), "properties": properties}
+
+
+async def test_a_geocode_to_keep_says_permanent_and_a_temporary_one_never_does() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return geocoded(kept_feature(), kept_feature("GA", "99999"))
+
+    mapbox = provider(handler)
+    kept = await mapbox.geocode_to_keep(ADDRESS)
+    temporary = await mapbox.geocode(ADDRESS)
+
+    to_keep, to_drop = (dict(request.url.params) for request in seen)
+    # Mapbox's terms: only a result asked for with permanent=true may be stored.
+    assert to_keep.pop("permanent") == "true"
+    assert "permanent" not in to_drop
+    # The same question otherwise: structured, in the query, the ZIP's five digits.
+    assert to_keep == to_drop
+    assert to_keep["postcode"] == "00001"
+    assert [request.method for request in seen] == ["GET", "GET"]
+    assert all(
+        f"{request.url.scheme}://{request.url.host}{request.url.path}" == GEOCODE_URL
+        and request.extensions["timeout"] == httpx.Timeout(TIMEOUT).as_dict()
+        for request in seen
+    )
+    # The first feature: its point, and the state and the ZIP Mapbox places it in.
+    assert kept == KeptGeocode(
+        coordinate=Coordinate(lat=26.234568, lng=-80.254321), region_code="FL", postcode="00001"
+    )
+    assert temporary == Coordinate(lat=26.234568, lng=-80.254321)
+
+
+@pytest.mark.parametrize(
+    ("made", "area"),
+    [
+        (kept_feature(" FL ", " 00001 "), ("FL", "00001")),
+        (kept_feature("fl", "00001-1234"), ("fl", "00001-1234")),  # as Mapbox wrote them
+        (kept_feature(None, "00001"), (None, "00001")),
+        (kept_feature("FL", 1), ("FL", None)),
+        (kept_feature("", "  "), (None, None)),
+        (feature(), (None, None)),
+        (_without_context("Test Street"), (None, None)),
+        (_without_context({"context": ["FL", "00001"]}), (None, None)),
+        (_without_context({"context": {"region": "FL", "postcode": "00001"}}), (None, None)),
+    ],
+    ids=[
+        "trimmed",
+        "unchanged",
+        "no_region_code",
+        "postcode_not_text",
+        "blank",
+        "no_context",
+        "properties_not_an_object",
+        "context_not_an_object",
+        "layers_not_objects",
+    ],
+)
+async def test_the_area_of_a_result_to_keep_is_what_mapbox_names(
+    made: dict[str, Any], area: tuple[str | None, str | None]
+) -> None:
+    kept = await provider(lambda _: geocoded(made)).geocode_to_keep(ADDRESS)
+
+    assert kept is not None
+    assert (kept.region_code, kept.postcode) == area
+
+
+async def test_no_such_address_to_keep_is_none() -> None:
+    assert await provider(lambda _: geocoded()).geocode_to_keep(ADDRESS) is None
+
+
+@pytest.mark.parametrize("handler", list(GEOCODING_FAILURES.values()), ids=list(GEOCODING_FAILURES))
+async def test_failures_of_a_geocode_to_keep_are_unavailable_without_a_leak(
+    handler: Handler, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.DEBUG), pytest.raises(MapboxUnavailableError) as info:
+        await provider(handler).geocode_to_keep(ADDRESS)
+
+    assert_unavailable_without_leak(info, caplog)
+
+
+async def test_unconfigured_provider_keeps_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.DEBUG), pytest.raises(MapboxUnavailableError):
+        await UnconfiguredRouteProvider().geocode_to_keep(ADDRESS)
+
+    assert [(r.message, r.levelno) for r in caplog.records] == [
+        ("mapbox_not_configured", logging.WARNING)
+    ]
+
+
+def test_the_worker_gets_the_mapbox_client_only_with_a_token() -> None:
+    assert isinstance(provider_from_settings(make_settings()), UnconfiguredRouteProvider)
+    assert isinstance(
+        provider_from_settings(make_settings(mapbox_access_token=TOKEN)), MapboxRouteProvider
+    )

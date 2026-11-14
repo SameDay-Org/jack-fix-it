@@ -6,8 +6,11 @@ Two calls, both with httpx (async, one deadline each from settings); nothing is 
   in the body: the URL names the profile and carries the access token in its query string,
   which is where Mapbox wants it.
 - Geocoding v6, forward, structured input: where a US street address is. The address travels
-  in the query string. Results are temporary ones (`permanent` left out): Mapbox's terms do
-  not allow keeping or caching them, and nothing here or in its caller does.
+  in the query string. It comes in two kinds, and the caller says which by the method:
+  `geocode` asks for a temporary result (`permanent` left out), which Mapbox's terms do not
+  allow keeping or caching, and nothing here or in its caller does; `geocode_to_keep` asks
+  with `permanent=true` (#384), the only kind that may be stored. Mapbox bills that kind
+  apart and answers it only for an account with a payment method on file.
 
 A position and an address are PII, and the token is a secret. So nothing here logs a
 coordinate, an address part, the token, a URL or a response body, and no exception leaves this
@@ -84,6 +87,26 @@ class DrivingRoute:
     steps: tuple[RouteStep, ...]
 
 
+@dataclass(frozen=True)
+class KeptGeocode:
+    """A result that may be stored (`permanent=true`): the point, and the state and the ZIP
+    Mapbox places it in (None where its answer names none), for the caller to hold against
+    the address it asked about before it keeps anything."""
+
+    coordinate: Coordinate
+    region_code: str | None
+    postcode: str | None
+
+
+class AddressGeocoder(Protocol):
+    """Places an address to keep its point (#384). Raises MapboxUnavailableError when the
+    provider cannot answer."""
+
+    async def geocode_to_keep(self, address: StreetAddress) -> KeptGeocode | None:
+        """Where the address is, or None when the provider finds no such address."""
+        ...
+
+
 class RouteProvider(Protocol):
     """Both calls raise MapboxUnavailableError when the provider cannot answer."""
 
@@ -100,6 +123,9 @@ class UnconfiguredRouteProvider:
     """Stands in while MAPBOX_ACCESS_TOKEN is unset: every call is unavailable."""
 
     async def geocode(self, address: StreetAddress) -> Coordinate | None:
+        raise self._unavailable()
+
+    async def geocode_to_keep(self, address: StreetAddress) -> KeptGeocode | None:
         raise self._unavailable()
 
     async def route(self, origin: Coordinate, destination: Coordinate) -> DrivingRoute | None:
@@ -134,6 +160,21 @@ class MapboxRouteProvider:
         )
 
     async def geocode(self, address: StreetAddress) -> Coordinate | None:
+        """A temporary result: for this one use, never to be stored or cached."""
+        feature = await self._first_address(address, permanent=False)
+        return None if feature is None else _feature_coordinate(feature)
+
+    async def geocode_to_keep(self, address: StreetAddress) -> KeptGeocode | None:
+        """A permanent result (billed apart): the only kind the caller may store."""
+        feature = await self._first_address(address, permanent=True)
+        if feature is None:
+            return None
+        coordinate = _feature_coordinate(feature)
+        region_code, postcode = _feature_area(feature)
+        return KeptGeocode(coordinate=coordinate, region_code=region_code, postcode=postcode)
+
+    async def _first_address(self, address: StreetAddress, *, permanent: bool) -> object | None:
+        """The best address feature Mapbox has for the address, or None when it has none."""
         params = {
             "address_line1": address.line1,
             "place": address.city,
@@ -145,19 +186,15 @@ class MapboxRouteProvider:
             "autocomplete": "false",
             "access_token": self._access_token,
         }
+        if permanent:
+            # https://docs.mapbox.com/api/search/geocoding/: "whether you intend to store the
+            # results of the query". Left out, the result is a temporary one.
+            params["permanent"] = "true"
         body = await self._send("geocoding", "GET", GEOCODE_URL, params=params)
         features = body.get("features")
         if not isinstance(features, list):
             raise _unexpected("geocoding", "no_features")
-        if not features:
-            return None
-        first = features[0]
-        geometry = first.get("geometry") if isinstance(first, dict) else None
-        point = geometry.get("coordinates") if isinstance(geometry, dict) else None
-        coordinate = _coordinate(point)
-        if coordinate is None:
-            raise _unexpected("geocoding", "bad_coordinates")
-        return coordinate
+        return features[0] if features else None
 
     async def route(self, origin: Coordinate, destination: Coordinate) -> DrivingRoute | None:
         form = {
@@ -250,6 +287,32 @@ def _coordinate(point: object) -> Coordinate | None:
     return Coordinate(lat=lat, lng=lng)
 
 
+def _feature_coordinate(feature: object) -> Coordinate:
+    geometry = feature.get("geometry") if isinstance(feature, dict) else None
+    point = geometry.get("coordinates") if isinstance(geometry, dict) else None
+    coordinate = _coordinate(point)
+    if coordinate is None:
+        raise _unexpected("geocoding", "bad_coordinates")
+    return coordinate
+
+
+def _feature_area(feature: object) -> tuple[str | None, str | None]:
+    """The state's code (`context.region.region_code`, "FL") and the ZIP
+    (`context.postcode.name`) of a geocoding feature; None for one its answer does not name."""
+    properties = feature.get("properties") if isinstance(feature, dict) else None
+    context = properties.get("context") if isinstance(properties, dict) else None
+    if not isinstance(context, dict):
+        return None, None
+    region_code = _context_text(context, "region", "region_code")
+    return region_code, _context_text(context, "postcode", "name")
+
+
+def _context_text(context: dict[str, object], layer: str, field: str) -> str | None:
+    entry = context.get(layer)
+    value = entry.get(field) if isinstance(entry, dict) else None
+    return value.strip() or None if isinstance(value, str) else None
+
+
 def _amount(value: object) -> float | None:
     """A distance in meters or a time in seconds: a finite number, zero or more."""
     number = _number(value)
@@ -299,6 +362,14 @@ def _step(step: object) -> RouteStep | None:
     return RouteStep(street_name=name.strip(), distance_m=distance, duration_s=duration)
 
 
+def provider_from_settings(settings: Settings) -> MapboxRouteProvider | UnconfiguredRouteProvider:
+    """Mapbox with MAPBOX_ACCESS_TOKEN; without it the stand-in whose every call is
+    unavailable. Either is a RouteProvider and an AddressGeocoder."""
+    if settings.mapbox_access_token is None:
+        return UnconfiguredRouteProvider()
+    return MapboxRouteProvider.from_settings(settings)
+
+
 def get_route_provider(request: Request) -> RouteProvider:
     """FastAPI dependency: one provider per app, built on first use (tests override this).
 
@@ -306,10 +377,6 @@ def get_route_provider(request: Request) -> RouteProvider:
     """
     provider: RouteProvider | None = getattr(request.app.state, "route_provider", None)
     if provider is None:
-        settings: Settings = request.app.state.settings
-        if settings.mapbox_access_token is None:
-            provider = UnconfiguredRouteProvider()
-        else:
-            provider = MapboxRouteProvider.from_settings(settings)
+        provider = provider_from_settings(request.app.state.settings)
         request.app.state.route_provider = provider
     return provider

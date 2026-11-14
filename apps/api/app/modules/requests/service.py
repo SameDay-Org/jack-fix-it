@@ -6,8 +6,10 @@ origin (app), language (the caller's locale) and status (received); urgency and 
 contact are not accepted from the client yet (#45 defines their values).
 
 After the commit, create queues dispatch (#48) for the worker, then, when the request has
-media, the privacy-safe copy of its photos and videos (#173); a failed or slow enqueue is
-logged and never fails the request (the BDC can dispatch it again).
+media, the privacy-safe copy of its photos and videos (#173), then, with GEOCODE_ON_SAVE, the
+geocoding of its address (#384: the address id only); a failed or slow enqueue is logged and
+never fails the request (the BDC can dispatch it again; an address without a point is placed
+by its route).
 
 A create may carry an Idempotency-Key (#264), a UUID the app makes once per draft. Within
 REQUEST_IDEMPOTENCY_WINDOW_SECONDS a repeat of the customer's key answers the request it made
@@ -41,6 +43,7 @@ from app.db import violated_constraint
 from app.errors import NotFoundError
 from app.idempotency import body_fingerprint, same_body
 from app.integrations.storage import Storage
+from app.modules.addresses.geocode import enqueue_geocode
 from app.modules.addresses.schemas import AddressArea, AddressOut
 from app.modules.addresses.service import AddressPlace, AddressService
 from app.modules.auth.permissions import ensure_owner
@@ -102,6 +105,8 @@ class RequestConfig:
     media_url_ttl_seconds: int
     enqueue_timeout_seconds: float
     idempotency_window_seconds: int
+    # GEOCODE_ON_SAVE (#384): whether a new request's address is queued for its point.
+    geocode_on_save: bool
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "RequestConfig":
@@ -113,6 +118,7 @@ class RequestConfig:
             media_url_ttl_seconds=settings.download_url_ttl_seconds,
             enqueue_timeout_seconds=settings.job_enqueue_timeout_seconds,
             idempotency_window_seconds=settings.request_idempotency_window_seconds,
+            geocode_on_save=settings.geocode_on_save,
         )
 
 
@@ -237,6 +243,8 @@ class ServiceRequestService:
         await self._queue_dispatch(request.id)
         if media_kinds:
             await self._queue_sanitize(request.id)
+        if self._config.geocode_on_save:
+            await self._queue_geocode(request.id, address_id)
         return CreatedRequest(request=await self._detail(request), created=True)
 
     async def _replay(
@@ -268,6 +276,18 @@ class ServiceRequestService:
             await enqueue_sanitize(self._queue, request_id, self._config.enqueue_timeout_seconds)
         except (RedisError, OSError):  # TimeoutError is an OSError
             logger.error("sanitize_enqueue_failed", extra={"service_request_id": str(request_id)})
+
+    async def _queue_geocode(self, request_id: uuid.UUID, address_id: uuid.UUID) -> None:
+        """Hands the committed address to its geocoding (#384), last: it delays nothing. Only
+        the create that made the address queues it (a replay does not). Never fails the
+        create: the address stays without a point, and its route places it by itself."""
+        try:
+            await enqueue_geocode(self._queue, address_id, self._config.enqueue_timeout_seconds)
+        except (RedisError, OSError):  # TimeoutError is an OSError
+            logger.error(
+                "address_geocode_enqueue_failed",
+                extra={"service_request_id": str(request_id), "address_id": str(address_id)},
+            )
 
     async def get(self, user: UserAccount, request_id: uuid.UUID) -> RequestOut:
         request = await self._requests.get(request_id)

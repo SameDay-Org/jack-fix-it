@@ -35,6 +35,7 @@ from app.integrations.mapbox import (
     StreetAddress,
     get_route_provider,
 )
+from app.modules.addresses.geocode import AddressGeocodeService, GeocodeOutcome
 from app.modules.addresses.models import Address
 from app.modules.addresses.service import AddressPlace
 from app.modules.jobs.location import (
@@ -67,6 +68,7 @@ from tests.conftest import (
 )
 from tests.helpers import log_fields, masked_fields
 from tests.job_world import LINE1, LINE2, JobWorld, Party, build_world, make_job, record_pushes
+from tests.test_address_geocode import FakeGeocoder, MemoryGeocodeClaims, kept
 from tests.test_pro_location_api import (
     CODE,
     FORBIDDEN,
@@ -1911,3 +1913,67 @@ def test_openapi_documents_the_route(app: FastAPI) -> None:
     assert set(schemas["JobRouteStep"]["required"]) == {"street_name", "distance_m", "duration_s"}
     point = schemas["JobRoute"]["properties"]["geometry"]["items"]
     assert (point["minItems"], point["maxItems"]) == (2, 2)
+
+
+# Geocode on save (#384): the route reads the point the address was given
+
+
+async def geocode_on_save(
+    session: AsyncSession, world: JobWorld, found: Coordinate, *, postcode: str
+) -> GeocodeOutcome:
+    """The worker's step for the job's address, Mapbox answering `found` in ZIP `postcode`."""
+    geocoder = FakeGeocoder()
+    geocoder.answer = kept(region="FL", postcode=postcode, point=found)
+    service = AddressGeocodeService(session, geocoder, MemoryGeocodeClaims(), enabled=True)
+    outcome = await service.geocode(world.address_id)
+    # The worker has its own session; this test's remembers the row from before.
+    address = await session.get(Address, world.address_id)
+    assert address is not None
+    await session.refresh(address)
+    return outcome
+
+
+async def test_a_point_kept_on_save_is_routed_to_and_nothing_is_geocoded(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    store: RedisJobLocationStore,
+    cache: RedisJobRouteCache,
+    mapbox: FakeMapbox,
+) -> None:
+    job = await on_the_way_job(db_session, world)  # its address row has no lat/lng
+    saved = await geocode_on_save(db_session, world, DESTINATION, postcode="32801")
+    await plant(store, job.id)
+
+    route = await shown(db_client, job.id, world)
+
+    assert saved is GeocodeOutcome.STORED
+    assert route is not None
+    # One call to Mapbox per computed route: the directions, to the point as it was stored
+    # (five decimals). The address is not sent again.
+    assert mapbox.geocodes == []
+    assert mapbox.routes == [(ORIGIN, Coordinate(lat=26.23457, lng=-80.25432))]
+
+
+async def test_an_address_whose_geocode_kept_nothing_is_placed_by_its_route(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    store: RedisJobLocationStore,
+    cache: RedisJobRouteCache,
+    mapbox: FakeMapbox,
+) -> None:
+    job = await on_the_way_job(db_session, world)
+    saved = await geocode_on_save(db_session, world, DESTINATION, postcode="32899")
+    await plant(store, job.id)
+
+    route = await shown(db_client, job.id, world)
+
+    # Mapbox put the address in another ZIP: nothing was kept, and the route works as it did
+    # before, with a temporary geocode of its own.
+    assert saved is GeocodeOutcome.MISMATCH
+    assert route is not None
+    assert mapbox.geocodes == [
+        StreetAddress(line1=LINE1, city="Orlando", state="FL", zip_code="32801")
+    ]
+    assert mapbox.routes == [(ORIGIN, GEOCODED)]
