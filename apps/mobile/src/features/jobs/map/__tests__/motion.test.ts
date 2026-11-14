@@ -1,3 +1,4 @@
+import { overviewStop } from "../camera";
 import {
   bearingDeg,
   distanceM,
@@ -7,6 +8,7 @@ import {
   slicePath,
   towardDeg,
   turnDeg,
+  type LngLat,
 } from "../geo";
 import {
   MIN_MOVE_M,
@@ -179,5 +181,31 @@ describe("routeAhead", () => {
   it("bridges straight without a route before it", () => {
     const recomputed = measurePath([at(0, 200), at(0, 400)]);
     expect(routeAhead(recomputed, null, at(0, 100))).toEqual([at(0, 100), at(0, 200), at(0, 400)]);
+  });
+});
+
+describe("overviewStop", () => {
+  const SIZE = { width: 320, height: 320 };
+
+  it("centers between the pro and the address and fits both in the room left", () => {
+    const stop = overviewStop([at(0, 0), DOOR], SIZE, 100, 0);
+    const center = stop.centerCoordinate as unknown as LngLat;
+    expect(distanceM(center, at(200, 200))).toBeLessThan(2);
+    // 400 m by 400 m into 240 x 112 dp: the height decides, 3.6 m per dp (zoom 14.2) less the
+    // tilt's margin.
+    expect(stop.zoomLevel).toBeCloseTo(13.95, 1);
+    expect(stop.padding).toEqual({
+      paddingTop: 64,
+      paddingBottom: 144,
+      paddingLeft: 40,
+      paddingRight: 40,
+    });
+  });
+
+  it("zooms out further for a pro farther away, and never in past street level", () => {
+    const near = overviewStop([at(0, 0), DOOR], SIZE, 100, 0).zoomLevel as number;
+    const far = overviewStop([at(-3000, -3000), DOOR], SIZE, 100, 0).zoomLevel as number;
+    expect(far).toBeLessThan(near - 2);
+    expect(overviewStop([DOOR, DOOR], SIZE, 100, 0).zoomLevel).toBe(15);
   });
 });

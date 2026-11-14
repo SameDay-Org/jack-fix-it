@@ -5,7 +5,13 @@ import { Text } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
 
 import type { JobRoute } from "../api";
-import { FOLLOW_PITCH, FOLLOW_ZOOM, OVERVIEW_HOLD_MS, REDUCED_MOTION_MS } from "../camera";
+import {
+  FOLLOW_PITCH,
+  FOLLOW_ZOOM,
+  OVERVIEW_HOLD_MS,
+  OVERVIEW_PITCH,
+  REDUCED_MOTION_MS,
+} from "../camera";
 import { distanceM, type LngLat } from "../geo";
 import { LiveMap, STANDARD_STYLE_URL, type LiveMapProps } from "../LiveMap";
 import type { Fix } from "../motion";
@@ -72,6 +78,10 @@ function lastVan() {
 
 const cameraCalls = () => mapbox.mockCamera.setCamera.mock.calls.map(([stop]) => stop);
 const lastCamera = () => cameraCalls().at(-1);
+
+const loadMap = async () => {
+  await act(async () => screen.getByTestId("live-map-view").props.onDidFinishLoadingMap());
+};
 
 const gesture = async (heading: number, isUserInteraction: boolean) => {
   await act(async () => {
@@ -206,6 +216,7 @@ describe("LiveMap's follow camera", () => {
 
   it("stops following when the customer moves the map, and Recenter takes it back", async () => {
     await render(<LiveMap {...props()} />);
+    await loadMap();
     expect(screen.queryByTestId("live-map-recenter")).toBeNull();
     await gesture(0, true);
     const recenter = screen.getByTestId("live-map-recenter");
@@ -224,10 +235,12 @@ describe("LiveMap's follow camera", () => {
 
   it("fits the pro and the address first, then follows once the map has loaded", async () => {
     await render(<LiveMap {...props({ route: route(1200) })} />);
-    expect(screen.getByTestId("mapbox-Camera").props.defaultSettings.bounds).toMatchObject({
-      ne: [DOOR[0], DOOR[1]],
-    });
-    await act(async () => screen.getByTestId("live-map-view").props.onDidFinishLoadingMap());
+    expect(cameraCalls()).toHaveLength(0);
+    // The overview is placed once the map has loaded (it has no size to fit before).
+    await loadMap();
+    expect(cameraCalls()).toHaveLength(1);
+    expect(lastCamera()).toMatchObject({ animationDuration: 0, pitch: OVERVIEW_PITCH, heading: 0 });
+    expect(lastCamera()?.zoomLevel).toBeLessThan(FOLLOW_ZOOM);
     await advance(OVERVIEW_HOLD_MS);
     expect(lastCamera()).toMatchObject({ pitch: FOLLOW_PITCH, animationMode: "easeTo" });
   });
@@ -235,12 +248,12 @@ describe("LiveMap's follow camera", () => {
   it("keeps the overview while the pro is more than 3 km away, then follows", async () => {
     const far = props({ route: route(5000) });
     await render(<LiveMap {...far} />);
-    await act(async () => screen.getByTestId("live-map-view").props.onDidFinishLoadingMap());
+    await loadMap();
     await advance(OVERVIEW_HOLD_MS);
     await screen.rerender(<LiveMap {...far} fix={fix(at(0, 150), POLL_MS, 0)} />);
     await advance(FRAME_MS);
-    expect(cameraCalls().every((stop) => stop?.bounds !== undefined)).toBe(true);
-    expect(lastCamera()?.bounds).toBeDefined();
+    expect(cameraCalls().every((stop) => stop?.pitch === OVERVIEW_PITCH)).toBe(true);
+    expect(lastCamera()?.pitch).toBe(OVERVIEW_PITCH);
 
     await screen.rerender(
       <LiveMap {...far} route={route(2900)} fix={fix(at(0, 150), POLL_MS, 0)} />,

@@ -24,7 +24,7 @@ import {
   type Ref,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { Platform, Pressable, useColorScheme, View } from "react-native";
+import { Platform, Pressable, useColorScheme, useWindowDimensions, View } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
 
@@ -147,6 +147,7 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
   const { t } = useTranslation();
   const reduceMotion = useReducedMotion();
   const lightPreset = useColorScheme() === "dark" ? "night" : "day";
+  const { width } = useWindowDimensions();
   const camera = useRef<ComponentRef<typeof Camera>>(null);
   const van = useRef<ShapeSource>(null);
   const pose = useRef<VanPose | null>(null);
@@ -181,7 +182,9 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
   const showOverview = (point: LngLat, duration: number) => {
     if (trail.destination === null) return;
     heading.current = 0;
-    camera.current?.setCamera(overviewStop([point, trail.destination], covered, duration));
+    camera.current?.setCamera(
+      overviewStop([point, trail.destination], { width, height }, covered, duration),
+    );
   };
 
   // Each frame draws the van; while following, the camera moves on to where the van will be.
@@ -203,28 +206,31 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
     onFrame,
   );
 
-  // A new mode moves the camera there; the first one is the camera's default settings.
-  const applyMode = useEffectEvent((next: CameraMode) => {
+  // Each mode moves the camera there, once the map has loaded: before that the map has no size to
+  // fit an overview to (Android fits the default settings' bounds too early). The first move is
+  // instant, every later one eases.
+  const applyMode = useEffectEvent((next: CameraMode, first: boolean) => {
     const at = pose.current;
     if (at === null) return;
-    const duration = reduceMotion ? REDUCED_MOTION_MS : CAMERA_TRANSITION_MS;
+    const duration = first ? 0 : reduceMotion ? REDUCED_MOTION_MS : CAMERA_TRANSITION_MS;
     if (next === "follow") {
-      moveTo(at.point, at.bearing, duration, "easeTo");
+      moveTo(at.point, at.bearing, duration, first ? "none" : "easeTo");
       nextStep.current = Date.now() + duration;
     } else if (next === "overview") {
       showOverview(at.point, duration);
     }
   });
-  const shownMode = useRef(mode);
+  const placedFor = useRef<CameraMode | null>(null);
   useEffect(() => {
-    if (shownMode.current === mode) return;
-    shownMode.current = mode;
-    applyMode(mode);
-  }, [mode]);
+    if (!loaded || placedFor.current === mode) return;
+    const first = placedFor.current === null;
+    placedFor.current = mode;
+    applyMode(mode, first);
+  }, [loaded, mode]);
 
   // The overview follows each new fix.
   const refitOverview = useEffectEvent(() => {
-    if (mode === "overview") showOverview(fix.point, CAMERA_TRANSITION_MS);
+    if (loaded && mode === "overview") showOverview(fix.point, CAMERA_TRANSITION_MS);
   });
   useEffect(() => refitOverview(), [fix.at]);
 
@@ -243,10 +249,7 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
 
   const [initial] = useState(() => ({
     van: vanFeature({ point: fix.point, bearing: fix.heading ?? 0 }, stale),
-    camera:
-      trail.destination !== null
-        ? overviewStop([fix.point, trail.destination], covered, 0)
-        : followStop(fix.point, fix.heading ?? 0, padding, 0, "none"),
+    camera: followStop(fix.point, fix.heading ?? 0, padding, 0, "none"),
   }));
 
   return (
