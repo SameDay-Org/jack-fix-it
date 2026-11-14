@@ -25,6 +25,10 @@ const CONTROL_GLYPHS = {
   share: ["M12 14.5V4", "M8 8l4-4 4 4", "M6 11.5v7.5a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-7.5"],
   // An arrow rising, for sending a message.
   send: ["M12 19V5.5", "M6 11.5l6-6 6 6"],
+  // A five-point star, for a rating: outlined while empty, drawn filled once given.
+  star: [
+    "M12 3.32L14.54 9.42L21.13 9.95L16.11 14.25L17.64 20.68L12 17.24L6.36 20.68L7.89 14.25L2.87 9.95L9.46 9.42Z",
+  ],
   // Three dots in a row, for a menu of more actions (draw it filled).
   more: [
     "M4.75 12a1.25 1.25 0 1 0 2.5 0a1.25 1.25 0 1 0-2.5 0",
@@ -42,6 +46,8 @@ export type ControlIconProps = {
   color: string;
   /** Fills the shape too (the play triangle on a thumbnail). */
   filled?: boolean;
+  /** With `filled`: the fill's own color, inside a stroke of `color` (a given star). */
+  fillColor?: string;
   testID?: string;
 };
 
@@ -53,6 +59,7 @@ export function ControlIcon({
   size = DEFAULT_SIZE,
   color,
   filled = false,
+  fillColor = color,
   testID,
 }: ControlIconProps) {
   return (
@@ -68,7 +75,7 @@ export function ControlIcon({
         <Path
           key={d}
           d={d}
-          fill={filled ? color : "none"}
+          fill={filled ? fillColor : "none"}
           stroke={color}
           strokeWidth={GLYPH_STROKE_WIDTH}
           strokeLinecap="round"
