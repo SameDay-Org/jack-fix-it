@@ -5,6 +5,7 @@ import {
   Images,
   LineLayer,
   MapView,
+  ModelLayer,
   setAccessToken,
   setTelemetryEnabled,
   ShapeSource,
@@ -59,6 +60,13 @@ import {
 } from "./geo";
 import { routeAhead, sampleGlide, type Fix, type Glide, type VanPose } from "./motion";
 import { useVanMotion, type VanFrame } from "./useVanMotion";
+import {
+  STALE_OPACITY,
+  VanModelAsset,
+  vanModelSource,
+  vanModelStyle,
+  vanRotation,
+} from "./VanModel";
 
 // Once, before any map is drawn: the token, then Mapbox's telemetry off (the SDK collects usage
 // events by default; the customer's map is not one of them).
@@ -85,7 +93,6 @@ const OVERLAY_GAP = 12;
 // The Mapbox wordmark and attribution sit just above the overlay row, where they stay visible.
 const ORNAMENT_GAP = 4;
 const ORNAMENT_SIDE = 16;
-const STALE_OPACITY = 0.45;
 const VAN_SOURCE = "jack-van";
 const ROUTE_SOURCE = "jack-route";
 /** While the van glides, the route's line is cut back to it this often (and where it stops). */
@@ -128,7 +135,7 @@ const { colors } = tokens;
 
 type CameraMode = "overview" | "follow" | "free";
 
-const pointFeature = (point: LngLat, properties: Record<string, number> = {}) => ({
+const pointFeature = (point: LngLat, properties: Record<string, number | number[]> = {}) => ({
   type: "Feature" as const,
   geometry: { type: "Point" as const, coordinates: [point[0], point[1]] },
   properties,
@@ -136,7 +143,11 @@ const pointFeature = (point: LngLat, properties: Record<string, number> = {}) =>
 
 /** The van as the map draws it: where it is, the way it points, dimmed while the fix is old. */
 const vanFeature = (pose: VanPose, stale: boolean) =>
-  pointFeature(pose.point, { bearing: pose.bearing, opacity: stale ? STALE_OPACITY : 1 });
+  pointFeature(pose.point, {
+    bearing: pose.bearing,
+    rotation: vanRotation(pose.bearing),
+    opacity: stale ? STALE_OPACITY : 1,
+  });
 
 /** The van written straight to its native source (GeoJSON text, as the source takes it). */
 const vanShape = (pose: VanPose, stale: boolean) => JSON.stringify(vanFeature(pose, stale));
@@ -212,6 +223,8 @@ export function LiveMap({ fix, stale, active, route, height, cards, onUnavailabl
   // Every camera move that eases takes this long.
   const transitionMs = reduceMotion ? REDUCED_MOTION_MS : CAMERA_TRANSITION_MS;
   const [loaded, setLoaded] = useState(false);
+  // The pro is a 3D van; without its model, the arrow.
+  const [vanModel] = useState(vanModelSource);
   // The first overview: on once the address is known (at mount or soon after the map loads).
   const [hold, setHold] = useState<"waiting" | "on" | "done">(
     trail.destination !== null ? "on" : "waiting",
@@ -380,6 +393,7 @@ export function LiveMap({ fix, stale, active, route, height, cards, onUnavailabl
           }}
         />
         <MapGlyphs />
+        {vanModel === null ? null : <VanModelAsset source={vanModel} />}
         {ahead ? (
           <ShapeSource ref={line} id={ROUTE_SOURCE} shape={lineFeature(ahead)}>
             <LineLayer
@@ -420,7 +434,7 @@ export function LiveMap({ fix, stale, active, route, height, cards, onUnavailabl
             />
           </ShapeSource>
         ) : null}
-        <VanLayer ref={van} shape={initial.van} />
+        <VanLayer ref={van} shape={initial.van} model={vanModel !== null} stale={stale} />
       </MapView>
       <View
         pointerEvents="box-none"
@@ -461,10 +475,23 @@ function useTrail(path: MeasuredPath | null) {
 const VanLayer = memo(function VanLayer({
   ref,
   shape,
+  model,
+  stale,
 }: {
   ref: Ref<ShapeSource>;
   shape: ReturnType<typeof vanFeature>;
+  /** Draw the 3D van; false draws the arrow instead. */
+  model: boolean;
+  /** The position is old: the van dims (the arrow reads that from its feature). */
+  stale: boolean;
 }) {
+  if (model) {
+    return (
+      <ShapeSource ref={ref} id={VAN_SOURCE} shape={shape}>
+        <ModelLayer id="jack-van-model" style={vanModelStyle(stale)} />
+      </ShapeSource>
+    );
+  }
   return (
     <ShapeSource ref={ref} id={VAN_SOURCE} shape={shape}>
       <SymbolLayer
