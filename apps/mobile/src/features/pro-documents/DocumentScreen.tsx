@@ -229,8 +229,9 @@ type PhotoBubbleProps = {
 function PhotoBubble({ photo, current, missing, disabled }: PhotoBubbleProps) {
   const { t } = useTranslation();
   const savedUri = useStableImageUri(current);
-  const uri = photo.previewUri ?? savedUri;
   const [failedUri, setFailedUri] = useState<string>();
+  // A saved picture that did not load (no connection) is tried again from the next answer's URL.
+  const uri = photo.previewUri ?? (savedUri === failedUri ? current?.url : savedUri);
   const shown = uri !== undefined && uri !== failedUri;
   const problem = photo.failure !== null || missing;
   const status =

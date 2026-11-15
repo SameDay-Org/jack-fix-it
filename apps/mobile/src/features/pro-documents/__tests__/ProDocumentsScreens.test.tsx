@@ -164,9 +164,15 @@ beforeEach(() => {
 
 afterEach(async () => {
   await flush();
-  // A signed URL is shown inside the app only: it never reaches a log.
+  // A signed URL is shown inside the app only, and an upload's key goes to the API only:
+  // neither reaches a log, as an argument or inside an error.
   for (const spy of consoleSpies) {
-    expect(JSON.stringify(spy.mock.calls)).not.toContain(URL_MARK);
+    // An Error serialises as {} on its own: its message and stack are read too.
+    const logged = JSON.stringify(spy.mock.calls, (_key, value: unknown) =>
+      value instanceof Error ? `${value.name}: ${value.message} ${value.stack}` : value,
+    );
+    expect(logged).not.toContain(URL_MARK);
+    expect(logged).not.toContain(UPLOAD_KEY);
   }
   jest.restoreAllMocks();
 });
@@ -209,7 +215,7 @@ describe("ProDocumentsScreen", () => {
 
     expect(labelOf("pro-document-id")).toBe("Photo ID: Approved");
     expect(labelOf("pro-document-insurance")).toBe(
-      "Insurance: Rejected. Reason: The policy number is cut off.. Expires Mar 12, 2027",
+      "Insurance: Rejected. Reason: The policy number is cut off. Expires Mar 12, 2027",
     );
     expect(
       screen.getByText("Reason: The policy number is cut off.", { includeHiddenElements: true }),
@@ -220,6 +226,15 @@ describe("ProDocumentsScreen", () => {
     await openList(documents([document({ doc_type: "id", status: "pending" })]));
 
     expect(labelOf("pro-document-id")).toBe("Photo ID: In review");
+  });
+
+  it("asks nothing for a customer", async () => {
+    jest.mocked(useSession).mockReturnValue(signedIn({ role: "customer" }));
+    await renderWithQuery(<ProDocumentsScreen />, client);
+    await flush();
+
+    expect(apiGet).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("pro-document-id")).toBeNull();
   });
 
   it("a row opens its type", async () => {
@@ -314,6 +329,79 @@ describe("DocumentScreen", () => {
     });
     expect(announced()).toContain("Document sent for review");
     expect(router.back).toHaveBeenCalledTimes(1);
+  });
+
+  it("two quick presses send one document", async () => {
+    await openType("id");
+    await addPhoto();
+    const answer = deferred<ProDocument>();
+    jest.mocked(apiPost).mockReturnValueOnce(answer.promise as ReturnType<typeof apiPost>);
+    await submit();
+    await submit();
+
+    expect(apiPost).toHaveBeenCalledTimes(1);
+    await act(async () => answer.resolve(document({ doc_type: "id" })));
+  });
+
+  it("asks for the list again once the document is in", async () => {
+    await openType("id");
+    await addPhoto();
+    const sent = document({ doc_type: "id" });
+    jest.mocked(apiPost).mockResolvedValueOnce(sent as never);
+    server = documents([sent]);
+    jest.mocked(apiGet).mockClear();
+    await submit();
+
+    await waitFor(() =>
+      expect(apiGet).toHaveBeenCalledWith(DOCUMENTS, expect.objectContaining(SENT)),
+    );
+  });
+
+  it("a retry refused because the first try went through shows the document in review", async () => {
+    await openType("id");
+    await addPhoto();
+    // The first answer is lost on the way back: the server has the document.
+    jest
+      .mocked(apiPost)
+      .mockRejectedValueOnce(new NetworkError(true))
+      .mockRejectedValueOnce(new ApiError(422, "invalid_media"));
+    await submit();
+    expect(screen.getByTestId("pro-document-failure")).toHaveTextContent(OFFLINE);
+
+    const stored = document({ doc_type: "id", status: "pending" });
+    server = documents([stored]);
+    await submit();
+
+    // The list was asked again: the screen shows what the server holds.
+    await waitFor(() =>
+      expect(screen.getByTestId("pro-document-status")).toHaveTextContent("In review"),
+    );
+    expect(screen.getByTestId("pro-document-photo-image").props.source).toEqual({
+      uri: stored.url,
+    });
+  });
+
+  it("a saved picture that did not load is tried again from the next answer's URL", async () => {
+    const pending = document({ doc_type: "id", status: "pending" });
+    await openType("id", documents([pending]));
+    await act(async () =>
+      fireEvent(screen.getByTestId("pro-document-photo-image"), "error", { nativeEvent: {} }),
+    );
+
+    expect(screen.queryByTestId("pro-document-photo-image")).toBeNull();
+    expect(screen.getByTestId("pro-document-photo-frame").props.accessibilityLabel).toBe(
+      "The document's photo can't be shown right now",
+    );
+
+    // The same document, listed again with a fresh signed URL.
+    const fresh = { ...pending, url: pending.url.replace("sig-", "sig-fresh-") };
+    server = documents([fresh]);
+    await act(async () => {
+      await client.refetchQueries({ queryKey: myDocumentsQueryKey(1) });
+    });
+
+    const image = await screen.findByTestId("pro-document-photo-image");
+    expect(image.props.source).toEqual({ uri: fresh.url });
   });
 
   it("an insurance: the expiry date goes as the API's date", async () => {

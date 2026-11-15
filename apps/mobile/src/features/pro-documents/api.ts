@@ -56,18 +56,23 @@ export type SubmitDocumentVariables = { body: DocumentSubmission; generation: nu
 
 /**
  * Submits a document for review (POST). A pending one of the same type is replaced by the
- * server. The cached list shows the new document at once, then is asked for again.
+ * server. The cached list shows the new document at once, and is asked for again after every
+ * submission, accepted or not.
  */
 export function useSubmitDocument() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({ body, generation }: SubmitDocumentVariables) =>
       apiPost("/v1/pros/me/documents", body, { auth: true, generation }),
-    onSuccess: (document, { generation }) => {
-      const key = myDocumentsQueryKey(generation);
-      client.setQueryData<MyDocuments>(key, (data) => data && withSubmitted(data, document));
-      void client.invalidateQueries({ queryKey: key });
-    },
+    onSuccess: (document, { generation }) =>
+      client.setQueryData<MyDocuments>(
+        myDocumentsQueryKey(generation),
+        (data) => data && withSubmitted(data, document),
+      ),
+    // Asked again whatever the answer: a submission whose answer was lost may have gone through
+    // (its retry is then refused, the key being a document already), and the list says which.
+    onSettled: (_document, _error, { generation }) =>
+      void client.invalidateQueries({ queryKey: myDocumentsQueryKey(generation) }),
   });
 }
 

@@ -42,7 +42,10 @@ function Row({ row, onPress }: { row: DocumentRow; onPress: () => void }) {
   return (
     <Card
       onPress={onPress}
-      accessibilityLabel={[t("proDocuments.row", { name, status }), ...facts].join(". ")}
+      // Read as sentences: a reason that ends in a period does not get a second one.
+      accessibilityLabel={[t("proDocuments.row", { name, status }), ...facts]
+        .map((part) => part.replace(/[.\s]+$/, ""))
+        .join(". ")}
       testID={testID}
     >
       <View {...VISUAL_ONLY} className="gap-2">
