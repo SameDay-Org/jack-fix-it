@@ -64,18 +64,21 @@ export function useVanMotion(
     const moved = state.at !== at;
     const routed = newest !== null && newest !== state.route && onRoute(fix.point, newest) !== null;
     if (newest !== null) state.route = newest;
-    if (state.glide !== null && !moved && !routed && !state.paused) return;
+    // Back with nothing new and the van already where its glide ended: it stays as it stands.
+    const stands = state.glide !== null && sampleGlide(state.glide, state.last).done;
+    const resumed = state.paused && !stands;
+    state.paused = false;
+    if (state.glide !== null && !moved && !routed && !resumed) return;
     // A route alone leaves the van due where it was due, not a whole glide later.
     const left = state.glide ? state.glide.startedAt + state.glide.durationMs - now : 0;
     const duration =
-      moved || state.paused || left <= 0
+      moved || resumed || left <= 0
         ? durationMs
         : Math.max(left, Math.min(durationMs, RESNAP_MIN_MS));
     state.glide = planGlide(state.pose, { ...fix, at }, routes, now, duration);
     state.pose ??= { point: state.glide.path.points[0], bearing: state.glide.restBearing };
     state.last = now;
     state.at = at;
-    state.paused = false;
   });
 
   // One frame: the van moved and turned on; true while the glide or the turn goes on.

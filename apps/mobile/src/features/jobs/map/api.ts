@@ -75,9 +75,9 @@ const isRefusal = (error: unknown): boolean =>
  * nothing is asked for (mounting out of focus starts no request), and both are asked for again
  * the moment it holds again.
  *
- * A refusal of either (`REFUSALS`) ends the tracking for this job and session: `refused` turns
- * true, nothing more is asked for, and what the cache held of the pro's position and route is
- * removed, so no screen can draw them again.
+ * A refusal of either (`REFUSALS`) ends the tracking for as long as this map is mounted:
+ * `refused` turns true, nothing more is asked for, and what the cache held of the pro's position
+ * and route is removed, so no screen can draw them again. A map mounted later asks once more.
  */
 export function useLiveTracking(jobId: string, enabled: boolean) {
   const client = useQueryClient();

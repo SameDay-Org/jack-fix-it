@@ -505,6 +505,39 @@ describe("JobHero's live map when the API says no", () => {
     expect(await screen.findByTestId("live-map-placeholder-unavailable")).toBeTruthy();
     await advance(POLL_MS * 2);
     expect([calls(POSITION_PATH), calls(ROUTE_PATH)]).toEqual([1, 1]);
+    for (const queryKey of KEYS) expect(client.getQueryData(queryKey)).toBeUndefined();
+  });
+
+  it("drops a route that was still on its way when the position was refused", async () => {
+    const client = newQueryClient();
+    await renderWithQuery(hero("onTheWay"), client);
+    await screen.findByTestId("live-map-view");
+    let land: (answer: unknown) => void = () => undefined;
+    api.position = refuse(403);
+    api.route = () => new Promise((resolve) => (land = resolve));
+    await advance(POLL_MS);
+    expect(screen.getByTestId("live-map-placeholder-unavailable")).toBeTruthy();
+    await act(async () => land({ route: ROUTE }));
+    await advance(0);
+    for (const queryKey of KEYS) expect(client.getQueryData(queryKey)).toBeUndefined();
+    expect(screen.queryByTestId("live-map-view")).toBeNull();
+  });
+
+  it("a refusal that lands after the screen lost focus still takes the pro off it", async () => {
+    const client = newQueryClient();
+    const refetch = jest.fn(async () => undefined);
+    await renderWithQuery(hero("onTheWay", refetch), client);
+    await screen.findByTestId("live-map-view");
+    let fail: (error: unknown) => void = () => undefined;
+    api.position = () => new Promise((_, reject) => (fail = reject));
+    await advance(POLL_MS);
+    await act(async () => navigation.setFocused(false));
+    await act(async () => fail(new ApiError(403, "forbidden")));
+    await advance(0);
+    expect(screen.queryByTestId("live-map-view")).toBeNull();
+    expect(screen.getByTestId("live-map-placeholder-unavailable")).toBeTruthy();
+    for (const queryKey of KEYS) expect(client.getQueryData(queryKey)).toBeUndefined();
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 
   it.each([

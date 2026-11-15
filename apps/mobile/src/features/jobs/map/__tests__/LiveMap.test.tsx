@@ -629,3 +629,64 @@ describe("LiveMap under Reduce Motion", () => {
     expect(REDUCED_MOTION_MS).toBeLessThanOrEqual(300);
   });
 });
+
+describe("LiveMap's camera nobody is watching", () => {
+  it("stays put when the first overview ends or a far position lands, and is placed on the way back", async () => {
+    const far = props({ route: route(5000) });
+    await render(<LiveMap {...far} />);
+    await loadMap();
+    // Blurred during the first overview's hold.
+    await advance(OVERVIEW_HOLD_MS / 2);
+    await screen.rerender(<LiveMap {...far} active={false} />);
+    mapbox.mockCamera.setCamera.mockClear();
+    await advance(OVERVIEW_HOLD_MS);
+    // A position that was on its way lands, and the pro is now close enough to follow.
+    const near = { ...far, route: route(2900), fix: fix(at(0, 200), POLL_MS, 0) };
+    await screen.rerender(<LiveMap {...near} active={false} />);
+    await advance(POLL_MS);
+    expect(mapbox.mockCamera.setCamera).not.toHaveBeenCalled();
+
+    await screen.rerender(<LiveMap {...near} />);
+    expect(lastCamera()).toMatchObject({ pitch: FOLLOW_PITCH, animationMode: "easeTo" });
+  });
+
+  it("fits the overview again when a far pro's map is watched again", async () => {
+    const far = props({ route: route(5000) });
+    await render(<LiveMap {...far} />);
+    await loadMap();
+    await advance(OVERVIEW_HOLD_MS);
+    await screen.rerender(<LiveMap {...far} active={false} />);
+    mapbox.mockCamera.setCamera.mockClear();
+    await screen.rerender(<LiveMap {...far} active={false} fix={fix(at(0, 200), POLL_MS, 0)} />);
+    expect(mapbox.mockCamera.setCamera).not.toHaveBeenCalled();
+    await screen.rerender(<LiveMap {...far} fix={fix(at(0, 200), POLL_MS, 0)} />);
+    expect(lastCamera()).toMatchObject({ pitch: OVERVIEW_PITCH });
+  });
+});
+
+describe("LiveMap's pro, back with nothing new", () => {
+  it("keeps the way a standing pro points, and draws nothing but the frame back", async () => {
+    // Standing on a road that runs north, pointing east.
+    const first = props({ fix: fix(at(0, 100), 0, 90), route: route(1200) });
+    await render(<LiveMap {...first} />);
+    expect(lastVan().bearing).toBe(90);
+    await screen.rerender(<LiveMap {...first} active={false} />);
+    await screen.rerender(<LiveMap {...first} />);
+    await advance(POLL_MS);
+    expect(lastVan().bearing).toBe(90);
+    expect(distanceM(lastVan().point, at(0, 100))).toBeLessThan(0.1);
+  });
+
+  it("draws a route that lands while unwatched from where the pro stands, not from its last rest", async () => {
+    const first = props({ route: route(1200) });
+    await render(<LiveMap {...first} />);
+    const moved = { ...first, fix: fix(at(0, 300), POLL_MS, 0) };
+    await screen.rerender(<LiveMap {...moved} />);
+    await advance(POLL_MS / 2);
+    await screen.rerender(<LiveMap {...moved} active={false} />);
+    mapbox.mockSourceProps.mockClear();
+    await screen.rerender(<LiveMap {...moved} active={false} route={route(1100)} />);
+    expect(mapbox.mockSourceProps).not.toHaveBeenCalled();
+    expect(distanceM(reactLine()[0], at(0, 200))).toBeLessThan(1);
+  });
+});

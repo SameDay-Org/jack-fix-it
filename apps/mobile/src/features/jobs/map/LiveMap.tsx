@@ -302,19 +302,20 @@ export function LiveMap({ fix, stale, active, route, height, cards, onUnavailabl
       showOverview(duration);
     }
   });
+  // A map nobody watches keeps its camera: the mode it should be in is placed on the way back.
   const placedFor = useRef<CameraMode | null>(null);
   useEffect(() => {
-    if (!loaded || placedFor.current === mode) return;
+    if (!loaded || !active || placedFor.current === mode) return;
     const first = placedFor.current === null;
     placedFor.current = mode;
     applyMode(mode, first);
-  }, [loaded, mode]);
+  }, [active, loaded, mode]);
 
-  // The overview follows each new fix.
+  // The overview follows each new fix, and fits again when the map is watched again.
   const refitOverview = useEffectEvent(() => {
-    if (loaded && mode === "overview") showOverview(transitionMs);
+    if (loaded && active && mode === "overview") showOverview(transitionMs);
   });
-  useEffect(() => refitOverview(), [fix.at]);
+  useEffect(() => refitOverview(), [fix.at, active]);
 
   // The first overview is brief: it gives way to the follow camera after OVERVIEW_HOLD_MS. It is
   // only for the first load: an address first known later than OVERVIEW_WINDOW_MS after it
@@ -335,6 +336,15 @@ export function LiveMap({ fix, stale, active, route, height, cards, onUnavailabl
     van.current?.setNativeProps({ id: VAN_SOURCE, shape: vanShape(pose.current, stale) });
   });
   useEffect(() => restyle(), [stale]);
+
+  // Unwatched in the middle of a glide, the frames stop cutting the line: React's own copy takes
+  // it over from where the van stands, so a route that still lands is drawn from there.
+  const settle = useEffectEvent(() => {
+    const at = pose.current;
+    if (active || at === null) return;
+    setRest((was) => (distanceM(was, at.point) < SAME_REST_M ? was : at.point));
+  });
+  useEffect(() => settle(), [active]);
 
   const [initial] = useState(() => ({
     van: vanFeature({ point: fix.point, bearing: fix.heading ?? 0 }, stale),
