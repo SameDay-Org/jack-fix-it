@@ -65,6 +65,8 @@ export type { CodeInputProps } from "./CodeInput";
 export { announce, moveAccessibilityFocus } from "./focus";
 export { FlowProgress } from "./FlowProgress";
 export type { FlowProgressProps } from "./FlowProgress";
+export { STAR_SCORES, StarRating, StarsShown } from "./StarRating";
+export type { StarRatingProps, StarRatingSize, StarScore } from "./StarRating";
 export { StepSlider } from "./StepSlider";
 export type { StepSliderProps } from "./StepSlider";
 export { IdCard } from "./IdCard";

@@ -22,6 +22,7 @@ const DRAFT: RequestDraft = {
   preferredDate: null,
   preferredPeriod: "flexible",
   refusal: null,
+  sendKeys: {},
 };
 
 const ADDRESS = {

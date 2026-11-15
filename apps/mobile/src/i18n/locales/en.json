@@ -12,7 +12,11 @@
     "hidePassword": "Hide password",
     "dismiss": "Dismiss",
     "notSet": "Not set",
-    "optionalLabel": "{{label}} (optional)"
+    "optionalLabel": "{{label}} (optional)",
+    "stars": {
+      "value": "{{count}} of {{max}} stars",
+      "none": "Not rated"
+    }
   },
   "welcome": {
     "support": "Tell Jack. We'll take care of the rest.",
@@ -1416,6 +1420,99 @@
       "unread_one": "{{count}} unread message",
       "unread_other": "{{count}} unread messages",
       "label": "{{action}}, {{unread}}"
+    }
+  },
+  "reviews": {
+    "title": {
+      "customer": "Rate your pro",
+      "pro": "Rate your customer"
+    },
+    "intro": {
+      "customer": "How did the job go?",
+      "pro": "How did this job go?"
+    },
+    "overall": {
+      "label": "Overall rating",
+      "prompt": "Tap a star to rate"
+    },
+    "word": {
+      "1": "Poor",
+      "2": "Fair",
+      "3": "Good",
+      "4": "Very good",
+      "5": "Excellent"
+    },
+    "details": {
+      "title": "More details",
+      "optional": "Optional. Tap a star again to clear it."
+    },
+    "dimension": {
+      "communication": "Communication",
+      "quality": "Quality of the work",
+      "punctuality": "Punctuality",
+      "value": "Value for money"
+    },
+    "comment": {
+      "label": "Comment",
+      "hint": "Don't share phone numbers or emails: they are removed.",
+      "tooLong_one": "Your comment is {{count}} character too long.",
+      "tooLong_other": "Your comment is {{count}} characters too long."
+    },
+    "send": "Send rating",
+    "retry": "Try again",
+    "failure": {
+      "offline": {
+        "title": "We couldn't send your rating",
+        "body": "It's still here. Check your connection, then try again."
+      },
+      "failed": {
+        "title": "We couldn't send your rating",
+        "body": "It's still here. Give it another try in a moment."
+      },
+      "rateLimited": {
+        "title": "That's a lot of ratings for now",
+        "body": "Your rating is still here. Please send it a little later."
+      },
+      "alreadyReviewed": {
+        "title": "You already rated this job",
+        "body": "We can't load your rating right now."
+      }
+    },
+    "thanks": {
+      "title": "Thanks for rating",
+      "body_one": "You gave this job {{count}} star.",
+      "body_other": "You gave this job {{count}} stars.",
+      "done": "Done"
+    },
+    "redacted": {
+      "title": "Contact details aren't shared in reviews",
+      "body": "We took them out of your comment. The rest is saved as you wrote it."
+    },
+    "notYet": {
+      "title": "Not ready to rate yet",
+      "body": "You can rate after the job is confirmed.",
+      "back": "Back to the job"
+    },
+    "gone": {
+      "title": "We couldn't find this job",
+      "body": "It may belong to another account, or the link is broken.",
+      "home": "Go to Home"
+    },
+    "loadFailed": {
+      "title": "We couldn't load this rating",
+      "body": "Check your connection and try again.",
+      "retry": "Try again"
+    },
+    "entry": {
+      "hint": "How did it go? It takes a minute.",
+      "rated_one": "Thanks, you rated {{count}} star",
+      "rated_other": "Thanks, you rated {{count}} stars"
+    },
+    "rating": {
+      "count_one": "{{total}} rating",
+      "count_other": "{{total}} ratings",
+      "spoken": "{{average}} out of 5, {{ratings}}",
+      "unavailable": "Unavailable"
     }
   }
 }

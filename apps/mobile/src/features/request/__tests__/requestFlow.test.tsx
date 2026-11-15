@@ -16,7 +16,7 @@ import {
 } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
-import { ApiError, apiGet, apiPost, type SessionUser } from "@/api";
+import { ApiError, apiGet, apiPost, NetworkError, type SessionUser } from "@/api";
 import type { MediaItem, MediaUpload } from "@/features/media";
 
 import { user } from "../../../api/__tests__/helpers";
@@ -262,6 +262,13 @@ async function toReview() {
 }
 
 const posted = () => jest.mocked(apiPost).mock.calls.map(([path, body]) => ({ path, body }));
+/** The Idempotency-Key each send carried (#388), in order. */
+const sentKeys = () =>
+  jest.mocked(apiPost).mock.calls.map((call) => {
+    const options: unknown = call[2];
+    return (options as { idempotencyKey?: string } | undefined)?.idempotencyKey;
+  });
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
@@ -365,6 +372,10 @@ describe("the request flow", () => {
         },
       },
     ]);
+    expect(jest.mocked(apiPost).mock.calls[0]?.[2]).toStrictEqual({
+      auth: true,
+      idempotencyKey: expect.stringMatching(UUID_V4),
+    });
 
     await act(async () => sending.resolve(created()));
     await waitFor(() => expect(result.getPathname()).toBe("/request/sent"));
@@ -585,6 +596,64 @@ describe("the request flow", () => {
     await press("Try again");
     await waitFor(() => expect(result.getPathname()).toBe("/request/sent"));
     expect(apiPost).toHaveBeenCalledTimes(2);
+    // The same request again: the same key, so the server can only answer the one it made.
+    expect(sentKeys()[0]).toMatch(UUID_V4);
+    expect(sentKeys()[1]).toBe(sentKeys()[0]);
+  });
+
+  it("retries a timed-out send after midnight with its key, though its day has passed", async () => {
+    const now = Date.now();
+    const result = await toReview();
+    const today = offeredDays(1)[0];
+    await act(async () => requestDraftStore.setState({ preferredDate: today }));
+    jest.mocked(apiPost).mockRejectedValueOnce(new NetworkError(true));
+    await press("Send request");
+    await waitFor(() => expect(screen.getByText("Your request didn't go through")).toBeTruthy());
+
+    // Midnight passes before Try again. The request may exist: its retry goes, with its key, and
+    // the server answers the request that key made.
+    jest.setSystemTime(now + 24 * 60 * 60 * 1000);
+    jest.mocked(apiPost).mockResolvedValueOnce(created() as never);
+    await press("Try again");
+
+    await waitFor(() => expect(result.getPathname()).toBe("/request/sent"));
+    expect(sentKeys()[0]).toMatch(UUID_V4);
+    expect(sentKeys()[1]).toBe(sentKeys()[0]);
+    expect(posted()[1]?.body).toMatchObject({ preferred_date: today });
+    jest.setSystemTime(now);
+  });
+
+  it("sends an edited request with a new key, and on a 409 for the key says try again without sending", async () => {
+    jest.mocked(apiPost).mockRejectedValueOnce(new NetworkError(true));
+    const result = await toReview();
+    await press("Send request");
+    await waitFor(() => expect(screen.getByText("Your request didn't go through")).toBeTruthy());
+
+    // The customer changes the description after the failed send.
+    await press("Edit the description and files");
+    await waitFor(() => expect(result.getPathname()).toBe("/request/describe"));
+    await fireEvent.changeText(screen.getByTestId("describe-text"), "Water stain, now dripping");
+    await press("Continue");
+    await waitFor(() => expect(result.getPathname()).toBe("/request/where"));
+    await press("Continue");
+    await throughWhen(result);
+    jest.mocked(apiPost).mockRejectedValueOnce(new ApiError(409, "idempotency_key_reused"));
+    await press(/Send request|Try again/);
+
+    await waitFor(() => expect(screen.getByText("Your request didn't go through")).toBeTruthy());
+    expect(sentKeys()[1]).toMatch(UUID_V4);
+    expect(sentKeys()[1]).not.toBe(sentKeys()[0]);
+    expect(posted()[1]?.body).toMatchObject({ description: "Water stain, now dripping" });
+    // Nothing goes again by itself (the router's fake clock moves a second on).
+    await act(() => jest.advanceTimersByTimeAsync(1_000));
+    expect(apiPost).toHaveBeenCalledTimes(2);
+
+    jest.mocked(apiPost).mockResolvedValueOnce(created() as never);
+    await press("Try again");
+    await waitFor(() => expect(result.getPathname()).toBe("/request/sent"));
+    expect(apiPost).toHaveBeenCalledTimes(3);
+    expect(sentKeys()[2]).toMatch(UUID_V4);
+    expect(new Set(sentKeys()).size).toBe(3);
   });
 
   it("sends a day gone by back to When, where flexible clears it", async () => {
