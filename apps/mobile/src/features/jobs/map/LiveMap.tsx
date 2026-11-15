@@ -60,8 +60,12 @@ import {
 import { routeAhead, sampleGlide, type Fix, type Glide, type VanPose } from "./motion";
 import { useVanMotion, type VanFrame } from "./useVanMotion";
 
-// Once, before any map is drawn: the token, then Mapbox's telemetry off (the SDK collects usage
-// events by default; the customer's map is not one of them).
+// Once, before any map is drawn: the token, then Mapbox's usage and location telemetry off.
+// What still leaves the phone for Mapbox, by design: the SDK's turnstile event (it counts monthly
+// active users for billing, carries no location, and the SDK has no switch for it), and the
+// requests for the style, tiles, glyphs and 3D models, whose tile ids tell Mapbox which area is
+// on screen. The pro's position, the route and the customer's address are only this map's own
+// source data: they come from our API, go to no other endpoint, and are never logged.
 if (liveMapConfig.accessToken) {
   void setAccessToken(liveMapConfig.accessToken);
   setTelemetryEnabled(false);
