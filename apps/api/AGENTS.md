@@ -71,7 +71,11 @@ rules apply.
   timestamps only, never PII or secrets; a new staff money action adds an `AuditAction`.
   A staff action the BDC takes too goes through `AuditService.record_staff_action`, which
   takes an active agent or admin: today a support ticket's status (#274,
-  `PATCH /v1/admin/support/tickets/{id}`), written in the change's transaction the same way.
+  `PATCH /v1/admin/support/tickets/{id}`) and the review of a pro (#41: a document's review and
+  the profile's approval or rejection under `/v1/admin/pros`, with the reason staff typed),
+  written in the change's transaction the same way. A staff read that hands out a pro's
+  documents (`GET /v1/admin/pros/{id}`) writes its row through `record_read` and commits it
+  before answering.
 
 ## Live position (#350)
 

@@ -1,12 +1,18 @@
 import uuid
 from datetime import date, datetime
-from typing import Annotated
+from enum import StrEnum
+from typing import Annotated, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from app.modules.addresses.schemas import NO_NUL
 from app.modules.categories.schemas import CategorySummary
-from app.modules.pros.models import ProDocumentStatus, ProDocumentType, ProVerificationStatus
+from app.modules.pros.models import (
+    REVIEW_REASON_MAX_LENGTH,
+    ProDocumentStatus,
+    ProDocumentType,
+    ProVerificationStatus,
+)
 from app.modules.service_areas.schemas import ServiceAreaOut
 from app.modules.uploads.schemas import PhotoOut
 
@@ -18,6 +24,9 @@ class ProProfileOut(BaseModel):
     years_of_experience: int | None
     photo: PhotoOut | None
     verification_status: ProVerificationStatus
+    rejection_reason: str | None = Field(
+        description="Why the team rejected the profile, as they wrote it; null unless rejected."
+    )
     payouts_enabled: bool
     categories: list[CategorySummary]
     service_areas: list[ServiceAreaOut]
@@ -85,3 +94,144 @@ class DocumentsOut(BaseModel):
     missing_types: list[ProDocumentType] = Field(
         description="Required types with no pending or approved document."
     )
+
+
+# --- Staff review (#41) ----------------------------------------------------------------------
+
+ReviewReason = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, min_length=1, max_length=REVIEW_REASON_MAX_LENGTH, pattern=NO_NUL
+    ),
+]
+
+
+class ReviewDecision(StrEnum):
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class ProReviewIn(BaseModel):
+    """Staff's decision on a document or on a profile."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision: ReviewDecision
+    reason: ReviewReason | None = Field(
+        default=None,
+        description=(
+            "Why, as plain text the pro reads: required with rejected, refused with approved."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _reason_goes_with_a_rejection(self) -> Self:
+        if (self.decision is ReviewDecision.REJECTED) != (self.reason is not None):
+            raise ValueError("a reason is required with rejected and refused with approved")
+        return self
+
+
+class StaffDocumentReviewOut(BaseModel):
+    """A document as a review answers it: never its file."""
+
+    id: uuid.UUID
+    doc_type: ProDocumentType
+    status: ProDocumentStatus
+    rejection_reason: str | None
+    expires_on: date | None
+    created_at: datetime
+    reviewed_at: datetime | None
+
+
+class StaffDocumentOut(StaffDocumentReviewOut):
+    url: str = Field(description="Presigned GET URL of the file; short-lived.")
+    expires_at: datetime = Field(description="When the URL stops working.")
+
+
+class StaffDocumentCounts(BaseModel):
+    """A pro's documents by status, superseded ones left out."""
+
+    pending: int
+    approved: int
+    rejected: int
+
+
+class StaffProItem(BaseModel):
+    """A pro in the staff list: no email, phone, last name or address."""
+
+    id: uuid.UUID = Field(description="The pro profile's id.")
+    name: str | None = Field(
+        description='First name and last initial ("María P."); null when a name is missing or '
+        "shows a contact detail."
+    )
+    verification_status: ProVerificationStatus
+    payouts_enabled: bool
+    categories: list[CategorySummary]
+    zip_count: int = Field(description="How many ZIPs the pro serves.")
+    documents: StaffDocumentCounts
+    submitted_at: datetime | None = Field(
+        description="When the oldest document still pending was submitted; null with none."
+    )
+    created_at: datetime
+
+
+class StaffProStatusCounts(BaseModel):
+    """Every pro profile by verification status."""
+
+    pending: int
+    approved: int
+    rejected: int
+
+
+class StaffProPage(BaseModel):
+    items: list[StaffProItem] = Field(description="Newest profile first.")
+    next_cursor: str | None = Field(description="Pass as `cursor` for older profiles.")
+    counts: StaffProStatusCounts
+
+
+class ApprovalBlockerKind(StrEnum):
+    # A required type has no approved document.
+    DOCUMENT_MISSING = "document_missing"
+    # Every approved document of a required type has expired.
+    DOCUMENT_EXPIRED = "document_expired"
+    NO_CATEGORY = "no_category"
+    NO_SERVICE_AREA = "no_service_area"
+
+
+class ApprovalBlocker(BaseModel):
+    kind: ApprovalBlockerKind
+    doc_type: ProDocumentType | None = Field(description="Set for the two document kinds.")
+
+
+class StaffProDecisionOut(BaseModel):
+    """A profile as a decision answers it."""
+
+    id: uuid.UUID
+    verification_status: ProVerificationStatus
+    rejection_reason: str | None
+    reviewed_at: datetime | None
+
+
+class StaffProOut(StaffProDecisionOut):
+    user_id: uuid.UUID
+    name: str | None = Field(description='First name and last initial ("María P.").')
+    payouts_enabled: bool
+    bio: str | None = Field(description="As the pro wrote it: it may hold contact details.")
+    years_of_experience: int | None
+    photo: PhotoOut | None
+    categories: list[CategorySummary]
+    service_areas: list[ServiceAreaOut]
+    documents: list[StaffDocumentOut] = Field(
+        description="The latest document of each type, superseded ones left out."
+    )
+    history: list[StaffDocumentOut] = Field(
+        description="Older reviewed (approved or rejected) documents, newest first."
+    )
+    required_types: list[ProDocumentType]
+    missing_types: list[ProDocumentType] = Field(
+        description="Required types with no pending or approved document."
+    )
+    approval_blockers: list[ApprovalBlocker] = Field(
+        description="What an approval still needs; empty when the pro can be approved."
+    )
+    created_at: datetime

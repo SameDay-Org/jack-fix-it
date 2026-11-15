@@ -2,6 +2,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
+from typing import Final
 
 from sqlalchemy import (
     CheckConstraint,
@@ -18,6 +19,9 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, IdTimestampsMixin, str_enum
+
+# The longest reason staff give for rejecting a document or a profile (#41); the pro reads it.
+REVIEW_REASON_MAX_LENGTH: Final = 500
 
 
 class ProVerificationStatus(StrEnum):
@@ -46,6 +50,11 @@ class ProProfile(IdTimestampsMixin, Base):
         server_default=ProVerificationStatus.PENDING.value,
         index=True,
     )
+    # Staff's decision (#41): why the profile was rejected (cleared by an approval), who made
+    # the last decision and when. All NULL until the first one.
+    rejection_reason: Mapped[str | None] = mapped_column(Text)
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), index=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     stripe_account_id: Mapped[str | None] = mapped_column(String(255), unique=True)
     # When the account's create was attempted (#39), committed before the call: a create whose
     # answer was lost long ago is looked up in Stripe before another one.

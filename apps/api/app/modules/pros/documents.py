@@ -9,6 +9,7 @@ Documents are sensitive: logs carry ids and the document type only, never a key 
 
 import logging
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Final
 
@@ -30,6 +31,37 @@ logger = logging.getLogger(__name__)
 ALWAYS_REQUIRED: Final = (ProDocumentType.ID, ProDocumentType.INSURANCE)
 # A document of these statuses covers its type; a rejected one does not.
 _COVERING: Final = frozenset({ProDocumentStatus.PENDING, ProDocumentStatus.APPROVED})
+
+
+def required_types(*, needs_license: bool) -> list[ProDocumentType]:
+    """ID and insurance always; a license when any of the pro's categories requires one."""
+    required = list(ALWAYS_REQUIRED)
+    if needs_license:
+        required.insert(1, ProDocumentType.LICENSE)
+    return required
+
+
+def latest_and_history(
+    current: Sequence[ProDocument],
+) -> tuple[list[ProDocument], list[ProDocument]]:
+    """(the latest document of each type, the older ones) of a pro's documents given newest
+    first, superseded ones left out (ProDocumentRepository.current_of)."""
+    latest: dict[ProDocumentType, ProDocument] = {}
+    history: list[ProDocument] = []
+    for document in current:
+        if document.doc_type in latest:
+            history.append(document)
+        else:
+            latest[document.doc_type] = document
+    return list(latest.values()), history
+
+
+def uncovered_types(
+    required: Sequence[ProDocumentType], current: Sequence[ProDocument]
+) -> list[ProDocumentType]:
+    """The required types with no pending or approved document."""
+    covered = {d.doc_type for d in current if d.status in _COVERING}
+    return [doc_type for doc_type in required if doc_type not in covered]
 
 
 class ProDocumentService:
@@ -90,30 +122,21 @@ class ProDocumentService:
     async def list_own(self, user: UserAccount) -> DocumentsOut:
         profile = await self._profiles.get_by_user_id(user.id)
         current = await self._documents.current_of(profile.id) if profile is not None else []
-        latest: dict[ProDocumentType, ProDocument] = {}
-        history: list[ProDocument] = []
-        for document in current:  # newest first
-            if document.doc_type in latest:
-                history.append(document)
-            else:
-                latest[document.doc_type] = document
+        latest, history = latest_and_history(current)
         required = await self._required_types(profile.id if profile is not None else None)
-        covered = {d.doc_type for d in current if d.status in _COVERING}
         return DocumentsOut(
-            documents=[self._out(d) for d in latest.values()],
+            documents=[self._out(d) for d in latest],
             history=[self._out(d) for d in history],
             required_types=required,
-            missing_types=[t for t in required if t not in covered],
+            missing_types=uncovered_types(required, current),
         )
 
     async def _required_types(self, pro_id: uuid.UUID | None) -> list[ProDocumentType]:
-        """ID and insurance always; a license when any of the pro's categories requires one."""
-        required = list(ALWAYS_REQUIRED)
+        needs_license = False
         if pro_id is not None:
             category_ids = await self._profiles.category_ids(pro_id)
-            if await self._categories.any_requires_license(category_ids):
-                required.insert(1, ProDocumentType.LICENSE)
-        return required
+            needs_license = await self._categories.any_requires_license(category_ids)
+        return required_types(needs_license=needs_license)
 
     def _out(self, document: ProDocument) -> DocumentOut:
         return DocumentOut(
