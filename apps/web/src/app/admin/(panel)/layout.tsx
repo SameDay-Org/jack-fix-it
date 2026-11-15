@@ -1,4 +1,4 @@
-import { House, LifeBuoy, LogOut } from "lucide-react";
+import { BadgeCheck, House, LifeBuoy, LogOut } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,7 @@ import { requireStaff } from "@/lib/session";
 
 import { logout } from "../logout/actions";
 import { NavLink } from "./nav-link";
+import { PROS_PATH } from "./pros/pros";
 import { SUPPORT_PATH } from "./support/tickets";
 
 /**
@@ -31,6 +32,10 @@ export default async function PanelLayout({ children }: { children: ReactNode })
           <NavLink href="/admin" exact>
             <House aria-hidden className="size-4" />
             {t("admin.nav.home")}
+          </NavLink>
+          <NavLink href={PROS_PATH}>
+            <BadgeCheck aria-hidden className="size-4" />
+            {t("admin.nav.pros")}
           </NavLink>
           <NavLink href={SUPPORT_PATH}>
             <LifeBuoy aria-hidden className="size-4" />

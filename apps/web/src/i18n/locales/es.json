@@ -26,7 +26,8 @@
     "nav": {
       "label": "Panel",
       "home": "Inicio",
-      "support": "Soporte"
+      "support": "Soporte",
+      "pros": "Profesionales"
     },
     "roles": {
       "agent": "Agente",
@@ -104,6 +105,117 @@
           "not_found": "Este ticket ya no existe.",
           "forbidden": "Tu cuenta no puede cambiar tickets.",
           "unavailable": "No pudimos guardar el estado. Vuelve a intentarlo en un momento."
+        }
+      }
+    },
+    "pros": {
+      "title": "Profesionales",
+      "subtitle": "Revisa los documentos de cada profesional y luego apruébalo o recházalo. Solo los profesionales aprobados reciben solicitudes.",
+      "filter": {
+        "label": "Profesionales por estado"
+      },
+      "status": {
+        "pending": "Pendientes",
+        "approved": "Aprobados",
+        "rejected": "Rechazados"
+      },
+      "documentStatus": {
+        "pending": "Pendiente",
+        "approved": "Aprobado",
+        "rejected": "Rechazado",
+        "superseded": "Reemplazado"
+      },
+      "documentType": {
+        "id": "Identificación con foto",
+        "license": "Licencia",
+        "insurance": "Seguro"
+      },
+      "documentCount": {
+        "pending": "Pendientes: {{count}}",
+        "approved": "Aprobados: {{count}}",
+        "rejected": "Rechazados: {{count}}"
+      },
+      "columns": {
+        "pro": "Profesional",
+        "categories": "Categorías",
+        "zips": "ZIP",
+        "documents": "Documentos",
+        "submitted": "En espera desde"
+      },
+      "noName": "Sin nombre registrado",
+      "noPayouts": "Pagos sin configurar",
+      "noCategories": "Aún sin categorías",
+      "noDocuments": "Aún sin documentos",
+      "nothingPending": "Nada por revisar",
+      "empty": {
+        "pending": "Ningún profesional espera una decisión.",
+        "approved": "Aún no hay profesionales aprobados.",
+        "rejected": "No hay profesionales rechazados."
+      },
+      "older": "Profesionales anteriores",
+      "noOlder": "No hay profesionales anteriores.",
+      "newest": "Volver a los más recientes",
+      "loadError": "No pudimos cargar los profesionales. Vuelve a intentarlo en un momento.",
+      "retry": "Reintentar",
+      "detail": {
+        "back": "Todos los profesionales",
+        "notFound": "Este profesional no existe.",
+        "loadError": "No pudimos cargar este profesional. Vuelve a intentarlo en un momento.",
+        "payouts": "Pagos",
+        "payoutsEnabled": "Configurados",
+        "payoutsMissing": "Aún sin configurar",
+        "experience": "Años de experiencia",
+        "notGiven": "Sin indicar",
+        "categories": "Categorías",
+        "areas": "Zonas de servicio",
+        "noAreas": "Aún sin zonas de servicio",
+        "joined": "Perfil creado",
+        "decided": "Última decisión",
+        "reason": "Motivo",
+        "bio": "Acerca de",
+        "viewPhoto": "Abrir la foto de perfil",
+        "documents": "Documentos",
+        "linksExpire": "Los archivos se abren en una pestaña nueva. Los enlaces funcionan unos minutos: recarga la página si alguno venció.",
+        "required": "Requeridos",
+        "notSubmitted": "Aún sin enviar",
+        "submitted": "Enviado",
+        "expires": "Vence",
+        "noExpiry": "Sin fecha de vencimiento",
+        "expired": "Vencido",
+        "reviewed": "Revisado",
+        "viewFile": "Abrir el archivo ({{type}})",
+        "reviewLabel": "Revisar: {{type}}",
+        "approveDocument": "Aprobar",
+        "rejectDocument": "Rechazar",
+        "history": "Documentos anteriores",
+        "blockers": {
+          "title": "Antes de aprobar a este profesional",
+          "document_missing": "{{type}}: sin documento aprobado",
+          "document_expired": "{{type}}: el documento aprobado venció",
+          "no_category": "El profesional no tiene categoría",
+          "no_service_area": "El profesional no tiene zona de servicio"
+        },
+        "decision": {
+          "title": "Decisión",
+          "hint": "Un profesional aprobado recibe solicitudes cuando sus pagos están configurados. El profesional puede leer el motivo de un rechazo.",
+          "approve": "Aprobar profesional",
+          "reject": "Rechazar profesional",
+          "approveQuestion": "¿Aprobar a este profesional?",
+          "confirmApprove": "Sí, aprobar",
+          "confirmReject": "Rechazar con este motivo",
+          "cancel": "Cancelar",
+          "reasonLabel": "Motivo",
+          "reasonHint": "El profesional puede leerlo. Hasta {{max}} caracteres.",
+          "saving": "Guardando…",
+          "saved": "Guardado."
+        },
+        "errors": {
+          "reason_required": "Escribe un motivo de hasta {{max}} caracteres.",
+          "not_found": "Esto ya no existe. Recarga la página.",
+          "already_reviewed": "Este documento ya fue revisado o reemplazado. Recarga la página.",
+          "not_approvable": "Este profesional aún no puede aprobarse. Revisa lo que falta.",
+          "forbidden": "Tu cuenta no puede revisar profesionales.",
+          "unavailable": "No pudimos guardar la decisión. Vuelve a intentarlo en un momento."
         }
       }
     }
