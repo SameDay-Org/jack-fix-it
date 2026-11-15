@@ -1,12 +1,6 @@
 import { document, documents, NOTHING_SENT } from "../../pro-documents/__tests__/helpers";
 import { EMPTY_PROFILE, FULL_PROFILE } from "../../pro-profile/__tests__/helpers";
-import {
-  awaitsPayouts,
-  documentsChecklist,
-  homeMode,
-  rejectedDocuments,
-  showsBanner,
-} from "../verification";
+import { awaitsPayouts, documentsChecklist, homeMode, rejectedDocuments } from "../verification";
 
 jest.mock("@/api", () => jest.requireActual("../../../api/errors"));
 
@@ -16,20 +10,15 @@ const APPROVED = { ...FULL_PROFILE, verification_status: "approved" as const };
 const PAID_OUT = { ...APPROVED, payouts_enabled: true };
 
 describe("the pro's home by verification status", () => {
-  it("lists requests for an approved pro only", () => {
+  it("lists requests only for a pro who is approved and has payouts on", () => {
     expect(homeMode(PENDING)).toBe("onboarding");
     expect(homeMode(REJECTED)).toBe("onboarding");
-    expect(homeMode(APPROVED)).toBe("requests");
+    // Approved, but the API sends this pro no request until payouts are on.
+    expect(homeMode(APPROVED)).toBe("onboarding");
     expect(homeMode(PAID_OUT)).toBe("requests");
-  });
-
-  it("says where the review stands until the pro is approved and paid out", () => {
-    expect([PENDING, REJECTED, APPROVED, PAID_OUT].map(showsBanner)).toEqual([
-      true,
-      true,
-      true,
-      false,
-    ]);
+    // Payouts alone open nothing.
+    expect(homeMode({ ...PENDING, payouts_enabled: true })).toBe("onboarding");
+    expect(homeMode({ ...REJECTED, payouts_enabled: true })).toBe("onboarding");
   });
 
   it("an approved pro still waits for payouts until they are on", () => {

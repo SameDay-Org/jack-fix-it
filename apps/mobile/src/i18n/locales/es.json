@@ -1657,7 +1657,7 @@
     "banner": {
       "label": "Verificación: {{status}}",
       "pending": "Nuestro equipo revisa tu perfil y tus documentos antes de que empieces a recibir solicitudes.",
-      "approved": "Sigue: configurar los pagos. Aún no está disponible en la app.",
+      "approved": "Completa la configuración de pagos para empezar a recibir solicitudes.",
       "rejected": "Mira qué corregir y envíalo de nuevo."
     },
     "pending": {

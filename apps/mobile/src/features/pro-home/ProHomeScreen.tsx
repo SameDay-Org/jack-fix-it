@@ -7,24 +7,19 @@ import { Screen, useTabBarInset } from "@/components/ui";
 import { NotificationsPrompt } from "@/features/notifications/NotificationsPrompt";
 import { ProfileChecklistCard, useMyProProfile } from "@/features/pro-profile";
 import { useProJobs, YourJobs } from "@/features/pro-jobs";
-import {
-  homeMode,
-  ProOnboarding,
-  showsBanner,
-  VerificationBanner,
-} from "@/features/pro-verification";
+import { homeMode, ProOnboarding } from "@/features/pro-verification";
 import { useRefetchOnReturn } from "@/features/quotes/useRequestQuotes";
 
 import { OpportunityList } from "./OpportunityList";
 
 /**
- * The pro's home (#219), the Home tab. Once the platform approved the pro: a greeting, the pro's
- * active jobs (#63), then the new opportunities, which scroll the header along; a pull refreshes
- * the jobs and the profile with them. Until then (#38) the home shows where the review stands and
- * what is left to do instead (`ProOnboarding`): no request is listed, and none is asked for.
- * Under the greeting, the notifications pre-prompt while it applies (#334); for an approved pro,
- * the review's status while payouts are still to set up, and "Finish your profile" while the
- * profile misses something (#36). The wallet (#70) comes later.
+ * The pro's home (#219), the Home tab. Once the pro is approved and can be paid: a greeting, the
+ * pro's active jobs (#63), then the new opportunities, which scroll the header along; a pull
+ * refreshes the jobs and the profile with them. Until then (#38) the home shows where the pro
+ * stands and what is left instead (`ProOnboarding`), with the pro's jobs under it: no request is
+ * listed, and none is asked for. Under the greeting, the notifications pre-prompt while it
+ * applies (#334), and "Finish your profile" while the profile misses something (#36). The wallet
+ * (#70) comes later.
  */
 export function ProHomeScreen() {
   const { t } = useTranslation();
@@ -57,21 +52,18 @@ export function ProHomeScreen() {
     </>
   );
   const refresh = () => Promise.all([refetchJobs(), refetchProfile()]);
-  const approved = profile.data !== undefined && homeMode(profile.data) === "requests";
+  const listsRequests = profile.data !== undefined && homeMode(profile.data) === "requests";
 
   return (
     // No bottom edge: the page pads the tab bar itself.
     <Screen bar="light" edges={[]} ownsStatusBar={focused} testID="pro-home">
       <View className="flex-1" style={{ paddingBottom: inset }}>
-        {approved ? (
+        {listsRequests ? (
           <OpportunityList
             onRefresh={refresh}
             header={
               <View className="gap-6 pb-4 pt-2">
                 {greeting}
-                {profile.data && showsBanner(profile.data) ? (
-                  <VerificationBanner profile={profile.data} />
-                ) : null}
                 <ProfileChecklistCard />
                 <YourJobs />
                 <Text accessibilityRole="header" className="text-headline text-navy-900">

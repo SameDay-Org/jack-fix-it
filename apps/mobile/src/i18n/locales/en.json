@@ -1657,7 +1657,7 @@
     "banner": {
       "label": "Verification: {{status}}",
       "pending": "Our team reviews your profile and documents before you start receiving requests.",
-      "approved": "Next: payout setup. It isn't available in the app yet.",
+      "approved": "Finish payout setup to start receiving requests.",
       "rejected": "See what to fix and send it again."
     },
     "pending": {

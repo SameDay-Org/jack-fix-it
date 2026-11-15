@@ -28,10 +28,15 @@ jest.mock(
   () => jest.requireActual("../../pro-documents/__tests__/helpers").routerMock,
 );
 // "Your jobs" (#63) and the notifications pre-prompt (#334) have their own suites; left out here.
-jest.mock("@/features/pro-jobs", () => ({
-  YourJobs: () => null,
-  useProJobs: () => ({ refetch: () => Promise.resolve() }),
-}));
+jest.mock("@/features/pro-jobs", () => {
+  const { View } = jest.requireActual<typeof import("react-native")>("react-native");
+  const { createElement } = jest.requireActual<typeof import("react")>("react");
+  return {
+    // A mark where "Your jobs" goes: the gated home keeps it.
+    YourJobs: () => createElement(View, { testID: "your-jobs-stub" }),
+    useProJobs: () => ({ refetch: () => Promise.resolve() }),
+  };
+});
 jest.mock("@/features/notifications/NotificationsPrompt", () => ({
   NotificationsPrompt: () => null,
 }));
@@ -169,17 +174,41 @@ describe("the pro's home until the pro is approved (#38)", () => {
     expect(paths()).not.toContain(DOCUMENTS);
   });
 
-  it("an approved pro without payouts sees what is next over the list, empty until payouts are on", async () => {
-    server = { profile: APPROVED, documents: NOTHING_SENT, requests: page([]) };
-    await renderWithQuery(<ProHomeScreen />);
-    await flush();
+  it("an approved pro without payouts sees what is left, keeps the jobs, and no request is asked for", async () => {
+    await open(APPROVED);
 
     expect(labelOf("verification-banner")).toBe(
-      "Verification: Approved. Next: payout setup. It isn't available in the app yet.",
+      "Verification: Approved. Finish payout setup to start receiving requests.",
     );
-    // The API sends this pro no request yet: the list is asked for and says it is empty.
-    expect(await screen.findByText("No new requests right now")).toBeTruthy();
-    expect(paths()).toContain(OPPORTUNITIES);
+    // Payout setup is a placeholder, labelled as one, and not a control.
+    expect(screen.getByTestId("payout-setup")).toHaveTextContent(
+      /^Payout setup\s*Not available yet\s*You'll set up how you get paid here\. It isn't available in the app yet\.$/,
+    );
+    expect(screen.getAllByRole("button").map((button) => button.props.testID as string)).toEqual([
+      "verification-banner",
+    ]);
+    expect(screen.getByTestId("your-jobs-stub")).toBeTruthy();
+
+    // The API sends this pro no request: an empty list would mislead, so none is asked for.
+    expect(screen.queryByText("New opportunities")).toBeNull();
+    expect(screen.queryByText("No new requests right now")).toBeNull();
+    expect(paths()).not.toContain(OPPORTUNITIES);
+    // The review is over: no document is asked for either.
+    expect(screen.queryByTestId("documents-checklist")).toBeNull();
+    expect(paths()).not.toContain(DOCUMENTS);
+  });
+
+  it("the requests take the home once payouts are on", async () => {
+    await open(APPROVED);
+    expect(screen.getByTestId("pro-onboarding")).toBeTruthy();
+
+    server.profile = { ...APPROVED, payouts_enabled: true };
+    await act(async () => navigation.setFocused(false));
+    await act(async () => navigation.setFocused(true));
+
+    expect(await screen.findByTestId(`opportunity-${REQUEST.dispatch_id}`)).toBeTruthy();
+    expect(screen.queryByTestId("pro-onboarding")).toBeNull();
+    expect(screen.queryByTestId("verification-banner")).toBeNull();
   });
 
   it("a pull on the gated home asks again for the profile and the documents", async () => {

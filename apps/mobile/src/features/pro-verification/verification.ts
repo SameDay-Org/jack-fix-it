@@ -17,14 +17,15 @@ export const STATUS_TONE: Record<VerificationStatus, StatusTone> = {
 
 /**
  * What the pro's home is for:
- * - `requests`: approved, so the new requests are listed;
- * - `onboarding`: pending or rejected, so the home shows what is left to do instead. A pro who
- *   is not approved is sent no request, and the app asks for none.
+ * - `requests`: approved and with payouts on, so the new requests are listed;
+ * - `onboarding`: anything short of that, so the home shows where the pro stands and what is
+ *   left instead. The API sends a request only to a pro who is approved and can be paid: for
+ *   anyone else the app asks for none, since an empty list would read as "no work near you".
  */
 export type HomeMode = "requests" | "onboarding";
 
 export const homeMode = (profile: ProProfile): HomeMode =>
-  profile.verification_status === "approved" ? "requests" : "onboarding";
+  profile.verification_status === "approved" && profile.payouts_enabled ? "requests" : "onboarding";
 
 /**
  * An approved pro receives requests only once payouts are on as well. Until then that is the
@@ -32,10 +33,6 @@ export const homeMode = (profile: ProProfile): HomeMode =>
  */
 export const awaitsPayouts = (profile: ProProfile): boolean =>
   profile.verification_status === "approved" && !profile.payouts_enabled;
-
-/** The home says where the review stands unless there is nothing left to say: approved and paid out. */
-export const showsBanner = (profile: ProProfile): boolean =>
-  profile.verification_status !== "approved" || !profile.payouts_enabled;
 
 /** A required document counts as sent while it waits for the review or was approved. */
 const isSent = ({ state }: DocumentRow): boolean => state === "pending" || state === "approved";

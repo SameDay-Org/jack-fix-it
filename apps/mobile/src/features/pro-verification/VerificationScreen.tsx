@@ -7,7 +7,6 @@ import { NetworkError } from "@/api";
 import { ACCOUNT_GLYPHS } from "@/components/icons";
 import {
   Button,
-  Card,
   ListGroup,
   ListRow,
   Notice,
@@ -23,6 +22,7 @@ import { profileChecklist, useMyProProfile, type ProProfile } from "@/features/p
 import { useGuardedPush } from "@/features/quotes/navigation";
 import { useRefetchOnReturn, useSettledError } from "@/features/quotes/useRequestQuotes";
 
+import { PayoutSetupPlaceholder } from "./PayoutSetupPlaceholder";
 import { awaitsPayouts, documentsChecklist, rejectedDocuments, STATUS_TONE } from "./verification";
 
 const HOME = "/";
@@ -127,25 +127,7 @@ function Status({ profile }: { profile: ProProfile }) {
               : "proVerification.approved.ready",
           )}
         />
-        {awaitsPayouts(profile) ? (
-          // A placeholder, labelled as one: nothing here is a control until payout setup ships.
-          <Card testID="verification-payouts">
-            <View className="gap-2">
-              <View className="flex-row flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                <Text className="shrink text-headline text-navy-900">
-                  {t("proVerification.approved.placeholder.title")}
-                </Text>
-                <StatusBadge
-                  label={t("proVerification.approved.placeholder.badge")}
-                  tone="neutral"
-                />
-              </View>
-              <Text className="text-callout text-gray-500">
-                {t("proVerification.approved.placeholder.body")}
-              </Text>
-            </View>
-          </Card>
-        ) : null}
+        {awaitsPayouts(profile) ? <PayoutSetupPlaceholder testID="verification-payouts" /> : null}
       </>
     );
   }

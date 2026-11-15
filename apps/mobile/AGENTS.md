@@ -156,7 +156,8 @@ options={sheetOptions([0.5, 0.95])} />`, or `"fitToContents"`), rendering `Sheet
   or an insurance (MM/DD/YYYY, today or later in UTC as the API reads it) and POSTs it; a pending
   one is replaced by the server. A signed URL is an `Image` source and nothing else: never a log.
 - Pro verification (#38): `src/features/pro-verification`. The pro's home lists requests only for
-  an approved pro (`homeMode`); until then `ProOnboarding` takes its place: the status
+  a pro who is approved and has payouts on (`homeMode`: the API sends requests to no one else);
+  until then `ProOnboarding` takes its place: the status
   (`VerificationBanner`, which opens `/pro/verification`), "Finish your profile" and "Send your
   documents" (`DocumentsChecklistCard`), each gone once done, and no opportunity is asked for.
   The profile is asked for again on every return to the home. `VerificationScreen` shows Pending
