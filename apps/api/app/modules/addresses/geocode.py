@@ -13,7 +13,8 @@ point goes to `addresses.lat/lng`; the route reads it and asks for no geocoding.
 - Once: a request keeps the address it was made with, and nothing edits one (a static test
   holds that: tests/test_address_geocode_guard.py), so a row that has its point is never
   placed again. The task is registered with one try: another run would be another billed
-  call. Only the backfill script asks again about a row that kept nothing, once per run.
+  call. Only the backfill script asks again about a row that kept nothing, once per run,
+  and only once the attempt window of the call before has ended.
 - One caller at a time: the worker's task and the backfill script both run this step, so it
   takes the address's claim (addresses/geocode_claim.py) before it asks, and looks at the row
   again once it holds it. A caller that finds the claim taken asks nothing (BUSY): the

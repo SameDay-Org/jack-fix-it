@@ -13,9 +13,10 @@ async def geocode_address(ctx: dict[str, Any], address_id: str) -> str:
     """ARQ task: gives one address its point (addresses/geocode.py) and returns the outcome.
     The switch is read here too: a job queued before GEOCODE_ON_SAVE was turned off asks
     Mapbox nothing. A database error fails the job (ARQ logs it, with the id only); the
-    address stays without a point and its route places it by itself. So does a claim that
-    Redis cannot give (geocode_claim.py): Mapbox is not asked. The claims are in ctx["redis"],
-    the queue's own Redis, where the backfill script takes them too."""
+    address stays without a point and its route places it by itself. So does a claim, or an
+    attempt's mark, that Redis cannot give (geocode_claim.py): Mapbox is not asked. The
+    claims and the marks are in ctx["redis"], the queue's own Redis, where the backfill
+    script takes them too."""
     settings: Settings = ctx["settings"]
     geocoder: AddressGeocoder = ctx["address_geocoder"]
     claims = RedisGeocodeClaims.from_settings(ctx["redis"], settings)

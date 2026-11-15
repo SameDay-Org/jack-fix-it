@@ -235,7 +235,8 @@ coordination only, and can end under a holder still at work (paused, or its COMM
 so the holder also marks the attempt in the same Redis before the call
 (`geocode-address-attempt:<address id>`, a random token, no address data), and nobody asks
 about that address again until the mark ends with `GEOCODE_ATTEMPT_WINDOW_SECONDS` (1800 by
-default, at least 60): one billed call per address per window. Nothing deletes the mark,
+default, at least 60, and longer than the claim or every geocode stops before its call):
+one billed call per address per window. Nothing deletes the mark,
 whatever the answer, so a backfill run within the window skips an address the run before
 asked about. An address claimed or marked elsewhere is skipped (outcome `busy`): the worker
 leaves it and the backfill counts it and moves on. If that Redis is unreachable the
@@ -254,10 +255,11 @@ the request limiter, a rate bound and not a spending cap: `REQUEST_CREATE_LIMIT`
 per customer per `REQUEST_CREATE_WINDOW_SECONDS` (10 an hour by default). It fails open when
 its Redis is down (the availability policy of every limiter here), and there is no global
 budget for the vendor across accounts and windows. The attempt marks live in the queue's
-Redis memory: if it loses its data within the window (a flush, or a failover without
-persistence), an address whose attempt was still unresolved can be asked about once more,
-one extra billed call, bounded by the request limiter; never a wrong point, since the
-write is conditional. So Cesar sets a spending alert in the Mapbox account before
+Redis: if it loses them within the window (a flush, a failover without persistence, an
+eviction under a `maxmemory-policy` other than `noeviction`), each address asked about
+within the window and still without a point can be asked about once more: one extra
+billed call per address, bounded by the request limiter for the worker and by the typed
+count for a backfill run; never a wrong point, since the write is conditional. So Cesar sets a spending alert in the Mapbox account before
 turning the switch on. Turning it off takes the variable change and
 the restart of api and worker that follows it: from then on no call is made, jobs already
 queued included. It cannot undo a call already sent; the points kept so far stay in use.

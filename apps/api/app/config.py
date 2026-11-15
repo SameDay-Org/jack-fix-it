@@ -423,7 +423,7 @@ class Settings(BaseSettings):
     # nobody asks again until the mark ends with this window. Far longer than an address's
     # claim (MAPBOX_TIMEOUT_SECONDS and a few seconds), so a holder paused past its claim, or
     # a COMMIT that lands late, is never billed twice; a backfill run within it skips the
-    # address.
+    # address. A window not longer than the claim stops each geocode before any call.
     geocode_attempt_window_seconds: int = Field(default=1800, ge=60)
     # Job chat (D14.1, #71): messages one user may send in one job's chat per window.
     chat_message_rate_limit: int = Field(default=20, gt=0)

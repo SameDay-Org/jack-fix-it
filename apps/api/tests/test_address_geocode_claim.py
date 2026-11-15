@@ -43,6 +43,7 @@ from app.observability import JsonFormatter, init_sentry
 from scripts import backfill_address_geocodes as backfill
 from tests.conftest import make_settings
 from tests.test_address_geocode import (
+    GEOCODE_LOGGER,
     KEPT_LAT,
     KEPT_LNG,
     TOKEN,
@@ -60,6 +61,8 @@ __all__ = ["sentry_transport"]
 MAPBOX_TIMEOUT = 5.0
 REDIS_TIMEOUT = 2.0
 WINDOW = 1800.0  # the attempt window's default
+# A window that ends within a test, with round trips to spare on a loaded runner.
+SHORT_WINDOW = 2.0
 # The holder's own deadlines in the Vault's reproductions: a claim of four seconds (a second
 # of deadlines and three of margin), so a test waits for it to end.
 SHORT_DEADLINES: dict[str, Any] = {
@@ -90,13 +93,45 @@ async def address_ids(redis: Redis) -> AsyncIterator[list[uuid.UUID]]:
     await redis.delete(*(claim_key(address_id) for address_id in ids))
 
 
-def claims_of(redis: Redis, *, window: float = WINDOW) -> RedisGeocodeClaims:
+def claims_of(redis: Redis) -> RedisGeocodeClaims:
     return RedisGeocodeClaims(
         redis,
         mapbox_timeout_seconds=MAPBOX_TIMEOUT,
         timeout_seconds=REDIS_TIMEOUT,
-        attempt_window_seconds=window,
+        attempt_window_seconds=WINDOW,
     )
+
+
+def short_window_claims(redis: Redis, monkeypatch: pytest.MonkeyPatch) -> RedisGeocodeClaims:
+    """Claims whose window ends within a test. The window must be longer than the claim, so
+    the claim is a second: deadlines of a second, no margin (the turn's real database steps
+    take far less)."""
+    monkeypatch.setattr(geocode_claim, "DATABASE_SECONDS", 0)
+    monkeypatch.setattr(geocode_claim, "EARLY_END_SECONDS", 0)
+    claims = RedisGeocodeClaims(
+        redis,
+        mapbox_timeout_seconds=0.5,
+        timeout_seconds=0.25,
+        attempt_window_seconds=SHORT_WINDOW,
+    )
+    assert claims.claim_seconds == 1
+    return claims
+
+
+def test_the_window_outlasts_the_claim(redis: Redis) -> None:
+    """A mark that ended inside its holder's turn would record nothing: such a window builds
+    no claims, so every geocode stops before Redis or Mapbox is asked."""
+    with pytest.raises(ValueError, match="GEOCODE_ATTEMPT_WINDOW_SECONDS"):
+        RedisGeocodeClaims(
+            redis, mapbox_timeout_seconds=5.0, timeout_seconds=2.0, attempt_window_seconds=12
+        )
+    assert RedisGeocodeClaims(
+        redis, mapbox_timeout_seconds=5.0, timeout_seconds=2.0, attempt_window_seconds=13
+    )
+    # A Mapbox deadline near a minute against the smallest window the settings allow.
+    settings = make_settings(mapbox_timeout_seconds=55.0, geocode_attempt_window_seconds=60)
+    with pytest.raises(ValueError, match="GEOCODE_ATTEMPT_WINDOW_SECONDS"):
+        RedisGeocodeClaims.from_settings(redis, settings)
 
 
 # The claim
@@ -266,9 +301,9 @@ async def test_redis_error_text_reaches_no_log_and_no_sentry(
 
 
 async def test_an_attempt_is_marked_once_per_window(
-    redis: Redis, address_ids: list[uuid.UUID]
+    redis: Redis, address_ids: list[uuid.UUID], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    claims = claims_of(redis, window=0.5)
+    claims = short_window_claims(redis, monkeypatch)
     one, other = address_ids
     try:
         assert await claims.mark_attempt(one, token="first")
@@ -278,13 +313,13 @@ async def test_an_attempt_is_marked_once_per_window(
         # In Redis: one key by the address's id, holding the token, that ends by itself.
         assert attempt_key(one) == f"geocode-address-attempt:{one}"
         assert await redis.get(attempt_key(one)) == b"first"
-        assert 0 < await redis.pttl(attempt_key(one)) <= 500
+        assert 0 < await redis.pttl(attempt_key(one)) <= SHORT_WINDOW * 1000
         # Not the claim's key, and the release of a claim leaves it.
         assert await claims.claim(one, token="first")
         await claims.release(one, token="first")
         assert await redis.get(attempt_key(one)) == b"first"
 
-        await asyncio.sleep(0.6)  # past the window
+        await asyncio.sleep(SHORT_WINDOW + 0.1)  # past the window
 
         assert await claims.mark_attempt(one, token="third")
         assert await redis.get(attempt_key(one)) == b"third"
@@ -293,16 +328,16 @@ async def test_an_attempt_is_marked_once_per_window(
 
 
 async def test_one_billed_call_per_address_per_window(
-    db_session: AsyncSession, redis: Redis
+    db_session: AsyncSession, redis: Redis, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An address that kept nothing is not asked about again until its attempt's mark ends
-    (half a second here). The mark holds the holder's random token: nothing of the address."""
+    (SHORT_WINDOW here). The mark holds the holder's random token: nothing of the address."""
     texts = {"line1": "4412 Markwindow Rd", "line2": "Unit Markwindow", "city": "Markwindowton"}
     address = await make_address(db_session, **texts)
     geocoder = FakeGeocoder()
     geocoder.answer = None
     geocode = AddressGeocodeService(
-        db_session, geocoder, claims_of(redis, window=0.5), enabled=True
+        db_session, geocoder, short_window_claims(redis, monkeypatch), enabled=True
     ).geocode
 
     assert await geocode(address.id) is GeocodeOutcome.NO_RESULT
@@ -315,7 +350,7 @@ async def test_one_billed_call_per_address_per_window(
     assert await geocode(address.id) is GeocodeOutcome.BUSY  # within the window
     assert len(geocoder.asked) == 1
 
-    await asyncio.sleep(0.6)  # past the window
+    await asyncio.sleep(SHORT_WINDOW + 0.1)  # past the window
 
     assert await geocode(address.id) is GeocodeOutcome.NO_RESULT
     assert len(geocoder.asked) == 2
@@ -444,26 +479,36 @@ async def test_the_worker_and_the_backfill_ask_mapbox_once_about_one_address(
 
 
 async def test_two_backfills_ask_mapbox_once_about_one_address(
-    sessions: async_sessionmaker[AsyncSession], redis: Redis, address: Address
+    sessions: async_sessionmaker[AsyncSession],
+    redis: Redis,
+    address: Address,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """Both runs walk every row without a point, other tests' committed ones too, and mark
+    them (each such row is not found here). So each run may find some of them marked by the
+    other: only the address's own outcomes are counted, from the step's log lines."""
     mapbox = SlowMapbox(address.line1)
-    first = asyncio.create_task(apply(sessions, mapbox, redis))
-    try:
-        async with asyncio.timeout(5):
-            await mapbox.asked.wait()  # the first run's call is in flight
+    with caplog.at_level(logging.INFO, logger=GEOCODE_LOGGER):
+        first = asyncio.create_task(apply(sessions, mapbox, redis))
+        try:
+            async with asyncio.timeout(5):
+                await mapbox.asked.wait()  # the first run's call is in flight
 
-        second_code, second_output = await apply(sessions, mapbox, redis)
+            second_code, second_output = await apply(sessions, mapbox, redis)
 
-        mapbox.answer.set()
-        first_code, first_output = await first
-    finally:
-        mapbox.answer.set()
-        await asyncio.gather(first, return_exceptions=True)
+            mapbox.answer.set()
+            first_code, first_output = await first
+        finally:
+            mapbox.answer.set()
+            await asyncio.gather(first, return_exceptions=True)
 
     assert len(mapbox.calls) == 1
     assert (first_code, second_code) == (0, 0)
-    assert (line(first_output, "Point kept"), line(first_output, BUSY_LINE)) == (1, 0)
-    assert (line(second_output, "Point kept"), line(second_output, BUSY_LINE)) == (0, 1)
+    # Only the address can be kept (any other row is not found): the first run kept it, and
+    # the second, which found it claimed, did not ask.
+    assert (line(first_output, "Point kept"), line(second_output, "Point kept")) == (1, 0)
+    ours = [r for r in caplog.records if r.__dict__.get("address_id") == str(address.id)]
+    assert sorted(r.__dict__["outcome"] for r in ours) == ["busy", "stored"]
     async with sessions() as session:
         assert await point_of(session, address.id) == (KEPT_LAT, KEPT_LNG)
 

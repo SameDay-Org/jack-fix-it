@@ -39,11 +39,14 @@ The keys:
   None, so no message or cause of it reaches a log or Sentry). Without the claim and the
   marker Mapbox is not asked. Each call to Redis gets JOB_ENQUEUE_TIMEOUT_SECONDS, the
   queue's own deadline.
-- The limit: the marker lives in Redis's memory. If the queue's Redis loses its data within
-  the window (a flush, or a failover without persistence), an address whose attempt was
-  still unresolved can be asked about once more: one extra billed call, bounded by the
-  request limiter, never a wrong point (the write is conditional: AddressRepository
-  .set_point).
+- The window is longer than the claim, or nothing is built (ValueError): a mark that ended
+  inside its holder's turn would record nothing.
+- The limit: the marks live in Redis. If the queue's Redis loses them within the window (a
+  flush, a failover without persistence, an eviction under a maxmemory-policy other than
+  noeviction), each address asked about within the window and still without a point can be
+  asked about once more: one extra billed call per address, bounded by the request limiter
+  for the worker and by the typed count for a backfill run. Never a wrong point: the write
+  is conditional (AddressRepository.set_point).
 """
 
 import asyncio
@@ -135,6 +138,13 @@ class RedisGeocodeClaims:
         self.claim_seconds: Final = claim_seconds(
             mapbox_timeout_seconds=mapbox_timeout_seconds, redis_timeout_seconds=timeout_seconds
         )
+        if attempt_window_seconds <= self.claim_seconds:
+            raise ValueError(
+                "GEOCODE_ATTEMPT_WINDOW_SECONDS must be longer than an address's claim "
+                f"({self.claim_seconds} s with MAPBOX_TIMEOUT_SECONDS and "
+                "JOB_ENQUEUE_TIMEOUT_SECONDS as set): a mark that ends inside its holder's turn "
+                "records nothing"
+            )
         self.attempt_window_seconds: Final = attempt_window_seconds
         self._release = redis.register_script(_RELEASE_SCRIPT)
 
