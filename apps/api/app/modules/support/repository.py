@@ -25,6 +25,14 @@ class SupportTicketRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    @staticmethod
+    def open_job_ids() -> Select[uuid.UUID | None]:
+        """The jobs a ticket that is not closed is about, as a statement for another module's
+        query."""
+        return select(SupportTicket.job_id).where(
+            SupportTicket.job_id.is_not(None), SupportTicket.status != TicketStatus.CLOSED
+        )
+
     async def add(self, ticket: SupportTicket) -> SupportTicket:
         """Inserts the ticket and reads back what Postgres set (id, status, timestamps)."""
         self._session.add(ticket)

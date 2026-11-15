@@ -262,6 +262,75 @@ def is_reviewable(job: Job) -> bool:
     return job.status in REVIEWABLE
 
 
+@dataclass(frozen=True)
+class StaffJobEvent:
+    """One line of a job's history as staff read it in the request card (#81): what happened
+    and when. Never the check-in's coordinates, and no actor beyond "the system or a person"."""
+
+    type: str
+    from_status: JobStatus | None
+    to_status: JobStatus | None
+    by_system: bool
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class StaffJob:
+    """A request's job for the operations queue's card (#81): ids, status and dates. No money,
+    no arrival code, no position."""
+
+    id: uuid.UUID
+    status: JobStatus
+    pro_id: uuid.UUID
+    quote_id: uuid.UUID
+    started_at: datetime | None
+    completed_at: datetime | None
+    confirmed_at: datetime | None
+    created_at: datetime
+    events: tuple[StaffJobEvent, ...]  # oldest first
+
+
+class JobStaffReader:
+    """A request's job for staff, for another module (the operations queue, #81). Reads only:
+    the caller checks that the reader is staff."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._jobs = JobRepository(session)
+
+    @staticmethod
+    def queue_facts() -> Subquery:
+        """Each job's request (`request_id`), id (`job_id`), accepted quote (`quote_id`) and
+        status (`job_status`), as a subquery: the queue reads a request's bucket in its own
+        query."""
+        return JobRepository.queue_facts()
+
+    async def of_request(self, request_id: uuid.UUID) -> StaffJob | None:
+        """The request's job with its history, or None when it has none yet. Two queries."""
+        job = await self._jobs.get_of_request(request_id)
+        if job is None:
+            return None
+        return StaffJob(
+            id=job.id,
+            status=job.status,
+            pro_id=job.pro_id,
+            quote_id=job.quote_id,
+            started_at=job.started_at,
+            completed_at=job.completed_at,
+            confirmed_at=job.confirmed_at,
+            created_at=job.created_at,
+            events=tuple(
+                StaffJobEvent(
+                    type=event.type,
+                    from_status=event.from_status,
+                    to_status=event.to_status,
+                    by_system=event.actor_id is None,
+                    created_at=event.created_at,
+                )
+                for event in await self._jobs.events_of(job.id)
+            ),
+        )
+
+
 class JobPartiesReader:
     """The parties of a job, for another module (the chat, the reviews). Reads only."""
 
