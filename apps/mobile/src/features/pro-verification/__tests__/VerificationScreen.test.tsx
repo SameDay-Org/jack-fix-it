@@ -1,5 +1,6 @@
 import "@/i18n";
 
+import type { QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { router } from "expo-router";
 
@@ -10,6 +11,7 @@ import {
   document,
   documents,
   navigation,
+  newQueryClient,
   NOTHING_SENT,
   renderWithQuery,
   signedIn,
@@ -44,6 +46,7 @@ const APPROVED: ProProfile = { ...FULL_PROFILE, verification_status: "approved" 
 
 /** What the API answers now, by path; an Error is thrown. */
 let server: { profile: ProProfile | Error; documents: MyDocuments | Error };
+let client: QueryClient;
 
 const flush = () => act(async () => settle());
 const pressed = (testID: string) => act(async () => fireEvent.press(screen.getByTestId(testID)));
@@ -52,13 +55,14 @@ const message = () => screen.getByTestId("verification-message");
 
 async function open(profile: ProProfile | Error, list: MyDocuments | Error = NOTHING_SENT) {
   server = { profile, documents: list };
-  await renderWithQuery(<VerificationScreen />);
+  await renderWithQuery(<VerificationScreen />, client);
   await flush();
 }
 
 beforeEach(() => {
   jest.clearAllMocks();
   navigation.reset();
+  client = newQueryClient();
   jest.mocked(useSession).mockReturnValue(signedIn({ role: "pro" }));
   jest.mocked(apiGet).mockImplementation((async (path: string) => {
     const answer = path === PROFILE ? server.profile : server.documents;
@@ -111,7 +115,7 @@ describe("VerificationScreen", () => {
     expect(await screen.findByRole("button", { name: "Documents, All sent" })).toBeTruthy();
   });
 
-  it("Approved without payouts: what is next, as a placeholder labelled Coming soon", async () => {
+  it("Approved without payouts: what is next, as a placeholder labelled not available", async () => {
     await open(APPROVED);
 
     expect(screen.getByTestId("verification-status")).toHaveTextContent("Approved");
@@ -119,7 +123,7 @@ describe("VerificationScreen", () => {
       "You're approvedOne step is left before requests reach you: payout setup.",
     );
     expect(screen.getByTestId("verification-payouts")).toHaveTextContent(
-      /^Payout setup\s*Coming soon\s*You'll set up how you get paid here\. It isn't available in the app yet\.$/,
+      /^Payout setup\s*Not available yet\s*You'll set up how you get paid here\. It isn't available in the app yet\.$/,
     );
     // A placeholder is not a control: nothing on the screen but Back can be pressed.
     expect(screen.getAllByRole("button").map((button) => button.props.accessibilityLabel)).toEqual([
@@ -151,7 +155,7 @@ describe("VerificationScreen", () => {
 
     expect(screen.getByTestId("verification-status")).toHaveTextContent("Rejected");
     expect(message()).toHaveTextContent(
-      "Your verification wasn't approvedReview your profile and your documents, fix what's listed here, and send it again.",
+      "Your verification wasn't approvedReview your profile and your documents, then send them again.",
     );
     expect(await screen.findByTestId("verification-reason-id")).toHaveTextContent(
       "Photo IDThe photo is too dark to read.",
@@ -178,6 +182,21 @@ describe("VerificationScreen", () => {
       "We couldn't load your documents.Try again",
     );
     expect(screen.getByRole("button", { name: "Fix documents" })).toBeTruthy();
+
+    // A retry that is still on its way keeps the notice, its button busy: no jump to a skeleton.
+    jest
+      .mocked(apiGet)
+      .mockImplementationOnce((() => new Promise(() => undefined)) as typeof apiGet);
+    await pressed("verification-reasons-error-action");
+    await flush();
+    expect(
+      screen.getByTestId("verification-reasons-error-action").props.accessibilityState,
+    ).toMatchObject({ busy: true });
+    expect(screen.queryByTestId("verification-reasons-loading")).toBeNull();
+    await act(async () => {
+      await client.cancelQueries();
+    });
+    await flush();
 
     server.documents = documents([
       document({ doc_type: "id", status: "rejected", rejection_reason: "Blurry." }),

@@ -31,8 +31,9 @@ const DOCUMENTS = "/pro/documents";
 /**
  * The pro's verification status (`/pro/verification`, #38): Pending (the team reviews the
  * profile and the documents; no date is promised), Approved (what is next: payout setup, a
- * labelled placeholder until #277), or Rejected (the reasons the review gave on the documents,
- * and the way to fix them). The profile's own reason joins it once the API's type has it.
+ * placeholder labelled as not available yet, until #277), or Rejected (the reasons the review
+ * gave on the documents, when it gave any, and the way to fix them). The profile's own reason
+ * joins it once the API's type has it.
  */
 export function VerificationScreen() {
   const { t } = useTranslation();
@@ -112,6 +113,8 @@ function Status({ profile }: { profile: ProProfile }) {
   // pro's screen asks for none.
   const status = profile.verification_status;
   const documents = useMyDocuments({ enabled: status !== "approved" });
+  // The error a retry started from stays on screen while it runs (its button shows busy).
+  const documentsError = useSettledError(documents.data, documents.error);
 
   if (status === "approved") {
     return (
@@ -156,7 +159,7 @@ function Status({ profile }: { profile: ProProfile }) {
       {status === "rejected" ? (
         <Reasons
           documents={documents.data}
-          failed={documents.isError}
+          failed={documentsError !== null}
           busy={documents.isFetching}
           onRetry={() => void documents.refetch()}
         />

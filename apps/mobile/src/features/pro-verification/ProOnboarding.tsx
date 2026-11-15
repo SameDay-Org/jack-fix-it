@@ -1,10 +1,12 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { RefreshControl, ScrollView, View } from "react-native";
 
-import { NetworkError } from "@/api";
+import { NetworkError, useSessionGeneration } from "@/api";
 import { Card, ChecklistCardSkeleton, TextSkeleton } from "@/components/ui";
 import { RetryNotice } from "@/features/opportunities/RetryNotice";
+import { myDocumentsQueryKey } from "@/features/pro-documents/api";
 import { profileChecklist, ProfileChecklistCard, type ProProfile } from "@/features/pro-profile";
 import { PROFILE_STEPS } from "@/features/pro-profile/completeness";
 import { useSettledError } from "@/features/quotes/useRequestQuotes";
@@ -21,7 +23,7 @@ export type ProOnboardingProps = {
   /** The profile is being asked for (again). */
   loading: boolean;
   onRetry: () => void;
-  /** Asked again on a pull: the profile, and whatever else the home shows. */
+  /** Asked again on a pull, with the documents: the profile, and whatever else the home shows. */
   onRefresh: () => Promise<unknown>;
   /** Scrolls above everything: the home's greeting. */
   header: ReactNode;
@@ -49,12 +51,18 @@ export function ProOnboarding({
 }: ProOnboardingProps) {
   const { t } = useTranslation();
   const shownError = useSettledError(profile, error);
+  const client = useQueryClient();
+  const generation = useSessionGeneration();
   const [pulling, setPulling] = useState(false);
 
   const refresh = async () => {
     setPulling(true);
     try {
-      await onRefresh();
+      // The documents with the rest: a review may have rejected one since the home opened.
+      await Promise.all([
+        onRefresh(),
+        client.refetchQueries({ queryKey: myDocumentsQueryKey(generation) }),
+      ]);
     } finally {
       setPulling(false);
     }

@@ -1670,13 +1670,13 @@
       "payouts": "One step is left before requests reach you: payout setup.",
       "placeholder": {
         "title": "Payout setup",
-        "badge": "Coming soon",
+        "badge": "Not available yet",
         "body": "You'll set up how you get paid here. It isn't available in the app yet."
       }
     },
     "rejected": {
       "title": "Your verification wasn't approved",
-      "body": "Review your profile and your documents, fix what's listed here, and send it again.",
+      "body": "Review your profile and your documents, then send them again.",
       "fix": "Fix documents"
     },
     "information": {

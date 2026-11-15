@@ -2,6 +2,7 @@ import "@/i18n";
 
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { router } from "expo-router";
+import { RefreshControl, type RefreshControlProps } from "react-native";
 
 import { ApiError, apiGet, NetworkError, useSession } from "@/api";
 
@@ -19,6 +20,7 @@ import type { MyDocuments } from "../../pro-documents/documents";
 import type { ProProfile } from "../../pro-profile";
 import { EMPTY_PROFILE, FULL_PROFILE } from "../../pro-profile/__tests__/helpers";
 import { ProHomeScreen } from "../ProHomeScreen";
+import type { OpportunityPage } from "../useOpportunities";
 
 jest.mock("@/api", () => jest.requireActual("../../pro-documents/__tests__/helpers").apiMock());
 jest.mock(
@@ -53,7 +55,13 @@ const APPROVED: ProProfile = { ...FULL_PROFILE, verification_status: "approved" 
 const REQUEST = summary(1);
 
 /** What the API answers now, by path; an Error is thrown. */
-let server: { profile: ProProfile | Error; documents: MyDocuments };
+let server: { profile: ProProfile | Error; documents: MyDocuments; requests: OpportunityPage };
+
+/** A pull on the list on screen (React Native's mock keeps the last RefreshControl). */
+function pullToRefresh(): void {
+  const mock = RefreshControl as unknown as { latestRef: { props: RefreshControlProps } | null };
+  mock.latestRef?.props.onRefresh?.();
+}
 
 const flush = () => act(async () => settle());
 const pressed = (testID: string) => act(async () => fireEvent.press(screen.getByTestId(testID)));
@@ -61,7 +69,7 @@ const paths = () => jest.mocked(apiGet).mock.calls.map(([path]) => path as strin
 const labelOf = (testID: string) => screen.getByTestId(testID).props.accessibilityLabel as string;
 
 async function open(profile: ProProfile | Error, list: MyDocuments = NOTHING_SENT) {
-  server = { profile, documents: list };
+  server = { profile, documents: list, requests: page([REQUEST]) };
   await renderWithQuery(<ProHomeScreen />);
   await flush();
 }
@@ -71,7 +79,7 @@ beforeEach(() => {
   navigation.reset();
   jest.mocked(useSession).mockReturnValue(signedIn({ role: "pro", first_name: "Dan" }));
   jest.mocked(apiGet).mockImplementation((async (path: string) => {
-    if (path === OPPORTUNITIES) return page([REQUEST]);
+    if (path === OPPORTUNITIES) return server.requests;
     if (path === DOCUMENTS) return server.documents;
     if (server.profile instanceof Error) throw server.profile;
     return server.profile;
@@ -161,13 +169,61 @@ describe("the pro's home until the pro is approved (#38)", () => {
     expect(paths()).not.toContain(DOCUMENTS);
   });
 
-  it("an approved pro without payouts sees the requests under what is next", async () => {
-    await open(APPROVED);
+  it("an approved pro without payouts sees what is next over the list, empty until payouts are on", async () => {
+    server = { profile: APPROVED, documents: NOTHING_SENT, requests: page([]) };
+    await renderWithQuery(<ProHomeScreen />);
+    await flush();
 
-    expect(await screen.findByTestId(`opportunity-${REQUEST.dispatch_id}`)).toBeTruthy();
     expect(labelOf("verification-banner")).toBe(
       "Verification: Approved. Next: payout setup. It isn't available in the app yet.",
     );
+    // The API sends this pro no request yet: the list is asked for and says it is empty.
+    expect(await screen.findByText("No new requests right now")).toBeTruthy();
+    expect(paths()).toContain(OPPORTUNITIES);
+  });
+
+  it("a pull on the gated home asks again for the profile and the documents", async () => {
+    await open(EMPTY_PROFILE, documents([document({ doc_type: "id", status: "pending" })]));
+    expect(await screen.findByTestId("documents-checklist-progress")).toHaveTextContent(
+      "1 of 2 sent",
+    );
+
+    // Meanwhile the review rejected the document, and the pro with it.
+    server.profile = { ...EMPTY_PROFILE, verification_status: "rejected" };
+    server.documents = documents([document({ doc_type: "id", status: "rejected" })]);
+    await act(async () => pullToRefresh());
+    await flush();
+
+    expect(labelOf("verification-banner")).toContain("Verification: Rejected");
+    expect(screen.getByTestId("documents-checklist-progress")).toHaveTextContent("0 of 2 sent");
+    expect(labelOf("documents-checklist-id")).toBe("Photo ID: rejected");
+    expect(paths()).not.toContain(OPPORTUNITIES);
+  });
+
+  it("an approved pro keeps the requests when a refresh of the profile fails", async () => {
+    await open({ ...APPROVED, payouts_enabled: true });
+    expect(await screen.findByTestId(`opportunity-${REQUEST.dispatch_id}`)).toBeTruthy();
+
+    server.profile = new NetworkError(false);
+    await act(async () => navigation.setFocused(false));
+    await act(async () => navigation.setFocused(true));
+    await flush();
+
+    expect(screen.getByTestId(`opportunity-${REQUEST.dispatch_id}`)).toBeTruthy();
+    expect(screen.queryByTestId("pro-onboarding")).toBeNull();
+  });
+
+  it("an approval taken back takes the requests off the home", async () => {
+    await open({ ...APPROVED, payouts_enabled: true });
+    expect(await screen.findByTestId(`opportunity-${REQUEST.dispatch_id}`)).toBeTruthy();
+
+    server.profile = REJECTED;
+    await act(async () => navigation.setFocused(false));
+    await act(async () => navigation.setFocused(true));
+
+    expect(await screen.findByTestId("pro-onboarding")).toBeTruthy();
+    expect(screen.queryByTestId(`opportunity-${REQUEST.dispatch_id}`)).toBeNull();
+    expect(labelOf("verification-banner")).toContain("Verification: Rejected");
   });
 
   it("while the profile is not known, draws the shape of the checklist and asks for no request", async () => {

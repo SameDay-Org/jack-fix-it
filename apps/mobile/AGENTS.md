@@ -160,7 +160,7 @@ options={sheetOptions([0.5, 0.95])} />`, or `"fitToContents"`), rendering `Sheet
   (`VerificationBanner`, which opens `/pro/verification`), "Finish your profile" and "Send your
   documents" (`DocumentsChecklistCard`), each gone once done, and no opportunity is asked for.
   The profile is asked for again on every return to the home. `VerificationScreen` shows Pending
-  (no date promised), Approved (payout setup as a placeholder labelled "Coming soon" until #277)
+  (no date promised), Approved (payout setup as a placeholder labelled "Not available yet" until #277)
   or Rejected (the rejected documents' reasons and "Fix documents"). `ChecklistCard` is in the kit.
 - Strings: `src/i18n/locales/{en,es}.json` through `useTranslation()`. Signed out, the device
   language picks the catalog (English is the fallback); signed in, the account's saved `locale`

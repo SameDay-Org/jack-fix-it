@@ -1670,13 +1670,13 @@
       "payouts": "Falta un paso para que te lleguen solicitudes: configurar los pagos.",
       "placeholder": {
         "title": "Configuración de pagos",
-        "badge": "Próximamente",
+        "badge": "Aún no disponible",
         "body": "Aquí configurarás cómo recibes tus pagos. Aún no está disponible en la app."
       }
     },
     "rejected": {
       "title": "Tu verificación no fue aprobada",
-      "body": "Revisa tu perfil y tus documentos, corrige lo que aparece aquí y envíalo de nuevo.",
+      "body": "Revisa tu perfil y tus documentos y envíalos de nuevo.",
       "fix": "Corregir documentos"
     },
     "information": {
