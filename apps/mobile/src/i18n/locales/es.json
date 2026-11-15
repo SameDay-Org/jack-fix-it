@@ -1688,7 +1688,7 @@
     "documents": {
       "title": "Envía tus documentos",
       "progress": "{{sent}} de {{total}} enviados",
-      "action": "Enviar documentos",
+      "action": "Enviar",
       "stepSent": "{{name}}: enviado",
       "stepTodo": "{{name}}: pendiente",
       "stepRejected": "{{name}}: rechazado",

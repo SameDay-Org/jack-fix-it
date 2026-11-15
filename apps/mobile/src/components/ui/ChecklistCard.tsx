@@ -3,7 +3,7 @@ import { Text, View } from "react-native";
 import { ControlIcon } from "@/components/icons";
 import { tokens } from "@/theme";
 
-import { Button } from "./Button";
+import { Button, type ButtonVariant } from "./Button";
 import { Card } from "./Card";
 import { Skeleton } from "./Skeleton";
 import { TextSkeleton } from "./TextSkeleton";
@@ -26,6 +26,8 @@ export type ChecklistCardProps = {
   /** The card's one action: where the steps are done. */
   actionLabel: string;
   onAction: () => void;
+  /** `secondary` when another card on the screen already holds the primary action. */
+  actionVariant?: ButtonVariant;
   testID: string;
 };
 
@@ -44,6 +46,7 @@ export function ChecklistCard({
   steps,
   actionLabel,
   onAction,
+  actionVariant = "primary",
   testID,
 }: ChecklistCardProps) {
   return (
@@ -90,7 +93,12 @@ export function ChecklistCard({
             </View>
           ))}
         </View>
-        <Button label={actionLabel} onPress={onAction} testID={`${testID}-action`} />
+        <Button
+          label={actionLabel}
+          variant={actionVariant}
+          onPress={onAction}
+          testID={`${testID}-action`}
+        />
       </View>
     </Card>
   );

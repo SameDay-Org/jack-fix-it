@@ -161,6 +161,15 @@ function Status({ profile }: { profile: ProProfile }) {
           onRetry={() => void documents.refetch()}
         />
       ) : null}
+      {/* The fix first: on a short screen it stays in sight under the reasons. */}
+      {status === "rejected" ? (
+        <Button
+          label={t("proVerification.rejected.fix")}
+          size="lg"
+          onPress={() => push(DOCUMENTS)}
+          testID="verification-fix"
+        />
+      ) : null}
       <ListGroup testID="verification-information">
         <ListRow
           label={t("proVerification.information.profile")}
@@ -178,14 +187,6 @@ function Status({ profile }: { profile: ProProfile }) {
           testID="verification-documents"
         />
       </ListGroup>
-      {status === "rejected" ? (
-        <Button
-          label={t("proVerification.rejected.fix")}
-          size="lg"
-          onPress={() => push(DOCUMENTS)}
-          testID="verification-fix"
-        />
-      ) : null}
     </>
   );
 }

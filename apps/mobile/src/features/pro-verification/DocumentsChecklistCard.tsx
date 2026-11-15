@@ -25,7 +25,14 @@ const STEP_KEY: Record<DocumentState, "stepSent" | "stepRejected" | "stepTodo"> 
  * once it is sent, and the way to the documents screen. It shows while one is missing or was
  * rejected, and leaves once all are in. Loading draws its shape; a failure offers a retry.
  */
-export function DocumentsChecklistCard({ testID = "documents-checklist" }: { testID?: string }) {
+export function DocumentsChecklistCard({
+  primary = true,
+  testID = "documents-checklist",
+}: {
+  /** Whether its button is the screen's primary action: not while another card's is. */
+  primary?: boolean;
+  testID?: string;
+}) {
   const { t } = useTranslation();
   const { data, error, isFetching, refetch } = useMyDocuments();
   const shownError = useSettledError(data, error);
@@ -65,6 +72,7 @@ export function DocumentsChecklistCard({ testID = "documents-checklist" }: { tes
       })}
       actionLabel={t("proVerification.documents.action")}
       onAction={() => push("/pro/documents")}
+      actionVariant={primary ? "primary" : "secondary"}
       testID={testID}
     />
   );

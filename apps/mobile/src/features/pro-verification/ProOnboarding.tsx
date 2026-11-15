@@ -5,7 +5,7 @@ import { RefreshControl, ScrollView, View } from "react-native";
 import { NetworkError } from "@/api";
 import { Card, ChecklistCardSkeleton, TextSkeleton } from "@/components/ui";
 import { RetryNotice } from "@/features/opportunities/RetryNotice";
-import { ProfileChecklistCard, type ProProfile } from "@/features/pro-profile";
+import { profileChecklist, ProfileChecklistCard, type ProProfile } from "@/features/pro-profile";
 import { PROFILE_STEPS } from "@/features/pro-profile/completeness";
 import { useSettledError } from "@/features/quotes/useRequestQuotes";
 import { tokens } from "@/theme";
@@ -78,7 +78,8 @@ export function ProOnboarding({
         <>
           <VerificationBanner profile={profile} />
           <ProfileChecklistCard />
-          <DocumentsChecklistCard />
+          {/* One primary action on the home: the profile's while it is shown, then this one. */}
+          <DocumentsChecklistCard primary={profileChecklist(profile).complete} />
         </>
       ) : shownError !== null ? (
         <RetryNotice
