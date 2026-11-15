@@ -252,7 +252,17 @@ async def test_apply_fills_every_address_without_a_point_and_a_second_run_asks_n
     for address in (*placed, nowhere, elsewhere):
         assert str(address.id) not in output
 
-    # Idempotent: a second run asks only about the two that still have no point.
+    # Within the window of those calls, a second run asks about none of the two that still
+    # have no point: one billed call per address per window (their attempts are marked).
+    code, output = await run("--apply")
+
+    assert code == 0
+    assert asked_streets(geocoder) == streets
+    assert line(output, "Addresses looked at") == 2
+    assert line(output, BUSY_LINE) == 2
+
+    # Idempotent: once the window has ended, a run asks only about the two without a point.
+    run.claims.marked.clear()
     geocoder.asked.clear()
     code, output = await run("--apply")
 
@@ -287,8 +297,9 @@ async def test_apply_stops_when_mapbox_is_unavailable(
     for address in addresses:
         assert await point_of(db_session, address.id) == (None, None)
 
-    # The later run takes up the rest.
+    # A later run, past the window of those three calls, takes up the rest.
     geocoder.down = False
+    run.claims.marked.clear()
     code, _ = await run("--apply")
 
     assert code == 0
@@ -477,7 +488,7 @@ async def test_apply_asks_about_no_more_addresses_than_the_operator_confirmed(
 # One caller per address (Vault round 1); the overlaps on real sessions and the real Redis
 # are in tests/test_address_geocode_claim.py
 
-BUSY_LINE = "Claimed by the worker or another run (skipped)"
+BUSY_LINE = "Claimed, or asked about within the attempt window (skipped)"
 
 
 async def test_an_address_claimed_elsewhere_is_skipped_not_waited_for(
@@ -556,6 +567,7 @@ async def test_main_gives_the_run_the_terminal_and_the_queues_redis(
         mapbox_timeout_seconds=config.mapbox_timeout_seconds,
         redis_timeout_seconds=config.job_enqueue_timeout_seconds,
     )
+    assert claims.attempt_window_seconds == config.geocode_attempt_window_seconds == 1800
     expected = Redis.from_url(config.redis_url)
     try:
         assert (
@@ -566,11 +578,12 @@ async def test_main_gives_the_run_the_terminal_and_the_queues_redis(
         await expected.aclose()
 
 
-def test_the_settings_bound_the_batch_and_the_rate() -> None:
+def test_the_settings_bound_the_batch_the_rate_and_the_attempt_window() -> None:
     for bad in (
         {"geocode_backfill_batch_size": 0},
         {"geocode_backfill_batch_size": 1001},
         {"geocode_backfill_per_minute": 0},
+        {"geocode_attempt_window_seconds": 59},  # a window shorter than a minute is no window
     ):
         with pytest.raises(ValidationError):
             make_settings(**bad)

@@ -418,6 +418,13 @@ class Settings(BaseSettings):
     # Mapbox about per minute.
     geocode_backfill_batch_size: int = Field(default=100, gt=0, le=1000)
     geocode_backfill_per_minute: int = Field(default=300, gt=0)
+    # One billed call per address per window (addresses/geocode_claim.py): the worker and the
+    # backfill mark an address in the queue's Redis before they ask Mapbox about it, and
+    # nobody asks again until the mark ends with this window. Far longer than an address's
+    # claim (MAPBOX_TIMEOUT_SECONDS and a few seconds), so a holder paused past its claim, or
+    # a COMMIT that lands late, is never billed twice; a backfill run within it skips the
+    # address.
+    geocode_attempt_window_seconds: int = Field(default=1800, ge=60)
     # Job chat (D14.1, #71): messages one user may send in one job's chat per window.
     chat_message_rate_limit: int = Field(default=20, gt=0)
     chat_message_rate_window_seconds: int = Field(default=60, gt=0)

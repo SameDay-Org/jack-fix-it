@@ -164,18 +164,22 @@ async def point_of(session: AsyncSession, address_id: uuid.UUID) -> tuple[Any, A
 
 
 class MemoryGeocodeClaims:
-    """GeocodeClaims in memory: who holds each address, and each call made (the real one, in
-    Redis: tests/test_address_geocode_claim.py). `on_claim` runs once a claim is taken, before
-    its caller hears of it; `down` and `stuck` are Redis failing at the claim and at the
-    release."""
+    """GeocodeClaims in memory: who holds each address, each attempt marked (never removed:
+    the window does not end here), and each call made (the real one, in Redis:
+    tests/test_address_geocode_claim.py). `on_claim` and `on_mark` run once a claim is taken
+    or an attempt marked, before the caller hears of it; `down`, `mark_down` and `stuck` are
+    Redis failing at the claim, at the mark and at the release."""
 
     def __init__(self, session: AsyncSession | None = None, *, work_seconds: float = 5.0) -> None:
         self.work_seconds = work_seconds
         self.held: dict[uuid.UUID, str] = {}
+        self.marked: dict[uuid.UUID, str] = {}
         self.calls: list[tuple[str, uuid.UUID]] = []
         self.in_transaction: list[bool] = []
         self.on_claim: Callable[[], Awaitable[None]] | None = None
+        self.on_mark: Callable[[], Awaitable[None]] | None = None
         self.down = False
+        self.mark_down = False
         self.stuck = False
         self._session = session
 
@@ -190,6 +194,17 @@ class MemoryGeocodeClaims:
         self.held[address_id] = token
         if self.on_claim is not None:
             await self.on_claim()
+        return True
+
+    async def mark_attempt(self, address_id: uuid.UUID, *, token: str) -> bool:
+        self.calls.append(("mark", address_id))
+        if self.mark_down:
+            raise GeocodeClaimUnavailableError
+        if address_id in self.marked:
+            return False
+        self.marked[address_id] = token
+        if self.on_mark is not None:
+            await self.on_mark()
         return True
 
     async def release(self, address_id: uuid.UUID, *, token: str) -> None:
@@ -436,6 +451,7 @@ async def test_the_row_is_read_again_once_the_claim_is_held(db_session: AsyncSes
     assert geocoder.asked == []
     assert await point_of(db_session, address.id) == theirs
     assert claims.held == {}
+    assert claims.marked == {}  # nothing asked, nothing marked
 
 
 @pytest.mark.parametrize(
@@ -457,9 +473,11 @@ async def test_the_claim_is_taken_before_mapbox_and_given_back_after(
     geocoder.answer = answer
     claims = MemoryGeocodeClaims(db_session)
     held_while_asked: list[bool] = []
+    marked_while_asked: list[bool] = []
 
     async def look() -> None:
         held_while_asked.append(address.id in claims.held)
+        marked_while_asked.append(address.id in claims.marked)
 
     geocoder.meanwhile = look
 
@@ -470,10 +488,35 @@ async def test_the_claim_is_taken_before_mapbox_and_given_back_after(
         assert await service(db_session, geocoder, claims).geocode(address.id) is outcome
 
     assert held_while_asked == [True]
-    assert claims.calls == [("claim", address.id), ("release", address.id)]
+    assert marked_while_asked == [True]  # marked before the call starts
+    assert claims.calls == [("claim", address.id), ("mark", address.id), ("release", address.id)]
     assert claims.held == {}
+    # The mark is not given back with the claim, whatever the answer: it ends with its window.
+    assert list(claims.marked) == [address.id]
     # No transaction of ours is open while Redis answers either.
     assert claims.in_transaction == [False]
+
+
+async def test_an_address_asked_about_within_the_window_is_not_asked_again(
+    db_session: AsyncSession,
+) -> None:
+    """Vault round 2: the claim of the caller before ended (paused past it, its COMMIT late,
+    its key lost) and its point is not visible: the row still reads as one without a point.
+    Its attempt's mark says a billed call started: no second one."""
+    address = await make_address(db_session)
+    geocoder = FakeGeocoder()
+    claims = MemoryGeocodeClaims()
+    claims.marked[address.id] = "the caller before's token"
+
+    outcome = await service(db_session, geocoder, claims).geocode(address.id)
+
+    assert outcome is GeocodeOutcome.BUSY
+    assert not outcome.asked
+    assert geocoder.asked == []
+    assert await point_of(db_session, address.id) == (None, None)
+    assert claims.calls == [("claim", address.id), ("mark", address.id), ("release", address.id)]
+    assert claims.held == {}
+    assert claims.marked == {address.id: "the caller before's token"}  # left as it was
 
 
 @pytest.mark.parametrize("row", ["off", "missing", "already"])
@@ -510,6 +553,29 @@ async def test_without_the_claim_mapbox_is_not_asked(
     assert geocoder.asked == []
     assert await point_of(db_session, address.id) == (None, None)
     assert caplog.records == []  # no outcome: the caller reports the failure
+
+
+async def test_without_the_mark_mapbox_is_not_asked(
+    db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Redis fails once the claim is held: whether an attempt started is unknown, so nothing
+    is asked, and the claim is given back."""
+    address = await make_address(db_session)
+    geocoder = FakeGeocoder()
+    claims = MemoryGeocodeClaims()
+    claims.mark_down = True
+
+    with (
+        caplog.at_level(logging.DEBUG, logger=GEOCODE_LOGGER),
+        pytest.raises(GeocodeClaimUnavailableError),
+    ):
+        await service(db_session, geocoder, claims).geocode(address.id)
+
+    assert geocoder.asked == []
+    assert await point_of(db_session, address.id) == (None, None)
+    assert claims.calls == [("claim", address.id), ("mark", address.id), ("release", address.id)]
+    assert claims.held == {}
+    assert caplog.records == []
 
 
 def hold_the_loop(seconds: float) -> None:
@@ -586,7 +652,7 @@ async def test_a_turn_that_runs_out_keeps_nothing(
         assert extras <= {"address_id", "outcome", "message", "asctime"}, extras
 
 
-@pytest.mark.parametrize("late", ["claim", "look", "write"])
+@pytest.mark.parametrize("late", ["claim", "look", "mark", "write"])
 async def test_a_turn_whose_time_went_by_unseen_asks_and_keeps_nothing(
     db_session: AsyncSession,
     caplog: pytest.LogCaptureFixture,
@@ -596,15 +662,15 @@ async def test_a_turn_whose_time_went_by_unseen_asks_and_keeps_nothing(
     """asyncio cuts a turn at an await, once the loop runs the deadline's timer. Here the
     turn's time goes by with the loop held up, and the step in hand comes back late with the
     timer not run: unchecked, the turn would go on past its time, and so past its claim, to
-    ask Mapbox ("claim", "look") or to keep its point ("write"). "claim" is also the turn
-    counted from before the claim is asked for: a claim that comes with that time spent
-    starts no turn."""
+    mark its attempt and ask Mapbox ("claim", "look"), to ask Mapbox ("mark") or to keep its
+    point ("write"). "claim" is also the turn counted from before the claim is asked for: a
+    claim that comes with that time spent starts no turn."""
     address_id = (await make_address(db_session)).id  # read now: a rollback expires the row
     geocoder = FakeGeocoder()
     claims = MemoryGeocodeClaims(work_seconds=SHORT_TURN)
     commit, write = db_session.commit, AddressRepository.set_point
 
-    async def claim_late() -> None:
+    async def late_by_a_turn() -> None:
         hold_the_loop(claims.work_seconds)
 
     async def look_late() -> None:
@@ -618,7 +684,9 @@ async def test_a_turn_whose_time_went_by_unseen_asks_and_keeps_nothing(
         return written
 
     if late == "claim":
-        claims.on_claim = claim_late
+        claims.on_claim = late_by_a_turn
+    elif late == "mark":
+        claims.on_mark = late_by_a_turn
     elif late == "look":
         monkeypatch.setattr(db_session, "commit", look_late)
     else:
@@ -632,6 +700,8 @@ async def test_a_turn_whose_time_went_by_unseen_asks_and_keeps_nothing(
     # Read in the turn's own session: a point written and not committed would show here.
     assert await point_of(db_session, address_id) == (None, None)
     assert claims.held == {}
+    # A turn already over marks nothing; a mark made stays (that address waits the window).
+    assert list(claims.marked) == ([address_id] if late in ("mark", "write") else [])
     assert [(r.levelno, r.message) for r in caplog.records] == TURN_ENDED_LOGS
 
 
@@ -656,14 +726,26 @@ async def test_a_claim_that_cannot_be_given_back_does_not_undo_the_point(
 # The worker task
 
 
+async def forget_attempts(redis: Redis) -> None:
+    """Deletes every attempt mark in the test Redis. A mark lasts the window (30 minutes) and
+    the backfill marks each row without a point, other tests' committed ones too: left
+    there, they would read as BUSY in the next test, or the next run."""
+    keys = [key async for key in redis.scan_iter(match="geocode-address-attempt:*")]
+    if keys:
+        await redis.delete(*keys)
+
+
 @pytest.fixture
 async def queue_redis() -> AsyncIterator[Redis]:
-    """The real Redis of REDIS_URL, as ARQ's ctx["redis"]: the task takes its claims there. A
-    claim is one key by the address's id, deleted by its holder."""
+    """The real Redis of REDIS_URL, as ARQ's ctx["redis"]: the task takes its claims and marks
+    its attempts there. A claim is one key by the address's id, deleted by its holder; the
+    marks are deleted here, before and after the test."""
     client = Redis.from_url(Settings().redis_url)
+    await forget_attempts(client)
     try:
         yield client
     finally:
+        await forget_attempts(client)
         await client.aclose()
 
 

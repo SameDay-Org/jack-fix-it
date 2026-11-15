@@ -213,10 +213,13 @@ variable is not a secret. Before setting it to `true`:
    done). With `--apply` each of them is one billed call (`GEOCODE_BACKFILL_BATCH_SIZE` ids
    per step, at most `GEOCODE_BACKFILL_PER_MINUTE` calls a minute). It stops when Mapbox is
    unavailable three times in a row and can be run again; a later run asks once more, and
-   is billed once more, for each address that kept nothing.
+   is billed once more, for each address that kept nothing, once that address's attempt
+   window has ended (see below).
 
-   `--apply` never runs unattended, because every call it makes is billed. Run it from an
-   interactive shell: `railway ssh --service worker`, or a local terminal with the service's
+   `--apply` requires an interactive terminal and the typed count, because every call it
+   makes is billed. That is an operational restriction, not an authorization boundary: an
+   operator who controls the shell can still supply the count. Run it from an interactive
+   shell: `railway ssh --service worker`, or a local terminal with the service's
    variables. Before Mapbox is asked anything it prints how many addresses it would send and
    that each one is billed, then waits for the operator to type that number. Without a
    terminal on standard input (a pipe, a file, a scheduled job), at the end of the input, on
@@ -227,10 +230,17 @@ variable is not a secret. Before setting it to `true`:
 One caller at a time asks Mapbox about an address. The worker's job and the backfill both
 claim the address in the queue's Redis (`REDIS_URL`, never `redis-location`) before the
 call, and look at the row again once they hold the claim; a claim ends by itself a few
-seconds after `MAPBOX_TIMEOUT_SECONDS`, so a holder that died blocks nobody. An address
-claimed elsewhere is skipped (outcome `busy`): the worker leaves it to the holder and the
-backfill counts it and moves on. If that Redis is unreachable the backfill stops with exit 1
-before asking about the address, and the worker's job fails without asking.
+seconds after `MAPBOX_TIMEOUT_SECONDS`, so a holder that died blocks nobody. A claim is
+coordination only, and can end under a holder still at work (paused, or its COMMIT late),
+so the holder also marks the attempt in the same Redis before the call
+(`geocode-address-attempt:<address id>`, a random token, no address data), and nobody asks
+about that address again until the mark ends with `GEOCODE_ATTEMPT_WINDOW_SECONDS` (1800 by
+default, at least 60): one billed call per address per window. Nothing deletes the mark,
+whatever the answer, so a backfill run within the window skips an address the run before
+asked about. An address claimed or marked elsewhere is skipped (outcome `busy`): the worker
+leaves it and the backfill counts it and moves on. If that Redis is unreachable the
+backfill stops with exit 1 before asking about the address, and the worker's job fails
+without asking.
 
 A point is kept only when Mapbox places the address in its own state and ZIP. Anything else
 keeps nothing and the route places that address itself, as with the switch off: WARNING
@@ -243,8 +253,12 @@ Budget and abuse. One new request is one permanent geocoding call. What bounds t
 the request limiter, a rate bound and not a spending cap: `REQUEST_CREATE_LIMIT` creations
 per customer per `REQUEST_CREATE_WINDOW_SECONDS` (10 an hour by default). It fails open when
 its Redis is down (the availability policy of every limiter here), and there is no global
-budget for the vendor across accounts and windows. So Cesar sets a spending alert in the
-Mapbox account before turning the switch on. Turning it off takes the variable change and
+budget for the vendor across accounts and windows. The attempt marks live in the queue's
+Redis memory: if it loses its data within the window (a flush, or a failover without
+persistence), an address whose attempt was still unresolved can be asked about once more,
+one extra billed call, bounded by the request limiter; never a wrong point, since the
+write is conditional. So Cesar sets a spending alert in the Mapbox account before
+turning the switch on. Turning it off takes the variable change and
 the restart of api and worker that follows it: from then on no call is made, jobs already
 queued included. It cannot undo a call already sent; the points kept so far stay in use.
 

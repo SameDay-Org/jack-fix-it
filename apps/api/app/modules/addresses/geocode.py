@@ -20,6 +20,10 @@ point goes to `addresses.lat/lng`; the route reads it and asks for no geocoding.
   address is being handled. The holder's turn has one deadline, shorter than the claim, for
   the look, Mapbox and the write; a turn that runs out keeps nothing. The turn also reads
   the clock itself before it asks and before it keeps the point (_in_time).
+- One billed call per address per window: before it asks, the holder marks the attempt in
+  Redis (GEOCODE_ATTEMPT_WINDOW_SECONDS), and a caller that finds the mark asks nothing
+  (BUSY), even once the claim has ended under a holder still at work. The mark is never
+  removed: an address that kept nothing is asked about again after the window only.
 - What is kept: the point, to POINT_PLACES decimals, and only when Mapbox places it in the
   address's own state and ZIP. Anything else (no such address, another state or ZIP, Mapbox
   failing or slow, no token) keeps nothing: the row stays without a point, and its route
@@ -67,7 +71,9 @@ class GeocodeOutcome(StrEnum):
     OFF = "off"  # GEOCODE_ON_SAVE is false
     MISSING = "missing"  # no such address
     ALREADY = "already"  # the row has its point
-    BUSY = "busy"  # another caller holds the address's claim: it is being handled
+    # Another caller holds the address's claim, or one asked about it within the attempt
+    # window (GEOCODE_ATTEMPT_WINDOW_SECONDS): it is being handled, or was just now.
+    BUSY = "busy"
     # Mapbox was asked:
     STORED = "stored"
     NO_RESULT = "no_result"  # it finds no such address
@@ -173,8 +179,8 @@ class AddressGeocodeService:
     async def geocode(self, address_id: uuid.UUID) -> GeocodeOutcome:
         """Gives the address its point when it has none and Mapbox places it in its own state
         and ZIP. Never raises for Mapbox: every outcome but STORED leaves the row as it was.
-        Raises GeocodeClaimUnavailableError, Mapbox not asked, when the claim cannot be
-        taken."""
+        Raises GeocodeClaimUnavailableError, Mapbox not asked, when Redis cannot give the
+        claim or mark the attempt."""
         outcome = await self._geocode(address_id)
         level, event = _EVENTS[outcome]
         logger.log(level, event, extra={"address_id": str(address_id), "outcome": outcome.value})
@@ -195,7 +201,7 @@ class AddressGeocodeService:
             return GeocodeOutcome.BUSY
         try:
             async with asyncio.timeout_at(turn_ends) as turn:
-                return await self._ask_and_keep(address_id, turn_ends)
+                return await self._ask_and_keep(address_id, token, turn_ends)
         except _TurnEndedError:
             return await self._turn_ended(address_id)
         except TimeoutError:
@@ -212,13 +218,22 @@ class AddressGeocodeService:
         logger.warning("address_geocode_turn_ended", extra={"address_id": str(address_id)})
         return GeocodeOutcome.UNAVAILABLE
 
-    async def _ask_and_keep(self, address_id: uuid.UUID, turn_ends: float) -> GeocodeOutcome:
+    async def _ask_and_keep(
+        self, address_id: uuid.UUID, token: str, turn_ends: float
+    ) -> GeocodeOutcome:
         """The holder's turn. The look before the claim is old by now: a caller that held the
-        claim since may have kept the point, so the row is read again, and this look decides."""
+        claim since may have kept the point, so the row is read again, and this look decides.
+        Then the attempt is marked, and only then is Mapbox asked: an attempt marked within
+        the window, by a holder whose claim has ended since, is BUSY. The mark stays, whatever
+        the answer (geocode_claim.py); a turn that runs out once it is marked asks nothing,
+        and its address waits for the window."""
         _in_time(turn_ends)  # the claim can come with the turn's time spent
         asked = await self._place_without_point(address_id)
         if isinstance(asked, GeocodeOutcome):
             return asked
+        _in_time(turn_ends)
+        if not await self._claims.mark_attempt(address_id, token=token):
+            return GeocodeOutcome.BUSY
         _in_time(turn_ends)
         try:
             found = await self._geocoder.geocode_to_keep(asked)

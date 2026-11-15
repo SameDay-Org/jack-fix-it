@@ -11,30 +11,35 @@ happen, with the very same step: one permanent geocoding call per address withou
 point kept only when Mapbox puts it in the address's own state and ZIP.
 
 - Which rows: every address without a point, whatever became of its request (open,
-  cancelled, expired or done). The dry run's count is the number of calls --apply makes.
+  cancelled, expired or done). The dry run's count is the most calls --apply makes.
 - A dry run unless --apply is given: it counts the addresses without a point and asks Mapbox
   nothing.
 - --apply needs GEOCODE_ON_SAVE=true and MAPBOX_ACCESS_TOKEN: each address asked about is a
   billed call. It reads GEOCODE_BACKFILL_BATCH_SIZE ids at a time and asks about at most
   GEOCODE_BACKFILL_PER_MINUTE addresses a minute.
-- --apply needs an operator: it never runs unattended. Before Mapbox is asked anything it
-  prints how many addresses it would send and that each is billed, and goes on only when
-  standard input is a terminal and the operator types that number. No terminal (a pipe, a
-  file, a scheduled job), the end of the input, an empty line or any other answer stops the
-  run, exit 1, Mapbox not asked. Nothing skips the question: there is no --yes flag and no
-  variable for it. The run then asks about that many addresses at the most.
+- --apply requires an interactive terminal and the typed count. Before Mapbox is asked
+  anything it prints how many addresses it would send and that each is billed, and goes
+  on only when standard input is a terminal and that number is typed. No terminal (a
+  pipe, a file, a scheduled job), the end of the input, an empty line or any other answer
+  stops the run, exit 1, Mapbox not asked. Nothing skips the question: there is no --yes
+  flag and no variable for it. The run then asks about that many addresses at the most.
+  This is an operational restriction, not an authorization boundary: an operator who
+  controls the shell can still supply the count (a pseudo-terminal driven by a tool).
 - One caller per address: the worker may be geocoding the same rows, and another run of this
   script too. Each address is claimed in Redis (REDIS_URL, the queue's own;
-  app/modules/addresses/geocode_claim.py) before Mapbox is asked about it. An address
-  claimed elsewhere is skipped, not waited for. Redis unreachable stops the run, exit 1:
-  without its claim no address is asked about.
+  app/modules/addresses/geocode_claim.py) before Mapbox is asked about it, and its
+  attempt is marked there for GEOCODE_ATTEMPT_WINDOW_SECONDS. An address claimed
+  elsewhere, or asked about within that window, is skipped, not waited for. Redis
+  unreachable stops the run, exit 1: without its claim and its mark no address is asked
+  about.
 - When Mapbox is unavailable: one such answer can be about its own address (a text Mapbox
   refuses), so the run goes on to the next row. STOP_AFTER_UNAVAILABLE of them in a row are
   Mapbox itself (a refused token, no billing, a rate limit, an outage): the run stops, and
   the rest waits for the next run.
 - Idempotent: an address that has its point is never asked about again. An address that kept
   nothing (not found, found in another state or ZIP, or unavailable) stays without a point,
-  and each later run asks about it once more: one more billed call each time.
+  and a later run asks about it once more, one more billed call, once the attempt window
+  of the call before has ended; within it the run skips the address.
 - Prints counts only: never an address, an id or a coordinate. The log lines carry the
   address id and the outcome.
 """
@@ -76,7 +81,7 @@ _LINES: Final = (
     (GeocodeOutcome.MISMATCH, "Found in another state or ZIP (nothing kept)"),
     (GeocodeOutcome.CHANGED, "Changed meanwhile (nothing kept)"),
     (GeocodeOutcome.ALREADY, "Had a point by then"),
-    (GeocodeOutcome.BUSY, "Claimed by the worker or another run (skipped)"),
+    (GeocodeOutcome.BUSY, "Claimed, or asked about within the attempt window (skipped)"),
     (GeocodeOutcome.UNAVAILABLE, "Mapbox unavailable"),
 )
 
