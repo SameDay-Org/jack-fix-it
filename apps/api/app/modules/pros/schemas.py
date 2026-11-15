@@ -215,6 +215,10 @@ class StaffProDecisionOut(BaseModel):
 class StaffProOut(StaffProDecisionOut):
     user_id: uuid.UUID
     name: str | None = Field(description='First name and last initial ("María P.").')
+    legal_name: str | None = Field(
+        description="First and last name as on the account, to match the ID document; null "
+        "when the account has neither. Only this detail carries it, never the list."
+    )
     payouts_enabled: bool
     bio: str | None = Field(description="As the pro wrote it: it may hold contact details.")
     years_of_experience: int | None

@@ -4,9 +4,10 @@ reject the profile. Only an approved profile (with payouts enabled) receives req
 
 - The list carries the public name only ("María P."), counts and statuses: never an email, a
   phone, a last name or an address.
-- The detail hands out short-lived URLs of the documents (IDs among them). A read that shows
-  at least one document writes an audit_log row and commits it before answering, so no
-  document is shown unaudited. Review answers never carry a URL.
+- The detail shows the pro's legal name (first and last, to match the ID document) and hands
+  out short-lived URLs of the documents (IDs among them). Every detail read writes an
+  audit_log row and commits it before answering, so neither is shown unaudited. Review
+  answers never carry a URL or the legal name.
 - A document review locks the document row. Only a pending document is reviewed; the same
   decision again answers the document as first decided and writes nothing; any other is a 409.
 - A profile decision locks the profile row (the pro's own edits wait for it). An approval
@@ -17,7 +18,8 @@ reject the profile. Only an approved profile (with payouts enabled) receives req
 - Each change writes one audit_log row (the actor, before, after and the reason) in the same
   transaction: a failed audit write changes nothing.
 
-Logs carry ids, statuses and counts: never a name, a reason, a storage key or a URL.
+Logs carry ids, statuses and counts: never a name, a reason, a storage key or a URL. The list
+never carries the legal name.
 """
 
 import base64
@@ -168,29 +170,29 @@ class ProReviewService:
         )
 
     async def staff_get(self, staff: UserAccount, pro_id: uuid.UUID) -> StaffProOut:
-        """One pro with their documents' URLs; the read of documents is audited first."""
+        """One pro with their legal name and their documents' URLs; the read is audited
+        first."""
         profile = await self._profiles.get_by_id(pro_id)
         if profile is None:
             raise ProNotFoundError
         detail = await self._detail(profile)
         shown = [document.id for document in (*detail.documents, *detail.history)]
-        if shown:
-            # Committed before the answer: an audit write that fails answers 500, so no
-            # document is shown unaudited.
-            try:
-                await self._audit.record_read(
-                    staff.id,
-                    AuditAction.PRO_DOCUMENTS_READ,
-                    AuditEntity(AuditEntityType.PRO_PROFILE, pro_id),
-                    {
-                        "documents": len(shown),
-                        "document_ids": ",".join(str(document_id) for document_id in shown),
-                    },
-                )
-            except ReaderNotStaffError:
-                await self._session.rollback()
-                raise ForbiddenError from None
-            await self._session.commit()
+        # Committed before the answer: an audit write that fails answers 500, so neither the
+        # legal name nor a document is shown unaudited.
+        try:
+            await self._audit.record_read(
+                staff.id,
+                AuditAction.PRO_REVIEW_READ,
+                AuditEntity(AuditEntityType.PRO_PROFILE, pro_id),
+                {
+                    "documents": len(shown),
+                    "document_ids": ",".join(str(document_id) for document_id in shown),
+                },
+            )
+        except ReaderNotStaffError:
+            await self._session.rollback()
+            raise ForbiddenError from None
+        await self._session.commit()
         logger.info(
             "pro_read_by_staff",
             extra={"pro_id": str(pro_id), "staff_id": str(staff.id), "documents": len(shown)},
@@ -334,6 +336,7 @@ class ProReviewService:
             **_decision_out(profile).model_dump(),
             user_id=profile.user_id,
             name=names.get(profile.user_id),
+            legal_name=await self._users.legal_name(profile.user_id),
             payouts_enabled=profile.payouts_enabled,
             bio=profile.bio,
             years_of_experience=profile.years_of_experience,

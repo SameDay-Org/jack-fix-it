@@ -517,9 +517,9 @@ export interface paths {
         };
         /**
          * Read a pro for review (staff)
-         * @description One pro: the profile, the documents with short-lived presigned URLs, the types required
-         *     and missing, and what an approval still needs. A read that shows documents is recorded in
-         *     the audit log with the staff member who made it.
+         * @description One pro: the profile with the legal name (to match the ID document), the documents with
+         *     short-lived presigned URLs, the types required and missing, and what an approval still
+         *     needs. Every read is recorded in the audit log with the staff member who made it.
          */
         get: operations["staff_get_pro_v1_admin_pros__pro_id__get"];
         put?: never;
@@ -4078,6 +4078,11 @@ export interface components {
              * @description First name and last initial ("María P.").
              */
             name: string | null;
+            /**
+             * Legal Name
+             * @description First and last name as on the account, to match the ID document; null when the account has neither. Only this detail carries it, never the list.
+             */
+            legal_name: string | null;
             /** Payouts Enabled */
             payouts_enabled: boolean;
             /**
