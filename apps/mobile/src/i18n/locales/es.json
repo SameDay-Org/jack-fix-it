@@ -1626,8 +1626,8 @@
       "retry": "Reintentar"
     },
     "submit": {
-      "send": "Enviar documento",
-      "replace": "Reemplazar documento",
+      "send": "Enviar",
+      "replace": "Reemplazar",
       "sent": "Documento enviado para revisión",
       "check": "Revisa algunos campos.",
       "expiry": "Fecha de vencimiento",

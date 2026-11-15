@@ -370,7 +370,7 @@ describe("DocumentScreen", () => {
     expect(screen.getByTestId("pro-document-pending")).toHaveTextContent(
       "Sending a new photo replaces the one in review.",
     );
-    expect(screen.getByRole("button", { name: "Replace document" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Replace" })).toBeTruthy();
     // The one on file shows until a new photo is chosen.
     expect(screen.getByTestId("pro-document-photo-image").props.source).toEqual({
       uri: pending.url,

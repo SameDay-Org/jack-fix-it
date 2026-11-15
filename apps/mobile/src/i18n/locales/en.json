@@ -1626,8 +1626,8 @@
       "retry": "Try again"
     },
     "submit": {
-      "send": "Submit document",
-      "replace": "Replace document",
+      "send": "Submit",
+      "replace": "Replace",
       "sent": "Document sent for review",
       "check": "Some fields need a look.",
       "expiry": "Expiry date",
