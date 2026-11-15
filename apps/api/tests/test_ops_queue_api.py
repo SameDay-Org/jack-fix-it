@@ -6,7 +6,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
 import httpx
@@ -15,12 +15,12 @@ from fastapi import FastAPI
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.config import Settings
+from app.config import Settings, get_app_settings
 from app.integrations.storage import get_storage_provider
 from app.modules.addresses.models import Address
 from app.modules.audit.repository import AuditRepository
 from app.modules.audit.service import AuditService
-from app.modules.audit.types import ActorNotStaffError
+from app.modules.audit.types import ActorNotStaffError, AuditAction, ReaderNotStaffError
 from app.modules.categories.models import Category
 from app.modules.jobs.models import JobEvent, JobStatus
 from app.modules.media.safe_status import MediaSafeStatus
@@ -365,6 +365,40 @@ async def test_every_request_is_in_one_bucket_by_precedence_and_the_settings(
         assert leak not in summary.text
 
 
+def zone_where_it_is(hour: int, now: datetime) -> str:
+    """A fixed-offset zone in which the wall clock reads `hour` now. POSIX names invert the
+    sign: Etc/GMT-3 is three hours ahead of UTC."""
+    offset = (hour - now.astimezone(UTC).hour + 12) % 24 - 12
+    return f"Etc/GMT{-offset:+d}"
+
+
+@pytest.mark.parametrize(("local_hour", "bucket"), [(6, "scheduled_today"), (18, "other")])
+async def test_scheduled_today_is_read_in_the_business_time_zone(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    app: FastAPI,
+    local_hour: int,
+    bucket: str,
+) -> None:
+    now = await db_now(db_session)
+    # Twelve hours from now: the same day where it is 6 in the morning, the next day where it
+    # is 6 in the evening. Only the setting tells the two apart.
+    job = await make_job(db_session, world, start=now + timedelta(hours=12))
+    zone = zone_where_it_is(local_hour, now)
+    app.dependency_overrides[get_app_settings] = lambda: make_settings(
+        business_time_zone=zone, request_list_default_limit=PAGE
+    )
+
+    listed = await db_client.get(BASE, headers=world.agent.headers)
+    summary = await db_client.get(SUMMARY, headers=world.agent.headers)
+
+    assert [(item["id"], item["bucket"]) for item in listed.json()["items"]] == [
+        (str(job.request_id), bucket)
+    ], zone
+    assert summary.json()["scheduled_today"] == (1 if bucket == "scheduled_today" else 0)
+
+
 # --- The list --------------------------------------------------------------------------------
 
 
@@ -499,6 +533,24 @@ async def test_the_list_pages_with_a_cursor_in_each_order(
     assert ids(capped) == newest_first
 
 
+async def test_requests_created_at_the_same_instant_are_paged_once_each(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    # One transaction, one clock: the four share created_at, so only the id orders them.
+    created = {str((await make_request(db_session, world)).id) for _ in range(4)}
+    staff = world.agent.headers
+
+    for params in ({}, {"bucket": "new"}):
+        first = await db_client.get(BASE, params=params, headers=staff)
+        second = await db_client.get(
+            BASE, params={**params, "cursor": first.json()["next_cursor"]}, headers=staff
+        )
+
+        assert (len(ids(first)), len(ids(second))) == (PAGE, 1)
+        assert set(ids(first)) | set(ids(second)) == created
+        assert second.json()["next_cursor"] is None
+
+
 # --- The card --------------------------------------------------------------------------------
 
 
@@ -627,22 +679,32 @@ def _no_storage() -> FakeStorage:
     raise AssertionError("the storage is not needed")
 
 
+@pytest.mark.parametrize("failure", ["audit_write_fails", "audit_refuses_the_reader"])
 async def test_nothing_is_shown_when_the_read_cannot_be_audited(
     db_client: httpx.AsyncClient,
     db_session: AsyncSession,
     world: JobWorld,
     monkeypatch: pytest.MonkeyPatch,
+    failure: str,
 ) -> None:
     request = await make_request(db_session, world)
 
-    async def fail(self: AuditRepository, **fields: Any) -> None:
-        raise RuntimeError("probe failure")
+    if failure == "audit_write_fails":
 
-    monkeypatch.setattr(AuditRepository, "add", fail)
+        async def fail(self: AuditRepository, **fields: Any) -> None:
+            raise RuntimeError("probe failure")
+
+        monkeypatch.setattr(AuditRepository, "add", fail)
+    else:
+
+        async def refuse(self: AuditService, *args: Any, **kwargs: Any) -> None:
+            raise ReaderNotStaffError
+
+        monkeypatch.setattr(AuditService, "record_read", refuse)
 
     response = await db_client.get(one(request), headers=world.agent.headers)
 
-    assert response.status_code == 500
+    assert response.status_code == (500 if failure == "audit_write_fails" else 403)
     assert response.headers["cache-control"] == "no-store"
     for leak in (*CONTACT_LEAKS, CUSTOMER_FIRST, DESCRIPTION):
         assert leak not in response.text
@@ -817,16 +879,20 @@ class Racers:
     sessions: async_sessionmaker[AsyncSession]
     request_id: uuid.UUID
     agents: tuple[Party, Party]
+    audited: list[tuple[uuid.UUID, AuditAction]]  # (actor, action) of each audit row asked for
 
 
 @pytest.fixture
 async def racers(committed: Committed, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Racers]:
     """Two agents and one unassigned request, committed, and deleted afterwards. The audit
-    write is replaced by a check that it was asked for: audit_log is append-only, so a
-    committed row could never be cleaned up. The audit itself is proven above."""
+    write is replaced by a record of what was asked for: audit_log is append-only, so a
+    committed row could never be cleaned up. The row itself is proven above."""
+    audited: list[tuple[uuid.UUID, AuditAction]] = []
 
-    async def no_row(self: AuditService, *args: Any, **kwargs: Any) -> None:
-        return None
+    async def no_row(
+        self: AuditService, actor_id: uuid.UUID, action: AuditAction, *args: Any, **kwargs: Any
+    ) -> None:
+        audited.append((actor_id, action))
 
     monkeypatch.setattr(AuditService, "record_staff_action", no_row)
     tag = uuid.uuid4().hex[:8]
@@ -856,7 +922,7 @@ async def racers(committed: Committed, monkeypatch: pytest.MonkeyPatch) -> Async
         Party(agents[1].id, headers_for(agents[1].id, UserRole.AGENT)),
     )
     try:
-        yield Racers(committed.client, committed.sessions, request.id, parties)
+        yield Racers(committed.client, committed.sessions, request.id, parties, audited)
     finally:
         async with committed.sessions() as session:
             await session.execute(delete(ServiceRequest).where(ServiceRequest.id == request.id))
@@ -882,6 +948,8 @@ async def test_two_agents_claiming_at_once_one_wins_and_the_other_is_409(
     async with racers.sessions() as session:
         stored = await request_row(session, racers.request_id)
     assert str(stored.assigned_agent_id) == won.json()["assigned_agent"]["id"]
+    # Only the winner's claim asked for an audit row.
+    assert racers.audited == [(stored.assigned_agent_id, AuditAction.REQUEST_CLAIM)]
 
 
 # --- Logs ------------------------------------------------------------------------------------
