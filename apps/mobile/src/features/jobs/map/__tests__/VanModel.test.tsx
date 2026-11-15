@@ -164,7 +164,7 @@ describe("LiveMap's van", () => {
       modelRotation: ["get", "rotation"],
       modelCastShadows: true,
     });
-    expect(layer.props.style.modelOpacity).toBeUndefined();
+    expect(layer.props.style.modelOpacity).toBe(1);
     // Twice as large for each zoom level out of 19, where it is its real size.
     expect(layer.props.style.modelScale).toEqual([
       "interpolate",
@@ -224,8 +224,10 @@ describe("LiveMap's van", () => {
     await screen.rerender(<LiveMap {...props({ stale: true })} />);
     expect(screen.getByTestId(MODEL_LAYER).props.style.modelOpacity).toBe(STALE_OPACITY);
     expect(STALE_OPACITY).toBeLessThan(1);
-    // Fresh again: the very same style object, so the layer is restyled only on the flip.
+    // Fresh again: the opacity is set back in so many words (a key left out would keep the dim),
+    // with the very same style object, so the layer is restyled only on the flip.
     await screen.rerender(<LiveMap {...props()} />);
+    expect(screen.getByTestId(MODEL_LAYER).props.style.modelOpacity).toBe(1);
     expect(screen.getByTestId(MODEL_LAYER).props.style).toBe(fresh);
   });
 

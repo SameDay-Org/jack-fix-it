@@ -46,6 +46,8 @@ const VAN_MODEL_STYLE: ModelLayerStyle = {
   modelId: VAN_MODEL,
   modelType: "common-3d",
   modelRotation: ["get", "rotation"],
+  // Said in full: a key that is only left out keeps the value the layer had last.
+  modelOpacity: 1,
   modelScale: [
     "interpolate",
     ["exponential", 0.5],
