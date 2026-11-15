@@ -84,7 +84,10 @@ from app.modules.quotes.errors import (
     QuoteNotAcceptableError,
     QuoteOutOfBoundsError,
 )
-from app.modules.quotes.models import Quote, QuoteStatus
+from app.modules.quotes.models import Quote
+
+# Re-exported: other modules name a quote's status through this module (ADR 0003).
+from app.modules.quotes.models import QuoteStatus as QuoteStatus
 from app.modules.quotes.repository import QuoteRepository
 from app.modules.quotes.schemas import (
     CustomerQuote,

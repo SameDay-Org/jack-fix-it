@@ -19,7 +19,7 @@ from app.modules.ops.schemas import (
     RequestCard,
 )
 from app.modules.ops.service import OpsConfig, OpsQueueService
-from app.modules.requests.models import RequestStatus
+from app.modules.requests.queue import RequestStatus
 
 # The BDC and admins work the requests in the panel (#81). No HTTP cache may keep an answer:
 # the card carries the customer's contacts.

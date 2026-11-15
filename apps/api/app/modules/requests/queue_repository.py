@@ -25,7 +25,6 @@ from sqlalchemy import (
     or_,
     select,
     tuple_,
-    update,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -230,19 +229,12 @@ class RequestQueueRepository:
             for value, count in (await self._session.execute(statement)).all()
         }
 
-    async def set_assigned_agent(
-        self, request_id: uuid.UUID, agent_id: uuid.UUID | None
-    ) -> ServiceRequest:
-        """Writes who holds the request (None: nobody) in one statement and returns the
-        request as written. The caller holds the row's lock (get_for_update)."""
-        statement = (
-            update(_R)
-            .where(_R.id == request_id)
-            .values(assigned_agent_id=agent_id, updated_at=func.now())
-            .returning(_R)
-            .execution_options(populate_existing=True)
-        )
-        return (await self._session.scalars(statement)).one()
+    async def set_assigned_agent(self, request: ServiceRequest, agent_id: uuid.UUID | None) -> None:
+        """Writes who holds the request (None: nobody) on the row the caller locked
+        (get_for_update). Through the row, not an UPDATE statement: statements on
+        service_requests belong to the state machine (#160)."""
+        request.assigned_agent_id = agent_id
+        await self._session.flush()
 
     @staticmethod
     def _joined[S: Select[*tuple[Any, ...]]](

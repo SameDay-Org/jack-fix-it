@@ -13,15 +13,15 @@ from pydantic import BaseModel, Field, JsonValue
 
 from app.modules.addresses.schemas import AddressOut
 from app.modules.categories.schemas import CategorySummary
-from app.modules.jobs.models import JobStatus
-from app.modules.quotes.models import QuoteStatus
-from app.modules.requests.models import (
+from app.modules.jobs.service import JobStatus
+from app.modules.quotes.service import QuoteStatus
+from app.modules.requests.queue import (
     PreferredPeriod,
+    QueueBucket,
     RequestMediaKind,
     RequestOrigin,
     RequestStatus,
 )
-from app.modules.requests.queue import QueueBucket
 
 
 class BucketFilter(StrEnum):

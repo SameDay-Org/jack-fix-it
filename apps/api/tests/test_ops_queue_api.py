@@ -12,7 +12,7 @@ from typing import Any, Final
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings, get_app_settings
@@ -119,6 +119,10 @@ def storage(app: FastAPI) -> FakeStorage:
 @pytest.fixture
 async def world(db_session: AsyncSession, storage: FakeStorage) -> JobWorld:
     return await build_world(db_session)
+
+
+def minutes(count: int) -> timedelta:
+    return timedelta(minutes=count)
 
 
 async def db_now(session: AsyncSession) -> datetime:
@@ -276,7 +280,6 @@ async def test_agents_and_admins_work_the_queue(
 async def test_every_request_is_in_one_bucket_by_precedence_and_the_settings(
     db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
 ) -> None:
-    minutes = lambda n: timedelta(minutes=n)  # noqa: E731 - a local shorthand
     in_status = RequestStatus
     now = await db_now(db_session)
     disputed = await make_job(db_session, world, JobStatus.DISPUTED)
@@ -416,7 +419,7 @@ async def test_a_list_item_shows_no_contact(
         )
     )
     await db_session.execute(
-        User.__table__.update()
+        update(User)
         .where(User.id == world.agent.id)
         .values(first_name="Eva", last_name="Agentlast")
     )

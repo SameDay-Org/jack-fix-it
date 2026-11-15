@@ -41,8 +41,7 @@ from app.modules.audit.types import (
 from app.modules.categories.schemas import CategorySummary
 from app.modules.categories.service import CategoryService
 from app.modules.dispatch.opportunities import sign_safe_media
-from app.modules.jobs.models import JobStatus
-from app.modules.jobs.service import JobStaffReader, StaffJob
+from app.modules.jobs.service import JobStaffReader, JobStatus, StaffJob
 from app.modules.jobs.transitions import CUSTOMER_STATUS
 from app.modules.ops.errors import (
     InvalidQueueQueryError,
@@ -67,15 +66,16 @@ from app.modules.ops.schemas import (
 from app.modules.pros.service import ProService
 from app.modules.quotes.service import QuoteReader
 from app.modules.requests.customer_status import REQUEST_CUSTOMER_STATUS
-from app.modules.requests.models import RequestStatus, ServiceRequest
 from app.modules.requests.queue import (
     After,
+    LockedRequest,
     QueueBucket,
+    QueuedRequest,
     QueueFilters,
-    QueueRow,
     QueueRules,
     QueueSources,
     RequestQueueReader,
+    RequestStatus,
 )
 from app.modules.requests.service import ProRequestReader
 from app.modules.service_areas.schemas import zip5
@@ -171,7 +171,7 @@ class OpsQueueService:
         page, more = rows[:size], len(rows) > size
         return QueuePage(
             items=await self._items(page),
-            next_cursor=_encode_cursor(page[-1].request) if more and page else None,
+            next_cursor=_encode_cursor(page[-1]) if more and page else None,
         )
 
     async def summary(self) -> QueueSummary:
@@ -202,7 +202,7 @@ class OpsQueueService:
                 staff.id,
                 AuditAction.REQUEST_CARD_READ,
                 AuditEntity(AuditEntityType.SERVICE_REQUEST, request_id),
-                {"status": row.request.status.value, "media": len(card.media)},
+                {"status": row.status.value, "media": len(card.media)},
             )
         except ReaderNotStaffError:
             await self._session.rollback()
@@ -220,47 +220,47 @@ class OpsQueueService:
 
     async def claim(self, staff: UserAccount, request_id: uuid.UUID) -> ClaimOut:
         """Gives an unassigned request to the caller, audited, and commits."""
-        request = await self._requests.lock(request_id)
-        if request is None:
+        locked = await self._requests.lock(request_id)
+        if locked is None:
             raise QueueRequestNotFoundError
-        holder = request.assigned_agent_id
+        holder = locked.assigned_agent_id
         if holder == staff.id:
             await self._session.commit()  # a replay: nothing changed, only the row lock goes
-            return await self._claim_out(request)
+            return await self._claim_out(request_id, holder)
         if holder is not None:
             raise RequestHeldError
-        return await self._assign(staff, request_id, AuditAction.REQUEST_CLAIM, None, staff.id)
+        return await self._assign(staff, locked, AuditAction.REQUEST_CLAIM, staff.id)
 
     async def release(self, staff: UserAccount, request_id: uuid.UUID) -> ClaimOut:
         """Lets go of a request the caller holds (an admin: anyone's), audited, and commits."""
-        request = await self._requests.lock(request_id)
-        if request is None:
+        locked = await self._requests.lock(request_id)
+        if locked is None:
             raise QueueRequestNotFoundError
-        holder = request.assigned_agent_id
+        holder = locked.assigned_agent_id
         if holder is None:
             await self._session.commit()  # nothing to release: only the row lock goes
-            return await self._claim_out(request)
+            return await self._claim_out(request_id, None)
         if holder != staff.id and staff.role != UserRole.ADMIN:
             raise RequestHeldError
-        return await self._assign(staff, request_id, AuditAction.REQUEST_RELEASE, holder, None)
+        return await self._assign(staff, locked, AuditAction.REQUEST_RELEASE, None)
 
     async def _assign(
         self,
         staff: UserAccount,
-        request_id: uuid.UUID,
+        locked: LockedRequest,
         action: AuditAction,
-        before: uuid.UUID | None,
-        after: uuid.UUID | None,
+        agent_id: uuid.UUID | None,
     ) -> ClaimOut:
-        request = await self._requests.assign(request_id, after)
+        before = locked.assigned_agent_id
+        await self._requests.assign(locked, agent_id)
         try:
             # In the change's transaction: an audit write that fails rolls the change back.
             await self._audit.record_staff_action(
                 staff.id,
                 action,
-                AuditEntity(AuditEntityType.SERVICE_REQUEST, request_id),
+                AuditEntity(AuditEntityType.SERVICE_REQUEST, locked.id),
                 {"assigned_agent_id": None if before is None else str(before)},
-                {"assigned_agent_id": None if after is None else str(after)},
+                {"assigned_agent_id": None if agent_id is None else str(agent_id)},
             )
         except ActorNotStaffError:
             await self._session.rollback()
@@ -269,25 +269,24 @@ class OpsQueueService:
         logger.info(
             "request_assignment_changed",
             extra={
-                "service_request_id": str(request_id),
+                "service_request_id": str(locked.id),
                 "staff_id": str(staff.id),
                 "action": action.value,
             },
         )
-        return await self._claim_out(request)
+        return await self._claim_out(locked.id, agent_id)
 
-    async def _claim_out(self, request: ServiceRequest) -> ClaimOut:
-        agents = await self._agents({request.assigned_agent_id})
-        holder = request.assigned_agent_id
-        return ClaimOut(id=request.id, assigned_agent=None if holder is None else agents[holder])
+    async def _claim_out(self, request_id: uuid.UUID, holder: uuid.UUID | None) -> ClaimOut:
+        agents = await self._agents({holder})
+        return ClaimOut(id=request_id, assigned_agent=None if holder is None else agents[holder])
 
     async def _agents(self, agent_ids: set[uuid.UUID | None]) -> dict[uuid.UUID, QueueAgent]:
         ids = {agent_id for agent_id in agent_ids if agent_id is not None}
         names = await self._users.first_names(ids)
         return {agent_id: QueueAgent(id=agent_id, name=names.get(agent_id)) for agent_id in ids}
 
-    async def _items(self, rows: list[QueueRow]) -> list[QueueItem]:
-        requests = [row.request for row in rows]
+    async def _items(self, rows: list[QueuedRequest]) -> list[QueueItem]:
+        requests = rows
         names = await self._users.public_names({request.customer_id for request in requests})
         agents = await self._agents({request.assigned_agent_id for request in requests})
         categories = {
@@ -300,28 +299,24 @@ class OpsQueueService:
         return [
             self._item(
                 row,
-                customer_name=names.get(row.request.customer_id),
-                category=categories.get(row.request.category_id)
-                if row.request.category_id
-                else None,
-                agent=agents.get(row.request.assigned_agent_id)
-                if row.request.assigned_agent_id
-                else None,
-                media_count=media.get(row.request.id, 0),
+                customer_name=names.get(row.customer_id),
+                category=categories.get(row.category_id) if row.category_id else None,
+                agent=agents.get(row.assigned_agent_id) if row.assigned_agent_id else None,
+                media_count=media.get(row.id, 0),
             )
             for row in rows
         ]
 
     def _item(
         self,
-        row: QueueRow,
+        row: QueuedRequest,
         *,
         customer_name: str | None,
         category: CategorySummary | None,
         agent: QueueAgent | None,
         media_count: int,
     ) -> QueueItem:
-        request = row.request
+        request = row
         return QueueItem(
             id=request.id,
             public_code=request.public_code,
@@ -340,8 +335,8 @@ class OpsQueueService:
             media_count=media_count,
         )
 
-    async def _card(self, row: QueueRow) -> RequestCard:
-        request = row.request
+    async def _card(self, row: QueuedRequest) -> RequestCard:
+        request = row
         [item] = await self._items([row])
         customer = await self._users.get_by_id(request.customer_id)
         address = await self._addresses.get(request.address_id)
@@ -404,11 +399,11 @@ class OpsQueueService:
         )
 
 
-def _customer_status(row: QueueRow) -> str:
+def _customer_status(row: QueuedRequest) -> str:
     """What the customer sees: the job's status once there is a job, else the request's."""
     if row.job_status is not None:
         return CUSTOMER_STATUS[JobStatus(row.job_status)]
-    return REQUEST_CUSTOMER_STATUS[row.request.status]
+    return REQUEST_CUSTOMER_STATUS[row.status]
 
 
 def _card_job(job: StaffJob, scheduled_start_at: datetime | None) -> CardJob:
@@ -432,7 +427,7 @@ def _card_job(job: StaffJob, scheduled_start_at: datetime | None) -> CardJob:
     )
 
 
-def _encode_cursor(request: ServiceRequest) -> str:
+def _encode_cursor(request: QueuedRequest) -> str:
     raw = f"{request.created_at.isoformat()}|{request.id}".encode()
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 

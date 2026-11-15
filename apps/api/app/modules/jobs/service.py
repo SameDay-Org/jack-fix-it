@@ -36,7 +36,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.errors import ForbiddenError, NotFoundError
 from app.modules.jobs.errors import InvalidTransitionError
 from app.modules.jobs.location import JobLocationStore, forget_position
-from app.modules.jobs.models import Job, JobEvent, JobStatus
+from app.modules.jobs.models import Job, JobEvent
+
+# Re-exported: other modules name a job's status through this module (ADR 0003).
+from app.modules.jobs.models import JobStatus as JobStatus
 from app.modules.jobs.repository import JobRepository
 from app.modules.jobs.transitions import CHAT_OPEN, REVIEWABLE, TRANSITIONS, ActorKind
 from app.modules.pros.service import ProService
