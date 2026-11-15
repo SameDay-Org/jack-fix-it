@@ -216,7 +216,9 @@
           "not_approvable": "This pro can't be approved yet. See what is still needed.",
           "forbidden": "Your account can't review pros.",
           "unavailable": "We couldn't save the decision. Try again in a moment."
-        }
+        },
+        "legalNameHint": "Name on the account. Compare it with the ID document.",
+        "legalNameMissing": "The account has no full name to compare with the ID document."
       }
     }
   }

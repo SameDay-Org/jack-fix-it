@@ -58,6 +58,7 @@ export function pro(extra: Partial<Pro> = {}): Pro {
     id: PRO_ID,
     user_id: "3c1e0f3a-2222-4333-8444-655566667741",
     name: "Lucía R.",
+    legal_name: "Lucía Ramírez",
     verification_status: "pending",
     rejection_reason: null,
     reviewed_at: null,

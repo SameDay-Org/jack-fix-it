@@ -135,7 +135,7 @@ function DocumentRow({
 }
 
 /**
- * One pro for review (D7.4, #41): the profile, the documents with a preview link each and
+ * One pro for review (D7.4, #41): the profile with the legal name, the documents with a preview link each and
  * their approve and reject buttons, then the decision on the pro, with what an approval still
  * needs. Reading this page is recorded by the API (it shows ID documents). An id that is not a
  * UUID never reaches the API.
@@ -171,12 +171,18 @@ export default async function ProPage({ params }: { params: Promise<{ proId: str
           <Card className="flex flex-col gap-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h1 className="text-2xl font-bold break-words">
-                {pro.name ?? t("admin.pros.noName")}
+                {pro.legal_name ?? pro.name ?? t("admin.pros.noName")}
               </h1>
               <StatusBadge status={pro.verification_status}>
                 {t(`admin.pros.status.${pro.verification_status}`)}
               </StatusBadge>
             </div>
+            {/* The name as on the account: staff match it to the name on the ID document. */}
+            <p className="-mt-4 text-sm text-gray-500">
+              {pro.legal_name
+                ? t("admin.pros.detail.legalNameHint")
+                : t("admin.pros.detail.legalNameMissing")}
+            </p>
             <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-3 text-sm">
               <dt className="text-gray-500">{t("admin.pros.detail.payouts")}</dt>
               <dd>

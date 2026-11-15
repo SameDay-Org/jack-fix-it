@@ -69,7 +69,8 @@ describe("pro page", () => {
     expect(new Headers(request?.init?.headers).get("Authorization")).toBe(`Bearer ${ACCESS_TOKEN}`);
     expect(request?.init?.cache).toBe("no-store");
     for (const text of [
-      "Lucía R.",
+      "Lucía Ramírez",
+      "Name on the account. Compare it with the ID document.",
       "Plumbing",
       "33301 Fort Lauderdale",
       "Not set up yet",
@@ -167,6 +168,7 @@ describe("pro page", () => {
     api(() =>
       Response.json(
         pro({
+          legal_name: null,
           verification_status: "approved",
           documents: [],
           missing_types: [],
@@ -178,6 +180,9 @@ describe("pro page", () => {
     const page = await render();
 
     expect(buttons(page)).toEqual(["Reject pro"]);
+    // Without a name on the account the public name stands in, and the page says so.
+    expect(page).toContain("Lucía R.");
+    expect(page).toContain("The account has no full name to compare with the ID document.");
     expect(page).toContain("No documents yet");
     expect(page).not.toContain("Before this pro can be approved");
   });

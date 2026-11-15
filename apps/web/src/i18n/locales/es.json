@@ -216,7 +216,9 @@
           "not_approvable": "Este profesional aún no puede aprobarse. Revisa lo que falta.",
           "forbidden": "Tu cuenta no puede revisar profesionales.",
           "unavailable": "No pudimos guardar la decisión. Vuelve a intentarlo en un momento."
-        }
+        },
+        "legalNameHint": "Nombre de la cuenta. Compáralo con el documento de identificación.",
+        "legalNameMissing": "La cuenta no tiene nombre completo para comparar con el documento de identificación."
       }
     }
   }
