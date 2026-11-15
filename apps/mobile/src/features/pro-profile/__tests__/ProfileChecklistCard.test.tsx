@@ -1,14 +1,22 @@
 import "@/i18n";
 
-import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { router } from "expo-router";
 import { Text } from "react-native";
 
 import { ApiError, apiGet, useSession } from "@/api";
 
+import { myProProfileQueryKey } from "../api";
 import { ProfileChecklistCard } from "../ProfileChecklistCard";
 import { ProOnly } from "../ProOnly";
-import { EMPTY_PROFILE, FULL_PROFILE, navigation, renderWithQuery, signedIn } from "./helpers";
+import {
+  EMPTY_PROFILE,
+  FULL_PROFILE,
+  navigation,
+  newQueryClient,
+  renderWithQuery,
+  signedIn,
+} from "./helpers";
 
 jest.mock("@/api", () => jest.requireActual("./helpers").apiMock());
 // Where a redirect sends the screen; it draws nothing.
@@ -64,11 +72,13 @@ describe("ProfileChecklistCard", () => {
   });
 
   it("is gone once the profile is complete", async () => {
-    jest.mocked(apiGet).mockResolvedValue(FULL_PROFILE);
-    await renderWithQuery(<ProfileChecklistCard />);
+    // Shown first, so the card leaving is the complete profile's doing, not a slow answer's.
+    const client = newQueryClient();
+    await renderWithQuery(<ProfileChecklistCard />, client);
+    expect(await screen.findByTestId("profile-checklist")).toBeTruthy();
 
-    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(1));
-    expect(screen.queryByTestId("profile-checklist")).toBeNull();
+    await act(async () => client.setQueryData(myProProfileQueryKey(1), FULL_PROFILE));
+    await waitFor(() => expect(screen.queryByTestId("profile-checklist")).toBeNull());
   });
 
   it.each([

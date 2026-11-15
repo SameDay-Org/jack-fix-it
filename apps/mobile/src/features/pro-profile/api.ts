@@ -23,11 +23,11 @@ export type ServiceCity = ServiceRegion["cities"][number];
  * The profile as the session that asked for it sees it: the generation is part of the key and
  * pins every call, so an answer for a session that is gone never lands where the next one reads.
  */
-export const proProfileQueryKey = (generation: number) => ["pro-profile", generation] as const;
+export const myProProfileQueryKey = (generation: number) => ["pro-profile", generation] as const;
 
-export const proProfileQueryOptions = (generation: number) =>
+export const myProProfileQueryOptions = (generation: number) =>
   queryOptions({
-    queryKey: proProfileQueryKey(generation),
+    queryKey: myProProfileQueryKey(generation),
     queryFn: ({ signal }): Promise<ProProfile> =>
       apiGet("/v1/pros/me", { auth: true, signal, generation }),
     retry: false,
@@ -37,11 +37,11 @@ export const proProfileQueryOptions = (generation: number) =>
  * The signed-in pro's profile; the first read creates an empty one, pending verification. Asked
  * for only while a pro is signed in. A failure is shown with a retry, not retried in silence.
  */
-export function useProProfile() {
+export function useMyProProfile() {
   const generation = useSessionGeneration();
   const { status, user } = useSession();
   const enabled = status === "signedIn" && user?.role === "pro";
-  return useQuery({ ...proProfileQueryOptions(generation), enabled });
+  return useQuery({ ...myProProfileQueryOptions(generation), enabled });
 }
 
 /** The fields to change, for the session the form was sent in. */
@@ -54,7 +54,7 @@ export function useUpdateProProfile() {
     mutationFn: ({ body, generation }: ProProfileUpdateVariables) =>
       apiPatch("/v1/pros/me", body, { auth: true, generation }),
     onSuccess: (profile, { generation }) =>
-      client.setQueryData(proProfileQueryKey(generation), profile),
+      client.setQueryData(myProProfileQueryKey(generation), profile),
   });
 }
 

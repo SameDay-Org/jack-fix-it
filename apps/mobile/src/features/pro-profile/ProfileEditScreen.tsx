@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { KeyboardAvoidingView, ScrollView, Text, View } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
@@ -19,7 +19,7 @@ import { backToPrevious, BackButton } from "@/features/auth/components/BackButto
 import { useCategories, type Category } from "@/features/home/useCategories";
 import { lengthCounter } from "@/features/request/counter";
 
-import { useProProfile, useServiceAreas, type ProProfile, type ServiceRegion } from "./api";
+import { useMyProProfile, useServiceAreas, type ProProfile, type ServiceRegion } from "./api";
 import { BIO_MAX, YEARS_MAX } from "./config";
 import { areaIdsOf, draftErrors, draftOf } from "./draft";
 import { PhotoField } from "./PhotoField";
@@ -39,7 +39,7 @@ const YEARS_DIGITS = String(YEARS_MAX).length;
  */
 export function ProProfileEditScreen() {
   const { t } = useTranslation();
-  const profile = useProProfile();
+  const profile = useMyProProfile();
   const categories = useCategories();
   const areas = useServiceAreas();
   const queries = [profile, categories, areas];
@@ -142,7 +142,7 @@ function Editor({ profile, categories, regions }: EditorProps) {
   const editor = useProfileEditor({ initial, offered, onSaved: () => backToPrevious(HOME) });
   const { draft, photo, errors, saving } = editor;
   const reduceMotion = useReducedMotion();
-  const scroll = useRef<ScrollView>(null);
+  const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
   // Where the two parts Save can refuse start in the list, to bring the first one into view.
   const offsets = useRef({ about: 0, areas: 0 });
 
@@ -242,7 +242,7 @@ function Editor({ profile, categories, regions }: EditorProps) {
             label={t("proProfile.edit.save")}
             size="lg"
             loading={saving}
-            disabled={photo.busy}
+            disabled={photo.busy || photo.choosing}
             onPress={save}
             testID="pro-profile-save"
           />

@@ -103,7 +103,8 @@ export function useProfileEditor({
   };
 
   const submit = async () => {
-    if (saving || photo.busy) return;
+    // Not while the photo is on its way, nor while its sheet or the picker is opening over the form.
+    if (saving || photo.busy || photo.choosing) return;
     setChecked(true);
     if (Object.keys(draftErrors(draft)).length > 0) {
       announce(t("proProfile.edit.check"));

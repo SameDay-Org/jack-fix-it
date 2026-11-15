@@ -55,7 +55,7 @@ jest.mock("@/features/pro-jobs", () => ({
 const mockRefetchProfile = jest.fn(() => Promise.resolve());
 jest.mock("@/features/pro-profile", () => ({
   ProfileChecklistCard: () => null,
-  useProProfile: () => ({ refetch: mockRefetchProfile }),
+  useMyProProfile: () => ({ refetch: mockRefetchProfile }),
 }));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock("expo-notifications");

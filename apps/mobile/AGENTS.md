@@ -139,7 +139,7 @@ options={sheetOptions([0.5, 0.95])} />`, or `"fitToContents"`), rendering `Sheet
   log). The tries left after a wrong code come from `ApiError.header()`. A sheet closes once
   (`useSheetExit`), and only for the session it opened in.
 - Pro profile (#36): `src/features/pro-profile`, routes under `src/app/(app)/pro` (its layout is
-  `ProOnly`: anyone but a pro is sent home). `useProProfile` reads `GET /v1/pros/me`, keyed by the
+  `ProOnly`: anyone but a pro is sent home). `useMyProProfile` reads `GET /v1/pros/me`, keyed by the
   session generation. "Finish your profile" on the pro's home (`ProfileChecklistCard`, driven by
   `profileChecklist`) and Account > Pro profile open `/pro/profile`: one form whose Save sends a
   single PATCH with only the fields that changed (`profilePatch`; the category and ZIP lists go

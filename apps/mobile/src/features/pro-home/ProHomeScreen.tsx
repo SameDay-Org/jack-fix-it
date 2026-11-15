@@ -5,7 +5,7 @@ import { Text, View } from "react-native";
 import { useSession } from "@/api";
 import { Screen, useTabBarInset } from "@/components/ui";
 import { NotificationsPrompt } from "@/features/notifications/NotificationsPrompt";
-import { ProfileChecklistCard, useProProfile } from "@/features/pro-profile";
+import { ProfileChecklistCard, useMyProProfile } from "@/features/pro-profile";
 import { useProJobs, YourJobs } from "@/features/pro-jobs";
 
 import { OpportunityList } from "./OpportunityList";
@@ -24,7 +24,7 @@ export function ProHomeScreen() {
   const inset = useTabBarInset();
   // The pull's refresh only: "Your jobs" refreshes the list on focus and foreground itself.
   const { refetch: refetchJobs } = useProJobs({ refetchOnReturn: false });
-  const { refetch: refetchProfile } = useProProfile();
+  const { refetch: refetchProfile } = useMyProProfile();
 
   if (!user) return null;
 

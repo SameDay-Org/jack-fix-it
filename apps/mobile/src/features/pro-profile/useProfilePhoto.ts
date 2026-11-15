@@ -1,5 +1,3 @@
-import { useEffect, useRef } from "react";
-
 import { useMediaAdd, useMediaUpload, type MediaFailure } from "@/features/media";
 
 /** The "Camera or library" sheet of the profile's stack. */
@@ -32,22 +30,14 @@ export type ProfilePhoto = {
 
 /**
  * The profile's new photo: one picture from the camera or the library, compressed and uploaded
- * (`profile_photo`) as the request media are. Choosing again replaces it. Nothing here touches
- * the profile: Save sends the key.
+ * (`profile_photo`) as the request media are. Choosing again replaces it, and closing the picker
+ * without a choice keeps the one held. Nothing here touches the profile: Save sends the key.
  */
 export function useProfilePhoto(): ProfilePhoto {
-  const upload = useMediaUpload({ purpose: "profile_photo", max: 1 });
+  // One photo, and choosing again replaces it once the picker hands the new one over.
+  const upload = useMediaUpload({ purpose: "profile_photo", max: 1, replace: true });
   const { adding, add } = useMediaAdd(upload, SOURCE_SHEET);
   const item = upload.items.at(0);
-  // Choosing again drops the photo held first; the picker opens once the list has room for one.
-  const replacing = useRef(false);
-
-  useEffect(() => {
-    if (!replacing.current || upload.remaining === 0) return;
-    replacing.current = false;
-    void add();
-  }, [add, upload.remaining]);
-
   const discard = () => {
     if (item) upload.remove(item.id);
   };
@@ -63,11 +53,7 @@ export function useProfilePhoto(): ProfilePhoto {
       if (item) upload.retry(item.id);
     },
     choosing: adding,
-    choose: () => {
-      if (!item) return void add();
-      replacing.current = true;
-      discard();
-    },
+    choose: () => void add(),
     discard,
     permissionDenied: upload.permissionDenied !== null,
     dismissPermissionNotice: upload.dismissPermissionNotice,

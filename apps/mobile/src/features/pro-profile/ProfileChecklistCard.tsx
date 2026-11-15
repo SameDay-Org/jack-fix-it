@@ -6,7 +6,7 @@ import { Button, Card } from "@/components/ui";
 import { useGuardedPush } from "@/features/quotes/navigation";
 import { tokens } from "@/theme";
 
-import { useProProfile } from "./api";
+import { useMyProProfile } from "./api";
 import { profileChecklist, type ProfileStep } from "./completeness";
 
 /** The step mark's side, on the 4-pt grid; the tick inside leaves a 4 dp margin. */
@@ -55,7 +55,7 @@ function StepRow({ step, done }: { step: ProfileStep; done: boolean }) {
  */
 export function ProfileChecklistCard({ testID = "profile-checklist" }: { testID?: string }) {
   const { t } = useTranslation();
-  const { data } = useProProfile();
+  const { data } = useMyProProfile();
   const push = useGuardedPush();
   if (!data) return null;
   const checklist = profileChecklist(data);

@@ -41,7 +41,7 @@ jest.mock("@/features/pro-jobs", () => ({
 // "Finish your profile" (#36) has its own suite too (features/pro-profile); stubbed here.
 jest.mock("@/features/pro-profile", () => ({
   ProfileChecklistCard: () => null,
-  useProProfile: () => ({ refetch: () => Promise.resolve() }),
+  useMyProProfile: () => ({ refetch: () => Promise.resolve() }),
 }));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(

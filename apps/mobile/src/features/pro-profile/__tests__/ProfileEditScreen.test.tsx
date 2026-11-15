@@ -16,10 +16,10 @@ import {
   useSession,
 } from "@/api";
 
-import { settle } from "../../../api/__tests__/helpers";
+import { deferred, settle } from "../../../api/__tests__/helpers";
 import { prepareMedia, type PickedMedia } from "../../media/compress";
 import { chooseMediaSource } from "../../media/mediaSource";
-import { proProfileQueryKey, type ProProfile } from "../api";
+import { myProProfileQueryKey, type ProProfile } from "../api";
 import { proProfileConfig } from "../config";
 import { ProProfileEditScreen } from "../ProfileEditScreen";
 import {
@@ -64,6 +64,11 @@ jest.mock("../../media/mediaSource", () => ({
   chooseMediaSource: jest.fn(),
   closeMediaSourceSheet: jest.fn(),
 }));
+
+const { mockSession, mockSignOut } = jest.requireMock<{
+  mockSession: { generation: number };
+  mockSignOut: () => void;
+}>("@/api");
 
 const PROFILE = "/v1/pros/me";
 const SENT = { auth: true, generation: 1 };
@@ -113,6 +118,7 @@ async function choosePhoto() {
 beforeEach(() => {
   jest.clearAllMocks();
   navigation.reset();
+  mockSession.generation = 1;
   client = newQueryClient();
   server = { profile: FULL_PROFILE, categories: CATEGORIES, regions: REGIONS };
   upload = null;
@@ -184,7 +190,7 @@ describe("ProProfileEditScreen", () => {
 
     expect(apiPatch).toHaveBeenCalledTimes(1);
     expect(apiPatch).toHaveBeenCalledWith(PROFILE, { bio: "Plumber since 2014." }, SENT);
-    expect(client.getQueryData(proProfileQueryKey(1))).toEqual(answer);
+    expect(client.getQueryData(myProProfileQueryKey(1))).toEqual(answer);
     expect(router.back).toHaveBeenCalledTimes(1);
     expect(announced()).toContain("Profile saved");
   });
@@ -288,6 +294,51 @@ describe("ProProfileEditScreen", () => {
     await save();
 
     expect(patches()).toEqual([{ photo_key: second }]);
+  });
+
+  it("choosing again and closing the picker keeps the photo already uploaded", async () => {
+    await open();
+    await choosePhoto();
+    await act(async () => upload?.resolve());
+
+    jest
+      .mocked(ImagePicker.launchImageLibraryAsync)
+      .mockResolvedValueOnce({ canceled: true, assets: null });
+    await pressed("pro-profile-photo-choose");
+    await flush();
+
+    expect(photoStatus()).toBe("New photo ready. Save to keep it.");
+    await save();
+    expect(patches()).toEqual([{ photo_key: PHOTO_KEY }]);
+  });
+
+  it("Save waits while the camera or the library is opening over the form", async () => {
+    await open();
+    await typed("pro-profile-bio", "Plumber since 2014.");
+    // The sheet has not answered yet.
+    jest.mocked(chooseMediaSource).mockReturnValueOnce(new Promise(() => undefined));
+    await pressed("pro-profile-photo-choose");
+
+    expect(stateOf("pro-profile-save").disabled).toBe(true);
+    await save();
+    expect(apiPatch).not.toHaveBeenCalled();
+  });
+
+  it("a save answered after the session changed leaves the screen alone", async () => {
+    await open();
+    await typed("pro-profile-bio", "Plumber since 2014.");
+    const answer = deferred<ProProfile>();
+    jest.mocked(apiPatch).mockReturnValueOnce(answer.promise as ReturnType<typeof apiPatch>);
+    await save();
+
+    await act(async () => {
+      mockSignOut();
+      answer.resolve(FULL_PROFILE);
+    });
+    await flush();
+
+    expect(router.back).not.toHaveBeenCalled();
+    expect(announced()).not.toContain("Profile saved");
   });
 
   it("a photo that does not upload keeps the form: a retry, or Save without it", async () => {
