@@ -36,11 +36,12 @@ export const myDocumentsQueryOptions = (generation: number) =>
  * The signed-in pro's verification documents: asked for while a pro is signed in, and again each
  * time the screen comes back into focus or the app to the foreground (a review may have landed,
  * and the URLs are signed for a few minutes only). A failure shows with a retry.
+ * `enabled: false` asks nothing (a screen that has no use for them yet).
  */
-export function useMyDocuments() {
+export function useMyDocuments({ enabled: wanted = true }: { enabled?: boolean } = {}) {
   const generation = useSessionGeneration();
   const { status, user } = useSession();
-  const enabled = status === "signedIn" && user?.role === "pro";
+  const enabled = wanted && status === "signedIn" && user?.role === "pro";
   const query = useQuery({ ...myDocumentsQueryOptions(generation), enabled });
   const { refetch: refetchQuery } = query;
   const refetch = useCallback(

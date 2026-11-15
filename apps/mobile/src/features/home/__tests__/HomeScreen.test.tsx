@@ -20,10 +20,14 @@ jest.mock("@/features/pro-jobs", () => ({
   YourJobs: () => null,
   useProJobs: () => ({ refetch: () => Promise.resolve() }),
 }));
-// "Finish your profile" (#36) has its own suite too (features/pro-profile); stubbed here.
+// "Finish your profile" (#36) has its own suite too (features/pro-profile); stubbed here as
+// an approved pro's, so the home lists requests (the gate of #38 has its own suite).
 jest.mock("@/features/pro-profile", () => ({
   ProfileChecklistCard: () => null,
-  useMyProProfile: () => ({ refetch: () => Promise.resolve() }),
+  useMyProProfile: () => ({
+    data: { verification_status: "approved", payouts_enabled: true },
+    refetch: () => Promise.resolve(),
+  }),
 }));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(

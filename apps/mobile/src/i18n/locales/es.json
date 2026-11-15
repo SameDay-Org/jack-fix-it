@@ -1642,5 +1642,62 @@
         "generic": "No pudimos enviar este documento. Inténtalo de nuevo."
       }
     }
+  },
+  "proVerification": {
+    "title": "Verificación",
+    "retry": "Reintentar",
+    "loading": "Cargando el estado de tu verificación",
+    "loadFailed": "No pudimos cargar el estado de tu verificación",
+    "loadBody": "Inténtalo de nuevo en un momento.",
+    "status": {
+      "pending": "Pendiente",
+      "approved": "Aprobado",
+      "rejected": "Rechazado"
+    },
+    "banner": {
+      "label": "Verificación: {{status}}",
+      "pending": "Nuestro equipo revisa tu perfil y tus documentos antes de que empieces a recibir solicitudes.",
+      "approved": "Sigue: configurar los pagos. Aún no está disponible en la app.",
+      "rejected": "Mira qué corregir y envíalo de nuevo."
+    },
+    "pending": {
+      "title": "Tu verificación está pendiente",
+      "body": "Nuestro equipo revisa tu perfil y tus documentos antes de que empieces a recibir solicitudes. El resultado aparece aquí."
+    },
+    "approved": {
+      "title": "Estás aprobado",
+      "ready": "Las solicitudes nuevas cerca de ti aparecen en Inicio.",
+      "payouts": "Falta un paso para que te lleguen solicitudes: configurar los pagos.",
+      "placeholder": {
+        "title": "Configuración de pagos",
+        "badge": "Próximamente",
+        "body": "Aquí configurarás cómo recibes tus pagos. Aún no está disponible en la app."
+      }
+    },
+    "rejected": {
+      "title": "Tu verificación no fue aprobada",
+      "body": "Revisa tu perfil y tus documentos, corrige lo que aparece aquí y envíalo de nuevo.",
+      "fix": "Corregir documentos"
+    },
+    "information": {
+      "profile": "Perfil profesional",
+      "profileComplete": "Completo",
+      "documents": "Documentos",
+      "documentsComplete": "Todos enviados"
+    },
+    "documents": {
+      "title": "Envía tus documentos",
+      "progress": "{{sent}} de {{total}} enviados",
+      "action": "Enviar documentos",
+      "stepSent": "{{name}}: enviado",
+      "stepTodo": "{{name}}: pendiente",
+      "stepRejected": "{{name}}: rechazado",
+      "loadFailed": "No pudimos cargar tus documentos."
+    },
+    "home": {
+      "loading": "Cargando tu cuenta",
+      "loadFailed": "No pudimos cargar tu cuenta. Inténtalo de nuevo en un momento.",
+      "offline": "No tienes conexión. Revisa tu conexión e inténtalo de nuevo."
+    }
   }
 }

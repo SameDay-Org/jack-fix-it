@@ -51,11 +51,15 @@ jest.mock("@/features/pro-jobs", () => ({
   useProJobs: (options?: { refetchOnReturn?: boolean }) => mockUseProJobs(options),
 }));
 // "Finish your profile" under the greeting (#36) has its own suite (features/pro-profile); here
-// the card is left out, and a pull refreshes the (stubbed) profile with the list.
+// the card is left out, the pro is approved and paid out (the home lists requests: the gate
+// of #38 has its own suite, ProHomeGate), and a pull refreshes the (stubbed) profile too.
 const mockRefetchProfile = jest.fn(() => Promise.resolve());
 jest.mock("@/features/pro-profile", () => ({
   ProfileChecklistCard: () => null,
-  useMyProProfile: () => ({ refetch: mockRefetchProfile }),
+  useMyProProfile: () => ({
+    data: { verification_status: "approved", payouts_enabled: true },
+    refetch: mockRefetchProfile,
+  }),
 }));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock("expo-notifications");
@@ -346,11 +350,16 @@ describe("ProHomeScreen", () => {
     await act(async () => navigation.setFocused(true));
     await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
 
-    const onChange = jest.mocked(AppState.addEventListener).mock.calls.at(-1)?.[1] as (
-      state: AppStateStatus,
-    ) => void;
+    // Two readers ask again on a return to the app: the list, and the profile (#38).
+    const listeners = jest
+      .mocked(AppState.addEventListener)
+      .mock.calls.slice(-2)
+      .map(([, listener]) => listener as (state: AppStateStatus) => void);
+    const onChange = (state: AppStateStatus) => listeners.forEach((listener) => listener(state));
+    mockRefetchProfile.mockClear();
     await act(async () => onChange("background"));
     await act(async () => onChange("active"));
+    expect(mockRefetchProfile).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(3));
 
     jest.mocked(apiGet).mockRejectedValueOnce(new NetworkError(false));

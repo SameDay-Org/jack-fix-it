@@ -1642,5 +1642,62 @@
         "generic": "We couldn't submit this document. Try again."
       }
     }
+  },
+  "proVerification": {
+    "title": "Verification",
+    "retry": "Try again",
+    "loading": "Loading your verification status",
+    "loadFailed": "We couldn't load your verification status",
+    "loadBody": "Give it another try in a moment.",
+    "status": {
+      "pending": "Pending",
+      "approved": "Approved",
+      "rejected": "Rejected"
+    },
+    "banner": {
+      "label": "Verification: {{status}}",
+      "pending": "Our team reviews your profile and documents before you start receiving requests.",
+      "approved": "Next: payout setup. It isn't available in the app yet.",
+      "rejected": "See what to fix and send it again."
+    },
+    "pending": {
+      "title": "Your verification is pending",
+      "body": "Our team reviews your profile and documents before you start receiving requests. The result shows up here."
+    },
+    "approved": {
+      "title": "You're approved",
+      "ready": "New requests near you show up on Home.",
+      "payouts": "One step is left before requests reach you: payout setup.",
+      "placeholder": {
+        "title": "Payout setup",
+        "badge": "Coming soon",
+        "body": "You'll set up how you get paid here. It isn't available in the app yet."
+      }
+    },
+    "rejected": {
+      "title": "Your verification wasn't approved",
+      "body": "Review your profile and your documents, fix what's listed here, and send it again.",
+      "fix": "Fix documents"
+    },
+    "information": {
+      "profile": "Pro profile",
+      "profileComplete": "Complete",
+      "documents": "Documents",
+      "documentsComplete": "All sent"
+    },
+    "documents": {
+      "title": "Send your documents",
+      "progress": "{{sent}} of {{total}} sent",
+      "action": "Send documents",
+      "stepSent": "{{name}}: sent",
+      "stepTodo": "{{name}}: to do",
+      "stepRejected": "{{name}}: rejected",
+      "loadFailed": "We couldn't load your documents."
+    },
+    "home": {
+      "loading": "Loading your account",
+      "loadFailed": "We couldn't load your account. Give it another try in a moment.",
+      "offline": "You're offline. Check your connection and try again."
+    }
   }
 }
