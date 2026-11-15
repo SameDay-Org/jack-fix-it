@@ -1514,5 +1514,70 @@
       "spoken": "{{average}} out of 5, {{ratings}}",
       "unavailable": "Unavailable"
     }
+  },
+  "proProfile": {
+    "menu": "Pro profile",
+    "limit": "That's the most you can choose.",
+    "checklist": {
+      "title": "Finish your profile",
+      "progress": "{{done}} of {{total}} done",
+      "action": "Complete profile",
+      "steps": {
+        "photo": "Profile photo",
+        "about": "About you",
+        "categories": "Categories",
+        "areas": "Service areas"
+      },
+      "stepDone": "{{step}}: done",
+      "stepTodo": "{{step}}: to do"
+    },
+    "edit": {
+      "title": "Your profile",
+      "support": "Tell us about your work and where you take jobs.",
+      "save": "Save profile",
+      "saved": "Profile saved",
+      "check": "Some fields need a look.",
+      "loading": "Loading your profile",
+      "loadFailed": "We couldn't load your profile",
+      "loadBody": "Give it another try in a moment.",
+      "retry": "Try again",
+      "failed": {
+        "offline": "You're offline. Check your connection and try again.",
+        "photo": "We couldn't use that photo. Choose another one.",
+        "choices": "Some of your choices are no longer available. Review them and save again.",
+        "generic": "We couldn't save your profile. Try again."
+      }
+    },
+    "photo": {
+      "title": "Profile photo",
+      "support": "Use a clear, recent photo of yourself.",
+      "add": "Add photo",
+      "change": "Change photo",
+      "ready": "New photo ready. Save to keep it.",
+      "uploading": "Uploading your photo",
+      "retry": "Try again"
+    },
+    "about": {
+      "title": "About you",
+      "bio": "Bio",
+      "bioHint": "Your experience and the work you do best.",
+      "years": "Years of experience",
+      "yearsInvalid": "Enter a number from 0 to {{max}}."
+    },
+    "categories": {
+      "title": "Categories",
+      "support": "The kinds of jobs you take."
+    },
+    "areas": {
+      "title": "Service areas",
+      "support": "The ZIP codes where you take jobs. Choose at least one.",
+      "required": "Choose at least one ZIP code.",
+      "count_one": "{{count}} ZIP code selected",
+      "count_other": "{{count}} ZIP codes selected",
+      "selectAll": "Select all",
+      "clear": "Clear",
+      "selectCity": "Select all ZIP codes in {{city}}",
+      "clearCity": "Clear all ZIP codes in {{city}}"
+    }
   }
 }

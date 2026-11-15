@@ -1514,5 +1514,70 @@
       "spoken": "{{average}} de 5, {{ratings}}",
       "unavailable": "No disponible"
     }
+  },
+  "proProfile": {
+    "menu": "Perfil profesional",
+    "limit": "Es el máximo que puedes elegir.",
+    "checklist": {
+      "title": "Completa tu perfil",
+      "progress": "{{done}} de {{total}} listos",
+      "action": "Completar perfil",
+      "steps": {
+        "photo": "Foto de perfil",
+        "about": "Sobre ti",
+        "categories": "Categorías",
+        "areas": "Zonas de servicio"
+      },
+      "stepDone": "{{step}}: listo",
+      "stepTodo": "{{step}}: pendiente"
+    },
+    "edit": {
+      "title": "Tu perfil",
+      "support": "Cuéntanos sobre tu trabajo y dónde aceptas trabajos.",
+      "save": "Guardar perfil",
+      "saved": "Perfil guardado",
+      "check": "Revisa algunos campos.",
+      "loading": "Cargando tu perfil",
+      "loadFailed": "No pudimos cargar tu perfil",
+      "loadBody": "Inténtalo de nuevo en un momento.",
+      "retry": "Reintentar",
+      "failed": {
+        "offline": "No tienes conexión. Revisa tu conexión e inténtalo de nuevo.",
+        "photo": "No pudimos usar esa foto. Elige otra.",
+        "choices": "Algunas de tus opciones ya no están disponibles. Revísalas y guarda de nuevo.",
+        "generic": "No pudimos guardar tu perfil. Inténtalo de nuevo."
+      }
+    },
+    "photo": {
+      "title": "Foto de perfil",
+      "support": "Usa una foto tuya clara y reciente.",
+      "add": "Agregar foto",
+      "change": "Cambiar foto",
+      "ready": "Nueva foto lista. Guarda para conservarla.",
+      "uploading": "Subiendo tu foto",
+      "retry": "Reintentar"
+    },
+    "about": {
+      "title": "Sobre ti",
+      "bio": "Biografía",
+      "bioHint": "Tu experiencia y el trabajo que mejor haces.",
+      "years": "Años de experiencia",
+      "yearsInvalid": "Escribe un número de 0 a {{max}}."
+    },
+    "categories": {
+      "title": "Categorías",
+      "support": "Los tipos de trabajo que aceptas."
+    },
+    "areas": {
+      "title": "Zonas de servicio",
+      "support": "Los códigos postales donde aceptas trabajos. Elige al menos uno.",
+      "required": "Elige al menos un código postal.",
+      "count_one": "{{count}} código postal seleccionado",
+      "count_other": "{{count}} códigos postales seleccionados",
+      "selectAll": "Seleccionar todos",
+      "clear": "Quitar",
+      "selectCity": "Seleccionar todos los códigos postales de {{city}}",
+      "clearCity": "Quitar todos los códigos postales de {{city}}"
+    }
   }
 }
