@@ -368,7 +368,7 @@ describe("DocumentScreen", () => {
     await openType("insurance", documents([id, pending]));
 
     expect(screen.getByTestId("pro-document-pending")).toHaveTextContent(
-      "In reviewSending a new photo replaces the one in review.",
+      "Sending a new photo replaces the one in review.",
     );
     expect(screen.getByRole("button", { name: "Replace document" })).toBeTruthy();
     // The one on file shows until a new photo is chosen.

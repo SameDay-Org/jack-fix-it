@@ -1613,13 +1613,10 @@
       "title": "Este documento fue rechazado",
       "noReason": "Envía una foto nueva."
     },
-    "pending": {
-      "title": "En revisión",
-      "body": "Si envías una foto nueva, reemplaza la que está en revisión."
-    },
+    "pending": "Si envías una foto nueva, reemplaza la que está en revisión.",
     "photo": {
       "label": "Foto del documento",
-      "emptyLabel": "Aún no hay foto",
+      "unavailable": "La foto del documento no se puede mostrar ahora",
       "support": "Toma una foto clara del documento completo.",
       "required": "Primero agrega una foto del documento.",
       "ready": "Foto lista. Envíala para revisión.",

@@ -1613,13 +1613,10 @@
       "title": "This document was rejected",
       "noReason": "Send a new photo of it."
     },
-    "pending": {
-      "title": "In review",
-      "body": "Sending a new photo replaces the one in review."
-    },
+    "pending": "Sending a new photo replaces the one in review.",
     "photo": {
       "label": "Photo of the document",
-      "emptyLabel": "No photo yet",
+      "unavailable": "The document's photo can't be shown right now",
       "support": "Take a clear photo of the whole document.",
       "required": "Add a photo of the document first.",
       "ready": "Photo ready. Submit to send it for review.",
