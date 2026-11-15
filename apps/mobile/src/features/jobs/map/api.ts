@@ -1,9 +1,9 @@
 import type { ApiSchema } from "@jack/shared";
-import { queryOptions, useQuery } from "@tanstack/react-query";
+import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useIsFocused } from "expo-router";
+import { useEffect, useState } from "react";
 
 import { apiGet, ApiError, useSession, useSessionGeneration } from "@/api";
-import { useRefetchOnReturn } from "@/features/quotes/useRequestQuotes";
 
 import { useInForeground } from "../api";
 
@@ -31,6 +31,8 @@ const proLocationQueryOptions = (jobId: string, generation: number) =>
       return position;
     },
     retry: false,
+    // Never fresh: the query asks again each time it is enabled again (the screen or app is back).
+    staleTime: 0,
   });
 
 /**
@@ -56,33 +58,54 @@ const jobRouteQueryOptions = (jobId: string, generation: number) =>
       }
     },
     retry: false,
+    staleTime: 0,
   });
 
+// The API's definitive "no": not this customer's job (403), no such job (404), or the pro is
+// not on the way any more (409). Anything else (offline, 5xx) is worth another try.
+const REFUSALS: readonly number[] = [403, 404, 409];
+const isRefusal = (error: unknown): boolean =>
+  error instanceof ApiError && REFUSALS.includes(error.status);
+
 /**
- * The pro's position and route while the live map is up: asked for when the map mounts, again
- * when the screen comes back into focus or the app to the foreground, and every
- * `liveMapConfig.pollMs` while the screen is focused and the app in the foreground. Nothing is
- * asked for while `enabled` is false (the job is not on the way, or there is no map) or signed out.
+ * The pro's position and route while the live map is watched. `active` is the one condition for
+ * all tracking work, the requests here and the map's animation alike: `enabled` (the job is on
+ * the way and there is a map), signed in, the screen focused and the app in the foreground.
+ * While it holds, both are asked for at once and every `liveMapConfig.pollMs`; while it does not,
+ * nothing is asked for (mounting out of focus starts no request), and both are asked for again
+ * the moment it holds again.
+ *
+ * A refusal of either (`REFUSALS`) ends the tracking for this job and session: `refused` turns
+ * true, nothing more is asked for, and what the cache held of the pro's position and route is
+ * removed, so no screen can draw them again.
  */
 export function useLiveTracking(jobId: string, enabled: boolean) {
+  const client = useQueryClient();
   const generation = useSessionGeneration();
   const signedIn = useSession().status === "signedIn";
   const focused = useIsFocused();
   const foreground = useInForeground();
-  const live = enabled && signedIn;
-  const refetchInterval = live && focused && foreground ? liveMapConfig.pollMs : false;
+  const scope = `${jobId}:${generation}`;
+  const [refusedIn, setRefusedIn] = useState<string | null>(null);
+  const refused = refusedIn === scope;
+  const active = enabled && signedIn && focused && foreground && !refused;
+  const refetchInterval = active ? liveMapConfig.pollMs : false;
 
   const position = useQuery({
     ...proLocationQueryOptions(jobId, generation),
-    enabled: live,
+    enabled: active,
     refetchInterval,
   });
   const route = useQuery({
     ...jobRouteQueryOptions(jobId, generation),
-    enabled: live,
+    enabled: active,
     refetchInterval,
   });
-  useRefetchOnReturn(position.refetch, live);
-  useRefetchOnReturn(route.refetch, live);
-  return { position, route };
+  if (!refused && (isRefusal(position.error) || isRefusal(route.error))) setRefusedIn(scope);
+  useEffect(() => {
+    if (!refused) return;
+    client.removeQueries({ queryKey: proLocationQueryKey(jobId, generation), exact: true });
+    client.removeQueries({ queryKey: jobRouteQueryKey(jobId, generation), exact: true });
+  }, [client, generation, jobId, refused]);
+  return { position, route, active, refused };
 }

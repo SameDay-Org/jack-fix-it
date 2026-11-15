@@ -42,7 +42,7 @@ export type Glide = {
 };
 
 /** The point drawn for a position: on the route when it is within SNAP_M of it. */
-function onRoute(point: LngLat, route: MeasuredPath | null) {
+export function onRoute(point: LngLat, route: MeasuredPath | null) {
   const hit = route ? nearestOnPath(route, point) : null;
   return hit !== null && hit.offM <= SNAP_M ? hit : null;
 }
@@ -80,7 +80,8 @@ function alongARoute(
  * itself is drawn on the newest route when close to it, so the van never goes past the route's end.
  * The van then points the pro's heading while moving; without one, the way it just drove (the
  * last two positions); standing still (a heading is noise then), the way the route goes on from
- * there; with none of these, the way it pointed already.
+ * there; with none of these, the way it pointed already. A hop onto the route alone (a route
+ * that came after the position) is standing still: the van never ends up pointing sideways.
  */
 export function planGlide(
   shown: VanPose | null,
@@ -105,7 +106,8 @@ export function planGlide(
   const road = alongARoute(shown.point, target, routes);
   const path = measurePath(road?.points ?? withoutRepeats([shown.point, target]));
   const moved = path.length >= MIN_MOVE_M;
-  const restBearing = moved
+  const drove = path.length - (road?.leadIn?.length ?? 0) >= MIN_MOVE_M;
+  const restBearing = drove
     ? (fix.heading ?? pointAlong(path, path.length).bearing)
     : (routeBearing ?? shown.bearing);
   return {
@@ -118,7 +120,7 @@ export function planGlide(
 }
 
 /**
- * The line still to drive from `from` (where the van starts its glide): the route from where
+ * The line still to drive from `from` (where the van is drawn): the route from where
  * `from` lies on it; or, when the route was recomputed from a newer fix ahead of the van, the way
  * from `from` to its start (along the route before it, straight without one) and then the route.
  */

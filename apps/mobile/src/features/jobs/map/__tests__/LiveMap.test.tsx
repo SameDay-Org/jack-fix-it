@@ -1,6 +1,7 @@
 import "@/i18n";
 
 import { act, fireEvent, render, screen } from "@testing-library/react-native";
+import { Profiler } from "react";
 import { Text } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
 
@@ -14,7 +15,7 @@ import {
   REDUCED_MOTION_MS,
 } from "../camera";
 import { distanceM, type LngLat } from "../geo";
-import { LiveMap, STANDARD_STYLE_URL, type LiveMapProps } from "../LiveMap";
+import { LiveMap, ROUTE_TRIM_MS, STANDARD_STYLE_URL, type LiveMapProps } from "../LiveMap";
 import type { Fix } from "../motion";
 
 import { at, DOOR, L_ROUTE } from "./helpers";
@@ -53,6 +54,7 @@ const route = (distance: number, points: LngLat[] = L_ROUTE): JobRoute => ({
 const props = (overrides: Partial<LiveMapProps> = {}): LiveMapProps => ({
   fix: fix(at(0, 100), 0, 0),
   stale: false,
+  active: true,
   route: null,
   height: HEIGHT,
   cards: <Text>Cards</Text>,
@@ -76,6 +78,15 @@ function lastVan() {
   };
   return { point: feature.geometry.coordinates as LngLat, ...feature.properties };
 }
+
+type Line = { geometry: { coordinates: LngLat[] } };
+const routeWrites = () => mapbox.mockSourceProps.mock.calls.filter(([id]) => id === "jack-route");
+/** The route's line as the frames last cut it in the map's native source. */
+const lastLine = () =>
+  (JSON.parse(String(routeWrites().at(-1)?.[1].shape)) as Line).geometry.coordinates;
+/** The route's line as React last drew it. */
+const reactLine = () =>
+  (screen.getByTestId("mapbox-ShapeSource-jack-route").props.shape as Line).geometry.coordinates;
 
 const cameraCalls = () => mapbox.mockCamera.setCamera.mock.calls.map(([stop]) => stop);
 const lastCamera = () => cameraCalls().at(-1);
@@ -114,6 +125,17 @@ beforeEach(() => {
 afterEach(() => {
   jest.useRealTimers();
   jest.restoreAllMocks();
+});
+
+describe("LiveMap's Mapbox setup", () => {
+  it("turns Mapbox's telemetry off right after the token, before any map is drawn", () => {
+    // Both ran when the module loaded: nothing has been rendered yet.
+    expect(mapbox.setAccessToken.mock.calls).toEqual([["pk.test"]]);
+    expect(mapbox.setTelemetryEnabled.mock.calls).toEqual([[false]]);
+    const [token] = mapbox.setAccessToken.mock.invocationCallOrder;
+    const [telemetry] = mapbox.setTelemetryEnabled.mock.invocationCallOrder;
+    expect(telemetry).toBe(token + 1);
+  });
 });
 
 describe("LiveMap's style", () => {
@@ -159,14 +181,62 @@ describe("LiveMap's style", () => {
     });
   });
 
-  it("trims the route once the van drove past its start", async () => {
+  it("cuts the line back to the pro as it glides, in the native source, not through React", async () => {
+    const commits = jest.fn();
+    const map = (next: LiveMapProps) => (
+      <Profiler id="map" onRender={commits}>
+        <LiveMap {...next} />
+      </Profiler>
+    );
+    const first = props({ route: route(1200) });
+    await render(map(first));
+    await screen.rerender(map({ ...first, fix: fix(at(0, 300), POLL_MS, 0) }));
+    commits.mockClear();
+    mapbox.mockSourceProps.mockClear();
+
+    // Halfway through 200 m in 10 s: the line starts under the pro, at most one cut behind it.
+    await advance(POLL_MS / 2);
+    expect(distanceM(lastVan().point, at(0, 200))).toBeLessThan(1);
+    const behind = distanceM(lastLine()[0], lastVan().point);
+    expect(behind).toBeLessThan(20 * (ROUTE_TRIM_MS / 1000) + 1);
+    expect(lastLine()[0][1]).toBeLessThanOrEqual(lastVan().point[1]);
+    expect(lastLine().at(-1)).toEqual(DOOR);
+    await advance(POLL_MS / 2 - 2 * FRAME_MS);
+    // No frame went through React, and the line was cut on its own clock, not every frame.
+    expect(commits).not.toHaveBeenCalled();
+    expect(routeWrites().length).toBeGreaterThan(POLL_MS / ROUTE_TRIM_MS - 10);
+    expect(routeWrites().length).toBeLessThanOrEqual(POLL_MS / ROUTE_TRIM_MS + 2);
+  });
+
+  it("starts the line where the pro stopped, with no newer position to come", async () => {
     const first = props({ route: route(1200) });
     await render(<LiveMap {...first} />);
-    await screen.rerender(<LiveMap {...first} fix={fix(at(0, 300), POLL_MS, 0)} />);
-    await screen.rerender(<LiveMap {...first} fix={fix(at(0, 380), 2 * POLL_MS, 0)} />);
-    const coordinates = screen.getByTestId("mapbox-ShapeSource-jack-route").props.shape.geometry
-      .coordinates as LngLat[];
-    expect(distanceM(coordinates[0], at(0, 300))).toBeLessThan(0.5);
+    await screen.rerender(<LiveMap {...first} fix={fix(at(0, 300), POLL_MS)} />);
+    await advance(POLL_MS + FRAME_MS);
+    expect(distanceM(lastVan().point, at(0, 300))).toBeLessThan(0.5);
+    // In the native source and in React's own copy alike.
+    expect(distanceM(lastLine()[0], lastVan().point)).toBeLessThan(0.5);
+    expect(distanceM(reactLine()[0], lastVan().point)).toBeLessThan(0.5);
+    expect(reactLine().at(-1)).toEqual(DOOR);
+
+    // Nothing newer comes (the next polls fail): the line stays there, and nothing is drawn again.
+    mapbox.mockSourceProps.mockClear();
+    await advance(POLL_MS * 3);
+    expect(mapbox.mockSourceProps).not.toHaveBeenCalled();
+    expect(distanceM(reactLine()[0], at(0, 300))).toBeLessThan(0.5);
+  });
+
+  it("cuts a route that changes under a gliding pro at the pro, at once", async () => {
+    const first = props({ route: route(1200) });
+    await render(<LiveMap {...first} />);
+    const moved = { ...first, fix: fix(at(0, 300), POLL_MS, 0) };
+    await screen.rerender(<LiveMap {...moved} />);
+    await advance(POLL_MS / 2);
+    mapbox.mockSourceProps.mockClear();
+    // The same road, computed again.
+    await screen.rerender(<LiveMap {...moved} route={route(1100)} />);
+    expect(routeWrites()).toHaveLength(1);
+    expect(distanceM(lastLine()[0], at(0, 200))).toBeLessThan(1);
   });
 });
 
@@ -383,5 +453,179 @@ describe("LiveMap's pro", () => {
     const map = screen.getByTestId("live-map-view");
     await act(async () => map.props.onMapLoadingError({ error: "offline", type: "style" }));
     expect(onUnavailable).not.toHaveBeenCalled();
+  });
+});
+
+describe("LiveMap's pro and a route that comes later", () => {
+  it("moves a standing pro onto a first route that lands after the position, without a jump", async () => {
+    // 12 m east of the road, standing: the position came first, the route after it.
+    const first = props({ fix: fix(at(12, 250), 0) });
+    await render(<LiveMap {...first} />);
+    await loadMap();
+    expect(distanceM(lastVan().point, at(12, 250))).toBeLessThan(0.1);
+    await screen.rerender(<LiveMap {...first} route={route(1200)} />);
+    await advance(FRAME_MS);
+    expect(distanceM(lastVan().point, at(12, 250))).toBeLessThan(0.5);
+    await advance(POLL_MS / 2);
+    expect(distanceM(lastVan().point, at(6, 250))).toBeLessThan(0.5);
+    await advance(POLL_MS / 2);
+    expect(distanceM(lastVan().point, at(0, 250))).toBeLessThan(0.5);
+    // It points the way the road runs there (north), not the way it hopped (west).
+    expect(lastVan().bearing).toBeCloseTo(0, 0);
+    expect(distanceM(reactLine()[0], at(0, 250))).toBeLessThan(0.5);
+  });
+
+  it("leaves a pro more than 25 m off the new route where it is", async () => {
+    const first = props({ fix: fix(at(40, 250), 0) });
+    await render(<LiveMap {...first} />);
+    mapbox.mockSourceProps.mockClear();
+    await screen.rerender(<LiveMap {...first} route={route(1200)} />);
+    await advance(POLL_MS + FRAME_MS);
+    expect(distanceM(lastVan().point, at(40, 250))).toBeLessThan(0.1);
+  });
+
+  it("keeps the arrival time of a glide when the route lands in the middle of it", async () => {
+    await render(<LiveMap {...props()} />);
+    const moved = props({ fix: fix(at(12, 300), POLL_MS, 0) });
+    await screen.rerender(<LiveMap {...moved} />);
+    await advance(POLL_MS / 2);
+    const before = lastVan().point;
+    expect(distanceM(before, at(6, 200))).toBeLessThan(1);
+    await screen.rerender(<LiveMap {...moved} route={route(1200)} />);
+    await advance(FRAME_MS);
+    expect(distanceM(lastVan().point, before)).toBeLessThan(1);
+    // On the road, at the fix's place on it, when the first glide was due to end.
+    await advance(POLL_MS / 2);
+    expect(distanceM(lastVan().point, at(0, 300))).toBeLessThan(0.5);
+  });
+
+  it("does not start a glide again for a render that brings no new position or route", async () => {
+    const first = props({ route: route(1200) });
+    await render(<LiveMap {...first} />);
+    const moved = { ...first, fix: fix(at(0, 300), POLL_MS, 0) };
+    await screen.rerender(<LiveMap {...moved} />);
+    await advance(POLL_MS / 2);
+    await screen.rerender(
+      <LiveMap {...moved} cards={<Text>Other cards</Text>} height={HEIGHT + 40} />,
+    );
+    await advance(FRAME_MS);
+    expect(distanceM(lastVan().point, at(0, 200))).toBeLessThan(1);
+    await advance(POLL_MS / 2);
+    expect(distanceM(lastVan().point, at(0, 300))).toBeLessThan(0.5);
+  });
+});
+
+describe("LiveMap nobody is watching", () => {
+  it("stops every frame at once, and glides on from where the pro is drawn when watched again", async () => {
+    await render(<LiveMap {...props()} />);
+    await loadMap();
+    const moved = props({ fix: fix(at(0, 300), POLL_MS, 0) });
+    await screen.rerender(<LiveMap {...moved} />);
+    await advance(POLL_MS / 4);
+    expect(distanceM(lastVan().point, at(0, 150))).toBeLessThan(1);
+
+    // Blurred or in the background, in the middle of the glide; the position turns old meanwhile.
+    await screen.rerender(<LiveMap {...moved} active={false} />);
+    mapbox.mockSourceProps.mockClear();
+    mapbox.mockCamera.setCamera.mockClear();
+    await screen.rerender(<LiveMap {...moved} active={false} stale />);
+    await advance(POLL_MS * 2);
+    expect(mapbox.mockSourceProps).not.toHaveBeenCalled();
+    expect(mapbox.mockCamera.setCamera).not.toHaveBeenCalled();
+
+    // Back: no jump to where the old glide would have ended, a new glide from the drawn place.
+    await screen.rerender(<LiveMap {...moved} stale />);
+    await advance(FRAME_MS);
+    expect(distanceM(lastVan().point, at(0, 150))).toBeLessThan(1);
+    expect(lastVan().opacity).toBeLessThan(1);
+    await advance(POLL_MS / 2);
+    expect(distanceM(lastVan().point, at(0, 225))).toBeLessThan(1.5);
+    await advance(POLL_MS / 2);
+    expect(distanceM(lastVan().point, at(0, 300))).toBeLessThan(0.5);
+    expect(cameraCalls().length).toBeGreaterThan(0);
+  });
+
+  it("mounted unwatched, places the pro once and runs no frame until it is watched", async () => {
+    const idle = props({ active: false, route: route(1200) });
+    await render(<LiveMap {...idle} />);
+    expect(mapbox.mockSourceProps.mock.calls.filter(([id]) => id === "jack-van")).toHaveLength(1);
+    expect(distanceM(lastVan().point, at(0, 100))).toBeLessThan(0.1);
+    mapbox.mockSourceProps.mockClear();
+    await screen.rerender(<LiveMap {...idle} fix={fix(at(0, 300), POLL_MS, 0)} />);
+    await advance(POLL_MS);
+    expect(mapbox.mockSourceProps).not.toHaveBeenCalled();
+
+    await screen.rerender(<LiveMap {...idle} active fix={fix(at(0, 300), POLL_MS, 0)} />);
+    await advance(FRAME_MS);
+    expect(distanceM(lastVan().point, at(0, 100))).toBeLessThan(1);
+    await advance(POLL_MS);
+    expect(distanceM(lastVan().point, at(0, 300))).toBeLessThan(0.5);
+  });
+});
+
+describe("LiveMap under Reduce Motion", () => {
+  it("moves the camera for at most 300 ms in every mode: overview, its refits, follow, Recenter", async () => {
+    jest.mocked(useReducedMotion).mockReturnValue(true);
+    const far = props({ route: route(5000) });
+    await render(<LiveMap {...far} />);
+    // The first overview is placed at once.
+    await loadMap();
+    expect(lastCamera()).toMatchObject({ pitch: OVERVIEW_PITCH, animationDuration: 0 });
+    await advance(OVERVIEW_HOLD_MS);
+
+    // Far away, the overview fits each new position again.
+    mapbox.mockCamera.setCamera.mockClear();
+    await screen.rerender(<LiveMap {...far} fix={fix(at(0, 200), POLL_MS, 0)} />);
+    expect(cameraCalls().length).toBeGreaterThan(0);
+    expect(lastCamera()).toMatchObject({
+      pitch: OVERVIEW_PITCH,
+      animationDuration: REDUCED_MOTION_MS,
+    });
+    await advance(REDUCED_MOTION_MS + FRAME_MS);
+
+    // Closer than 3 km: the overview gives way to following.
+    const near = { ...far, route: route(2900), fix: fix(at(0, 200), POLL_MS, 0) };
+    await screen.rerender(<LiveMap {...near} />);
+    expect(lastCamera()).toMatchObject({
+      pitch: FOLLOW_PITCH,
+      animationMode: "easeTo",
+      animationDuration: REDUCED_MOTION_MS,
+    });
+    // Following a glide.
+    await screen.rerender(<LiveMap {...near} fix={fix(at(0, 300), 2 * POLL_MS, 0)} />);
+    await advance(REDUCED_MOTION_MS + FRAME_MS);
+    expect(distanceM(lastCamera()?.centerCoordinate as LngLat, at(0, 300))).toBeLessThan(0.5);
+
+    // Freed by a gesture, then Recenter.
+    await gesture(0, true);
+    mapbox.mockCamera.setCamera.mockClear();
+    await act(async () => fireEvent.press(screen.getByTestId("live-map-recenter")));
+    expect(lastCamera()).toMatchObject({
+      pitch: FOLLOW_PITCH,
+      animationMode: "easeTo",
+      animationDuration: REDUCED_MOTION_MS,
+    });
+  });
+
+  it("never asks the camera for a longer move, whatever happened", async () => {
+    jest.mocked(useReducedMotion).mockReturnValue(true);
+    const setCamera = mapbox.mockCamera.setCamera;
+    const far = props({ route: route(5000) });
+    await render(<LiveMap {...far} />);
+    await loadMap();
+    await advance(OVERVIEW_HOLD_MS);
+    await screen.rerender(<LiveMap {...far} fix={fix(at(0, 200), POLL_MS, 0)} />);
+    await advance(POLL_MS);
+    const near = { ...far, route: route(2900) };
+    await screen.rerender(<LiveMap {...near} fix={fix(at(0, 300), 2 * POLL_MS, 0)} />);
+    await advance(POLL_MS);
+    await gesture(0, true);
+    await act(async () => fireEvent.press(screen.getByTestId("live-map-recenter")));
+    await screen.rerender(<LiveMap {...near} fix={fix(at(0, 380), 3 * POLL_MS, 0)} />);
+    await advance(POLL_MS);
+    const durations = setCamera.mock.calls.map(([stop]) => stop.animationDuration as number);
+    expect(durations.length).toBeGreaterThanOrEqual(6);
+    expect(Math.max(...durations)).toBeLessThanOrEqual(300);
+    expect(REDUCED_MOTION_MS).toBeLessThanOrEqual(300);
   });
 });

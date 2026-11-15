@@ -155,6 +155,24 @@ describe("planGlide", () => {
     expect(sampleGlide(glide, NOW + SPAN / 2).heading).toBeCloseTo(0, 0);
   });
 
+  it("hopping onto a route that came after the position, ends the way the route runs", () => {
+    // 12 m beside the road, not driving: a heading is noise, and the hop itself goes sideways.
+    for (const heading of [null, 200]) {
+      const glide = planGlide(
+        shownAt(at(12, 250), 0),
+        fix(at(12, 250), heading),
+        [ROUTE],
+        NOW,
+        SPAN,
+      );
+      expect(glide.path.length).toBeCloseTo(12, 0);
+      expect(glide.durationMs).toBe(SPAN);
+      expect(glide.restBearing).toBeCloseTo(0, 0);
+      expect(sampleGlide(glide, NOW + SPAN / 2).heading).toBeCloseTo(0, 0);
+      expect(distanceM(sampleGlide(glide, NOW + SPAN).point, at(0, 250))).toBeLessThan(0.5);
+    }
+  });
+
   it("standing still off any route keeps the way the van pointed", () => {
     const glide = planGlide(shownAt(at(0, 0), 123), fix(at(0, 1), 200), [null], NOW, SPAN);
     expect(glide.restBearing).toBe(123);

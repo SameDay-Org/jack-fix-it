@@ -17,6 +17,7 @@ type MockProps = {
 const Host = View as unknown as ComponentType<Record<string, unknown>>;
 
 export const setAccessToken = jest.fn(async (_token: string | null) => undefined);
+export const setTelemetryEnabled = jest.fn((_enabled: boolean) => undefined);
 export const mockCamera = { setCamera: jest.fn() };
 export const mockSourceProps = jest.fn((_id: string, _props: Record<string, unknown>) => undefined);
 

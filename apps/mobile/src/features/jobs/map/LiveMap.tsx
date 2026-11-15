@@ -6,6 +6,7 @@ import {
   LineLayer,
   MapView,
   setAccessToken,
+  setTelemetryEnabled,
   ShapeSource,
   StyleImport,
   SymbolLayer,
@@ -48,11 +49,23 @@ import {
   REDUCED_MOTION_MS,
 } from "./camera";
 import { liveMapConfig } from "./config";
-import { measurePath, normalizeDeg, towardDeg, type LngLat, type MeasuredPath } from "./geo";
+import {
+  distanceM,
+  measurePath,
+  normalizeDeg,
+  towardDeg,
+  type LngLat,
+  type MeasuredPath,
+} from "./geo";
 import { routeAhead, sampleGlide, type Fix, type Glide, type VanPose } from "./motion";
 import { useVanMotion, type VanFrame } from "./useVanMotion";
 
-if (liveMapConfig.accessToken) void setAccessToken(liveMapConfig.accessToken);
+// Once, before any map is drawn: the token, then Mapbox's telemetry off (the SDK collects usage
+// events by default; the customer's map is not one of them).
+if (liveMapConfig.accessToken) {
+  void setAccessToken(liveMapConfig.accessToken);
+  setTelemetryEnabled(false);
+}
 
 /** Mapbox Standard: streets and their names, places, landmarks and 3D buildings. */
 export const STANDARD_STYLE_URL = "mapbox://styles/mapbox/standard";
@@ -74,6 +87,11 @@ const ORNAMENT_GAP = 4;
 const ORNAMENT_SIDE = 16;
 const STALE_OPACITY = 0.45;
 const VAN_SOURCE = "jack-van";
+const ROUTE_SOURCE = "jack-route";
+/** While the van glides, the route's line is cut back to it this often (and where it stops). */
+export const ROUTE_TRIM_MS = 200;
+/** Two rests of the van closer than this are the same place: the line is not drawn again. */
+const SAME_REST_M = 0.05;
 const ARROW = 36;
 const ARROW_RIM = 3;
 const ARROW_GLYPH = 18;
@@ -123,11 +141,22 @@ const vanFeature = (pose: VanPose, stale: boolean) =>
 /** The van written straight to its native source (GeoJSON text, as the source takes it). */
 const vanShape = (pose: VanPose, stale: boolean) => JSON.stringify(vanFeature(pose, stale));
 
+const lineFeature = (points: readonly LngLat[]) => ({
+  type: "Feature" as const,
+  geometry: { type: "LineString" as const, coordinates: points.map((p) => [p[0], p[1]]) },
+  properties: {},
+});
+
 export type LiveMapProps = {
   /** The pro's newest position (the last one known when the API stopped sending them). */
   fix: Fix;
   /** The position is old: the van dims. */
   stale: boolean;
+  /**
+   * The map is being watched (screen focused, app in the foreground, pro on the way): only then
+   * does the van move. The same condition asks for the positions (`useLiveTracking`).
+   */
+  active: boolean;
   route: JobRoute | null;
   height: number;
   /** The cards over the map's bottom edge, beside the Recenter control. */
@@ -138,19 +167,21 @@ export type LiveMapProps = {
 
 /**
  * The live map of the pro on the way (#353): Mapbox Standard with the city's names, landmarks and
- * 3D buildings, the route ahead in lime and the pro gliding along it from fix to fix (drawn by
- * `useVanMotion` straight to the native source, never through React). The camera first fits the
- * pro and the address, then follows the pro tilted like a navigation app, turning with them the
- * short way round; while the pro is more than `FAR_M` away it keeps the overview. A pan, pinch or
+ * 3D buildings, the route ahead in lime (it starts where the pro is drawn) and the pro gliding
+ * along it from fix to fix (both drawn by `useVanMotion`'s frames straight to the native sources,
+ * never through React state per frame). The camera first fits the pro and the address, then
+ * follows the pro tilted like a navigation app, turning with them the short way round; while the
+ * pro is more than `FAR_M` away it keeps the overview. A pan, pinch or
  * rotate frees the camera until Recenter. The map itself is not read out: the cards' summary is.
  */
-export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: LiveMapProps) {
+export function LiveMap({ fix, stale, active, route, height, cards, onUnavailable }: LiveMapProps) {
   const { t } = useTranslation();
   const reduceMotion = useReducedMotion();
   const lightPreset = useColorScheme() === "dark" ? "night" : "day";
   const { width } = useWindowDimensions();
   const camera = useRef<ComponentRef<typeof Camera>>(null);
   const van = useRef<ShapeSource>(null);
+  const line = useRef<ShapeSource>(null);
   const pose = useRef<VanPose | null>(null);
   // The camera's heading, from the map's own reports and what was last asked of it.
   const heading = useRef<number | null>(null);
@@ -164,7 +195,22 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
   const padding = followPadding(height, covered);
 
   const path = useMemo(() => (route ? measurePath(route.geometry) : null), [route]);
-  const trail = useTrail(fix, path);
+  const trail = useTrail(path);
+  // Where the van last came to rest: React's own copy of the line starts there. Between two
+  // rests the frames cut the line back to the van in the native source.
+  const [rest, setRest] = useState<LngLat>(fix.point);
+  const ahead = useMemo(
+    () => (trail.path ? routeAhead(trail.path, trail.previous, rest) : null),
+    [trail, rest],
+  );
+  const trim = useRef({
+    glide: null as Glide | null,
+    ended: null as Glide | null,
+    path: null as MeasuredPath | null,
+    next: 0,
+  });
+  // Every camera move that eases takes this long.
+  const transitionMs = reduceMotion ? REDUCED_MOTION_MS : CAMERA_TRANSITION_MS;
   const [loaded, setLoaded] = useState(false);
   // The first overview: on once the address is known (at mount or soon after the map loads).
   const [hold, setHold] = useState<"waiting" | "on" | "done">(
@@ -196,11 +242,34 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
     camera.current?.setCamera(overviewStop(points, { width, height }, covered, duration));
   };
 
-  // Each frame draws the van; while following, the camera moves on to where the van will be.
-  const onFrame = ({ pose: next, glide, now }: VanFrame) => {
+  // The line starts at the van: cut back as a glide starts, every ROUTE_TRIM_MS during it, where
+  // it ends (React then takes the line over from there) and when the route itself changes.
+  const trimRoute = ({ pose: next, glide, now, arrived }: VanFrame) => {
+    const state = trim.current;
+    const same = state.path === trail.path;
+    const waits = !arrived && state.glide === glide && now < state.next;
+    if (same && (state.ended === glide || waits)) return;
+    Object.assign(state, { glide, path: trail.path, next: now + ROUTE_TRIM_MS });
+    if (trail.path) {
+      const points = routeAhead(trail.path, trail.previous, next.point);
+      line.current?.setNativeProps({
+        id: ROUTE_SOURCE,
+        shape: JSON.stringify(lineFeature(points)),
+      });
+    }
+    if (!arrived) return;
+    state.ended = glide;
+    setRest((was) => (distanceM(was, next.point) < SAME_REST_M ? was : next.point));
+  };
+
+  // Each frame draws the van and the line from it; while following, the camera moves on to where
+  // the van will be.
+  const onFrame = (frame: VanFrame) => {
+    const { pose: next, glide, now } = frame;
     pose.current = next;
     gliding.current = glide;
     van.current?.setNativeProps({ id: VAN_SOURCE, shape: vanShape(next, stale) });
+    trimRoute(frame);
     if (mode !== "follow" || (glide === followed.current && now < nextStep.current)) return;
     followed.current = glide;
     const step = reduceMotion ? REDUCED_MOTION_MS : CAMERA_STEP_MS;
@@ -210,9 +279,10 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
   };
   useVanMotion(
     fix,
-    trail.routes,
+    [trail.path, trail.previous],
     reduceMotion ? REDUCED_MOTION_MS : liveMapConfig.pollMs,
     reduceMotion,
+    active,
     onFrame,
   );
 
@@ -222,7 +292,7 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
   const applyMode = useEffectEvent((next: CameraMode, first: boolean) => {
     const at = pose.current;
     if (at === null) return;
-    const duration = first ? 0 : reduceMotion ? REDUCED_MOTION_MS : CAMERA_TRANSITION_MS;
+    const duration = first ? 0 : transitionMs;
     if (next === "follow") {
       moveTo(at.point, at.bearing, duration, first ? "none" : "easeTo");
       // The frames take over once this move is done, even in the middle of a glide.
@@ -242,7 +312,7 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
 
   // The overview follows each new fix.
   const refitOverview = useEffectEvent(() => {
-    if (loaded && mode === "overview") showOverview(CAMERA_TRANSITION_MS);
+    if (loaded && mode === "overview") showOverview(transitionMs);
   });
   useEffect(() => refitOverview(), [fix.at]);
 
@@ -258,8 +328,10 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
     return () => clearTimeout(timer);
   }, [hold, loaded]);
 
+  // The van dims and lights up again where it stands. A map nobody watches is left alone: its
+  // first frame back draws the van as it should look by then.
   const restyle = useEffectEvent(() => {
-    if (pose.current === null) return;
+    if (!active || pose.current === null) return;
     van.current?.setNativeProps({ id: VAN_SOURCE, shape: vanShape(pose.current, stale) });
   });
   useEffect(() => restyle(), [stale]);
@@ -298,15 +370,8 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
           }}
         />
         <MapGlyphs />
-        {trail.ahead ? (
-          <ShapeSource
-            id="jack-route"
-            shape={{
-              type: "Feature",
-              geometry: { type: "LineString", coordinates: trail.ahead.map((p) => [p[0], p[1]]) },
-              properties: {},
-            }}
-          >
+        {ahead ? (
+          <ShapeSource ref={line} id={ROUTE_SOURCE} shape={lineFeature(ahead)}>
             <LineLayer
               id="jack-route-casing"
               slot="middle"
@@ -363,38 +428,23 @@ export function LiveMap({ fix, stale, route, height, cards, onUnavailable }: Liv
 }
 
 /**
- * The route still ahead (from the fix before the newest, where the van starts its glide, so it
- * drives on the line), the address at its end (kept while the route is briefly unavailable),
- * and the newest two routes for `planGlide`: a fix can still lie on the one before a recomputed one.
+ * The newest route, the one before it (a fix, or the van, can still lie on the one before a
+ * recomputed one) and the address at the route's end, kept while the route is briefly unavailable.
  */
-function useTrail(fix: Fix, path: MeasuredPath | null) {
+function useTrail(path: MeasuredPath | null) {
   const [trail, setTrail] = useState({
-    at: fix.at,
-    last: fix.point,
-    from: fix.point,
     path,
     previous: null as MeasuredPath | null,
     destination: (path?.points.at(-1) ?? null) as LngLat | null,
   });
-  if (trail.at !== fix.at || trail.path !== path) {
-    const moved = trail.at !== fix.at;
+  if (trail.path !== path) {
     setTrail({
-      at: fix.at,
-      last: fix.point,
-      from: moved ? trail.last : trail.from,
       path,
-      previous: trail.path !== path ? (trail.path ?? trail.previous) : trail.previous,
+      previous: trail.path ?? trail.previous,
       destination: path?.points.at(-1) ?? trail.destination,
     });
   }
-  return useMemo(
-    () => ({
-      routes: [trail.path, trail.previous] as const,
-      ahead: trail.path ? routeAhead(trail.path, trail.previous, trail.from) : null,
-      destination: trail.destination,
-    }),
-    [trail],
-  );
+  return trail;
 }
 
 /** The van, drawn from the native source `useVanMotion` writes to; React never redraws it. */

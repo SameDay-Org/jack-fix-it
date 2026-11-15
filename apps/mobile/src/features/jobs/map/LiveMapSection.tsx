@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useEffectEvent, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { Text, useWindowDimensions, View } from "react-native";
 import Animated, {
@@ -27,6 +27,8 @@ import { trackingText, type TrackingText } from "./tracking";
 const LIVE_MAP_SHARE = 0.5;
 const { stepSlideMs, transitionMs } = tokens.motion;
 const CARD_STYLE = [bubbleShadow, continuousCorners];
+/** The longest wait a timer takes. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
 
 type PlaceholderKind = "loading" | "waiting" | "offline" | "unavailable";
 
@@ -116,9 +118,11 @@ type LiveMapSectionProps = Omit<JobHeroProps, "phase" | "travel"> & {
 
 /**
  * The pro's live position on the map, or a calm card saying why it is not there: loading, no
- * position shared yet, offline, or no map (no Mapbox token, or its style failed to load). The last
- * position stays on the map, dimmed, once it is older than `liveMapConfig.staleMs` or the API
- * stops sending one; the latter also asks for the job again.
+ * position shared yet, offline, or no map (no Mapbox token, its style failed to load, or the API
+ * refused the position). The last position stays on the map, dimmed, once it is older than
+ * `liveMapConfig.staleMs` (a poll that fails for a while ends there too) or the API stops sending
+ * one; the latter also asks for the job again. A refusal (`useLiveTracking`) takes the pro and the
+ * address off the screen at once, forgets them, and asks for the job again.
  */
 function LiveMapSection({
   jobId,
@@ -135,19 +139,22 @@ function LiveMapSection({
   // A map that could not load is tried again when the screen or the app comes back.
   const retry = useCallback(async () => setFailed(false), []);
   useRefetchOnReturn(retry, failed);
-  const { position, route } = useLiveTracking(jobId, usable && !leaving);
-  const latest = position.data ?? null;
+  const { position, route, active, refused } = useLiveTracking(jobId, usable && !leaving);
+  const latest = refused ? null : (position.data ?? null);
 
   const [fix, setFix] = useState<Fix | null>(null);
+  if (refused && fix !== null) setFix(null);
   if (latest && latest.updated_at !== fix?.at) {
     setFix({ point: [latest.lng, latest.lat], heading: latest.heading_deg, at: latest.updated_at });
   }
   const lost = fix !== null && position.isSuccess && latest === null;
   const old = useIsOld(fix?.at ?? null, liveMapConfig.staleMs);
+  // The pro stopped sharing, or the API refused: the job has likely moved on.
+  const gone = lost || refused;
   const askForJob = useEffectEvent(() => void refetch());
   useEffect(() => {
-    if (lost) askForJob();
-  }, [lost]);
+    if (gone) askForJob();
+  }, [gone]);
 
   const eta = etaOf(etaAt, now, jobsConfig.etaCloseMinutes);
   const text = trackingText(t, {
@@ -157,7 +164,9 @@ function LiveMapSection({
     waiting: lost || old,
   });
 
-  if (!usable) return <MapPlaceholder kind="unavailable" name={name} height={height} />;
+  if (!usable || refused) {
+    return <MapPlaceholder kind="unavailable" name={name} height={height} />;
+  }
   if (fix === null) {
     const kind: PlaceholderKind = position.isPending
       ? "loading"
@@ -170,6 +179,7 @@ function LiveMapSection({
     <LiveMap
       fix={fix}
       stale={lost || old}
+      active={active}
       route={route.data ?? null}
       height={height}
       cards={<MapCards text={text} />}
@@ -179,18 +189,36 @@ function LiveMapSection({
 }
 
 /**
- * True once the same fix (`at`) has been on the map for `staleMs`, timed on the phone from its
- * arrival: a phone clock set wrong never makes every fix look old. A fix older than the API's own
- * limit is never sent.
+ * True once the fix is `staleMs` old: the phone's clock now, less the fix's own time (`at`, the
+ * API's `updated_at`). The age belongs to the fix, not to this screen: a fix that arrives old (the
+ * API sends a position until it expires there, which by default is later than `staleMs`) or comes
+ * back from the cache after a remount is old at once, and a fresh one turns old at `at + staleMs`
+ * on a timer.
+ *
+ * Clock skew: a phone behind the server sees a negative age, which counts as zero (the fix turns
+ * old `staleMs` after its own time on the phone's clock). Nothing else is corrected: a phone
+ * running ahead calls a fix old early.
  */
 function useIsOld(at: string | null, staleMs: number): boolean {
-  const [oldAt, setOldAt] = useState<string | null>(null);
-  useEffect(() => {
-    if (at === null) return;
-    const timer = setTimeout(() => setOldAt(at), staleMs);
-    return () => clearTimeout(timer);
-  }, [at, staleMs]);
-  return at !== null && oldAt === at;
+  const deadline = at === null ? Number.NaN : Date.parse(at) + staleMs;
+  const subscribe = useCallback(
+    (onOld: () => void) => {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      // A wait longer than a timer can hold is taken in parts.
+      const wait = () => {
+        const left = deadline - Date.now();
+        if (left > 0) timer = setTimeout(wait, Math.min(left, MAX_TIMER_MS));
+        else onOld();
+      };
+      if (deadline - Date.now() > 0) wait();
+      return () => {
+        if (timer !== null) clearTimeout(timer);
+      };
+    },
+    [deadline],
+  );
+  const isOld = useCallback(() => Date.now() >= deadline, [deadline]);
+  return useSyncExternalStore(subscribe, isOld, isOld);
 }
 
 /** The time left, the distance and the street, one sentence for screen readers. */
