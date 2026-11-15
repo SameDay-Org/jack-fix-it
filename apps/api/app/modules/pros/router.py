@@ -211,9 +211,9 @@ async def staff_list_pros(
     },
 )
 async def staff_get_pro(pro_id: uuid.UUID, user: PanelUser, reviews: Reviews) -> StaffProOut:
-    """One pro: the profile, the documents with short-lived presigned URLs, the types required
-    and missing, and what an approval still needs. A read that shows documents is recorded in
-    the audit log with the staff member who made it."""
+    """One pro: the profile with the legal name (to match the ID document), the documents with
+    short-lived presigned URLs, the types required and missing, and what an approval still
+    needs. Every read is recorded in the audit log with the staff member who made it."""
     return await reviews.staff_get(user, pro_id)
 
 

@@ -385,6 +385,7 @@ async def test_the_detail_shows_the_profile_and_documents_and_audits_the_read(
     body = response.json()
     assert (body["id"], body["user_id"]) == (str(pro.profile_id), str(pro.id))
     assert (body["name"], body["bio"], body["years_of_experience"]) == (f"{FIRST} R.", BIO, 9)
+    assert body["legal_name"] == f"{FIRST} {LAST}"
     assert (body["verification_status"], body["rejection_reason"], body["reviewed_at"]) == (
         "pending",
         None,
@@ -408,12 +409,12 @@ async def test_the_detail_shows_the_profile_and_documents_and_audits_the_read(
     # Every URL is short-lived by the setting, and no superseded file gets one.
     assert {ttl for _, ttl in storage.gets} == {URL_TTL}
     assert len(storage.gets) == 3
-    for leak in CONTACT_LEAKS:
+    for leak in (EMAIL, PHONE):
         assert leak not in response.text
     assert await audit_rows(db_session) == [
         AuditRow(
             actor_user_id=world.agent.id,
-            action="pro_profile.read_documents",
+            action="pro_profile.read_for_review",
             entity_type="pro_profile",
             entity_id=pro.profile_id,
             before={},
@@ -423,7 +424,7 @@ async def test_the_detail_shows_the_profile_and_documents_and_audits_the_read(
     ]
 
 
-async def test_a_detail_without_documents_writes_no_audit_row(
+async def test_a_detail_without_documents_is_audited_too(
     db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
 ) -> None:
     pro = await make_pro(db_session)
@@ -433,35 +434,88 @@ async def test_a_detail_without_documents_writes_no_audit_row(
     assert response.status_code == 200
     body = response.json()
     assert (body["documents"], body["history"], body["photo"]) == ([], [], None)
+    assert (body["name"], body["legal_name"]) == (None, None)
     assert body["approval_blockers"] == [
         {"kind": "document_missing", "doc_type": "id"},
         {"kind": "document_missing", "doc_type": "insurance"},
         {"kind": "no_category", "doc_type": None},
         {"kind": "no_service_area", "doc_type": None},
     ]
-    assert await audit_rows(db_session) == []
+    assert await audit_rows(db_session) == [
+        AuditRow(
+            actor_user_id=world.admin.id,
+            action="pro_profile.read_for_review",
+            entity_type="pro_profile",
+            entity_id=pro.profile_id,
+            before={},
+            after={"documents": 0, "document_ids": ""},
+            reason=None,
+        )
+    ]
 
 
-async def test_documents_are_not_shown_when_the_read_cannot_be_audited(
+@pytest.mark.parametrize("who", ["customer", "pro", "the_pro_reviewed"])
+async def test_only_the_staff_detail_carries_the_legal_name(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld, who: str
+) -> None:
+    pro = await make_pro(db_session, first_name=FIRST, last_name=LAST, email=EMAIL, phone=PHONE)
+    first_only = await make_pro(db_session, first_name="Solo")
+    caller: Party = pro if who == "the_pro_reviewed" else getattr(world, who)
+    staff = world.agent.headers
+    one = f"{STAFF}/{pro.profile_id}"
+
+    listed = [
+        await db_client.get(STAFF, params={"status": status}, headers=staff)
+        for status in ("pending", "approved", "rejected")
+    ]
+    detail = await db_client.get(one, headers=staff)
+    partial = await db_client.get(f"{STAFF}/{first_only.profile_id}", headers=staff)
+    refused = [
+        await db_client.get(STAFF, headers=caller.headers),
+        await db_client.get(one, headers=caller.headers),
+    ]
+
+    # The list: first name and last initial, in every tab; never the last name.
+    assert [r.status_code for r in listed] == [200] * 3
+    assert f"{FIRST} R." in listed[0].text
+    assert all(LAST not in r.text and "legal_name" not in r.text for r in listed)
+    # The detail: the name as on the account, to match the ID document. No email or phone.
+    assert (detail.status_code, detail.json()["legal_name"]) == (200, f"{FIRST} {LAST}")
+    assert (detail.json()["name"], partial.json()["legal_name"]) == (f"{FIRST} R.", "Solo")
+    assert EMAIL not in detail.text
+    assert PHONE not in detail.text
+    # The app's users get neither, not even the pro's own.
+    assert [(r.status_code, r.json()) for r in refused] == [(403, FORBIDDEN)] * 2
+    assert all(LAST not in r.text for r in refused)
+    # Each staff detail read is audited; a refused one writes nothing.
+    assert [(row.actor_user_id, row.action) for row in await audit_rows(db_session)] == [
+        (world.agent.id, "pro_profile.read_for_review")
+    ] * 2
+
+
+async def test_nothing_is_shown_when_the_read_cannot_be_audited(
     db_client: httpx.AsyncClient,
     db_session: AsyncSession,
     world: JobWorld,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    pro = await make_pro(db_session)
+    pro = await make_pro(db_session, first_name=FIRST, last_name=LAST)
     document = await add_document(db_session, pro, ProDocumentType.ID)
+    bare = await make_pro(db_session, first_name=FIRST, last_name=LAST)  # no document
 
     async def fail(self: AuditRepository, **fields: Any) -> None:
         raise RuntimeError("probe failure")
 
     monkeypatch.setattr(AuditRepository, "add", fail)
 
-    response = await db_client.get(f"{STAFF}/{pro.profile_id}", headers=world.agent.headers)
+    for profile_id in (pro.profile_id, bare.profile_id):
+        response = await db_client.get(f"{STAFF}/{profile_id}", headers=world.agent.headers)
 
-    assert response.status_code == 500
-    assert response.headers["cache-control"] == "no-store"
-    assert document.file_key not in response.text
-    assert "storage.example.invalid" not in response.text
+        assert response.status_code == 500
+        assert response.headers["cache-control"] == "no-store"
+        assert document.file_key not in response.text
+        assert "storage.example.invalid" not in response.text
+        assert LAST not in response.text
 
 
 async def test_an_unknown_pro_is_404_and_a_bad_id_422(

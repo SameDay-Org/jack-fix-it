@@ -1796,7 +1796,7 @@
           "pros"
         ],
         "summary": "Read a pro for review (staff)",
-        "description": "One pro: the profile, the documents with short-lived presigned URLs, the types required\nand missing, and what an approval still needs. A read that shows documents is recorded in\nthe audit log with the staff member who made it.",
+        "description": "One pro: the profile with the legal name (to match the ID document), the documents with\nshort-lived presigned URLs, the types required and missing, and what an approval still\nneeds. Every read is recorded in the audit log with the staff member who made it.",
         "operationId": "staff_get_pro_v1_admin_pros__pro_id__get",
         "security": [
           {
@@ -11820,6 +11820,18 @@
             "title": "Name",
             "description": "First name and last initial (\"Mar\u00eda P.\")."
           },
+          "legal_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Name",
+            "description": "First and last name as on the account, to match the ID document; null when the account has neither. Only this detail carries it, never the list."
+          },
           "payouts_enabled": {
             "type": "boolean",
             "title": "Payouts Enabled"
@@ -11924,6 +11936,7 @@
           "reviewed_at",
           "user_id",
           "name",
+          "legal_name",
           "payouts_enabled",
           "bio",
           "years_of_experience",
