@@ -1,27 +1,11 @@
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
 
 import { Avatar, Button, Card, ProgressRing } from "@/components/ui";
-import { MediaPermissionNotice } from "@/features/media";
+import { MediaPermissionNotice, singlePhotoStatus, useStableImageUri } from "@/features/media";
 
 import type { ProProfile } from "./api";
 import type { ProfilePhoto } from "./useProfilePhoto";
-
-/** A URL this close to its expiry counts as expired: the photo would start loading as it runs out. */
-const EXPIRY_MARGIN_MS = 30_000;
-const PERCENT = 100;
-
-/**
- * The profile's own photo. Every answer carries a new signed URL for the same picture: the one
- * the form opened with is kept while it still works, so the photo is not loaded twice.
- */
-function useSavedPhotoUri(photo: ProProfile["photo"]): string | undefined {
-  const [first] = useState(() =>
-    photo && Date.parse(photo.expires_at) - EXPIRY_MARGIN_MS > Date.now() ? photo.url : undefined,
-  );
-  return first ?? photo?.url;
-}
 
 export type PhotoFieldProps = {
   photo: ProfilePhoto;
@@ -39,16 +23,13 @@ export type PhotoFieldProps = {
  */
 export function PhotoField({ photo, saved, name, disabled }: PhotoFieldProps) {
   const { t } = useTranslation();
-  const savedUri = useSavedPhotoUri(saved);
+  // Every answer carries a new signed URL for the same photo: the first is kept while it works.
+  const savedUri = useStableImageUri(saved);
   const uri = photo.previewUri ?? savedUri;
   const failed = photo.failure !== null;
-  const status = photo.busy
-    ? t("media.status.uploading", { percent: Math.round(photo.progress * PERCENT) })
-    : failed
-      ? t(photo.canRetry ? "media.status.failed" : "media.status.rejected")
-      : photo.key
-        ? t("proProfile.photo.ready")
-        : t("proProfile.photo.support");
+  const status =
+    singlePhotoStatus(t, photo) ??
+    t(photo.key ? "proProfile.photo.ready" : "proProfile.photo.support");
 
   return (
     <View className="gap-3">
