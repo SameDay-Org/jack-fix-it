@@ -12,13 +12,16 @@ type SectionProps = {
   support: string;
   /** What is wrong with the choice, in red; read when it appears. */
   error?: string;
-  /** A quiet line under the chips: how many are chosen, or that no more fit. */
+  /** A quiet line over the chips: how many are chosen, or that no more fit. */
   note?: string;
   children: ReactNode;
   testID: string;
 };
 
-/** A titled group of choices: the title, one supporting line, the chips, then a note or an error. */
+/**
+ * A titled group of choices: the title, one supporting line, a note or an error, then the chips.
+ * The error sits with the title, not under the chips: a long list would push it out of sight.
+ */
 function Section({ title, support, error, note, children, testID }: SectionProps) {
   return (
     <View className="gap-3" testID={testID}>
@@ -28,7 +31,6 @@ function Section({ title, support, error, note, children, testID }: SectionProps
         </Text>
         <Text className="text-callout text-gray-500">{support}</Text>
       </View>
-      {children}
       {error ? (
         <Text
           accessibilityLiveRegion="polite"
@@ -42,6 +44,7 @@ function Section({ title, support, error, note, children, testID }: SectionProps
           {note}
         </Text>
       ) : null}
+      {children}
     </View>
   );
 }
@@ -117,7 +120,7 @@ export function AreaChoices({ regions, selected, required, full, ...rest }: Area
       testID="pro-profile-areas"
     >
       {regions.map((region) => (
-        <View key={region.region} className="gap-4">
+        <View key={region.region} className="gap-5">
           <Text className="text-callout font-semibold text-navy-900">{region.region}</Text>
           {region.cities.map((city) => (
             <CityChoices
@@ -151,8 +154,9 @@ function CityChoices({
   const all = ids.every((id) => selected.includes(id));
 
   return (
-    <View className="gap-1">
-      <View className="flex-row flex-wrap items-center justify-between gap-x-3">
+    // No gap: the name's row is as tall as its button, which already sets the chips off.
+    <View>
+      <View className="min-h-12 flex-row flex-wrap items-center justify-between gap-x-3">
         <Text className="shrink text-callout text-navy-900">{city.city}</Text>
         {ids.length > 1 ? (
           <Button
@@ -164,7 +168,9 @@ function CityChoices({
             variant="ghost"
             disabled={disabled || !cityFits(ids)}
             onPress={() => onToggleCity(ids)}
-            className="-mr-5"
+            // The ghost pill's own padding pulls the label to the content edge: the right one
+            // beside the name, the left one once a large font wraps it under the name.
+            className="-mx-5"
             testID={`pro-profile-city-${city.city}`}
           />
         ) : null}

@@ -1,6 +1,7 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { KeyboardAvoidingView, ScrollView, Text, View } from "react-native";
+import { useReducedMotion } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { NetworkError, useSession } from "@/api";
@@ -20,7 +21,7 @@ import { lengthCounter } from "@/features/request/counter";
 
 import { useProProfile, useServiceAreas, type ProProfile, type ServiceRegion } from "./api";
 import { BIO_MAX, YEARS_MAX } from "./config";
-import { areaIdsOf, draftOf } from "./draft";
+import { areaIdsOf, draftErrors, draftOf } from "./draft";
 import { PhotoField } from "./PhotoField";
 import { AreaChoices, CategoryChoices } from "./ProfileChoices";
 import { useProfileEditor } from "./useProfileEditor";
@@ -140,6 +141,17 @@ function Editor({ profile, categories, regions }: EditorProps) {
   const [initial] = useState(() => draftOf(profile, offered));
   const editor = useProfileEditor({ initial, offered, onSaved: () => backToPrevious(HOME) });
   const { draft, photo, errors, saving } = editor;
+  const reduceMotion = useReducedMotion();
+  const scroll = useRef<ScrollView>(null);
+  // Where the two parts Save can refuse start in the list, to bring the first one into view.
+  const offsets = useRef({ about: 0, areas: 0 });
+
+  const save = () => {
+    const invalid = draftErrors(draft);
+    const part = invalid.years ? "about" : invalid.areas ? "areas" : null;
+    if (part) scroll.current?.scrollTo({ y: offsets.current[part], animated: !reduceMotion });
+    void editor.submit();
+  };
 
   return (
     <Screen bar="light" testID="pro-profile-screen">
@@ -151,7 +163,8 @@ function Editor({ profile, categories, regions }: EditorProps) {
         className="flex-1"
       >
         <ScrollView
-          contentContainerClassName="gap-6 px-4 pb-4 pt-2"
+          ref={scroll}
+          contentContainerClassName="gap-6 px-4 pb-6 pt-2"
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
         >
@@ -162,7 +175,10 @@ function Editor({ profile, categories, regions }: EditorProps) {
             name={(user && fullName(user)) ?? t("proProfile.photo.title")}
             disabled={saving}
           />
-          <View className="gap-3">
+          <View
+            className="gap-3"
+            onLayout={({ nativeEvent }) => (offsets.current.about = nativeEvent.layout.y)}
+          >
             <Text accessibilityRole="header" className="text-headline text-navy-900">
               {t("proProfile.about.title")}
             </Text>
@@ -198,19 +214,23 @@ function Editor({ profile, categories, regions }: EditorProps) {
             disabled={saving}
             onToggle={editor.toggleCategory}
           />
-          <AreaChoices
-            regions={regions}
-            selected={draft.areaIds}
-            full={editor.areasFull}
-            disabled={saving}
-            required={errors.areas === "required"}
-            onToggle={editor.toggleArea}
-            onToggleCity={editor.toggleCity}
-            cityFits={editor.areasFit}
-          />
+          <View onLayout={({ nativeEvent }) => (offsets.current.areas = nativeEvent.layout.y)}>
+            <AreaChoices
+              regions={regions}
+              selected={draft.areaIds}
+              full={editor.areasFull}
+              disabled={saving}
+              required={errors.areas === "required"}
+              onToggle={editor.toggleArea}
+              onToggleCity={editor.toggleCity}
+              cityFits={editor.areasFit}
+            />
+          </View>
         </ScrollView>
-        {/* Under the list, not in it: Save stays in reach however long the ZIP codes run. */}
-        <View className="gap-3 px-4 pb-4 pt-2">
+        {/* Under the list, not in it: Save stays in reach however long the ZIP codes run. Opaque
+            and drawn over the scroll view, as the request flow's action is: Android draws a
+            scroll view's content past its frame. */}
+        <View className="z-10 gap-3 bg-gray-50 px-4 pb-4 pt-2">
           {editor.failure ? (
             <Notice
               tone="danger"
@@ -223,7 +243,7 @@ function Editor({ profile, categories, regions }: EditorProps) {
             size="lg"
             loading={saving}
             disabled={photo.busy}
-            onPress={() => void editor.submit()}
+            onPress={save}
             testID="pro-profile-save"
           />
         </View>
