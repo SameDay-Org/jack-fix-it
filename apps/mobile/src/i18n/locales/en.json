@@ -403,12 +403,13 @@
     "title": "Payment methods",
     "support": "Tap a card to make it your default or to delete it.",
     "emptySupport": "No cards saved yet.",
-    "note": "Card details go straight to Stripe. We only ever see the brand, the last four digits and the expiry date.",
+    "note": "Card details go straight to Stripe. This app only receives the brand, the last four digits and the expiry date.",
     "default": "Default",
     "expires": "Expires {{expiry}}",
     "seeAll": "See all",
     "showLess": "Show less",
     "retry": "Try again",
+    "refreshFailed": "We couldn't refresh your cards. What you see may be out of date.",
     "brand": {
       "visa": "Visa",
       "mastercard": "Mastercard",
@@ -426,6 +427,7 @@
       "none": "No default card",
       "noneHint": "Open a card to make it your default.",
       "updating": "Updating your wallet…",
+      "stale": "Couldn't check your default card",
       "add": "Add a card",
       "addHint": "Opens Stripe's secure card form."
     },
@@ -464,7 +466,7 @@
         },
         "sheetTimeout": {
           "title": "Saving the card took too long",
-          "body": "Please try again."
+          "body": "It may have been saved: check your cards before you try again."
         },
         "sheetUnavailable": {
           "title": "The card form couldn't open",
@@ -490,7 +492,7 @@
     "failed": {
       "setDefault": "We couldn't make {{card}} your default. Try again in a moment.",
       "delete": "We couldn't delete {{card}}. Try again in a moment.",
-      "offline": "You're offline, so nothing changed. Try again once you're connected.",
+      "offline": "We couldn't confirm that change. Check your connection, then open your cards again to see where things stand.",
       "rateLimited": "That's a lot of changes at once. Try again in a moment.",
       "unavailable": "Cards can't be changed right now. Try again in a moment.",
       "gone": "That card isn't in your wallet anymore."

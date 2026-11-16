@@ -3,15 +3,12 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, Text, View } from "react-native";
 
-import { Button, Notice, Screen, Skeleton } from "@/components/ui";
+import { Button, Notice, Screen, Skeleton, TextSkeleton } from "@/components/ui";
 import { BackButton } from "@/features/auth/components/BackButton";
 
 import { useAddCard, usePaymentMethods, useWalletBusy } from "./api";
 import { walletFailure, type SavedCard } from "./cards";
-import { WalletPocket } from "./WalletPocket";
-
-// The loading wallet's shapes: the top of one card peeking out, and the pocket's front under it.
-const SKELETON = { card: 48, pocket: 152 } as const;
+import { POCKET, STRIP, WalletPocket } from "./WalletPocket";
 
 /**
  * Account > Payment methods: the customer's wallet. The pocket holds the saved cards, the default
@@ -31,6 +28,8 @@ export function PaymentMethodsScreen() {
   const open = (card: SavedCard) =>
     router.push({ pathname: "/account/payment-methods/[id]", params: { id: card.id } });
   const loadFailure = cards === undefined && wallet.isError ? walletFailure(wallet.error) : null;
+  // The wallet is on screen, but the last try to list it again failed: it may be out of date.
+  const stale = cards !== undefined && wallet.isError;
 
   return (
     <Screen bar="light" testID="payment-methods-screen">
@@ -45,7 +44,25 @@ export function PaymentMethodsScreen() {
               {t(cards.length ? "paymentMethods.support" : "paymentMethods.emptySupport")}
             </Text>
           ) : null}
+          {cards === undefined && wallet.isPending ? (
+            <TextSkeleton type="callout" width="85%" />
+          ) : null}
         </View>
+        {stale ? (
+          <Notice
+            tone="info"
+            title={t("paymentMethods.refreshFailed")}
+            testID="payment-methods-stale"
+          >
+            <Button
+              label={t("paymentMethods.retry")}
+              variant="secondary"
+              loading={wallet.isFetching}
+              onPress={() => void wallet.refetch()}
+              testID="payment-methods-refresh"
+            />
+          </Notice>
+        ) : null}
         {cards === undefined && wallet.isPending ? <WalletSkeleton /> : null}
         {loadFailure ? (
           <Notice
@@ -75,7 +92,9 @@ export function PaymentMethodsScreen() {
               onOpen={open}
               onAdd={add}
               adding={adding}
+              locked={busy && !adding}
               settling={busy || wallet.isFetching}
+              stale={stale}
             />
             {failure ? (
               <Notice
@@ -106,16 +125,23 @@ export function PaymentMethodsScreen() {
   );
 }
 
-/** The wallet's outline while it loads: a card peeking out of the pocket, side by side, not overlaid. */
+/**
+ * The wallet's outline while it loads, as tall as a wallet of one card: the "See all" tab, a card
+ * peeking out of the pocket and the pocket's front, one under the other, never overlaid (two
+ * translucent shapes over each other would draw a darker band).
+ */
 function WalletSkeleton() {
   const { t } = useTranslation();
   return (
     <View accessible accessibilityLabel={t("common.loading")} testID="payment-methods-loading">
-      {/* The inset on a wrapper: on the full-width shape itself it would push it past the edge. */}
-      <View className="px-3">
-        <Skeleton height={SKELETON.card} radius="lg" />
+      <View className="w-2/3 self-center" testID="payment-methods-loading-tab">
+        <Skeleton height={STRIP.peek + STRIP.tuck} radius="lg" />
       </View>
-      <Skeleton height={SKELETON.pocket} radius="lg" />
+      {/* The inset on a wrapper: on the full-width shape itself it would push it past the edge. */}
+      <View style={{ paddingHorizontal: STRIP.inset }}>
+        <Skeleton height={STRIP.peek + STRIP.tuck} radius="lg" />
+      </View>
+      <Skeleton height={POCKET.minHeight - STRIP.tuck} radius="lg" />
     </View>
   );
 }

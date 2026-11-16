@@ -145,6 +145,12 @@ export function openPaymentSheet(
  * The same sheet in setup mode (#253): it saves a card on the customer and charges nothing. No
  * Apple Pay or Google Pay here: a wallet is not a saved card. The card goes from the sheet to
  * Stripe; this code only learns how the sheet ended.
+ *
+ * It opens without the customer (no customer id, no ephemeral key): the API created the SetupIntent
+ * on the customer, so Stripe attaches the card it confirms to them all the same. Given the customer,
+ * Stripe's sheet would also list their saved cards, let them remove one (a detach that skips the
+ * API's delete and its choice of the next default) or pick one again ("saved" with no new card).
+ * Without it the sheet is only the form for a new card, and the wallet changes only through the API.
  */
 export async function openSetupSheet(
   setup: SetupIntentOut,
@@ -154,8 +160,6 @@ export async function openSetupSheet(
     setup.publishable_key,
     (shared) => ({
       ...shared,
-      customerId: setup.customer_id,
-      customerEphemeralKeySecret: setup.ephemeral_key_secret,
       setupIntentClientSecret: setup.client_secret,
       allowsDelayedPaymentMethods: false,
     }),

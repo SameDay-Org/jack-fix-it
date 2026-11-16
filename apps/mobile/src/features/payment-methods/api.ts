@@ -231,7 +231,8 @@ const SHEET_FAILURES: Record<Extract<SetupResult, { kind: "failed" }>["reason"],
 /**
  * How an add ended: `saved` (and whether the default rule could not be applied), `failed` with
  * why, or `idle`: the customer closed the sheet, the screen or the session went away, or another
- * Stripe sheet was up. Nothing of Stripe's secrets is in it.
+ * Stripe sheet was up. Nothing of Stripe's secrets is in it. Closing the sheet saves nothing and
+ * changes no saved card: it is only the form for a new card (`openSetupSheet`).
  */
 type AddOutcome =
   | { kind: "saved"; defaultFailed: boolean }
@@ -319,9 +320,14 @@ async function addCard(client: QueryClient, variables: AddVariables): Promise<Ad
   }
   // Saved for another account's session: nothing of it is shown to this one.
   if (!current()) return IDLE;
-  if (result.kind === "failed") return { kind: "failed", failure: SHEET_FAILURES[result.reason] };
-  if (result.kind !== "saved") return IDLE;
-  return { kind: "saved", defaultFailed: !(await settleNewCard(client, variables)) };
+  if (result.kind === "saved") {
+    return { kind: "saved", defaultFailed: !(await settleNewCard(client, variables)) };
+  }
+  if (result.kind !== "failed") return IDLE;
+  // A sheet that timed out may have saved the card all the same (Stripe took it, its answer did
+  // not come back in time): the wallet is listed again, and a new card there gets the default rule.
+  if (result.reason === "timeout") await settleNewCard(client, variables);
+  return { kind: "failed", failure: SHEET_FAILURES[result.reason] };
 }
 
 /**

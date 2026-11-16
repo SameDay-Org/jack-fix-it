@@ -37,9 +37,9 @@ export const POCKET_CARDS = 3;
  * target at the smallest font), `tuck` what hides behind it, `inset` how much narrower than the
  * pocket the cards are.
  */
-const STRIP = { peek: 48, tuck: 24, inset: 12 } as const;
+export const STRIP = { peek: 48, tuck: 24, inset: 12 } as const;
 /** The pocket's front: its height at the smallest font, and the dip its top edge makes. */
-const POCKET = {
+export const POCKET = {
   minHeight: 152,
   notchDepth: 16,
   notchFrom: 0.28,
@@ -56,6 +56,8 @@ const TAB_CHEVRON = 16;
 const ADD_ICON = 24;
 
 const WHITE = tokens.colors.white;
+/** A control that cannot be used right now, as the kit's Button dims one. */
+const DIMMED: ViewStyle = { opacity: 0.5 };
 const cardTop: ViewStyle = { borderTopLeftRadius: CORNER, borderTopRightRadius: CORNER };
 
 /** The pocket's front as one outline: rounded corners, and a soft dip in the middle of the top. */
@@ -210,8 +212,12 @@ export type WalletPocketProps = {
   /** The empty pocket is the Add button. */
   onAdd: () => void;
   adding: boolean;
+  /** Another change of the wallet is unanswered: the empty pocket cannot add a card meanwhile. */
+  locked: boolean;
   /** A change of the wallet is unanswered, or its list is on its way: who is the default may move. */
   settling: boolean;
+  /** The wallet could not be listed again: what it shows may be out of date. */
+  stale: boolean;
 };
 
 /**
@@ -226,7 +232,9 @@ export function WalletPocket({
   onOpen,
   onAdd,
   adding,
+  locked,
   settling,
+  stale,
 }: WalletPocketProps) {
   const { t } = useTranslation();
   const cards = useMemo(() => walletOrder(wallet), [wallet]);
@@ -247,6 +255,9 @@ export function WalletPocket({
   const defaultCard = cards.find((card) => card.is_default);
   const frontStyle: ViewStyle = { marginTop: empty ? 0 : -STRIP.tuck, minHeight: POCKET.minHeight };
   const faceClass = "flex-1 items-center justify-center gap-1 px-6 pb-7";
+  // With no default on the face: a change on its way, a list that could not be fetched again (no
+  // claim either way), or a wallet the server says has none.
+  const noneFace = settling ? "updating" : stale ? "stale" : "none";
   const facePadding = { paddingTop: POCKET.notchDepth + 28 };
 
   return (
@@ -305,8 +316,8 @@ export function WalletPocket({
           accessibilityRole="button"
           accessibilityLabel={t("paymentMethods.pocket.add")}
           accessibilityHint={t("paymentMethods.pocket.addHint")}
-          accessibilityState={{ disabled: adding, busy: adding }}
-          disabled={adding}
+          accessibilityState={{ disabled: adding || locked, busy: adding }}
+          disabled={adding || locked}
           onPress={onAdd}
           onPressIn={addPressIn}
           onPressOut={addPressOut}
@@ -315,6 +326,7 @@ export function WalletPocket({
           style={[
             frontStyle,
             { elevation: bubbleShadow.elevation },
+            locked && !adding && DIMMED,
             addPressed && pressedTransform,
           ]}
           testID="wallet-pocket-add"
@@ -356,15 +368,20 @@ export function WalletPocket({
               </Text>
             </View>
           ) : (
-            <View accessible className={faceClass} style={facePadding} testID="wallet-pocket-none">
+            <View
+              accessible
+              className={faceClass}
+              style={facePadding}
+              testID={`wallet-pocket-${noneFace}`}
+            >
               <Text className="text-center text-title-2 text-white">
-                {t(settling ? "paymentMethods.pocket.updating" : "paymentMethods.pocket.none")}
+                {t(`paymentMethods.pocket.${noneFace}`)}
               </Text>
-              {settling ? null : (
+              {noneFace === "none" ? (
                 <Text className="text-center text-callout text-white">
                   {t("paymentMethods.pocket.noneHint")}
                 </Text>
-              )}
+              ) : null}
             </View>
           )}
         </View>

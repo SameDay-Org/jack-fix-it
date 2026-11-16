@@ -403,12 +403,13 @@
     "title": "Métodos de pago",
     "support": "Toca una tarjeta para hacerla predeterminada o eliminarla.",
     "emptySupport": "Aún no has guardado tarjetas.",
-    "note": "Los datos de la tarjeta van directo a Stripe. Solo vemos la marca, los últimos cuatro dígitos y la fecha de vencimiento.",
+    "note": "Los datos de la tarjeta van directo a Stripe. Esta app solo recibe la marca, los últimos cuatro dígitos y la fecha de vencimiento.",
     "default": "Predeterminada",
     "expires": "Vence {{expiry}}",
     "seeAll": "Ver todas",
     "showLess": "Ver menos",
     "retry": "Reintentar",
+    "refreshFailed": "No pudimos actualizar tus tarjetas. Lo que ves puede no estar al día.",
     "brand": {
       "visa": "Visa",
       "mastercard": "Mastercard",
@@ -426,6 +427,7 @@
       "none": "Sin tarjeta predeterminada",
       "noneHint": "Abre una tarjeta para hacerla predeterminada.",
       "updating": "Actualizando tu billetera…",
+      "stale": "No pudimos revisar tu tarjeta predeterminada",
       "add": "Agregar tarjeta",
       "addHint": "Abre el formulario seguro de Stripe."
     },
@@ -464,7 +466,7 @@
         },
         "sheetTimeout": {
           "title": "Guardar la tarjeta tardó demasiado",
-          "body": "Inténtalo de nuevo."
+          "body": "Puede que se haya guardado: revisa tus tarjetas antes de intentarlo de nuevo."
         },
         "sheetUnavailable": {
           "title": "No se pudo abrir el formulario de la tarjeta",
@@ -473,7 +475,7 @@
       }
     },
     "card": {
-      "setDefault": "Hacer predeterminada",
+      "setDefault": "Usar por defecto",
       "isDefault": "Esta es tu tarjeta predeterminada.",
       "delete": "Eliminar tarjeta",
       "deleteHint": "Pregunta antes de eliminar."
@@ -490,7 +492,7 @@
     "failed": {
       "setDefault": "No pudimos hacer predeterminada {{card}}. Inténtalo de nuevo en un momento.",
       "delete": "No pudimos eliminar {{card}}. Inténtalo de nuevo en un momento.",
-      "offline": "No tienes conexión, así que no cambió nada. Inténtalo de nuevo cuando te conectes.",
+      "offline": "No pudimos confirmar ese cambio. Revisa tu conexión y vuelve a abrir tus tarjetas para ver cómo quedaron.",
       "rateLimited": "Son muchos cambios seguidos. Inténtalo de nuevo en un momento.",
       "unavailable": "No se pueden cambiar las tarjetas ahora. Inténtalo de nuevo en un momento.",
       "gone": "Esa tarjeta ya no está en tu billetera."
