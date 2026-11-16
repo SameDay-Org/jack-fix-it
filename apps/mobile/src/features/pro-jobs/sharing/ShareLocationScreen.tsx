@@ -54,7 +54,8 @@ export function ShareLocationScreen() {
     });
 
   return (
-    <Screen bar="light" edges={["top"]} testID="share-location-screen">
+    // The backdrop covers the top inset and SheetContent pads the bottom one: no edges here.
+    <Screen bar="light" edges={[]} testID="share-location-screen">
       <SheetContent
         title={t("proJobs.sharing.prompt.title")}
         actions={

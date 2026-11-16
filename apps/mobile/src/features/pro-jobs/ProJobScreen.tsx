@@ -182,10 +182,11 @@ export function ProJobScreen() {
                 testID="pro-job-refresh-failed"
               />
             ) : null}
-            <JobHero job={data} now={dataUpdatedAt} />
+            {/* Above the hero, like the notice above: in view on a short screen, over the dock. */}
             {sharingConfig.enabled && isSharedStep(data) ? (
               <SharingNote jobId={data.id} name={nameOf(t, data)} />
             ) : null}
+            <JobHero job={data} now={dataUpdatedAt} />
             {/* Rating the customer opens once the job is confirmed (#77). */}
             <RateEntry jobId={data.id} side="pro" enabled={RATEABLE.includes(data.status)} />
             <JobFacts job={data} />
