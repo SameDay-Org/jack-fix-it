@@ -46,6 +46,14 @@ PHONE: Final = "+13055550141"
 STREET: Final = "41 Probe Street"
 BIO: Final = "probe-bio-41"
 REASON: Final = "The photo is blurry zqxj-reason-41."
+# A reason in which staff pasted contacts (#406 Vault B1): the pro reads it masked, as the chat
+# masks them (app.redaction).
+LEAKY_REASON: Final = (
+    "Blurry ID. Email reviewer41@example.invalid, call +1 305 555 0146 or visit"
+    " https://docs41.example.invalid/id"
+)
+MASKED_REASON: Final = "Blurry ID. Email •••, call ••• or visit •••"
+REASON_CONTACTS: Final = ("reviewer41@example", "555 0146", "5550146", "docs41.example")
 CONTACT_LEAKS = (LAST, EMAIL, PHONE, STREET)
 TODAY = datetime.now(UTC).date()
 
@@ -600,6 +608,52 @@ async def test_the_pro_reads_why_a_document_was_rejected(
     assert mine.json()["missing_types"] == ["id", "insurance"]
 
 
+async def test_a_document_rejection_reaches_the_pro_with_its_contacts_masked(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    pro = await make_pro(db_session)
+    document = await add_document(db_session, pro, ProDocumentType.ID)
+
+    answer = await db_client.post(
+        review_url(pro, document),
+        json={"decision": "rejected", "reason": LEAKY_REASON},
+        headers=world.agent.headers,
+    )
+    mine = await db_client.get("/v1/pros/me/documents", headers=pro.headers)
+
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["rejection_reason"] == MASKED_REASON
+    [listed] = mine.json()["documents"]
+    assert listed["rejection_reason"] == MASKED_REASON
+    assert (await document_of(db_session, document.id)).rejection_reason == MASKED_REASON
+    [row] = await audit_rows(db_session)
+    assert row.reason == MASKED_REASON  # no original kept, not even in the audit
+    for text in (answer.text, mine.text):
+        assert not any(contact in text for contact in REASON_CONTACTS)
+
+
+async def test_a_profile_rejection_reaches_the_pro_with_its_contacts_masked(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    pro = await make_pro(db_session)
+    body = {"decision": "rejected", "reason": LEAKY_REASON}
+
+    first = await db_client.post(decision_url(pro), json=body, headers=world.agent.headers)
+    replay = await db_client.post(decision_url(pro), json=body, headers=world.admin.headers)
+    mine = await db_client.get("/v1/pros/me", headers=pro.headers)
+
+    assert first.status_code == 200, first.text
+    assert first.json() == replay.json()
+    assert first.json()["rejection_reason"] == MASKED_REASON
+    assert mine.json()["rejection_reason"] == MASKED_REASON
+    assert (await profile_of(db_session, pro)).rejection_reason == MASKED_REASON
+    # The replay of the same text compares masked with masked: a no-op, no second row.
+    [row] = await audit_rows(db_session)
+    assert (row.actor_user_id, row.reason) == (world.agent.id, MASKED_REASON)
+    for text in (first.text, mine.text):
+        assert not any(contact in text for contact in REASON_CONTACTS)
+
+
 @pytest.mark.parametrize(
     "status",
     [ProDocumentStatus.APPROVED, ProDocumentStatus.REJECTED, ProDocumentStatus.SUPERSEDED],
@@ -633,6 +687,7 @@ async def test_only_a_pending_document_is_reviewed(
         {"decision": "rejected", "reason": "   "},
         {"decision": "rejected", "reason": "x" * 501},
         {"decision": "rejected", "reason": "nul\x00byte"},
+        {"decision": "rejected", "reason": "​​"},  # nothing left once masked
         {"decision": "approved", "reason": REASON},
         {"decision": "pending"},
         {"decision": "superseded"},

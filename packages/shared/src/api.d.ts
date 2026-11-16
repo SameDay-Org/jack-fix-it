@@ -3120,7 +3120,7 @@ export interface components {
             verification_status: components["schemas"]["ProVerificationStatus"];
             /**
              * Rejection Reason
-             * @description Why the team rejected the profile, as they wrote it; null unless rejected.
+             * @description Why the team rejected the profile, contact details masked; null unless rejected.
              */
             rejection_reason: string | null;
             /** Payouts Enabled */
@@ -3222,7 +3222,7 @@ export interface components {
             decision: components["schemas"]["ReviewDecision"];
             /**
              * Reason
-             * @description Why, as plain text the pro reads: required with rejected, refused with approved.
+             * @description Why, as plain text the pro reads (contact details are masked): required with rejected, refused with approved.
              */
             reason?: string | null;
         };

@@ -15,6 +15,9 @@ reject the profile. Only an approved profile (with payouts enabled) receives req
   area: else a 422 that lists what is missing, in fixed words. A rejection needs a reason, kept
   on the profile for the pro to read; an approval clears it. A rejected pro can be approved
   later. The same decision with the same reason again changes and writes nothing.
+- A reason (document or profile) reaches the service with its contact details already masked
+  (schemas.ReviewReason, #406 Vault B1): only that text is stored, audited, answered and
+  compared on a replay.
 - Each change writes one audit_log row (the actor, before, after and the reason) in the same
   transaction: a failed audit write changes nothing.
 

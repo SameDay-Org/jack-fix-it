@@ -3,7 +3,14 @@ from datetime import date, datetime
 from enum import StrEnum
 from typing import Annotated, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 from app.modules.addresses.schemas import NO_NUL
 from app.modules.categories.schemas import CategorySummary
@@ -15,6 +22,7 @@ from app.modules.pros.models import (
 )
 from app.modules.service_areas.schemas import ServiceAreaOut
 from app.modules.uploads.schemas import PhotoOut
+from app.redaction import redact_contacts
 
 MAX_YEARS_OF_EXPERIENCE = 80  # the pro_profiles CHECK
 
@@ -25,7 +33,9 @@ class ProProfileOut(BaseModel):
     photo: PhotoOut | None
     verification_status: ProVerificationStatus
     rejection_reason: str | None = Field(
-        description="Why the team rejected the profile, as they wrote it; null unless rejected."
+        description=(
+            "Why the team rejected the profile, contact details masked; null unless rejected."
+        )
     )
     payouts_enabled: bool
     categories: list[CategorySummary]
@@ -98,11 +108,25 @@ class DocumentsOut(BaseModel):
 
 # --- Staff review (#41) ----------------------------------------------------------------------
 
+
+def _contacts_masked(value: str) -> str:
+    """The reason as the pro will read it: every contact detail app.redaction recognizes (a
+    phone, an email, a link, a handle...) masked, as in the chat, so a contact pasted by staff
+    never reaches the pro (#406 Vault B1). Only this text goes on: stored, audited, answered
+    and compared on a replay; no original is kept. Nothing left once invisible characters are
+    dropped, or (in theory) masks past the limit, is a 422."""
+    text = redact_contacts(value).text.strip()
+    if not text or len(text) > REVIEW_REASON_MAX_LENGTH:
+        raise ValueError("a reason needs text once its contact details are masked")
+    return text
+
+
 ReviewReason = Annotated[
     str,
     StringConstraints(
         strip_whitespace=True, min_length=1, max_length=REVIEW_REASON_MAX_LENGTH, pattern=NO_NUL
     ),
+    AfterValidator(_contacts_masked),
 ]
 
 
@@ -120,7 +144,8 @@ class ProReviewIn(BaseModel):
     reason: ReviewReason | None = Field(
         default=None,
         description=(
-            "Why, as plain text the pro reads: required with rejected, refused with approved."
+            "Why, as plain text the pro reads (contact details are masked): required with"
+            " rejected, refused with approved."
         ),
     )
 
