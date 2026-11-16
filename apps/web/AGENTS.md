@@ -73,10 +73,13 @@ apply.
     headline beats and the phone's screens follow the scroll (`hero3d/choreography.ts`); the
     browser's scrolling is never changed. `hero-motion.tsx` picks the mode
     (`hero3d/capabilities.ts`): reduced motion, no script or a short viewport get a plain hero
-    (the `still` variant of `globals.css`); no WebGL 2, a low-end device or a slow connection
-    get the CSS phone; others get the 3D phone (three.js), imported only after the page has
-    loaded and while the tab is shown. It falls back to the CSS phone when its frames are slow
-    (`hero3d/frame-probe.ts`, visible time only) or the GPU drops it.
+    (the `still` variant of `globals.css`); a low-end device or a slow connection get the CSS
+    phone; others get the 3D phone (three.js). Its chunk is downloaded once the page is idle,
+    but three.js is evaluated and WebGL set up only on the reader's first intent (a scroll, a
+    touch, a key: `hero3d/load-triggers.ts`, `hero3d/scene-loader.ts`), both only for a
+    pinned hero in a visible tab. Choosing the mode makes no WebGL context (too expensive at
+    page start). It falls back to the CSS phone when WebGL 2 is missing or software-only, when
+    its frames are slow (`hero3d/frame-probe.ts`, visible time only) or the GPU drops it.
     `check:bundle` fails when three.js reaches the first load, and measures the lazy 3D chunk
     against a 200 KB gzip budget. The phone is built in code, with no model file
     (`hero3d/MODEL.md`).
