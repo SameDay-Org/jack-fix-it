@@ -262,6 +262,26 @@ What Sentinel checks after each deploy:
 | worker  | a JSON log line with `"message": "worker_started"`                          |
 | web     | `GET /api/health` 200                                                       |
 
+### Verify Sentry (#397)
+
+To prove that a service reports errors to Sentry, open a shell in it (`railway ssh` into api
+or worker) and run `python -m scripts.sentry_smoke`. It is safe in any environment: it starts
+Sentry as the service does, sends one synthetic event and touches nothing else (no database,
+no request, no user). There is no HTTP route for it.
+
+- It prints one line: the event id, the environment and the DSN's ingest host, never the DSN
+  or its key. It waits 10 seconds at the most and nothing else after it.
+- Exit 0: Sentry accepted the event (it answered 2xx). 1: `SENTRY_DSN` is not set (nothing
+  sent). 2: not delivered: Sentry could not be reached, or refused the event (a wrong key or
+  project in `SENTRY_DSN`, a rate limit, an error of its own; the line names the SDK's reason,
+  such as `network`, `status_403`, `status_429`), or did not answer within the 10 seconds.
+- In Sentry (project jackfixit-api) the issue is titled
+  `RuntimeError: sentry smoke test (safe to resolve)`, tagged `smoke=true`, in the environment
+  named by `APP_ENV`, with a stack trace through `scripts/sentry_smoke.py`, no local variable
+  values and no host name. Exit 0 without that issue is a question about the project or its
+  filters (the DSN of another project, an inbound filter), not a delivery failure.
+- Cesar resolves or ignores the issue afterwards.
+
 ## Sentinel allowlist
 
 `docs/agents/sentinel.md` is authoritative. Where each allowed change lives:
