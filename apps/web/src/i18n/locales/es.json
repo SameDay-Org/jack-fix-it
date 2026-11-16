@@ -31,7 +31,17 @@
       "title": "Pase lo que pase en casa, lo <accent>arreglamos</accent>.",
       "lead": "Cuéntaselo a Jack. Nosotros nos encargamos del resto.",
       "body": "Describe lo que pasa, compara presupuestos de precio fijo de profesionales verificados y paga en la app. Tu pago queda retenido hasta que confirmes que el trabajo está terminado.",
-      "cta": "Mira cómo funciona"
+      "cta": "Mira cómo funciona",
+      "beats": {
+        "quotes": {
+          "title": "Cuéntalo una vez. Recibe <accent>precios fijos</accent>.",
+          "body": "Describe lo que pasa con tus palabras. Profesionales verificados te envían presupuestos de precio fijo para comparar."
+        },
+        "pay": {
+          "title": "Paga con tranquilidad. <accent>Sigue</accent> a tu profesional.",
+          "body": "Tu pago queda retenido hasta que confirmes que el trabajo está terminado, y el mapa te muestra a tu profesional en camino."
+        }
+      }
     },
     "how": {
       "eyebrow": "Cómo funciona",

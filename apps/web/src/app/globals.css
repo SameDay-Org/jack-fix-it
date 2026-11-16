@@ -24,3 +24,14 @@
   --radius-xl: 32px;
   --radius-pill: 9999px;
 }
+
+/*
+ * A page that keeps still: the visitor asks for reduced motion, no script runs, or the
+ * viewport is too short for a pinned stage (a phone held sideways). The showcase hero is not
+ * pinned then (features/showcase/hero.tsx; STILL_QUERY in hero3d/capabilities.ts says the same).
+ */
+@custom-variant still {
+  @media (prefers-reduced-motion: reduce), (scripting: none), (max-height: 30rem) {
+    @slot;
+  }
+}
