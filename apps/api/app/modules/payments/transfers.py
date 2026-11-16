@@ -17,6 +17,9 @@ release(job_id), in three steps:
    - the job's payment succeeded and froze the same payout as the job did, a positive one;
    - the transfer row exists, or is created now: one per job (unique job_id), with the amount
      copied from the job's frozen pro_payout_cents, never computed from a rate;
+   - staff approve the pro now (#41): else the row stays pending with `pro_not_approved`
+     (held) and no Stripe call is made, whether or not Stripe still has their payouts enabled;
+     the sweep takes the job again once staff approve them again;
    - the pro can be paid out (a Stripe account, payouts enabled): else the row stays pending
      with `payouts_not_enabled` and no Stripe call is made; the sweep takes the job again once
      the pro can.
@@ -39,6 +42,12 @@ release(job_id), in three steps:
 3. Under the same locks again: the transfer's id is stored (created) and the job moves
    confirmed -> paid_out through JobStateMachine as the system (one job_events row), in one
    transaction.
+4. Once that is committed, the transfer is read from Stripe again. A transfer reversed between
+   its create and step 3 (its create answer slow to come back) had its transfer.reversed event
+   find no row with its id, and that event is processed and gone. So a reversal found now is
+   recorded through the webhook's own path (record_reversal); a later event finds the stored
+   id itself, and whichever comes second changes nothing. A failed read is logged for staff
+   (`transfer_reversal_check_failed`); the transfer stays created.
 
 A Stripe error leaves the job confirmed and the row failed with Stripe's error code (or the
 error's class name; never its text) for the next try. Stripe keeps a create's own refusal under
@@ -72,12 +81,14 @@ from app.modules.payments.models import (
 )
 from app.modules.payments.repository import PaymentRepository, TransferRepository
 from app.modules.payments.service import transfer_group
+from app.modules.payments.transfer_webhooks import record_reversal
 from app.modules.pros.service import ProService
 
 logger = logging.getLogger(__name__)
 
 # last_error_code values of ours, beside Stripe's own codes.
 PAYOUTS_NOT_ENABLED: Final = "payouts_not_enabled"
+PRO_NOT_APPROVED: Final = "pro_not_approved"
 TRANSFER_NEEDS_REVIEW: Final = "transfer_needs_review"
 
 
@@ -107,7 +118,8 @@ class ReleaseOutcome(StrEnum):
     ALREADY_CREATED = "already_created"
     # The job is not confirmed (or does not exist): not this call's to pay.
     NOT_CONFIRMED = "not_confirmed"
-    # Something holds the job's money back (has_open_hold).
+    # Something holds the job's money back (has_open_hold), or staff do not approve the pro
+    # now: tried again once that changes.
     HELD = "held"
     # The pro has no Stripe account or their payouts are not enabled: tried again later.
     PAYOUTS_NOT_ENABLED = "payouts_not_enabled"
@@ -233,7 +245,7 @@ class TransferService:
                 },
             )
             return ReleaseOutcome.FAILED
-        return await self._settle(attempt, made)
+        return await self._settle(self._stripe, attempt, made)
 
     async def _prepare(self, job_id: uuid.UUID) -> _Attempt | ReleaseOutcome:
         """Step 1: the checks under the job's lock, the row, and the attempt stamped and
@@ -276,6 +288,13 @@ class TransferService:
                 )
             )
         account = await self._pros.payout_account_of_profile(job.pro_id)
+        if account is not None and not account.approved:
+            # Staff rejected the pro after the job, or never approved them: Stripe may still
+            # have their payouts enabled, so this is the check that keeps the money here.
+            await self._transfers.hold_back(transfer.id, PRO_NOT_APPROVED)
+            await self._session.commit()
+            logger.warning("transfer_pro_not_approved", extra=ids)
+            return ReleaseOutcome.HELD
         destination = None if account is None else account.stripe_account_id
         if account is None or destination is None or not account.payouts_enabled:
             await self._transfers.hold_back(transfer.id, PAYOUTS_NOT_ENABLED)
@@ -355,8 +374,11 @@ class TransferService:
         )
         return _fitting(created, attempt)
 
-    async def _settle(self, attempt: _Attempt, made: TransferFacts) -> ReleaseOutcome:
-        """Step 3: the transfer's id stored and the job paid_out, in one transaction."""
+    async def _settle(
+        self, stripe: StripeTransfers, attempt: _Attempt, made: TransferFacts
+    ) -> ReleaseOutcome:
+        """Step 3: the transfer's id stored and the job paid_out, in one transaction; then
+        step 4."""
         job = await self._jobs.locked(attempt.job_id)
         if not await self._transfers.mark_created(attempt.transfer_id, made.transfer_id):
             # Another attempt of this job stored it first: the same transfer (one key).
@@ -367,7 +389,29 @@ class TransferService:
             logger.error("transfer_created_job_not_confirmed", extra=attempt.ids)
         await self._session.commit()
         logger.info("transfer_created", extra={**attempt.ids, "stripe_request_id": made.request_id})
+        await self._check_reversal(stripe, attempt, made.transfer_id)
         return ReleaseOutcome.CREATED
+
+    async def _check_reversal(
+        self, stripe: StripeTransfers, attempt: _Attempt, stripe_transfer_id: str
+    ) -> None:
+        """Step 4: the stored transfer read again, a reversal recorded (see the module doc).
+        No transaction is open during the read."""
+        try:
+            current = await stripe.retrieve_transfer(stripe_transfer_id)
+        except StripeCallError as error:
+            logger.error(
+                "transfer_reversal_check_failed",
+                extra={
+                    **attempt.ids,
+                    "stripe_request_id": error.request_id,
+                    "stripe_code": error.code,
+                },
+            )
+            return
+        if current.reversed:
+            await record_reversal(self._session, stripe_transfer_id, attempt.ids)
+            await self._session.commit()
 
     async def _end_failed(self, attempt: _Attempt, code: str) -> None:
         await self._transfers.mark_failed(attempt.transfer_id, attempt.number, code)

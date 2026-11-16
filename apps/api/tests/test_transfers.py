@@ -42,12 +42,13 @@ from app.modules.payments.transfer_webhooks import (
 )
 from app.modules.payments.transfers import (
     PAYOUTS_NOT_ENABLED,
+    PRO_NOT_APPROVED,
     TRANSFER_NEEDS_REVIEW,
     ReleaseOutcome,
     TransferConfig,
     TransferService,
 )
-from app.modules.pros.models import ProProfile
+from app.modules.pros.models import ProProfile, ProVerificationStatus
 from app.modules.quotes.models import Quote, QuoteStatus
 from app.modules.requests.models import RequestOrigin, RequestStatus, ServiceRequest
 from app.modules.users.models import User
@@ -92,6 +93,7 @@ class FakeStripeTransfers:
     creates: list[dict[str, Any]] = field(default_factory=list)
     lists: list[str] = field(default_factory=list)
     charges: list[str] = field(default_factory=list)
+    retrieves: list[str] = field(default_factory=list)
     errors: dict[str, list[Exception]] = field(default_factory=dict)
     lost_answers: int = 0
     on_create: Callable[[], Awaitable[None]] | None = None
@@ -175,6 +177,11 @@ class FakeStripeTransfers:
             if self._groups[transfer_id] == transfer_group
         )
         return FoundTransfers(transfers=found, complete=self.list_complete)
+
+    async def retrieve_transfer(self, transfer_id: str) -> TransferFacts:
+        self._fail("retrieve")
+        self.retrieves.append(transfer_id)
+        return self.transfers[transfer_id]
 
 
 @dataclass
@@ -559,6 +566,79 @@ async def test_a_pro_without_payouts_waits_and_is_released_once_enabled(
     assert await service(db_session, stripe, clock).release(job.id) is ReleaseOutcome.CREATED
     assert len(stripe.creates) == 1
     assert (await job_row(db_session, job.id)).status is JobStatus.PAID_OUT
+
+
+UNAPPROVED = pytest.mark.parametrize(
+    "verification", [ProVerificationStatus.PENDING, ProVerificationStatus.REJECTED]
+)
+
+
+@UNAPPROVED
+async def test_a_pro_staff_do_not_approve_now_is_held_until_approved_again(
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe: FakeStripeTransfers,
+    clock: Clock,
+    verification: ProVerificationStatus,
+) -> None:
+    """Staff reject the pro (or set them back to pending) after the job was confirmed: Stripe
+    still has their payouts enabled, yet neither the release nor the sweep sends anything or
+    burns an attempt. Approved again, the next sweep pays the job (#416 r1)."""
+    job = await confirmed_job(db_session, world)
+    pro = update(ProProfile).where(ProProfile.id == world.pro.profile_id)
+    await db_session.execute(pro.values(verification_status=verification))
+    await db_session.commit()
+    sweep = worker_ctx(db_session, stripe, transfer_release_batch_size=10_000)
+
+    assert await service(db_session, stripe, clock).release(job.id) is ReleaseOutcome.HELD
+    assert job.id not in await service(db_session, stripe, clock).due(10_000)
+    await release_confirmed_jobs(sweep)
+    assert await service(db_session, stripe, clock).release(job.id) is ReleaseOutcome.HELD
+
+    assert (stripe.creates, stripe.charges, stripe.lists) == ([], [], [])
+    row = await transfer_of(db_session, job.id)
+    assert row is not None
+    assert (row.status, row.last_error_code, row.attempts, row.requested_at) == (
+        TransferStatus.PENDING,
+        PRO_NOT_APPROVED,
+        0,
+        None,
+    )
+    assert (await job_row(db_session, job.id)).status is JobStatus.CONFIRMED
+
+    await db_session.execute(pro.values(verification_status=ProVerificationStatus.APPROVED))
+    await db_session.commit()
+    assert job.id in await service(db_session, stripe, clock).due(10_000)
+    await release_confirmed_jobs(sweep)
+
+    assert str(job.id) in {c["metadata"]["job_id"] for c in stripe.creates}
+    await db_session.refresh(row)
+    assert (row.status, row.attempts) == (TransferStatus.CREATED, 1)
+    assert (await job_row(db_session, job.id)).status is JobStatus.PAID_OUT
+
+
+@UNAPPROVED
+async def test_the_sweep_never_reads_a_job_of_a_pro_staff_do_not_approve(
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe: FakeStripeTransfers,
+    clock: Clock,
+    verification: ProVerificationStatus,
+) -> None:
+    """Before any release ran (no row yet): the sweep alone keeps the job out."""
+    job = await confirmed_job(db_session, world)
+    await db_session.execute(
+        update(ProProfile)
+        .where(ProProfile.id == world.pro.profile_id)
+        .values(verification_status=verification)
+    )
+    await db_session.commit()
+
+    assert job.id not in await service(db_session, stripe, clock).due(10_000)
+    await release_confirmed_jobs(worker_ctx(db_session, stripe, transfer_release_batch_size=10_000))
+
+    assert str(job.id) not in {c["metadata"]["job_id"] for c in stripe.creates}
+    assert await transfer_of(db_session, job.id) is None
 
 
 # Stripe errors, retries and lost answers.
@@ -1390,7 +1470,10 @@ async def committed_world(test_database_url: URL) -> AsyncIterator[CommittedWorl
         session.add_all([customer, pro_user])
         await session.flush()
         profile = ProProfile(
-            user_id=pro_user.id, stripe_account_id=f"{ACCOUNT}{tag}", payouts_enabled=True
+            user_id=pro_user.id,
+            stripe_account_id=f"{ACCOUNT}{tag}",
+            payouts_enabled=True,
+            verification_status=ProVerificationStatus.APPROVED,
         )
         address = Address(
             user_id=customer.id, line1="1 Main St", city="Orlando", state="FL", zip_code="32801"
@@ -1627,3 +1710,69 @@ async def test_two_releases_racing_for_the_job_lock_make_one_transfer(
         sorted(outcomes) == sorted([ReleaseOutcome.CREATED, ReleaseOutcome.NOT_CONFIRMED])
     )
     assert len(stripe.creates) == 1
+
+
+@UNAPPROVED
+async def test_unapproved_pro_cannot_receive_transfer(
+    committed_world: CommittedWorld,
+    stripe: FakeStripeTransfers,
+    clock: Clock,
+    verification: ProVerificationStatus,
+) -> None:
+    """The Vault's probe of #416 r1, on committed rows: staff no longer approve the pro, whose
+    payouts Stripe still has enabled; neither the sweep nor a release on its own connection
+    sends anything."""
+    world = committed_world
+    async with world.sessions() as session:
+        await session.execute(
+            update(ProProfile)
+            .where(ProProfile.id == world.pro_id)
+            .values(verification_status=verification)
+        )
+        await session.commit()
+
+    async with world.sessions() as session:
+        due = await service(session, stripe, clock).due(10_000)
+    async with world.sessions() as session:
+        outcome = await service(session, stripe, clock).release(world.job_id)
+
+    assert world.job_id not in due
+    assert outcome is ReleaseOutcome.HELD
+    assert (stripe.creates, stripe.charges, stripe.lists) == ([], [], [])
+
+
+async def test_a_failed_reversal_check_leaves_the_transfer_created_and_tells_staff(
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe: FakeStripeTransfers,
+    clock: Clock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Step 4 reads the stored transfer again; when Stripe cannot answer, the transfer stays
+    created and staff get an error with ids only."""
+    caplog.set_level(logging.INFO)
+    job = await confirmed_job(db_session, world)
+    stripe.errors["retrieve"] = [StripeUnavailableError(request_id="req_x")]
+
+    assert await service(db_session, stripe, clock).release(job.id) is ReleaseOutcome.CREATED
+
+    row = await transfer_of(db_session, job.id)
+    assert row is not None
+    assert row.status is TransferStatus.CREATED
+    assert (await job_row(db_session, job.id)).status is JobStatus.PAID_OUT
+    [failed] = [r for r in caplog.records if r.getMessage() == "transfer_reversal_check_failed"]
+    assert failed.levelno == logging.ERROR
+    assert_no_leak(caplog)
+
+
+async def test_the_release_reads_the_stored_transfer_again(
+    db_session: AsyncSession, world: JobWorld, stripe: FakeStripeTransfers, clock: Clock
+) -> None:
+    job = await confirmed_job(db_session, world)
+
+    assert await service(db_session, stripe, clock).release(job.id) is ReleaseOutcome.CREATED
+
+    row = await transfer_of(db_session, job.id)
+    assert row is not None
+    assert stripe.retrieves == [row.stripe_transfer_id]
+    assert row.status is TransferStatus.CREATED

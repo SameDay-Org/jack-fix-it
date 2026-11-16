@@ -5,7 +5,10 @@ part (from the Dashboard today: nothing in the app reverses one). The row of tha
 created -> reversed, once, and an error is logged with ids for staff: the job stays paid_out
 (its state machine has no way back), and the staff read of the job's transfer shows the
 reversal. An event for a transfer no row holds changes nothing: not ours, or its create answer
-is not stored yet (the release that adopts it later refuses a reversed transfer).
+is not stored yet. In that case the release that stores it reads the transfer from Stripe
+again right after its commit and records the reversal through record_reversal, the same path
+(transfers.py, step 4), so the reversal holds whichever comes first. Only the exact Stripe
+transfer id selects a row: the event's metadata never does.
 
 Stripe has no transfer.failed event in this API version (a transfer is made or refused when it
 is created), and a connected account's payout.failed is out of scope (#68).
@@ -48,19 +51,31 @@ def _transfer_id(event: StripeEvent) -> str:
     return transfer_id
 
 
-async def transfer_reversed(
-    session: AsyncSession, event: StripeEvent, after_commit: AfterCommit
-) -> None:
-    reversed_row = await TransferRepository(session).mark_reversed(_transfer_id(event))
-    ids = {"stripe_event_id": event.stripe_event_id}
+async def record_reversal(
+    session: AsyncSession, stripe_transfer_id: str, ids: Mapping[str, str | int]
+) -> bool:
+    """created -> reversed for the row holding this Stripe transfer, with the error log for
+    staff (`ids` added to it). False when no row holds it as created: not ours, not stored
+    yet, or reversed already. The webhook's path and the release's re-read; the caller
+    commits."""
+    reversed_row = await TransferRepository(session).mark_reversed(stripe_transfer_id)
     if reversed_row is None:
-        logger.warning("transfer_reversed_unknown", extra=ids)
-        return
+        return False
     transfer_id, job_id = reversed_row
     # For staff: the pro's money was taken back after the job was paid out.
     logger.error(
         "transfer_reversed", extra={**ids, "transfer_id": str(transfer_id), "job_id": str(job_id)}
     )
+    return True
+
+
+async def transfer_reversed(
+    session: AsyncSession, event: StripeEvent, after_commit: AfterCommit
+) -> None:
+    stripe_transfer_id = _transfer_id(event)
+    ids = {"stripe_event_id": event.stripe_event_id}
+    if not await record_reversal(session, stripe_transfer_id, ids):
+        logger.warning("transfer_reversed_unknown", extra=ids)
 
 
 TRANSFER_HANDLERS: Final[Mapping[str, StripeEventHandler]] = MappingProxyType(

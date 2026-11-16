@@ -9,6 +9,7 @@ transfer to the charge's `transfer_group`. Every create carries the caller's ide
 A transfer whose create answer was lost is found again by listing the request's
 `transfer_group` (one page of TRANSFER_LIST_LIMIT; the List API reads Stripe's own records, so
 it is not eventually consistent like Search) and reading each transfer's metadata job_id.
+Once a transfer is stored, it is read again by id: whether it was reversed before then.
 
 What leaves this module is typed and minimal: a charge's id, and a transfer's id, amount,
 currency, destination, metadata job_id and whether it was reversed. Stripe's errors become
@@ -78,6 +79,10 @@ class StripeTransfers(Protocol):
 
     async def list_transfers(self, transfer_group: str) -> FoundTransfers:
         """The platform's transfers of the group, one page."""
+        ...
+
+    async def retrieve_transfer(self, transfer_id: str) -> TransferFacts:
+        """The transfer as Stripe holds it now: reversed or not since it was made."""
         ...
 
 
@@ -156,6 +161,13 @@ class StripeTransfersClient:
             transfers=tuple(_facts(transfer) for transfer in page.data),
             complete=not page.has_more,
         )
+
+    async def retrieve_transfer(self, transfer_id: str) -> TransferFacts:
+        try:
+            transfer = await self._client.v1.transfers.retrieve_async(transfer_id)
+        except stripe.StripeError as error:
+            raise_typed(error)
+        return _facts(transfer)
 
 
 def _facts(transfer: stripe.Transfer) -> TransferFacts:

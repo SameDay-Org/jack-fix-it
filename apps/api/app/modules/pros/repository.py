@@ -51,11 +51,16 @@ class ProProfileRepository:
 
     @staticmethod
     def payable() -> Subquery:
-        """The id (`pro_id`) of every profile a transfer can be made to (#68): it has a
-        Stripe account with payouts enabled. A subquery for another module's query."""
+        """The id (`pro_id`) of every profile a transfer can be made to (#68): staff approve
+        it now, and it has a Stripe account with payouts enabled. A subquery for another
+        module's query."""
         return (
             select(ProProfile.id.label("pro_id"))
-            .where(ProProfile.stripe_account_id.is_not(None), ProProfile.payouts_enabled)
+            .where(
+                ProProfile.verification_status == ProVerificationStatus.APPROVED,
+                ProProfile.stripe_account_id.is_not(None),
+                ProProfile.payouts_enabled,
+            )
             .subquery()
         )
 

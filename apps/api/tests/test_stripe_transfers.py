@@ -153,6 +153,26 @@ async def test_list_reads_the_group_one_page() -> None:
     assert f"limit={TRANSFER_LIST_LIMIT}" in url
 
 
+async def test_retrieve_reads_one_transfer_by_id() -> None:
+    wrapper, http = client((200, transfer_body(amount_reversed=1)))
+
+    found = await wrapper.retrieve_transfer(TRANSFER)
+
+    assert (found.transfer_id, found.job_id, found.reversed) == (TRANSFER, JOB_ID, True)
+    [(method, url, _, _)] = http.sent
+    assert (method, url) == ("get", f"https://api.stripe.com/v1/transfers/{TRANSFER}")
+
+
+async def test_a_failed_retrieve_carries_the_code_never_the_text() -> None:
+    wrapper, _ = client((500, refusal("api_error")))
+
+    with pytest.raises(StripeUnavailableError) as raised:
+        await wrapper.retrieve_transfer(TRANSFER)
+
+    assert raised.value.__cause__ is None
+    assert ACCOUNT not in str(raised.value)
+
+
 @pytest.mark.parametrize(
     ("charge", "expected"),
     [(CHARGE, CHARGE), ({"id": CHARGE, "object": "charge"}, CHARGE), (None, None)],

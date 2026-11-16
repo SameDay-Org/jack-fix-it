@@ -77,13 +77,15 @@ class ProPublicDetails:
 @dataclass(frozen=True)
 class PayoutAccount:
     """A pro's payout side (#39): the profile, its Stripe Express account (None until the first
-    onboarding link), when that account's create was attempted (None before the first attempt)
-    and whether payouts are enabled, as last read from Stripe."""
+    onboarding link), when that account's create was attempted (None before the first attempt),
+    whether payouts are enabled, as last read from Stripe, and whether staff approve the pro
+    now (#41): Stripe can keep payouts enabled for a pro staff rejected."""
 
     profile_id: uuid.UUID
     stripe_account_id: str | None
     stripe_account_requested_at: datetime | None
     payouts_enabled: bool
+    approved: bool
 
 
 def _payout_account(profile: ProProfile) -> PayoutAccount:
@@ -92,6 +94,7 @@ def _payout_account(profile: ProProfile) -> PayoutAccount:
         stripe_account_id=profile.stripe_account_id,
         stripe_account_requested_at=profile.stripe_account_requested_at,
         payouts_enabled=profile.payouts_enabled,
+        approved=profile.verification_status is ProVerificationStatus.APPROVED,
     )
 
 
@@ -109,8 +112,9 @@ class ProService:
 
     @staticmethod
     def payable() -> Subquery:
-        """The id (`pro_id`) of every profile a transfer can be made to now (a Stripe
-        account with payouts enabled), as a subquery: the transfer sweep (#68) joins it."""
+        """The id (`pro_id`) of every profile a transfer can be made to now (approved by
+        staff, a Stripe account with payouts enabled), as a subquery: the transfer sweep (#68)
+        joins it."""
         return ProProfileRepository.payable()
 
     @staticmethod
