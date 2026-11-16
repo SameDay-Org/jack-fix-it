@@ -26,6 +26,8 @@ class AuditAction(StrEnum):
     JOB_CHAT_ORIGINALS_READ = "job.read_chat_originals"
     # A staff member moved a support ticket to another status (#274).
     SUPPORT_TICKET_SET_STATUS = "support_ticket.set_status"
+    # A staff read of a job's transfer to its pro (#68).
+    JOB_TRANSFER_READ = "job.read_transfer"
 
 
 class AuditEntityType(StrEnum):

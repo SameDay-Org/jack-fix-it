@@ -19,6 +19,7 @@ from app.modules.jobs.router import router as jobs_router
 from app.modules.notifications.router import router as notification_preferences_router
 from app.modules.payment_methods.router import router as payment_methods_router
 from app.modules.payments.router import router as payments_router
+from app.modules.payments.router import staff_router as staff_transfers_router
 from app.modules.payouts.router import pages_router as payout_pages_router
 from app.modules.payouts.router import router as payouts_router
 from app.modules.pros.router import router as pros_router
@@ -52,6 +53,7 @@ v1_router.include_router(opportunities_router)
 v1_router.include_router(quotes_router)
 v1_router.include_router(customer_quotes_router)
 v1_router.include_router(payments_router)
+v1_router.include_router(staff_transfers_router)
 v1_router.include_router(payment_methods_router)
 v1_router.include_router(customer_jobs_router)
 v1_router.include_router(jobs_router)

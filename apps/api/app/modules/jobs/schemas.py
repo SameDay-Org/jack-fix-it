@@ -12,6 +12,7 @@ from typing import Annotated, Final
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
 
 from app.modules.jobs.models import JobPhotoKind, JobStatus
+from app.modules.payments.transfer_reader import PayoutStatus
 from app.modules.quotes.schemas import QuotePro
 
 # "On my way" asks how far the pro is: from 5 minutes to 4 hours (#63).
@@ -132,6 +133,18 @@ class JobAddress(_Out):
     zip_code: str
 
 
+class JobPayout(_Out):
+    """The pro's payout for their job (#68), once the job is confirmed."""
+
+    status: PayoutStatus = Field(
+        description="pending: the job is confirmed and the transfer to the pro's account is "
+        "on its way to being made; created: the transfer was made."
+    )
+    amount_cents: int = Field(
+        description="What the pro receives for the job (its pro_payout_cents), in integer cents."
+    )
+
+
 class ProJob(_Out):
     """The pro's own job. Never the arrival code, the customer's last name or contacts."""
 
@@ -168,6 +181,10 @@ class ProJob(_Out):
     )
     photos: ProJobPhotos
     pro_payout_cents: int = Field(description="What the pro receives for the job.")
+    payout: JobPayout | None = Field(
+        description="The transfer of that amount to the pro's account: null until the job is "
+        "confirmed (and for a job that was never confirmed, or whose transfer was reversed)."
+    )
     unread_messages: int = Field(
         description="The customer's chat messages the pro has not marked read (#71)."
     )

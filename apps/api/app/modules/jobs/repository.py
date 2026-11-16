@@ -21,6 +21,16 @@ class JobRepository:
         never confirmed) only, as a subquery for another module's query."""
         return select(Job.id.label("job_id"), Job.confirmed_at.label("confirmed_at")).subquery()
 
+    @staticmethod
+    def confirmed() -> Subquery:
+        """The id (`job_id`) and pro (`pro_id`) of every job that is confirmed, so waiting for
+        its transfer (#68), as a subquery for another module's query."""
+        return (
+            select(Job.id.label("job_id"), Job.pro_id.label("pro_id"))
+            .where(Job.status == JobStatus.CONFIRMED)
+            .subquery()
+        )
+
     async def get_for_update(self, job_id: uuid.UUID) -> Job | None:
         """The job, locked until the transaction ends, so transitions on it run one at a time.
 

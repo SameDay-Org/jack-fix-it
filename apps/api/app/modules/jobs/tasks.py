@@ -28,6 +28,7 @@ from app.config import Settings
 from app.modules.jobs.confirmation import AutoConfirmed, JobAutoConfirmer
 from app.modules.jobs.photos import JobPhotoRows
 from app.modules.notifications.events import push_job_confirmed
+from app.modules.payments.transfer_queue import enqueue_transfer_release
 from app.modules.requests.tasks import media_copy_task, run_media_copy
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,12 @@ async def auto_confirm_jobs(ctx: dict[str, Any]) -> None:
                         job_id=confirmed.job_id,
                         public_code=confirmed.public_code,
                         timeout_seconds=settings.job_enqueue_timeout_seconds,
+                    )
+                if confirmed is not None:
+                    # The pro's transfer (#68), after the commit too; a queue failure is
+                    # logged, never raised, and the transfer sweep takes the job.
+                    await enqueue_transfer_release(
+                        ctx["redis"], confirmed.job_id, settings.job_enqueue_timeout_seconds
                     )
             if len(due) < AUTO_CONFIRM_BATCH:
                 return

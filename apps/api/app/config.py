@@ -75,6 +75,9 @@ def is_publishable_key(value: str) -> bool:
 # Stripe keeps an idempotency key at least this long (its documented 24 hours): Stripe's fact,
 # not a setting.
 STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS = 86_400
+# The Stripe calls one attempt at a job's transfer makes at most (#68): the lookup of an
+# earlier attempt's transfer, the payment's charge, the create.
+TRANSFER_ATTEMPT_STRIPE_CALLS = 3
 # Upper bound on passwords (NIST 800-63B allows a cap); also bounds the Argon2 input.
 PASSWORD_MAX_LENGTH = 128
 
@@ -343,6 +346,22 @@ class Settings(BaseSettings):
     payment_unpaid_cancel_after_seconds: int = Field(default=7_200, gt=0)
     payment_unpaid_sweep_minutes: int = Field(default=10, ge=1, le=60)
     payment_unpaid_sweep_timeout_seconds: int = Field(default=540, gt=0)
+    # Transfers to the pros (D13.3, #68): once a job is confirmed its pro's payout is
+    # transferred to their Stripe account, by a worker task queued at the confirmation and by a
+    # sweep for whatever is left. How often the worker sweeps (a cron, in minutes of the hour),
+    # the longest one run may take and the most jobs one run tries; two runs that overlap are
+    # safe (each job is locked and checked again, and Stripe gets one key per job), so the
+    # timeout only bounds a stuck run, and what a run leaves the next one takes.
+    transfer_release_sweep_minutes: int = Field(default=5, ge=1, le=60)
+    transfer_release_sweep_timeout_seconds: int = Field(default=270, gt=0)
+    transfer_release_batch_size: int = Field(default=50, gt=0)
+    # An attempt stamped on a transfer with no outcome recorded is taken to be under way for
+    # this many minutes: nothing else calls Stripe for that job meanwhile. Past them it is
+    # lost (a worker that died, an answer that never arrived): the next attempt looks the
+    # transfer up in Stripe before it creates anything. The sweep also waits this long between
+    # two tries of a job that failed. It must outlast the Stripe calls of one attempt (checked
+    # below).
+    transfer_stuck_pending_minutes: int = Field(default=15, gt=0)
     # Job execution (D12.2, #63): wrong arrival codes a pro may enter at check-in before the
     # code locks and the BDC is alerted (Cesar, 2026-10-29: 5).
     arrival_code_max_attempts: int = Field(default=5, gt=0)
@@ -676,6 +695,25 @@ class Settings(BaseSettings):
         missing = [name.upper() for name in _EMAIL_SETTINGS if getattr(self, name) is None]
         if missing:
             raise ValueError(f"{', '.join(missing)} must be set when APP_ENV is {self.app_env}")
+        return self
+
+    @model_validator(mode="after")
+    def _transfer_attempt_outlasts_its_stripe_calls(self) -> Self:
+        # One attempt makes at most TRANSFER_ATTEMPT_STRIPE_CALLS calls, each tried
+        # STRIPE_MAX_NETWORK_RETRIES + 1 times for STRIPE_TIMEOUT_SECONDS. An attempt still
+        # running when it is taken for lost would have a second worker calling Stripe for the
+        # same job, so the window is at least twice that.
+        longest = (
+            TRANSFER_ATTEMPT_STRIPE_CALLS
+            * (self.stripe_max_network_retries + 1)
+            * self.stripe_timeout_seconds
+        )
+        if self.transfer_stuck_pending_minutes * 60 < 2 * longest:
+            raise ValueError(
+                "TRANSFER_STUCK_PENDING_MINUTES must be at least twice the longest Stripe "
+                f"attempt ({longest:.0f} s with STRIPE_TIMEOUT_SECONDS and "
+                "STRIPE_MAX_NETWORK_RETRIES)"
+            )
         return self
 
     @model_validator(mode="after")

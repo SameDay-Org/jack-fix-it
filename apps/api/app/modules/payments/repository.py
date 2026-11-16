@@ -1,10 +1,22 @@
 import uuid
+from collections.abc import Collection
 from datetime import datetime
+from typing import Final
 
-from sqlalchemy import ColumnElement, func, select, update
+from sqlalchemy import ColumnElement, Subquery, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.payments.models import UNPAID_STATUSES, Payment, PaymentStatus
+from app.modules.payments.models import (
+    MADE_STATUSES,
+    UNPAID_STATUSES,
+    Payment,
+    PaymentStatus,
+    Transfer,
+    TransferStatus,
+)
+
+# Statuses of a transfer Stripe has not made: the only ones an attempt may leave or enter.
+_NOT_MADE: Final = tuple(status for status in TransferStatus if status not in MADE_STATUSES)
 
 
 class PaymentRepository:
@@ -43,6 +55,16 @@ class PaymentRepository:
         statement = select(Payment.id, Payment.request_id, Payment.quote_id).where(where)
         row = (await self._session.execute(statement)).one_or_none()
         return None if row is None else (row.id, row.request_id, row.quote_id)
+
+    async def succeeded_of_quote(self, quote_id: uuid.UUID) -> Payment | None:
+        """The quote's payment that succeeded: the one its job was created from (#61), so
+        the one its transfer pays from (#68). At most one (a quote has one live payment, and
+        succeeded is terminal); None when the quote has none. Unlocked: nothing about a
+        succeeded payment changes."""
+        statement = select(Payment).where(
+            Payment.quote_id == quote_id, Payment.status == PaymentStatus.SUCCEEDED
+        )
+        return (await self._session.scalars(statement)).one_or_none()
 
     async def unpaid_due(
         self, created_before: datetime, after: uuid.UUID | None, limit: int
@@ -118,3 +140,149 @@ class PaymentRepository:
             .values(stripe_payment_intent_id=intent_id)
         )
         return bool(result.rowcount)  # type: ignore[attr-defined]  # CursorResult of an UPDATE
+
+
+class TransferRepository:
+    """transfers (#68). status is written here only, by conditional UPDATEs: a transfer Stripe
+    made (created, reversed) is never taken back to pending or failed."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_of_job_for_update(self, job_id: uuid.UUID) -> Transfer | None:
+        """The job's transfer row, locked until the transaction ends, read as last committed;
+        None before the first release of the job. Take the job's lock first."""
+        statement = (
+            select(Transfer)
+            .where(Transfer.job_id == job_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def get_of_job(self, job_id: uuid.UUID) -> Transfer | None:
+        statement = (
+            select(Transfer)
+            .where(Transfer.job_id == job_id)
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def statuses_of_jobs(
+        self, job_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, TransferStatus]:
+        """Each job's transfer status, for the jobs among `job_ids` that have a row."""
+        if not job_ids:
+            return {}
+        statement = select(Transfer.job_id, Transfer.status).where(Transfer.job_id.in_(job_ids))
+        return {row.job_id: row.status for row in await self._session.execute(statement)}
+
+    async def add(self, transfer: Transfer) -> Transfer:
+        """Inserts the row now (flush), so a second row for the job surfaces here."""
+        self._session.add(transfer)
+        await self._session.flush()
+        return transfer
+
+    async def start_attempt(self, transfer_id: uuid.UUID, now: datetime) -> int | None:
+        """Stamps a Stripe attempt starting at `now` and returns its number: pending, no
+        error code, one more attempt. None (nothing written) once Stripe made the transfer.
+        The caller holds the row's lock and commits before the Stripe call."""
+        statement = (
+            update(Transfer)
+            .where(Transfer.id == transfer_id, Transfer.status.in_(_NOT_MADE))
+            .values(
+                status=TransferStatus.PENDING,
+                last_error_code=None,
+                requested_at=now,
+                attempts=Transfer.attempts + 1,
+            )
+            .returning(Transfer.attempts)
+        )
+        return await self._session.scalar(statement)
+
+    async def hold_back(self, transfer_id: uuid.UUID, code: str) -> None:
+        """Leaves the row pending with `code`, the reason no attempt was started (the pro
+        cannot be paid out yet); nothing once Stripe made the transfer. The caller holds the
+        row's lock and commits."""
+        await self._session.execute(
+            update(Transfer)
+            .where(Transfer.id == transfer_id, Transfer.status.in_(_NOT_MADE))
+            .values(status=TransferStatus.PENDING, last_error_code=code)
+        )
+
+    async def mark_failed(self, transfer_id: uuid.UUID, attempt: int, code: str) -> bool:
+        """Ends attempt number `attempt` as failed with `code`. False (nothing written) when a
+        later attempt started meanwhile or the transfer was stored: this attempt's failure no
+        longer says where the row stands."""
+        statement = (
+            update(Transfer)
+            .where(
+                Transfer.id == transfer_id,
+                Transfer.attempts == attempt,
+                Transfer.status == TransferStatus.PENDING,
+                Transfer.stripe_transfer_id.is_(None),
+            )
+            .values(status=TransferStatus.FAILED, last_error_code=code)
+            .returning(Transfer.id)
+        )
+        return (await self._session.scalar(statement)) is not None
+
+    async def mark_created(self, transfer_id: uuid.UUID, stripe_transfer_id: str) -> bool:
+        """Stores the transfer Stripe made unless the row holds one already; False then. The
+        caller commits it together with the job's move to paid_out."""
+        statement = (
+            update(Transfer)
+            .where(
+                Transfer.id == transfer_id,
+                Transfer.status.in_(_NOT_MADE),
+                Transfer.stripe_transfer_id.is_(None),
+            )
+            .values(
+                status=TransferStatus.CREATED,
+                stripe_transfer_id=stripe_transfer_id,
+                last_error_code=None,
+            )
+            .returning(Transfer.id)
+        )
+        return (await self._session.scalar(statement)) is not None
+
+    async def mark_reversed(self, stripe_transfer_id: str) -> tuple[uuid.UUID, uuid.UUID] | None:
+        """created -> reversed for the row holding this Stripe transfer; its (id, job id), or
+        None when no row holds it or it is reversed already."""
+        statement = (
+            update(Transfer)
+            .where(
+                Transfer.stripe_transfer_id == stripe_transfer_id,
+                Transfer.status == TransferStatus.CREATED,
+            )
+            .values(status=TransferStatus.REVERSED)
+            .returning(Transfer.id, Transfer.job_id)
+        )
+        row = (await self._session.execute(statement)).one_or_none()
+        return None if row is None else (row.id, row.job_id)
+
+    async def due(
+        self, confirmed: Subquery, payable: Subquery, retry_before: datetime, limit: int
+    ) -> list[uuid.UUID]:
+        """Up to `limit` ids of the confirmed jobs whose transfer is still to be made and may
+        be tried now (#68's sweep): the job is confirmed (`confirmed`: job_id, pro_id), its pro
+        can be paid out (`payable`: pro_id), and it has no transfer row, or one Stripe has not
+        made whose latest attempt, if any, started at or before `retry_before`. So an attempt
+        under way is left alone, and a failed one waits its turn. Least recently tried first
+        (never tried before all), then by job id: a job that keeps failing goes to the back, so
+        it never holds the others up. Unlocked: release checks each job again under its lock."""
+        statement = (
+            select(confirmed.c.job_id)
+            .join(payable, payable.c.pro_id == confirmed.c.pro_id)
+            .outerjoin(Transfer, Transfer.job_id == confirmed.c.job_id)
+            .where(
+                or_(
+                    Transfer.id.is_(None),
+                    Transfer.status.in_(_NOT_MADE)
+                    & (Transfer.requested_at.is_(None) | (Transfer.requested_at <= retry_before)),
+                )
+            )
+            .order_by(Transfer.requested_at.asc().nulls_first(), confirmed.c.job_id)
+            .limit(limit)
+        )
+        return list((await self._session.scalars(statement)).all())

@@ -108,6 +108,12 @@ class ProService:
         return ProProfileRepository.users()
 
     @staticmethod
+    def payable() -> Subquery:
+        """The id (`pro_id`) of every profile a transfer can be made to now (a Stripe
+        account with payouts enabled), as a subquery: the transfer sweep (#68) joins it."""
+        return ProProfileRepository.payable()
+
+    @staticmethod
     def photo_keys_among(keys: Collection[str]) -> Select[str | None]:
         """The upload keys among `keys` that a profile holds as its photo, as a statement (the
         uploads sweep of unreferenced uploads, #191)."""
@@ -157,6 +163,12 @@ class ProService:
         """The user's payout account (#39), or None when they have no profile yet. `lock`: its
         profile row FOR UPDATE until the caller's transaction ends."""
         profile = await self._profiles.get_by_user_id(user_id, lock=lock)
+        return None if profile is None else _payout_account(profile)
+
+    async def payout_account_of_profile(self, pro_id: uuid.UUID) -> PayoutAccount | None:
+        """The profile's payout account as last committed, unlocked: where a job's transfer
+        goes (#68). None when no profile has this id."""
+        profile = await self._profiles.get_by_id(pro_id)
         return None if profile is None else _payout_account(profile)
 
     async def lock_payout_account_by_profile(self, pro_id: uuid.UUID) -> PayoutAccount | None:

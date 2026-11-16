@@ -90,7 +90,7 @@ import hmac
 import logging
 import secrets
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
@@ -128,6 +128,7 @@ from app.modules.jobs.schemas import (
     CustomerJob,
     JobAddress,
     JobCategory,
+    JobPayout,
     JobTimelineEntry,
     ProJob,
     ProJobPage,
@@ -142,6 +143,8 @@ from app.modules.notifications.events import (
     push_job_on_the_way,
     push_job_started,
 )
+from app.modules.payments.transfer_queue import enqueue_transfer_release
+from app.modules.payments.transfer_reader import PayoutStatus, TransferReader
 from app.modules.pros.service import ProService
 from app.modules.quotes.schemas import QuotePro
 from app.modules.quotes.service import QuoteReader
@@ -225,6 +228,7 @@ class JobExecutionService:
         self._users = UserService(session)
         self._categories = CategoryService(session)
         self._chat = ChatUnreadReader(session)
+        self._transfers = TransferReader(session)
 
     # Reads
 
@@ -520,6 +524,9 @@ class JobExecutionService:
                 public_code=public_code,
                 timeout_seconds=self._config.enqueue_timeout_seconds,
             )
+        # The pro's transfer (#68), after the commit: it never fails the confirmation (a queue
+        # failure is logged, and the transfer sweep takes the job).
+        await enqueue_transfer_release(queue, job.id, self._config.enqueue_timeout_seconds)
         return await self.customer_job(user, request_id)
 
     # Helpers
@@ -562,6 +569,7 @@ class JobExecutionService:
         requests = await self._requests.job_views([job.request_id for job in jobs])
         names = await self._users.first_names([job.customer_id for job in jobs])
         unread = await self._chat.unread_counts([job.id for job in jobs], user.id)
+        payouts = await self._transfers.payouts([job.id for job in jobs])
         photos: dict[uuid.UUID, list[JobPhoto]] = {job.id: [] for job in jobs}
         for photo in await self._photos.of_jobs(list(photos)):
             photos[photo.job_id].append(photo)
@@ -604,10 +612,23 @@ class JobExecutionService:
                     confirm_by=confirm_by(job, self._config.auto_confirm_after),
                     photos=self._signer.for_pro(photos[job.id]),
                     pro_payout_cents=job.pro_payout_cents,
+                    payout=_payout(job, payouts),
                     unread_messages=unread[job.id],
                 )
             )
         return items
+
+
+def _payout(job: Job, payouts: Mapping[uuid.UUID, PayoutStatus | None]) -> JobPayout | None:
+    """The pro's payout for the job (#68): what its transfer row says (TransferReader.payouts);
+    with no row yet, pending once the job is confirmed and nothing before."""
+    if job.id in payouts:
+        status = payouts[job.id]
+    else:
+        status = PayoutStatus.PENDING if job.status is JobStatus.CONFIRMED else None
+    if status is None:
+        return None
+    return JobPayout(status=status, amount_cents=job.pro_payout_cents)
 
 
 def _same_code(stored: str | None, given: str) -> bool:

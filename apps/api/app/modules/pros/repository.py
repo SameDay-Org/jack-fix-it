@@ -34,6 +34,16 @@ class ProProfileRepository:
         another module's query."""
         return select(ProProfile.id.label("pro_id"), ProProfile.user_id.label("user_id")).subquery()
 
+    @staticmethod
+    def payable() -> Subquery:
+        """The id (`pro_id`) of every profile a transfer can be made to (#68): it has a
+        Stripe account with payouts enabled. A subquery for another module's query."""
+        return (
+            select(ProProfile.id.label("pro_id"))
+            .where(ProProfile.stripe_account_id.is_not(None), ProProfile.payouts_enabled)
+            .subquery()
+        )
+
     async def dispatch_candidates(
         self, category_id: uuid.UUID, service_area_ids: Collection[uuid.UUID]
     ) -> list[ProProfile]:

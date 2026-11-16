@@ -16,11 +16,13 @@ from app.db import create_engine, create_session_factory
 from app.integrations.expo_push import ExpoPushSender
 from app.integrations.storage import S3Storage, StorageNotConfiguredError
 from app.integrations.stripe_payments import StripePaymentsClient
+from app.integrations.stripe_transfers import StripeTransfersClient
 from app.modules.chat.tasks import purge_chat_originals
 from app.modules.dispatch.tasks import dispatch_request
 from app.modules.jobs.tasks import auto_confirm_jobs, photo_sanitize_task
 from app.modules.notifications.push_tasks import check_push_receipts, send_push
 from app.modules.payments.tasks import cancel_unpaid_payments
+from app.modules.payments.transfer_tasks import release_confirmed_jobs, release_transfer
 from app.modules.quotes.tasks import expire_quotes
 from app.modules.requests.tasks import sanitize_task
 from app.modules.uploads.tasks import sweep_orphan_uploads
@@ -56,6 +58,13 @@ async def startup(ctx: dict[str, Any]) -> None:
     # sweep cancels no PaymentIntent in Stripe (cancel_unpaid_payments logs it).
     ctx["stripe_payments"] = (
         None if settings.stripe_secret_key is None else StripePaymentsClient.from_settings(settings)
+    )
+    # The same key makes the transfers to the pros (#68): without it no job is released
+    # (release_transfer and release_confirmed_jobs log it).
+    ctx["stripe_transfers"] = (
+        None
+        if settings.stripe_secret_key is None
+        else StripeTransfersClient.from_settings(settings)
     )
     # Sentinel looks for this line to confirm a worker deploy is healthy.
     logger.info("worker_started", extra={"app_env": settings.app_env})
@@ -99,6 +108,9 @@ class WorkerSettings:
         discarding_result(
             process_stripe_event, max_tries=get_settings().stripe_webhook_max_attempts
         ),
+        # One run per queued confirmation; it never raises, and the sweep below takes whatever
+        # a run could not finish.
+        discarding_result(release_transfer, max_tries=1),
     )
     # A cron job keeps no result by default (ARQ's cron keep_result is 0); stated anyway.
     cron_jobs = (
@@ -140,6 +152,13 @@ class WorkerSettings:
             auto_confirm_jobs,
             minute=every(get_settings().job_auto_confirm_sweep_minutes),
             timeout=get_settings().job_auto_confirm_sweep_timeout_seconds,
+            keep_result=0,
+            keep_result_forever=False,
+        ),
+        cron(
+            release_confirmed_jobs,
+            minute=every(get_settings().transfer_release_sweep_minutes),
+            timeout=get_settings().transfer_release_sweep_timeout_seconds,
             keep_result=0,
             keep_result_forever=False,
         ),
