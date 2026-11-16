@@ -1274,8 +1274,10 @@ async def test_two_workers_on_one_job_make_one_transfer(
     try:
         async with asyncio.timeout(5):
             await inside.wait()
-        # The cron or the confirm's task, while the first one waits on Stripe.
-        second = await run()
+            # The cron or the confirm's task, while the first one waits on Stripe. Bounded: a
+            # lock held across the Stripe call makes it wait for the first one, which waits
+            # for this one; the test then fails instead of hanging.
+            second = await run()
     finally:
         go_on.set()
         outcomes = await asyncio.gather(first, return_exceptions=True)
