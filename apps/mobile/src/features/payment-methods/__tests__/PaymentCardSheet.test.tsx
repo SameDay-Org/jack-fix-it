@@ -2,7 +2,7 @@ import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, renderHook, screen, waitFor } from "@testing-library/react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import type { ReactNode } from "react";
-import { AccessibilityInfo, Alert, type AlertButton } from "react-native";
+import { AccessibilityInfo, Alert, StyleSheet, type AlertButton } from "react-native";
 
 import { ApiError, apiDelete, apiGet, apiPost, NetworkError } from "@/api";
 import { dismissToast, toastStore } from "@/components/ui/toast";
@@ -20,6 +20,7 @@ import {
   card,
   CARD_PATH,
   DEFAULT_PATH,
+  DISCOVER,
   MASTER,
   newQueryClient,
   renderWallet,
@@ -153,6 +154,18 @@ describe("PaymentCardSheet", () => {
     expect(screen.getByText("This is your default card.")).toBeOnTheScreen();
     expect(screen.queryByRole("button", { name: "Set as default" })).toBeNull();
     expect(screen.getByRole("button", { name: "Delete card" })).toBeOnTheScreen();
+  });
+
+  it("the card right behind the front one opens in its strip's tone, which is not the front card's", async () => {
+    // Four cards, the oldest (Visa) still the default: by its age alone Discover, the newest and
+    // right behind Visa in the pocket, would take Visa's tone.
+    server = [DISCOVER, AMEX, MASTER, VISA];
+    await openBoth("pm_discover");
+    const surface = (testID: string): unknown =>
+      StyleSheet.flatten(screen.getByTestId(testID).props.style).backgroundColor;
+
+    expect(surface("wallet-card-pm_discover")).not.toBe(surface("wallet-card-pm_visa"));
+    expect(surface("payment-card-face")).toBe(surface("wallet-card-pm_discover"));
   });
 
   it("Set as default closes the sheet, shows on the wallet at once and then as the server has it", async () => {
@@ -611,6 +624,178 @@ describe("one change of the wallet at a time", () => {
       { payment_method_id: "pm_amex" },
     ]);
     expect(cachedWallet(client)).toEqual(["pm_visa", "pm_master", "pm_amex*"]);
+  });
+});
+
+describe("an open sheet follows the wallet until it acts", () => {
+  /**
+   * The wallet's screen with a card's sheet over it, on one cache. `openNext(id)` taps another card
+   * on the wallet, and the sheet the router opens for it takes the place of the one before (that
+   * one closed over its own change).
+   */
+  const openOnWallet = async (id: string) => {
+    let sheets = 0;
+    const tree = () => (
+      <>
+        <PaymentMethodsScreen />
+        <PaymentCardSheet key={sheets} />
+      </>
+    );
+    jest.mocked(useLocalSearchParams).mockReturnValue({ id });
+    const client = newQueryClient();
+    const view = await renderWallet(tree(), client);
+    await screen.findByTestId("payment-card-face");
+    const openNext = async (next: string) => {
+      jest.mocked(router.push).mockClear();
+      await fireEvent.press(screen.getByTestId(`wallet-card-${next}`));
+      expect(router.push).toHaveBeenCalledWith({
+        pathname: "/account/payment-methods/[id]",
+        params: { id: next },
+      });
+      jest.mocked(useLocalSearchParams).mockReturnValue({ id: next });
+      sheets += 1;
+      await view.rerender(tree());
+    };
+    return { client, openNext };
+  };
+  /** What the open sheet says of its card: the default line, Set as default, the face's label. */
+  const sheetSays = () => ({
+    isDefault: screen.queryByTestId("payment-card-is-default") !== null,
+    offersSetDefault: screen.queryByRole("button", { name: "Set as default" }) !== null,
+    spoken: screen.getByTestId("payment-card-face").props.accessibilityLabel as string,
+  });
+
+  it("opened while the default's delete is unanswered, it shows the server's new default as its card", async () => {
+    const answer = deferred<undefined>();
+    remove.mockReturnValue(answer.promise);
+    const { client, openNext } = await openOnWallet("pm_visa");
+    await confirmDelete();
+    await waitFor(() => expect(cachedWallet(client)).toEqual(["pm_master", "pm_amex"]));
+
+    // Amex opens on the wallet the delete drew: no card is the default there.
+    await openNext("pm_amex");
+    expect(sheetSays()).toEqual({
+      isDefault: false,
+      offersSetDefault: true,
+      spoken: "American Express ending 0005, expires 07 27",
+    });
+
+    // The server deleted Visa and made Amex the default; the list asked afterwards says so.
+    server = [MASTER, { ...AMEX, is_default: true }];
+    await act(async () => answer.resolve(undefined));
+    await act(() => settle());
+    await waitFor(() => expect(cachedWallet(client)).toEqual(["pm_master", "pm_amex*"]));
+
+    expect(screen.getByTestId("payment-card-is-default")).toHaveTextContent(
+      "This is your default card.",
+    );
+    expect(screen.queryByRole("button", { name: "Set as default" })).toBeNull();
+    expect(screen.getByTestId("payment-card-face").props.accessibilityLabel).toBe(
+      "American Express ending 0005, expires 07 27, default",
+    );
+    // Deleting it now says the default moves on, as Visa's did.
+    await fireEvent.press(screen.getByRole("button", { name: "Delete card" }));
+    expect(alert.mock.calls.map(([title, body]) => [title, body])).toEqual([
+      [
+        "Delete Visa ending 4242?",
+        "It leaves your wallet for good. Another card becomes your default.",
+      ],
+      [
+        "Delete American Express ending 0005?",
+        "It leaves your wallet for good. Another card becomes your default.",
+      ],
+    ]);
+  });
+
+  it.each([
+    [
+      // The card the change named: the default on the wallet while it is unanswered.
+      "pm_master",
+      {
+        isDefault: true,
+        offersSetDefault: false,
+        spoken: "Mastercard ending 4444, expires 03 30, default",
+      },
+      { isDefault: false, offersSetDefault: true, spoken: "Mastercard ending 4444, expires 03 30" },
+    ],
+    [
+      // The default it took the mark from.
+      "pm_visa",
+      { isDefault: false, offersSetDefault: true, spoken: "Visa ending 4242, expires 12 28" },
+      {
+        isDefault: true,
+        offersSetDefault: false,
+        spoken: "Visa ending 4242, expires 12 28, default",
+      },
+    ],
+  ])(
+    "opened while a default change is unanswered, it follows the wallet when the change is refused (%s)",
+    async (id, unanswered, refused) => {
+      const answer = deferred<SavedCard>();
+      post.mockReturnValue(answer.promise);
+      const { client, openNext } = await openOnWallet("pm_master");
+      await fireEvent.press(screen.getByRole("button", { name: "Set as default" }));
+      await waitFor(() =>
+        expect(cachedWallet(client)).toEqual(["pm_visa", "pm_master*", "pm_amex"]),
+      );
+
+      await openNext(id);
+      expect(sheetSays()).toEqual(unanswered);
+
+      // The list asked afterwards is still on its way: the wallet is the change taken back.
+      jest.mocked(apiGet).mockReturnValueOnce(deferred<Wallet>().promise as never);
+      await act(async () => answer.reject(new ApiError(500, "internal_error")));
+      await act(() => settle());
+
+      expect(cachedWallet(client)).toEqual(["pm_visa*", "pm_master", "pm_amex"]);
+      expect(sheetSays()).toEqual(refused);
+    },
+  );
+
+  it("once Set as default is pressed it holds what it showed while it closes, whatever lands in the wallet", async () => {
+    const answer = deferred<SavedCard>();
+    post.mockReturnValue(answer.promise);
+    const client = await openBoth("pm_master");
+    const shown = sheetSays();
+    expect(shown).toEqual({
+      isDefault: false,
+      offersSetDefault: true,
+      spoken: "Mastercard ending 4444, expires 03 30",
+    });
+
+    await fireEvent.press(screen.getByRole("button", { name: "Set as default" }));
+    // The change is drawn on the wallet at once, under the closing sheet...
+    await waitFor(() => expect(cachedWallet(client)).toEqual(["pm_visa", "pm_master*", "pm_amex"]));
+    expect(screen.getByTestId("wallet-pocket-default")).toHaveTextContent(
+      "DefaultMastercard •••• 4444",
+    );
+    expect(sheetSays()).toEqual(shown);
+
+    // ...then the server's answer and the list asked afterwards land.
+    await act(async () => answer.resolve(serverSetsDefault("pm_master")));
+    await act(() => settle());
+
+    expect(cachedWallet(client)).toEqual(["pm_visa", "pm_master*", "pm_amex"]);
+    expect(sheetSays()).toEqual(shown);
+    expect(router.back).toHaveBeenCalledTimes(1);
+  });
+
+  it("once a delete is confirmed it holds what it showed too, when the card comes back as the default", async () => {
+    const answer = deferred<undefined>();
+    remove.mockReturnValue(answer.promise);
+    const client = await openBoth("pm_master");
+    const shown = sheetSays();
+
+    await confirmDelete();
+    await waitFor(() => expect(cachedWallet(client)).toEqual(["pm_visa*", "pm_amex"]));
+    // Another device made Mastercard the default meanwhile, and this delete is refused.
+    serverSetsDefault("pm_master");
+    await act(async () => answer.reject(new ApiError(500, "internal_error")));
+    await act(() => settle());
+
+    await waitFor(() => expect(cachedWallet(client)).toEqual(["pm_visa", "pm_master*", "pm_amex"]));
+    expect(sheetSays()).toEqual(shown);
+    expect(router.back).toHaveBeenCalledTimes(1);
   });
 });
 

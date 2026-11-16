@@ -1,11 +1,13 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
-import { router } from "expo-router";
+import { router, unstable_useIsNavigating } from "expo-router";
+import { StyleSheet } from "react-native";
 
 import { ApiError, apiGet, apiPost, NetworkError } from "@/api";
 import { dismissToast, toastStore } from "@/components/ui/toast";
 import { openSetupSheet } from "@/features/payments/paymentSheet";
 import i18n from "@/i18n";
+import { bubbleShadow, tokens } from "@/theme";
 
 import { deferred, settle } from "../../../api/__tests__/helpers";
 import type { Wallet } from "../cards";
@@ -79,6 +81,8 @@ beforeEach(() => {
   answerPosts();
   sheet.mockReset().mockResolvedValue({ kind: "saved" });
   jest.mocked(router.push).mockClear();
+  // Idle, whatever a test that lands a navigation left it at.
+  jest.mocked(unstable_useIsNavigating).mockReturnValue(false);
   toastStore.setState({ current: null });
 });
 
@@ -98,6 +102,22 @@ const strips = () =>
     .getAllByTestId(/^wallet-card-pm_[a-z]+$/)
     .map((strip) => strip.props.accessibilityLabel as string)
     .reverse();
+/** The surface color of the cards peeking out of the pocket, front to back. */
+const stripColors = () =>
+  screen
+    .getAllByTestId(/^wallet-card-pm_[a-z]+$/)
+    .map((strip) => StyleSheet.flatten(strip.props.style).backgroundColor)
+    .reverse();
+/** The surface color of each card on screen, by its id. */
+const colorsById = () =>
+  Object.fromEntries(
+    screen
+      .getAllByTestId(/^wallet-card-pm_[a-z]+$/)
+      .map((strip) => [
+        (strip.props.testID as string).replace("wallet-card-", ""),
+        StyleSheet.flatten(strip.props.style).backgroundColor,
+      ]),
+  );
 const addButton = () => screen.getByTestId("payment-methods-add");
 /** Lists the wallet again, as the refresh after a change does, and lets the answer land. */
 const refresh = async (client: QueryClient) => {
@@ -109,6 +129,12 @@ const SUPPORT = "Tap a card to make it your default or to delete it.";
 const REFRESH_FAILED = "We couldn't refresh your cards. What you see may be out of date.";
 const TIMED_OUT = "Saving the card took too long";
 const TIMED_OUT_BODY = "It may have been saved: check your cards before you try again.";
+const SAVED_NOT_DEFAULT =
+  "Card saved. We couldn't make it your default: open the card to try again.";
+// A card's tones by its age (0 for the oldest): white, lime, deep green, then white again.
+const WHITE = tokens.colors.white;
+const LIME = tokens.colors["green-500"];
+const GREEN = tokens.colors["green-700"];
 
 describe("PaymentMethodsScreen", () => {
   it("shows the wallet: the default in front and named on the pocket, each card read in full", async () => {
@@ -130,6 +156,98 @@ describe("PaymentMethodsScreen", () => {
     expect(screen.queryByText("Expires 03/30")).toBeNull();
     expect(screen.getByText("Tap a card to make it your default or to delete it.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Add a card" })).toBeOnTheScreen();
+  });
+
+  it("holds the strips in one box before the pocket's face, so a screen reader reads the cards first", async () => {
+    await open();
+    await screen.findByTestId("wallet-pocket-default");
+    const box = screen.getByTestId("wallet-strips");
+
+    // Every strip is in the box, and the face is not.
+    const stripIds = (nodes: { props: { testID?: string } }[]) =>
+      nodes.map((node) => node.props.testID);
+    expect(stripIds(within(box).getAllByTestId(/^wallet-card-pm_[a-z]+$/))).toEqual([
+      "wallet-card-pm_amex",
+      "wallet-card-pm_master",
+      "wallet-card-pm_visa",
+    ]);
+    expect(stripIds(screen.getAllByTestId(/^wallet-card-pm_[a-z]+$/))).toEqual(
+      stripIds(within(box).getAllByTestId(/^wallet-card-pm_[a-z]+$/)),
+    );
+    expect(within(box).queryByTestId("wallet-pocket-default")).toBeNull();
+    // The box comes before the face in the tree.
+    expect(stripIds(screen.getAllByTestId(/^wallet-(strips|pocket-default)$/))).toEqual([
+      "wallet-strips",
+      "wallet-pocket-default",
+    ]);
+    // A view of its own on Android, never flattened away, and raised as high as the face, so the
+    // strips stay drawn over the wallet's back.
+    expect(box.props.collapsable).toBe(false);
+    const raised = StyleSheet.flatten(box.props.style).elevation;
+    expect(raised).toBeGreaterThan(0);
+    expect(raised).toBe(bubbleShadow.elevation);
+    expect(raised).toBe(
+      StyleSheet.flatten(screen.getByTestId("wallet-pocket-face").props.style).elevation,
+    );
+  });
+
+  it("never gives the card right behind the front one the front card's color", async () => {
+    // Saved Visa, Amex, Mastercard and Discover in that order, the first still the default: by
+    // age, Visa and Discover share a tone, and in the stack Discover sits right behind Visa.
+    server = [DISCOVER, MASTER, AMEX, VISA];
+    const { client } = await open();
+    await screen.findByTestId("wallet-pocket-default");
+
+    expect(strips()).toEqual([
+      "Visa ending 4242, expires 12 28, default",
+      "Discover ending 1117, expires 12 28",
+      "Mastercard ending 4444, expires 03 30",
+    ]);
+    const [front, behind, back] = stripColors();
+    expect(front).toBe(WHITE);
+    expect(behind).not.toBe(front);
+    expect(back).not.toBe(behind);
+
+    // See all: no two cards next to each other share a color either.
+    await fireEvent.press(screen.getByRole("button", { name: "See all" }));
+    const all = stripColors();
+    expect(all).toHaveLength(4);
+    all.slice(1).forEach((color, place) => expect(color).not.toBe(all[place]));
+    // Every other card keeps the tone of its age.
+    const before = colorsById();
+    expect(before).toMatchObject({ pm_visa: WHITE, pm_amex: LIME, pm_master: GREEN });
+
+    // Amex becomes the default: each color goes with its card, and Discover, no longer behind a
+    // card of its tone, takes its own back.
+    server = server.map((saved) => ({ ...saved, is_default: saved.id === "pm_amex" }));
+    await refresh(client);
+
+    expect(strips()[0]).toBe("American Express ending 0005, expires 07 27, default");
+    expect(colorsById()).toEqual({
+      pm_amex: before.pm_amex,
+      pm_discover: WHITE,
+      pm_master: before.pm_master,
+      pm_visa: before.pm_visa,
+    });
+    const moved = stripColors();
+    moved.slice(1).forEach((color, place) => expect(color).not.toBe(moved[place]));
+  });
+
+  it("a wallet of three cards: each card keeps the tone of its age, whichever is the default", async () => {
+    server = [MASTER, AMEX, VISA];
+    const { client } = await open();
+    await screen.findByTestId("wallet-pocket-default");
+
+    const byAge = { pm_visa: WHITE, pm_amex: LIME, pm_master: GREEN };
+    expect(colorsById()).toEqual(byAge);
+    expect(stripColors()).toEqual([WHITE, GREEN, LIME]);
+
+    server = server.map((saved) => ({ ...saved, is_default: saved.id === "pm_master" }));
+    await refresh(client);
+
+    expect(strips()[0]).toBe("Mastercard ending 4444, expires 03 30, default");
+    expect(colorsById()).toEqual(byAge);
+    expect(stripColors()).toEqual([GREEN, LIME, WHITE]);
   });
 
   it("gives a card's brand a line of its own once it would wrap, so no word is broken", async () => {
@@ -191,6 +309,30 @@ describe("PaymentMethodsScreen", () => {
     });
   });
 
+  it("a double tap opens one sheet; once the router is idle again, a card opens again", async () => {
+    const { view } = await open();
+    const navigating = jest.mocked(unstable_useIsNavigating);
+    const opened = (id: string) => [{ pathname: "/account/payment-methods/[id]", params: { id } }];
+
+    // The router only queues the push: the wallet stays tappable until it lands.
+    await fireEvent.press(await screen.findByTestId("wallet-card-pm_master"));
+    await fireEvent.press(screen.getByTestId("wallet-card-pm_master"));
+    expect(jest.mocked(router.push).mock.calls).toEqual([opened("pm_master")]);
+
+    // While the push is on its way, another card opens nothing either.
+    navigating.mockReturnValue(true);
+    await view.rerender(<PaymentMethodsScreen />);
+    await fireEvent.press(screen.getByTestId("wallet-card-pm_amex"));
+    expect(jest.mocked(router.push).mock.calls).toEqual([opened("pm_master")]);
+
+    // It landed, and the customer is back on the wallet: the router is idle.
+    navigating.mockReturnValue(false);
+    await view.rerender(<PaymentMethodsScreen />);
+    await fireEvent.press(screen.getByTestId("wallet-card-pm_amex"));
+
+    expect(jest.mocked(router.push).mock.calls).toEqual([opened("pm_master"), opened("pm_amex")]);
+  });
+
   it("with cards but no default, the pocket says so and how to choose one", async () => {
     server = [MASTER, AMEX];
     await open();
@@ -231,6 +373,31 @@ describe("PaymentMethodsScreen", () => {
     expect(screen.queryByTestId("payment-methods-loading")).toBeNull();
     expect(screen.queryByTestId("payment-methods-loading-tab")).toBeNull();
     expect(screen.getByTestId("payment-methods-support")).toHaveTextContent(SUPPORT);
+  });
+
+  it("while the wallet loads, the support line's placeholder is laid out from the sentence it stands for", async () => {
+    const list = deferred<Wallet>();
+    jest.mocked(apiGet).mockReturnValue(list.promise as never);
+    await open();
+
+    // An invisible copy of a wallet's support sentence takes the lines that sentence will (two at
+    // 320 dp, more with large text), so the wallet does not move when it lands. Nobody sees or
+    // hears it.
+    const placeholder = screen.getByText(SUPPORT, { includeHiddenElements: true });
+    expect(placeholder).not.toBeVisible();
+    expect(placeholder.props.importantForAccessibility).toBe("no-hide-descendants");
+    expect(screen.queryByText(SUPPORT)).toBeNull();
+    expect(screen.queryByTestId("payment-methods-support")).toBeNull();
+
+    await act(async () => list.resolve([VISA]));
+
+    const support = await screen.findByTestId("payment-methods-support");
+    expect(support).toHaveTextContent(SUPPORT);
+    expect(support).toBeVisible();
+    // The placeholder is gone: the one copy of the sentence left is the support line itself.
+    const copies = screen.getAllByText(SUPPORT, { includeHiddenElements: true });
+    expect(copies).toHaveLength(1);
+    expect(copies[0]).toBe(support);
   });
 
   it.each([
@@ -545,6 +712,33 @@ describe("Add a card", () => {
       message: "Card saved. We couldn't make it your default: open the card to try again.",
       tone: "neutral",
     });
+  });
+
+  it("the cached default was deleted elsewhere: the list says the rule is owed, and a refused call says so", async () => {
+    server = [VISA];
+    const { client } = await open();
+    await screen.findByTestId("wallet-pocket-default");
+    // Visa is deleted on another device: the server's wallet is empty, this one still shows Visa
+    // as the default when Add is tapped. Stripe then saves the new card, the only one listed.
+    server = [];
+    sheetSaves();
+    post.mockImplementation(async (path: string) => {
+      if (path === SETUP_PATH) return { ...SETUP };
+      throw new ApiError(503, "payments_unavailable");
+    });
+    expect(cachedWallet(client)).toEqual(["pm_visa*"]);
+
+    await fireEvent.press(addButton());
+    await act(() => settle());
+
+    // The list has no default: the new card is asked to be it...
+    expect(postsTo(DEFAULT_PATH).map(([, , options]) => options.params)).toEqual([
+      { payment_method_id: "pm_new" },
+    ]);
+    // ...and that was refused: the card is saved, but not the default, and the toast says so.
+    expect(toast()).toEqual({ message: SAVED_NOT_DEFAULT, tone: "neutral" });
+    expect(cachedWallet(client)).toEqual(["pm_new"]);
+    expect(screen.getByTestId("wallet-pocket-none")).toHaveTextContent(/No default card/);
   });
 
   it("saved, but the wallet cannot be listed: with a default before, nothing is owed", async () => {
