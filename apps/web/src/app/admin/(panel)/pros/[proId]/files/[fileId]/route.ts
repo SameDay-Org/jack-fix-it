@@ -26,7 +26,7 @@ const INLINE_TYPES: ReadonlySet<string> = new Set([
   "application/pdf",
 ]);
 
-const NO_STORE = "no-store, private";
+const NO_STORE = "no-store";
 
 function fail(status: 404 | 502): Response {
   return new Response(null, { status, headers: { "Cache-Control": NO_STORE } });

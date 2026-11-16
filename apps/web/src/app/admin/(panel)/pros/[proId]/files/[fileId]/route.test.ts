@@ -96,7 +96,7 @@ describe("a pro's file, opened through the panel", () => {
     expect(Object.fromEntries(response.headers)).toMatchObject({
       "content-type": "application/pdf",
       "content-disposition": "inline",
-      "cache-control": "no-store, private",
+      "cache-control": "no-store",
       "x-content-type-options": "nosniff",
       "referrer-policy": "no-referrer",
       "content-length": "8",
