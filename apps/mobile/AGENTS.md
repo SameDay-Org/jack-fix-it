@@ -138,6 +138,15 @@ options={sheetOptions([0.5, 0.95])} />`, or `"fitToContents"`), rendering `Sheet
   and the position go into the one request and nowhere else (no state after submit, no cache, no
   log). The tries left after a wrong code come from `ApiError.header()`. A sheet closes once
   (`useSheetExit`), and only for the session it opened in.
+- Pro profile (#36): `src/features/pro-profile`, routes under `src/app/(app)/pro` (its layout is
+  `ProOnly`: anyone but a pro is sent home). `useMyProProfile` reads `GET /v1/pros/me`, keyed by the
+  session generation. "Finish your profile" on the pro's home (`ProfileChecklistCard`, driven by
+  `profileChecklist`) and Account > Pro profile open `/pro/profile`: one form whose Save sends a
+  single PATCH with only the fields that changed (`profilePatch`; the category and ZIP lists go
+  whole, the API replaces the set). The photo is one `profile_photo` upload (`useProfilePhoto`
+  over `useMediaUpload`); its key goes with Save, and a failed or refused photo never loses what
+  was typed. The limits mirror the API: `BIO_MAX`, `YEARS_MAX`, `EXPO_PUBLIC_PRO_MAX_CATEGORIES`,
+  `EXPO_PUBLIC_PRO_MAX_SERVICE_AREAS`.
 - Strings: `src/i18n/locales/{en,es}.json` through `useTranslation()`. Signed out, the device
   language picks the catalog (English is the fallback); signed in, the account's saved `locale`
   does (`features/account/AccountLanguage.tsx`), and Settings changes it (`LanguageSection`).

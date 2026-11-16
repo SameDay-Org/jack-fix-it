@@ -5,6 +5,7 @@ import { Text, View } from "react-native";
 import { useSession } from "@/api";
 import { Screen, useTabBarInset } from "@/components/ui";
 import { NotificationsPrompt } from "@/features/notifications/NotificationsPrompt";
+import { ProfileChecklistCard, useMyProProfile } from "@/features/pro-profile";
 import { useProJobs, YourJobs } from "@/features/pro-jobs";
 
 import { OpportunityList } from "./OpportunityList";
@@ -12,8 +13,8 @@ import { OpportunityList } from "./OpportunityList";
 /**
  * The pro's home (#219), the Home tab: a greeting, the pro's active jobs (#63), then the new
  * opportunities, which scroll the header along. A pull refreshes the jobs with the
- * opportunities. Under the greeting, the notifications pre-prompt while it applies (#334). The
- * wallet (#70) comes later.
+ * opportunities. Under the greeting, the notifications pre-prompt while it applies (#334), then
+ * "Finish your profile" while the profile misses something (#36). The wallet (#70) comes later.
  */
 export function ProHomeScreen() {
   const { t } = useTranslation();
@@ -23,6 +24,7 @@ export function ProHomeScreen() {
   const inset = useTabBarInset();
   // The pull's refresh only: "Your jobs" refreshes the list on focus and foreground itself.
   const { refetch: refetchJobs } = useProJobs({ refetchOnReturn: false });
+  const { refetch: refetchProfile } = useMyProProfile();
 
   if (!user) return null;
 
@@ -32,7 +34,7 @@ export function ProHomeScreen() {
     <Screen bar="light" edges={[]} ownsStatusBar={focused} testID="pro-home">
       <View className="flex-1" style={{ paddingBottom: inset }}>
         <OpportunityList
-          onRefresh={refetchJobs}
+          onRefresh={() => Promise.all([refetchJobs(), refetchProfile()])}
           header={
             <View className="gap-6 pb-4 pt-2">
               <Text
@@ -45,6 +47,7 @@ export function ProHomeScreen() {
                   : t("opportunities.greetingNoName")}
               </Text>
               <NotificationsPrompt audience="pro" testID="pro-home-notifications" />
+              <ProfileChecklistCard />
               <YourJobs />
               <Text accessibilityRole="header" className="text-headline text-navy-900">
                 {t("opportunities.title")}
