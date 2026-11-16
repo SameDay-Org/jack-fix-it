@@ -68,7 +68,8 @@ const MARKER = 20;
 const MARKER_CORE = 12;
 const HOME = 32;
 const HOME_GLYPH = 18;
-const HOUSE_PATH = "M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-5H9v5H5a1 1 0 0 1-1-1z";
+/** A house on the icon grid: the customer's door, here and on the live map. */
+export const HOUSE_PATH = "M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-5H9v5H5a1 1 0 0 1-1-1z";
 const BADGE = 16;
 const PULSE_MS = 1400;
 const PULSE_SCALE = 2.4;
@@ -79,6 +80,10 @@ const navy900 = tokens.colors["navy-900"];
 const navy700 = tokens.colors["navy-700"];
 const green500 = tokens.colors["green-500"];
 const green700 = tokens.colors["green-700"];
+
+/** The drawn map's height at a screen width: the drawing's ratio, never taller than MAX_HEIGHT. */
+export const jobMapHeight = (width: number): number =>
+  Math.min(MAX_HEIGHT, (width * VIEW_H) / VIEW_W);
 
 /** The point `share` of the way along the route, in drawing units (a worklet). */
 function pointAt(share: number): { x: number; y: number } {
@@ -112,7 +117,7 @@ export type JobMapProps = {
 export function JobMap({ phase, travel, testID = "job-map" }: JobMapProps) {
   const reduceMotion = useReducedMotion();
   const { width } = useWindowDimensions();
-  const height = Math.min(MAX_HEIGHT, (width * VIEW_H) / VIEW_W);
+  const height = jobMapHeight(width);
   // "Cover": the drawing fills the box, centered, its overflow cut.
   const scale = Math.max(width / VIEW_W, height / VIEW_H);
   const offsetX = (width - VIEW_W * scale) / 2;

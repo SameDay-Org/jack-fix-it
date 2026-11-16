@@ -24,6 +24,7 @@ import { JobMap } from "./JobMap";
 import { JobPhotos } from "./JobPhotos";
 import { PaidRow, ProRow } from "./JobDetails";
 import { JobTimeline } from "./JobTimeline";
+import { JobHero } from "./map/LiveMapSection";
 import {
   jobPhase,
   jobText,
@@ -317,8 +318,16 @@ function JobContent({ job, requestId, updatedAt, refetch, text, now }: JobConten
 
   return (
     <View className="flex-grow">
-      <JobMap phase={phase} travel={travelOf(job, now)} />
-      <MapBack />
+      <JobHero
+        jobId={job.id}
+        etaAt={job.eta_at}
+        phase={phase}
+        travel={travelOf(job, now)}
+        name={names.inline}
+        now={now}
+        refetch={refetch}
+      />
+      <MapBack onMap={phase === "onTheWay"} />
       <Sheet testID="job-sheet">
         <View className="gap-2">
           <Text accessibilityRole="header" className="text-title-1 text-navy-900">
@@ -327,11 +336,6 @@ function JobContent({ job, requestId, updatedAt, refetch, text, now }: JobConten
           <Text className="text-callout text-gray-500" testID="job-support">
             {support}
           </Text>
-          {phase === "onTheWay" ? (
-            <Text className="text-footnote text-gray-500" testID="job-map-note">
-              {t("jobs.map.estimate")}
-            </Text>
-          ) : null}
         </View>
         {reached === null ? null : (
           <Milestones
