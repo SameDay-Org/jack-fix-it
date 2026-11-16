@@ -93,6 +93,10 @@ jest.mock("react-native-reanimated", () => {
   };
 });
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
+// No Mapbox token: the live map's own tests (map/__tests__) cover it; here it is its placeholder.
+jest.mock("../map/config", () => ({
+  liveMapConfig: { accessToken: null, pollMs: 10_000, staleMs: 60_000 },
+}));
 jest.mock(
   "react-native-safe-area-context",
   () => jest.requireActual("react-native-safe-area-context/jest/mock").default,
@@ -563,18 +567,19 @@ describe("JobScreen", () => {
     expect(jobCalls()).toBe(1);
   });
 
-  it("says the map is an estimate while the pro is on the way, and only then", async () => {
+  it("puts the live map, not the drawn one, at the top while the pro is on the way", async () => {
     await renderWithQuery(<JobScreen />);
     await loaded("Dan is on the way");
-    expect(screen.getByTestId("job-map-note").props.children).toBe(
-      "The map is an estimate from the arrival time, not a live location.",
-    );
+    const hero = screen.getByTestId("job-hero");
+    expect(within(hero).getByText("The live map isn't available")).toBeTruthy();
+    expect(within(hero).queryByTestId("job-map", HIDDEN)).toBeNull();
 
     await screen.unmount();
     answerJob(WORKING);
     await renderWithQuery(<JobScreen />);
     await loaded("Dan is working");
-    expect(screen.queryByTestId("job-map-note")).toBeNull();
+    expect(within(screen.getByTestId("job-hero")).getByTestId("job-map", HIDDEN)).toBeTruthy();
+    expect(screen.queryByTestId("live-map-placeholder-unavailable")).toBeNull();
   });
 
   it("the way back stays reachable to screen readers while the job loads", async () => {
@@ -706,12 +711,13 @@ describe("JobScreen", () => {
   it.each([
     [false, true],
     [true, false],
-  ])("reduce motion %s: the marker pulses %s while on the way", async (reduce, pulses) => {
+  ])("reduce motion %s: the door pulses %s while the pro works", async (reduce, pulses) => {
     jest.mocked(useReducedMotion).mockReturnValue(reduce);
+    answerJob(WORKING);
     await renderWithQuery(<JobScreen />);
-    await loaded("Dan is on the way");
+    await loaded("Dan is working");
 
-    expect(screen.getByTestId("job-map-marker", HIDDEN)).toBeTruthy();
+    expect(screen.getByTestId("job-map-home", HIDDEN)).toBeTruthy();
     expect(screen.queryByTestId("job-map-pulse", HIDDEN) !== null).toBe(pulses);
   });
 });
