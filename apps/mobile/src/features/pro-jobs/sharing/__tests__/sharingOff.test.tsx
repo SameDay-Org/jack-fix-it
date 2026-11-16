@@ -20,7 +20,7 @@ import {
 import { proJobQueryKey } from "../../api";
 import { OnTheWaySheet } from "../../OnTheWaySheet";
 import { ProJobScreen } from "../../ProJobScreen";
-import { followJob, startSharing, stopSharing } from "../sender";
+import { followJob, shareJob, startSharing, stopSharing } from "../sender";
 
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../__tests__/helpers").apiMock(),
@@ -32,6 +32,8 @@ jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock("expo-location", () => ({
   getForegroundPermissionsAsync: jest.fn(),
   requestForegroundPermissionsAsync: jest.fn(),
+  hasServicesEnabledAsync: jest.fn(),
+  enableNetworkProviderAsync: jest.fn(),
   startLocationUpdatesAsync: jest.fn(),
   stopLocationUpdatesAsync: jest.fn(),
   hasStartedLocationUpdatesAsync: jest.fn(),
@@ -60,6 +62,8 @@ const locationCalls = () =>
   [
     Location.getForegroundPermissionsAsync,
     Location.requestForegroundPermissionsAsync,
+    Location.hasServicesEnabledAsync,
+    Location.enableNetworkProviderAsync,
     Location.startLocationUpdatesAsync,
     Location.stopLocationUpdatesAsync,
     Location.hasStartedLocationUpdatesAsync,
@@ -109,6 +113,7 @@ describe("sharing off (the flag is not 'on')", () => {
   });
 
   it("starting, stopping, a job's answer and a sign-out ask the system nothing", async () => {
+    await shareJob(JOB_ID, 1);
     await startSharing(JOB_ID, 1);
     await followJob(arrived());
     await stopSharing();

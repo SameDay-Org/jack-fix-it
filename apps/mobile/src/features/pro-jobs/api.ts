@@ -132,12 +132,16 @@ export const isJobGone = (error: unknown): boolean =>
  * The job as an action answered it, in place at once (the screen under a sheet redraws as the
  * sheet closes), and "Your jobs" asked again. Only for the session the action started in: after a
  * sign-out or another sign-in the answer goes nowhere. A job past the way (the check-in) ends its
- * location sharing at once (#352).
+ * location sharing at once, and the list never shows the job as it was before the answer (#352).
  */
 function applyJob(client: QueryClient, job: ProJob, generation: number): void {
   if (!isCurrentGeneration(generation)) return;
   void followJob(job);
   client.setQueryData(proJobQueryKey(job.id, generation), job);
+  // The list holds the answer too until it is in again: nothing reads the job as it was.
+  client.setQueryData<ProJob[]>(proJobsQueryKey(generation), (jobs) =>
+    jobs?.map((each) => (each.id === job.id ? job : each)),
+  );
   void client.invalidateQueries({ queryKey: proJobsQueryKey(generation) });
 }
 

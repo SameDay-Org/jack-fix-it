@@ -116,7 +116,7 @@ function failureOf(error: unknown): LocationFailure {
  * system's one-tap "turn on location" dialog first; declining it is `off` too. iOS has no such
  * dialog: the pro turns it on in Settings.
  */
-async function ensureLocationOn(): Promise<void> {
+export async function ensureLocationOn(): Promise<void> {
   let on: boolean;
   try {
     on = await Location.hasServicesEnabledAsync();

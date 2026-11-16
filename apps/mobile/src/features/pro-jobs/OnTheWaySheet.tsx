@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
@@ -18,8 +18,6 @@ import { readLocationAccess } from "./location";
 import { jobStep } from "./phase";
 import { reportStepFailure } from "./failure";
 import { sharingConfig } from "./sharing/config";
-import { startSharing } from "./sharing/sender";
-import { SharePrompt } from "./sharing/SharePrompt";
 import { useSheetExit } from "./useSheetExit";
 
 const MINUTE_MS = 60_000;
@@ -32,8 +30,8 @@ type Choice = { kind: "preset"; minutes: number } | { kind: "custom" } | null;
  * expects to arrive, from one-tap presets or a custom time from 5 minutes to 4 hours, then one
  * POST. On the way already, it updates only the arrival time ("Update arrival time"). The job
  * screen under it redraws with the answer as it closes. Offline, the sheet stays with the reason;
- * a job that moved on or went away closes it with a toast. Going on the way starts sharing the
- * pro's location (#352) when the permission is there; never asked yet, the sheet explains first.
+ * a job that moved on or went away closes it with a toast. Going on the way, the sheet hands over to
+ * the explanation of the location sharing (#352), unless the permission was refused for good.
  */
 export function OnTheWaySheet() {
   const { t } = useTranslation();
@@ -46,8 +44,6 @@ export function OnTheWaySheet() {
   const [choice, setChoice] = useState<Choice>(null);
   const [custom, setCustom] = useState(presets[presets.length - 1]);
   const [offline, setOffline] = useState(false);
-  // On the way now, and the location never asked for: the sheet explains before the system asks.
-  const [prompt, setPrompt] = useState(false);
   const { busy, run, mounted } = useSingleFlight();
   const { leave, leaving, sameSession } = useSheetExit(generation);
   // As the sheet opened: its words stay put while the answer redraws the job under it.
@@ -65,9 +61,6 @@ export function OnTheWaySheet() {
   if (!job) return null;
 
   const name = customerName(job) ?? t("proJobs.customerFallback");
-  if (prompt) {
-    return <SharePrompt jobId={job.id} name={name} generation={generation} onDone={leave} />;
-  }
   const minutes = choice === null ? null : choice.kind === "preset" ? choice.minutes : custom;
   const arrival = minutes === null ? null : formatTimeOfDay(pickedAt + minutes * MINUTE_MS);
 
@@ -82,15 +75,17 @@ export function OnTheWaySheet() {
           () => undefined,
         );
         if (updating) announce(t("proJobs.announce.etaUpdated"));
-        if (!updating && sharingConfig.enabled) {
-          const access = await readLocationAccess();
-          if (access === "granted") void startSharing(job.id, started);
-          if (access === "askable" && mounted.current) {
-            setPrompt(true);
-            return;
-          }
+        // Going on the way: the explanation in place of the sheet, even with the permission given
+        // before (for check-in); refused for good, the job screen's line has the way to Settings.
+        const explain =
+          !updating && sharingConfig.enabled && (await readLocationAccess()) !== "blocked";
+        if (!mounted.current || leaving.current) return;
+        if (explain) {
+          leaving.current = true;
+          router.replace({ pathname: "/jobs/[id]/share-location", params: { id: job.id } });
+          return;
         }
-        if (mounted.current) leave();
+        leave();
       } catch (error) {
         const failure = stepFailure(error);
         if (failure === "signedOut") return;

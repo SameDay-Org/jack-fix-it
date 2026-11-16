@@ -17,11 +17,22 @@ export const permission = (access: Access): Permission =>
 
 /**
  * Fresh location mocks: the permission reads `access` until the system's prompt answers (a grant
- * unless a test says otherwise, read from then on), and the task runs from a start until a stop, as
- * the system keeps it. `running` can be set to stand for a task the system restored on its own.
+ * unless a test says otherwise, read from then on); the phone's location is on unless `on` is set
+ * false (Android's dialog switches it on); and the task runs from a start until a stop, as the
+ * system keeps it. `running` can be set to stand for a task the system restored on its own.
  */
 export function resetLocation(access: Access = "granted") {
-  const task = { running: false, access };
+  const task = { running: false, access, on: true };
+  jest
+    .mocked(Location.hasServicesEnabledAsync)
+    .mockReset()
+    .mockImplementation(async () => task.on);
+  jest
+    .mocked(Location.enableNetworkProviderAsync)
+    .mockReset()
+    .mockImplementation(async () => {
+      task.on = true;
+    });
   jest
     .mocked(Location.getForegroundPermissionsAsync)
     .mockReset()

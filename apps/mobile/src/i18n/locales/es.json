@@ -901,7 +901,7 @@
         "title": "Comparte tu ubicación en camino",
         "body_one": "Mientras vas en camino, Jack Fix It comparte tu ubicación con {{name}} cada {{count}} segundo, para que vea que vas llegando.",
         "body_other": "Mientras vas en camino, Jack Fix It comparte tu ubicación con {{name}} cada {{count}} segundos, para que vea que vas llegando.",
-        "stops": "Se detiene en cuanto registras tu llegada o si se cancela el trabajo. Tu recorrido no se guarda.",
+        "stops": "Se detiene en cuanto registras tu llegada o si se cancela el trabajo. Jack Fix It no guarda un historial de dónde has estado.",
         "continue": "Continuar",
         "notNow": "Ahora no"
       },

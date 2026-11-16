@@ -28,21 +28,41 @@ const EARLY_SHARE = 0.1;
 const MAX_ACCURACY_M = 10_000;
 const FULL_TURN_DEG = 360;
 /** The answers that end sharing for a job: not this pro's, gone, or not on the way any more. */
-const REFUSED = new Set([401, 403, 404, 409]);
+const REFUSED = new Set([403, 404, 409]);
 
-// In memory only, never on disk: a relaunch or a reload starts with nothing shared, so a task the
-// system restored stops at its first fix until the app starts it again.
+// The app keeps no position, and what it keeps about sharing lives in memory only: a relaunch or
+// a reload starts with nothing chosen and nothing shared, so a task the system restored stops at
+// its first fix until the pro shares again.
 let shared: Shared | null = null;
 let lastSentAt = Number.NEGATIVE_INFINITY;
 let sending = false;
+// Jobs the pro chose to share this session (the explanation's Continue, or the job screen's line):
+// sharing never starts without that choice, whatever the permission already allows.
+const chosen = new Set<string>();
 // Jobs that left the way this session (or that the API refused): a job never comes back on it.
 const ended = new Set<string>();
 // Starts and stops run one at a time, in the order asked.
 let queue: Promise<void> = Promise.resolve();
+// Who listens for the shared job (the job screen's line).
+const listeners = new Set<() => void>();
 
 function serially(step: () => Promise<void>): Promise<void> {
   queue = queue.then(step).catch(() => undefined);
   return queue;
+}
+
+function setShared(next: Shared | null): void {
+  if (next === shared) return;
+  shared = next;
+  listeners.forEach((listener) => listener());
+}
+
+/** Calls `listener` whenever the shared job changes; returns the unsubscribe. */
+export function subscribeSharing(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 /** On the way and not checked in yet (a locked check-in included): the steps that share. */
@@ -56,6 +76,9 @@ const leftTheWay = (job: ProJob): boolean => job.status !== "scheduled" && !isSh
 
 /** The job shared now, if any. */
 export const sharedJobId = (): string | null => shared?.jobId ?? null;
+
+/** The pro chose to share `jobId` this session, and it has not left the way. */
+export const mayShare = (jobId: string): boolean => chosen.has(jobId) && !ended.has(jobId);
 
 const inRange = (value: number | null, max: number): number | null =>
   value !== null && Number.isFinite(value) && value >= 0 && value <= max ? value : null;
@@ -75,8 +98,7 @@ const newest = (fixes: readonly Location.LocationObject[]) =>
     undefined,
   );
 
-const refusal = (error: unknown): boolean =>
-  error instanceof SessionExpiredError || (error instanceof ApiError && REFUSED.has(error.status));
+const refusal = (error: unknown): boolean => error instanceof ApiError && REFUSED.has(error.status);
 
 /**
  * One fix in, at most one ping out: none while the last one is still on its way, none sooner than
@@ -99,10 +121,10 @@ async function send(fixes: readonly Location.LocationObject[]): Promise<void> {
       params: { job_id: current.jobId },
     });
   } catch (error) {
-    if (refusal(error)) {
-      ended.add(current.jobId);
-      await stopIf(current);
-    }
+    // Refused for this session's job: done with it. The session itself ended (a sign-out, a
+    // refresh the server refused): stop, and leave the job to the next session.
+    if (refusal(error) && isCurrentGeneration(current.generation)) ended.add(current.jobId);
+    if (refusal(error) || error instanceof SessionExpiredError) await stopIf(current);
   } finally {
     sending = false;
   }
@@ -118,7 +140,7 @@ async function stopTask(): Promise<void> {
 function stopIf(expected: Shared | null): Promise<void> {
   return serially(async () => {
     if (shared !== expected) return;
-    shared = null;
+    setShared(null);
     await stopTask();
   });
 }
@@ -141,39 +163,55 @@ const taskOptions = (): Location.LocationTaskOptions => ({
   },
 });
 
+/** The phone's location is on; unreadable counts as on (the start reports it otherwise). */
+const locationOn = (): Promise<boolean> =>
+  Location.hasServicesEnabledAsync().then(
+    (on) => on,
+    () => true,
+  );
+
 /**
  * Shares the pro's position for `jobId` from now on, every `intervalMs`, in the background and
  * with the phone locked too (Android's foreground service with its notification, iOS's location
- * background mode). It asks for no permission: without the "while using" one it does nothing.
- * Called with the app in front (Android starts no foreground service from the background). The
- * same job again changes nothing; another job takes its place in the same task.
+ * background mode), once the pro chose to (`shareJob`). It asks for no permission: without the
+ * "while using" one, or with the phone's location off, it does nothing. Called with the app in
+ * front (Android starts no foreground service from the background). The same job again changes
+ * nothing; another job takes its place in the same task.
  */
 export function startSharing(jobId: string, generation: number): Promise<void> {
   if (!sharingConfig.enabled) return Promise.resolve();
   return serially(async () => {
-    if (ended.has(jobId) || !isCurrentGeneration(generation)) return;
+    if (!mayShare(jobId) || !isCurrentGeneration(generation)) return;
     if (!(await Location.getForegroundPermissionsAsync()).granted) return;
+    // Android would register the task with the location off and never ask again for that job.
+    if (!(await locationOn())) return;
     const same = shared?.jobId === jobId && shared.generation === generation;
     if (same && (await Location.hasStartedLocationUpdatesAsync(SHARING_TASK))) return;
-    if (!isCurrentGeneration(generation)) return;
-    shared = { jobId, generation };
+    if (!isCurrentGeneration(generation) || !mayShare(jobId)) return;
+    setShared({ jobId, generation });
     lastSentAt = Number.NEGATIVE_INFINITY;
     try {
       await Location.startLocationUpdatesAsync(SHARING_TASK, taskOptions());
     } catch {
-      // Not started (the app left the front first, or the location is off): the next return to
-      // the app tries again.
-      shared = null;
+      // Not started (the app left the front first): the next return to the app tries again.
+      setShared(null);
     }
   });
+}
+
+/** The pro chose to share `jobId` (this session only): it starts as `startSharing` allows. */
+export function shareJob(jobId: string, generation: number): Promise<void> {
+  if (!sharingConfig.enabled || !isCurrentGeneration(generation)) return Promise.resolve();
+  chosen.add(jobId);
+  return startSharing(jobId, generation);
 }
 
 /** Ends sharing whatever it was for: the pro has no job on the way. */
 export function stopSharing(): Promise<void> {
   if (!sharingConfig.enabled) return Promise.resolve();
-  shared = null;
+  setShared(null);
   return serially(async () => {
-    shared = null;
+    setShared(null);
     await stopTask();
   });
 }
@@ -187,7 +225,7 @@ export function followJob(job: ProJob): Promise<void> {
   ended.add(job.id);
   return serially(async () => {
     if (shared?.jobId !== job.id) return;
-    shared = null;
+    setShared(null);
     await stopTask();
   });
 }
@@ -201,6 +239,7 @@ if (sharingConfig.enabled) {
   });
   // A sign-out (or another account signing in) ends sharing before anything else is cleared.
   onSignOut(() => {
+    chosen.clear();
     ended.clear();
     void stopSharing();
   });

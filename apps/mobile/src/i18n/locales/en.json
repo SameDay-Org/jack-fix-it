@@ -901,7 +901,7 @@
         "title": "Share your location on the way",
         "body_one": "While you're on the way, Jack Fix It shares your location with {{name}} every {{count}} second, so they can see you coming.",
         "body_other": "While you're on the way, Jack Fix It shares your location with {{name}} every {{count}} seconds, so they can see you coming.",
-        "stops": "It stops as soon as you check in, or if the job is cancelled. Your route isn't saved.",
+        "stops": "It stops as soon as you check in, or if the job is cancelled. Jack Fix It doesn't keep a history of where you've been.",
         "continue": "Continue",
         "notNow": "Not now"
       },

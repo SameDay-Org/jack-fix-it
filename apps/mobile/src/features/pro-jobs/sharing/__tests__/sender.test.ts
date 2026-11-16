@@ -1,5 +1,6 @@
 import "@/i18n";
 
+import { waitFor } from "@testing-library/react-native";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 
@@ -9,7 +10,7 @@ import { tokens } from "@/theme";
 import { deferred } from "../../../../api/__tests__/helpers";
 import { arrived, JOB_ID, jobN, NOW, onTheWay, proJob, working } from "../../__tests__/helpers";
 import type { ProJob } from "../../phase";
-import { followJob, SHARING_TASK, sharedJobId, startSharing, stopSharing } from "../sender";
+import { followJob, mayShare, shareJob, SHARING_TASK, sharedJobId, startSharing } from "../sender";
 
 import { consoleText, deliver, fix, LAT, LNG, resetLocation, starts, stops } from "./helpers";
 
@@ -21,6 +22,8 @@ jest.mock("@/api", () => ({
 jest.mock("expo-location", () => ({
   getForegroundPermissionsAsync: jest.fn(),
   requestForegroundPermissionsAsync: jest.fn(),
+  hasServicesEnabledAsync: jest.fn(),
+  enableNetworkProviderAsync: jest.fn(),
   startLocationUpdatesAsync: jest.fn(),
   stopLocationUpdatesAsync: jest.fn(),
   hasStartedLocationUpdatesAsync: jest.fn(),
@@ -49,7 +52,7 @@ const pings = () => jest.mocked(apiPut).mock.calls;
 /** The body of the nth ping. */
 const sent = (index: number) => pings()[index]?.[1];
 
-let task: { running: boolean };
+let task: ReturnType<typeof resetLocation>;
 
 beforeEach(async () => {
   // Whatever an earlier test left shared ends with its session, as a sign-out ends it.
@@ -73,7 +76,7 @@ describe("the location task", () => {
   });
 
   it("starts every 10 s at balanced accuracy, moving or not, with the notification and the indicator", async () => {
-    await startSharing(JOB_ID, 1);
+    await shareJob(JOB_ID, 1);
 
     expect(Location.startLocationUpdatesAsync).toHaveBeenCalledTimes(1);
     expect(Location.startLocationUpdatesAsync).toHaveBeenCalledWith(SHARING_TASK, {
@@ -95,7 +98,7 @@ describe("the location task", () => {
   });
 
   it("sends each fix with the job id, for the session that started it: the newest of a batch", async () => {
-    await startSharing(JOB_ID, 1);
+    await shareJob(JOB_ID, 1);
     await deliver([fix(NOW - 3 * SECOND, { latitude: 1, longitude: 2 }), fix(NOW - SECOND)]);
 
     expect(pings()).toEqual([
@@ -117,14 +120,14 @@ describe("the location task", () => {
     ["an unknown accuracy and heading (iOS reports -1)", { accuracy: null, heading: -1 }],
     ["an accuracy past the API's range", { accuracy: 20_000, heading: Number.NaN }],
   ])("leaves out %s", async (_case, coords) => {
-    await startSharing(JOB_ID, 1);
+    await shareJob(JOB_ID, 1);
     await deliver([fix(NOW, coords)]);
 
     expect(sent(0)).toEqual(expect.objectContaining({ accuracy_m: null, heading_deg: null }));
   });
 
   it("sends no sooner than the interval; a fix a little early still goes", async () => {
-    await startSharing(JOB_ID, 1);
+    await shareJob(JOB_ID, 1);
     await deliver([fix(NOW)]);
     at(5 * SECOND);
     await deliver([fix(NOW + 5 * SECOND)]);
@@ -142,7 +145,7 @@ describe("the location task", () => {
   it("never sends a second ping while one is on its way", async () => {
     const slow = deferred<undefined>();
     jest.mocked(apiPut).mockReturnValueOnce(slow.promise);
-    await startSharing(JOB_ID, 1);
+    await shareJob(JOB_ID, 1);
     const first = deliver([fix(NOW)]);
     at(20 * SECOND);
     await deliver([fix(NOW + 20 * SECOND)]);
@@ -165,7 +168,7 @@ describe("the location task", () => {
     "drops a ping that failed (%s): no retry, no backlog, and sharing goes on",
     async (_c, error) => {
       jest.mocked(apiPut).mockRejectedValueOnce(error);
-      await startSharing(JOB_ID, 1);
+      await shareJob(JOB_ID, 1);
       await deliver([fix(NOW - SECOND, { latitude: 1 })]);
       expect(pings()).toHaveLength(1);
 
@@ -188,10 +191,9 @@ describe("the location task", () => {
     ["not on the way any more (409 not_on_the_way)", new ApiError(409, "not_on_the_way")],
     ["not this pro's job (403)", new ApiError(403, "forbidden")],
     ["a job that is gone (404)", new ApiError(404, "not_found")],
-    ["a session the server ended", new SessionExpiredError("expired")],
   ])("stops when the API refuses: %s, and never shares that job again", async (_c, error) => {
     jest.mocked(apiPut).mockRejectedValueOnce(error);
-    await startSharing(JOB_ID, 1);
+    await shareJob(JOB_ID, 1);
     await deliver([fix(NOW)]);
 
     expect(stops()).toBe(1);
@@ -199,26 +201,25 @@ describe("the location task", () => {
     expect(sharedJobId()).toBeNull();
 
     // The screen under a stale list asks again: nothing starts for that job.
-    await startSharing(JOB_ID, 1);
+    await shareJob(JOB_ID, 1);
     expect(starts()).toBe(1);
     at(10 * SECOND);
     await deliver([fix(NOW + 10 * SECOND)]);
     expect(pings()).toHaveLength(1);
   });
 
-  it("stops at a sign-out, and a fix after it sends nothing", async () => {
-    await startSharing(JOB_ID, 1);
+  it("stops at a sign-out on its own, before any fix comes, and a fix after it sends nothing", async () => {
+    await shareJob(JOB_ID, 1);
     mockSignOut();
-    await stopSharing(); // the queue the sign-out's stop runs in, settled
 
-    expect(stops()).toBe(1);
+    await waitFor(() => expect(stops()).toBe(1));
     expect(task.running).toBe(false);
     await deliver([fix(NOW)]);
     expect(pings()).toHaveLength(0);
   });
 
   it("never sends for a session that is over, even before its stop has run", async () => {
-    await startSharing(JOB_ID, 1);
+    await shareJob(JOB_ID, 1);
     mockSession.generation = 2; // the session moved on; its sign-out work has not run yet
 
     await deliver([fix(NOW)]);
@@ -226,10 +227,67 @@ describe("the location task", () => {
     expect(task.running).toBe(false);
   });
 
-  it("starts nothing for a session that is over", async () => {
-    mockSession.generation = 2;
+  it("a session the server ended during a ping stops sharing, and the next session can share the job", async () => {
+    const answer = deferred<undefined>();
+    jest.mocked(apiPut).mockReturnValueOnce(answer.promise);
+    await shareJob(JOB_ID, 1);
+    const ping = deliver([fix(NOW)]);
+    mockSignOut(); // the refresh the ping needed was refused: the session ends under it
+    answer.reject(new SessionExpiredError("expired"));
+    await ping;
+    await waitFor(() => expect(task.running).toBe(false));
+
+    // Signed in again (the generation the sign-out moved to), the pro shares the job again.
+    await shareJob(JOB_ID, 2);
+    expect(task.running).toBe(true);
+    expect(sharedJobId()).toBe(JOB_ID);
+  });
+
+  it("a refusal that lands after a sign-out leaves the job to the next session", async () => {
+    const answer = deferred<undefined>();
+    jest.mocked(apiPut).mockReturnValueOnce(answer.promise);
+    await shareJob(JOB_ID, 1);
+    const ping = deliver([fix(NOW)]);
+    mockSignOut();
+    answer.reject(new ApiError(409, "not_on_the_way"));
+    await ping;
+
+    await shareJob(JOB_ID, 2);
+    expect(sharedJobId()).toBe(JOB_ID);
+  });
+
+  it("never starts a job the pro did not choose, whatever the permission allows", async () => {
     await startSharing(JOB_ID, 1);
     expect(starts()).toBe(0);
+    expect(mayShare(JOB_ID)).toBe(false);
+
+    await shareJob(JOB_ID, 1);
+    expect(starts()).toBe(1);
+    expect(mayShare(JOB_ID)).toBe(true);
+  });
+
+  it("with the phone's location off it starts nothing; switched on, the next start shares", async () => {
+    task.on = false;
+    await shareJob(JOB_ID, 1);
+    expect(starts()).toBe(0);
+    expect(sharedJobId()).toBeNull();
+
+    task.on = true;
+    await startSharing(JOB_ID, 1);
+    expect(starts()).toBe(1);
+  });
+
+  it("forgets the pro's choices at a sign-out", async () => {
+    await shareJob(JOB_ID, 1);
+    mockSignOut();
+    expect(mayShare(JOB_ID)).toBe(false);
+  });
+
+  it("starts nothing for a session that is over", async () => {
+    mockSession.generation = 2;
+    await shareJob(JOB_ID, 1);
+    expect(starts()).toBe(0);
+    expect(mayShare(JOB_ID)).toBe(false);
   });
 
   it("stops a task the system restored on its own (a relaunch): nothing is shared in memory", async () => {
@@ -241,12 +299,12 @@ describe("the location task", () => {
   });
 
   it("starts one task for a job however often it is asked, and another job takes its place", async () => {
-    await startSharing(JOB_ID, 1);
-    await startSharing(JOB_ID, 1);
-    await Promise.all([startSharing(JOB_ID, 1), startSharing(JOB_ID, 1)]);
+    await shareJob(JOB_ID, 1);
+    await shareJob(JOB_ID, 1);
+    await Promise.all([shareJob(JOB_ID, 1), shareJob(JOB_ID, 1)]);
     expect(starts()).toBe(1);
 
-    await startSharing(OTHER_JOB, 1);
+    await shareJob(OTHER_JOB, 1);
     expect(starts()).toBe(2);
     const names = jest.mocked(Location.startLocationUpdatesAsync).mock.calls.map(([name]) => name);
     expect(new Set(names)).toEqual(new Set([SHARING_TASK]));
@@ -254,18 +312,33 @@ describe("the location task", () => {
     expect(pings()[0][2]).toEqual(expect.objectContaining({ params: { job_id: OTHER_JOB } }));
   });
 
+  it("a refusal for the job shared before leaves the job shared now running", async () => {
+    const answer = deferred<undefined>();
+    jest.mocked(apiPut).mockReturnValueOnce(answer.promise);
+    await shareJob(JOB_ID, 1);
+    const ping = deliver([fix(NOW)]);
+    // The pro goes on the way to another job while the first job's ping is out.
+    await shareJob(OTHER_JOB, 1);
+
+    answer.reject(new ApiError(409, "not_on_the_way"));
+    await ping;
+    expect(stops()).toBe(0);
+    expect(task.running).toBe(true);
+    expect(sharedJobId()).toBe(OTHER_JOB);
+  });
+
   it("starts again for the same job when the system stopped the task", async () => {
-    await startSharing(JOB_ID, 1);
+    await shareJob(JOB_ID, 1);
     task.running = false;
-    await startSharing(JOB_ID, 1);
+    await shareJob(JOB_ID, 1);
     expect(starts()).toBe(2);
   });
 
   it("without the permission it starts nothing, and asks nothing", async () => {
     resetLocation("askable");
-    await startSharing(JOB_ID, 1);
+    await shareJob(JOB_ID, 1);
     resetLocation("blocked");
-    await startSharing(JOB_ID, 1);
+    await shareJob(JOB_ID, 1);
 
     expect(starts()).toBe(0);
     expect(Location.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
@@ -273,16 +346,16 @@ describe("the location task", () => {
 
   it("a start the system refuses leaves nothing shared, and the next one tries again", async () => {
     jest.mocked(Location.startLocationUpdatesAsync).mockRejectedValueOnce(new Error("background"));
-    await startSharing(JOB_ID, 1);
+    await shareJob(JOB_ID, 1);
     expect(sharedJobId()).toBeNull();
 
-    await startSharing(JOB_ID, 1);
+    await shareJob(JOB_ID, 1);
     expect(starts()).toBe(2);
     expect(sharedJobId()).toBe(JOB_ID);
   });
 
   it("an error from the system sends nothing and stops nothing", async () => {
-    await startSharing(JOB_ID, 1);
+    await shareJob(JOB_ID, 1);
     await deliver([fix(NOW)], { code: 0, message: "kCLErrorLocationUnknown" });
 
     expect(pings()).toHaveLength(0);
@@ -297,11 +370,11 @@ describe("followJob: the app saw the job as it is now", () => {
     ["working", working()],
     ["cancelled", cancelled],
   ])("%s: sharing stops and the job is never shared again", async (_c, job) => {
-    await startSharing(JOB_ID, 1);
+    await shareJob(JOB_ID, 1);
     await followJob(job);
 
     expect(stops()).toBe(1);
-    await startSharing(JOB_ID, 1);
+    await shareJob(JOB_ID, 1);
     expect(starts()).toBe(1);
   });
 
@@ -310,13 +383,13 @@ describe("followJob: the app saw the job as it is now", () => {
     ["on the way", onTheWay()],
     ["locked", onTheWay({ arrival_code_locked: true })],
   ])("%s: sharing goes on", async (_c, job) => {
-    await startSharing(JOB_ID, 1);
+    await shareJob(JOB_ID, 1);
     await followJob(job);
     expect(stops()).toBe(0);
   });
 
   it("another job past the way leaves this one shared", async () => {
-    await startSharing(JOB_ID, 1);
+    await shareJob(JOB_ID, 1);
     await followJob(jobN(7, { status: "cancelled" }));
     expect(stops()).toBe(0);
   });
@@ -331,7 +404,7 @@ it("never writes a coordinate to the console, whatever happens", async () => {
     new ApiError(422, "validation_error"),
     new ApiError(409, "not_on_the_way"),
   ];
-  await startSharing(JOB_ID, 1);
+  await shareJob(JOB_ID, 1);
   for (const [index, failure] of failures.entries()) {
     jest.mocked(apiPut).mockRejectedValueOnce(failure);
     at(index * 10 * SECOND);
