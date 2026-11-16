@@ -14,8 +14,12 @@ import { formatMinutes } from "@/features/quotes/format";
 import { markOnTheWay, proJobQueryOptions, stepFailure, useSingleFlight } from "./api";
 import { ETA_MAX_MINUTES, ETA_MIN_MINUTES, nextEta, previousEta, proJobsConfig } from "./config";
 import { customerName } from "./format";
+import { readLocationAccess } from "./location";
 import { jobStep } from "./phase";
 import { reportStepFailure } from "./failure";
+import { sharingConfig } from "./sharing/config";
+import { startSharing } from "./sharing/sender";
+import { SharePrompt } from "./sharing/SharePrompt";
 import { useSheetExit } from "./useSheetExit";
 
 const MINUTE_MS = 60_000;
@@ -28,7 +32,8 @@ type Choice = { kind: "preset"; minutes: number } | { kind: "custom" } | null;
  * expects to arrive, from one-tap presets or a custom time from 5 minutes to 4 hours, then one
  * POST. On the way already, it updates only the arrival time ("Update arrival time"). The job
  * screen under it redraws with the answer as it closes. Offline, the sheet stays with the reason;
- * a job that moved on or went away closes it with a toast.
+ * a job that moved on or went away closes it with a toast. Going on the way starts sharing the
+ * pro's location (#352) when the permission is there; never asked yet, the sheet explains first.
  */
 export function OnTheWaySheet() {
   const { t } = useTranslation();
@@ -41,6 +46,8 @@ export function OnTheWaySheet() {
   const [choice, setChoice] = useState<Choice>(null);
   const [custom, setCustom] = useState(presets[presets.length - 1]);
   const [offline, setOffline] = useState(false);
+  // On the way now, and the location never asked for: the sheet explains before the system asks.
+  const [prompt, setPrompt] = useState(false);
   const { busy, run, mounted } = useSingleFlight();
   const { leave, leaving, sameSession } = useSheetExit(generation);
   // As the sheet opened: its words stay put while the answer redraws the job under it.
@@ -58,6 +65,9 @@ export function OnTheWaySheet() {
   if (!job) return null;
 
   const name = customerName(job) ?? t("proJobs.customerFallback");
+  if (prompt) {
+    return <SharePrompt jobId={job.id} name={name} generation={generation} onDone={leave} />;
+  }
   const minutes = choice === null ? null : choice.kind === "preset" ? choice.minutes : custom;
   const arrival = minutes === null ? null : formatTimeOfDay(pickedAt + minutes * MINUTE_MS);
 
@@ -72,6 +82,14 @@ export function OnTheWaySheet() {
           () => undefined,
         );
         if (updating) announce(t("proJobs.announce.etaUpdated"));
+        if (!updating && sharingConfig.enabled) {
+          const access = await readLocationAccess();
+          if (access === "granted") void startSharing(job.id, started);
+          if (access === "askable" && mounted.current) {
+            setPrompt(true);
+            return;
+          }
+        }
         if (mounted.current) leave();
       } catch (error) {
         const failure = stepFailure(error);

@@ -112,11 +112,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ["expo-sensors", { motionPermission: en.permissions.motion }],
       // The share sheet for the card's PNG. Without options the app receives no shares.
       "expo-sharing",
-      // The pro's check-in at a job (#63; a change here needs a new dev build): the location
-      // while the app is in use, read once when the pro checks in. No "always" or background
-      // location (no background mode on iOS, no ACCESS_BACKGROUND_LOCATION or foreground service
-      // on Android) and no temporary full-accuracy prompt. Motion activity stays off on Android;
-      // the iOS motion string is the ID card's, set above.
+      // The pro's location (a change here needs a new dev build): read once at check-in (#63), and
+      // sent every few seconds while on the way to a job (#352), on the "while using" permission
+      // alone. Sharing starts with the app in front, so it goes on in the background and with the
+      // phone locked: iOS through the location background mode (the system shows its location
+      // indicator), Android through a foreground service with its notification (no
+      // ACCESS_BACKGROUND_LOCATION). Never "always", and no temporary full-accuracy prompt. Motion
+      // activity stays off on Android; the iOS motion string is the ID card's, set above.
       [
         "expo-location",
         {
@@ -124,9 +126,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           locationAlwaysAndWhenInUsePermission: false,
           locationAlwaysPermission: false,
           locationFullAccuracyPermission: false,
-          isIosBackgroundLocationEnabled: false,
+          isIosBackgroundLocationEnabled: true,
           isAndroidBackgroundLocationEnabled: false,
-          isAndroidForegroundServiceEnabled: false,
+          isAndroidForegroundServiceEnabled: true,
           isAndroidMotionActivityEnabled: false,
         },
       ],

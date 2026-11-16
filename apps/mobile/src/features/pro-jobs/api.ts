@@ -16,6 +16,7 @@ import { useRefetchOnReturn } from "@/features/quotes/useRequestQuotes";
 
 import type { CheckInPosition } from "./location";
 import { isActiveJob, soonestFirst, type JobPhotoKind, type ProJob } from "./phase";
+import { followJob } from "./sharing/sender";
 
 const PRO_JOBS = "pro-jobs";
 
@@ -130,10 +131,12 @@ export const isJobGone = (error: unknown): boolean =>
 /**
  * The job as an action answered it, in place at once (the screen under a sheet redraws as the
  * sheet closes), and "Your jobs" asked again. Only for the session the action started in: after a
- * sign-out or another sign-in the answer goes nowhere.
+ * sign-out or another sign-in the answer goes nowhere. A job past the way (the check-in) ends its
+ * location sharing at once (#352).
  */
 function applyJob(client: QueryClient, job: ProJob, generation: number): void {
   if (!isCurrentGeneration(generation)) return;
+  void followJob(job);
   client.setQueryData(proJobQueryKey(job.id, generation), job);
   void client.invalidateQueries({ queryKey: proJobsQueryKey(generation) });
 }

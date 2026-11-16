@@ -38,6 +38,7 @@ import { reportStepFailure } from "./failure";
 import { addressLines, addressText, customerName, dayLabel, mapsUrl, whenLabel } from "./format";
 import { JobPhotoSection } from "./JobPhotoSection";
 import { jobStep, STEP_TONE, type JobStep, type ProJob } from "./phase";
+import { followJob, isSharedStep, sharingConfig, SharingNote } from "./sharing";
 import { useJobDone, type DoneState } from "./useJobDone";
 import { useJobPhotos, type JobPhotos as KindPhotos } from "./useJobPhotos";
 
@@ -139,6 +140,10 @@ export function ProJobScreen() {
   // Locked, done and cancelled have nothing to act on: no dock.
   const docked = data !== undefined && !gone && DOCKED_STEPS.includes(jobStep(data));
   useAnnounceStep(data);
+  // A refetch that finds the job past the way (cancelled, checked in elsewhere) ends its sharing.
+  useEffect(() => {
+    if (data) void followJob(data);
+  }, [data]);
 
   return (
     // With the action dock, the dock pads the bottom safe area itself (its white runs to the edge).
@@ -178,6 +183,9 @@ export function ProJobScreen() {
               />
             ) : null}
             <JobHero job={data} now={dataUpdatedAt} />
+            {sharingConfig.enabled && isSharedStep(data) ? (
+              <SharingNote jobId={data.id} name={nameOf(t, data)} />
+            ) : null}
             {/* Rating the customer opens once the job is confirmed (#77). */}
             <RateEntry jobId={data.id} side="pro" enabled={RATEABLE.includes(data.status)} />
             <JobFacts job={data} />
