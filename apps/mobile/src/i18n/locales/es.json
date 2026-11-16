@@ -1708,5 +1708,68 @@
       "selectCity": "Seleccionar todos los códigos postales de {{city}}",
       "clearCity": "Quitar todos los códigos postales de {{city}}"
     }
+  },
+  "proDocuments": {
+    "menu": "Documentos",
+    "title": "Documentos de verificación",
+    "support": "Nuestro equipo los revisa antes de que empieces a recibir solicitudes.",
+    "loading": "Cargando tus documentos",
+    "loadFailed": "No pudimos cargar tus documentos",
+    "loadBody": "Inténtalo de nuevo en un momento.",
+    "offline": "No tienes conexión. Revisa tu conexión e inténtalo de nuevo.",
+    "refreshFailed": "No pudimos actualizar tus documentos.",
+    "retry": "Reintentar",
+    "row": "{{name}}: {{status}}",
+    "reason": "Motivo: {{reason}}",
+    "expires": "Vence el {{date}}",
+    "types": {
+      "id": "Identificación con foto",
+      "license": "Licencia",
+      "insurance": "Seguro"
+    },
+    "hints": {
+      "id": "Una foto de tu identificación.",
+      "license": "Una foto de tu licencia profesional.",
+      "insurance": "Una foto de tu comprobante de seguro."
+    },
+    "status": {
+      "missing": "Falta",
+      "pending": "En revisión",
+      "approved": "Aprobado",
+      "rejected": "Rechazado"
+    },
+    "rejected": {
+      "title": "Este documento fue rechazado",
+      "noReason": "Envía una foto nueva."
+    },
+    "pending": "Si envías una foto nueva, reemplaza la que está en revisión.",
+    "photo": {
+      "label": "Foto del documento",
+      "unavailable": "La foto del documento no se puede mostrar ahora",
+      "support": "Toma una foto clara del documento completo.",
+      "required": "Primero agrega una foto del documento.",
+      "ready": "Foto lista. Envíala para revisión.",
+      "uploading": "Subiendo la foto del documento",
+      "add": "Agregar foto",
+      "change": "Cambiar foto",
+      "retry": "Reintentar"
+    },
+    "submit": {
+      "send": "Enviar",
+      "replace": "Reemplazar",
+      "sent": "Documento enviado para revisión",
+      "check": "Revisa algunos campos.",
+      "expiry": "Fecha de vencimiento",
+      "expiryHint": "MM/DD/AAAA",
+      "expiryErrors": {
+        "invalid": "Escribe la fecha como MM/DD/AAAA.",
+        "past": "Escribe la fecha de hoy o una posterior."
+      },
+      "failed": {
+        "offline": "No tienes conexión. Revisa tu conexión e inténtalo de nuevo.",
+        "photo": "No pudimos usar esa foto. Elige otra.",
+        "generic": "No pudimos enviar este documento. Inténtalo de nuevo."
+      }
+    }
   }
 }

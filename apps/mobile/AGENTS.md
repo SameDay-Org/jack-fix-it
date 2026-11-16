@@ -147,6 +147,14 @@ options={sheetOptions([0.5, 0.95])} />`, or `"fitToContents"`), rendering `Sheet
   over `useMediaUpload`); its key goes with Save, and a failed or refused photo never loses what
   was typed. The limits mirror the API: `BIO_MAX`, `YEARS_MAX`, `EXPO_PUBLIC_PRO_MAX_CATEGORIES`,
   `EXPO_PUBLIC_PRO_MAX_SERVICE_AREAS`.
+- Pro documents (#37): `src/features/pro-documents`, routes `/pro/documents` (the list) and
+  `/pro/documents/[type]`, opened from Account > Documents. `useMyDocuments` reads
+  `GET /v1/pros/me/documents` (keyed by the session generation, asked again on focus: its URLs
+  are signed for minutes); `documentRows` gives one row per required type (and any other type
+  sent) as Missing, In review, Approved or Rejected with the reason. A type's screen takes one
+  photo (`useSinglePhoto`, purpose `pro_document`: photos only), an optional expiry for a license
+  or an insurance (MM/DD/YYYY, today or later in UTC as the API reads it) and POSTs it; a pending
+  one is replaced by the server. A signed URL is an `Image` source and nothing else: never a log.
 - Strings: `src/i18n/locales/{en,es}.json` through `useTranslation()`. Signed out, the device
   language picks the catalog (English is the fallback); signed in, the account's saved `locale`
   does (`features/account/AccountLanguage.tsx`), and Settings changes it (`LanguageSection`).

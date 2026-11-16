@@ -70,6 +70,15 @@ export const ACCOUNT_GLYPHS = {
       "M8.5 16.5c.5-1.6 1.8-2.5 3.5-2.5s3 .9 3.5 2.5",
     ],
   },
+  // A page with a folded corner and a check mark on it: the pro's verification documents.
+  proDocuments: {
+    accent: "M7 3.5h7l4 4v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1Z",
+    strokes: [
+      "M7 3.5h7l4 4v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1Z",
+      "M14 3.5v4h4",
+      "M9 14l2 2 4-4.5",
+    ],
+  },
   // An open door with an arrow leaving through it.
   logOut: {
     accent: "M5.5 5a1 1 0 0 1 1-1h6.5v16H6.5a1 1 0 0 1-1-1Z",
