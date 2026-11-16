@@ -161,6 +161,7 @@
       "addressesNone": "Ninguna guardada todavía",
       "addressesCount_one": "{{count}} guardada",
       "addressesCount_other": "{{count}} guardadas",
+      "paymentMethods": "Métodos de pago",
       "help": "Ayuda",
       "legal": "Legal",
       "logOut": "Cerrar sesión"
@@ -396,6 +397,103 @@
         "gone": "Esta dirección ya no está en tu libreta de direcciones.",
         "generic": "No pudimos guardar esta dirección. Intenta de nuevo."
       }
+    }
+  },
+  "paymentMethods": {
+    "title": "Métodos de pago",
+    "support": "Toca una tarjeta para hacerla predeterminada o eliminarla.",
+    "emptySupport": "Aún no has guardado tarjetas.",
+    "note": "Los datos de la tarjeta van directo a Stripe. Solo vemos la marca, los últimos cuatro dígitos y la fecha de vencimiento.",
+    "default": "Predeterminada",
+    "expires": "Vence {{expiry}}",
+    "seeAll": "Ver todas",
+    "showLess": "Ver menos",
+    "retry": "Reintentar",
+    "brand": {
+      "visa": "Visa",
+      "mastercard": "Mastercard",
+      "amex": "American Express",
+      "discover": "Discover",
+      "generic": "Tarjeta"
+    },
+    "spoken": {
+      "card": "{{brand}} terminada en {{last4}}, vence {{month}} {{year}}",
+      "default": "predeterminada",
+      "short": "{{brand}} terminada en {{last4}}"
+    },
+    "pocket": {
+      "defaultSpoken": "Tarjeta predeterminada: {{card}}",
+      "none": "Sin tarjeta predeterminada",
+      "noneHint": "Abre una tarjeta para hacerla predeterminada.",
+      "updating": "Actualizando tu billetera…",
+      "add": "Agregar tarjeta",
+      "addHint": "Abre el formulario seguro de Stripe."
+    },
+    "strip": {
+      "hint": "Abre la tarjeta."
+    },
+    "loadFailed": {
+      "generic": "No pudimos cargar tus tarjetas.",
+      "offline": "No tienes conexión. Conéctate para ver tus tarjetas.",
+      "unavailable": "Tus tarjetas no están disponibles ahora. Inténtalo de nuevo en un momento."
+    },
+    "add": {
+      "label": "Agregar tarjeta",
+      "saved": "Tarjeta guardada.",
+      "savedNotDefault": "Tarjeta guardada. No pudimos hacerla predeterminada: abre la tarjeta para intentarlo de nuevo.",
+      "failure": {
+        "offline": {
+          "title": "Sin conexión",
+          "body": "Revisa tu internet e inténtalo de nuevo."
+        },
+        "unavailable": {
+          "title": "No se pueden agregar tarjetas ahora",
+          "body": "No se guardó nada. Inténtalo de nuevo en un momento."
+        },
+        "rateLimited": {
+          "title": "Son muchos intentos seguidos",
+          "body": "No se guardó nada. Inténtalo de nuevo en un momento."
+        },
+        "generic": {
+          "title": "No pudimos empezar a agregar la tarjeta",
+          "body": "No se guardó nada. Inténtalo de nuevo."
+        },
+        "sheetFailed": {
+          "title": "La tarjeta no se guardó",
+          "body": "Inténtalo de nuevo o usa otra tarjeta."
+        },
+        "sheetTimeout": {
+          "title": "Guardar la tarjeta tardó demasiado",
+          "body": "Inténtalo de nuevo."
+        },
+        "sheetUnavailable": {
+          "title": "No se pudo abrir el formulario de la tarjeta",
+          "body": "No se guardó nada. Inténtalo de nuevo."
+        }
+      }
+    },
+    "card": {
+      "setDefault": "Hacer predeterminada",
+      "isDefault": "Esta es tu tarjeta predeterminada.",
+      "delete": "Eliminar tarjeta",
+      "deleteHint": "Pregunta antes de eliminar."
+    },
+    "delete": {
+      "title": "¿Eliminar {{card}}?",
+      "body": "Saldrá de tu billetera definitivamente.",
+      "bodyNextDefault": "Saldrá de tu billetera definitivamente. Otra tarjeta pasará a ser la predeterminada.",
+      "cancel": "Cancelar",
+      "confirm": "Eliminar"
+    },
+    "madeDefault": "{{card}} ahora es tu tarjeta predeterminada",
+    "deleted": "{{card}} eliminada",
+    "failed": {
+      "setDefault": "No pudimos hacer predeterminada {{card}}. Inténtalo de nuevo en un momento.",
+      "delete": "No pudimos eliminar {{card}}. Inténtalo de nuevo en un momento.",
+      "offline": "No tienes conexión, así que no cambió nada. Inténtalo de nuevo cuando te conectes.",
+      "rateLimited": "Son muchos cambios seguidos. Inténtalo de nuevo en un momento.",
+      "unavailable": "No se pueden cambiar las tarjetas ahora. Inténtalo de nuevo en un momento.",
+      "gone": "Esa tarjeta ya no está en tu billetera."
     }
   },
   "phone": {

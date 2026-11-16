@@ -9,9 +9,9 @@ import { ListGroup, ListRow } from "@/components/ui";
 import { useSavedAddresses } from "@/features/addresses";
 
 /**
- * The Account tab's short list: Settings, Addresses (a customer's, with how many are saved), Pro
- * profile (a pro's), Help and Legal open their screens; Log out sits apart, has no chevron (it opens nothing) and asks
- * first.
+ * The Account tab's short list: Settings, Addresses (a customer's, with how many are saved),
+ * Payment methods (a customer's wallet, #253), Pro profile (a pro's), Help and Legal open their
+ * screens; Log out sits apart, has no chevron (it opens nothing) and asks first.
  */
 export function AccountMenu() {
   const { t } = useTranslation();
@@ -84,6 +84,14 @@ export function AccountMenu() {
             }
             onPress={() => router.push("/account/addresses")}
             testID="account-addresses"
+          />
+        ) : null}
+        {isCustomer ? (
+          <ListRow
+            label={t("account.menu.paymentMethods")}
+            glyph={ACCOUNT_GLYPHS.paymentMethods}
+            onPress={() => router.push("/account/payment-methods")}
+            testID="account-payment-methods"
           />
         ) : null}
         {role === "pro" ? (

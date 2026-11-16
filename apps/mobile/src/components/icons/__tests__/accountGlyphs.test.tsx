@@ -9,7 +9,15 @@ const NAMES = Object.keys(ACCOUNT_GLYPHS) as AccountGlyphName[];
 
 describe("ACCOUNT_GLYPHS", () => {
   it("has the Account menu's six glyphs", () => {
-    expect(NAMES).toEqual(["settings", "addresses", "help", "legal", "proProfile", "logOut"]);
+    expect(NAMES).toEqual([
+      "settings",
+      "addresses",
+      "paymentMethods",
+      "help",
+      "legal",
+      "proProfile",
+      "logOut",
+    ]);
   });
 
   it.each(NAMES)(
