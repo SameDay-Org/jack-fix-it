@@ -26,9 +26,12 @@ release(job_id), in three steps:
 2. Stripe, with no transaction open. A retry (any attempt after the first) first lists the
    request's transfer group and looks for a transfer whose metadata names the job: exactly one
    that fits the row (amount, currency, destination, not reversed) is adopted, so an answer
-   lost in an earlier attempt never leads to a second create, however old the attempt; more
-   than one, one that does not fit, or a listing with further pages creates nothing
-   (`transfer_needs_review`, for staff). Otherwise the transfer is created from the payment's
+   lost in an earlier attempt never leads to a second create, however old the attempt. A
+   transfer reversed in Stripe does not count (staff reversed a duplicate); one that was the
+   only match creates nothing. More than one live match, one that does not fit, or a listing
+   with further pages creates nothing either (`transfer_needs_review`, for staff: they reverse
+   the duplicate, or store the transfer on the row as created, and the sweep then moves the
+   job to paid_out). Otherwise the transfer is created from the payment's
    charge (source_transaction), for the row's amount, to the pro's account, in the request's
    transfer group, with metadata job_id and the idempotency key `transfer:<job id>`: the same
    key for every attempt of the job, so Stripe itself answers a repeated create with the first
@@ -311,7 +314,8 @@ class TransferService:
     async def _already_made(self, job: JobPayoutFacts, transfer: Transfer) -> ReleaseOutcome:
         """The row holds a transfer Stripe made, and the job is still confirmed: a created one
         only misses the job's move (its transaction is the one that stores the transfer, so
-        this is a row someone repaired by hand); a reversed one is staff's."""
+        this is a row staff repaired by hand after a review; the sweep reads these); a reversed
+        one is staff's."""
         ids = {"job_id": str(job.job_id), "transfer_id": str(transfer.id)}
         if transfer.status is not TransferStatus.CREATED:
             logger.error("transfer_reversed_job_confirmed", extra=ids)
@@ -330,10 +334,14 @@ class TransferService:
             if not found.complete:
                 raise _NeedsReviewError("listing_incomplete")
             ours = [fact for fact in found.transfers if fact.job_id == str(attempt.job_id)]
-            if len(ours) > 1:
+            live = [fact for fact in ours if not fact.reversed]
+            if len(live) > 1:
                 raise _NeedsReviewError("several_transfers")
+            if live:
+                return _fitting(live[0], attempt)
             if ours:
-                return _fitting(ours[0], attempt)
+                # The job's only transfers were reversed: paying again is staff's call.
+                raise _NeedsReviewError("transfer_reversed")
         charge_id = await stripe.charge_of_payment_intent(attempt.payment_intent_id)
         created = await stripe.create_transfer(
             # From the row committed in step 1, never from a request or a rate.

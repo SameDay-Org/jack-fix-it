@@ -404,6 +404,24 @@ async def test_the_amount_is_the_frozen_payout_never_the_current_rate(
     assert [create["amount_cents"] for create in stripe.creates] == [PAYOUT]
 
 
+async def test_the_amount_is_the_job_payout_not_one_derived_from_the_payment(
+    db_session: AsyncSession, world: JobWorld, stripe: FakeStripeTransfers, clock: Clock
+) -> None:
+    # 16_999 is neither the amount at the payment's own rate (17_000) nor anything else a
+    # rate or a rounding rule gives back: only the frozen value itself.
+    payout, fee = PAYOUT - 1, FEE + 1
+    job = await confirmed_job(db_session, world, pro_payout_cents=payout, platform_fee_cents=fee)
+    await db_session.execute(update(Job).where(Job.id == job.id).values(pro_payout_cents=payout))
+    await db_session.commit()
+
+    assert await service(db_session, stripe, clock).release(job.id) is ReleaseOutcome.CREATED
+
+    assert [create["amount_cents"] for create in stripe.creates] == [payout]
+    row = await transfer_of(db_session, job.id)
+    assert row is not None
+    assert row.amount_cents == payout
+
+
 async def test_a_payout_that_does_not_match_the_payment_is_never_sent(
     db_session: AsyncSession,
     world: JobWorld,
@@ -669,6 +687,36 @@ async def test_a_lookup_that_cannot_be_matched_creates_nothing(
     assert (await job_row(db_session, job.id)).status is JobStatus.CONFIRMED
 
 
+async def test_a_duplicate_staff_reversed_leaves_the_live_transfer_to_adopt(
+    db_session: AsyncSession, world: JobWorld, stripe: FakeStripeTransfers, clock: Clock
+) -> None:
+    job = await confirmed_job(db_session, world)
+    stripe.errors["create"] = [StripeUnavailableError()]
+    await service(db_session, stripe, clock).release(job.id)
+    group = transfer_group(job.request_id)
+    live = TransferFacts(
+        transfer_id="tr_probe68live",
+        amount_cents=PAYOUT,
+        currency="usd",
+        destination=ACCOUNT,
+        job_id=str(job.id),
+        reversed=False,
+        request_id=None,
+    )
+    stripe.add(
+        TransferFacts(**{**live.__dict__, "transfer_id": "tr_probe68rev", "reversed": True}), group
+    )
+    stripe.add(live, group)
+
+    assert await service(db_session, stripe, clock).release(job.id) is ReleaseOutcome.CREATED
+
+    assert stripe.creates == []
+    row = await transfer_of(db_session, job.id)
+    assert row is not None
+    assert (row.status, row.stripe_transfer_id) == (TransferStatus.CREATED, "tr_probe68live")
+    assert (await job_row(db_session, job.id)).status is JobStatus.PAID_OUT
+
+
 # The database guards.
 
 
@@ -763,6 +811,65 @@ async def test_due_reads_only_payable_confirmed_jobs_and_respects_the_wait(
     assert {fresh.id, failed.id} <= set(later)
     # Never tried first, the failed one after.
     assert later.index(fresh.id) < later.index(failed.id)
+
+
+async def test_the_sweep_takes_a_held_back_job_once_its_pro_can_be_paid(
+    db_session: AsyncSession, world: JobWorld, stripe: FakeStripeTransfers, clock: Clock
+) -> None:
+    job = await confirmed_job(db_session, world)
+    pro = update(ProProfile).where(ProProfile.id == world.pro.profile_id)
+    await db_session.execute(pro.values(payouts_enabled=False))
+    await db_session.commit()
+    first = await service(db_session, stripe, clock).release(job.id)
+    assert first is ReleaseOutcome.PAYOUTS_NOT_ENABLED
+    assert job.id not in await service(db_session, stripe, clock).due(10_000)
+
+    await db_session.execute(pro.values(payouts_enabled=True))
+    await db_session.commit()
+    # Right away: no attempt was made, so there is nothing to wait for.
+    assert job.id in await service(db_session, stripe, clock).due(10_000)
+
+    await release_confirmed_jobs(worker_ctx(db_session, stripe, transfer_release_batch_size=10_000))
+
+    assert str(job.id) in {c["metadata"]["job_id"] for c in stripe.creates}
+    assert (await job_row(db_session, job.id)).status is JobStatus.PAID_OUT
+
+
+async def test_the_sweep_pays_out_a_job_whose_row_staff_repaired(
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe: FakeStripeTransfers,
+    clock: Clock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """After a review staff store the transfer on the row by hand (created, with its id): the
+    sweep moves the job to paid_out without calling Stripe."""
+    job = await confirmed_job(db_session, world)
+    stripe.errors["create"] = [StripeUnavailableError()]
+    await service(db_session, stripe, clock).release(job.id)
+    await db_session.execute(
+        update(Transfer)
+        .where(Transfer.job_id == job.id)
+        .values(status=TransferStatus.CREATED, stripe_transfer_id="tr_probe68repaired")
+    )
+    await db_session.commit()
+
+    assert job.id in await service(db_session, stripe, clock).due(10_000)
+    await release_confirmed_jobs(worker_ctx(db_session, stripe, transfer_release_batch_size=10_000))
+
+    assert stripe.creates == []
+    assert (await job_row(db_session, job.id)).status is JobStatus.PAID_OUT
+    assert "transfer_job_paid_out_late" in [r.getMessage() for r in caplog.records]
+    assert job.id not in await service(db_session, stripe, clock).due(10_000)
+
+
+async def test_due_reads_at_most_its_limit(
+    db_session: AsyncSession, world: JobWorld, stripe: FakeStripeTransfers, clock: Clock
+) -> None:
+    jobs = {(await confirmed_job(db_session, world)).id for _ in range(3)}
+
+    assert len(await service(db_session, stripe, clock).due(2)) == 2
+    assert jobs <= set(await service(db_session, stripe, clock).due(10_000))
 
 
 async def test_the_sweep_is_bounded_and_one_failure_never_stops_it(
@@ -989,16 +1096,18 @@ async def test_staff_read_the_transfer_and_each_read_is_audited(
     assert "idempotency_key" not in transfer
     audits = (
         await db_session.scalars(
-            select(AuditLog)
-            .where(AuditLog.entity_id == job.id, AuditLog.action == "job.read_transfer")
-            .order_by(AuditLog.created_at)
+            select(AuditLog).where(
+                AuditLog.entity_id == job.id, AuditLog.action == "job.read_transfer"
+            )
         )
     ).all()
-    assert [(a.actor_user_id, a.entity_type) for a in audits] == [
-        (world.agent.id, "job"),
-        (world.admin.id, "job"),
-    ]
-    assert audits[1].after == {"transfer_id": str(row.id), "status": "created"}
+    # One transaction in this test: both rows share created_at, so they are told apart by reader.
+    by_reader = {a.actor_user_id: a for a in audits}
+    assert len(audits) == 2
+    assert set(by_reader) == {world.agent.id, world.admin.id}
+    assert {a.entity_type for a in audits} == {"job"}
+    assert by_reader[world.agent.id].after == {"transfer_id": None, "status": None}
+    assert by_reader[world.admin.id].after == {"transfer_id": str(row.id), "status": "created"}
 
 
 async def test_only_staff_read_a_transfer(

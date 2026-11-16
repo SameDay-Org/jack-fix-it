@@ -89,4 +89,3 @@ async def test_the_round_trip_touches_only_the_new_table(db_session: AsyncSessio
     assert (await connection.run_sync(schema))[TABLE] == at_head[TABLE]
     total = await db_session.scalar(text("SELECT count(*) FROM transfers"))
     assert total == 0
-

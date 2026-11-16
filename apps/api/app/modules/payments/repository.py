@@ -268,9 +268,11 @@ class TransferRepository:
         be tried now (#68's sweep): the job is confirmed (`confirmed`: job_id, pro_id), its pro
         can be paid out (`payable`: pro_id), and it has no transfer row, or one Stripe has not
         made whose latest attempt, if any, started at or before `retry_before`. So an attempt
-        under way is left alone, and a failed one waits its turn. Least recently tried first
-        (never tried before all), then by job id: a job that keeps failing goes to the back, so
-        it never holds the others up. Unlocked: release checks each job again under its lock."""
+        under way is left alone, and a failed one waits its turn. Also a confirmed job whose row
+        says created: staff stored the transfer by hand after a review, and release moves the
+        job to paid_out. Least recently tried first (never tried before all), then by job id: a
+        job that keeps failing goes to the back, so it never holds the others up. Unlocked:
+        release checks each job again under its lock."""
         statement = (
             select(confirmed.c.job_id)
             .join(payable, payable.c.pro_id == confirmed.c.pro_id)
@@ -280,6 +282,7 @@ class TransferRepository:
                     Transfer.id.is_(None),
                     Transfer.status.in_(_NOT_MADE)
                     & (Transfer.requested_at.is_(None) | (Transfer.requested_at <= retry_before)),
+                    Transfer.status == TransferStatus.CREATED,
                 )
             )
             .order_by(Transfer.requested_at.asc().nulls_first(), confirmed.c.job_id)
