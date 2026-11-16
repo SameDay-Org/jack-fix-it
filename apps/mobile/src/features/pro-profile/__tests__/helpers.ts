@@ -58,6 +58,7 @@ export const EMPTY_PROFILE: ProProfile = {
   years_of_experience: null,
   photo: null,
   verification_status: "pending",
+  rejection_reason: null,
   payouts_enabled: false,
   categories: [],
   service_areas: [],
