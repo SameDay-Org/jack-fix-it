@@ -14,7 +14,7 @@ import {
   useWalletBusy,
 } from "./api";
 import { CardFace, cardTone } from "./CardFace";
-import { shortSpokenCard, walletOrder } from "./cards";
+import { ageOf, shortSpokenCard } from "./cards";
 
 /**
  * A saved card, opened: a sheet route presented with `sheetOptions("fitToContents")`. It shows
@@ -34,10 +34,8 @@ export function PaymentCardSheet() {
   const wallet = usePaymentMethods({ enabled: !cachedAtOpen });
   const [listed, setListed] = useState(wallet.data);
   if (listed === undefined && wallet.data) setListed(wallet.data);
-  const cards = listed && walletOrder(listed);
-  const index = cards ? cards.findIndex((card) => card.id === id) : -1;
-  const card = cards?.[index];
-  const missing = cards === undefined ? wallet.isError : !card;
+  const card = listed?.find((saved) => saved.id === id);
+  const missing = listed === undefined ? wallet.isError : !card;
   const busy = useWalletBusy();
   const setDefault = useSetDefaultCard();
   const deleteCard = useDeleteCard();
@@ -56,10 +54,10 @@ export function PaymentCardSheet() {
     if (missing) leave();
   }, [leave, missing]);
 
-  if (!cards || !card) return null;
+  if (!listed || !card) return null;
   const spoken = shortSpokenCard(t, card);
   // Who is the default next is the server's choice: no card is named.
-  const movesDefault = card.is_default && cards.length > 1;
+  const movesDefault = card.is_default && listed.length > 1;
 
   const confirmDelete = () => {
     if (asking.current) return;
@@ -118,7 +116,7 @@ export function PaymentCardSheet() {
     >
       {/* Room for the card's shadow inside the sheet's scrolling body. */}
       <View className="gap-3 px-1 pb-2 pt-1">
-        <CardFace card={card} tone={cardTone(index)} testID="payment-card-face" />
+        <CardFace card={card} tone={cardTone(ageOf(listed, card))} testID="payment-card-face" />
         {card.is_default ? (
           <Text className="text-callout text-navy-900" testID="payment-card-is-default">
             {t("paymentMethods.card.isDefault")}

@@ -16,8 +16,11 @@ const TONES: readonly CardTone[] = [
   { surface: "green-700", ink: "white", mark: "light" },
 ];
 
-/** The tone of the card at `index` of the wallet's order: the same in the pocket and opened. */
-export const cardTone = (index: number): CardTone => TONES[Math.max(index, 0) % TONES.length];
+/**
+ * The tone of a card of this `age` (`ageOf`, 0 for the oldest): the same in the pocket and opened,
+ * and the same whichever card is the default.
+ */
+export const cardTone = (age: number): CardTone => TONES[Math.max(age, 0) % TONES.length];
 
 /** The card's height at the smallest font; it grows with what is written on it. */
 const FACE_MIN_HEIGHT = 168;

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
@@ -17,12 +17,14 @@ import { bubbleShadow, continuousCorners, pressedTransform, tokens, withOpacity 
 import { BrandMark } from "./BrandMark";
 import { cardTone, DefaultMark } from "./CardFace";
 import {
+  ageOf,
   brandOf,
   cardName,
   expiryOf,
   maskedNumber,
   shortSpokenCard,
   spokenCard,
+  walletOrder,
   type SavedCard,
   type Wallet,
 } from "./cards";
@@ -135,8 +137,8 @@ function PocketFront({ size }: { size: Size | null }) {
 
 type CardStripProps = {
   card: SavedCard;
-  /** Its place in the wallet's order: its tone. */
-  index: number;
+  /** Its age in the wallet (`ageOf`): its tone. */
+  age: number;
   /** The card at the back of the stack: it tucks behind nothing, under the rim of the wallet's back. */
   first: boolean;
   /** With its expiry and its Default mark, as "See all" shows the cards. */
@@ -145,10 +147,10 @@ type CardStripProps = {
 };
 
 /** One card peeking out of the pocket: a button that opens it, read out in full. */
-function CardStrip({ card, index, first, detailed, onOpen }: CardStripProps) {
+function CardStrip({ card, age, first, detailed, onOpen }: CardStripProps) {
   const { t } = useTranslation();
   const [pressed, pressIn, pressOut] = useFlag();
-  const tone = cardTone(index);
+  const tone = cardTone(age);
   const ink = { color: tokens.colors[tone.ink] };
   return (
     <Pressable
@@ -199,8 +201,8 @@ function CardStrip({ card, index, first, detailed, onOpen }: CardStripProps) {
 }
 
 export type WalletPocketProps = {
-  /** The wallet in its order: the default first. */
-  cards: Wallet;
+  /** The wallet as the API lists it (the newest first); the pocket puts the default in front. */
+  wallet: Wallet;
   /** Every card out of the pocket, each with its expiry ("See all"). */
   expanded: boolean;
   onToggle: () => void;
@@ -218,7 +220,7 @@ export type WalletPocketProps = {
  * all" brings every card out with its expiry; a card opens when tapped.
  */
 export function WalletPocket({
-  cards,
+  wallet,
   expanded,
   onToggle,
   onOpen,
@@ -227,6 +229,7 @@ export function WalletPocket({
   settling,
 }: WalletPocketProps) {
   const { t } = useTranslation();
+  const cards = useMemo(() => walletOrder(wallet), [wallet]);
   const [front, setFront] = useState<Size | null>(null);
   const [tabHeight, setTabHeight] = useState<number>(STRIP.peek + STRIP.tuck);
   const [tabPressed, tabPressIn, tabPressOut] = useFlag();
@@ -287,19 +290,16 @@ export function WalletPocket({
         ]}
       />
       {/* Back to front, so each card is drawn over the one behind it. */}
-      {shown
-        .map((card, index) => ({ card, index }))
-        .reverse()
-        .map(({ card, index }, place) => (
-          <CardStrip
-            key={card.id}
-            card={card}
-            index={index}
-            first={place === 0}
-            detailed={expanded}
-            onOpen={() => onOpen(card)}
-          />
-        ))}
+      {[...shown].reverse().map((card, place) => (
+        <CardStrip
+          key={card.id}
+          card={card}
+          age={ageOf(wallet, card)}
+          first={place === 0}
+          detailed={expanded}
+          onOpen={() => onOpen(card)}
+        />
+      ))}
       {empty ? (
         <Pressable
           accessibilityRole="button"

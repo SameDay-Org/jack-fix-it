@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, Text, View } from "react-native";
 
@@ -7,11 +7,11 @@ import { Button, Notice, Screen, Skeleton } from "@/components/ui";
 import { BackButton } from "@/features/auth/components/BackButton";
 
 import { useAddCard, usePaymentMethods, useWalletBusy } from "./api";
-import { walletFailure, walletOrder, type SavedCard } from "./cards";
+import { walletFailure, type SavedCard } from "./cards";
 import { WalletPocket } from "./WalletPocket";
 
-// The loading wallet's shapes: one card peeking out, and the pocket's front.
-const SKELETON = { card: 72, tuck: 24, pocket: 152 } as const;
+// The loading wallet's shapes: the top of one card peeking out, and the pocket's front under it.
+const SKELETON = { card: 48, pocket: 152 } as const;
 
 /**
  * Account > Payment methods: the customer's wallet. The pocket holds the saved cards, the default
@@ -23,7 +23,7 @@ const SKELETON = { card: 72, tuck: 24, pocket: 152 } as const;
 export function PaymentMethodsScreen() {
   const { t } = useTranslation();
   const wallet = usePaymentMethods();
-  const cards = useMemo(() => wallet.data && walletOrder(wallet.data), [wallet.data]);
+  const cards = wallet.data;
   const busy = useWalletBusy();
   const { add, adding, failure } = useAddCard();
   const [expanded, setExpanded] = useState(false);
@@ -69,7 +69,7 @@ export function PaymentMethodsScreen() {
         {cards ? (
           <>
             <WalletPocket
-              cards={cards}
+              wallet={cards}
               expanded={expanded}
               onToggle={() => setExpanded((now) => !now)}
               onOpen={open}
@@ -106,15 +106,16 @@ export function PaymentMethodsScreen() {
   );
 }
 
-/** The wallet's outline while it loads: a card peeking out of the pocket. */
+/** The wallet's outline while it loads: a card peeking out of the pocket, side by side, not overlaid. */
 function WalletSkeleton() {
   const { t } = useTranslation();
   return (
     <View accessible accessibilityLabel={t("common.loading")} testID="payment-methods-loading">
-      <Skeleton height={SKELETON.card} radius="lg" className="mx-3" />
-      <View style={{ marginTop: -SKELETON.tuck }}>
-        <Skeleton height={SKELETON.pocket} radius="lg" />
+      {/* The inset on a wrapper: on the full-width shape itself it would push it past the edge. */}
+      <View className="px-3">
+        <Skeleton height={SKELETON.card} radius="lg" />
       </View>
+      <Skeleton height={SKELETON.pocket} radius="lg" />
     </View>
   );
 }

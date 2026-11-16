@@ -3,6 +3,7 @@ import i18n from "@/i18n";
 
 import {
   addedCard,
+  ageOf,
   brandOf,
   cardName,
   expiryOf,
@@ -78,6 +79,16 @@ describe("the wallet's order and its changes", () => {
 
   it("takes a card out without naming who is the default next", () => {
     expect(ids(withoutCard([VISA, MASTER, AMEX], "pm_visa"))).toEqual(["pm_master", "pm_amex"]);
+  });
+
+  it("ages a card from the oldest, so it keeps its color whoever is the default or is added", () => {
+    // The API lists the newest first.
+    expect([AMEX, MASTER, VISA].map((saved) => ageOf([AMEX, MASTER, VISA], saved))).toEqual([
+      2, 1, 0,
+    ]);
+    expect(ageOf(withDefault([AMEX, MASTER, VISA], "pm_amex"), VISA)).toBe(0);
+    expect(ageOf([NEW, AMEX, MASTER, VISA], MASTER)).toBe(1);
+    expect(ageOf([AMEX], NEW)).toBe(0);
   });
 
   it("finds the card an add saved: the one the wallet did not have before", () => {
