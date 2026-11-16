@@ -1,7 +1,7 @@
 """transfers
 
 Revision ID: 52bb3f92f12b
-Revises: 3f4b8f6a2cd8
+Revises: 6fedce2078df
 Create Date: 2026-11-15 23:30:05.127977
 
 """
@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "52bb3f92f12b"
-down_revision: str | Sequence[str] | None = "3f4b8f6a2cd8"
+down_revision: str | Sequence[str] | None = "6fedce2078df"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

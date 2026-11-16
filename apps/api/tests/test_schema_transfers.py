@@ -79,7 +79,7 @@ async def test_the_round_trip_touches_only_the_new_table(db_session: AsyncSessio
     at_head = await connection.run_sync(schema)
     others = {name: shape for name, shape in at_head.items() if name != TABLE}
 
-    assert migration().down_revision == "3f4b8f6a2cd8"
+    assert migration().down_revision == "6fedce2078df"
     for name in ("downgrade", "upgrade", "downgrade", "upgrade"):
         await step(db_session, name)
         now = await connection.run_sync(schema)
