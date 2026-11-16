@@ -18,9 +18,9 @@ const NOSE_TURN_DEG = 180;
  * size it has on screen there, about as long as the arrow is wide: a real van is a few pixels at
  * the follow camera's zoom.
  */
-const REAL_SIZE_ZOOM = 19;
-const FAR_ZOOM = 8;
-const FAR_SCALE = 2 ** (REAL_SIZE_ZOOM - FAR_ZOOM);
+const REAL_SIZE_ZOOM = 19.5;
+/** The van's scale is kept to this many decimals: finer steps cannot be seen. */
+const SCALE_DECIMALS = 3;
 /** A development server's asset address: the server's asset root, then the file's path. */
 const SERVED_ASSET = /^(https?:\/\/[^/]+\/assets\/)\?unstable_path=([^&]+)/;
 
@@ -38,9 +38,21 @@ export const vanRotation = (bearing: number): [number, number, number] => [
 ];
 
 /**
- * The van reads its turn from the feature the frames write, as the arrow does, so no frame goes
- * through React. Its opacity cannot come from the feature (the map's model layer takes one
- * opacity for the layer): `vanModelStyle` gives the layer's style, dimmed while the position is old.
+ * The model layer's scale (x, y, z) at a camera zoom: twice as large for each level out of
+ * `REAL_SIZE_ZOOM`, never smaller than the real van. It rides in the pro's feature and not in a
+ * zoom expression of the layer's style: the map works such an expression out at whole zoom
+ * levels only, which made the van jump to twice its size and back inside each level.
+ */
+export const vanScale = (zoom: number): [number, number, number] => {
+  const scale = Number(Math.max(1, 2 ** (REAL_SIZE_ZOOM - zoom)).toFixed(SCALE_DECIMALS));
+  return [scale, scale, scale];
+};
+
+/**
+ * The van reads its turn and its scale from the feature the map's frames write, as the arrow
+ * does, so no frame goes through React. Its opacity cannot come from the feature (the map's model
+ * layer takes one opacity for the layer): `vanModelStyle` gives the layer's style, dimmed while
+ * the position is old.
  */
 const VAN_MODEL_STYLE: ModelLayerStyle = {
   modelId: VAN_MODEL,
@@ -48,15 +60,7 @@ const VAN_MODEL_STYLE: ModelLayerStyle = {
   modelRotation: ["get", "rotation"],
   // Said in full: a key that is only left out keeps the value the layer had last.
   modelOpacity: 1,
-  modelScale: [
-    "interpolate",
-    ["exponential", 0.5],
-    ["zoom"],
-    FAR_ZOOM,
-    ["literal", [FAR_SCALE, FAR_SCALE, FAR_SCALE]],
-    REAL_SIZE_ZOOM,
-    ["literal", [1, 1, 1]],
-  ],
+  modelScale: ["get", "scale"],
   modelCastShadows: true,
 };
 const STALE_VAN_MODEL_STYLE: ModelLayerStyle = { ...VAN_MODEL_STYLE, modelOpacity: STALE_OPACITY };

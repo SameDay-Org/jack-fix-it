@@ -42,6 +42,7 @@ import {
   CAMERA_STEP_MS,
   CAMERA_TRANSITION_MS,
   FAR_M,
+  FOLLOW_ZOOM,
   followPadding,
   followStop,
   OVERVIEW_HOLD_MS,
@@ -66,6 +67,7 @@ import {
   vanModelSource,
   vanModelStyle,
   vanRotation,
+  vanScale,
 } from "./VanModel";
 
 // Once, before any map is drawn: the token, then Mapbox's telemetry off (the SDK collects usage
@@ -95,6 +97,8 @@ const ORNAMENT_GAP = 4;
 const ORNAMENT_SIDE = 16;
 const VAN_SOURCE = "jack-van";
 const ROUTE_SOURCE = "jack-route";
+/** The van is sized again once the camera's zoom moved this much (about 1 % of its size). */
+const ZOOM_STEP = 0.02;
 /** While the van glides, the route's line is cut back to it this often (and where it stops). */
 export const ROUTE_TRIM_MS = 200;
 /** Two rests of the van closer than this are the same place: the line is not drawn again. */
@@ -142,15 +146,17 @@ const pointFeature = (point: LngLat, properties: Record<string, number | number[
 });
 
 /** The van as the map draws it: where it is, the way it points, dimmed while the fix is old. */
-const vanFeature = (pose: VanPose, stale: boolean) =>
+const vanFeature = (pose: VanPose, stale: boolean, zoom: number) =>
   pointFeature(pose.point, {
     bearing: pose.bearing,
     rotation: vanRotation(pose.bearing),
+    scale: vanScale(zoom),
     opacity: stale ? STALE_OPACITY : 1,
   });
 
 /** The van written straight to its native source (GeoJSON text, as the source takes it). */
-const vanShape = (pose: VanPose, stale: boolean) => JSON.stringify(vanFeature(pose, stale));
+const vanShape = (pose: VanPose, stale: boolean, zoom: number) =>
+  JSON.stringify(vanFeature(pose, stale, zoom));
 
 const lineFeature = (points: readonly LngLat[]) => ({
   type: "Feature" as const,
@@ -194,6 +200,8 @@ export function LiveMap({ fix, stale, active, route, height, cards, onUnavailabl
   const van = useRef<ShapeSource>(null);
   const line = useRef<ShapeSource>(null);
   const pose = useRef<VanPose | null>(null);
+  // The camera's zoom as the map last reported it: the van's size on screen follows it.
+  const zoom = useRef(FOLLOW_ZOOM);
   // The camera's heading, from the map's own reports and what was last asked of it.
   const heading = useRef<number | null>(null);
   // The glide the van is on, the one the camera follows, and when the camera's next step is due:
@@ -281,7 +289,7 @@ export function LiveMap({ fix, stale, active, route, height, cards, onUnavailabl
     const { pose: next, glide, now } = frame;
     pose.current = next;
     gliding.current = glide;
-    van.current?.setNativeProps({ id: VAN_SOURCE, shape: vanShape(next, stale) });
+    van.current?.setNativeProps({ id: VAN_SOURCE, shape: vanShape(next, stale, zoom.current) });
     trimRoute(frame);
     if (mode !== "follow" || (glide === followed.current && now < nextStep.current)) return;
     followed.current = glide;
@@ -342,12 +350,23 @@ export function LiveMap({ fix, stale, active, route, height, cards, onUnavailabl
     return () => clearTimeout(timer);
   }, [hold, loaded]);
 
-  // The van dims and lights up again where it stands. A map nobody watches is left alone: its
-  // first frame back draws the van as it should look by then.
-  const restyle = useEffectEvent(() => {
+  // The van drawn again where it stands, as it should look now. A map nobody watches is left
+  // alone: its first frame back draws the van as it should look by then.
+  const redraw = () => {
     if (!active || pose.current === null) return;
-    van.current?.setNativeProps({ id: VAN_SOURCE, shape: vanShape(pose.current, stale) });
-  });
+    van.current?.setNativeProps({
+      id: VAN_SOURCE,
+      shape: vanShape(pose.current, stale, zoom.current),
+    });
+  };
+  // It keeps its size on screen as the camera zooms, for each step of zoom one could see.
+  const rescale = (at: number) => {
+    if (!(Math.abs(at - zoom.current) >= ZOOM_STEP)) return;
+    zoom.current = at;
+    redraw();
+  };
+  // It dims and lights up again with the age of its position.
+  const restyle = useEffectEvent(redraw);
   useEffect(() => restyle(), [stale]);
 
   // Unwatched in the middle of a glide, the frames stop cutting the line: React's own copy takes
@@ -360,7 +379,7 @@ export function LiveMap({ fix, stale, active, route, height, cards, onUnavailabl
   useEffect(() => settle(), [active]);
 
   const [initial] = useState(() => ({
-    van: vanFeature({ point: fix.point, bearing: fix.heading ?? 0 }, stale),
+    van: vanFeature({ point: fix.point, bearing: fix.heading ?? 0 }, stale, FOLLOW_ZOOM),
     camera: followStop(fix.point, fix.heading ?? 0, padding, 0, "none"),
   }));
 
@@ -389,6 +408,7 @@ export function LiveMap({ fix, stale, active, route, height, cards, onUnavailabl
         <CameraGestureObserver
           onCameraChanged={({ nativeEvent }) => {
             heading.current = nativeEvent.properties.heading;
+            rescale(nativeEvent.properties.zoom);
             if (nativeEvent.properties.isUserInteraction && !free) setFree(true);
           }}
         />

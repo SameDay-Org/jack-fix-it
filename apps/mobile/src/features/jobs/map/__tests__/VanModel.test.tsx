@@ -4,10 +4,11 @@ import { act, render, screen } from "@testing-library/react-native";
 import { Image, Text } from "react-native";
 
 import type { JobRoute } from "../api";
+import { FOLLOW_ZOOM } from "../camera";
 import { distanceM, type LngLat } from "../geo";
 import { LiveMap, type LiveMapProps } from "../LiveMap";
 import type { Fix } from "../motion";
-import { STALE_OPACITY, vanModelSource, vanRotation } from "../VanModel";
+import { STALE_OPACITY, vanModelSource, vanRotation, vanScale } from "../VanModel";
 
 import { at, L_ROUTE } from "./helpers";
 
@@ -70,7 +71,12 @@ const advance = async (ms: number) => {
 
 type VanFeature = {
   geometry: { coordinates: [number, number] };
-  properties: { bearing: number; rotation: [number, number, number]; opacity: number };
+  properties: {
+    bearing: number;
+    rotation: [number, number, number];
+    scale: [number, number, number];
+    opacity: number;
+  };
 };
 /** Every feature the frames wrote for the pro, oldest first. */
 const vanWrites = () =>
@@ -78,6 +84,15 @@ const vanWrites = () =>
     .filter(([id]) => id === "jack-van")
     .map(([, written]) => JSON.parse(String(written.shape)) as VanFeature);
 const lastVan = () => vanWrites().at(-1) as VanFeature;
+
+/** The map reports its camera, as it does on every change of it. */
+const cameraAt = async (zoom: number) => {
+  await act(async () => {
+    screen.getByTestId("mapbox-CameraGestureObserver").props.onCameraChanged({
+      nativeEvent: { properties: { heading: 0, zoom, isUserInteraction: false } },
+    });
+  });
+};
 
 const withAsset = (source: typeof BUNDLED | null) =>
   jest
@@ -152,7 +167,7 @@ describe("the van's model source", () => {
 });
 
 describe("LiveMap's van", () => {
-  it("draws the pro as the 3D model from its own source, at a readable size, real from zoom 19", async () => {
+  it("draws the pro as the 3D model from its own source, at a readable size", async () => {
     await render(<LiveMap {...props()} />);
     expect(screen.getByTestId("mapbox-Models").props.models).toEqual({ "jack-van-model": 1 });
     const layer = screen.getByTestId(MODEL_LAYER);
@@ -165,17 +180,57 @@ describe("LiveMap's van", () => {
       modelCastShadows: true,
     });
     expect(layer.props.style.modelOpacity).toBe(1);
-    // Twice as large for each zoom level out of 19, where it is its real size.
-    expect(layer.props.style.modelScale).toEqual([
-      "interpolate",
-      ["exponential", 0.5],
-      ["zoom"],
-      8,
-      ["literal", [2048, 2048, 2048]],
-      19,
-      ["literal", [1, 1, 1]],
-    ]);
+    // Its size comes from the feature too, never from a zoom expression in the style (the map
+    // works those out at whole zoom levels only).
+    expect(layer.props.style.modelScale).toEqual(["get", "scale"]);
+    expect(lastVan().properties.scale).toEqual(vanScale(FOLLOW_ZOOM));
     expect(screen.queryByTestId(ARROW_LAYER)).toBeNull();
+  });
+
+  it("is its real size from zoom 19.5 in, and twice as large for each level out of it", () => {
+    expect(vanScale(19.5)).toEqual([1, 1, 1]);
+    expect(vanScale(21)).toEqual([1, 1, 1]);
+    expect(vanScale(18.5)).toEqual([2, 2, 2]);
+    // The follow camera's zoom: eight times a real van, about as long as the arrow is wide.
+    expect(vanScale(FOLLOW_ZOOM)).toEqual([8, 8, 8]);
+    // Between two levels too: the same size on screen at 16 and at 17 as at 16.5.
+    expect(vanScale(16)[0]).toBeCloseTo(8 * Math.SQRT2, 3);
+    const onScreen = (zoom: number) => vanScale(zoom)[0] * 2 ** zoom;
+    expect(onScreen(13) / onScreen(16.5)).toBeCloseTo(1, 3);
+  });
+
+  it("keeps its size on screen as the camera zooms: sized again where it stands", async () => {
+    await render(<LiveMap {...props({ fix: fix(at(0, 100), 0, 90) })} />);
+    mapbox.mockSourceProps.mockClear();
+    // The overview, further out.
+    await cameraAt(13);
+    expect(vanWrites()).toHaveLength(1);
+    expect(lastVan().properties).toMatchObject({ scale: vanScale(13), rotation: [0, 0, 270] });
+    expect(vanScale(13)[0]).toBeCloseTo(64 * Math.SQRT2, 3);
+    expect(distanceM(lastVan().geometry.coordinates, at(0, 100))).toBeLessThan(0.1);
+    // A change of zoom nobody could see draws nothing; neither does a camera that only turns.
+    await cameraAt(13.01);
+    await cameraAt(13.01);
+    expect(vanWrites()).toHaveLength(1);
+    await cameraAt(13.5);
+    expect(vanWrites()).toHaveLength(2);
+    expect(lastVan().properties.scale).toEqual(vanScale(13.5));
+    // The frames of a glide carry the camera's zoom as well.
+    await screen.rerender(<LiveMap {...props({ fix: fix(at(0, 200), POLL_MS, 0) })} />);
+    await advance(POLL_MS);
+    expect(lastVan().properties.scale).toEqual(vanScale(13.5));
+  });
+
+  it("unwatched, only notes the camera's zoom: the first frame back has the right size", async () => {
+    await render(<LiveMap {...props()} />);
+    await screen.rerender(<LiveMap {...props({ active: false })} />);
+    mapbox.mockSourceProps.mockClear();
+    await cameraAt(14);
+    expect(mapbox.mockSourceProps).not.toHaveBeenCalled();
+    await screen.rerender(<LiveMap {...props()} />);
+    await advance(FRAME_MS);
+    expect(lastVan().properties.scale).toEqual(vanScale(14));
+    expect(vanScale(14)).not.toEqual(vanScale(FOLLOW_ZOOM));
   });
 
   it("turns the model with the pro's heading: its nose, glTF's +Z, points that way", async () => {
