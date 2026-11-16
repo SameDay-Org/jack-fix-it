@@ -4,11 +4,14 @@ import {
   PaymentSheetError,
   presentPaymentSheet,
   type AppearanceParams,
+  type SetupParams,
 } from "@stripe/stripe-react-native";
 
 import { tokens } from "@/theme";
 
 import { paymentConfig } from "./config";
+import type { ApiSchema } from "@jack/shared";
+
 import type { PaymentSheetOut } from "./paymentStore";
 import { resetSheetCustomer, sheetCustomerReady } from "./sheetCustomer";
 import { STRIPE_RETURN_PATH } from "./stripeReturn";
@@ -48,6 +51,16 @@ const APPEARANCE: AppearanceParams = {
   },
 };
 
+/** What the API hands over for the sheet to save a card (`POST /v1/me/payment-methods/setup-intent`). */
+export type SetupIntentOut = ApiSchema<"SetupIntentOut">;
+
+/** How a card-saving sheet ended: `saved` (Stripe confirmed the SetupIntent), or as a payment's. */
+export type SetupResult = Exclude<SheetResult, { kind: "paid" }> | { kind: "saved" };
+
+type SheetOptions = { merchantName: string; stillWanted: () => boolean; signal?: AbortSignal };
+/** What every sheet of the app is opened with, whatever it is for. */
+type SharedParams = Pick<SetupParams, "merchantDisplayName" | "returnURL" | "appearance">;
+
 /**
  * Opens Stripe's Payment Sheet for what the API prepared and waits for the customer. Card data goes
  * from the sheet to Stripe and never through this code, and neither secret is logged, kept or
@@ -58,13 +71,10 @@ const APPEARANCE: AppearanceParams = {
  * (`sheetCustomer`), and does not open when they could not (`unavailable`); when its own session
  * ends while Stripe is working, the reset is asked for again once Stripe is done.
  */
-export async function openPaymentSheet(
-  sheet: PaymentSheetOut,
-  {
-    merchantName,
-    stillWanted,
-    signal,
-  }: { merchantName: string; stillWanted: () => boolean; signal?: AbortSignal },
+async function runSheet(
+  publishableKey: string,
+  params: (shared: SharedParams) => SetupParams,
+  { merchantName, stillWanted, signal }: SheetOptions,
 ): Promise<SheetResult> {
   const session = await sheetCustomerReady(signal);
   if (session.kind === "unavailable") return { kind: "failed", reason: "unavailable" };
@@ -73,29 +83,19 @@ export async function openPaymentSheet(
   if (!wanted()) return { kind: "superseded" };
   try {
     await initStripe({
-      publishableKey: sheet.publishable_key,
+      publishableKey,
       merchantIdentifier: paymentConfig.appleMerchantId,
       urlScheme: paymentConfig.urlScheme,
     });
     if (!wanted()) return { kind: "superseded" };
 
-    const init = await initPaymentSheet({
-      merchantDisplayName: merchantName,
-      customerId: sheet.customer_id,
-      customerEphemeralKeySecret: sheet.ephemeral_key_secret,
-      paymentIntentClientSecret: sheet.payment_intent_client_secret,
-      allowsDelayedPaymentMethods: false,
-      returnURL: `${paymentConfig.urlScheme}://${STRIPE_RETURN_PATH}`,
-      applePay: paymentConfig.appleMerchantId
-        ? { merchantCountryCode: MERCHANT_COUNTRY }
-        : undefined,
-      googlePay: {
-        merchantCountryCode: MERCHANT_COUNTRY,
-        currencyCode: sheet.currency.toUpperCase(),
-        testEnv: !sheet.publishable_key.startsWith(LIVE_KEY_PREFIX),
-      },
-      appearance: APPEARANCE,
-    });
+    const init = await initPaymentSheet(
+      params({
+        merchantDisplayName: merchantName,
+        returnURL: `${paymentConfig.urlScheme}://${STRIPE_RETURN_PATH}`,
+        appearance: APPEARANCE,
+      }),
+    );
     if (init.error) return { kind: "failed", reason: "unavailable" };
     if (!wanted()) return { kind: "superseded" };
 
@@ -113,4 +113,53 @@ export async function openPaymentSheet(
     // Stripe may have saved this customer's sign-in after the reset ran: reset it again.
     if (session.ended()) resetSheetCustomer();
   }
+}
+
+/** The sheet that takes a payment for a quote (#59): see `runSheet` for what it promises. */
+export function openPaymentSheet(
+  sheet: PaymentSheetOut,
+  options: SheetOptions,
+): Promise<SheetResult> {
+  return runSheet(
+    sheet.publishable_key,
+    (shared) => ({
+      ...shared,
+      customerId: sheet.customer_id,
+      customerEphemeralKeySecret: sheet.ephemeral_key_secret,
+      paymentIntentClientSecret: sheet.payment_intent_client_secret,
+      allowsDelayedPaymentMethods: false,
+      applePay: paymentConfig.appleMerchantId
+        ? { merchantCountryCode: MERCHANT_COUNTRY }
+        : undefined,
+      googlePay: {
+        merchantCountryCode: MERCHANT_COUNTRY,
+        currencyCode: sheet.currency.toUpperCase(),
+        testEnv: !sheet.publishable_key.startsWith(LIVE_KEY_PREFIX),
+      },
+    }),
+    options,
+  );
+}
+
+/**
+ * The same sheet in setup mode (#253): it saves a card on the customer and charges nothing. No
+ * Apple Pay or Google Pay here: a wallet is not a saved card. The card goes from the sheet to
+ * Stripe; this code only learns how the sheet ended.
+ */
+export async function openSetupSheet(
+  setup: SetupIntentOut,
+  options: SheetOptions,
+): Promise<SetupResult> {
+  const result = await runSheet(
+    setup.publishable_key,
+    (shared) => ({
+      ...shared,
+      customerId: setup.customer_id,
+      customerEphemeralKeySecret: setup.ephemeral_key_secret,
+      setupIntentClientSecret: setup.client_secret,
+      allowsDelayedPaymentMethods: false,
+    }),
+    options,
+  );
+  return result.kind === "paid" ? { kind: "saved" } : result;
 }
