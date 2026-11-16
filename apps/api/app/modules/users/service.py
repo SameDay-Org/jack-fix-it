@@ -84,13 +84,22 @@ class UserService:
     async def public_names(self, user_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str | None]:
         """Each user's public name ("María P.", names.safe_public_name), read in one query;
         None when a name is missing or shows a contact detail, the user's own email and phone
-        included. The full names and the contacts never leave this module."""
+        included. The contacts never leave this module, and the full name only through
+        `legal_name` (staff's review of a pro)."""
         return {
             user_id: safe_public_name(
                 first, last, KnownValues(emails=(email,), phones=(phone,) if phone else ())
             )
             for user_id, first, last, email, phone in await self._users.names(user_ids)
         }
+
+    async def legal_name(self, user_id: uuid.UUID) -> str | None:
+        """The account's first and last name as stored, for the staff member who matches a
+        pro's ID document to the account (#41): the audited staff detail of one pro only,
+        never a list and never another user's view. None when the account has neither name."""
+        rows = await self._users.names({user_id})
+        parts = [name for _, first, last, _, _ in rows for name in (first, last) if name]
+        return " ".join(parts) or None
 
     async def first_names(self, user_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str | None]:
         """Each user's first name alone, read in one query: what the pro of a paid job sees of
