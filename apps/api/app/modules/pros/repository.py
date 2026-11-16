@@ -1,9 +1,10 @@
 import uuid
 from collections.abc import Collection, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Select, Subquery, delete, func, select, update
+from sqlalchemy import Select, Subquery, delete, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +23,20 @@ _RECEIVES_REQUESTS = (
     ProProfile.verification_status == ProVerificationStatus.APPROVED,
     ProProfile.payouts_enabled,
 )
+
+# Where a page of the staff list starts: strictly before this (created_at, id).
+Before = tuple[datetime, uuid.UUID]
+
+
+@dataclass(frozen=True)
+class DocumentSummary:
+    """A pro's documents by status, superseded ones left out, and when the oldest one still
+    pending was submitted (None with none pending)."""
+
+    pending: int = 0
+    approved: int = 0
+    rejected: int = 0
+    oldest_pending_at: datetime | None = None
 
 
 class ProProfileRepository:
@@ -194,6 +209,78 @@ class ProProfileRepository:
         statement = select(ProServiceArea.service_area_id).where(ProServiceArea.pro_id == pro_id)
         return list((await self._session.scalars(statement)).all())
 
+    async def staff_page(
+        self, *, status: ProVerificationStatus, limit: int, before: Before | None
+    ) -> list[ProProfile]:
+        """The profiles in `status` for staff (#41), newest first by (created_at, id), after
+        the cursor."""
+        statement = select(ProProfile).where(ProProfile.verification_status == status)
+        if before is not None:
+            statement = statement.where(
+                tuple_(ProProfile.created_at, ProProfile.id) < tuple_(*before)
+            )
+        statement = statement.order_by(ProProfile.created_at.desc(), ProProfile.id.desc())
+        return list((await self._session.scalars(statement.limit(limit))).all())
+
+    async def count_by_status(self) -> dict[ProVerificationStatus, int]:
+        """How many profiles each verification status has; a status with none is left out."""
+        statement = select(ProProfile.verification_status, func.count()).group_by(
+            ProProfile.verification_status
+        )
+        return {status: count for status, count in (await self._session.execute(statement)).all()}
+
+    async def category_ids_of(
+        self, pro_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, list[uuid.UUID]]:
+        """The category ids of each of these profiles, in one query; a profile with none is
+        left out."""
+        if not pro_ids:
+            return {}
+        statement = select(ProCategory.pro_id, ProCategory.category_id).where(
+            ProCategory.pro_id.in_(pro_ids)
+        )
+        found: dict[uuid.UUID, list[uuid.UUID]] = {}
+        for pro_id, category_id in (await self._session.execute(statement)).all():
+            found.setdefault(pro_id, []).append(category_id)
+        return found
+
+    async def service_area_counts(self, pro_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, int]:
+        """How many areas each of these profiles serves, in one query; none is left out."""
+        if not pro_ids:
+            return {}
+        statement = (
+            select(ProServiceArea.pro_id, func.count())
+            .where(ProServiceArea.pro_id.in_(pro_ids))
+            .group_by(ProServiceArea.pro_id)
+        )
+        return {pro_id: count for pro_id, count in (await self._session.execute(statement)).all()}
+
+    async def set_verification(
+        self,
+        pro_id: uuid.UUID,
+        status: ProVerificationStatus,
+        *,
+        reason: str | None,
+        reviewed_by: uuid.UUID,
+    ) -> ProProfile:
+        """Writes staff's decision (#41) in one statement: the status, why (None clears it),
+        who and when by the database clock. Returns the profile as written. The caller holds
+        the row's lock (get_by_id)."""
+        statement = (
+            update(ProProfile)
+            .where(ProProfile.id == pro_id)
+            .values(
+                verification_status=status,
+                rejection_reason=reason,
+                reviewed_by=reviewed_by,
+                reviewed_at=func.now(),
+                updated_at=func.now(),
+            )
+            .returning(ProProfile)
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one()
+
     async def replace_categories(self, pro_id: uuid.UUID, ids: Sequence[uuid.UUID]) -> None:
         await self._session.execute(delete(ProCategory).where(ProCategory.pro_id == pro_id))
         self._session.add_all(ProCategory(pro_id=pro_id, category_id=i) for i in ids)
@@ -246,3 +333,77 @@ class ProDocumentRepository:
             .order_by(ProDocument.created_at.desc(), ProDocument.id.desc())
         )
         return list((await self._session.scalars(statement)).all())
+
+    async def summaries(self, pro_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, DocumentSummary]:
+        """Each of these pros' documents by status, superseded ones left out, in one query; a
+        pro with no document is left out."""
+        if not pro_ids:
+            return {}
+        statement = (
+            select(
+                ProDocument.pro_id,
+                ProDocument.status,
+                func.count(),
+                func.min(ProDocument.created_at),
+            )
+            .where(
+                ProDocument.pro_id.in_(pro_ids),
+                ProDocument.status != ProDocumentStatus.SUPERSEDED,
+            )
+            .group_by(ProDocument.pro_id, ProDocument.status)
+        )
+        counts: dict[uuid.UUID, dict[ProDocumentStatus, int]] = {}
+        oldest_pending: dict[uuid.UUID, datetime] = {}
+        for pro_id, status, count, oldest in (await self._session.execute(statement)).all():
+            counts.setdefault(pro_id, {})[status] = count
+            if status == ProDocumentStatus.PENDING:
+                oldest_pending[pro_id] = oldest
+        return {
+            pro_id: DocumentSummary(
+                pending=by_status.get(ProDocumentStatus.PENDING, 0),
+                approved=by_status.get(ProDocumentStatus.APPROVED, 0),
+                rejected=by_status.get(ProDocumentStatus.REJECTED, 0),
+                oldest_pending_at=oldest_pending.get(pro_id),
+            )
+            for pro_id, by_status in counts.items()
+        }
+
+    async def get_of_pro_for_update(
+        self, pro_id: uuid.UUID, document_id: uuid.UUID
+    ) -> ProDocument | None:
+        """The pro's document as last committed, its row locked until the caller's transaction
+        ends: two reviews of one document run one after the other. None when the pro has no
+        such document."""
+        statement = (
+            select(ProDocument)
+            .where(ProDocument.id == document_id, ProDocument.pro_id == pro_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def set_review(
+        self,
+        document_id: uuid.UUID,
+        status: ProDocumentStatus,
+        *,
+        reason: str | None,
+        reviewed_by: uuid.UUID,
+    ) -> ProDocument:
+        """Writes staff's review (#41) in one statement: the status, why, who and when by the
+        database clock. Returns the document as written. The caller holds the row's lock
+        (get_of_pro_for_update)."""
+        statement = (
+            update(ProDocument)
+            .where(ProDocument.id == document_id)
+            .values(
+                status=status,
+                rejection_reason=reason,
+                reviewed_by=reviewed_by,
+                reviewed_at=func.now(),
+                updated_at=func.now(),
+            )
+            .returning(ProDocument)
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one()

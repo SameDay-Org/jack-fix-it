@@ -26,6 +26,13 @@ class AuditAction(StrEnum):
     JOB_CHAT_ORIGINALS_READ = "job.read_chat_originals"
     # A staff member moved a support ticket to another status (#274).
     SUPPORT_TICKET_SET_STATUS = "support_ticket.set_status"
+    # A staff read of a pro for review: the detail shows the legal name and hands out the
+    # URLs of the verification documents (#41).
+    PRO_REVIEW_READ = "pro_profile.read_for_review"
+    # A staff member approved or rejected a verification document (#41).
+    PRO_DOCUMENT_REVIEW = "pro_document.review"
+    # A staff member approved or rejected a pro profile (#41).
+    PRO_PROFILE_SET_VERIFICATION = "pro_profile.set_verification"
     # A staff read of a job's transfer to its pro (#68).
     JOB_TRANSFER_READ = "job.read_transfer"
 
@@ -33,6 +40,7 @@ class AuditAction(StrEnum):
 class AuditEntityType(StrEnum):
     PAYMENT = "payment"
     PRO_PROFILE = "pro_profile"
+    PRO_DOCUMENT = "pro_document"
     JOB = "job"
     SUPPORT_TICKET = "support_ticket"
 

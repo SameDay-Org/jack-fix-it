@@ -425,6 +425,25 @@ class Settings(BaseSettings):
     route_refresh_distance_m: float = Field(default=100.0, ge=0)
     route_max_points: int = Field(default=500, ge=2)
     route_max_steps: int = Field(default=30, gt=0)
+    # Geocode on save (#384): true gives a request's address its point once, when the request
+    # is made, with Mapbox's PERMANENT geocoding (the only kind that may be stored), so its
+    # route asks for no geocoding. Mapbox bills that kind apart and refuses it to an account
+    # without a payment method: leave it false until billing is set up (docs/railway.md).
+    # False, or a geocode that kept nothing: the route places the address by itself each
+    # time, as before. The worker makes the call (one per address, MAPBOX_TIMEOUT_SECONDS at
+    # the most), so it needs MAPBOX_ACCESS_TOKEN too; the save only waits for the queue.
+    geocode_on_save: bool = False
+    # scripts/backfill_address_geocodes.py: addresses read per step, and the most it asks
+    # Mapbox about per minute.
+    geocode_backfill_batch_size: int = Field(default=100, gt=0, le=1000)
+    geocode_backfill_per_minute: int = Field(default=300, gt=0)
+    # One billed call per address per window (addresses/geocode_claim.py): the worker and the
+    # backfill mark an address in the queue's Redis before they ask Mapbox about it, and
+    # nobody asks again until the mark ends with this window. Far longer than an address's
+    # claim (MAPBOX_TIMEOUT_SECONDS and a few seconds), so a holder paused past its claim, or
+    # a COMMIT that lands late, is never billed twice; a backfill run within it skips the
+    # address. A window not longer than the claim stops each geocode before any call.
+    geocode_attempt_window_seconds: int = Field(default=1800, ge=60)
     # Job chat (D14.1, #71): messages one user may send in one job's chat per window.
     chat_message_rate_limit: int = Field(default=20, gt=0)
     chat_message_rate_window_seconds: int = Field(default=60, gt=0)
