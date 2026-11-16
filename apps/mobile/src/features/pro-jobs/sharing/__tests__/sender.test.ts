@@ -299,9 +299,12 @@ describe("the location task", () => {
     const permissionRead = deferred<ReturnType<typeof permission>>();
     jest.mocked(Location.getForegroundPermissionsAsync).mockReturnValueOnce(permissionRead.promise);
     const start = shareJob(JOB_ID, 1);
-    await followJob(arrived()); // queued behind the start: the start re-checks first
+    // The start is reading the permission when the job leaves the way; its stop waits behind it.
+    await waitFor(() => expect(Location.getForegroundPermissionsAsync).toHaveBeenCalled());
+    const ending = followJob(arrived());
     permissionRead.resolve(permission("granted"));
     await start;
+    await ending;
     expect(starts()).toBe(0);
   });
 
