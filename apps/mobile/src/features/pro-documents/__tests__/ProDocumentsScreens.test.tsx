@@ -60,6 +60,24 @@ jest.mock("expo-image-picker", () => ({
   launchImageLibraryAsync: jest.fn(),
 }));
 jest.mock("expo-image-manipulator", () => ({}));
+// The phone's disk, as the files the app sees: what exists, and what was deleted.
+const mockDisk = { files: new Set<string>(), deleted: [] as string[] };
+jest.mock("expo-file-system", () => ({
+  Paths: { cache: { uri: "file:///data/app/cache/" } },
+  File: class {
+    mockUri: string;
+    constructor(mockUri: string) {
+      this.mockUri = mockUri;
+    }
+    get exists() {
+      return mockDisk.files.has(this.mockUri);
+    }
+    delete() {
+      mockDisk.files.delete(this.mockUri);
+      mockDisk.deleted.push(this.mockUri);
+    }
+  },
+}));
 jest.mock("../../media/compress", () => ({ prepareMedia: jest.fn(), compressImage: jest.fn() }));
 // "Camera or library" answers at once: the sheet's route is not part of these screens.
 jest.mock("../../media/mediaSource", () => ({
@@ -402,6 +420,76 @@ describe("DocumentScreen", () => {
 
     const image = await screen.findByTestId("pro-document-photo-image");
     expect(image.props.source).toEqual({ uri: fresh.url });
+  });
+
+  it("a fresh URL that fails too settles on the placeholder, and only a new one is tried", async () => {
+    const pending = document({ doc_type: "id", status: "pending" });
+    await openType("id", documents([pending]));
+    const failImage = () =>
+      act(async () =>
+        fireEvent(screen.getByTestId("pro-document-photo-image"), "error", { nativeEvent: {} }),
+      );
+    const refetchWith = async (url: string) => {
+      server = documents([{ ...pending, url }]);
+      await act(async () => {
+        await client.refetchQueries({ queryKey: myDocumentsQueryKey(1) });
+      });
+    };
+
+    await failImage(); // A
+    const urlB = pending.url.replace("sig-", "sig-b-");
+    await refetchWith(urlB);
+    expect((await screen.findByTestId("pro-document-photo-image")).props.source).toEqual({
+      uri: urlB,
+    });
+    await failImage(); // B
+
+    // Neither A nor B is loaded again: the frame says the photo is unavailable, and stays so.
+    await settle();
+    expect(screen.queryByTestId("pro-document-photo-image")).toBeNull();
+    expect(screen.getByTestId("pro-document-photo-frame").props.accessibilityLabel).toBe(
+      "The document's photo can't be shown right now",
+    );
+    await refetchWith(urlB);
+    expect(screen.queryByTestId("pro-document-photo-image")).toBeNull();
+
+    // A genuinely new URL gets its one try.
+    const urlC = pending.url.replace("sig-", "sig-c-");
+    await refetchWith(urlC);
+    expect((await screen.findByTestId("pro-document-photo-image")).props.source).toEqual({
+      uri: urlC,
+    });
+  });
+
+  it("the photo's copies leave the phone: compressed once uploaded, picked once the screen goes", async () => {
+    const pickedCopy = "file:///data/app/cache/ImagePicker/id.jpg";
+    const compressedCopy = "file:///data/app/cache/ImageManipulator/id.jpg";
+    mockDisk.files = new Set([pickedCopy]);
+    mockDisk.deleted = [];
+    jest.mocked(prepareMedia).mockImplementationOnce(async () => {
+      mockDisk.files.add(compressedCopy);
+      return { uri: compressedCopy, contentType: "image/jpeg", kind: "image" };
+    });
+    const view = await (async () => {
+      server = NOTHING_SENT;
+      navigation.setParams({ type: "id" });
+      const rendered = await renderWithQuery(<DocumentScreen />, client);
+      await screen.findByTestId("pro-document-submit");
+      return rendered;
+    })();
+    jest.mocked(ImagePicker.launchImageLibraryAsync).mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: pickedCopy, width: 800, height: 600, type: "image" }],
+    });
+    await pressed("pro-document-photo-choose");
+    await flush();
+    await act(async () => upload?.resolve());
+
+    // On the storage: only the preview's copy is left.
+    expect([...mockDisk.files]).toEqual([pickedCopy]);
+    await act(async () => view.unmount());
+    expect([...mockDisk.files]).toEqual([]);
+    expect(mockDisk.deleted.sort()).toEqual([compressedCopy, pickedCopy]);
   });
 
   it("an insurance: the expiry date goes as the API's date", async () => {

@@ -14,6 +14,7 @@ from sqlalchemy.exc import ProgrammingError
 
 import app.worker as app_worker
 from app.config import Settings, get_settings
+from app.integrations.mapbox import MapboxRouteProvider, UnconfiguredRouteProvider
 from app.integrations.stripe_payments import StripePaymentsClient
 from app.modules.chat.tasks import purge_chat_originals
 from app.modules.dispatch.tasks import dispatch_request
@@ -84,6 +85,8 @@ def test_registration_keeps_names_tries_and_timeouts() -> None:
             get_settings().media_sanitize_job_timeout_seconds,
         ),
         "process_stripe_event": (get_settings().stripe_webhook_max_attempts, None),
+        # One try: each run that reaches Mapbox is a billed call (#384).
+        "geocode_address": (1, None),
     }
 
 
@@ -249,6 +252,27 @@ async def test_startup_gives_the_sweep_a_stripe_client_only_with_a_key(
     without_key, with_key = contexts
     assert without_key["stripe_payments"] is None
     assert isinstance(with_key["stripe_payments"], StripePaymentsClient)
+
+
+async def test_startup_gives_the_geocode_task_mapbox_only_with_a_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """geocode_address (#384) reads ctx["address_geocoder"]: the Mapbox client with the
+    token, the stand-in whose every call is unavailable without it."""
+    monkeypatch.setattr(app_worker, "configure_logging", lambda level: None)
+    monkeypatch.setattr(app_worker, "init_sentry", lambda settings: None)
+    geocoders: list[object] = []
+    for token in (None, "pk.test-mapbox-token-not-real"):
+        settings = make_settings(mapbox_access_token=token)
+        monkeypatch.setattr(app_worker, "get_settings", lambda settings=settings: settings)
+        ctx: dict[str, Any] = {}
+        await app_worker.startup(ctx)
+        await app_worker.shutdown(ctx)
+        geocoders.append(ctx["address_geocoder"])
+
+    without_token, with_token = geocoders
+    assert isinstance(without_token, UnconfiguredRouteProvider)
+    assert isinstance(with_token, MapboxRouteProvider)
 
 
 @pytest.fixture

@@ -1240,9 +1240,6 @@
       "value": "Paso {{current}} de {{total}}, {{step}}",
       "none": "Aún no empieza"
     },
-    "map": {
-      "estimate": "El mapa es una estimación según la hora de llegada, no una ubicación en vivo."
-    },
     "paid": {
       "title": "Pagado",
       "tax": "Incluye {{tax}} de impuestos",
@@ -1337,6 +1334,37 @@
       "pending_other": "Estamos preparando {{count}} fotos más.",
       "pendingOnly_one": "Estamos preparando {{count}} foto.",
       "pendingOnly_other": "Estamos preparando {{count}} fotos."
+    },
+    "liveMap": {
+      "recenter": "Volver a centrar el mapa",
+      "miles": "{{miles}} mi",
+      "onStreet": "En {{street}}",
+      "waiting": "Esperando la ubicación",
+      "summary": {
+        "etaStreet": "{{name}} está a {{span}}, en {{street}}",
+        "eta": "{{name}} está a {{span}}",
+        "street": "{{name}} está en {{street}}",
+        "moving": "{{name}} va en camino",
+        "waiting": "Esperando la ubicación de {{name}}"
+      },
+      "placeholder": {
+        "loading": {
+          "title": "Cargando el mapa en vivo",
+          "body": "La ubicación de {{name}} aparecerá aquí en un momento."
+        },
+        "waiting": {
+          "title": "Esperando la ubicación de {{name}}",
+          "body": "El mapa mostrará a {{name}} en cuanto su teléfono comparta dónde está."
+        },
+        "offline": {
+          "title": "No se puede cargar el mapa en vivo",
+          "body": "Revisa tu conexión. Seguimos intentando, y la hora de llegada está abajo."
+        },
+        "unavailable": {
+          "title": "El mapa en vivo no está disponible",
+          "body": "La hora de llegada que dio {{name}} está abajo."
+        }
+      }
     }
   },
   "chat": {

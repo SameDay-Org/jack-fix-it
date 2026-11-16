@@ -212,6 +212,24 @@ pnpm --filter @jack/mobile exec expo export --platform android --output-dir dist
 docker run -d -p 9000:9000 -e RUSTFS_ACCESS_KEY=<key> -e RUSTFS_SECRET_KEY=<secret> rustfs/rustfs
 ```
 
+## Mapbox data boundary
+
+The live map (#353, `src/features/jobs/map`) is the only place where the app talks to Mapbox.
+
+- **Off:** usage and location telemetry. `setTelemetryEnabled(false)` runs right after
+  `setAccessToken`, before any map view exists (`LiveMap.tsx`; a test asserts the order). Keep it
+  there.
+- **Still sent, by design:** the SDK's turnstile event, which counts monthly active users for
+  billing (no location; the SDK has no switch for it, and blocking it would break its billing
+  contract), and the requests for the style, tiles, glyphs and the Standard style's 3D models.
+  Tile ids tell Mapbox which area the map shows.
+- **Local only:** the pro's position, the route and the customer's address come from our API and
+  live in the map's own sources. The app sends them to no endpoint but our API and logs none of
+  them (the PII rule in the root `AGENTS.md`).
+- The app makes no directions, geocoding or search call to Mapbox: the route and the street names
+  come from our API. Its token is the public `pk.` one (`EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN`).
+- Privacy policy (#97): it must name Mapbox as a processor of map requests and billing events.
+
 ## Mobile craft bar
 
 Every mobile change ships as if a senior mobile engineer and a senior product designer built it
