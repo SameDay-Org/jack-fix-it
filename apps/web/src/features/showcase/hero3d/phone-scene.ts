@@ -1,18 +1,15 @@
 import {
-  ACESFilmicToneMapping,
   CanvasTexture,
   ClampToEdgeWrapping,
-  DirectionalLight,
+  ImageBitmapLoader,
   LinearMipmapLinearFilter,
   PerspectiveCamera,
-  PMREMGenerator,
   Scene,
   SRGBColorSpace,
+  Texture,
   TextureLoader,
   WebGLRenderer,
-  type Texture,
 } from "three";
-import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 
 import { FRONT_POSE, mixPose, poseAt, screenAt, smoothstep, type PhonePose } from "./choreography";
 import { browserProbeHost, probeFrames } from "./frame-probe";
@@ -28,6 +25,9 @@ import { createPhone, PHONE } from "./phone-model";
  * or the tab is hidden. The canvas takes no pointer or touch input: a finger on it scrolls
  * the page.
  *
+ * It is kept cheap to prepare on a phone's CPU: unlit matcap materials (no lights, no
+ * environment map), shaders compiled without blocking where the GPU allows it
+ * (compileAsync), and screen captures decoded off the main thread (createImageBitmap).
  * Before it is handed over, everything the scroll will need is on the GPU (shaders and every
  * screen capture, one upload per frame), so no screen change stalls a frame later. If the
  * GPU drops the context before that, creating or probing the scene fails; after it, `onLost`
@@ -71,11 +71,76 @@ export function cameraDistance(fill: number, aspect: number, fovDegrees = FOV): 
   return Math.max(byHeight, byWidth);
 }
 
-function glareTexture(): CanvasTexture {
+/** A 2D canvas, or null where the browser cannot make one. */
+function canvas2d(
+  width: number,
+  height: number,
+): [HTMLCanvasElement, CanvasRenderingContext2D | null] {
   const canvas = document.createElement("canvas");
-  canvas.width = 256;
-  canvas.height = 512;
-  const context = canvas.getContext("2d");
+  canvas.width = width;
+  canvas.height = height;
+  return [canvas, canvas.getContext("2d")];
+}
+
+/**
+ * A matcap: a sphere lit from the upper left, darker towards its rim, with a faint ring of
+ * light near the rim that the band's bevel catches as the phone turns.
+ */
+function matcapTexture(stops: readonly [number, string][], key: string): CanvasTexture {
+  const size = 256;
+  const half = size / 2;
+  const [canvas, context] = canvas2d(size, size);
+  if (context) {
+    const body = context.createRadialGradient(
+      size * 0.4,
+      size * 0.35,
+      size * 0.04,
+      half,
+      half,
+      half,
+    );
+    for (const [at, colour] of stops) body.addColorStop(at, colour);
+    context.fillStyle = body;
+    context.fillRect(0, 0, size, size);
+    const light = context.createRadialGradient(
+      size * 0.32,
+      size * 0.27,
+      0,
+      size * 0.32,
+      size * 0.27,
+      size * 0.32,
+    );
+    light.addColorStop(0, key);
+    light.addColorStop(1, "rgba(255,255,255,0)");
+    context.fillStyle = light;
+    context.fillRect(0, 0, size, size);
+    const rim = context.createRadialGradient(half, half, size * 0.36, half, half, half);
+    rim.addColorStop(0, "rgba(255,255,255,0)");
+    rim.addColorStop(0.78, "rgba(255,255,255,0.3)");
+    rim.addColorStop(1, "rgba(255,255,255,0)");
+    context.fillStyle = rim;
+    context.fillRect(0, 0, size, size);
+  }
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  return texture;
+}
+
+/** A screen capture as a texture, decoded off the main thread where the browser can. */
+async function screenTexture(src: string, bitmaps: ImageBitmap[]): Promise<Texture> {
+  if (typeof createImageBitmap !== "function") return new TextureLoader().loadAsync(src);
+  const loader = new ImageBitmapLoader();
+  loader.setOptions({ imageOrientation: "flipY", premultiplyAlpha: "none" });
+  const bitmap = await loader.loadAsync(src);
+  bitmaps.push(bitmap);
+  const texture = new Texture(bitmap);
+  texture.flipY = false; // flipped when decoded
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function glareTexture(): CanvasTexture {
+  const [canvas, context] = canvas2d(256, 512);
   if (context) {
     const streak = context.createLinearGradient(0, 0, 256, 512);
     streak.addColorStop(0, "rgba(255,255,255,0)");
@@ -118,8 +183,13 @@ export async function createPhoneScene(options: PhoneSceneOptions): Promise<Phon
 
   // Filled in as they are made, so that a failure half-way releases what exists.
   const textures: Texture[] = [];
-  let release = () => {
+  const bitmaps: ImageBitmap[] = [];
+  const releaseImages = () => {
     textures.forEach((texture) => texture.dispose());
+    bitmaps.forEach((bitmap) => bitmap.close());
+  };
+  let release = () => {
+    releaseImages();
     canvas.removeEventListener("webglcontextlost", lost);
     renderer.dispose();
     renderer.forceContextLoss();
@@ -127,10 +197,9 @@ export async function createPhoneScene(options: PhoneSceneOptions): Promise<Phon
   };
 
   try {
-    const loader = new TextureLoader();
     const loaded = await Promise.all(
       screens.map(async (src) => {
-        const texture = await loader.loadAsync(src);
+        const texture = await screenTexture(src, bitmaps);
         texture.colorSpace = SRGBColorSpace;
         texture.minFilter = LinearMipmapLinearFilter;
         texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
@@ -145,24 +214,33 @@ export async function createPhoneScene(options: PhoneSceneOptions): Promise<Phon
   }
 
   renderer.setClearColor(0x000000, 0);
-  renderer.toneMapping = ACESFilmicToneMapping;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxPixelRatio));
   canvas.setAttribute("aria-hidden", "true");
   canvas.className = "block size-full";
 
   const scene = new Scene();
-  const pmrem = new PMREMGenerator(renderer);
-  const room = new RoomEnvironment();
-  const environment = pmrem.fromScene(room, 0.04).texture;
-  room.dispose();
-  scene.environment = environment;
-  const key = new DirectionalLight(0xffffff, 1.2);
-  key.position.set(-2, 3, 4);
-  scene.add(key);
-
-  const glare = glareTexture();
-  textures.push(glare);
-  const phone = createPhone(glare);
+  const looks = {
+    glare: glareTexture(),
+    metal: matcapTexture(
+      [
+        [0, "#f2f4f6"],
+        [0.45, "#b8bcc1"],
+        [0.8, "#7b8086"],
+        [1, "#555a61"],
+      ],
+      "rgba(255,255,255,0.9)",
+    ),
+    glass: matcapTexture(
+      [
+        [0, "#66717b"],
+        [0.5, "#1e252c"],
+        [1, "#05080b"],
+      ],
+      "rgba(255,255,255,0.45)",
+    ),
+  };
+  textures.push(looks.glare, looks.metal, looks.glass);
+  const phone = createPhone(looks);
   scene.add(phone.group);
   const camera = new PerspectiveCamera(FOV, 1, 0.1, 50);
 
@@ -230,9 +308,7 @@ export async function createPhoneScene(options: PhoneSceneOptions): Promise<Phon
     visibility.disconnect();
     canvas.removeEventListener("webglcontextlost", lost);
     phone.dispose();
-    textures.forEach((texture) => texture.dispose());
-    environment.dispose();
-    pmrem.dispose();
+    releaseImages();
     renderer.dispose();
     renderer.forceContextLoss();
     canvas.remove();
@@ -242,7 +318,8 @@ export async function createPhoneScene(options: PhoneSceneOptions): Promise<Phon
   try {
     container.append(canvas);
     resize();
-    renderer.compile(scene, camera);
+    await renderer.compileAsync(scene, camera);
+    if (!alive()) throw new Error("The WebGL context was lost while the shaders compiled.");
     // Every capture on the GPU now, one per frame, while the CSS phone still shows: no upload
     // stalls a frame when the scroll first brings a screen in.
     for (const texture of textures) {

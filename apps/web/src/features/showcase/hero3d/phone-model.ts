@@ -3,7 +3,7 @@ import {
   Group,
   Mesh,
   MeshBasicMaterial,
-  MeshStandardMaterial,
+  MeshMatcapMaterial,
   Shape,
   ShapeGeometry,
   type BufferGeometry,
@@ -17,6 +17,10 @@ import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeom
  * comes from a third party or from Apple (MODEL.md). A modern phone in the brand's light:
  * a rounded titanium band with a soft bevel, a dark glass front, the screen, the camera
  * island, the side buttons and a faint reflection that moves as the phone turns.
+ *
+ * The metal and the glass are matcap materials (a picture of a lit sphere, drawn on a canvas
+ * by phone-scene.ts): no lights, no environment map and tiny shaders, so the phone is cheap to
+ * prepare on a phone's CPU while still catching a highlight along its bevel as it turns.
  *
  * Units: the body is 1 wide. The screen keeps the 1:2 of the app's captures (media.ts), so a
  * capture fills it without being cut or stretched. The side buttons sit where the phone
@@ -81,15 +85,24 @@ export type Phone = {
   dispose(): void;
 };
 
-/** `glare`: a texture of a soft light streak, or null for none (tests have no canvas). */
-export function createPhone(glare: Texture | null): Phone {
+/** The canvas-drawn pictures the phone is made of; tests pass none (they have no canvas). */
+export type PhoneLooks = {
+  /** A soft light streak for the glass. */
+  glare: Texture;
+  /** Matcaps: brushed titanium for the band and buttons, dark glass for the front and back. */
+  metal: Texture;
+  glass: Texture;
+};
+
+export function createPhone(looks: PhoneLooks | null): Phone {
+  const glare = looks?.glare ?? null;
   const { width, height, depth, radius, bevel, screen, island } = PHONE;
   const front = depth / 2;
   const group = new Group();
 
-  const titanium = new MeshStandardMaterial({ color: 0x8f9398, metalness: 1, roughness: 0.34 });
-  const backGlass = new MeshStandardMaterial({ color: 0x14202c, metalness: 0.1, roughness: 0.3 });
-  const frontGlass = new MeshStandardMaterial({ color: 0x020407, metalness: 0, roughness: 0.08 });
+  const titanium = new MeshMatcapMaterial({ matcap: looks?.metal ?? null });
+  const backGlass = new MeshMatcapMaterial({ matcap: looks?.glass ?? null, color: 0x8fa3b8 });
+  const frontGlass = new MeshMatcapMaterial({ matcap: looks?.glass ?? null, color: 0x3a4148 });
 
   // The body: a rounded slab whose edge is the band. Extrusion caps are the glass faces
   // (material 0), the walls and their bevel are the band (material 1).
@@ -100,8 +113,8 @@ export function createPhone(glare: Texture | null): Phone {
     bevelEnabled: true,
     bevelThickness: bevel,
     bevelSize: bevel,
-    bevelSegments: 8,
-    curveSegments: 40,
+    bevelSegments: 6,
+    curveSegments: 28,
   });
   bodyGeometry.translate(0, 0, -slab / 2);
   group.add(new Mesh(bodyGeometry, [backGlass, titanium]));

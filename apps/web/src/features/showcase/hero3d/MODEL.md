@@ -20,8 +20,8 @@ the 1:2 shape of the app's captures (`../media.ts`).
 - The screen shows the app's own captures from `public/showcase/posters/`, the same files as
   the rest of the page (media manifest, `handoffs/showcase-media-needed.md`).
 - The reflection on the glass is a gradient drawn in a canvas at run time (`phone-scene.ts`).
-- The surroundings the metal reflects are three.js's `RoomEnvironment`, which is generated in
-  code.
+- The titanium and the glass are matcaps: pictures of a lit sphere, also drawn in a canvas at
+  run time (`phone-scene.ts`). No lights and no environment map are needed.
 
 **Licence.** The phone is original work under the same terms as the rest of this repository.
 three.js is used under its MIT licence (`node_modules/three/LICENSE`, copyright the three.js

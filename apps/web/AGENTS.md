@@ -75,7 +75,8 @@ apply.
     (`hero3d/capabilities.ts`): reduced motion, no script or a short viewport get a plain hero
     (the `still` variant of `globals.css`); no WebGL 2, a low-end device or a slow connection
     get the CSS phone; others get the 3D phone (three.js), imported only after the page has
-    loaded. It falls back to the CSS phone when its frames are slow or the GPU drops it.
+    loaded and while the tab is shown. It falls back to the CSS phone when its frames are slow
+    (`hero3d/frame-probe.ts`, visible time only) or the GPU drops it.
     `check:bundle` fails when three.js reaches the first load, and measures the lazy 3D chunk
     against a 200 KB gzip budget. The phone is built in code, with no model file
     (`hero3d/MODEL.md`).

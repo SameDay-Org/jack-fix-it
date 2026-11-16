@@ -110,6 +110,9 @@ export function HeroMotion({ children, className, screens }: HeroMotionProps) {
       let created: PhoneScene | null = null;
       try {
         const { createPhoneScene } = await import("./hero3d/phone-scene");
+        // Let the browser breathe between evaluating three.js and making the GL context:
+        // two shorter tasks instead of one long one.
+        await new Promise((resolve) => window.setTimeout(resolve, 0));
         if (stopped) return;
         created = await createPhoneScene({
           container,
