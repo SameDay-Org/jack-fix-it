@@ -1,13 +1,16 @@
-import type { QueryClient } from "@tanstack/react-query";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
+import { act, fireEvent, renderHook, screen, waitFor } from "@testing-library/react-native";
 import { router, useLocalSearchParams } from "expo-router";
+import type { ReactNode } from "react";
 import { AccessibilityInfo, Alert, type AlertButton } from "react-native";
 
 import { ApiError, apiDelete, apiGet, apiPost, NetworkError } from "@/api";
 import { dismissToast, toastStore } from "@/components/ui/toast";
+import { openSetupSheet } from "@/features/payments/paymentSheet";
 import i18n from "@/i18n";
 
 import { deferred, settle } from "../../../api/__tests__/helpers";
+import { PAYMENT_METHODS_QUERY_KEY, useAddCard, useDeleteCard, useSetDefaultCard } from "../api";
 import type { SavedCard, Wallet } from "../cards";
 import { PaymentCardSheet } from "../PaymentCardSheet";
 import { PaymentMethodsScreen } from "../PaymentMethodsScreen";
@@ -20,6 +23,8 @@ import {
   MASTER,
   newQueryClient,
   renderWallet,
+  SETUP,
+  SETUP_PATH,
   toast,
   VISA,
   walletClient,
@@ -50,8 +55,14 @@ jest.mock(
 let server: Wallet;
 const post = jest.mocked(apiPost) as unknown as jest.Mock;
 const remove = jest.mocked(apiDelete) as unknown as jest.Mock;
+const sheet = jest.mocked(openSetupSheet);
+const postsTo = (path: string) => post.mock.calls.filter(([asked]) => asked === path);
 let alert: jest.SpyInstance;
 let announce: jest.SpyInstance;
+
+/** What a set default or delete with no answer says: the app cannot tell whether it went through. */
+const UNCONFIRMED =
+  "We couldn't confirm that change. Check your connection, then open your cards again to see where things stand.";
 
 beforeEach(() => {
   mockGeneration = 1;
@@ -62,6 +73,8 @@ beforeEach(() => {
     .mockImplementation((async () => server) as never);
   post.mockReset();
   remove.mockReset().mockResolvedValue(undefined);
+  // An add that reaches Stripe's sheet ends with the customer closing it.
+  sheet.mockReset().mockResolvedValue({ kind: "canceled" });
   jest.mocked(router.back).mockClear();
   alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
   // React Native's statics are Jest mocks already: spying again keeps their calls, so clear them.
@@ -98,6 +111,11 @@ const openBoth = async (id: string) => {
   await screen.findByTestId("payment-card-face");
   return client;
 };
+/** The wallet's hooks on their own, on one cache: the actions without a button in front of them. */
+const withClient = (client: QueryClient) =>
+  function Wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  };
 const buttons = (call = 0) => alert.mock.calls[call][2] as AlertButton[];
 const confirmDelete = async () => {
   await fireEvent.press(screen.getByRole("button", { name: "Delete card" }));
@@ -169,10 +187,7 @@ describe("PaymentCardSheet", () => {
       new ApiError(503, "payments_unavailable"),
       "Cards can't be changed right now. Try again in a moment.",
     ],
-    [
-      new NetworkError(false),
-      "You're offline, so nothing changed. Try again once you're connected.",
-    ],
+    [new NetworkError(false), UNCONFIRMED],
     [new ApiError(429, "rate_limited"), "That's a lot of changes at once. Try again in a moment."],
   ])("a refused default change (case %#) is taken back and said calmly", async (error, message) => {
     const answer = deferred<SavedCard>();
@@ -187,6 +202,23 @@ describe("PaymentCardSheet", () => {
     expect(cachedWallet(client)).toEqual(["pm_visa*", "pm_master", "pm_amex"]);
     expect(toast()).toEqual({ message, tone: "danger" });
     expect(announce).not.toHaveBeenCalled();
+  });
+
+  it("a default change that timed out never says nothing changed, and the wallet ends as the server has it", async () => {
+    const answer = deferred<SavedCard>();
+    post.mockReturnValue(answer.promise);
+    const client = await openBoth("pm_master");
+
+    await fireEvent.press(screen.getByRole("button", { name: "Set as default" }));
+    await waitFor(() => expect(cachedWallet(client)).toEqual(["pm_visa", "pm_master*", "pm_amex"]));
+    // The server made the change; its answer came after the app's timeout.
+    serverSetsDefault("pm_master");
+    await act(async () => answer.reject(new NetworkError(true)));
+    await act(() => settle());
+
+    expect(toast()).toEqual({ message: UNCONFIRMED, tone: "danger" });
+    expect(toast()?.message).not.toMatch(/nothing changed/i);
+    await waitFor(() => expect(cachedWallet(client)).toEqual(["pm_visa", "pm_master*", "pm_amex"]));
   });
 
   it("a card that is gone when made the default: says so, and the wallet is the server's", async () => {
@@ -288,10 +320,7 @@ describe("PaymentCardSheet", () => {
       new ApiError(503, "payments_unavailable"),
       "Cards can't be changed right now. Try again in a moment.",
     ],
-    [
-      new NetworkError(false),
-      "You're offline, so nothing changed. Try again once you're connected.",
-    ],
+    [new NetworkError(false), UNCONFIRMED],
   ])("a refused delete (case %#) puts the card back and says so", async (error, message) => {
     const answer = deferred<undefined>();
     remove.mockReturnValue(answer.promise);
@@ -305,6 +334,24 @@ describe("PaymentCardSheet", () => {
     expect(cachedWallet(client)).toEqual(["pm_visa*", "pm_master", "pm_amex"]);
     expect(toast()).toEqual({ message, tone: "danger" });
     expect(announce).not.toHaveBeenCalled();
+  });
+
+  it("a delete that timed out never says nothing changed, and the wallet ends as the server has it", async () => {
+    const answer = deferred<undefined>();
+    remove.mockReturnValue(answer.promise);
+    const client = await openBoth("pm_master");
+
+    await confirmDelete();
+    await waitFor(() => expect(cachedWallet(client)).toEqual(["pm_visa*", "pm_amex"]));
+    // Stripe detached the card; the answer came after the app's timeout.
+    server = [VISA, AMEX];
+    await act(async () => answer.reject(new NetworkError(true)));
+    await act(() => settle());
+
+    expect(toast()).toEqual({ message: UNCONFIRMED, tone: "danger" });
+    expect(toast()?.message).not.toMatch(/nothing changed/i);
+    await waitFor(() => expect(cachedWallet(client)).toEqual(["pm_visa*", "pm_amex"]));
+    expect(screen.queryByTestId("wallet-card-pm_master")).toBeNull();
   });
 
   it("a card already gone counts as deleted", async () => {
@@ -374,7 +421,7 @@ describe("PaymentCardSheet", () => {
     expect(screen.getByTestId("payment-card-face").props.accessibilityLabel).toBe(
       "Mastercard terminada en 4444, vence 03 30",
     );
-    expect(screen.getByRole("button", { name: "Hacer predeterminada" })).toBeOnTheScreen();
+    expect(screen.getByRole("button", { name: "Usar por defecto" })).toBeOnTheScreen();
     await fireEvent.press(screen.getByRole("button", { name: "Eliminar tarjeta" }));
     expect(alert.mock.calls[0][0]).toBe("¿Eliminar Mastercard terminada en 4444?");
   });
@@ -409,20 +456,28 @@ describe("one change of the wallet at a time", () => {
   });
 
   it("a delete confirmed while another change started is not sent, and the sheet stays", async () => {
-    const answer = deferred<SavedCard>();
-    post.mockReturnValue(answer.promise);
-    const client = await openBoth("pm_master");
+    const setup = deferred<typeof SETUP>();
+    post.mockReturnValue(setup.promise);
+    await openBoth("pm_master");
 
-    // The question opens first; the default change starts while it is still up.
+    // The question opens first; an add starts on the wallet's screen while it is still up. The
+    // sheet itself has not closed, so a close now could only come from the confirmed delete.
     await fireEvent.press(screen.getByRole("button", { name: "Delete card" }));
-    await fireEvent.press(screen.getByRole("button", { name: "Set as default" }));
-    await waitFor(() => expect(cachedWallet(client)).toEqual(["pm_visa", "pm_master*", "pm_amex"]));
-    jest.mocked(router.back).mockClear();
-    await act(async () => buttons()[1].onPress?.());
+    await fireEvent.press(screen.getByTestId("payment-methods-add"));
+    await waitFor(() => expect(postsTo(SETUP_PATH)).toHaveLength(1));
+    try {
+      await act(async () => buttons()[1].onPress?.());
 
-    expect(remove).not.toHaveBeenCalled();
-    expect(router.back).not.toHaveBeenCalled();
-    await act(async () => answer.resolve(serverSetsDefault("pm_master")));
+      expect(remove).not.toHaveBeenCalled();
+      expect(router.back).not.toHaveBeenCalled();
+      expect(screen.getByTestId("payment-card-sheet")).toBeOnTheScreen();
+    } finally {
+      // The add ends, the customer closing Stripe's sheet: the app's one sheet is free again for
+      // the next test, whatever failed here.
+      await act(async () => setup.resolve({ ...SETUP }));
+      await act(() => settle());
+    }
+    expect(sheet).toHaveBeenCalledTimes(1);
   });
 
   it("deleting the default: the pocket waits for the server to name the next one", async () => {
@@ -433,7 +488,7 @@ describe("one change of the wallet at a time", () => {
     await confirmDelete();
 
     // No card is crowned on the device: the pocket says the wallet is updating.
-    expect(await screen.findByTestId("wallet-pocket-none")).toHaveTextContent(
+    expect(await screen.findByTestId("wallet-pocket-updating")).toHaveTextContent(
       "Updating your wallet…",
     );
     // The server promotes the most recently added of the others, whatever the device would guess.
@@ -444,6 +499,116 @@ describe("one change of the wallet at a time", () => {
       "DefaultAmerican Express •••• 0005",
     );
     expect(screen.queryByTestId("wallet-card-pm_visa")).toBeNull();
+  });
+
+  it("deleting the default: a list that then fails never says there is no default, and Try again shows the server's", async () => {
+    const answer = deferred<undefined>();
+    remove.mockReturnValue(answer.promise);
+    await openBoth("pm_visa");
+
+    await confirmDelete();
+    expect(await screen.findByTestId("wallet-pocket-updating")).toBeOnTheScreen();
+    // The server deleted Visa and promoted Amex, but the list asked afterwards gets no answer.
+    server = [MASTER, { ...AMEX, is_default: true }];
+    jest.mocked(apiGet).mockRejectedValueOnce(new NetworkError(false));
+    await act(async () => answer.resolve(undefined));
+    await act(() => settle());
+
+    // No claim either way about the default, and the screen says the wallet may be out of date.
+    expect(await screen.findByTestId("wallet-pocket-stale")).toHaveTextContent(
+      "Couldn't check your default card",
+    );
+    expect(screen.queryByTestId("wallet-pocket-none")).toBeNull();
+    expect(screen.queryByText("No default card")).toBeNull();
+    expect(screen.getByTestId("payment-methods-stale")).toHaveTextContent(
+      "We couldn't refresh your cards. What you see may be out of date.",
+      { exact: false },
+    );
+    expect(screen.getByTestId("payment-methods-refresh")).toHaveTextContent("Try again");
+    expect(screen.queryByTestId("payment-methods-failed")).toBeNull();
+
+    await fireEvent.press(screen.getByTestId("payment-methods-refresh"));
+
+    expect(await screen.findByTestId("wallet-pocket-default")).toHaveTextContent(
+      "DefaultAmerican Express •••• 0005",
+    );
+    expect(screen.queryByTestId("payment-methods-stale")).toBeNull();
+    expect(screen.queryByTestId("wallet-pocket-stale")).toBeNull();
+  });
+
+  it("the empty pocket's Add is off while the delete that emptied it is unanswered", async () => {
+    server = [VISA];
+    const answer = deferred<undefined>();
+    remove.mockReturnValue(answer.promise);
+    const client = await openBoth("pm_visa");
+
+    await confirmDelete();
+
+    // The only card left at once: the pocket is the Add button, and it waits for the server.
+    const pocket = await screen.findByTestId("wallet-pocket-add");
+    expect(pocket).toBeDisabled();
+    expect(pocket).toHaveStyle({ opacity: 0.5 });
+    await fireEvent.press(pocket);
+    expect(postsTo(SETUP_PATH)).toEqual([]);
+
+    server = [];
+    await act(async () => answer.resolve(undefined));
+    await act(() => settle());
+
+    expect(cachedWallet(client)).toEqual([]);
+    await waitFor(() => expect(screen.getByTestId("wallet-pocket-add")).toBeEnabled());
+    expect(screen.getByTestId("wallet-pocket-add")).not.toHaveStyle({ opacity: 0.5 });
+    // Now a tap starts the add.
+    post.mockResolvedValue({ ...SETUP });
+    await fireEvent.press(screen.getByTestId("wallet-pocket-add"));
+    await act(() => settle());
+    expect(postsTo(SETUP_PATH)).toHaveLength(1);
+    expect(sheet).toHaveBeenCalledTimes(1);
+  });
+
+  it("the actions themselves refuse a second change while one is unanswered, buttons aside", async () => {
+    const answer = deferred<SavedCard>();
+    post.mockReturnValueOnce(answer.promise);
+    const client = walletClient(server);
+    const { result } = await renderHook(
+      () => ({
+        setDefault: useSetDefaultCard(),
+        deleteCard: useDeleteCard(),
+        addCard: useAddCard(),
+      }),
+      { wrapper: withClient(client) },
+    );
+
+    const first = await act(async () => result.current.setDefault(MASTER));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    const refused = await act(async () => {
+      const started = [result.current.setDefault(AMEX), result.current.deleteCard(AMEX)];
+      result.current.addCard.add();
+      return started;
+    });
+    await act(() => settle());
+
+    expect(first).toBe(true);
+    expect(refused).toEqual([false, false]);
+    expect(post.mock.calls.map(([path, , options]) => [path, options.params])).toEqual([
+      [DEFAULT_PATH, { payment_method_id: "pm_master" }],
+    ]);
+    expect(remove).not.toHaveBeenCalled();
+    expect(sheet).not.toHaveBeenCalled();
+
+    // Once the first is answered, the next one starts.
+    await act(async () => answer.resolve(serverSetsDefault("pm_master")));
+    await act(() => settle());
+    post.mockImplementation(async () => serverSetsDefault("pm_amex"));
+    const next = await act(async () => result.current.setDefault(AMEX));
+    await act(() => settle());
+
+    expect(next).toBe(true);
+    expect(postsTo(DEFAULT_PATH).map(([, , options]) => options.params)).toEqual([
+      { payment_method_id: "pm_master" },
+      { payment_method_id: "pm_amex" },
+    ]);
+    expect(cachedWallet(client)).toEqual(["pm_visa", "pm_master", "pm_amex*"]);
   });
 });
 
@@ -467,13 +632,14 @@ describe("a change belongs to the session it was asked in", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Set as default" }));
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
     await nextSession(client);
-    const listed = jest.mocked(apiGet).mock.calls.length;
     await act(async () => answer.resolve({ ...MASTER, is_default: true }));
     await act(() => settle());
 
     expect(cachedWallet(client)).toEqual(["pm_other*"]);
     expect(announce).not.toHaveBeenCalled();
-    expect(jest.mocked(apiGet).mock.calls).toHaveLength(listed);
+    // The new session's wallet is not listed again for it: a list asked for would mark it, even
+    // with no screen here to fetch it.
+    expect(client.getQueryState(PAYMENT_METHODS_QUERY_KEY)?.isInvalidated).toBe(false);
   });
 
   it("a delete refused after the session changed puts nothing back and shows nothing", async () => {
@@ -489,5 +655,6 @@ describe("a change belongs to the session it was asked in", () => {
 
     expect(cachedWallet(client)).toEqual(["pm_other*"]);
     expect(toast()).toBeNull();
+    expect(client.getQueryState(PAYMENT_METHODS_QUERY_KEY)?.isInvalidated).toBe(false);
   });
 });

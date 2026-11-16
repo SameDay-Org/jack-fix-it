@@ -97,6 +97,16 @@ const strips = () =>
     .map((strip) => strip.props.accessibilityLabel as string)
     .reverse();
 const addButton = () => screen.getByTestId("payment-methods-add");
+/** Lists the wallet again, as the refresh after a change does, and lets the answer land. */
+const refresh = async (client: QueryClient) => {
+  await act(() => client.invalidateQueries({ queryKey: ["payment-methods"], exact: true }));
+  await act(() => settle());
+};
+
+const SUPPORT = "Tap a card to make it your default or to delete it.";
+const REFRESH_FAILED = "We couldn't refresh your cards. What you see may be out of date.";
+const TIMED_OUT = "Saving the card took too long";
+const TIMED_OUT_BODY = "It may have been saved: check your cards before you try again.";
 
 describe("PaymentMethodsScreen", () => {
   it("shows the wallet: the default in front and named on the pocket, each card read in full", async () => {
@@ -185,11 +195,91 @@ describe("PaymentMethodsScreen", () => {
     await open();
 
     expect(screen.getByTestId("payment-methods-loading")).toBeOnTheScreen();
+    // The See all tab has its place in the outline too.
+    expect(screen.getByTestId("payment-methods-loading-tab")).toBeOnTheScreen();
     expect(screen.queryByTestId("wallet-pocket")).toBeNull();
+    // The support line waits for the list: what it says depends on whether there are cards.
+    expect(screen.queryByTestId("payment-methods-support")).toBeNull();
+    expect(screen.queryByText(SUPPORT)).toBeNull();
+    expect(screen.queryByText("No cards saved yet.")).toBeNull();
+    expect(screen.queryByTestId("payment-methods-stale")).toBeNull();
 
     await act(async () => list.resolve([VISA]));
     expect(await screen.findByTestId("wallet-pocket-default")).toBeOnTheScreen();
     expect(screen.queryByTestId("payment-methods-loading")).toBeNull();
+    expect(screen.queryByTestId("payment-methods-loading-tab")).toBeNull();
+    expect(screen.getByTestId("payment-methods-support")).toHaveTextContent(SUPPORT);
+  });
+
+  it.each([
+    ["offline", new NetworkError(false)],
+    ["a 503", new ApiError(503, "payments_unavailable")],
+  ])(
+    "a refresh that fails (%s) keeps the wallet on screen, says it may be out of date and offers a retry",
+    async (_case, error) => {
+      const { client } = await open();
+      await screen.findByTestId("wallet-pocket-default");
+      jest.mocked(apiGet).mockRejectedValueOnce(error);
+
+      await refresh(client);
+
+      // The wallet as last listed stays: the pocket, its default, its cards and Add.
+      expect(screen.getByTestId("wallet-pocket-default")).toHaveTextContent(
+        "DefaultVisa •••• 4242",
+      );
+      expect(strips()).toEqual([
+        "Visa ending 4242, expires 12 28, default",
+        "Mastercard ending 4444, expires 03 30",
+        "American Express ending 0005, expires 07 27",
+      ]);
+      expect(addButton()).toBeEnabled();
+      // Not the notice of a wallet that never loaded: this one did.
+      expect(screen.queryByTestId("payment-methods-failed")).toBeNull();
+      const notice = screen.getByTestId("payment-methods-stale");
+      expect(within(notice).getByText(REFRESH_FAILED)).toBeOnTheScreen();
+      const listed = jest.mocked(apiGet).mock.calls.length;
+
+      await fireEvent.press(within(notice).getByTestId("payment-methods-refresh"));
+
+      await waitFor(() => expect(screen.queryByTestId("payment-methods-stale")).toBeNull());
+      expect(
+        jest
+          .mocked(apiGet)
+          .mock.calls.slice(listed)
+          .map(([path]) => path),
+      ).toEqual([WALLET_PATH]);
+      expect(screen.getByTestId("wallet-pocket-default")).toBeOnTheScreen();
+      expect(screen.queryByTestId("payment-methods-failed")).toBeNull();
+    },
+  );
+
+  it("with cards but no default and a refresh that fails, the pocket does not claim there is none", async () => {
+    server = [MASTER, AMEX];
+    const { client } = await open();
+    await screen.findByTestId("wallet-pocket-none");
+    jest.mocked(apiGet).mockRejectedValueOnce(new NetworkError(false));
+
+    await refresh(client);
+
+    // The server may have a default by now (one chosen after a delete): the face makes no claim.
+    expect(screen.getByTestId("wallet-pocket-stale")).toHaveTextContent(
+      "Couldn't check your default card",
+    );
+    expect(screen.queryByTestId("wallet-pocket-none")).toBeNull();
+    expect(screen.queryByText("No default card")).toBeNull();
+    expect(screen.queryByText("Open a card to make it your default.")).toBeNull();
+    expect(
+      within(screen.getByTestId("payment-methods-stale")).getByText(REFRESH_FAILED),
+    ).toBeOnTheScreen();
+
+    // Listed again, the server's word is what the face says.
+    await fireEvent.press(screen.getByTestId("payment-methods-refresh"));
+
+    expect(await screen.findByTestId("wallet-pocket-none")).toHaveTextContent(
+      "No default cardOpen a card to make it your default.",
+    );
+    expect(screen.queryByTestId("wallet-pocket-stale")).toBeNull();
+    expect(screen.queryByTestId("payment-methods-stale")).toBeNull();
   });
 
   it.each([
@@ -305,19 +395,56 @@ describe("Add a card", () => {
 
   it.each([
     ["failed", "The card wasn't saved", "Try again, or use another card."],
-    ["timeout", "Saving the card took too long", "Please try again."],
     ["unavailable", "The card form couldn't open", "Nothing was saved. Please try again."],
-  ] as const)("a sheet that ends %s says so calmly", async (reason, title, body) => {
-    sheet.mockResolvedValue({ kind: "failed", reason });
-    await open();
+  ] as const)(
+    "a sheet that ends %s says so calmly and lists nothing again",
+    async (reason, title, body) => {
+      sheet.mockResolvedValue({ kind: "failed", reason });
+      await open();
+      await screen.findByTestId("payment-methods-add");
+      const listed = jest.mocked(apiGet).mock.calls.length;
 
-    await fireEvent.press(await screen.findByTestId("payment-methods-add"));
+      await fireEvent.press(addButton());
+      await act(() => settle());
+
+      const notice = screen.getByTestId("payment-methods-add-failed");
+      expect(within(notice).getByText(title)).toBeOnTheScreen();
+      expect(within(notice).getByText(body)).toBeOnTheScreen();
+      // No card can have been saved: the wallet is not listed again.
+      expect(jest.mocked(apiGet).mock.calls).toHaveLength(listed);
+      expect(postsTo(DEFAULT_PATH)).toEqual([]);
+      expect(toast()).toBeNull();
+
+      // The next try clears it.
+      sheet.mockResolvedValue({ kind: "canceled" });
+      await fireEvent.press(addButton());
+      await act(() => settle());
+      expect(screen.queryByTestId("payment-methods-add-failed")).toBeNull();
+    },
+  );
+
+  it("a sheet that times out with nothing saved: lists the wallet again, crowns no older card, and says to check", async () => {
+    server = [MASTER, AMEX];
+    sheet.mockResolvedValue({ kind: "failed", reason: "timeout" });
+    const { client } = await open();
+    await screen.findByTestId("payment-methods-add");
+    const listed = jest.mocked(apiGet).mock.calls.length;
+
+    await fireEvent.press(addButton());
     await act(() => settle());
 
     const notice = screen.getByTestId("payment-methods-add-failed");
-    expect(within(notice).getByText(title)).toBeOnTheScreen();
-    expect(within(notice).getByText(body)).toBeOnTheScreen();
+    expect(within(notice).getByText(TIMED_OUT)).toBeOnTheScreen();
+    expect(within(notice).getByText(TIMED_OUT_BODY)).toBeOnTheScreen();
+    // Stripe may have saved it all the same: the wallet is listed once more, for the session that
+    // asked...
+    expect(jest.mocked(apiGet).mock.calls.slice(listed)).toEqual([
+      [WALLET_PATH, { auth: true, generation: 1 }],
+    ]);
+    // ...and with no new card in it, no card is made the default, an older one least of all.
     expect(postsTo(DEFAULT_PATH)).toEqual([]);
+    expect(cachedWallet(client)).toEqual(["pm_master", "pm_amex"]);
+    expect(screen.getByTestId("wallet-pocket-none")).toHaveTextContent(/No default card/);
     expect(toast()).toBeNull();
 
     // The next try clears it.
@@ -325,6 +452,34 @@ describe("Add a card", () => {
     await fireEvent.press(addButton());
     await act(() => settle());
     expect(screen.queryByTestId("payment-methods-add-failed")).toBeNull();
+  });
+
+  it("a sheet that times out after Stripe saved the card: the new card gets the default, and the notice still says it took too long", async () => {
+    server = [MASTER, AMEX];
+    sheet.mockImplementation(async () => {
+      server = [NEW, ...server];
+      return { kind: "failed", reason: "timeout" };
+    });
+    const { client } = await open();
+
+    await fireEvent.press(await screen.findByTestId("payment-methods-add"));
+    await act(() => settle());
+
+    // The card the list shows that was not in the wallet before, not an older one.
+    expect(postsTo(DEFAULT_PATH)).toEqual([
+      [
+        DEFAULT_PATH,
+        undefined,
+        { auth: true, generation: 1, params: { payment_method_id: "pm_new" } },
+      ],
+    ]);
+    expect(cachedWallet(client)).toEqual(["pm_new*", "pm_master", "pm_amex"]);
+    expect(screen.getByTestId("wallet-pocket-default")).toHaveTextContent("DefaultVisa •••• 5556");
+    // The sheet never said it saved: no "Card saved.", the notice says what happened.
+    const notice = screen.getByTestId("payment-methods-add-failed");
+    expect(within(notice).getByText(TIMED_OUT)).toBeOnTheScreen();
+    expect(within(notice).getByText(TIMED_OUT_BODY)).toBeOnTheScreen();
+    expect(toast()).toBeNull();
   });
 
   it.each([
@@ -405,10 +560,11 @@ describe("Add a card", () => {
   it("the screen leaving while the SetupIntent is on its way: the sheet is not wanted", async () => {
     const setup = deferred<typeof SETUP>();
     post.mockReturnValueOnce(setup.promise);
+    // What the real sheet checks before it opens anything. Recorded, and asserted below: addCard
+    // catches whatever the sheet throws, an assertion's error too.
+    let seen: { wanted: boolean; aborted: boolean | undefined } | undefined;
     sheet.mockImplementation(async (_setup, { stillWanted, signal }) => {
-      // What the real sheet checks before it opens anything.
-      expect(stillWanted()).toBe(false);
-      expect(signal?.aborted).toBe(true);
+      seen = { wanted: stillWanted(), aborted: signal?.aborted };
       return { kind: "superseded" };
     });
     const { view } = await open();
@@ -419,6 +575,7 @@ describe("Add a card", () => {
     await act(() => settle());
 
     expect(sheet).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual({ wanted: false, aborted: true });
     expect(toast()).toBeNull();
   });
 
