@@ -35,6 +35,11 @@ class AuditAction(StrEnum):
     PRO_PROFILE_SET_VERIFICATION = "pro_profile.set_verification"
     # A staff read of a job's transfer to its pro (#68).
     JOB_TRANSFER_READ = "job.read_transfer"
+    # A staff read of a request's card: the customer's name, phone, email and address (#81).
+    REQUEST_CARD_READ = "service_request.read_card"
+    # A staff member took a request, or let go of one (#81).
+    REQUEST_CLAIM = "service_request.claim"
+    REQUEST_RELEASE = "service_request.release"
 
 
 class AuditEntityType(StrEnum):
@@ -43,6 +48,7 @@ class AuditEntityType(StrEnum):
     PRO_DOCUMENT = "pro_document"
     JOB = "job"
     SUPPORT_TICKET = "support_ticket"
+    SERVICE_REQUEST = "service_request"
 
 
 @dataclass(frozen=True)

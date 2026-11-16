@@ -37,6 +37,18 @@ class JobRepository:
             .subquery()
         )
 
+    @staticmethod
+    def queue_facts() -> Subquery:
+        """Every job's request (`request_id`), id (`job_id`), accepted quote (`quote_id`) and
+        status (`job_status`) only, as a subquery for another module's query: one row per
+        request at most (jobs.request_id is unique)."""
+        return select(
+            Job.request_id.label("request_id"),
+            Job.id.label("job_id"),
+            Job.quote_id.label("quote_id"),
+            Job.status.label("job_status"),
+        ).subquery()
+
     async def get_for_update(self, job_id: uuid.UUID) -> Job | None:
         """The job, locked until the transaction ends, so transitions on it run one at a time.
 
