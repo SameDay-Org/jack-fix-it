@@ -1667,12 +1667,7 @@
     "approved": {
       "title": "You're approved",
       "ready": "New requests near you show up on Home.",
-      "payouts": "One step is left before requests reach you: payout setup.",
-      "placeholder": {
-        "title": "Payout setup",
-        "badge": "Not available yet",
-        "body": "You'll set up how you get paid here. It isn't available in the app yet."
-      }
+      "payouts": "One step is left before requests reach you: payout setup."
     },
     "rejected": {
       "title": "Your verification wasn't approved",
@@ -1698,6 +1693,86 @@
       "loading": "Loading your account",
       "loadFailed": "We couldn't load your account. Give it another try in a moment.",
       "offline": "You're offline. Check your connection and try again."
+    }
+  },
+  "proPayouts": {
+    "title": "Payouts",
+    "menu": "Payouts",
+    "retry": "Try again",
+    "loading": "Loading your payout status",
+    "status": {
+      "not_started": "Not set up",
+      "incomplete": "In progress",
+      "in_review": "In review",
+      "enabled": "On"
+    },
+    "not_started": {
+      "title": "Set up how you get paid",
+      "body": "Jack Fix It pays you through Stripe. You need a payout account before requests can reach you."
+    },
+    "incomplete": {
+      "title": "Stripe needs more information",
+      "body": "Pick up where you left off to turn on payouts."
+    },
+    "in_review": {
+      "title": "Stripe is reviewing your details",
+      "body": "Everything is in. The result shows up here; there's nothing else to do for now.",
+      "check": "Check again"
+    },
+    "enabled": {
+      "title": "Payouts are on",
+      "approved": "You can receive requests. New ones near you show up on Home.",
+      "notApproved": "You're set to get paid. Requests reach you once your verification is approved.",
+      "body": "You're set to get paid for your jobs."
+    },
+    "asks": {
+      "title": "What Stripe will ask for",
+      "bank": "A bank account, where your payouts go",
+      "identity": "Your identity, to confirm it's you",
+      "privacy": "Stripe collects and keeps these details. Jack Fix It never sees them."
+    },
+    "action": {
+      "start": "Set up payouts",
+      "continue": "Continue setup"
+    },
+    "expired": {
+      "title": "That setup page expired",
+      "body": "Open a new one to pick up where you left off."
+    },
+    "failure": {
+      "offline": {
+        "title": "You're offline",
+        "body": "Check your connection and try again."
+      },
+      "busy": {
+        "title": "Give it a moment",
+        "body": "You've opened the setup page a few times in a row. Try again in a moment."
+      },
+      "review": {
+        "title": "Your payout account needs a review",
+        "body": "Our support team has to take a look before you can go on. Contact us so we can help.",
+        "contact": "Contact support"
+      },
+      "unavailable": {
+        "title": "Payout setup is unavailable right now",
+        "body": "Nothing was changed. Try again in a moment."
+      },
+      "generic": {
+        "title": "We couldn't open payout setup",
+        "body": "Give it another try in a moment."
+      }
+    },
+    "load": {
+      "title": "We couldn't load your payout status",
+      "offline": "You're offline. Check your connection and try again.",
+      "unavailable": "Payments are unavailable right now. Try again in a moment.",
+      "generic": "Give it another try in a moment.",
+      "stale": "We couldn't refresh your payout status."
+    },
+    "card": {
+      "title": "Finish payout setup",
+      "body": "Connect a payout account with Stripe to start receiving requests.",
+      "action": "Set up payouts"
     }
   }
 }

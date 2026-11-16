@@ -16,13 +16,13 @@ import {
 } from "@/components/ui";
 import { BackButton } from "@/features/auth/components/BackButton";
 import { RetryNotice } from "@/features/opportunities/RetryNotice";
+import { PayoutSetupCard } from "@/features/payouts";
 import { useMyDocuments } from "@/features/pro-documents/api";
 import type { MyDocuments } from "@/features/pro-documents/documents";
 import { profileChecklist, useMyProProfile, type ProProfile } from "@/features/pro-profile";
 import { useGuardedPush } from "@/features/quotes/navigation";
 import { useRefetchOnReturn, useSettledError } from "@/features/quotes/useRequestQuotes";
 
-import { PayoutSetupPlaceholder } from "./PayoutSetupPlaceholder";
 import { awaitsPayouts, documentsChecklist, rejectedDocuments, STATUS_TONE } from "./verification";
 
 const HOME = "/";
@@ -30,8 +30,8 @@ const DOCUMENTS = "/pro/documents";
 
 /**
  * The pro's verification status (`/pro/verification`, #38): Pending (the team reviews the
- * profile and the documents; no date is promised), Approved (what is next: payout setup, a
- * placeholder labelled as not available yet, until #277), or Rejected (the reasons the review
+ * profile and the documents; no date is promised), Approved (what is next: payout setup, which
+ * opens the payout screen, #277), or Rejected (the reasons the review
  * gave on the documents, when it gave any, and the way to fix them). The profile's own reason
  * joins it once the API's type has it.
  */
@@ -127,7 +127,7 @@ function Status({ profile }: { profile: ProProfile }) {
               : "proVerification.approved.ready",
           )}
         />
-        {awaitsPayouts(profile) ? <PayoutSetupPlaceholder testID="verification-payouts" /> : null}
+        {awaitsPayouts(profile) ? <PayoutSetupCard testID="verification-payouts" /> : null}
       </>
     );
   }

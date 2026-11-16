@@ -180,13 +180,19 @@ describe("the pro's home until the pro is approved (#38)", () => {
     expect(labelOf("verification-banner")).toBe(
       "Verification: Approved. Finish payout setup to start receiving requests.",
     );
-    // Payout setup is a placeholder, labelled as one, and not a control.
+    // What is left is payout setup (#277): one line on why, and the way to the payout screen.
     expect(screen.getByTestId("payout-setup")).toHaveTextContent(
-      /^Payout setup\s*Not available yet\s*You'll set up how you get paid here\. It isn't available in the app yet\.$/,
+      "Finish payout setupConnect a payout account with Stripe to start receiving requests.Set up payouts",
     );
     expect(screen.getAllByRole("button").map((button) => button.props.testID as string)).toEqual([
       "verification-banner",
+      "payout-setup-action",
     ]);
+    // The home asks Stripe's status of no one: only the payout screen does.
+    expect(paths()).not.toContain("/v1/pros/me/payouts");
+    await pressed("payout-setup-action");
+    expect(router.push).toHaveBeenCalledTimes(1);
+    expect(router.push).toHaveBeenCalledWith("/pro/payouts");
     expect(screen.getByTestId("your-jobs-stub")).toBeTruthy();
 
     // The API sends this pro no request: an empty list would mislead, so none is asked for.

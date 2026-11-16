@@ -584,6 +584,14 @@ describe("AccountScreen", () => {
       expect(router.push).toHaveBeenCalledWith("/pro/documents");
     });
 
+    it("opens the payouts of a pro from the row under the documents (#277)", async () => {
+      await renderAccount();
+
+      await fireEvent.press(screen.getByRole("button", { name: "Payouts" }));
+
+      expect(router.push).toHaveBeenCalledWith("/pro/payouts");
+    });
+
     it("is not there for a customer", async () => {
       jest.mocked(useSession).mockReturnValue(signedIn({ ...ALEX, role: "customer" }));
       jest.mocked(apiGet).mockRejectedValue(new Error("offline"));
@@ -591,6 +599,7 @@ describe("AccountScreen", () => {
 
       expect(screen.queryByText("Pro profile")).toBeNull();
       expect(screen.queryByText("Documents")).toBeNull();
+      expect(screen.queryByText("Payouts")).toBeNull();
     });
   });
 

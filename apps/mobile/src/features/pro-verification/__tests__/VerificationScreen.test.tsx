@@ -115,7 +115,7 @@ describe("VerificationScreen", () => {
     expect(await screen.findByRole("button", { name: "Documents, All sent" })).toBeTruthy();
   });
 
-  it("Approved without payouts: what is next, as a placeholder labelled not available", async () => {
+  it("Approved without payouts: what is next, and the way to the payout screen", async () => {
     await open(APPROVED);
 
     expect(screen.getByTestId("verification-status")).toHaveTextContent("Approved");
@@ -123,17 +123,16 @@ describe("VerificationScreen", () => {
       "You're approvedOne step is left before requests reach you: payout setup.",
     );
     expect(screen.getByTestId("verification-payouts")).toHaveTextContent(
-      /^Payout setup\s*Not available yet\s*You'll set up how you get paid here\. It isn't available in the app yet\.$/,
+      "Finish payout setupConnect a payout account with Stripe to start receiving requests.Set up payouts",
     );
-    // A placeholder is not a control: nothing on the screen but Back can be pressed.
-    expect(screen.getAllByRole("button").map((button) => button.props.accessibilityLabel)).toEqual([
-      "Back",
-    ]);
+    await pressed("verification-payouts-action");
+    expect(router.push).toHaveBeenCalledTimes(1);
+    expect(router.push).toHaveBeenCalledWith("/pro/payouts");
     // An approved pro's screen asks for no document.
     expect(paths()).not.toContain(DOCUMENTS);
   });
 
-  it("Approved with payouts on: requests show up on Home, and no placeholder", async () => {
+  it("Approved with payouts on: requests show up on Home, and no payout setup", async () => {
     await open({ ...APPROVED, payouts_enabled: true });
 
     expect(message()).toHaveTextContent("You're approvedNew requests near you show up on Home.");
