@@ -11,7 +11,7 @@ export type PayoutSetup = {
   start: () => void;
   /** From the press until the pro is back and the status is in again. */
   busy: boolean;
-  /** Why the setup page did not open, until the next press. */
+  /** Why the setup page did not open, until the next press or a status with nothing to set up. */
   failure: PayoutsFailure | null;
   /** The pro came back through an expired or used link: the next press opens a new one. */
   expired: boolean;
@@ -25,7 +25,8 @@ export type PayoutSetup = {
  * an expired one says so and waits for the next press (each link is a rate-limited Stripe call).
  * Leaving the screen ends it: a link not yet answered is cancelled and opens nothing, and a page
  * already open is closed where the system allows it. `settable` is whether the status still has
- * a setup to offer: without one an expired link has nothing to say, now or later.
+ * a setup to offer: without one, what a press came to (an expired link, a page that did not open)
+ * has nothing to say, now or later.
  */
 export function usePayoutSetup(settable: boolean): PayoutSetup {
   const generation = useSessionGeneration();
@@ -39,12 +40,20 @@ export function usePayoutSetup(settable: boolean): PayoutSetup {
       pageOpen.current = false;
     }
   }, []);
-  const { mutate, isPending, error, data } = useCreateOnboardingLink(openPage);
+  const { mutate, reset, isPending, error, data } = useCreateOnboardingLink(openPage);
   // An expired link that arrived as a route, not as the browser session's answer.
   const [expiredLink, setExpiredLink] = useState(false);
 
   // Adjusted while rendering: a status with nothing to set up forgets the expired link.
   if (!settable && expiredLink) setExpiredLink(false);
+
+  // The same for what the last press came to (its exit, its failure): once the status moves on,
+  // a later "more information needed" starts clean. Never while a press is under way: a reset
+  // detaches it, and its end (which frees the button) would go unheard.
+  const pressLeftSomething = data !== undefined || error !== null;
+  useEffect(() => {
+    if (!settable && !isPending && pressLeftSomething) reset();
+  }, [settable, isPending, pressLeftSomething, reset]);
 
   // The press under way, if any: also what stops two taps in one frame (the button only shows
   // busy from the next render on).

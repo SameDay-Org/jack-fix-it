@@ -90,17 +90,27 @@ const foreground = async () => {
 };
 
 /**
- * An Error serialises to `{}`: spelled out here, with its cause, so the sentinel would see a link
- * kept in an error's message or stack.
+ * An Error serialises to its own enumerable fields only: spelled out here, those fields kept, with
+ * its cause, so the sentinel would see a link kept in an error's message, stack or any field.
  */
 function spellErrors(_key: string, value: unknown): unknown {
   if (!(value instanceof Error)) return value;
-  return { name: value.name, message: value.message, stack: value.stack, cause: value.cause };
+  return {
+    ...value,
+    name: value.name,
+    message: value.message,
+    stack: value.stack,
+    cause: value.cause,
+  };
 }
+
+/** Every call the screen made on the router: wherever it went, the link must not ride along. */
+const routerCalls = () =>
+  Object.entries(router).map(([name, fn]) => [name, jest.isMockFunction(fn) ? fn.mock.calls : []]);
 
 /**
  * Everything the app holds after a link was used: the caches (errors included), the screen, the
- * logs, and every route the screen pushed or param it set.
+ * logs, every router call and every param the screen set.
  */
 function everythingKept(): string {
   return JSON.stringify(
@@ -115,7 +125,7 @@ function everythingKept(): string {
         .map((mutation) => mutation.state),
       screen: screen.toJSON(),
       logs: consoleSpies.flatMap((spy) => spy.mock.calls),
-      routes: [jest.mocked(router.push).mock.calls, ownRoute().setParams.mock.calls],
+      routes: [routerCalls(), ownRoute().setParams.mock.calls],
     },
     spellErrors,
   );
@@ -624,19 +634,22 @@ describe("PayoutsScreen: leaving while a setup is under way", () => {
     "a page already open is closed where the system allows it: %s",
     async (os, closed) => {
       const platform = jest.replaceProperty(Platform, "OS", os);
-      const browser = deferred<WebBrowserAuthSessionResult>();
-      jest.mocked(openAuthSessionAsync).mockReturnValueOnce(browser.promise);
-      await open(payouts("not_started"));
-      await pressed("payouts-setup");
-      await flush();
-      expect(openAuthSessionAsync).toHaveBeenCalledTimes(1);
+      try {
+        const browser = deferred<WebBrowserAuthSessionResult>();
+        jest.mocked(openAuthSessionAsync).mockReturnValueOnce(browser.promise);
+        await open(payouts("not_started"));
+        await pressed("payouts-setup");
+        await flush();
+        expect(openAuthSessionAsync).toHaveBeenCalledTimes(1);
 
-      await screen.unmount();
+        await screen.unmount();
 
-      expect(dismissAuthSession).toHaveBeenCalledTimes(closed);
-      await act(async () => browser.resolve({ type: "dismiss" } as WebBrowserAuthSessionResult));
-      await flush();
-      platform.restore();
+        expect(dismissAuthSession).toHaveBeenCalledTimes(closed);
+        await act(async () => browser.resolve({ type: "dismiss" } as WebBrowserAuthSessionResult));
+        await flush();
+      } finally {
+        platform.restore();
+      }
     },
   );
 
@@ -683,6 +696,51 @@ describe("PayoutsScreen: the return link as a route", () => {
 
     expect(asked(PAYOUTS)).toBe(2);
     expect(screen.getByTestId("payouts-status")).toHaveTextContent("On");
+  });
+
+  it("Android, the browser session first and the router's copy while the status is on its way: one request, busy until it is back", async () => {
+    // On a phone the session ends as soon as the link fires; the router applies its copy later.
+    browserReturns(RETURN_LINK);
+    await open(payouts("incomplete"));
+    const status = deferred<Payouts>();
+    server.payouts = status.promise;
+
+    await pressed("payouts-setup");
+    await flush();
+    expect(asked(PAYOUTS)).toBe(2);
+
+    await act(async () => navigation.setParams({ result: "return" }));
+    await flush();
+
+    // The request under way is joined: neither cancelled nor sent again, and the press holds.
+    expect(asked(PAYOUTS)).toBe(2);
+    expect(setupButton()).toBeBusy();
+
+    await act(async () => status.resolve(payouts("enabled")));
+    await flush();
+
+    expect(asked(PAYOUTS)).toBe(2);
+    expect(screen.getByTestId("payouts-status")).toHaveTextContent("On");
+  });
+
+  it("Android, the browser read as closed first and the refresh page's link after it: expired", async () => {
+    jest
+      .mocked(openAuthSessionAsync)
+      .mockResolvedValueOnce({ type: "dismiss" } as WebBrowserAuthSessionResult);
+    await open(payouts("incomplete"));
+    const status = deferred<Payouts>();
+    server.payouts = status.promise;
+
+    await pressed("payouts-setup");
+    await flush();
+    await act(async () => navigation.setParams({ result: "refresh" }));
+    await act(async () => status.resolve(payouts("incomplete")));
+    await flush();
+
+    expect(asked(PAYOUTS)).toBe(2);
+    expect(screen.getByTestId("payouts-expired")).toBeTruthy();
+    expect(apiPost).toHaveBeenCalledTimes(1);
+    expect(setupButton()).not.toBeBusy();
   });
 
   it("Android: the browser reads as closed but the refresh page's link came in: expired", async () => {
@@ -737,18 +795,102 @@ describe("PayoutsScreen: the return link as a route", () => {
 
   it("an expired link with nothing to set up says nothing, now or once there is", async () => {
     // Anyone can write the link: in review, there is no setup page that could have expired.
+    // (In review shows no notice at all, so there is nothing to check yet.)
     await open(payouts("in_review"));
 
     await act(async () => navigation.setParams({ result: "refresh" }));
     await flush();
-    expect(screen.queryByTestId("payouts-expired")).toBeNull();
 
-    // Stripe asks for more later: the old link does not surface then either.
+    // Stripe asks for more later: the old link does not surface then.
     server.payouts = payouts("incomplete");
     await pressed("payouts-check");
     await flush();
 
     expect(screen.getByTestId("payouts-status")).toHaveTextContent("In progress");
     expect(screen.queryByTestId("payouts-expired")).toBeNull();
+  });
+});
+
+describe("PayoutsScreen: what a press came to, once the status moves on", () => {
+  /** Stripe takes the details (in review), then asks for more: back to "In progress". */
+  async function reviewedThenAskedForMore() {
+    server.payouts = payouts("in_review");
+    await foreground();
+    await flush();
+    expect(screen.getByTestId("payouts-status")).toHaveTextContent("In review");
+
+    server.payouts = payouts("incomplete");
+    await pressed("payouts-check");
+    await flush();
+    expect(screen.getByTestId("payouts-status")).toHaveTextContent("In progress");
+  }
+
+  it("an expired page from the browser session does not come back", async () => {
+    browserReturns(REFRESH_LINK);
+    await open(payouts("incomplete"));
+    await pressed("payouts-setup");
+    await flush();
+    expect(screen.getByTestId("payouts-expired")).toBeTruthy();
+
+    await reviewedThenAskedForMore();
+
+    expect(screen.queryByTestId("payouts-expired")).toBeNull();
+    expect(setupButton()).not.toBeBusy();
+  });
+
+  it("a page that did not open does not come back either", async () => {
+    await open(payouts("incomplete"));
+    server.link = new ApiError(503, "unavailable");
+    await pressed("payouts-setup");
+    await flush();
+    expect(screen.getByTestId("payouts-failure-unavailable")).toBeTruthy();
+
+    await reviewedThenAskedForMore();
+
+    expect(screen.queryByTestId("payouts-failure-unavailable")).toBeNull();
+  });
+
+  it("a status that moves on while the page is open: the press still ends, and the next one works", async () => {
+    const browser = deferred<WebBrowserAuthSessionResult>();
+    jest.mocked(openAuthSessionAsync).mockReturnValueOnce(browser.promise);
+    await open(payouts("incomplete"));
+    await pressed("payouts-setup");
+    await flush();
+
+    // The pro sent everything on Stripe's page: the app hears "in review" before the session ends.
+    server.payouts = payouts("in_review");
+    await foreground();
+    await flush();
+    expect(screen.getByTestId("payouts-status")).toHaveTextContent("In review");
+    await act(async () => browser.resolve({ type: "success", url: RETURN_LINK }));
+    await flush();
+
+    server.payouts = payouts("incomplete");
+    await pressed("payouts-check");
+    await flush();
+    browserReturns(RETURN_LINK);
+    await pressed("payouts-setup");
+    await flush();
+
+    expect(apiPost).toHaveBeenCalledTimes(2);
+    expect(openAuthSessionAsync).toHaveBeenCalledTimes(2);
+    expect(setupButton()).not.toBeBusy();
+  });
+
+  it("the next press still works after that", async () => {
+    browserReturns(REFRESH_LINK);
+    await open(payouts("incomplete"));
+    await pressed("payouts-setup");
+    await flush();
+    await reviewedThenAskedForMore();
+
+    browserReturns(RETURN_LINK);
+    server.payouts = payouts("enabled");
+    await pressed("payouts-setup");
+    await flush();
+
+    expect(apiPost).toHaveBeenCalledTimes(2);
+    expect(openAuthSessionAsync).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("payouts-status")).toHaveTextContent("On");
   });
 });

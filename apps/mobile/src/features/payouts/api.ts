@@ -76,7 +76,8 @@ export type OnboardingLinkVariables = { generation: number; signal: AbortSignal 
 /**
  * Asks for a link to Stripe's hosted payout setup (POST) and hands it to `open` at once. The
  * link is single-use and a way into the pro's payout account, so it exists in that one call
- * only: what the mutation keeps is its variables and what `open` returned, never the link. No
+ * only: what the mutation keeps is its variables, what `open` returned and its error (whose
+ * classes never quote the link: `SetupPageError`, `SetupLeftError`, the API's), never the link. No
  * query holds it and nothing logs it. A screen that was left before the link arrived opens
  * nothing: the request is cancelled, and a link that still arrives is dropped.
  *
