@@ -10,7 +10,7 @@ export const DEFAULT_POLL_SECONDS = 15;
 export const DEFAULT_ETA_CLOSE_MINUTES = 60;
 const MS_PER_SECOND = 1000;
 
-function positiveWhole(raw: string | undefined, fallback: number, name: string): number {
+export function positiveWhole(raw: string | undefined, fallback: number, name: string): number {
   const value = raw ? Number(raw) : fallback;
   if (!Number.isInteger(value) || value <= 0) {
     throw new Error(`${name} must be a positive whole number`);

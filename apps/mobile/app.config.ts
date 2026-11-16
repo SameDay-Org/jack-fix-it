@@ -144,6 +144,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // client, preview) or the store's; only a simulator would use development. Registration and
       // the credentials come in #334 and #335 (`googleServicesFile` above).
       ["expo-notifications", { color: colors["navy-900"], mode: "production" }],
+      // The live map of the pro on the way (#353; a change here needs a new dev build): Mapbox
+      // Maps SDK v11, at the version @rnmapbox/maps pins. Mapbox's Maven and pods download
+      // without a secret token now; the public `pk.` token is read at runtime
+      // (EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN). It adds no permission the app does not hold already.
+      "@rnmapbox/maps",
     ],
     locales: {
       en: { ios: PERMISSION_PROMPTS.en },
