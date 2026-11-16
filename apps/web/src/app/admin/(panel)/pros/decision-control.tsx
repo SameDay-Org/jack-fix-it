@@ -50,6 +50,8 @@ export function DecisionControl({
 }) {
   const [state, submit, pending] = useActionState(action, initialState);
   const [chosen, setChosen] = useState<Decision | null>(null);
+  // The button that opened a step the user cancelled: it takes the focus back.
+  const [returnTo, setReturnTo] = useState<Decision | null>(null);
   const reasonId = useId();
   // A decision that went through is no longer offered: back to the first step.
   const step = chosen !== null && offered.includes(chosen) ? chosen : null;
@@ -58,8 +60,15 @@ export function DecisionControl({
     ? (event: { preventDefault: () => void }) => event.preventDefault()
     : undefined;
   const waiting = pending ? "cursor-default opacity-60" : undefined;
-  const choose = (decision: Decision | null) => {
-    if (!pending) setChosen(decision);
+  const choose = (decision: Decision) => {
+    if (pending) return;
+    setChosen(decision);
+    setReturnTo(null);
+  };
+  const cancel = () => {
+    if (pending) return;
+    setReturnTo(step);
+    setChosen(null);
   };
 
   return (
@@ -76,6 +85,7 @@ export function DecisionControl({
                 value={asks ? undefined : decision}
                 size="sm"
                 variant={decision === "approved" ? "primary" : "secondary"}
+                autoFocus={decision === returnTo}
                 aria-disabled={pending ? true : undefined}
                 onClick={asks ? () => choose(decision) : ignoreWhilePending}
                 className={waiting}
@@ -119,7 +129,7 @@ export function DecisionControl({
             >
               {step === "approved" ? text.confirmApprove : text.confirmReject}
             </Button>
-            <Button type="button" size="sm" variant="secondary" onClick={() => choose(null)}>
+            <Button type="button" size="sm" variant="secondary" onClick={cancel}>
               {text.cancel}
             </Button>
           </div>

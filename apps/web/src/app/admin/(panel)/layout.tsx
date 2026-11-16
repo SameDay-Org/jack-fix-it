@@ -28,7 +28,11 @@ export default async function PanelLayout({ children }: { children: ReactNode })
         <p className="text-lg font-bold whitespace-nowrap md:whitespace-normal">
           {t("brand.name")} <span className="text-green-500">{t("admin.title")}</span>
         </p>
-        <nav aria-label={t("admin.nav.label")} className="flex gap-2 md:flex-col">
+        {/* Wraps on a phone: the links in Spanish are wider than a 320 px screen. */}
+        <nav
+          aria-label={t("admin.nav.label")}
+          className="flex flex-wrap gap-2 md:flex-col md:flex-nowrap"
+        >
           <NavLink href="/admin" exact>
             <House aria-hidden className="size-4" />
             {t("admin.nav.home")}
