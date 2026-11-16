@@ -10,7 +10,7 @@ Documents are sensitive: logs carry ids and the document type only, never a key 
 import logging
 import uuid
 from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Final
 
 from sqlalchemy.exc import IntegrityError
@@ -56,11 +56,28 @@ def latest_and_history(
     return list(latest.values()), history
 
 
+def expired(document: ProDocument, today: date) -> bool:
+    """Whether the document's expiry date has passed: it is before `today` (UTC). A document
+    without one never expires."""
+    return document.expires_on is not None and document.expires_on < today
+
+
 def uncovered_types(
-    required: Sequence[ProDocumentType], current: Sequence[ProDocument]
+    required: Sequence[ProDocumentType],
+    current: Sequence[ProDocument],
+    *,
+    today: date | None = None,
 ) -> list[ProDocumentType]:
-    """The required types with no pending or approved document."""
-    covered = {d.doc_type for d in current if d.status in _COVERING}
+    """The required types with no pending or approved document. Given `today` (the staff
+    detail, #41), an approved document that has expired no longer covers its type: it counts as
+    missing again (Foreman decision on #41), as the approval reads it. The pro's own list
+    (list_own) passes no date and reads no expiry."""
+    covered = {
+        d.doc_type
+        for d in current
+        if d.status in _COVERING
+        and not (today is not None and d.status == ProDocumentStatus.APPROVED and expired(d, today))
+    }
     return [doc_type for doc_type in required if doc_type not in covered]
 
 

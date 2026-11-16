@@ -50,6 +50,16 @@ export const ACCOUNT_GLYPHS = {
       "M9 17.5h3.5",
     ],
   },
+  // A badge: a rounded card with a head and shoulders on it, the pro's profile.
+  proProfile: {
+    accent:
+      "M6.5 4h11A1.5 1.5 0 0 1 19 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 18.5v-13A1.5 1.5 0 0 1 6.5 4Z",
+    strokes: [
+      "M6.5 4h11A1.5 1.5 0 0 1 19 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 18.5v-13A1.5 1.5 0 0 1 6.5 4Z",
+      "M12 8a2 2 0 1 0 0 4a2 2 0 1 0 0-4",
+      "M8.5 16.5c.5-1.6 1.8-2.5 3.5-2.5s3 .9 3.5 2.5",
+    ],
+  },
   // An open door with an arrow leaving through it.
   logOut: {
     accent: "M5.5 5a1 1 0 0 1 1-1h6.5v16H6.5a1 1 0 0 1-1-1Z",

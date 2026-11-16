@@ -9673,7 +9673,7 @@
               }
             ],
             "title": "Rejection Reason",
-            "description": "Why the team rejected the profile, as they wrote it; null unless rejected."
+            "description": "Why the team rejected the profile, contact details masked; null unless rejected."
           },
           "payouts_enabled": {
             "type": "boolean",
@@ -9892,7 +9892,7 @@
               }
             ],
             "title": "Reason",
-            "description": "Why, as plain text the pro reads: required with rejected, refused with approved."
+            "description": "Why, as plain text the pro reads (contact details are masked): required with rejected, refused with approved."
           }
         },
         "additionalProperties": false,

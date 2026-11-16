@@ -3,25 +3,37 @@ import { useTranslation } from "react-i18next";
 import { useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Button } from "@/components/ui";
+import { Button, GlassSurface } from "@/components/ui";
 import { backToPrevious } from "@/features/auth/components/BackButton";
 
 // The sheet rides this far up over the hero's bottom edge, its top corners rounded.
 export const SHEET_OVERLAP = 32;
 const SHEET_BOTTOM = 24;
 
-/** The round way back, over the hero's top left corner. */
-export function MapBack() {
+/**
+ * The round way back, over the hero's top left corner: a translucent white pill over the navy
+ * drawn map, a light glass one over the live map (#353), whose streets are light.
+ */
+export function MapBack({ onMap = false }: { onMap?: boolean }) {
   const { t } = useTranslation();
+  const button = (
+    <Button
+      glyph="back"
+      variant={onMap ? "ghost" : "hero"}
+      label={t("common.back")}
+      onPress={() => backToPrevious("/")}
+      testID="job-back"
+    />
+  );
   return (
     <View className="absolute left-4 top-2">
-      <Button
-        glyph="back"
-        variant="hero"
-        label={t("common.back")}
-        onPress={() => backToPrevious("/")}
-        testID="job-back"
-      />
+      {onMap ? (
+        <GlassSurface tone="light" shape="pill" interactive>
+          {button}
+        </GlassSurface>
+      ) : (
+        button
+      )}
     </View>
   );
 }

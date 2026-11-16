@@ -63,6 +63,12 @@ export type MediaUploadOptions = {
   purpose: UploadPurpose;
   /** Most items the list may hold; defaults to `EXPO_PUBLIC_REQUEST_MEDIA_MAX`. */
   max?: number;
+  /**
+   * A full list still takes a pick: what is picked takes the place of what is held (a profile
+   * photo, chosen again). The items held stay until the picker hands something over, so closing
+   * it without a choice changes nothing.
+   */
+  replace?: boolean;
 };
 
 // The API takes videos for request media only; every other purpose is photos (PURPOSES table).
@@ -106,6 +112,7 @@ function toPicked(asset: ImagePicker.ImagePickerAsset): PickedMedia {
 export function useMediaUpload({
   purpose,
   max = mediaConfig.requestMediaMax,
+  replace = false,
 }: MediaUploadOptions): MediaUpload {
   const [items, setItems] = useState<MediaItem[]>([]);
   const [picking, setPicking] = useState(false);
@@ -204,10 +211,12 @@ export function useMediaUpload({
   );
 
   const remaining = Math.max(0, max - items.length);
+  // How many files one pick may bring: all of the list when the pick replaces it.
+  const room = replace ? max : remaining;
 
   const add = useCallback(
     async (source: MediaSource) => {
-      if (pickingNow.current || remaining === 0) return;
+      if (pickingNow.current || room === 0) return;
       pickingNow.current = true;
       setPicking(true);
       // What the picker returns belongs to the session that opened it, and to no later one.
@@ -226,14 +235,19 @@ export function useMediaUpload({
           result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: VIDEO_PURPOSES.has(purpose) ? ["images", "videos"] : ["images"],
             allowsMultipleSelection: true,
-            selectionLimit: remaining,
+            selectionLimit: room,
             orderedSelection: true,
             exif: false,
           });
         }
         if (result.canceled || !mounted.current || !isCurrentGeneration(startedIn)) return;
 
-        const added = result.assets.slice(0, remaining).map((asset) => {
+        if (replace) {
+          // The items held make way: their uploads stop, and their keys are never attached.
+          entries.current.forEach((entry) => entry.controller?.abort());
+          entries.current.clear();
+        }
+        const added = result.assets.slice(0, room).map((asset) => {
           const id = `media-${(nextId.current += 1)}`;
           const picked = toPicked(asset);
           entries.current.set(id, { picked, generation: startedIn });
@@ -248,14 +262,14 @@ export function useMediaUpload({
           };
           return item;
         });
-        setItems((current) => [...current, ...added]);
+        setItems((current) => (replace ? added : [...current, ...added]));
         added.forEach((item) => enqueue(item.id));
       } finally {
         pickingNow.current = false;
         if (mounted.current) setPicking(false);
       }
     },
-    [enqueue, purpose, remaining],
+    [enqueue, purpose, replace, room],
   );
 
   const retry = useCallback(
