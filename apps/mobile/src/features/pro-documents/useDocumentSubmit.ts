@@ -48,7 +48,13 @@ export function useDocumentSubmit({
 }): DocumentSubmit {
   const { t } = useTranslation();
   const send = useSubmitDocument();
-  const photo = useSinglePhoto({ purpose: "pro_document", sourceSheet: SOURCE_SHEET });
+  // An ID, a license or an insurance policy: the app's copies of the photo leave the phone as soon
+  // as nothing needs them (on the storage, set aside, the screen left, the account changed).
+  const photo = useSinglePhoto({
+    purpose: "pro_document",
+    sourceSheet: SOURCE_SHEET,
+    discardFiles: true,
+  });
   const [expiry, setExpiryText] = useState("");
   const [checked, setChecked] = useState(false);
   const [failure, setFailure] = useState<DocumentFailure | null>(null);

@@ -35,6 +35,8 @@ export type SinglePhotoOptions = {
   purpose: UploadPurpose;
   /** The route that renders `MediaSourceSheet` in the screen's stack. */
   sourceSheet: Href;
+  /** Delete the app's copies of the photo as soon as nothing needs them (`useMediaUpload`). */
+  discardFiles?: boolean;
 };
 
 /**
@@ -43,9 +45,13 @@ export type SinglePhotoOptions = {
  * replaces it, and closing the picker without a choice keeps the one held. Nothing here attaches
  * the photo: the screen sends the key.
  */
-export function useSinglePhoto({ purpose, sourceSheet }: SinglePhotoOptions): SinglePhoto {
+export function useSinglePhoto({
+  purpose,
+  sourceSheet,
+  discardFiles = false,
+}: SinglePhotoOptions): SinglePhoto {
   // One photo, and choosing again replaces it once the picker hands the new one over.
-  const upload = useMediaUpload({ purpose, max: 1, replace: true });
+  const upload = useMediaUpload({ purpose, max: 1, replace: true, discardFiles });
   const { adding, add } = useMediaAdd(upload, sourceSheet);
   const item = upload.items.at(0);
   const discard = () => {
