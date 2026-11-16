@@ -22,6 +22,7 @@ from app.modules.payments.router import router as payments_router
 from app.modules.payouts.router import pages_router as payout_pages_router
 from app.modules.payouts.router import router as payouts_router
 from app.modules.pros.router import router as pros_router
+from app.modules.pros.router import staff_router as staff_pros_router
 from app.modules.quotes.router import customer_router as customer_quotes_router
 from app.modules.quotes.router import router as quotes_router
 from app.modules.requests.router import router as requests_router
@@ -46,6 +47,7 @@ v1_router.include_router(categories_router)
 v1_router.include_router(service_areas_router)
 v1_router.include_router(geo_router)
 v1_router.include_router(pros_router)
+v1_router.include_router(staff_pros_router)
 v1_router.include_router(payouts_router)
 v1_router.include_router(payout_pages_router)
 v1_router.include_router(opportunities_router)
