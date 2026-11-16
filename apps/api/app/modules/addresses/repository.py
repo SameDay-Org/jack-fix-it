@@ -1,10 +1,14 @@
 import uuid
 from collections.abc import Collection
+from decimal import Decimal
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.addresses.models import Address, SavedAddress
+
+# An address has its point when both halves are there (AddressService.place reads it so).
+_WITHOUT_POINT = or_(Address.lat.is_(None), Address.lng.is_(None))
 
 
 class AddressRepository:
@@ -41,6 +45,56 @@ class AddressRepository:
         if not address_ids:
             return []
         statement = select(Address).where(Address.id.in_(address_ids))
+        return list((await self._session.scalars(statement)).all())
+
+    async def place_to_geocode(
+        self, address_id: uuid.UUID
+    ) -> tuple[str, str, str, str, bool] | None:
+        """(line1, city, state, zip_code, without a point) as the database has them now,
+        whatever the session remembers of the row. The unit line is not loaded."""
+        statement = select(
+            Address.line1, Address.city, Address.state, Address.zip_code, _WITHOUT_POINT
+        ).where(Address.id == address_id)
+        row = (await self._session.execute(statement)).one_or_none()
+        return None if row is None else (row[0], row[1], row[2], row[3], bool(row[4]))
+
+    async def set_point(
+        self,
+        address_id: uuid.UUID,
+        *,
+        line1: str,
+        city: str,
+        state: str,
+        zip_code: str,
+        lat: Decimal,
+        lng: Decimal,
+    ) -> bool:
+        """Gives the address its point (#384). Only a row that has none and still reads as
+        the text the point was found for: False, and nothing written, for any other. The one
+        statement that updates an address (tests/test_address_geocode_guard.py)."""
+        result = await self._session.execute(
+            update(Address)
+            .where(
+                Address.id == address_id,
+                _WITHOUT_POINT,
+                Address.line1 == line1,
+                Address.city == city,
+                Address.state == state,
+                Address.zip_code == zip_code,
+            )
+            .values(lat=lat, lng=lng)
+        )
+        return bool(result.rowcount)  # type: ignore[attr-defined]  # CursorResult of an UPDATE
+
+    async def count_without_point(self) -> int:
+        statement = select(func.count()).select_from(Address).where(_WITHOUT_POINT)
+        return int(await self._session.scalar(statement) or 0)
+
+    async def ids_without_point(self, *, after: uuid.UUID | None, limit: int) -> list[uuid.UUID]:
+        """The ids only, in id order past `after`: no street is loaded to page through them."""
+        statement = select(Address.id).where(_WITHOUT_POINT).order_by(Address.id).limit(limit)
+        if after is not None:
+            statement = statement.where(Address.id > after)
         return list((await self._session.scalars(statement)).all())
 
 

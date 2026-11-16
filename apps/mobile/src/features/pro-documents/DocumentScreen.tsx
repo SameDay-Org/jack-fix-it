@@ -229,10 +229,13 @@ type PhotoBubbleProps = {
 function PhotoBubble({ photo, current, missing, disabled }: PhotoBubbleProps) {
   const { t } = useTranslation();
   const savedUri = useStableImageUri(current);
-  const [failedUri, setFailedUri] = useState<string>();
-  // A saved picture that did not load (no connection) is tried again from the next answer's URL.
-  const uri = photo.previewUri ?? (savedUri === failedUri ? current?.url : savedUri);
-  const shown = uri !== undefined && uri !== failedUri;
+  // Every URL that did not load on this screen. A saved picture that failed (no connection) is
+  // tried again from a NEW URL the next answer brings, never from one that already failed: with
+  // every URL failed, the frame says the photo is unavailable and nothing reloads.
+  const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set());
+  const saved = [savedUri, current?.url].find((url) => url !== undefined && !failed.has(url));
+  const uri = photo.previewUri ?? saved ?? current?.url;
+  const shown = uri !== undefined && !failed.has(uri);
   const problem = photo.failure !== null || missing;
   const status =
     singlePhotoStatus(t, photo) ??
@@ -266,7 +269,7 @@ function PhotoBubble({ photo, current, missing, disabled }: PhotoBubbleProps) {
                   source={{ uri }}
                   style={StyleSheet.absoluteFill}
                   resizeMode="contain"
-                  onError={() => setFailedUri(uri)}
+                  onError={() => setFailed((before) => new Set(before).add(uri))}
                   accessibilityIgnoresInvertColors
                   testID="pro-document-photo-image"
                 />
