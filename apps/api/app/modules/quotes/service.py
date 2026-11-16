@@ -84,7 +84,10 @@ from app.modules.quotes.errors import (
     QuoteNotAcceptableError,
     QuoteOutOfBoundsError,
 )
-from app.modules.quotes.models import Quote, QuoteStatus
+from app.modules.quotes.models import Quote
+
+# Re-exported: other modules name a quote's status through this module (ADR 0003).
+from app.modules.quotes.models import QuoteStatus as QuoteStatus
 from app.modules.quotes.repository import QuoteRepository
 from app.modules.quotes.schemas import (
     CustomerQuote,
@@ -409,9 +412,23 @@ class LockedQuote:
     accepted: bool  # the request's accepted quote (status accepted)
 
 
+@dataclass(frozen=True)
+class StaffQuote:
+    """A quote as staff read it in the request card (#81): who, how much, when and its
+    status. Never the scope or the approach, which are the pro's free text."""
+
+    id: uuid.UUID
+    pro_id: uuid.UUID
+    amount_cents: int
+    status: QuoteStatus
+    proposed_start_at: datetime
+    created_at: datetime
+
+
 class QuoteReader:
     """A request's quote for other modules (ADR 0003): the payment (#58) reads the accepted
-    one, locked; a job (#63) reads its quote's proposed start, its scheduled start."""
+    one, locked; a job (#63) reads its quote's proposed start, its scheduled start; the
+    operations queue (#81) reads a request's quotes for staff."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._quotes = QuoteRepository(session)
@@ -425,6 +442,27 @@ class QuoteReader:
         """Each quote's id (`quote_id`) and proposed start (`start_at`), as a subquery: the
         pro's jobs are ordered and paged by their scheduled start (#63)."""
         return QuoteRepository.starts()
+
+    @staticmethod
+    def pending_by_request() -> Subquery:
+        """Per request with a pending quote: `request_id`, how many (`pending`) and when the
+        oldest was sent (`oldest_at`), as a subquery: the operations queue tells a request
+        still waiting for a pro from one waiting for its customer (#81)."""
+        return QuoteRepository.pending_by_request()
+
+    async def of_request(self, request_id: uuid.UUID) -> list[StaffQuote]:
+        """Every quote of the request for staff, newest first: the caller checks the reader."""
+        return [
+            StaffQuote(
+                id=quote.id,
+                pro_id=quote.pro_id,
+                amount_cents=quote.amount_cents,
+                status=quote.status,
+                proposed_start_at=quote.proposed_start_at,
+                created_at=quote.created_at,
+            )
+            for quote in await self._quotes.of_request(request_id)
+        ]
 
     async def lock_of_request(
         self, quote_id: uuid.UUID, request_id: uuid.UUID

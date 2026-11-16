@@ -433,6 +433,16 @@ class Settings(BaseSettings):
     support_ticket_create_window_seconds: int = Field(default=3_600, gt=0)
     # How long a ticket create's Idempotency-Key answers its retries with the ticket (#380).
     support_ticket_idempotency_window_seconds: int = Field(default=86_400, gt=0)
+    # Operations queue (#81). Minutes the BDC has to make the first contact with a new request:
+    # past it, an uncontacted request counts as urgent.
+    ops_first_contact_sla_minutes: int = Field(default=5, gt=0)
+    # Minutes a pending quote may wait for its customer before the request counts as waiting
+    # on the customer instead of quote ready.
+    ops_quote_waiting_minutes: int = Field(default=1_440, gt=0)
+    # The IANA time zone "scheduled today" is read in, as Postgres names it.
+    business_time_zone: str = Field(
+        default="America/New_York", pattern=r"^[A-Za-z_]+(/[A-Za-z0-9_+-]+)*$"
+    )
     # Reviews (#77): reviews one user may write per window, over all their jobs.
     review_create_limit: int = Field(default=20, gt=0)
     review_create_window_seconds: int = Field(default=3_600, gt=0)
