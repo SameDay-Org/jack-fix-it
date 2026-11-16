@@ -24,8 +24,11 @@ const twoDigits = (value: number) => String(value % 100).padStart(2, "0");
 export const expiryOf = (card: Pick<SavedCard, "exp_month" | "exp_year">): string =>
   `${twoDigits(card.exp_month)}/${twoDigits(card.exp_year)}`;
 
-/** What the wallet shows of the number: four dots and the last four digits. */
-export const maskedNumber = (card: Pick<SavedCard, "last4">): string => `•••• ${card.last4}`;
+/**
+ * What the wallet shows of the number: four dots and the last four digits, joined by a no-break
+ * space so a line never ends between the dots and the digits (large text, a long brand name).
+ */
+export const maskedNumber = (card: Pick<SavedCard, "last4">): string => `••••\u00a0${card.last4}`;
 
 /** The card on one line, as its strip and the pocket's face write it: "Visa •••• 4242". */
 export const cardName = (t: TFunction, card: SavedCard): string =>

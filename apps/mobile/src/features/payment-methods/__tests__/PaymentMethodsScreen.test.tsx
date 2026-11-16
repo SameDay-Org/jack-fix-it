@@ -130,6 +130,26 @@ describe("PaymentMethodsScreen", () => {
     expect(screen.getByRole("button", { name: "Add a card" })).toBeOnTheScreen();
   });
 
+  it("gives a card's brand a line of its own once it would wrap, so no word is broken", async () => {
+    await open();
+    const brand = await screen.findByTestId("wallet-card-pm_master-brand");
+
+    // One line: the mark, the brand and the number stay side by side.
+    await act(async () => fireEvent(brand, "textLayout", { nativeEvent: { lines: [{}] } }));
+    expect(screen.queryByTestId("wallet-card-pm_master-stacked")).toBeNull();
+
+    // The brand would wrap (large text, a narrow phone): it moves under the mark and the number.
+    await act(async () => fireEvent(brand, "textLayout", { nativeEvent: { lines: [{}, {}] } }));
+    const stacked = screen.getByTestId("wallet-card-pm_master-stacked");
+    expect(stacked).toHaveTextContent("•••• 4444Mastercard");
+    expect(screen.queryByTestId("wallet-card-pm_master-brand")).toBeNull();
+    // The other cards keep their line, and the strip is still read out in full.
+    expect(screen.getByTestId("wallet-card-pm_amex-brand")).toBeOnTheScreen();
+    expect(screen.getByTestId("wallet-card-pm_master").props.accessibilityLabel).toBe(
+      "Mastercard ending 4444, expires 03 30",
+    );
+  });
+
   it("keeps three cards in the pocket until See all brings every one out with its expiry", async () => {
     server = [MASTER, AMEX, VISA, DISCOVER, JCB];
     await open();

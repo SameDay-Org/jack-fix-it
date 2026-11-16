@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Pressable,
   Text,
+  useWindowDimensions,
   View,
   type LayoutChangeEvent,
   type ViewStyle,
@@ -148,12 +149,27 @@ type CardStripProps = {
   onOpen: () => void;
 };
 
-/** One card peeking out of the pocket: a button that opens it, read out in full. */
+/**
+ * One card peeking out of the pocket: a button that opens it, read out in full. Its mark, brand
+ * and number share a line while the brand fits beside the number; once the brand name would wrap
+ * (large text, a narrow phone) the brand takes a line of its own under the mark and the number, so
+ * a word is never broken. A wrap counts for the width and font scale it happened at.
+ */
 function CardStrip({ card, age, first, detailed, onOpen }: CardStripProps) {
   const { t } = useTranslation();
   const [pressed, pressIn, pressOut] = useFlag();
+  const { width, fontScale } = useWindowDimensions();
+  const fit = `${width}:${fontScale}`;
+  const [wrappedAt, setWrappedAt] = useState<string | null>(null);
+  const stacked = wrappedAt === fit;
   const tone = cardTone(age);
   const ink = { color: tokens.colors[tone.ink] };
+  const brandName = t(`paymentMethods.brand.${brandOf(card)}`);
+  const number = (
+    <Text className="text-headline" style={ink}>
+      {maskedNumber(card)}
+    </Text>
+  );
   return (
     <Pressable
       accessibilityRole="button"
@@ -178,15 +194,32 @@ function CardStrip({ card, age, first, detailed, onOpen }: CardStripProps) {
       testID={`wallet-card-${card.id}`}
     >
       <View className="justify-center gap-1 px-4 py-2" style={{ minHeight: STRIP.peek }}>
-        <View className="flex-row flex-wrap items-center gap-x-3 gap-y-1">
-          <BrandMark brand={brandOf(card)} tone={tone.mark} />
-          <Text className="shrink grow text-headline" style={ink}>
-            {t(`paymentMethods.brand.${brandOf(card)}`)}
-          </Text>
-          <Text className="text-headline" style={ink}>
-            {maskedNumber(card)}
-          </Text>
-        </View>
+        {stacked ? (
+          <View className="gap-1" testID={`wallet-card-${card.id}-stacked`}>
+            <View className="flex-row items-center justify-between gap-3">
+              <BrandMark brand={brandOf(card)} tone={tone.mark} />
+              {number}
+            </View>
+            <Text className="text-headline" style={ink}>
+              {brandName}
+            </Text>
+          </View>
+        ) : (
+          <View className="flex-row items-center gap-3">
+            <BrandMark brand={brandOf(card)} tone={tone.mark} />
+            <Text
+              className="shrink grow text-headline"
+              style={ink}
+              onTextLayout={(event) => {
+                if (event.nativeEvent.lines.length > 1) setWrappedAt(fit);
+              }}
+              testID={`wallet-card-${card.id}-brand`}
+            >
+              {brandName}
+            </Text>
+            {number}
+          </View>
+        )}
         {detailed ? (
           <View className="flex-row flex-wrap items-center justify-between gap-x-3 gap-y-1">
             <Text className="text-footnote" style={ink}>

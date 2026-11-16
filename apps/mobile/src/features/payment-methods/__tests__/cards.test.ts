@@ -44,9 +44,11 @@ describe("a saved card, as the wallet writes and says it", () => {
   it("writes the expiry as MM/YY and the number as four dots and the last four digits", () => {
     expect(expiryOf(VISA)).toBe("12/28");
     expect(expiryOf(MASTER)).toBe("03/30");
-    expect(maskedNumber(AMEX)).toBe("•••• 0005");
-    expect(cardName(t, VISA)).toBe("Visa •••• 4242");
-    expect(cardName(t, JCB)).toBe("Card •••• 0505");
+    // A no-break space: a line never ends between the dots and the digits.
+    expect(maskedNumber(AMEX)).toBe("••••\u00a00005");
+    // The brand and the number may part at the plain space between them.
+    expect(cardName(t, VISA)).toBe("Visa ••••\u00a04242");
+    expect(cardName(t, JCB)).toBe("Card ••••\u00a00505");
   });
 
   it("says the card in full, with no dot read out", () => {
@@ -59,7 +61,7 @@ describe("a saved card, as the wallet writes and says it", () => {
     await i18n.changeLanguage("es");
 
     expect(spokenCard(t, VISA)).toBe("Visa terminada en 4242, vence 12 28, predeterminada");
-    expect(cardName(t, JCB)).toBe("Tarjeta •••• 0505");
+    expect(cardName(t, JCB)).toBe("Tarjeta ••••\u00a00505");
   });
 });
 
