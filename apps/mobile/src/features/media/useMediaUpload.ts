@@ -282,7 +282,15 @@ export function useMediaUpload({
             exif: false,
           });
         }
-        if (result.canceled || !mounted.current || !isCurrentGeneration(startedIn)) return;
+        if (result.canceled) return;
+        if (!mounted.current || !isCurrentGeneration(startedIn)) {
+          // Too late: the screen left, or the session changed, while the picker was open. Its copies
+          // are the app's own files and nothing will use them.
+          if (discardFiles) result.assets.forEach((asset) => deleteAppFile(asset.uri));
+          return;
+        }
+        // Anything past the room a pick may bring is dropped: its copy too.
+        if (discardFiles) result.assets.slice(room).forEach((asset) => deleteAppFile(asset.uri));
 
         if (replace) {
           // The items held make way: their uploads stop, their keys are never attached, their

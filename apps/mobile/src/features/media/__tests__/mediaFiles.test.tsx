@@ -209,6 +209,63 @@ describe("a document photo's files (discardFiles)", () => {
     expect(onDisk()).toEqual([pickedUri(1)]);
   });
 
+  /** Opens the picker and holds its answer: the copy is written when the picker hands it over. */
+  async function openPickerHeld(result: { current: ReturnType<typeof useMediaUpload> }) {
+    const answer = deferred<ImagePicker.ImagePickerResult>();
+    picker.launchImageLibraryAsync.mockReturnValueOnce(answer.promise);
+    let adding: Promise<void> | undefined;
+    await act(async () => {
+      adding = result.current.add("library");
+    });
+    return {
+      handOver: async (uri: string) => {
+        mockDisk.files.add(uri);
+        await act(async () => {
+          answer.resolve({
+            canceled: false,
+            assets: [{ uri, width: 800, height: 600, type: "image", mimeType: "image/jpeg" }],
+          } as ImagePicker.ImagePickerResult);
+          await adding;
+        });
+      },
+    };
+  }
+
+  it("a picker that answers after the screen left: its copy is deleted, nothing is prepared", async () => {
+    const { result, unmount } = await render();
+    const held = await openPickerHeld(result);
+
+    await act(async () => unmount());
+    await held.handOver(pickedUri(1));
+    expect(onDisk()).toEqual([]);
+    expect(mockDisk.deleted).toEqual([pickedUri(1)]);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("a picker that answers after a sign-out (or another account): its copy is deleted", async () => {
+    const { result } = await render();
+    const held = await openPickerHeld(result);
+
+    await act(async () => {
+      mockSession.generation += 1;
+      mockSession.forgetters.forEach((forget) => forget());
+    });
+    await held.handOver(pickedUri(1));
+    expect(onDisk()).toEqual([]);
+    expect(result.current.items).toEqual([]);
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it("a late picker answer never deletes a picture outside the app's cache", async () => {
+    const { result, unmount } = await render();
+    const held = await openPickerHeld(result);
+
+    await act(async () => unmount());
+    await held.handOver(LIBRARY);
+    expect(mockDisk.files.has(LIBRARY)).toBe(true);
+  });
+
   it("never deletes a picture outside the app's cache (a library original)", async () => {
     const { result, unmount } = await render();
     pick(LIBRARY);
@@ -223,6 +280,26 @@ describe("a document photo's files (discardFiles)", () => {
 });
 
 describe("other photos (no discardFiles: profile photo, job photos, request media)", () => {
+  it("keep a late picker answer's copy as before", async () => {
+    const answer = deferred<ImagePicker.ImagePickerResult>();
+    picker.launchImageLibraryAsync.mockReturnValueOnce(answer.promise);
+    const { result, unmount } = await render({ discardFiles: false });
+    let adding: Promise<void> | undefined;
+    await act(async () => {
+      adding = result.current.add("library");
+    });
+    await act(async () => unmount());
+    mockDisk.files.add(pickedUri(1));
+    await act(async () => {
+      answer.resolve({
+        canceled: false,
+        assets: [{ uri: pickedUri(1), width: 800, height: 600, type: "image" }],
+      } as ImagePicker.ImagePickerResult);
+      await adding;
+    });
+    expect(mockDisk.deleted).toEqual([]);
+  });
+
   it("keep their files as before", async () => {
     const { result, unmount } = await render({ discardFiles: false });
     await choose(result, 1);
