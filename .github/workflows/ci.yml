@@ -114,6 +114,8 @@ jobs:
       - run: pnpm -r lint
       - run: pnpm -r test
       - run: pnpm --filter @jack/web build
+      # First-load JavaScript of the showcase page against its budget (#403); needs the build.
+      - run: pnpm --filter @jack/web check:bundle
       # JS bundles only: catches Metro, Babel and NativeWind errors. Device builds run on EAS.
       - name: Bundle mobile (android)
         run: pnpm --filter @jack/mobile exec expo export --platform android --output-dir dist-ci

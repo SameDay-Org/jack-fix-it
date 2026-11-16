@@ -48,6 +48,32 @@ apply.
   `dangerouslySetInnerHTML`, no markdown and no auto-linked URLs, emails or phones. The API's
   contact redaction is not HTML sanitization: `<svg onload=alert(390)>` is stored and returned
   verbatim as a JSON string, so only the rendering keeps it inert (#392).
+- The product showcase (#403) is `src/app/(showcase)/`: `/app` in English and `/es/app` in
+  Spanish, both static, plus the legal placeholders the footer links to (`/terms`, `/privacy`
+  and their `/es` twins, `noindex` until the texts are approved). Its code is
+  `src/features/showcase/`; the routes only pick the language.
+  - Its layout loads Plus Jakarta Sans from `src/features/showcase/fonts/` (`next/font/local`,
+    license beside the file). No other route uses that font.
+  - App screens come from the typed manifest `src/features/showcase/media.ts`; the files are in
+    `public/showcase/`. Only real captures of the app: no mockups, and an entry is a
+    `placeholder` until its final footage replaces it (`media.test.ts` checks the files, their
+    sizes and both languages' text alternatives).
+  - Copy rules, on top of the root ones: no fee or take rate, no store badge or download link
+    while the app is not in the stores, no form without a working endpoint
+    (`showcase-page.test.ts` fails on a forbidden word in either language). FAQ answers reuse
+    the mobile app's help texts.
+  - The site has one root layout, so `<html lang>` is `en` in the server's HTML of every
+    route. A Spanish page wraps its content in `lang="es"` and `html-lang.tsx` sets
+    `<html lang>` in the browser. A server-rendered `lang` needs a root layout per route group.
+  - Keep its client JavaScript small: components are server components unless they need the
+    browser, and a client component does not import `cn` (it would ship tailwind-merge).
+    `pnpm --filter @jack/web check:bundle`, after a build, fails when the page's first-load
+    JavaScript passes 150 KB gzip; CI runs it.
+  - `SITE_URL` (optional, read at build time) gives the page its canonical, `hreflang` and
+    Open Graph addresses; without it the page has none.
+- The mascot is `src/features/mascot/mascot.tsx`: `<Mascot pose size title className>` with
+  the poses `wave`, `point`, `celebrate`, `peek`, `thinking` and `tools`. Today's drawing is a
+  placeholder; the final character replaces the drawing, not the props.
 - `src/app/robots.ts` allows indexing only when `APP_ENV=production`.
 - UI changes need screenshots at mobile and desktop width in the PR.
 
