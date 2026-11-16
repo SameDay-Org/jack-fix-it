@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Collection
 from datetime import datetime
 
-from sqlalchemy import Subquery, and_, case, exists, or_, select, update
+from sqlalchemy import Subquery, and_, case, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.quotes.models import Quote, QuoteStatus
@@ -19,6 +19,31 @@ class QuoteRepository:
         return select(
             Quote.id.label("quote_id"), Quote.proposed_start_at.label("start_at")
         ).subquery()
+
+    @staticmethod
+    def pending_by_request() -> Subquery:
+        """Per request with a pending quote: its id (`request_id`), how many are pending
+        (`pending`) and when the oldest was sent (`oldest_at`), as a subquery for another
+        module's query. A request with none has no row."""
+        return (
+            select(
+                Quote.request_id.label("request_id"),
+                func.count().label("pending"),
+                func.min(Quote.created_at).label("oldest_at"),
+            )
+            .where(Quote.status == QuoteStatus.PENDING)
+            .group_by(Quote.request_id)
+            .subquery()
+        )
+
+    async def of_request(self, request_id: uuid.UUID) -> list[Quote]:
+        """Every quote of the request, whatever its status, newest first."""
+        statement = (
+            select(Quote)
+            .where(Quote.request_id == request_id)
+            .order_by(Quote.created_at.desc(), Quote.id.desc())
+        )
+        return list((await self._session.scalars(statement)).all())
 
     async def proposed_starts(
         self, quote_ids: Collection[uuid.UUID]

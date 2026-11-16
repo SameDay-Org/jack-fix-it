@@ -36,6 +36,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from sqlalchemy import Select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -121,6 +122,12 @@ class SupportTicketService:
         self._jobs = JobPartiesReader(session, ProService(session))
         self._users = UserService(session)
         self._audit = AuditService(session)
+
+    @staticmethod
+    def open_job_ids() -> Select[uuid.UUID | None]:
+        """The jobs a ticket still open or in progress is about, as a statement: the
+        operations queue counts their requests as problems (#81)."""
+        return SupportTicketRepository.open_job_ids()
 
     async def is_retry(self, user: UserAccount, key: uuid.UUID) -> bool:
         """Whether `key` made one of the user's tickets within the window: a create with it
