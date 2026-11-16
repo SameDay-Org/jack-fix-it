@@ -163,13 +163,18 @@ const nextFrame = () => new Promise<number>((resolve) => requestAnimationFrame(r
 export async function createPhoneScene(options: PhoneSceneOptions): Promise<PhoneScene> {
   const { container, screens, maxPixelRatio, onLost } = options;
 
-  // Throws where only a slow software renderer exists: the caller keeps the CSS phone.
-  const renderer = new WebGLRenderer({
-    antialias: true,
+  // The one WebGL test: no WebGL 2, or only a slow software one, and this throws quietly
+  // (three.js is handed the context, so it logs nothing); the caller keeps the CSS phone.
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("webgl2", {
     alpha: true,
+    antialias: true,
+    depth: true,
+    stencil: false,
     failIfMajorPerformanceCaveat: true,
   });
-  const canvas = renderer.domElement;
+  if (!context) throw new Error("No fast WebGL 2 here: the CSS phone stays.");
+  const renderer = new WebGLRenderer({ canvas, context });
   let contextLost = false;
   let handedOver = false;
   let disposed = false;

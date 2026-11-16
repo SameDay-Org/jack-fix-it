@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   chooseHeroMode,
-  hasFastWebGL2,
   isLowEnd,
   MAX_PIXEL_RATIO,
   maxPixelRatio,
@@ -14,7 +13,6 @@ import {
 /** A capable desktop browser; each test changes what it is about. */
 const CAPABLE: HeroEnv = {
   reducedMotion: false,
-  webgl: true,
   cores: 8,
   memoryGb: 8,
   saveData: false,
@@ -23,7 +21,7 @@ const CAPABLE: HeroEnv = {
 };
 
 describe("the hero's mode (the fallback switch)", () => {
-  it("is the 3D phone on a capable device", () => {
+  it("is the 3D phone (built on intent) on a capable device", () => {
     expect(chooseHeroMode(CAPABLE)).toBe("webgl");
     // Safari reports neither memory nor connection: the frame-time probe decides there.
     expect(chooseHeroMode({ ...CAPABLE, memoryGb: null, cores: 4, effectiveType: null })).toBe(
@@ -33,11 +31,10 @@ describe("the hero's mode (the fallback switch)", () => {
 
   it("is the still hero for reduced motion, whatever the device can do", () => {
     expect(chooseHeroMode({ ...CAPABLE, reducedMotion: true })).toBe("static");
-    expect(chooseHeroMode({ ...CAPABLE, reducedMotion: true, webgl: false })).toBe("static");
+    expect(chooseHeroMode({ ...CAPABLE, reducedMotion: true, memoryGb: 2 })).toBe("static");
   });
 
   it.each<[string, Partial<HeroEnv>]>([
-    ["no WebGL 2 (or only a software one)", { webgl: false }],
     ["less than 4 GB of memory", { memoryGb: 2 }],
     ["less than 4 cores", { cores: 2 }],
     ["data saving", { saveData: true }],
@@ -61,63 +58,36 @@ describe("the hero's mode (the fallback switch)", () => {
   });
 });
 
-/** A browser double: media queries by text, a canvas that gives a context or not. */
-function browser(options: {
-  queries?: Record<string, boolean>;
-  context?: "fast" | "none" | "throws";
-  navigator?: BrowserLike["navigator"];
-}): BrowserLike & { asked: WebGLContextAttributes[]; lost: number } {
-  const asked: WebGLContextAttributes[] = [];
-  const double = {
+/** A browser double: media queries answered by their text. */
+function browser(
+  queries: Record<string, boolean>,
+  navigator: BrowserLike["navigator"] = {},
+): BrowserLike & { asked: string[] } {
+  const asked: string[] = [];
+  return {
     asked,
-    lost: 0,
-    navigator: options.navigator ?? {},
-    matchMedia: (query: string) => ({ matches: options.queries?.[query] ?? false }),
-    document: {
-      createElement: () => ({
-        getContext: (_: "webgl2", attributes: WebGLContextAttributes) => {
-          asked.push(attributes);
-          if (options.context === "throws") throw new Error("no canvas");
-          if (options.context !== "fast") return null;
-          return {
-            getExtension: () => ({
-              loseContext: () => {
-                double.lost += 1;
-              },
-            }),
-          };
-        },
-      }),
+    navigator,
+    matchMedia: (query: string) => {
+      asked.push(query);
+      return { matches: queries[query] ?? false };
     },
   };
-  return double;
 }
 
 describe("reading the browser", () => {
-  it("asks for a WebGL 2 context that is not a slow software one, and releases it", () => {
-    const fast = browser({ context: "fast" });
-    expect(hasFastWebGL2(fast)).toBe(true);
-    expect(fast.asked).toEqual([{ failIfMajorPerformanceCaveat: true }]);
-    expect(fast.lost).toBe(1);
-    expect(hasFastWebGL2(browser({ context: "none" }))).toBe(false);
-    expect(hasFastWebGL2(browser({ context: "throws" }))).toBe(false);
-  });
-
   it("reads memory, cores, connection and pointer where the browser gives them", () => {
     const env = readHeroEnv(
-      browser({
-        context: "fast",
-        queries: { "(pointer: coarse)": true },
-        navigator: {
+      browser(
+        { "(pointer: coarse)": true },
+        {
           hardwareConcurrency: 6,
           deviceMemory: 2,
           connection: { saveData: true, effectiveType: "3g" },
         },
-      }),
+      ),
     );
     expect(env).toEqual({
       reducedMotion: false,
-      webgl: true,
       cores: 6,
       memoryGb: 2,
       saveData: true,
@@ -126,19 +96,22 @@ describe("reading the browser", () => {
     });
   });
 
-  it("leaves out what the browser does not say, and makes no context for reduced motion", () => {
-    const still = browser({
-      context: "fast",
-      queries: { "(prefers-reduced-motion: reduce)": true },
-    });
-    expect(readHeroEnv(still)).toMatchObject({
+  it("leaves out what the browser does not say", () => {
+    expect(readHeroEnv(browser({ "(prefers-reduced-motion: reduce)": true }))).toEqual({
       reducedMotion: true,
-      webgl: false,
       cores: null,
       memoryGb: null,
       saveData: false,
       effectiveType: null,
+      coarsePointer: false,
     });
-    expect(still.asked).toEqual([]);
+  });
+
+  it("needs nothing but media queries and the navigator: no WebGL context is made to choose", () => {
+    const fake = browser({});
+    readHeroEnv(fake);
+    // BrowserLike has no document: making a canvas or a context here would not compile.
+    expect(Object.keys(fake).sort()).toEqual(["asked", "matchMedia", "navigator"]);
+    expect(fake.asked).toEqual(["(prefers-reduced-motion: reduce)", "(pointer: coarse)"]);
   });
 });

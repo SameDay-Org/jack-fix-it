@@ -4,6 +4,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 
 import { chooseHeroMode, maxPixelRatio, readHeroEnv, STILL_QUERY } from "./hero3d/capabilities";
 import { beatAt, dominantScreen, pinProgress } from "./hero3d/choreography";
+import { loadTriggers } from "./hero3d/load-triggers";
 import type { PhoneScene } from "./hero3d/phone-scene";
 
 type HeroMotionProps = {
@@ -46,10 +47,12 @@ function afterLoadAndIdle(run: () => void): () => void {
  *   drawn in CSS shows;
  * - `data-gl="ready"`: the 3D phone has replaced the CSS one.
  *
- * Nothing here listens to touch or wheel input or changes the scroll: the browser scrolls as
- * it always does. In `webgl` mode the 3D code (three.js) is fetched only once the page has
- * loaded, the browser is idle, the hero is pinned and the tab is shown; until the phone is ready,
- * and whenever it fails, the CSS phone stays.
+ * Nothing here changes the scroll or holds input back: the browser scrolls as it always does
+ * (the listeners below are passive and only notice the first intent). In `webgl` mode the 3D
+ * code is downloaded once the page has loaded and the browser is idle, and three.js is
+ * evaluated, with the WebGL setup, on the reader's first intent (hero3d/scene-loader.ts); both
+ * wait for a pinned hero in a visible tab. Until the phone is ready, and whenever it fails, the
+ * CSS phone stays.
  */
 export function HeroMotion({ children, className, screens }: HeroMotionProps) {
   const stageRef = useRef<HTMLDivElement>(null);
@@ -104,12 +107,19 @@ export function HeroMotion({ children, className, screens }: HeroMotionProps) {
       scene = null;
     };
 
-    const load = async () => {
+    // The 3D chunk (scene-loader.ts): downloaded once the page has loaded and the browser is
+    // idle, but three.js inside it is evaluated only on the reader's first intent.
+    let chunk: Promise<typeof import("./hero3d/scene-loader")> | null = null;
+    const download = () => (chunk ??= import("./hero3d/scene-loader"));
+
+    const build = async () => {
       const container = stage.querySelector<HTMLElement>("[data-hero-canvas]");
       if (!container || stopped) return;
       let created: PhoneScene | null = null;
       try {
-        const { createPhoneScene } = await import("./hero3d/phone-scene");
+        const { phoneSceneModule } = await download();
+        if (stopped) return;
+        const { createPhoneScene } = phoneSceneModule(); // evaluates three.js
         // Let the browser breathe between evaluating three.js and making the GL context:
         // two shorter tasks instead of one long one.
         await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -137,34 +147,40 @@ export function HeroMotion({ children, className, screens }: HeroMotionProps) {
       stage.dataset.gl = "ready";
     };
 
-    // The 3D phone only for a pinned hero in a tab the reader sees: a background tab waits,
-    // and fetches nothing, until it is shown.
-    const canLoad = () => !still.matches && document.visibilityState === "visible";
-    let stopWaiting = () => {};
-    const loadWhenShown = () => {
-      if (canLoad()) {
-        void load();
-        return;
+    // Downloaded when the page is idle, built on the first intent, both only for a pinned hero
+    // in a tab the reader sees (hero3d/load-triggers.ts). The hero opens the page, so it is
+    // always within a screen of the viewport: being near it is no trigger of its own.
+    const canLoad = () => !stopped && !still.matches && document.visibilityState === "visible";
+    const triggers = loadTriggers({
+      canLoad,
+      download: () => void download().catch(() => {}),
+      build: () => {
+        stopListening();
+        void build();
+      },
+    });
+    const INTENT = ["scroll", "wheel", "touchstart", "pointerdown", "keydown"] as const;
+    const onIntent = () => triggers.intent();
+    const onChange = () => triggers.changed();
+    const stopListening = () => {
+      for (const type of INTENT) window.removeEventListener(type, onIntent, true);
+      still.removeEventListener("change", onChange);
+      document.removeEventListener("visibilitychange", onChange);
+    };
+    let cancelIdle = () => {};
+    if (mode === "webgl") {
+      for (const type of INTENT) {
+        window.addEventListener(type, onIntent, { capture: true, passive: true });
       }
-      const onChange = () => {
-        if (!canLoad()) return;
-        stopWaiting();
-        void load();
-      };
       still.addEventListener("change", onChange);
       document.addEventListener("visibilitychange", onChange);
-      stopWaiting = () => {
-        still.removeEventListener("change", onChange);
-        document.removeEventListener("visibilitychange", onChange);
-        stopWaiting = () => {};
-      };
-    };
-    const cancelLoad = mode === "webgl" ? afterLoadAndIdle(loadWhenShown) : () => {};
+      cancelIdle = afterLoadAndIdle(() => triggers.idle());
+    }
 
     return () => {
       stopped = true;
-      cancelLoad();
-      stopWaiting();
+      cancelIdle();
+      stopListening();
       window.removeEventListener("scroll", schedule);
       window.removeEventListener("resize", schedule);
       still.removeEventListener("change", schedule);

@@ -137,7 +137,7 @@ export function Hero({ t }: { t: TFunction }) {
           <div className="relative min-h-0 lg:h-full still:h-auto">
             <div className="relative mx-auto flex h-full items-center justify-center still:block still:h-auto">
               <div className="relative aspect-[0.519] h-[74%] max-h-[44rem] short:h-[92%] still:mx-auto still:h-auto still:w-[min(60vw,18rem)] still:-mb-28 sm:still:w-72 lg:still:mb-0 lg:still:w-80">
-                <div className="size-full transition-opacity duration-700 group-data-[gl=ready]/hero:opacity-0 still:opacity-100!">
+                <div className="size-full transition-opacity duration-300 motion-reduce:transition-none group-data-[gl=ready]/hero:opacity-0 still:opacity-100!">
                   <PhoneFrame
                     media={MEDIA.home}
                     alt={t(MEDIA.home.alt)}
@@ -182,7 +182,7 @@ export function Hero({ t }: { t: TFunction }) {
             <div
               data-hero-canvas
               aria-hidden
-              className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-700 group-data-[gl=ready]/hero:opacity-100 still:hidden"
+              className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 motion-reduce:transition-none group-data-[gl=ready]/hero:opacity-100 still:hidden"
             />
           </div>
         </div>
