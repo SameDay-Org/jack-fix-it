@@ -13,15 +13,17 @@ import {
   useSetDefaultCard,
   useWalletBusy,
 } from "./api";
-import { CardFace, cardTone } from "./CardFace";
-import { ageOf, shortSpokenCard } from "./cards";
+import { CardFace, stackTone } from "./CardFace";
+import { shortSpokenCard, type Wallet } from "./cards";
 
 /**
  * A saved card, opened: a sheet route presented with `sheetOptions("fitToContents")`. It shows
  * the card with its data redacted (brand, last four digits, expiry) and offers Set as default
  * (unless it is already) and Delete, which asks first. Either one closes the sheet at once; the
  * wallet shows the change while the server answers, and says so if it did not stick. While
- * another change of the wallet is unanswered both wait.
+ * another change of the wallet is unanswered both wait, and whether this card is the default
+ * follows the wallet (the server may name it while the sheet is open); once the sheet acts it
+ * holds what it showed, so it never redraws as it closes over its own change.
  */
 export function PaymentCardSheet() {
   const { t } = useTranslation();
@@ -36,6 +38,10 @@ export function PaymentCardSheet() {
   if (listed === undefined && wallet.data) setListed(wallet.data);
   const card = listed?.find((saved) => saved.id === id);
   const missing = listed === undefined ? wallet.isError : !card;
+  // The wallet as this sheet reads it: the cache's (the observer follows it even when it fetches
+  // nothing) until the sheet acts, then as it was at that moment.
+  const [held, setHeld] = useState<Wallet | null>(null);
+  const now = held ?? wallet.data ?? listed;
   const busy = useWalletBusy();
   const setDefault = useSetDefaultCard();
   const deleteCard = useDeleteCard();
@@ -46,8 +52,9 @@ export function PaymentCardSheet() {
   const leave = useCallback(() => {
     if (left.current) return;
     left.current = true;
+    setHeld(now ?? null);
     router.back();
-  }, []);
+  }, [now]);
 
   // Its card is not in the wallet (a stale link), or the wallet could not load: nothing to show.
   useEffect(() => {
@@ -55,9 +62,11 @@ export function PaymentCardSheet() {
   }, [leave, missing]);
 
   if (!listed || !card) return null;
-  const spoken = shortSpokenCard(t, card);
+  // The card as the wallet has it now; the one first opened when it has left the wallet.
+  const current = now?.find((saved) => saved.id === id) ?? card;
+  const spoken = shortSpokenCard(t, current);
   // Who is the default next is the server's choice: no card is named.
-  const movesDefault = card.is_default && listed.length > 1;
+  const movesDefault = current.is_default && (now ?? listed).length > 1;
 
   const confirmDelete = () => {
     if (asking.current) return;
@@ -75,7 +84,7 @@ export function PaymentCardSheet() {
           style: "destructive",
           onPress: () => {
             answered();
-            if (deleteCard(card)) leave();
+            if (deleteCard(current)) leave();
           },
         },
       ],
@@ -91,13 +100,13 @@ export function PaymentCardSheet() {
       // Full width, one above the other: two pills never squeeze into a row on a narrow phone.
       actions={
         <View className="flex-1 gap-3">
-          {card.is_default ? null : (
+          {current.is_default ? null : (
             <Button
               label={t("paymentMethods.card.setDefault")}
               size="lg"
               disabled={busy}
               onPress={() => {
-                if (setDefault(card)) leave();
+                if (setDefault(current)) leave();
               }}
               testID="payment-card-default"
             />
@@ -116,8 +125,8 @@ export function PaymentCardSheet() {
     >
       {/* Room for the card's shadow inside the sheet's scrolling body. */}
       <View className="gap-3 px-1 pb-2 pt-1">
-        <CardFace card={card} tone={cardTone(ageOf(listed, card))} testID="payment-card-face" />
-        {card.is_default ? (
+        <CardFace card={current} tone={stackTone(listed, card)} testID="payment-card-face" />
+        {current.is_default ? (
           <Text className="text-callout text-navy-900" testID="payment-card-is-default">
             {t("paymentMethods.card.isDefault")}
           </Text>

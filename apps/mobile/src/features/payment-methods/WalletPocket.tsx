@@ -16,9 +16,8 @@ import { useFlag } from "@/components/ui";
 import { bubbleShadow, continuousCorners, pressedTransform, tokens, withOpacity } from "@/theme";
 
 import { BrandMark } from "./BrandMark";
-import { cardTone, DefaultMark } from "./CardFace";
+import { DefaultMark, stackTone, type CardTone } from "./CardFace";
 import {
-  ageOf,
   brandOf,
   cardName,
   expiryOf,
@@ -140,8 +139,8 @@ function PocketFront({ size }: { size: Size | null }) {
 
 type CardStripProps = {
   card: SavedCard;
-  /** Its age in the wallet (`ageOf`): its tone. */
-  age: number;
+  /** Its colors (`stackTone`). */
+  tone: CardTone;
   /** The card at the back of the stack: it tucks behind nothing, under the rim of the wallet's back. */
   first: boolean;
   /** With its expiry and its Default mark, as "See all" shows the cards. */
@@ -155,14 +154,13 @@ type CardStripProps = {
  * (large text, a narrow phone) the brand takes a line of its own under the mark and the number, so
  * a word is never broken. A wrap counts for the width and font scale it happened at.
  */
-function CardStrip({ card, age, first, detailed, onOpen }: CardStripProps) {
+function CardStrip({ card, tone, first, detailed, onOpen }: CardStripProps) {
   const { t } = useTranslation();
   const [pressed, pressIn, pressOut] = useFlag();
   const { width, fontScale } = useWindowDimensions();
   const fit = `${width}:${fontScale}`;
   const [wrappedAt, setWrappedAt] = useState<string | null>(null);
   const stacked = wrappedAt === fit;
-  const tone = cardTone(age);
   const ink = { color: tokens.colors[tone.ink] };
   const brandName = t(`paymentMethods.brand.${brandOf(card)}`);
   const number = (
@@ -333,17 +331,26 @@ export function WalletPocket({
           { top: empty ? 0 : tabHeight - STRIP.tuck + WALL_LIP },
         ]}
       />
-      {/* Back to front, so each card is drawn over the one behind it. */}
-      {[...shown].reverse().map((card, place) => (
-        <CardStrip
-          key={card.id}
-          card={card}
-          age={ageOf(wallet, card)}
-          first={place === 0}
-          detailed={expanded}
-          onOpen={() => onOpen(card)}
-        />
-      ))}
+      {/* Back to front, so each card is drawn over the one behind it. One full-width box above the
+          pocket's face: Android reads overlapping views by their left edge first, and the strips,
+          inset from the pocket's sides, would be read after the face. Its elevation keeps the
+          strips over the wallet's back on Android; with no background it casts no shadow. */}
+      <View
+        collapsable={false}
+        style={{ elevation: bubbleShadow.elevation }}
+        testID="wallet-strips"
+      >
+        {[...shown].reverse().map((card, place) => (
+          <CardStrip
+            key={card.id}
+            card={card}
+            tone={stackTone(wallet, card)}
+            first={place === 0}
+            detailed={expanded}
+            onOpen={() => onOpen(card)}
+          />
+        ))}
+      </View>
       {empty ? (
         <Pressable
           accessibilityRole="button"

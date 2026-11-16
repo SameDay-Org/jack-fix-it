@@ -261,6 +261,9 @@ async function settleNewCard(
   { generation, before }: Pick<AddVariables, "generation" | "before">,
 ): Promise<boolean> {
   const current = () => isCurrentGeneration(generation);
+  // Whether the rule is still owed: as the wallet stood at Add until it is listed again, then as
+  // that list says (the cached wallet can be out of date: a default deleted on another device).
+  let owed = !before?.some((card) => card.is_default);
   try {
     // A list asked before the card was saved would draw over the new one when it lands.
     await client.cancelQueries(WALLET);
@@ -268,6 +271,7 @@ async function settleNewCard(
     if (!current()) return true;
     client.setQueryData<Wallet>(PAYMENT_METHODS_QUERY_KEY, wallet);
     if (wallet.some((card) => card.is_default)) return true;
+    owed = true;
     const added = addedCard(before ?? [], wallet);
     if (!added) return true;
     const saved = await apiPost("/v1/me/payment-methods/{payment_method_id}/default", undefined, {
@@ -282,8 +286,8 @@ async function settleNewCard(
     );
     return true;
   } catch {
-    // Another account's by now, or a wallet that had its default before the add: nothing is owed.
-    return !current() || !!before?.some((card) => card.is_default);
+    // Another account's by now, or a wallet known to have its default: nothing is owed.
+    return !current() || !owed;
   }
 }
 

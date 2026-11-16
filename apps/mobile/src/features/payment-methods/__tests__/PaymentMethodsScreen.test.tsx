@@ -43,6 +43,8 @@ jest.mock("@/api", () => ({
 jest.mock("@/features/payments/paymentSheet", () => ({ openSetupSheet: jest.fn() }));
 jest.mock("expo-router", () => ({
   router: { push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true), replace: jest.fn() },
+  // The router is idle: a card opens on its first tap (a test that taps twice says otherwise).
+  unstable_useIsNavigating: jest.fn(() => false),
 }));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(

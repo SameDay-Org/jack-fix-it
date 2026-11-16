@@ -4,7 +4,16 @@ import { Text, View } from "react-native";
 import { bubbleShadow, continuousCorners, tokens, type ColorToken } from "@/theme";
 
 import { BrandMark, type BrandMarkTone } from "./BrandMark";
-import { brandOf, expiryOf, maskedNumber, spokenCard, type SavedCard } from "./cards";
+import {
+  ageOf,
+  brandOf,
+  expiryOf,
+  maskedNumber,
+  spokenCard,
+  walletOrder,
+  type SavedCard,
+  type Wallet,
+} from "./cards";
 
 /** A card's colors: its surface, the ink of everything written on it, and its brand mark's tile. */
 export type CardTone = { surface: ColorToken; ink: ColorToken; mark: BrandMarkTone };
@@ -21,6 +30,19 @@ const TONES: readonly CardTone[] = [
  * and the same whichever card is the default.
  */
 export const cardTone = (age: number): CardTone => TONES[Math.max(age, 0) % TONES.length];
+
+/**
+ * A card's tone in the pocket's stack (`walletOrder`: the default in front, then the newest
+ * first): its own by age, except the card right behind the front one, which takes the next tone
+ * when it would match the front card's (the oldest card as the default, with a multiple of three
+ * cards after it). Any other two neighbours are a card apart in age, or two: never the same tone.
+ */
+export function stackTone(wallet: Wallet, card: Pick<SavedCard, "id">): CardTone {
+  const age = ageOf(wallet, card);
+  const [front, behind] = walletOrder(wallet);
+  const clashes = behind?.id === card.id && cardTone(age) === cardTone(ageOf(wallet, front));
+  return cardTone(clashes ? age + 1 : age);
+}
 
 /** The card's height at the smallest font; it grows with what is written on it. */
 const FACE_MIN_HEIGHT = 168;

@@ -1,5 +1,5 @@
-import { router } from "expo-router";
-import { useState } from "react";
+import { router, unstable_useIsNavigating } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, Text, View } from "react-native";
 
@@ -25,8 +25,7 @@ export function PaymentMethodsScreen() {
   const { add, adding, failure } = useAddCard();
   const [expanded, setExpanded] = useState(false);
 
-  const open = (card: SavedCard) =>
-    router.push({ pathname: "/account/payment-methods/[id]", params: { id: card.id } });
+  const open = useOpenCard();
   const loadFailure = cards === undefined && wallet.isError ? walletFailure(wallet.error) : null;
   // The wallet is on screen, but the last try to list it again failed: it may be out of date.
   const stale = cards !== undefined && wallet.isError;
@@ -45,7 +44,7 @@ export function PaymentMethodsScreen() {
             </Text>
           ) : null}
           {cards === undefined && wallet.isPending ? (
-            <TextSkeleton type="callout" width="85%" />
+            <TextSkeleton type="callout" sample={t("paymentMethods.support")} />
           ) : null}
         </View>
         {stale ? (
@@ -123,6 +122,25 @@ export function PaymentMethodsScreen() {
       </ScrollView>
     </Screen>
   );
+}
+
+/**
+ * Opens a card. A second tap before its sheet is up opens nothing: the router queues a push and
+ * the wallet stays tappable until it lands. Once the router is idle again a card opens again.
+ */
+function useOpenCard() {
+  const opening = useRef(false);
+  const navigating = unstable_useIsNavigating();
+
+  useEffect(() => {
+    if (!navigating) opening.current = false;
+  }, [navigating]);
+
+  return useCallback((card: SavedCard) => {
+    if (opening.current) return;
+    opening.current = true;
+    router.push({ pathname: "/account/payment-methods/[id]", params: { id: card.id } });
+  }, []);
 }
 
 /**

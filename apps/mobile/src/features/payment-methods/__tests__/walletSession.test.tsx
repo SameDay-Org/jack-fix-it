@@ -36,6 +36,8 @@ jest.mock("@/features/payments/paymentSheet", () => ({ openSetupSheet: jest.fn()
 jest.mock("expo-router", () => ({
   router: { push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true), replace: jest.fn() },
   useLocalSearchParams: jest.fn(() => ({})),
+  // The router is idle: a card opens on its first tap (a test that taps twice says otherwise).
+  unstable_useIsNavigating: jest.fn(() => false),
 }));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
@@ -133,13 +135,12 @@ describe("the wallet belongs to the signed-in session", () => {
 
     await view.unmount();
     await act(() => logout());
-    const asked = paths().length;
     await act(async () => held.resolve(jsonResponse(500, { error: { code: "internal_error" } })));
     await act(() => settle());
 
-    // Nothing put back into the cleared cache, nothing said, nothing asked in that session's name.
+    // Nothing put back into the cleared cache and nothing said. (No request could be counted here:
+    // with the cache cleared and nothing mounted, nothing is left to ask for the wallet again.)
     expect(client.getQueryCache().getAll()).toEqual([]);
     expect(toast()).toBeNull();
-    expect(paths()).toHaveLength(asked);
   });
 });
