@@ -7,7 +7,7 @@ share to their Stripe Express account and the job to paid_out. Three callers, on
 worker task queued after each confirmation, and the sweep (transfer_tasks.py) for whatever those
 left behind. Any number of them, in any order, make one transfer.
 
-release(job_id), in three steps:
+release(job_id), in four steps:
 
 1. Under the job's row lock (the one every status change takes), then the transfer row's:
    - the job is confirmed: anything else is left alone (not_confirmed);
