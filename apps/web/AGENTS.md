@@ -60,8 +60,8 @@ apply.
     sizes and both languages' text alternatives).
   - Copy rules, on top of the root ones: no fee or take rate, no store badge or download link
     while the app is not in the stores, no form without a working endpoint
-    (`showcase-page.test.ts` fails on a forbidden word in either language). FAQ answers reuse
-    the mobile app's help texts.
+    (`showcase-page.test.ts` fails on a forbidden word in either language). Most FAQ answers
+    reuse the mobile app's help texts; the others state only what the context doc states.
   - The site has one root layout, so `<html lang>` is `en` in the server's HTML of every
     route. A Spanish page wraps its content in `lang="es"` and `html-lang.tsx` sets
     `<html lang>` in the browser. A server-rendered `lang` needs a root layout per route group.

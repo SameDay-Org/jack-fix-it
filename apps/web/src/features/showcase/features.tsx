@@ -7,7 +7,7 @@ import { MascotBubble } from "./mascot-bubble";
 import { MEDIA, type MediaId } from "./media";
 import { PhoneFrame } from "./phone-frame";
 import { ANCHORS } from "./routes";
-import { ANCHOR_OFFSET, CONTAINER, EYEBROW, SECTION_TITLE } from "./ui";
+import { CONTAINER, EYEBROW, SECTION_TITLE } from "./ui";
 
 type Feature<Id extends MediaId = MediaId> = {
   /** Its strings (`showcase.features.<id>`) and its screen in the media manifest. */
@@ -40,11 +40,7 @@ const PHONE_WIDTH = "w-[min(60vw,17.5rem)] sm:w-[17.5rem]";
  */
 export function HowItWorks({ t }: { t: TFunction }) {
   return (
-    <section
-      id={ANCHORS.how}
-      aria-labelledby="how-title"
-      className={cn(ANCHOR_OFFSET, "py-20 lg:py-28")}
-    >
+    <section id={ANCHORS.how} aria-labelledby="how-title" className="py-20 lg:py-28">
       <div className={CONTAINER}>
         <div className="mx-auto flex max-w-2xl flex-col items-center gap-4 text-center">
           <p className={cn(EYEBROW, "text-green-700")}>{t("showcase.how.eyebrow")}</p>
@@ -114,11 +110,7 @@ export function ForPros({ t }: { t: TFunction }) {
   const media = MEDIA[PRO_FEATURE.id];
 
   return (
-    <section
-      id={ANCHORS.pros}
-      aria-labelledby="pros-title"
-      className={cn(ANCHOR_OFFSET, "px-3 sm:px-6")}
-    >
+    <section id={ANCHORS.pros} aria-labelledby="pros-title" className="px-3 sm:px-6">
       <div className="mx-auto max-w-7xl rounded-xl bg-navy-900 text-white lg:rounded-[3rem]">
         <div
           className={cn(

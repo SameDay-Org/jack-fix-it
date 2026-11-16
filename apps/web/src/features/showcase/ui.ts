@@ -20,6 +20,3 @@ export const EYEBROW = "text-sm font-bold tracking-widest uppercase";
 /** A section's headline. */
 export const SECTION_TITLE =
   "text-[clamp(2rem,3.5vw+1rem,3.25rem)] leading-[1.08] font-extrabold tracking-tight text-balance [word-spacing:0.1em]";
-
-/** Sections the header links to stop below the sticky header, not under it. */
-export const ANCHOR_OFFSET = "scroll-mt-20";

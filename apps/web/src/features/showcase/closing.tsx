@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 
 import { MascotBubble } from "./mascot-bubble";
 import { ANCHORS } from "./routes";
-import { ANCHOR_OFFSET, CONTAINER, EYEBROW, FOCUS_ON_LIGHT, SECTION_TITLE } from "./ui";
+import { CONTAINER, EYEBROW, FOCUS_ON_LIGHT, SECTION_TITLE } from "./ui";
 
 /** The platforms the app is coming to, in the order the notice names them. */
 const PLATFORMS = ["ios", "android"] as const;
@@ -16,11 +16,7 @@ const PLATFORMS = ["ios", "android"] as const;
  */
 export function ComingSoon({ t }: { t: TFunction }) {
   return (
-    <section
-      id={ANCHORS.soon}
-      aria-labelledby="soon-title"
-      className={cn(ANCHOR_OFFSET, "py-20 lg:py-28")}
-    >
+    <section id={ANCHORS.soon} aria-labelledby="soon-title" className="py-20 lg:py-28">
       <div className={cn(CONTAINER, "flex flex-col items-center gap-6 text-center")}>
         <h2 id="soon-title" className={cn(SECTION_TITLE, "max-w-3xl")}>
           {t("showcase.soon.title")}
@@ -70,16 +66,12 @@ const FAQ_GROUP = "showcase-faq";
 
 /**
  * The questions as native disclosures (`<details>`): each opens with a click, Enter or Space,
- * needs no script, and its answer is in the page for a reader without one. The answers reuse
- * the app's own help texts, so the page promises what the app does and nothing more.
+ * needs no script, and its answer is in the page for a reader without one. Most answers reuse
+ * the app's own help texts; the others say only what docs/jack-fix-it-contexto.md states.
  */
 export function Faq({ t }: { t: TFunction }) {
   return (
-    <section
-      id={ANCHORS.faq}
-      aria-labelledby="faq-title"
-      className={cn(ANCHOR_OFFSET, "bg-gray-50 py-20 lg:py-28")}
-    >
+    <section id={ANCHORS.faq} aria-labelledby="faq-title" className="bg-gray-50 py-20 lg:py-28">
       <div
         className={cn(
           CONTAINER,
