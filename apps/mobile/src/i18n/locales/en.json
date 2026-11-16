@@ -903,12 +903,13 @@
         "body_other": "While you're on the way, Jack Fix It shares your location with {{name}} every {{count}} seconds, so they can see you coming.",
         "stops": "It stops as soon as you check in, or if the job is cancelled. Jack Fix It doesn't keep a history of where you've been.",
         "continue": "Continue",
-        "notNow": "Not now"
+        "notNow": "Not now",
+        "settings": "Open Settings",
+        "blocked": "Location is off for Jack Fix It. Turn it on in Settings, then come back here and tap Continue."
       },
       "note": {
         "message": "Your location isn't shared with {{name}} on the way.",
-        "share": "Share location",
-        "settings": "Open Settings"
+        "share": "Share location"
       },
       "notification": {
         "title": "Sharing your location",

@@ -138,9 +138,21 @@ function applyJob(client: QueryClient, job: ProJob, generation: number): void {
   if (!isCurrentGeneration(generation)) return;
   void followJob(job);
   client.setQueryData(proJobQueryKey(job.id, generation), job);
+  const listKey = proJobsQueryKey(generation);
+  const list = client.getQueryState<ProJob[]>(listKey);
+  if (list && list.data === undefined && list.fetchStatus === "fetching") {
+    // The list's first read is still under way: it started before this answer, so its jobs must
+    // never land over it (nor stop the sharing the answer allows). TanStack would join it on an
+    // invalidation (it cancels a refetch only once there is data), so it is cancelled first and
+    // the list asked again.
+    void client
+      .cancelQueries({ queryKey: listKey })
+      .then(() => client.invalidateQueries({ queryKey: listKey }));
+    return;
+  }
   // The list holds the answer too until it is in again, as the API would list it (active jobs,
   // soonest first): nothing reads the job as it was.
-  client.setQueryData<ProJob[]>(proJobsQueryKey(generation), (jobs) =>
+  client.setQueryData<ProJob[]>(listKey, (jobs) =>
     jobs === undefined
       ? undefined
       : soonestFirst([
@@ -148,7 +160,7 @@ function applyJob(client: QueryClient, job: ProJob, generation: number): void {
           ...(isActiveJob(job) ? [job] : []),
         ]),
   );
-  void client.invalidateQueries({ queryKey: proJobsQueryKey(generation) });
+  void client.invalidateQueries({ queryKey: listKey });
 }
 
 /** The job and the list asked again: an action found the job moved on (409) or gone (404). */

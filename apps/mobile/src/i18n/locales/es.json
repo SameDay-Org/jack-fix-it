@@ -903,12 +903,13 @@
         "body_other": "Mientras vas en camino, Jack Fix It comparte tu ubicación con {{name}} cada {{count}} segundos, para que vea que vas llegando.",
         "stops": "Se detiene en cuanto registras tu llegada o si se cancela el trabajo. Jack Fix It no guarda un historial de dónde has estado.",
         "continue": "Continuar",
-        "notNow": "Ahora no"
+        "notNow": "Ahora no",
+        "settings": "Abrir Configuración",
+        "blocked": "La ubicación está desactivada para Jack Fix It. Actívala en Configuración, luego vuelve aquí y toca Continuar."
       },
       "note": {
         "message": "Tu ubicación no se comparte con {{name}} mientras vas en camino.",
-        "share": "Compartir ubicación",
-        "settings": "Abrir Configuración"
+        "share": "Compartir ubicación"
       },
       "notification": {
         "title": "Compartiendo tu ubicación",

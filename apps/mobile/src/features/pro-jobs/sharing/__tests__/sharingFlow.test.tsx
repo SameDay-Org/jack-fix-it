@@ -5,7 +5,7 @@ import * as Location from "expo-location";
 import { router } from "expo-router";
 import { AppState, Linking, Platform, type AppStateStatus } from "react-native";
 
-import { apiGet, apiPost, useSession } from "@/api";
+import { apiGet, apiPost, apiPut, useSession } from "@/api";
 
 import {
   arrived,
@@ -118,6 +118,8 @@ beforeEach(() => {
   jest.mocked(apiPost).mockReset();
   jest.mocked(router.back).mockClear();
   jest.mocked(router.replace).mockClear();
+  jest.mocked(router.push).mockClear();
+  jest.mocked(apiPut).mockReset();
   jest.mocked(AppState.addEventListener).mockClear();
   jest.mocked(Linking.openSettings).mockClear?.();
   Object.defineProperty(AppState, "currentState", { value: "active", configurable: true });
@@ -140,7 +142,7 @@ async function chooseBeforeGrant(...jobIds: string[]) {
 describe("On my way hands over to the explanation", () => {
   const EXPLANATION = { pathname: "/jobs/[id]/share-location", params: { id: JOB_ID } };
 
-  it.each<Access>(["askable", "granted"])(
+  it.each<Access>(["askable", "granted", "blocked"])(
     "%s: the sheet becomes the explanation, and nothing is asked or shared yet",
     async (access) => {
       await goOnTheWay(access);
@@ -151,15 +153,6 @@ describe("On my way hands over to the explanation", () => {
       expect(starts()).toBe(0);
     },
   );
-
-  it("refused for good: no explanation, nothing asked or shared, and the sheet closes", async () => {
-    await goOnTheWay("blocked");
-
-    await waitFor(() => expect(router.back).toHaveBeenCalledTimes(1));
-    expect(router.replace).not.toHaveBeenCalled();
-    expect(Location.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
-    expect(starts()).toBe(0);
-  });
 
   it("an arrival time update asks nothing", async () => {
     resetLocation("askable");
@@ -282,6 +275,28 @@ describe("the explanation (/jobs/[id]/share-location)", () => {
     expect(Location.requestForegroundPermissionsAsync).toHaveBeenCalledTimes(1);
   });
 
+  it("refused for good: Open Settings in place of Continue, nothing recorded; back with the permission, Continue shares", async () => {
+    const task = await explain("blocked");
+
+    expect(await screen.findByTestId("share-location-blocked")).toHaveTextContent(
+      "Location is off for Jack Fix It. Turn it on in Settings, then come back here and tap Continue.",
+    );
+    expect(screen.queryByTestId("share-location-continue")).toBeNull();
+    await press("share-location-settings");
+    expect(Linking.openSettings).toHaveBeenCalledTimes(1);
+    expect(Location.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+    expect(mayShare(JOB_ID)).toBe(false);
+    expect(router.back).not.toHaveBeenCalled();
+
+    // Allowed in Settings, back in the app: nothing shares until Continue.
+    task.access = "granted";
+    await act(async () => appMoves("active"));
+    await screen.findByTestId("share-location-continue");
+    expect(starts()).toBe(0);
+    await press("share-location-continue");
+    expect(startedFor()).toEqual([SHARING_TASK]);
+  });
+
   it("a job no longer on the way (checked in elsewhere) leaves at once, asking nothing", async () => {
     await explain("askable", arrived());
 
@@ -300,41 +315,51 @@ describe("the job screen on the way", () => {
     return task;
   }
 
-  it("never asked: one calm line and Share location, which asks and starts sharing", async () => {
-    await open(onTheWay(), "askable");
+  const EXPLANATION = { pathname: "/jobs/[id]/share-location", params: { id: JOB_ID } };
 
-    const note = await screen.findByTestId("pro-job-sharing-note-message");
-    expect(note.props.children).toBe("Your location isn't shared with Maria on the way.");
-    expect(screen.getByTestId("pro-job-sharing-note-action").props.accessibilityLabel).toBe(
-      "Share location",
-    );
-    // The job flow is all there: I've arrived and the arrival time.
-    expect(screen.getByTestId("pro-job-arrived")).toBeTruthy();
+  it.each<Access>(["askable", "granted", "blocked"])(
+    "%s: one calm line, and Share location opens the explanation, asking and sending nothing",
+    async (access) => {
+      await open(onTheWay(), access);
 
+      const note = await screen.findByTestId("pro-job-sharing-note-message");
+      expect(note.props.children).toBe("Your location isn't shared with Maria on the way.");
+      expect(screen.getByTestId("pro-job-sharing-note-action").props.accessibilityLabel).toBe(
+        "Share location",
+      );
+      // The job flow is all there: I've arrived and the arrival time.
+      expect(screen.getByTestId("pro-job-arrived")).toBeTruthy();
+
+      await press("pro-job-sharing-note-action");
+      expect(router.push).toHaveBeenCalledWith(EXPLANATION);
+      expect(Location.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+      expect(Linking.openSettings).not.toHaveBeenCalled();
+      expect(mayShare(JOB_ID)).toBe(false);
+      expect(starts()).toBe(0);
+    },
+  );
+
+  it("Not now, a relaunch, a grant made for check-in: the line's way in shares nothing before Continue", async () => {
+    // Not now on the explanation, then the app relaunched: nothing chosen, the permission granted
+    // (check-in asked for it).
+    resetLocation("granted");
+    jest.mocked(apiGet).mockResolvedValue(onTheWay());
+    const client = newQueryClient();
+    await renderWithQuery(<ProJobScreen />, client);
+    await screen.findByTestId("pro-job-sharing-note");
     await press("pro-job-sharing-note-action");
-    expect(Location.requestForegroundPermissionsAsync).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(startedFor()).toEqual([SHARING_TASK]));
-    await waitFor(() => expect(screen.queryByTestId("pro-job-sharing-note")).toBeNull());
-  });
-
-  it("allowed but not chosen (Not now, or a relaunch): the line shows, and Share location shares", async () => {
-    await open(onTheWay(), "granted");
-
-    expect(await screen.findByTestId("pro-job-sharing-note")).toBeTruthy();
+    await act(async () => appMoves("background"));
+    await act(async () => appMoves("active"));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(Location.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+    expect(apiPut).not.toHaveBeenCalled();
     expect(starts()).toBe(0);
-    await press("pro-job-sharing-note-action");
-    await waitFor(() => expect(startedFor()).toEqual([SHARING_TASK]));
-    await waitFor(() => expect(screen.queryByTestId("pro-job-sharing-note")).toBeNull());
-  });
 
-  it("Android with the location off: Share location offers to switch it on, then shares", async () => {
-    jest.replaceProperty(Platform, "OS", "android");
-    const task = await open(onTheWay(), "granted");
-    task.on = false;
-
-    await press("pro-job-sharing-note-action");
-    expect(Location.enableNetworkProviderAsync).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(starts()).toBe(1));
+    // On the explanation, only Continue shares.
+    await renderWithQuery(<ShareLocationScreen />, client);
+    await screen.findByTestId("share-location-continue");
+    await press("share-location-continue");
+    expect(startedFor()).toEqual([SHARING_TASK]);
   });
 
   it("a job the API refused has no line: nothing could share it", async () => {
@@ -344,20 +369,6 @@ describe("the job screen on the way", () => {
     // Cancelled or checked in elsewhere: the app hears it before the screen reads the job again.
     await act(() => followJob(proJob({ status: "cancelled" })));
     await waitFor(() => expect(screen.queryByTestId("pro-job-sharing-note")).toBeNull());
-  });
-
-  it("refused for good: the line opens the settings, and nothing is asked", async () => {
-    await open(onTheWay(), "blocked");
-
-    await screen.findByTestId("pro-job-sharing-note");
-    expect(screen.getByTestId("pro-job-sharing-note-action").props.accessibilityLabel).toBe(
-      "Open Settings",
-    );
-    await press("pro-job-sharing-note-action");
-    expect(Linking.openSettings).toHaveBeenCalledTimes(1);
-    expect(Location.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
-    expect(mayShare(JOB_ID)).toBe(true);
-    expect(screen.getByTestId("pro-job-arrived")).toBeTruthy();
   });
 
   it.each<[string, ProJob]>([
@@ -586,6 +597,38 @@ describe("LocationSharing: in step with the pro's jobs", () => {
     await act(async () => held.resolve(jobPage([onTheWay()])));
     expect(stops()).toBe(0);
     expect(sharedJobId()).toBe(JOB_ID);
+  });
+
+  it("a first read of the list still under way when On my way answers never lands over it, nor stops sharing", async () => {
+    const client = newQueryClient();
+    const firstRead = deferred<ReturnType<typeof jobPage>>();
+    let lists = 0;
+    jest.mocked(apiGet).mockImplementation(async (path) => {
+      if (path !== LIST) throw new Error(`unexpected ${String(path)}`);
+      lists += 1;
+      return lists === 1 ? firstRead.promise : jobPage([onTheWay()]);
+    });
+    await renderWithQuery(<LocationSharing />, client);
+    await waitFor(() => expect(lists).toBe(1)); // the list's first read is under way
+
+    jest.mocked(apiPost).mockResolvedValueOnce(onTheWay());
+    await act(async () => {
+      await markOnTheWay(client, JOB_ID, 20, 1);
+    });
+    await shareJob(JOB_ID, 1);
+    expect(starts()).toBe(1);
+
+    // The first read answers late, with the job as it was before On my way.
+    await act(async () => firstRead.resolve(jobPage([proJob()])));
+    await act(async () => appMoves("background"));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(stops()).toBe(0);
+    expect(sharedJobId()).toBe(JOB_ID);
+    // The list was asked again after the answer: it holds the job on the way.
+    expect(lists).toBe(2);
+    expect(client.getQueryData<ProJob[]>(proJobsQueryKey(1))?.map(({ status }) => status)).toEqual([
+      "on_the_way",
+    ]);
   });
 
   it("asks nothing and shares nothing for a customer", async () => {

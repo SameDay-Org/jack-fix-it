@@ -16,10 +16,6 @@ export type LocationAccess = "unknown" | "granted" | "askable" | "blocked";
 const accessOf = ({ granted, canAskAgain }: Location.LocationPermissionResponse): LocationAccess =>
   granted ? "granted" : canAskAgain ? "askable" : "blocked";
 
-/** The permission as it stands, read once without prompting; an unreadable one reads as askable. */
-export const readLocationAccess = (): Promise<LocationAccess> =>
-  Location.getForegroundPermissionsAsync().then(accessOf, (): LocationAccess => "askable");
-
 /**
  * The foreground location permission, read on mount and again whenever the app comes back to the
  * foreground (a grant made in Settings reaches the open sheet; reading never prompts). `ask`

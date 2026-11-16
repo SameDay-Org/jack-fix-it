@@ -14,7 +14,6 @@ import { formatMinutes } from "@/features/quotes/format";
 import { markOnTheWay, proJobQueryOptions, stepFailure, useSingleFlight } from "./api";
 import { ETA_MAX_MINUTES, ETA_MIN_MINUTES, nextEta, previousEta, proJobsConfig } from "./config";
 import { customerName } from "./format";
-import { readLocationAccess } from "./location";
 import { jobStep } from "./phase";
 import { reportStepFailure } from "./failure";
 import { sharingConfig } from "./sharing/config";
@@ -31,7 +30,7 @@ type Choice = { kind: "preset"; minutes: number } | { kind: "custom" } | null;
  * POST. On the way already, it updates only the arrival time ("Update arrival time"). The job
  * screen under it redraws with the answer as it closes. Offline, the sheet stays with the reason;
  * a job that moved on or went away closes it with a toast. Going on the way, the sheet hands over to
- * the explanation of the location sharing (#352), unless the permission was refused for good.
+ * the explanation of the location sharing (#352).
  */
 export function OnTheWaySheet() {
   const { t } = useTranslation();
@@ -75,12 +74,9 @@ export function OnTheWaySheet() {
           () => undefined,
         );
         if (updating) announce(t("proJobs.announce.etaUpdated"));
-        // Going on the way: the explanation in place of the sheet, even with the permission given
-        // before (for check-in); refused for good, the job screen's line has the way to Settings.
-        const explain =
-          !updating && sharingConfig.enabled && (await readLocationAccess()) !== "blocked";
+        // Going on the way: the explanation in place of the sheet, whatever the permission says.
         if (!mounted.current || leaving.current) return;
-        if (explain) {
+        if (!updating && sharingConfig.enabled) {
           leaving.current = true;
           router.replace({ pathname: "/jobs/[id]/share-location", params: { id: job.id } });
           return;

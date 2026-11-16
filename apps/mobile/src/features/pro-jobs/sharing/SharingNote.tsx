@@ -1,50 +1,33 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 
-import { useSessionGeneration } from "@/api";
 import { RetryNotice } from "@/features/opportunities/RetryNotice";
+import { useGuardedPush } from "@/features/quotes/navigation";
 
-import { ensureLocationOn, useLocationAccess } from "../location";
-import { hasEnded, shareJob, sharedJobId, subscribeSharing } from "./sender";
+import { hasEnded, sharedJobId, subscribeSharing } from "./sender";
 
 /**
  * On the way and not shared (#352): one calm line that the customer does not see the pro coming,
- * and the one way to change it. "Share location" records the pro's choice, asks for the "while
- * using" permission (no prompt once given) and, on Android, offers to switch the location on;
- * refused for good, "Open Settings" (sharing starts once the app is back in front with it). The
- * job itself goes on either way. A job the API refused (cancelled or checked in elsewhere) has no
- * line: nothing could share it, and the screen catches up on its next read.
+ * and "Share location", which opens the explanation (`/jobs/[id]/share-location`). That screen is
+ * the only way to share: nothing is asked or recorded here, whatever the permission already allows
+ * (a grant made for check-in included). The job itself goes on either way. A job the API refused
+ * (cancelled or checked in elsewhere) has no line: nothing could share it, and the screen catches
+ * up on its next read.
  */
 export function SharingNote({ jobId, name }: { jobId: string; name: string }) {
   const { t } = useTranslation();
-  const generation = useSessionGeneration();
-  const { access, ask, openSettings } = useLocationAccess();
+  const push = useGuardedPush();
   const quiet = useSyncExternalStore(
     subscribeSharing,
     useCallback(() => sharedJobId() === jobId || hasEnded(jobId), [jobId]),
   );
-  if (quiet || access === "unknown") return null;
-
-  const blocked = access === "blocked";
-  const turnOn = () => {
-    if (blocked) {
-      void shareJob(jobId, generation);
-      openSettings();
-      return;
-    }
-    void (async () => {
-      if (!(await ask())) return;
-      // Switched off and left off (declined, or iOS, which has no such dialog): nothing to share.
-      await ensureLocationOn().catch(() => undefined);
-      await shareJob(jobId, generation);
-    })();
-  };
+  if (quiet) return null;
 
   return (
     <RetryNotice
       message={t("proJobs.sharing.note.message", { name })}
-      action={t(blocked ? "proJobs.sharing.note.settings" : "proJobs.sharing.note.share")}
-      onRetry={turnOn}
+      action={t("proJobs.sharing.note.share")}
+      onRetry={() => push({ pathname: "/jobs/[id]/share-location", params: { id: jobId } })}
       testID="pro-job-sharing-note"
     />
   );
