@@ -175,7 +175,7 @@
         "bio": "About",
         "viewPhoto": "Open the profile photo",
         "documents": "Documents",
-        "linksExpire": "Files open in a new tab. The links work for a few minutes: reload the page if one has expired.",
+        "filesNote": "Files open in a new tab, through the panel: each opening is recorded.",
         "required": "Required",
         "notSubmitted": "Not submitted yet",
         "submitted": "Submitted",

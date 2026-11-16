@@ -46,6 +46,17 @@ export function proHref(proId: string): string {
   return `${PROS_PATH}/${proId}`;
 }
 
+/** The file id of a pro's profile photo; a document's file id is the document's id. */
+export const PHOTO_FILE = "photo";
+
+/**
+ * Where the panel opens a pro's document or photo: its own route (files/[fileId]/route.ts),
+ * never the storage's signed address, which stays on the server.
+ */
+export function fileHref(proId: string, fileId: string): string {
+  return `${proHref(proId)}/files/${encodeURIComponent(fileId)}`;
+}
+
 /** A category's name in the reader's language, else in English, else its slug. */
 export function categoryName(category: Category, locale: string): string {
   return category.names[locale] ?? category.names.en ?? category.slug;

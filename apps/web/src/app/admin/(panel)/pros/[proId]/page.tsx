@@ -16,8 +16,10 @@ import { DecisionControl, type DecisionControlText } from "../decision-control";
 import {
   categoryName,
   DECISIONS,
+  fileHref,
   formatDay,
   isExpired,
+  PHOTO_FILE,
   type Pro,
   type ProDocument,
   PROS_PATH,
@@ -114,7 +116,12 @@ function DocumentRow({
           </>
         ) : null}
       </dl>
-      <a href={document.url} target="_blank" rel="noopener noreferrer" className={FILE_LINK}>
+      <a
+        href={fileHref(pro.id, document.id)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={FILE_LINK}
+      >
         {t("admin.pros.detail.viewFile", { type })}
         <ExternalLink aria-hidden className="size-4" />
       </a>
@@ -239,7 +246,7 @@ export default async function ProPage({ params }: { params: Promise<{ proId: str
             ) : null}
             {pro.photo ? (
               <a
-                href={pro.photo.url}
+                href={fileHref(pro.id, PHOTO_FILE)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className={FILE_LINK}
@@ -252,7 +259,7 @@ export default async function ProPage({ params }: { params: Promise<{ proId: str
           <Card className="flex flex-col gap-4">
             <div className="flex flex-col gap-1">
               <CardTitle>{t("admin.pros.detail.documents")}</CardTitle>
-              <CardDescription>{t("admin.pros.detail.linksExpire")}</CardDescription>
+              <CardDescription>{t("admin.pros.detail.filesNote")}</CardDescription>
             </div>
             <p className="text-sm">
               <span className="text-gray-500">{t("admin.pros.detail.required")}: </span>

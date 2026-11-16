@@ -175,7 +175,7 @@
         "bio": "Acerca de",
         "viewPhoto": "Abrir la foto de perfil",
         "documents": "Documentos",
-        "linksExpire": "Los archivos se abren en una pestaña nueva. Los enlaces funcionan unos minutos: recarga la página si alguno venció.",
+        "filesNote": "Los archivos se abren en una pestaña nueva, a través del panel: cada apertura queda registrada.",
         "required": "Requeridos",
         "notSubmitted": "Aún sin enviar",
         "submitted": "Enviado",

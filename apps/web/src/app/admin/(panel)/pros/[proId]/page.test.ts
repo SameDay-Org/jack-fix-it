@@ -17,7 +17,14 @@ vi.mock("next/navigation", async () => {
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import { ACCESS_TOKEN, decoded, me, requestsTo, signIn } from "../../support/support-test-helpers";
-import { document, FILE_URL, OLD_DOCUMENT_ID, pro, PRO_ID } from "../pros-test-helpers";
+import {
+  document,
+  DOCUMENT_ID,
+  FILE_URL,
+  OLD_DOCUMENT_ID,
+  pro,
+  PRO_ID,
+} from "../pros-test-helpers";
 import ProPage from "./page";
 
 const PRO = `/v1/admin/pros/${PRO_ID}`;
@@ -85,11 +92,14 @@ describe("pro page", () => {
     // The pro's own text is shown as text, line breaks kept by the style: markup stays inert.
     expect(page).toContain("Plumber since 2009.\nCall me at 305-555-0141 <b>now</b>.");
     expect(html).toContain("&lt;b&gt;now&lt;/b&gt;");
-    // The file opens in a new tab, with no opener and no referrer for the storage to read.
-    const [link] = page.match(/<a [^>]*href="https:\/\/storage[^>]*>/g) ?? [];
-    expect(link).toContain(`href="${FILE_URL}"`);
+    // The file opens in a new tab through the panel's own route, with no opener: the
+    // storage's signed address is nowhere in the page (nor, so, in the browser's history).
+    const [link] = page.match(/<a [^>]*href="\/admin\/pros\/[^"]*\/files\/[^>]*>/g) ?? [];
+    expect(link).toContain(`href="/admin/pros/${PRO_ID}/files/${DOCUMENT_ID}"`);
     expect(link).toContain('target="_blank"');
     expect(link).toContain('rel="noopener noreferrer"');
+    expect(html).not.toContain(FILE_URL);
+    expect(html).not.toContain("storage.test.invalid");
     // A pending document can be approved or rejected; the pro too, each in two steps.
     expect(buttons(page)).toEqual(["Approve", "Reject", "Approve pro", "Reject pro"]);
     for (const button of page.match(/<button[^>]*>/g) ?? []) {
@@ -162,6 +172,8 @@ describe("pro page", () => {
     expect(html).toContain("&lt;i&gt;photo&lt;/i&gt;");
     expect(page).not.toContain("Not submitted yet");
     expect(page.match(/rel="noopener noreferrer"/g)).toHaveLength(4);
+    expect(page).toContain(`href="/admin/pros/${PRO_ID}/files/photo"`);
+    expect(html).not.toContain("sig=");
   });
 
   it("offers only a rejection of an approved pro, with nothing left to do", async () => {
