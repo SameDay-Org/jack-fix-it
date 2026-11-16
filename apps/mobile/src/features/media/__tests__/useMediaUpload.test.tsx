@@ -184,6 +184,47 @@ describe("useMediaUpload", () => {
     expect(picker.launchCameraAsync).not.toHaveBeenCalled();
   });
 
+  describe("a list that replaces what it holds", () => {
+    it("takes a new pick when full: the one held makes way, its upload stopped", async () => {
+      picker.launchImageLibraryAsync.mockResolvedValueOnce(picked(asset(1)));
+      const { result } = await render({ purpose: "profile_photo", max: 1, replace: true });
+      await act(() => result.current.add("library"));
+      await flush();
+      const first = pending[0].options.signal;
+
+      picker.launchImageLibraryAsync.mockResolvedValueOnce(picked(asset(2)));
+      await act(() => result.current.add("library"));
+      await flush();
+
+      expect(picker.launchImageLibraryAsync).toHaveBeenLastCalledWith(
+        expect.objectContaining({ selectionLimit: 1 }),
+      );
+      expect(first?.aborted).toBe(true);
+      expect(result.current.items.map((item) => item.previewUri)).toEqual([asset(2).uri]);
+      // The cancelled upload's rejection changes nothing; the new file takes its turn.
+      await act(async () =>
+        pending[0].reject(Object.assign(new Error("Aborted"), { name: "AbortError" })),
+      );
+      await flush();
+      await act(async () => pending[1].resolve());
+      expect(result.current.keys).toEqual([keyOf(`${asset(2).uri}.compressed`)]);
+    });
+
+    it("keeps the one held when the picker closes without a choice", async () => {
+      picker.launchImageLibraryAsync.mockResolvedValueOnce(picked(asset(1)));
+      const { result } = await render({ purpose: "profile_photo", max: 1, replace: true });
+      await act(() => result.current.add("library"));
+      await flush();
+      await act(async () => pending[0].resolve());
+
+      picker.launchImageLibraryAsync.mockResolvedValueOnce({ canceled: true, assets: null });
+      await act(() => result.current.add("library"));
+
+      expect(result.current.keys).toEqual([keyOf(`${asset(1).uri}.compressed`)]);
+      expect(pending[0].options.signal?.aborted).toBe(false);
+    });
+  });
+
   it("a failed upload can be retried, without preparing the file again", async () => {
     picker.launchImageLibraryAsync.mockResolvedValue(picked(asset(1)));
     const { result } = await render();

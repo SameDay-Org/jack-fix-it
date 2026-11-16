@@ -567,6 +567,33 @@ describe("AccountScreen", () => {
     });
   });
 
+  describe("the Pro profile row", () => {
+    it("opens a pro's profile", async () => {
+      await renderAccount();
+
+      await fireEvent.press(screen.getByRole("button", { name: "Pro profile" }));
+
+      expect(router.push).toHaveBeenCalledWith("/pro/profile");
+    });
+
+    it("opens a pro's verification documents from the row under it", async () => {
+      await renderAccount();
+
+      await fireEvent.press(screen.getByRole("button", { name: "Documents" }));
+
+      expect(router.push).toHaveBeenCalledWith("/pro/documents");
+    });
+
+    it("is not there for a customer", async () => {
+      jest.mocked(useSession).mockReturnValue(signedIn({ ...ALEX, role: "customer" }));
+      jest.mocked(apiGet).mockRejectedValue(new Error("offline"));
+      await renderAccount();
+
+      expect(screen.queryByText("Pro profile")).toBeNull();
+      expect(screen.queryByText("Documents")).toBeNull();
+    });
+  });
+
   it("log out asks first, then signs out with the row busy", async () => {
     const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
     const pending = deferred<void>();

@@ -9,14 +9,15 @@ import { ListGroup, ListRow } from "@/components/ui";
 import { useSavedAddresses } from "@/features/addresses";
 
 /**
- * The Account tab's short list: Settings, Addresses (a customer's, with how many are saved), Help
- * and Legal open their screens; Log out sits apart, has no chevron (it opens nothing) and asks
+ * The Account tab's short list: Settings, Addresses (a customer's, with how many are saved), Pro
+ * profile and Documents (a pro's), Help and Legal open their screens; Log out sits apart, has no chevron (it opens nothing) and asks
  * first.
  */
 export function AccountMenu() {
   const { t } = useTranslation();
   // Only customers keep addresses: a pro's menu has no such row, and asks nothing for it.
-  const isCustomer = useSession().user?.role === "customer";
+  const role = useSession().user?.role;
+  const isCustomer = role === "customer";
   const count = useSavedAddresses({ enabled: isCustomer }).data?.items.length;
   const [signingOut, setSigningOut] = useState(false);
   // One question at a time: a second quick tap would stack a second dialog on Android.
@@ -84,6 +85,22 @@ export function AccountMenu() {
             onPress={() => router.push("/account/addresses")}
             testID="account-addresses"
           />
+        ) : null}
+        {role === "pro" ? (
+          <>
+            <ListRow
+              label={t("proProfile.menu")}
+              glyph={ACCOUNT_GLYPHS.proProfile}
+              onPress={() => router.push("/pro/profile")}
+              testID="account-pro-profile"
+            />
+            <ListRow
+              label={t("proDocuments.menu")}
+              glyph={ACCOUNT_GLYPHS.proDocuments}
+              onPress={() => router.push("/pro/documents")}
+              testID="account-pro-documents"
+            />
+          </>
         ) : null}
         <ListRow
           label={t("account.menu.help")}

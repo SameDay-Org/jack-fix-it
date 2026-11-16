@@ -1240,9 +1240,6 @@
       "value": "Step {{current}} of {{total}}, {{step}}",
       "none": "Not started yet"
     },
-    "map": {
-      "estimate": "The map is an estimate from the arrival time, not a live location."
-    },
     "paid": {
       "title": "Paid",
       "tax": "Includes {{tax}} in tax",
@@ -1337,6 +1334,37 @@
       "pending_other": "{{count}} more photos are being prepared.",
       "pendingOnly_one": "{{count}} photo is being prepared.",
       "pendingOnly_other": "{{count}} photos are being prepared."
+    },
+    "liveMap": {
+      "recenter": "Recenter the map",
+      "miles": "{{miles}} mi",
+      "onStreet": "On {{street}}",
+      "waiting": "Waiting for location",
+      "summary": {
+        "etaStreet": "{{name}} is {{span}} away, on {{street}}",
+        "eta": "{{name}} is {{span}} away",
+        "street": "{{name}} is on {{street}}",
+        "moving": "{{name}} is on the way",
+        "waiting": "Waiting for {{name}}'s location"
+      },
+      "placeholder": {
+        "loading": {
+          "title": "Loading the live map",
+          "body": "{{name}}'s location shows here in a moment."
+        },
+        "waiting": {
+          "title": "Waiting for {{name}}'s location",
+          "body": "The map shows {{name}} as soon as their phone shares where they are."
+        },
+        "offline": {
+          "title": "Can't load the live map",
+          "body": "Check your connection. We keep trying, and the arrival time is below."
+        },
+        "unavailable": {
+          "title": "The live map isn't available",
+          "body": "The arrival time {{name}} gave is below."
+        }
+      }
     }
   },
   "chat": {
@@ -1513,6 +1541,134 @@
       "count_other": "{{total}} ratings",
       "spoken": "{{average}} out of 5, {{ratings}}",
       "unavailable": "Unavailable"
+    }
+  },
+  "proProfile": {
+    "menu": "Pro profile",
+    "limit": "That's the most you can choose.",
+    "checklist": {
+      "title": "Finish your profile",
+      "progress": "{{done}} of {{total}} done",
+      "action": "Complete profile",
+      "steps": {
+        "photo": "Profile photo",
+        "about": "About you",
+        "categories": "Categories",
+        "areas": "Service areas"
+      },
+      "stepDone": "{{step}}: done",
+      "stepTodo": "{{step}}: to do"
+    },
+    "edit": {
+      "title": "Your profile",
+      "support": "Tell us about your work and where you take jobs.",
+      "save": "Save profile",
+      "saved": "Profile saved",
+      "check": "Some fields need a look.",
+      "loading": "Loading your profile",
+      "loadFailed": "We couldn't load your profile",
+      "loadBody": "Give it another try in a moment.",
+      "retry": "Try again",
+      "failed": {
+        "offline": "You're offline. Check your connection and try again.",
+        "photo": "We couldn't use that photo. Choose another one.",
+        "choices": "Some of your choices are no longer available. Review them and save again.",
+        "generic": "We couldn't save your profile. Try again."
+      }
+    },
+    "photo": {
+      "title": "Profile photo",
+      "support": "Use a clear, recent photo of yourself.",
+      "add": "Add photo",
+      "change": "Change photo",
+      "ready": "New photo ready. Save to keep it.",
+      "uploading": "Uploading your photo",
+      "retry": "Try again"
+    },
+    "about": {
+      "title": "About you",
+      "bio": "Bio",
+      "bioHint": "Your experience and the work you do best.",
+      "years": "Years of experience",
+      "yearsInvalid": "Enter a number from 0 to {{max}}."
+    },
+    "categories": {
+      "title": "Categories",
+      "support": "The kinds of jobs you take."
+    },
+    "areas": {
+      "title": "Service areas",
+      "support": "The ZIP codes where you take jobs. Choose at least one.",
+      "required": "Choose at least one ZIP code.",
+      "count_one": "{{count}} ZIP code selected",
+      "count_other": "{{count}} ZIP codes selected",
+      "selectAll": "Select all",
+      "clear": "Clear",
+      "selectCity": "Select all ZIP codes in {{city}}",
+      "clearCity": "Clear all ZIP codes in {{city}}"
+    }
+  },
+  "proDocuments": {
+    "menu": "Documents",
+    "title": "Verification documents",
+    "support": "Our team reviews these before you start receiving requests.",
+    "loading": "Loading your documents",
+    "loadFailed": "We couldn't load your documents",
+    "loadBody": "Give it another try in a moment.",
+    "offline": "You're offline. Check your connection and try again.",
+    "refreshFailed": "We couldn't refresh your documents.",
+    "retry": "Try again",
+    "row": "{{name}}: {{status}}",
+    "reason": "Reason: {{reason}}",
+    "expires": "Expires {{date}}",
+    "types": {
+      "id": "Photo ID",
+      "license": "License",
+      "insurance": "Insurance"
+    },
+    "hints": {
+      "id": "A photo of your ID.",
+      "license": "A photo of your trade license.",
+      "insurance": "A photo of your proof of insurance."
+    },
+    "status": {
+      "missing": "Missing",
+      "pending": "In review",
+      "approved": "Approved",
+      "rejected": "Rejected"
+    },
+    "rejected": {
+      "title": "This document was rejected",
+      "noReason": "Send a new photo of it."
+    },
+    "pending": "Sending a new photo replaces the one in review.",
+    "photo": {
+      "label": "Photo of the document",
+      "unavailable": "The document's photo can't be shown right now",
+      "support": "Take a clear photo of the whole document.",
+      "required": "Add a photo of the document first.",
+      "ready": "Photo ready. Submit to send it for review.",
+      "uploading": "Uploading the document photo",
+      "add": "Add photo",
+      "change": "Change photo",
+      "retry": "Try again"
+    },
+    "submit": {
+      "send": "Submit",
+      "replace": "Replace",
+      "sent": "Document sent for review",
+      "check": "Some fields need a look.",
+      "expiry": "Expiry date",
+      "expiryHint": "MM/DD/YYYY",
+      "expiryErrors": {
+        "invalid": "Enter the date as MM/DD/YYYY.",
+        "past": "Enter today's date or a later one."
+      },
+      "failed": {
+        "offline": "You're offline. Check your connection and try again.",
+        "photo": "We couldn't use that photo. Choose another one.",
+        "generic": "We couldn't submit this document. Try again."
+      }
     }
   }
 }

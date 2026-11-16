@@ -29,6 +29,8 @@ const CONTROL_GLYPHS = {
   star: [
     "M12 3.32L14.54 9.42L21.13 9.95L16.11 14.25L17.64 20.68L12 17.24L6.36 20.68L7.89 14.25L2.87 9.95L9.46 9.42Z",
   ],
+  // A navigation arrow, for the control that follows a moving marker on a map again.
+  locate: ["M12 4l6.5 15.5L12 16l-6.5 3.5z"],
   // Three dots in a row, for a menu of more actions (draw it filled).
   more: [
     "M4.75 12a1.25 1.25 0 1 0 2.5 0a1.25 1.25 0 1 0-2.5 0",

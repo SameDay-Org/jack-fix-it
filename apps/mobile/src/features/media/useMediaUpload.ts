@@ -10,6 +10,7 @@ import {
   type UploadPurpose,
 } from "@/api";
 
+import { deleteAppFile } from "./appFiles";
 import { prepareMedia, type MediaKind, type PickedMedia, type PreparedMedia } from "./compress";
 import { mediaConfig } from "./config";
 import { MediaSizeUnknownError, MediaTooLargeError, UnsupportedMediaError } from "./errors";
@@ -63,6 +64,21 @@ export type MediaUploadOptions = {
   purpose: UploadPurpose;
   /** Most items the list may hold; defaults to `EXPO_PUBLIC_REQUEST_MEDIA_MAX`. */
   max?: number;
+  /**
+   * A full list still takes a pick: what is picked takes the place of what is held (a profile
+   * photo, chosen again). The items held stay until the picker hands something over, so closing
+   * it without a choice changes nothing.
+   */
+  replace?: boolean;
+  /**
+   * Sensitive photos (a pro's documents): the files the app makes for an item, the picker's copy
+   * and the compressed JPEG, are deleted as soon as nothing needs them. The compressed one goes
+   * once the storage has it; both go when the item is set aside (removed, replaced), when the
+   * screen leaves and at the account boundary, and a compression that ends after that deletes its
+   * result. A failed upload keeps its file for a retry until the item goes. Only files recorded
+   * here as the app's own are deleted, and only inside the app's cache: never a library original.
+   */
+  discardFiles?: boolean;
 };
 
 // The API takes videos for request media only; every other purpose is photos (PURPOSES table).
@@ -76,6 +92,8 @@ type Entry = {
   controller?: AbortController;
   /** The session generation the item was picked (or last retried) in: it works for that one only. */
   generation: number;
+  /** The files the app made for the item and still has on disk (`discardFiles` only). */
+  owned: Set<string>;
 };
 
 export const isRetryable = (failure: MediaFailure | null): boolean =>
@@ -87,6 +105,28 @@ function describeFailure(error: unknown): MediaFailure {
   if (error instanceof UnsupportedMediaError) return "unsupported";
   if (error instanceof UploadRejectedError) return "rejected";
   return "failed";
+}
+
+/** Deletes the files the app made for `entry` (all of them, or the one `uri`). */
+function deleteOwned(entry: Entry, uri?: string): void {
+  for (const owned of entry.owned) {
+    if (uri !== undefined && owned !== uri) continue;
+    entry.owned.delete(owned);
+    deleteAppFile(owned);
+  }
+}
+
+/** The item is set aside: its work stops, and its files go. */
+function drop(entry: Entry): void {
+  entry.controller?.abort();
+  deleteOwned(entry);
+}
+
+/** The compressed copy, once nothing needs it (a video goes as it was picked: nothing to delete). */
+function deletePrepared(entry: Entry): void {
+  if (entry.prepared && entry.prepared.uri !== entry.picked.uri) {
+    deleteOwned(entry, entry.prepared.uri);
+  }
 }
 
 function toPicked(asset: ImagePicker.ImagePickerAsset): PickedMedia {
@@ -106,6 +146,8 @@ function toPicked(asset: ImagePicker.ImagePickerAsset): PickedMedia {
 export function useMediaUpload({
   purpose,
   max = mediaConfig.requestMediaMax,
+  replace = false,
+  discardFiles = false,
 }: MediaUploadOptions): MediaUpload {
   const [items, setItems] = useState<MediaItem[]>([]);
   const [picking, setPicking] = useState(false);
@@ -122,7 +164,7 @@ export function useMediaUpload({
     return () => {
       mounted.current = false;
       // Every item, running or still waiting its turn: nothing is prepared or uploaded after this.
-      live.forEach((entry) => entry.controller?.abort());
+      live.forEach(drop);
       live.clear();
     };
   }, []);
@@ -133,7 +175,7 @@ export function useMediaUpload({
   useEffect(
     () =>
       onSignOut(() => {
-        entries.current.forEach((entry) => entry.controller?.abort());
+        entries.current.forEach(drop);
         entries.current.clear();
         queue.current = Promise.resolve();
         setItems([]);
@@ -165,8 +207,10 @@ export function useMediaUpload({
         if (!entry.prepared) {
           update(id, { status: "compressing", progress: 0, failure: null });
           const prepared = await prepareMedia(entry.picked);
-          if (controller.signal.aborted) return;
           entry.prepared = prepared;
+          if (discardFiles && prepared.uri !== entry.picked.uri) entry.owned.add(prepared.uri);
+          // Set aside while it was compressed: its result goes too.
+          if (controller.signal.aborted) return deleteOwned(entry);
         }
         if (superseded()) return abandon();
         update(id, { status: "uploading", progress: 0, failure: null });
@@ -179,14 +223,19 @@ export function useMediaUpload({
           },
         });
         if (superseded()) return abandon();
+        // The storage has it: the compressed copy is no longer needed (the preview stays).
+        deletePrepared(entry);
         update(id, { status: "done", progress: 1, key });
       } catch (error) {
         if (controller.signal.aborted) return; // removed or unmounted: nothing to show
         if (superseded()) return abandon();
-        update(id, { status: "failed", failure: describeFailure(error) });
+        const failure = describeFailure(error);
+        // Kept for a retry; a failure no retry can mend needs it no more.
+        if (!isRetryable(failure)) deletePrepared(entry);
+        update(id, { status: "failed", failure });
       }
     },
-    [purpose, update],
+    [discardFiles, purpose, update],
   );
 
   // The item's controller exists from the moment it is queued, so unmounting or removing it stops
@@ -204,10 +253,12 @@ export function useMediaUpload({
   );
 
   const remaining = Math.max(0, max - items.length);
+  // How many files one pick may bring: all of the list when the pick replaces it.
+  const room = replace ? max : remaining;
 
   const add = useCallback(
     async (source: MediaSource) => {
-      if (pickingNow.current || remaining === 0) return;
+      if (pickingNow.current || room === 0) return;
       pickingNow.current = true;
       setPicking(true);
       // What the picker returns belongs to the session that opened it, and to no later one.
@@ -226,17 +277,33 @@ export function useMediaUpload({
           result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: VIDEO_PURPOSES.has(purpose) ? ["images", "videos"] : ["images"],
             allowsMultipleSelection: true,
-            selectionLimit: remaining,
+            selectionLimit: room,
             orderedSelection: true,
             exif: false,
           });
         }
-        if (result.canceled || !mounted.current || !isCurrentGeneration(startedIn)) return;
+        if (result.canceled) return;
+        if (!mounted.current || !isCurrentGeneration(startedIn)) {
+          // Too late: the screen left, or the session changed, while the picker was open. Its copies
+          // are the app's own files and nothing will use them.
+          if (discardFiles) result.assets.forEach((asset) => deleteAppFile(asset.uri));
+          return;
+        }
+        // Anything past the room a pick may bring is dropped: its copy too.
+        if (discardFiles) result.assets.slice(room).forEach((asset) => deleteAppFile(asset.uri));
 
-        const added = result.assets.slice(0, remaining).map((asset) => {
+        if (replace) {
+          // The items held make way: their uploads stop, their keys are never attached, their
+          // files go.
+          entries.current.forEach(drop);
+          entries.current.clear();
+        }
+        const added = result.assets.slice(0, room).map((asset) => {
           const id = `media-${(nextId.current += 1)}`;
           const picked = toPicked(asset);
-          entries.current.set(id, { picked, generation: startedIn });
+          // The picker hands over its own copy of what was chosen: the app's file to delete.
+          const owned = new Set(discardFiles ? [picked.uri] : []);
+          entries.current.set(id, { picked, generation: startedIn, owned });
           const item: MediaItem = {
             id,
             kind: picked.kind,
@@ -248,14 +315,14 @@ export function useMediaUpload({
           };
           return item;
         });
-        setItems((current) => [...current, ...added]);
+        setItems((current) => (replace ? added : [...current, ...added]));
         added.forEach((item) => enqueue(item.id));
       } finally {
         pickingNow.current = false;
         if (mounted.current) setPicking(false);
       }
     },
-    [enqueue, purpose, remaining],
+    [discardFiles, enqueue, purpose, replace, room],
   );
 
   const retry = useCallback(
@@ -275,7 +342,8 @@ export function useMediaUpload({
   );
 
   const remove = useCallback((id: string) => {
-    entries.current.get(id)?.controller?.abort();
+    const entry = entries.current.get(id);
+    if (entry) drop(entry);
     entries.current.delete(id);
     setItems((current) => current.filter((item) => item.id !== id));
   }, []);

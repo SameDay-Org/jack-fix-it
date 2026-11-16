@@ -138,6 +138,23 @@ options={sheetOptions([0.5, 0.95])} />`, or `"fitToContents"`), rendering `Sheet
   and the position go into the one request and nowhere else (no state after submit, no cache, no
   log). The tries left after a wrong code come from `ApiError.header()`. A sheet closes once
   (`useSheetExit`), and only for the session it opened in.
+- Pro profile (#36): `src/features/pro-profile`, routes under `src/app/(app)/pro` (its layout is
+  `ProOnly`: anyone but a pro is sent home). `useMyProProfile` reads `GET /v1/pros/me`, keyed by the
+  session generation. "Finish your profile" on the pro's home (`ProfileChecklistCard`, driven by
+  `profileChecklist`) and Account > Pro profile open `/pro/profile`: one form whose Save sends a
+  single PATCH with only the fields that changed (`profilePatch`; the category and ZIP lists go
+  whole, the API replaces the set). The photo is one `profile_photo` upload (`useProfilePhoto`
+  over `useMediaUpload`); its key goes with Save, and a failed or refused photo never loses what
+  was typed. The limits mirror the API: `BIO_MAX`, `YEARS_MAX`, `EXPO_PUBLIC_PRO_MAX_CATEGORIES`,
+  `EXPO_PUBLIC_PRO_MAX_SERVICE_AREAS`.
+- Pro documents (#37): `src/features/pro-documents`, routes `/pro/documents` (the list) and
+  `/pro/documents/[type]`, opened from Account > Documents. `useMyDocuments` reads
+  `GET /v1/pros/me/documents` (keyed by the session generation, asked again on focus: its URLs
+  are signed for minutes); `documentRows` gives one row per required type (and any other type
+  sent) as Missing, In review, Approved or Rejected with the reason. A type's screen takes one
+  photo (`useSinglePhoto`, purpose `pro_document`: photos only), an optional expiry for a license
+  or an insurance (MM/DD/YYYY, today or later in UTC as the API reads it) and POSTs it; a pending
+  one is replaced by the server. A signed URL is an `Image` source and nothing else: never a log.
 - Strings: `src/i18n/locales/{en,es}.json` through `useTranslation()`. Signed out, the device
   language picks the catalog (English is the fallback); signed in, the account's saved `locale`
   does (`features/account/AccountLanguage.tsx`), and Settings changes it (`LanguageSection`).
@@ -171,6 +188,24 @@ pnpm --filter @jack/mobile exec expo export --platform android --output-dir dist
 # S3_REGION=us-east-1.
 docker run -d -p 9000:9000 -e RUSTFS_ACCESS_KEY=<key> -e RUSTFS_SECRET_KEY=<secret> rustfs/rustfs
 ```
+
+## Mapbox data boundary
+
+The live map (#353, `src/features/jobs/map`) is the only place where the app talks to Mapbox.
+
+- **Off:** usage and location telemetry. `setTelemetryEnabled(false)` runs right after
+  `setAccessToken`, before any map view exists (`LiveMap.tsx`; a test asserts the order). Keep it
+  there.
+- **Still sent, by design:** the SDK's turnstile event, which counts monthly active users for
+  billing (no location; the SDK has no switch for it, and blocking it would break its billing
+  contract), and the requests for the style, tiles, glyphs and the Standard style's 3D models.
+  Tile ids tell Mapbox which area the map shows.
+- **Local only:** the pro's position, the route and the customer's address come from our API and
+  live in the map's own sources. The app sends them to no endpoint but our API and logs none of
+  them (the PII rule in the root `AGENTS.md`).
+- The app makes no directions, geocoding or search call to Mapbox: the route and the street names
+  come from our API. Its token is the public `pk.` one (`EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN`).
+- Privacy policy (#97): it must name Mapbox as a processor of map requests and billing events.
 
 ## Mobile craft bar
 

@@ -1240,9 +1240,6 @@
       "value": "Paso {{current}} de {{total}}, {{step}}",
       "none": "Aún no empieza"
     },
-    "map": {
-      "estimate": "El mapa es una estimación según la hora de llegada, no una ubicación en vivo."
-    },
     "paid": {
       "title": "Pagado",
       "tax": "Incluye {{tax}} de impuestos",
@@ -1337,6 +1334,37 @@
       "pending_other": "Estamos preparando {{count}} fotos más.",
       "pendingOnly_one": "Estamos preparando {{count}} foto.",
       "pendingOnly_other": "Estamos preparando {{count}} fotos."
+    },
+    "liveMap": {
+      "recenter": "Volver a centrar el mapa",
+      "miles": "{{miles}} mi",
+      "onStreet": "En {{street}}",
+      "waiting": "Esperando la ubicación",
+      "summary": {
+        "etaStreet": "{{name}} está a {{span}}, en {{street}}",
+        "eta": "{{name}} está a {{span}}",
+        "street": "{{name}} está en {{street}}",
+        "moving": "{{name}} va en camino",
+        "waiting": "Esperando la ubicación de {{name}}"
+      },
+      "placeholder": {
+        "loading": {
+          "title": "Cargando el mapa en vivo",
+          "body": "La ubicación de {{name}} aparecerá aquí en un momento."
+        },
+        "waiting": {
+          "title": "Esperando la ubicación de {{name}}",
+          "body": "El mapa mostrará a {{name}} en cuanto su teléfono comparta dónde está."
+        },
+        "offline": {
+          "title": "No se puede cargar el mapa en vivo",
+          "body": "Revisa tu conexión. Seguimos intentando, y la hora de llegada está abajo."
+        },
+        "unavailable": {
+          "title": "El mapa en vivo no está disponible",
+          "body": "La hora de llegada que dio {{name}} está abajo."
+        }
+      }
     }
   },
   "chat": {
@@ -1513,6 +1541,134 @@
       "count_other": "{{total}} calificaciones",
       "spoken": "{{average}} de 5, {{ratings}}",
       "unavailable": "No disponible"
+    }
+  },
+  "proProfile": {
+    "menu": "Perfil profesional",
+    "limit": "Es el máximo que puedes elegir.",
+    "checklist": {
+      "title": "Completa tu perfil",
+      "progress": "{{done}} de {{total}} listos",
+      "action": "Completar perfil",
+      "steps": {
+        "photo": "Foto de perfil",
+        "about": "Sobre ti",
+        "categories": "Categorías",
+        "areas": "Zonas de servicio"
+      },
+      "stepDone": "{{step}}: listo",
+      "stepTodo": "{{step}}: pendiente"
+    },
+    "edit": {
+      "title": "Tu perfil",
+      "support": "Cuéntanos sobre tu trabajo y dónde aceptas trabajos.",
+      "save": "Guardar perfil",
+      "saved": "Perfil guardado",
+      "check": "Revisa algunos campos.",
+      "loading": "Cargando tu perfil",
+      "loadFailed": "No pudimos cargar tu perfil",
+      "loadBody": "Inténtalo de nuevo en un momento.",
+      "retry": "Reintentar",
+      "failed": {
+        "offline": "No tienes conexión. Revisa tu conexión e inténtalo de nuevo.",
+        "photo": "No pudimos usar esa foto. Elige otra.",
+        "choices": "Algunas de tus opciones ya no están disponibles. Revísalas y guarda de nuevo.",
+        "generic": "No pudimos guardar tu perfil. Inténtalo de nuevo."
+      }
+    },
+    "photo": {
+      "title": "Foto de perfil",
+      "support": "Usa una foto tuya clara y reciente.",
+      "add": "Agregar foto",
+      "change": "Cambiar foto",
+      "ready": "Nueva foto lista. Guarda para conservarla.",
+      "uploading": "Subiendo tu foto",
+      "retry": "Reintentar"
+    },
+    "about": {
+      "title": "Sobre ti",
+      "bio": "Biografía",
+      "bioHint": "Tu experiencia y el trabajo que mejor haces.",
+      "years": "Años de experiencia",
+      "yearsInvalid": "Escribe un número de 0 a {{max}}."
+    },
+    "categories": {
+      "title": "Categorías",
+      "support": "Los tipos de trabajo que aceptas."
+    },
+    "areas": {
+      "title": "Zonas de servicio",
+      "support": "Los códigos postales donde aceptas trabajos. Elige al menos uno.",
+      "required": "Elige al menos un código postal.",
+      "count_one": "{{count}} código postal seleccionado",
+      "count_other": "{{count}} códigos postales seleccionados",
+      "selectAll": "Seleccionar todos",
+      "clear": "Quitar",
+      "selectCity": "Seleccionar todos los códigos postales de {{city}}",
+      "clearCity": "Quitar todos los códigos postales de {{city}}"
+    }
+  },
+  "proDocuments": {
+    "menu": "Documentos",
+    "title": "Documentos de verificación",
+    "support": "Nuestro equipo los revisa antes de que empieces a recibir solicitudes.",
+    "loading": "Cargando tus documentos",
+    "loadFailed": "No pudimos cargar tus documentos",
+    "loadBody": "Inténtalo de nuevo en un momento.",
+    "offline": "No tienes conexión. Revisa tu conexión e inténtalo de nuevo.",
+    "refreshFailed": "No pudimos actualizar tus documentos.",
+    "retry": "Reintentar",
+    "row": "{{name}}: {{status}}",
+    "reason": "Motivo: {{reason}}",
+    "expires": "Vence el {{date}}",
+    "types": {
+      "id": "Identificación con foto",
+      "license": "Licencia",
+      "insurance": "Seguro"
+    },
+    "hints": {
+      "id": "Una foto de tu identificación.",
+      "license": "Una foto de tu licencia profesional.",
+      "insurance": "Una foto de tu comprobante de seguro."
+    },
+    "status": {
+      "missing": "Falta",
+      "pending": "En revisión",
+      "approved": "Aprobado",
+      "rejected": "Rechazado"
+    },
+    "rejected": {
+      "title": "Este documento fue rechazado",
+      "noReason": "Envía una foto nueva."
+    },
+    "pending": "Si envías una foto nueva, reemplaza la que está en revisión.",
+    "photo": {
+      "label": "Foto del documento",
+      "unavailable": "La foto del documento no se puede mostrar ahora",
+      "support": "Toma una foto clara del documento completo.",
+      "required": "Primero agrega una foto del documento.",
+      "ready": "Foto lista. Envíala para revisión.",
+      "uploading": "Subiendo la foto del documento",
+      "add": "Agregar foto",
+      "change": "Cambiar foto",
+      "retry": "Reintentar"
+    },
+    "submit": {
+      "send": "Enviar",
+      "replace": "Reemplazar",
+      "sent": "Documento enviado para revisión",
+      "check": "Revisa algunos campos.",
+      "expiry": "Fecha de vencimiento",
+      "expiryHint": "MM/DD/AAAA",
+      "expiryErrors": {
+        "invalid": "Escribe la fecha como MM/DD/AAAA.",
+        "past": "Escribe la fecha de hoy o una posterior."
+      },
+      "failed": {
+        "offline": "No tienes conexión. Revisa tu conexión e inténtalo de nuevo.",
+        "photo": "No pudimos usar esa foto. Elige otra.",
+        "generic": "No pudimos enviar este documento. Inténtalo de nuevo."
+      }
     }
   }
 }
