@@ -14,7 +14,6 @@ audit_log row first, committed before the answer: a read that cannot be audited 
 import logging
 import uuid
 from collections.abc import Collection
-from enum import StrEnum
 from typing import Final
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,19 +23,13 @@ from app.modules.audit.service import AuditService
 from app.modules.audit.types import AuditAction, AuditEntity, AuditEntityType
 from app.modules.jobs.service import JobPayouts
 from app.modules.payments.models import TransferStatus
+from app.modules.payments.payout_status import PayoutStatus
 from app.modules.payments.repository import TransferRepository
 from app.modules.payments.schemas import JobTransferOut, TransferOut
 from app.modules.pros.service import ProService
 from app.modules.users.types import UserAccount
 
 logger = logging.getLogger(__name__)
-
-
-class PayoutStatus(StrEnum):
-    """A job's payout as its pro sees it."""
-
-    PENDING = "pending"
-    CREATED = "created"
 
 
 _PAYOUT: Final[dict[TransferStatus, PayoutStatus | None]] = {

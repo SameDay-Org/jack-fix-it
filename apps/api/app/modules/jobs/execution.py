@@ -143,8 +143,9 @@ from app.modules.notifications.events import (
     push_job_on_the_way,
     push_job_started,
 )
+from app.modules.payments.payout_status import PayoutStatus
 from app.modules.payments.transfer_queue import enqueue_transfer_release
-from app.modules.payments.transfer_reader import PayoutStatus, TransferReader
+from app.modules.payments.transfer_reader import TransferReader
 from app.modules.pros.service import ProService
 from app.modules.quotes.schemas import QuotePro
 from app.modules.quotes.service import QuoteReader

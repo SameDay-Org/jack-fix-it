@@ -12,7 +12,7 @@ from typing import Annotated, Final
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
 
 from app.modules.jobs.models import JobPhotoKind, JobStatus
-from app.modules.payments.transfer_reader import PayoutStatus
+from app.modules.payments.payout_status import PayoutStatus
 from app.modules.quotes.schemas import QuotePro
 
 # "On my way" asks how far the pro is: from 5 minutes to 4 hours (#63).
