@@ -723,7 +723,28 @@ describe("PayoutsScreen: the return link as a route", () => {
     expect(screen.getByTestId("payouts-status")).toHaveTextContent("On");
   });
 
-  it("Android, the browser read as closed first and the refresh page's link after it: expired", async () => {
+  it("Android, the refresh page's link in both, the session first: expired, one request", async () => {
+    browserReturns(REFRESH_LINK);
+    await open(payouts("incomplete"));
+    const status = deferred<Payouts>();
+    server.payouts = status.promise;
+
+    await pressed("payouts-setup");
+    await flush();
+    await act(async () => navigation.setParams({ result: "refresh" }));
+    await act(async () => status.resolve(payouts("incomplete")));
+    await flush();
+
+    expect(asked(PAYOUTS)).toBe(2);
+    expect(screen.getByTestId("payouts-expired")).toBeTruthy();
+    expect(apiPost).toHaveBeenCalledTimes(1);
+    expect(setupButton()).not.toBeBusy();
+  });
+
+  // Android only: back to the app through Recents ends the session as closed while the tab stays
+  // alive in its own task; the pro then goes back to the tab, and its refresh link reaches the
+  // router alone.
+  it("Android, the session read as closed first and the tab's refresh link after it: expired", async () => {
     jest
       .mocked(openAuthSessionAsync)
       .mockResolvedValueOnce({ type: "dismiss" } as WebBrowserAuthSessionResult);
@@ -850,6 +871,8 @@ describe("PayoutsScreen: what a press came to, once the status moves on", () => 
     expect(screen.queryByTestId("payouts-failure-unavailable")).toBeNull();
   });
 
+  // What this pins: no reset while a press is pending (a reset then would detach it, and the
+  // button would never be freed), whichever clause of the hook's check provides it.
   it("a status that moves on while the page is open: the press still ends, and the next one works", async () => {
     const browser = deferred<WebBrowserAuthSessionResult>();
     jest.mocked(openAuthSessionAsync).mockReturnValueOnce(browser.promise);
@@ -877,20 +900,27 @@ describe("PayoutsScreen: what a press came to, once the status moves on", () => 
     expect(setupButton()).not.toBeBusy();
   });
 
-  it("the next press still works after that", async () => {
+  it("the next press starts clean: it opens a new page, and what it comes to shows again", async () => {
     browserReturns(REFRESH_LINK);
     await open(payouts("incomplete"));
     await pressed("payouts-setup");
     await flush();
     await reviewedThenAskedForMore();
 
-    browserReturns(RETURN_LINK);
-    server.payouts = payouts("enabled");
+    // This press's own page expires too: forgetting the old one does not hide the new one.
+    browserReturns(REFRESH_LINK);
     await pressed("payouts-setup");
     await flush();
 
     expect(apiPost).toHaveBeenCalledTimes(2);
     expect(openAuthSessionAsync).toHaveBeenCalledTimes(2);
-    expect(screen.getByTestId("payouts-status")).toHaveTextContent("On");
+    expect(screen.getByTestId("payouts-expired")).toBeTruthy();
+
+    // And the press after it, refused, says so.
+    server.link = new ApiError(503, "unavailable");
+    await pressed("payouts-setup");
+    await flush();
+
+    expect(screen.getByTestId("payouts-failure-unavailable")).toBeTruthy();
   });
 });

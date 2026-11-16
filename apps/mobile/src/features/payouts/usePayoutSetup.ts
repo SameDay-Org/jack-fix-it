@@ -49,7 +49,9 @@ export function usePayoutSetup(settable: boolean): PayoutSetup {
 
   // The same for what the last press came to (its exit, its failure): once the status moves on,
   // a later "more information needed" starts clean. Never while a press is under way: a reset
-  // detaches it, and its end (which frees the button) would go unheard.
+  // detaches it, and its end (which frees the button) would go unheard. A pending press holds no
+  // data and no error yet, so `pressLeftSomething` already rules it out; `!isPending` is kept as
+  // a deliberate second guard that says so outright.
   const pressLeftSomething = data !== undefined || error !== null;
   useEffect(() => {
     if (!settable && !isPending && pressLeftSomething) reset();
