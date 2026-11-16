@@ -21,8 +21,8 @@ import { shortSpokenCard, type Wallet } from "./cards";
  * the card with its data redacted (brand, last four digits, expiry) and offers Set as default
  * (unless it is already) and Delete, which asks first. Either one closes the sheet at once; the
  * wallet shows the change while the server answers, and says so if it did not stick. While
- * another change of the wallet is unanswered, or the wallet is being listed after one, both wait:
- * who is the default may be moving. Whether this card is the default follows the wallet (the server
+ * another change of the wallet is unanswered, or the wallet is being listed (after a change, or as
+ * the screen opens), both wait, busy: who is the default may be moving. Whether this card is the default follows the wallet (the server
  * may name it while the sheet is open); once the sheet acts it holds what it showed and its actions
  * stay off, so it never redraws, nor acts twice, as it closes over its own change.
  */
@@ -125,7 +125,8 @@ export function PaymentCardSheet() {
             <Button
               label={t("paymentMethods.card.setDefault")}
               size="lg"
-              disabled={settling || acted}
+              loading={settling && !acted}
+              disabled={acted}
               onPress={() => {
                 if (setDefault(current)) leave();
               }}
@@ -137,7 +138,8 @@ export function PaymentCardSheet() {
             accessibilityHint={t("paymentMethods.card.deleteHint")}
             variant="secondary"
             size="lg"
-            disabled={settling || acted}
+            loading={settling && !acted}
+            disabled={acted}
             onPress={confirmDelete}
             testID="payment-card-delete"
           />

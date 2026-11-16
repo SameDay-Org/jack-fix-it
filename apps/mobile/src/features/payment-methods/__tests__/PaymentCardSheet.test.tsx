@@ -664,7 +664,8 @@ describe("an open sheet follows the wallet until it acts", () => {
   /** What the open sheet says of its card: the default line, Set as default, the face's label. */
   const sheetSays = () => ({
     isDefault: screen.queryByTestId("payment-card-is-default") !== null,
-    offersSetDefault: screen.queryByRole("button", { name: "Set as default" }) !== null,
+    // By id: while the wallet settles the action is busy, and its name then says so.
+    offersSetDefault: screen.queryByTestId("payment-card-default") !== null,
     spoken: screen.getByTestId("payment-card-face").props.accessibilityLabel as string,
   });
 
@@ -799,6 +800,196 @@ describe("an open sheet follows the wallet until it acts", () => {
     await waitFor(() => expect(cachedWallet(client)).toEqual(["pm_visa", "pm_master*", "pm_amex"]));
     expect(sheetSays()).toEqual(shown);
     expect(router.back).toHaveBeenCalledTimes(1);
+  });
+
+  it("opened while a change is answered but the wallet is still being listed, its actions wait for the list", async () => {
+    const answer = deferred<SavedCard>();
+    post.mockReturnValue(answer.promise);
+    const { client, openNext } = await openOnWallet("pm_master");
+    await fireEvent.press(screen.getByRole("button", { name: "Set as default" }));
+    await waitFor(() => expect(cachedWallet(client)).toEqual(["pm_visa", "pm_master*", "pm_amex"]));
+    await openNext("pm_amex");
+    expect(screen.getByTestId("payment-card-delete")).toBeDisabled();
+
+    // The server answers; the list asked afterwards is still on its way.
+    const list = deferred<Wallet>();
+    jest.mocked(apiGet).mockReturnValueOnce(list.promise as never);
+    await act(async () => answer.resolve(serverSetsDefault("pm_master")));
+    await act(() => settle());
+
+    // No change is unanswered (the wallet's Add is back), but who is the default may still move.
+    expect(client.getQueryState(PAYMENT_METHODS_QUERY_KEY)?.fetchStatus).toBe("fetching");
+    expect(screen.getByTestId("payment-methods-add")).toBeEnabled();
+    // Both wait, busy: a spinner in place, and a reader hears that they are loading.
+    for (const action of ["payment-card-default", "payment-card-delete"]) {
+      expect(screen.getByTestId(action)).toBeDisabled();
+      expect(screen.getByTestId(action).props.accessibilityState).toMatchObject({ busy: true });
+    }
+    expect(screen.getByRole("button", { name: "Delete card, Loading" })).toBeOnTheScreen();
+    // Pressed anyway: nothing is sent, nothing is asked.
+    await fireEvent.press(screen.getByTestId("payment-card-default"));
+    await fireEvent.press(screen.getByTestId("payment-card-delete"));
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(alert).not.toHaveBeenCalled();
+
+    await act(async () => list.resolve(server));
+    await act(() => settle());
+
+    expect(client.getQueryState(PAYMENT_METHODS_QUERY_KEY)?.fetchStatus).toBe("idle");
+    expect(screen.getByRole("button", { name: "Set as default" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Delete card" })).toBeEnabled();
+    expect(screen.getByTestId("payment-card-delete").props.accessibilityState).toMatchObject({
+      busy: false,
+    });
+  });
+
+  it("once it has acted its actions stay off, even when the change and the list have settled", async () => {
+    post.mockImplementation(async () => serverSetsDefault("pm_master"));
+    const client = await openBoth("pm_master");
+    const loads = jest.mocked(apiGet).mock.calls.length;
+
+    await fireEvent.press(screen.getByRole("button", { name: "Set as default" }));
+    await act(() => settle());
+
+    // The server answered and the wallet was listed again: the wallet's Add is back.
+    expect(jest.mocked(apiGet).mock.calls.length).toBe(loads + 1);
+    expect(client.getQueryState(PAYMENT_METHODS_QUERY_KEY)?.fetchStatus).toBe("idle");
+    expect(cachedWallet(client)).toEqual(["pm_visa", "pm_master*", "pm_amex"]);
+    expect(screen.getByTestId("payment-methods-add")).toBeEnabled();
+    // The closing sheet still shows what it showed, with its actions off: pressed, nothing happens.
+    expect(screen.getByRole("button", { name: "Set as default" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Delete card" })).toBeDisabled();
+    await fireEvent.press(screen.getByRole("button", { name: "Set as default" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Delete card" }));
+    await act(() => settle());
+
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(alert).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    expect(router.back).toHaveBeenCalledTimes(1);
+  });
+
+  it("a delete confirmed after a list made its card the default deletes the card as that list has it, and closes over that list", async () => {
+    remove.mockReturnValue(deferred<undefined>().promise);
+    const { client } = await openCard("pm_master");
+    await fireEvent.press(screen.getByRole("button", { name: "Delete card" }));
+    expect(alert.mock.calls[0][1]).toBe("It leaves your wallet for good.");
+
+    // While the question is up, a list lands: Mastercard was made the default on another device.
+    serverSetsDefault("pm_master");
+    await act(async () => client.setQueryData(PAYMENT_METHODS_QUERY_KEY, server));
+    await act(() => settle());
+    const newest = {
+      isDefault: true,
+      offersSetDefault: false,
+      spoken: "Mastercard ending 4444, expires 03 30, default",
+    };
+    expect(sheetSays()).toEqual(newest);
+
+    await act(async () => buttons()[1].onPress?.());
+
+    expect(remove.mock.calls).toEqual([
+      [
+        CARD_PATH,
+        undefined,
+        { auth: true, generation: 1, params: { payment_method_id: "pm_master" } },
+      ],
+    ]);
+    // The card as the wallet had it at the confirm, not as it was when the question opened.
+    expect(client.getMutationCache().getAll()).toHaveLength(1);
+    expect(client.getMutationCache().getAll()[0].state.variables).toEqual({
+      card: { ...MASTER, is_default: true },
+      generation: 1,
+    });
+    // The card left the wallet under the closing sheet, which holds the newest reading: it never
+    // flips back to the one the question opened on.
+    expect(cachedWallet(client)).toEqual(["pm_visa", "pm_amex"]);
+    expect(router.back).toHaveBeenCalledTimes(1);
+    expect(sheetSays()).toEqual(newest);
+    expect(screen.getByTestId("payment-card-is-default")).toHaveTextContent(
+      "This is your default card.",
+    );
+  });
+
+  it("on a wallet that could not be listed again after its default's delete, Delete says this card may be the default", async () => {
+    const { client, openNext } = await openOnWallet("pm_visa");
+    // The server deleted Visa and promoted Amex, but the list asked afterwards gets no answer.
+    server = [MASTER, { ...AMEX, is_default: true }];
+    jest.mocked(apiGet).mockRejectedValueOnce(new NetworkError(false));
+    await confirmDelete();
+    await act(() => settle());
+    expect(cachedWallet(client)).toEqual(["pm_master", "pm_amex"]);
+    expect(client.getQueryState(PAYMENT_METHODS_QUERY_KEY)?.status).toBe("error");
+
+    await openNext("pm_master");
+    expect(sheetSays().isDefault).toBe(false);
+    await fireEvent.press(screen.getByRole("button", { name: "Delete card" }));
+
+    expect(alert.mock.calls.map(([title, body]) => [title, body])).toEqual([
+      [
+        "Delete Visa ending 4242?",
+        "It leaves your wallet for good. Another card becomes your default.",
+      ],
+      [
+        "Delete Mastercard ending 4444?",
+        "It leaves your wallet for good. If it's your default, another card becomes your default.",
+      ],
+    ]);
+  });
+
+  it.each([
+    // [case, the wallet listed, the card opened, the next list fails, Delete's question]
+    ["a default known, another card", [VISA, MASTER, AMEX], "pm_master", true, "plain"],
+    ["a default known, the default", [VISA, MASTER, AMEX], "pm_visa", true, "next"],
+    ["no default, listed", [MASTER, AMEX], "pm_master", false, "plain"],
+    ["no default, not listed again", [MASTER, AMEX], "pm_master", true, "maybe"],
+    ["no default, the only card, not listed again", [MASTER], "pm_master", true, "plain"],
+  ] as const)(
+    "Delete's question says what the wallet knows of the default (%s)",
+    async (_case, cards, id, refreshFails, body) => {
+      server = [...cards];
+      const client = await openBoth(id);
+      if (refreshFails) {
+        jest.mocked(apiGet).mockRejectedValueOnce(new NetworkError(false));
+        await act(async () => {
+          await client.refetchQueries({ queryKey: PAYMENT_METHODS_QUERY_KEY });
+        });
+        await act(() => settle());
+        expect(screen.getByTestId("payment-methods-stale")).toBeOnTheScreen();
+      } else {
+        expect(screen.queryByTestId("payment-methods-stale")).toBeNull();
+      }
+
+      await fireEvent.press(screen.getByRole("button", { name: "Delete card" }));
+
+      expect(alert.mock.calls.map(([, asked]) => asked)).toEqual([
+        {
+          plain: "It leaves your wallet for good.",
+          next: "It leaves your wallet for good. Another card becomes your default.",
+          maybe:
+            "It leaves your wallet for good. If it's your default, another card becomes your default.",
+        }[body],
+      ]);
+    },
+  );
+
+  it("its face takes its tone from the wallet it reads: the card behind the front one loses its shifted tone when the default moves", async () => {
+    // Four cards, the oldest (Visa) the default: Discover, right behind it, takes the next tone.
+    server = [DISCOVER, AMEX, MASTER, VISA];
+    const client = await openBoth("pm_discover");
+    const surface = (testID: string): unknown =>
+      StyleSheet.flatten(screen.getByTestId(testID).props.style).backgroundColor;
+    const shifted = surface("wallet-card-pm_discover");
+    expect(surface("payment-card-face")).toBe(shifted);
+
+    // The default moves to Mastercard, as a list (or a refused change taken back) would draw it:
+    // Discover is still right behind the front card, now in its own tone.
+    serverSetsDefault("pm_master");
+    await act(async () => client.setQueryData(PAYMENT_METHODS_QUERY_KEY, server));
+    await act(() => settle());
+
+    expect(surface("wallet-card-pm_discover")).not.toBe(shifted);
+    expect(surface("payment-card-face")).toBe(surface("wallet-card-pm_discover"));
   });
 });
 
