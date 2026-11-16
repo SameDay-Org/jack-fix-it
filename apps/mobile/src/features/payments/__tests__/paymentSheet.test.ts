@@ -7,7 +7,7 @@ import {
 } from "@stripe/stripe-react-native";
 
 import { deferred } from "../../../api/__tests__/helpers";
-import { openPaymentSheet } from "../paymentSheet";
+import { openPaymentSheet, openSetupSheet } from "../paymentSheet";
 import { resetSheetCustomer } from "../sheetCustomer";
 import { SHEET } from "./helpers";
 
@@ -134,5 +134,60 @@ describe("openPaymentSheet", () => {
     stuck.resolve(null);
     await expect(open()).resolves.toEqual({ kind: "paid" });
     expect(sdkCalls()).toEqual({ stripe: 1, sheet: 1, present: 1 });
+  });
+});
+
+describe("openSetupSheet", () => {
+  // Recognizable values: the sheet's result and the console never carry one of them.
+  const SETUP = {
+    client_secret: "seti_123_secret_456",
+    ephemeral_key_secret: "ek_test_789",
+    customer_id: "cus_jack",
+    publishable_key: "pk_test_jack",
+  };
+  const save = (stillWanted = () => true) =>
+    openSetupSheet(SETUP, { merchantName: "Jack Fix It", stillWanted });
+
+  it("opens the sheet in setup mode: a SetupIntent, the customer, no wallet and no payment", async () => {
+    await expect(save()).resolves.toEqual({ kind: "saved" });
+
+    expect(initStripe).toHaveBeenCalledWith(
+      expect.objectContaining({ publishableKey: "pk_test_jack", urlScheme: "jackfixit" }),
+    );
+    const params = jest.mocked(initPaymentSheet).mock.calls[0][0];
+    expect(params).toMatchObject({
+      setupIntentClientSecret: "seti_123_secret_456",
+      customerId: "cus_jack",
+      customerEphemeralKeySecret: "ek_test_789",
+      merchantDisplayName: "Jack Fix It",
+      returnURL: "jackfixit://stripe-redirect",
+      allowsDelayedPaymentMethods: false,
+    });
+    expect(params.paymentIntentClientSecret).toBeUndefined();
+    // Apple Pay and Google Pay are not saved cards.
+    expect(params.applePay).toBeUndefined();
+    expect(params.googlePay).toBeUndefined();
+    expect(presentPaymentSheet).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps how the sheet ended, and never passes Stripe's message on", async () => {
+    jest
+      .mocked(presentPaymentSheet)
+      .mockResolvedValueOnce({ error: { code: PaymentSheetError.Canceled, message: "x" } })
+      .mockResolvedValueOnce({ error: { code: PaymentSheetError.Failed, message: "card 4242" } })
+      .mockResolvedValueOnce({ error: { code: PaymentSheetError.Timeout, message: "slow" } });
+    await expect(save()).resolves.toEqual({ kind: "canceled" });
+    await expect(save()).resolves.toEqual({ kind: "failed", reason: "failed" });
+    await expect(save()).resolves.toEqual({ kind: "failed", reason: "timeout" });
+
+    jest.mocked(initPaymentSheet).mockResolvedValueOnce({
+      error: { code: PaymentSheetError.Failed, message: "seti_123_secret_456" },
+    });
+    await expect(save()).resolves.toEqual({ kind: "failed", reason: "unavailable" });
+  });
+
+  it("opens nothing once the caller no longer wants the sheet", async () => {
+    await expect(save(() => false)).resolves.toEqual({ kind: "superseded" });
+    expect(sdkCalls()).toEqual(NONE);
   });
 });

@@ -197,7 +197,7 @@ describe("PaymentMethodsScreen", () => {
     [new ApiError(503, "not_configured"), "Your cards aren't available right now."],
     [new NetworkError(false), "You're offline. Connect to see your cards."],
     [new ApiError(500, "internal_error"), "We couldn't load your cards."],
-  ])("a wallet that cannot load (%s) says so and offers a retry", async (error, message) => {
+  ])("a wallet that cannot load (case %#) says so and offers a retry", async (error, message) => {
     jest.mocked(apiGet).mockRejectedValueOnce(error);
     await open();
 
@@ -248,7 +248,11 @@ describe("Add a card", () => {
     expect(sheet.mock.calls[0][1]).toMatchObject({ merchantName: "Jack Fix It" });
     // The API never makes the first card the default by itself: the app asks for it.
     expect(postsTo(DEFAULT_PATH)).toEqual([
-      [DEFAULT_PATH, undefined, { auth: true, generation: 1, params: { payment_method_id: "pm_new" } }],
+      [
+        DEFAULT_PATH,
+        undefined,
+        { auth: true, generation: 1, params: { payment_method_id: "pm_new" } },
+      ],
     ]);
     expect(cachedWallet(client)).toEqual(["pm_new*"]);
     expect(screen.getByTestId("wallet-pocket-default")).toHaveTextContent("DefaultVisa •••• 5556");
@@ -329,19 +333,22 @@ describe("Add a card", () => {
     [new NetworkError(false), "No connection"],
     [new ApiError(429, "rate_limited"), "That's a lot of tries at once"],
     [new ApiError(500, "internal_error"), "We couldn't start adding a card"],
-  ])("when the SetupIntent is refused (%s): a calm notice and no sheet", async (error, title) => {
-    post.mockRejectedValueOnce(error);
-    await open();
+  ])(
+    "when the SetupIntent is refused (case %#): a calm notice and no sheet",
+    async (error, title) => {
+      post.mockRejectedValueOnce(error);
+      await open();
 
-    await fireEvent.press(await screen.findByTestId("payment-methods-add"));
-    await act(() => settle());
+      await fireEvent.press(await screen.findByTestId("payment-methods-add"));
+      await act(() => settle());
 
-    expect(sheet).not.toHaveBeenCalled();
-    expect(
-      within(screen.getByTestId("payment-methods-add-failed")).getByText(title),
-    ).toBeOnTheScreen();
-    expect(addButton()).toBeEnabled();
-  });
+      expect(sheet).not.toHaveBeenCalled();
+      expect(
+        within(screen.getByTestId("payment-methods-add-failed")).getByText(title),
+      ).toBeOnTheScreen();
+      expect(addButton()).toBeEnabled();
+    },
+  );
 
   it("saved, but the default call is refused: says the card is saved and how to finish", async () => {
     server = [];

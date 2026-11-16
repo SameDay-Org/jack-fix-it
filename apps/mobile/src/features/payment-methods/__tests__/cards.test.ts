@@ -97,7 +97,7 @@ describe("why the wallet could not be read or changed", () => {
     [new ApiError(404, "not_found"), "generic"],
     [new ApiError(500, "internal_error"), "generic"],
     [new Error("boom"), "generic"],
-  ])("%s reads as %s", (error, failure) => {
+  ])("case %# reads as its failure", (error, failure) => {
     expect(walletFailure(error)).toBe(failure);
   });
 });

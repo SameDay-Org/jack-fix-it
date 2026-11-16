@@ -80,9 +80,10 @@ async function showChange(
   if (!isCurrentGeneration(generation)) return undefined;
   const before = client.getQueryData<Wallet>(PAYMENT_METHODS_QUERY_KEY);
   if (!before) return undefined;
-  const shown = edit(before);
-  client.setQueryData<Wallet>(PAYMENT_METHODS_QUERY_KEY, shown);
-  return { before, shown };
+  // As the cache keeps it (it shares what did not change with `before`): `undoChange` tells its
+  // own drawing by identity.
+  const shown = client.setQueryData<Wallet>(PAYMENT_METHODS_QUERY_KEY, edit(before));
+  return shown && { before, shown };
 }
 
 /**
