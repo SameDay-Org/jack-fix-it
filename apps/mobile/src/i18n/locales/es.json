@@ -1717,7 +1717,7 @@
     "in_review": {
       "title": "Stripe está revisando tus datos",
       "body": "Ya está todo enviado. El resultado aparecerá aquí; por ahora no tienes que hacer nada más.",
-      "check": "Comprobar de nuevo"
+      "check": "Revisar de nuevo"
     },
     "enabled": {
       "title": "Tus pagos están activos",
@@ -1729,14 +1729,14 @@
       "title": "Qué te pedirá Stripe",
       "bank": "Una cuenta bancaria, donde llegan tus pagos",
       "identity": "Tu identidad, para confirmar que eres tú",
-      "privacy": "Stripe recoge y guarda estos datos. Jack Fix It nunca los ve."
+      "privacy": "Stripe recopila y guarda estos datos. Jack Fix It nunca los ve."
     },
     "action": {
       "start": "Configurar pagos",
       "continue": "Continuar configuración"
     },
     "expired": {
-      "title": "Esa página de configuración caducó",
+      "title": "Esa página de configuración venció",
       "body": "Abre una nueva para continuar donde lo dejaste."
     },
     "failure": {

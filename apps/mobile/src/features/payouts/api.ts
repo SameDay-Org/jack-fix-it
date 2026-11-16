@@ -67,32 +67,48 @@ export function usePayoutsStatus() {
   return { ...query, refetch };
 }
 
-/** A setup link to ask for, for the session the button was pressed in. */
-export type OnboardingLinkVariables = { generation: number };
+/**
+ * A setup link to ask for: for the session the button was pressed in, and only while the screen
+ * that asked is still there (`signal`).
+ */
+export type OnboardingLinkVariables = { generation: number; signal: AbortSignal };
 
 /**
  * Asks for a link to Stripe's hosted payout setup (POST) and hands it to `open` at once. The
  * link is single-use and a way into the pro's payout account, so it exists in that one call
- * only: what the mutation keeps is what `open` returned, never the link, and nothing of it
- * outlives the screen (`gcTime: 0`). No query holds it and nothing logs it.
+ * only: what the mutation keeps is its variables and what `open` returned, never the link. No
+ * query holds it and nothing logs it. A screen that was left before the link arrived opens
+ * nothing: the request is cancelled, and a link that still arrives is dropped.
  *
- * Once the page is closed, however it was left, the status is asked for again, and the mutation
- * stays pending until that answer is in: the screen never shows the old status in between.
+ * A status request already under way is cancelled before the page opens (its answer would
+ * predate the setup). Once the page is closed, however it was left, the status is asked for
+ * again, and the mutation stays pending until that answer is in: the screen never shows the old
+ * status in between.
  */
 export function useCreateOnboardingLink<Result>(open: (url: string) => Promise<Result>) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: async ({ generation }: OnboardingLinkVariables): Promise<Result> => {
+    mutationFn: async ({ generation, signal }: OnboardingLinkVariables): Promise<Result> => {
       const { url } = await apiPost("/v1/pros/me/payouts/onboarding-link", undefined, {
         auth: true,
         generation,
+        signal,
       });
+      await client.cancelQueries({ queryKey: payoutsQueryKey(generation) });
+      if (signal.aborted) throw new SetupLeftError();
       return open(url);
     },
     onSuccess: (_result, { generation }) =>
       client.invalidateQueries({ queryKey: payoutsQueryKey(generation) }, { cancelRefetch: false }),
-    gcTime: 0,
   });
+}
+
+/** The screen that asked for a setup link was left before the link could be opened. */
+export class SetupLeftError extends Error {
+  constructor() {
+    super("The payout screen was left before the setup page opened");
+    this.name = "SetupLeftError";
+  }
 }
 
 /**

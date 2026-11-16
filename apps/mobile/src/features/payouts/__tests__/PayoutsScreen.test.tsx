@@ -3,8 +3,12 @@ import "@/i18n";
 import type { QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { router } from "expo-router";
-import { openAuthSessionAsync, type WebBrowserAuthSessionResult } from "expo-web-browser";
-import { AppState, type AppStateStatus } from "react-native";
+import {
+  dismissAuthSession,
+  openAuthSessionAsync,
+  type WebBrowserAuthSessionResult,
+} from "expo-web-browser";
+import { AppState, Platform, type AppStateStatus } from "react-native";
 
 import { ApiError, apiGet, apiPost, NetworkError, useSession } from "@/api";
 
@@ -35,9 +39,9 @@ jest.mock("@/api", () => jest.requireActual("./helpers").apiMock());
 jest.mock("expo-router", () => {
   const { routerMock, navigation: nav } =
     jest.requireActual<typeof import("./helpers")>("./helpers");
-  // The screen clears the link's param on its own route.
-  const own = { setParams: () => nav.setParams({}) };
-  return { ...routerMock, useNavigation: () => own };
+  // The screen clears the link's param on its own route: recorded, then applied.
+  const own = { setParams: jest.fn((_params: Record<string, unknown>) => nav.setParams({})) };
+  return { ...routerMock, useNavigation: () => own, mockOwnNavigation: own };
 });
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
@@ -54,8 +58,17 @@ jest.mock("react-native-reanimated", () => ({
 const APPROVED: ProProfile = { ...FULL_PROFILE, verification_status: "approved" };
 const CONSOLE_METHODS = ["log", "info", "warn", "error", "debug"] as const;
 
-/** What the API answers now, by path; an Error is thrown. */
-let server: { payouts: Payouts | Error; profile: ProProfile | Error; link: unknown };
+/** The screen's own route, as `useNavigation` hands it out (see the mock above). */
+const ownRoute = () =>
+  jest.requireMock<{ mockOwnNavigation: { setParams: jest.Mock } }>("expo-router")
+    .mockOwnNavigation;
+
+/** What the API answers now, by path; an Error is thrown, a promise is awaited. */
+let server: {
+  payouts: Payouts | Error | Promise<Payouts>;
+  profile: ProProfile | Error;
+  link: unknown;
+};
 let client: QueryClient;
 let consoleSpies: jest.SpyInstance[];
 
@@ -67,22 +80,45 @@ const message = () => screen.getByTestId("payouts-message");
 const setupButton = () => screen.getByTestId("payouts-setup");
 const browserReturns = (url: string) =>
   jest.mocked(openAuthSessionAsync).mockResolvedValueOnce({ type: "success", url });
+/** The app comes back to the foreground: what the screen's AppState listener hears. */
+const foreground = async () => {
+  const onChange = jest.mocked(AppState.addEventListener).mock.calls.at(-1)?.[1] as (
+    state: AppStateStatus,
+  ) => void;
+  await act(async () => onChange("background"));
+  await act(async () => onChange("active"));
+};
 
-/** Everything the app holds after a link was used: caches, states, the screen, the logs. */
+/**
+ * An Error serialises to `{}`: spelled out here, with its cause, so the sentinel would see a link
+ * kept in an error's message or stack.
+ */
+function spellErrors(_key: string, value: unknown): unknown {
+  if (!(value instanceof Error)) return value;
+  return { name: value.name, message: value.message, stack: value.stack, cause: value.cause };
+}
+
+/**
+ * Everything the app holds after a link was used: the caches (errors included), the screen, the
+ * logs, and every route the screen pushed or param it set.
+ */
 function everythingKept(): string {
-  return JSON.stringify({
-    queries: client
-      .getQueryCache()
-      .getAll()
-      .map((query) => [query.queryKey, query.state]),
-    mutations: client
-      .getMutationCache()
-      .getAll()
-      .map((mutation) => mutation.state),
-    screen: screen.toJSON(),
-    logs: consoleSpies.flatMap((spy) => spy.mock.calls),
-    params: navigation,
-  });
+  return JSON.stringify(
+    {
+      queries: client
+        .getQueryCache()
+        .getAll()
+        .map((query) => [query.queryKey, query.state]),
+      mutations: client
+        .getMutationCache()
+        .getAll()
+        .map((mutation) => mutation.state),
+      screen: screen.toJSON(),
+      logs: consoleSpies.flatMap((spy) => spy.mock.calls),
+      routes: [jest.mocked(router.push).mock.calls, ownRoute().setParams.mock.calls],
+    },
+    spellErrors,
+  );
 }
 
 async function open(status: Payouts | Error, profile: ProProfile | Error = APPROVED) {
@@ -291,6 +327,7 @@ describe("PayoutsScreen: Set up payouts", () => {
     expect(apiPost).toHaveBeenCalledWith(ONBOARDING_LINK, undefined, {
       auth: true,
       generation: 1,
+      signal: expect.objectContaining({ aborted: false }),
     });
     expect(openAuthSessionAsync).toHaveBeenCalledTimes(1);
     expect(openAuthSessionAsync).toHaveBeenCalledWith(SETUP_LINK, "jackfixit://payouts");
@@ -483,6 +520,7 @@ describe("PayoutsScreen: Set up payouts", () => {
   });
 
   it("a browser that would not open says so, and the link is still kept nowhere", async () => {
+    // The browser's own error quotes the link: the app keeps none of it, not even in an error.
     jest
       .mocked(openAuthSessionAsync)
       .mockRejectedValueOnce(new Error(`no browser for ${SETUP_LINK}`));
@@ -494,7 +532,120 @@ describe("PayoutsScreen: Set up payouts", () => {
     expect(screen.getByTestId("payouts-failure-generic")).toHaveTextContent(
       "We couldn't open payout setupGive it another try in a moment.",
     );
+    expect(client.getMutationCache().getAll()[0]?.state.error).toBeInstanceOf(Error);
     expect(everythingKept()).not.toContain(LINK_MARK);
+  });
+
+  it("stays busy until the status is back: the old one never shows with the button free", async () => {
+    browserReturns(RETURN_LINK);
+    await open(payouts("not_started"));
+    const status = deferred<Payouts>();
+    server.payouts = status.promise;
+
+    await pressed("payouts-setup");
+    await flush();
+
+    // The browser is closed and the status is still on its way: the press is not over.
+    expect(openAuthSessionAsync).toHaveBeenCalledTimes(1);
+    expect(asked(PAYOUTS)).toBe(2);
+    expect(setupButton()).toBeBusy();
+
+    await act(async () => status.resolve(payouts("incomplete")));
+    await flush();
+
+    expect(screen.getByTestId("payouts-status")).toHaveTextContent("In progress");
+    expect(setupButton()).not.toBeBusy();
+  });
+
+  it("back to the foreground and back from the browser at once: one status request", async () => {
+    const browser = deferred<WebBrowserAuthSessionResult>();
+    jest.mocked(openAuthSessionAsync).mockReturnValueOnce(browser.promise);
+    await open(payouts("not_started"));
+
+    await pressed("payouts-setup");
+    await flush();
+    // The app comes to the front first (its status request is still on its way)...
+    const status = deferred<Payouts>();
+    server.payouts = status.promise;
+    await foreground();
+    expect(asked(PAYOUTS)).toBe(2);
+    // ...then the browser session answers: the request under way is joined, not started again.
+    await act(async () => browser.resolve({ type: "success", url: RETURN_LINK }));
+    await act(async () => status.resolve(payouts("enabled")));
+    await flush();
+
+    expect(asked(PAYOUTS)).toBe(2);
+    expect(screen.getByTestId("payouts-status")).toHaveTextContent("On");
+  });
+
+  it("a status request under way when the page opens is cancelled: its answer predates the setup", async () => {
+    await open(payouts("not_started"));
+    const stale = deferred<Payouts>();
+    server.payouts = stale.promise;
+    await foreground();
+    expect(asked(PAYOUTS)).toBe(2);
+    server.payouts = payouts("incomplete");
+    browserReturns(RETURN_LINK);
+
+    await pressed("payouts-setup");
+    await act(async () => stale.resolve(payouts("not_started")));
+    await flush();
+
+    // The answer from before the page opened is dropped; the one asked after it shows.
+    expect(asked(PAYOUTS)).toBe(3);
+    expect(screen.getByTestId("payouts-status")).toHaveTextContent("In progress");
+  });
+});
+
+describe("PayoutsScreen: leaving while a setup is under way", () => {
+  it("a link not answered yet is cancelled, and opens nothing once it arrives", async () => {
+    const answer = deferred<unknown>();
+    jest.mocked(apiPost).mockReturnValueOnce(answer.promise as ReturnType<typeof apiPost>);
+    await open(payouts("not_started"));
+
+    await pressed("payouts-setup");
+    const options = jest.mocked(apiPost).mock.calls[0]?.[2] as { signal: AbortSignal };
+    expect(options.signal.aborted).toBe(false);
+
+    await screen.unmount();
+    expect(options.signal.aborted).toBe(true);
+    // The answer arrives anyway (the request was already sent): nothing opens over the next screen.
+    await act(async () => answer.resolve(link()));
+    await flush();
+
+    expect(openAuthSessionAsync).not.toHaveBeenCalled();
+    expect(dismissAuthSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["ios", 1],
+    ["android", 0],
+  ] as const)(
+    "a page already open is closed where the system allows it: %s",
+    async (os, closed) => {
+      const platform = jest.replaceProperty(Platform, "OS", os);
+      const browser = deferred<WebBrowserAuthSessionResult>();
+      jest.mocked(openAuthSessionAsync).mockReturnValueOnce(browser.promise);
+      await open(payouts("not_started"));
+      await pressed("payouts-setup");
+      await flush();
+      expect(openAuthSessionAsync).toHaveBeenCalledTimes(1);
+
+      await screen.unmount();
+
+      expect(dismissAuthSession).toHaveBeenCalledTimes(closed);
+      await act(async () => browser.resolve({ type: "dismiss" } as WebBrowserAuthSessionResult));
+      await flush();
+      platform.restore();
+    },
+  );
+
+  it("leaving with nothing under way closes nothing", async () => {
+    await open(payouts("not_started"));
+
+    await screen.unmount();
+
+    expect(dismissAuthSession).not.toHaveBeenCalled();
   });
 });
 
@@ -510,6 +661,44 @@ describe("PayoutsScreen: the return link as a route", () => {
     expect(asked(PAYOUTS)).toBe(2);
     expect(screen.getByTestId("payouts-status")).toHaveTextContent("On");
     expect(screen.queryByTestId("payouts-expired")).toBeNull();
+    // Cleared on the screen's own route, once: a later render reads no link.
+    expect(ownRoute().setParams).toHaveBeenCalledTimes(1);
+    expect(ownRoute().setParams).toHaveBeenCalledWith({ result: undefined });
+  });
+
+  it("Android hands the return link to both the browser session and the router: one status request", async () => {
+    await open(payouts("incomplete"));
+    const status = deferred<Payouts>();
+    jest.mocked(openAuthSessionAsync).mockImplementationOnce(async () => {
+      // The router's copy lands first, while the session is still answering.
+      server.payouts = status.promise;
+      navigation.setParams({ result: "return" });
+      await settle();
+      return { type: "success", url: RETURN_LINK };
+    });
+
+    await pressed("payouts-setup");
+    await act(async () => status.resolve(payouts("enabled")));
+    await flush();
+
+    expect(asked(PAYOUTS)).toBe(2);
+    expect(screen.getByTestId("payouts-status")).toHaveTextContent("On");
+  });
+
+  it("Android: the browser reads as closed but the refresh page's link came in: expired", async () => {
+    await open(payouts("incomplete"));
+    jest.mocked(openAuthSessionAsync).mockImplementationOnce(async () => {
+      navigation.setParams({ result: "refresh" });
+      await settle();
+      return { type: "dismiss" } as WebBrowserAuthSessionResult;
+    });
+
+    await pressed("payouts-setup");
+    await flush();
+
+    expect(screen.getByTestId("payouts-expired")).toBeTruthy();
+    expect(apiPost).toHaveBeenCalledTimes(1);
+    expect(setupButton()).not.toBeBusy();
   });
 
   it("a cold start through it asks once: the link and the opening share the request", async () => {
@@ -544,5 +733,22 @@ describe("PayoutsScreen: the return link as a route", () => {
     expect(screen.queryByTestId("payouts-expired")).toBeNull();
     expect(apiPost).not.toHaveBeenCalled();
     expect(router.push).not.toHaveBeenCalled();
+  });
+
+  it("an expired link with nothing to set up says nothing, now or once there is", async () => {
+    // Anyone can write the link: in review, there is no setup page that could have expired.
+    await open(payouts("in_review"));
+
+    await act(async () => navigation.setParams({ result: "refresh" }));
+    await flush();
+    expect(screen.queryByTestId("payouts-expired")).toBeNull();
+
+    // Stripe asks for more later: the old link does not surface then either.
+    server.payouts = payouts("incomplete");
+    await pressed("payouts-check");
+    await flush();
+
+    expect(screen.getByTestId("payouts-status")).toHaveTextContent("In progress");
+    expect(screen.queryByTestId("payouts-expired")).toBeNull();
   });
 });

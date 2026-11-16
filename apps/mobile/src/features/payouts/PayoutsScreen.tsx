@@ -38,6 +38,9 @@ const TICK_SIDE = 24;
 /** What Stripe's page asks for, in the order it asks. */
 const ASKS = ["bank", "identity"] as const;
 
+/** The statuses with a setup to start or to continue. */
+const SETTABLE: readonly PayoutsStatus[] = ["not_started", "incomplete"];
+
 const STATUS_TONE: Record<PayoutsStatus, StatusTone> = {
   not_started: "neutral",
   incomplete: "warning",
@@ -81,7 +84,7 @@ export function PayoutsScreen() {
   const { t } = useTranslation();
   const { data, error, isFetching, refetch } = usePayoutsStatus();
   const shownError = useSettledError(data, error);
-  const setup = usePayoutSetup();
+  const setup = usePayoutSetup(data === undefined || SETTABLE.includes(data.status));
   useReturnLink(refetch, setup.onReturnLink);
 
   let content: ReactNode;
