@@ -1,4 +1,5 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
+import { AndroidConfig, withAndroidManifest, type ConfigPlugin } from "expo/config-plugins";
 
 import en from "./src/i18n/locales/en.json";
 import es from "./src/i18n/locales/es.json";
@@ -46,6 +47,46 @@ const PERMISSION_PROMPTS = {
   },
 };
 
+const BOOT_COMPLETED = "android.permission.RECEIVE_BOOT_COMPLETED";
+
+/**
+ * The app's manifest without RECEIVE_BOOT_COMPLETED, removed from the merged manifest too
+ * (`tools:node="remove"`). expo-task-manager declares it, and with it granted it hands the pro's
+ * location fixes to Android's JobScheduler as PERSISTED jobs (`setPersisted(true)`): written to
+ * disk and kept across a reboot until the app reads them. Without it the jobs live in memory
+ * only. Nothing in the app needs it: push messages come from the server, and the one scheduled
+ * local notification (a dev screen's) fires seconds later. Pure, so a test can check the output.
+ */
+export function withoutBootCompleted(
+  manifest: AndroidConfig.Manifest.AndroidManifest,
+): AndroidConfig.Manifest.AndroidManifest {
+  const root = AndroidConfig.Manifest.ensureToolsAvailable(manifest).manifest;
+  const others = (root["uses-permission"] ?? []).filter(
+    (permission) => permission.$["android:name"] !== BOOT_COMPLETED,
+  );
+  return {
+    ...manifest,
+    manifest: {
+      ...root,
+      "uses-permission": [
+        ...others,
+        {
+          $: { "android:name": BOOT_COMPLETED, "tools:node": "remove" } as {
+            "android:name": string;
+          },
+        },
+      ],
+    },
+  };
+}
+
+// A change here needs a new dev build.
+const withNoBootCompleted: ConfigPlugin = (config) =>
+  withAndroidManifest(config, (mod) => {
+    mod.modResults = withoutBootCompleted(mod.modResults);
+    return mod;
+  });
+
 function appVariant(): AppVariant {
   const value = process.env.APP_VARIANT ?? "development";
   if (Object.hasOwn(VARIANTS, value)) return value as AppVariant;
@@ -56,7 +97,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const variant = VARIANTS[appVariant()];
   const appId = `${BASE_APP_ID}${variant.idSuffix}`;
 
-  return {
+  // Keeps the pro's location fixes out of persisted Android jobs (#352): see withoutBootCompleted.
+  return withNoBootCompleted({
     ...config,
     name: `Jack Fix It${variant.nameSuffix}`,
     slug: "jack-fix-it",
@@ -159,5 +201,5 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     experiments: { typedRoutes: true },
     // `appleMerchantId` reaches the Payment Sheet through expo-constants (src/features/payments).
     extra: { eas: { projectId: EAS_PROJECT_ID }, appleMerchantId: APPLE_MERCHANT_ID },
-  };
+  });
 };
