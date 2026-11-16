@@ -462,6 +462,53 @@ async def test_a_detail_without_documents_is_audited_too(
     ]
 
 
+async def expired_insurance_pro(session: AsyncSession) -> Pro:
+    """A pro with a category, an area, an approved ID and an approved insurance that expired
+    yesterday (Foreman decision on #41: it no longer covers its type)."""
+    pro = await make_pro(session)
+    await serve(session, pro)
+    await add_document(session, pro, ProDocumentType.ID, ProDocumentStatus.APPROVED)
+    await add_document(
+        session,
+        pro,
+        ProDocumentType.INSURANCE,
+        ProDocumentStatus.APPROVED,
+        expires_on=TODAY - timedelta(days=1),
+        age=timedelta(days=400),
+    )
+    return pro
+
+
+async def test_the_detail_counts_an_expired_approved_document_as_missing(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    pro = await expired_insurance_pro(db_session)
+
+    response = await db_client.get(f"{STAFF}/{pro.profile_id}", headers=world.agent.headers)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["missing_types"] == ["insurance"]
+    assert body["approval_blockers"] == [{"kind": "document_expired", "doc_type": "insurance"}]
+
+
+async def test_the_detail_counts_a_type_covered_again_by_a_valid_replacement(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    pro = await expired_insurance_pro(db_session)
+    # Approved and valid through today (an expiry date of today has not passed yet).
+    await add_document(
+        db_session, pro, ProDocumentType.INSURANCE, ProDocumentStatus.APPROVED, expires_on=TODAY
+    )
+
+    response = await db_client.get(f"{STAFF}/{pro.profile_id}", headers=world.agent.headers)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["missing_types"] == []
+    assert body["approval_blockers"] == []
+
+
 @pytest.mark.parametrize("who", ["customer", "pro", "the_pro_reviewed"])
 async def test_only_the_staff_detail_carries_the_legal_name(
     db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld, who: str

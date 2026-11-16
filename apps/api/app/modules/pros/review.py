@@ -47,7 +47,12 @@ from app.modules.audit.types import (
     ReaderNotStaffError,
 )
 from app.modules.categories.service import CategoryService
-from app.modules.pros.documents import latest_and_history, required_types, uncovered_types
+from app.modules.pros.documents import (
+    expired,
+    latest_and_history,
+    required_types,
+    uncovered_types,
+)
 from app.modules.pros.errors import (
     DocumentNotPendingError,
     InvalidProListError,
@@ -315,7 +320,9 @@ class ProReviewService:
 
     async def _detail(self, profile: ProProfile) -> StaffProOut:
         ttl = self._config.url_ttl_seconds
-        expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(seconds=ttl)
+        today = now.date()
         category_ids = await self._profiles.category_ids(profile.id)
         area_ids = await self._profiles.service_area_ids(profile.id)
         current = await self._documents.current_of(profile.id)
@@ -349,13 +356,14 @@ class ProReviewService:
             documents=[document_out(document) for document in latest],
             history=[document_out(document) for document in history],
             required_types=required,
-            missing_types=uncovered_types(required, current),
+            # The same day for both: what is missing and what blocks an approval agree.
+            missing_types=uncovered_types(required, current, today=today),
             approval_blockers=_blockers(
                 required,
                 current,
                 has_category=bool(category_ids),
                 has_service_area=bool(area_ids),
-                today=datetime.now(UTC).date(),
+                today=today,
             ),
             created_at=profile.created_at,
         )
@@ -382,7 +390,7 @@ def _blockers(
             blockers.append(
                 ApprovalBlocker(kind=ApprovalBlockerKind.DOCUMENT_MISSING, doc_type=doc_type)
             )
-        elif all(d.expires_on is not None and d.expires_on < today for d in approved):
+        elif all(expired(d, today) for d in approved):
             blockers.append(
                 ApprovalBlocker(kind=ApprovalBlockerKind.DOCUMENT_EXPIRED, doc_type=doc_type)
             )
