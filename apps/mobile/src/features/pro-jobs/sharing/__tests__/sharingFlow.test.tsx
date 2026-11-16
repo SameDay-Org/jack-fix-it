@@ -19,9 +19,10 @@ import {
   proJob,
   renderWithQuery,
   signedIn,
+  working,
 } from "../../__tests__/helpers";
 import { deferred } from "../../../../api/__tests__/helpers";
-import { checkIn, markOnTheWay, proJobQueryKey, proJobsQueryKey } from "../../api";
+import { checkIn, completeJob, markOnTheWay, proJobQueryKey, proJobsQueryKey } from "../../api";
 import { OnTheWaySheet } from "../../OnTheWaySheet";
 import type { ProJob } from "../../phase";
 import { ProJobScreen } from "../../ProJobScreen";
@@ -230,20 +231,43 @@ describe("the explanation (/jobs/[id]/share-location)", () => {
     },
   );
 
-  it("Continue, then refused: nothing is shared now; allowed later in Settings, it shares", async () => {
+  it("Continue, then refused at the system's prompt: a Not now; a grant made later for check-in shares nothing", async () => {
     await explain("askable");
     jest
       .mocked(Location.requestForegroundPermissionsAsync)
-      .mockResolvedValueOnce(permission("blocked"));
+      .mockResolvedValueOnce(permission("askable"));
 
     await press("share-location-continue");
     expect(starts()).toBe(0);
+    expect(mayShare(JOB_ID)).toBe(false);
     expect(router.back).toHaveBeenCalledTimes(1);
 
-    // The pro's Continue stands: back from Settings with the permission, the job is shared.
+    // Check-in asks for the same permission and gets it: still nothing is shared.
     jest.mocked(Location.getForegroundPermissionsAsync).mockResolvedValue(permission("granted"));
     await startSharing(JOB_ID, 1);
+    expect(starts()).toBe(0);
+  });
+
+  it("Android with the location off: Continue offers to switch it on, then shares", async () => {
+    jest.replaceProperty(Platform, "OS", "android");
+    const task = await explain("granted");
+    task.on = false;
+
+    await press("share-location-continue");
+    expect(Location.enableNetworkProviderAsync).toHaveBeenCalledTimes(1);
     expect(starts()).toBe(1);
+    expect(router.back).toHaveBeenCalledTimes(1);
+  });
+
+  it("left while the system answered: no second back", async () => {
+    await explain("askable");
+    const answer = deferred<ReturnType<typeof permission>>();
+    jest.mocked(Location.requestForegroundPermissionsAsync).mockReturnValueOnce(answer.promise);
+
+    await press("share-location-continue");
+    await screen.unmount(); // the pro went back meanwhile
+    await act(async () => answer.resolve(permission("granted")));
+    expect(router.back).not.toHaveBeenCalled();
   });
 
   it("two taps on Continue ask once", async () => {
@@ -313,15 +337,13 @@ describe("the job screen on the way", () => {
     await waitFor(() => expect(starts()).toBe(1));
   });
 
-  it("iOS with the location off: nothing is shared, and the line stays", async () => {
-    const task = await open(onTheWay(), "granted");
-    task.on = false;
+  it("a job the API refused has no line: nothing could share it", async () => {
+    await open(onTheWay(), "askable");
+    expect(await screen.findByTestId("pro-job-sharing-note")).toBeTruthy();
 
-    await press("pro-job-sharing-note-action");
-    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
-    expect(Location.enableNetworkProviderAsync).not.toHaveBeenCalled();
-    expect(starts()).toBe(0);
-    expect(screen.getByTestId("pro-job-sharing-note")).toBeTruthy();
+    // Cancelled or checked in elsewhere: the app hears it before the screen reads the job again.
+    await act(() => followJob(proJob({ status: "cancelled" })));
+    await waitFor(() => expect(screen.queryByTestId("pro-job-sharing-note")).toBeNull());
   });
 
   it("refused for good: the line opens the settings, and nothing is asked", async () => {
@@ -448,6 +470,79 @@ describe("LocationSharing: in step with the pro's jobs", () => {
     await renderWithQuery(<LocationSharing />, client);
     await waitFor(() => expect(starts()).toBe(1));
     expect(sharedJobId()).toBe(SECOND_JOB.id);
+  });
+
+  it("stops a shared job the list no longer has on the way, whatever else is on the way", async () => {
+    await shareJob(JOB_ID, 1);
+    answer(onTheWay());
+    const client = newQueryClient();
+    await renderWithQuery(<LocationSharing />, client);
+    await listIn(client);
+
+    // The job was cancelled; another one, never chosen, is on the way.
+    answer(SECOND_JOB);
+    await act(async () => {
+      await client.refetchQueries();
+    });
+    await waitFor(() => expect(stops()).toBe(1));
+    expect(sharedJobId()).toBeNull();
+  });
+
+  it("in the background, a shared job that is not the one to share stops; the next starts in front", async () => {
+    await chooseBeforeGrant(SECOND_JOB.id);
+    await shareJob(JOB_ID, 1);
+    answer(onTheWay(), SECOND_JOB);
+    const client = newQueryClient();
+    await renderWithQuery(<LocationSharing />, client);
+    await listIn(client);
+    expect(sharedJobId()).toBe(JOB_ID);
+
+    Object.defineProperty(AppState, "currentState", { value: "background", configurable: true });
+    await act(async () => appMoves("background"));
+    answer(SECOND_JOB, proJob({ id: JOB_ID, status: "cancelled" }));
+    await act(async () => {
+      await client.refetchQueries();
+    });
+    await waitFor(() => expect(stops()).toBe(1));
+    const before = starts();
+
+    await act(async () => appMoves("active"));
+    await waitFor(() => expect(starts()).toBe(before + 1));
+    expect(sharedJobId()).toBe(SECOND_JOB.id);
+  });
+
+  it("the list holds On my way's answer even when it did not have the job yet", async () => {
+    const client = newQueryClient();
+    const held = deferred<ReturnType<typeof jobPage>>();
+    let lists = 0;
+    jest.mocked(apiGet).mockImplementation(async (path) => {
+      if (path !== LIST) throw new Error(`unexpected ${String(path)}`);
+      lists += 1;
+      return lists === 1 ? jobPage([]) : held.promise;
+    });
+    await renderWithQuery(<LocationSharing />, client);
+    await listIn(client);
+
+    jest.mocked(apiPost).mockResolvedValueOnce(onTheWay());
+    await act(async () => {
+      await markOnTheWay(client, JOB_ID, 20, 1);
+    });
+    expect(client.getQueryData<ProJob[]>(proJobsQueryKey(1))?.map(({ id }) => id)).toEqual([
+      JOB_ID,
+    ]);
+    await shareJob(JOB_ID, 1);
+    await act(async () => appMoves("background"));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(stops()).toBe(0);
+  });
+
+  it("the list drops a job the answer says is done", async () => {
+    const client = newQueryClient();
+    client.setQueryData(proJobsQueryKey(1), [working()]);
+    jest.mocked(apiPost).mockResolvedValueOnce(working({ status: "completed" }));
+
+    await completeJob(client, JOB_ID, 1);
+    expect(client.getQueryData(proJobsQueryKey(1))).toEqual([]);
   });
 
   it("in the background it starts nothing; back in front, it shares", async () => {

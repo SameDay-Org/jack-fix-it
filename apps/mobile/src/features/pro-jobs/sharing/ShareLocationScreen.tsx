@@ -10,6 +10,7 @@ import { Button, Screen, SheetContent } from "@/components/ui";
 
 import { proJobQueryOptions, useSingleFlight } from "../api";
 import { customerName } from "../format";
+import { ensureLocationOn } from "../location";
 import { useSheetExit } from "../useSheetExit";
 import { sharingConfig } from "./config";
 import { isSharedStep, shareJob } from "./sender";
@@ -21,9 +22,11 @@ const MS_PER_SECOND = 1000;
  * once "On my way" has put the job on the way: why Jack shares the position, with whom, how often,
  * and when it stops. A screen, not a sheet, so the words scroll and both choices stay in view at
  * any text size. It shows even when the permission was given before (for check-in): sharing needs
- * the pro's Continue, which asks for the "while using" permission (no prompt once given) and
- * shares. Not now asks and shares nothing. Either way the job screen is next, and the job goes on:
- * not shared, it says so in one line with the way to share.
+ * the pro's Continue, which asks for the "while using" permission (no prompt once given), offers
+ * Android's switch-on dialog when the location is off, and shares. Refused at the system's prompt,
+ * it is a Not now: a grant made later for check-in shares nothing. Not now asks and shares nothing.
+ * Either way the job screen is next, and the job goes on: not shared, it says so in one line with
+ * the way to share. A build with sharing off has nothing to explain and leaves at once.
  */
 export function ShareLocationScreen() {
   const { t } = useTranslation();
@@ -32,10 +35,11 @@ export function ShareLocationScreen() {
   // Read from the job screen under it, never fetched here.
   const { data: job } = useQuery({ ...proJobQueryOptions(id, generation), enabled: false });
   const { leave, leaving, sameSession } = useSheetExit(generation);
-  const { busy, run } = useSingleFlight();
+  const { busy, run, mounted } = useSingleFlight();
 
-  // Opened without its job on the way (a stale link, a check-in elsewhere): nothing to explain.
-  const onTheWay = job !== undefined && isSharedStep(job);
+  // Opened without its job on the way (a stale link, a check-in elsewhere) or with sharing off:
+  // nothing to explain.
+  const onTheWay = sharingConfig.enabled && job !== undefined && isSharedStep(job);
   useEffect(() => {
     if (sameSession && !onTheWay && !busy && !leaving.current) leave();
   }, [busy, leave, leaving, onTheWay, sameSession]);
@@ -45,12 +49,17 @@ export function ShareLocationScreen() {
   const share = () =>
     void run(async () => {
       try {
-        await Location.requestForegroundPermissionsAsync();
-        await shareJob(job.id, generation);
+        const { granted } = await Location.requestForegroundPermissionsAsync();
+        if (granted) {
+          // Switched off and left off (declined, or iOS, which has no such dialog): not shared.
+          await ensureLocationOn().catch(() => undefined);
+          await shareJob(job.id, generation);
+        }
       } catch {
         // No answer from the system: nothing is shared, and the job screen says so.
       }
-      leave();
+      // Gone already (a back while the system answered, a sign-out): one back is enough.
+      if (mounted.current) leave();
     });
 
   return (

@@ -21,6 +21,7 @@ import { proJobQueryKey } from "../../api";
 import { OnTheWaySheet } from "../../OnTheWaySheet";
 import { ProJobScreen } from "../../ProJobScreen";
 import { followJob, shareJob, startSharing, stopSharing } from "../sender";
+import { ShareLocationScreen } from "../ShareLocationScreen";
 
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../__tests__/helpers").apiMock(),
@@ -82,6 +83,7 @@ beforeEach(() => {
   jest.mocked(apiGet).mockReset();
   jest.mocked(apiPost).mockReset();
   jest.mocked(router.back).mockClear();
+  jest.mocked(router.replace).mockClear();
 });
 
 describe("sharing off (the flag is not 'on')", () => {
@@ -98,7 +100,16 @@ describe("sharing off (the flag is not 'on')", () => {
     await press("on-the-way-preset-20");
     await press("on-the-way-send");
     await waitFor(() => expect(router.back).toHaveBeenCalledTimes(1));
-    expect(screen.queryByTestId("share-location-sheet")).toBeNull();
+    expect(router.replace).not.toHaveBeenCalled();
+    expect(locationCalls()).toBe(0);
+  });
+
+  it("the explanation, reached anyway (a link), leaves at once and asks nothing", async () => {
+    const client = newQueryClient();
+    client.setQueryData(proJobQueryKey(JOB_ID, 1), onTheWay());
+    await renderWithQuery(<ShareLocationScreen />, client);
+
+    await waitFor(() => expect(router.back).toHaveBeenCalledTimes(1));
     expect(locationCalls()).toBe(0);
   });
 

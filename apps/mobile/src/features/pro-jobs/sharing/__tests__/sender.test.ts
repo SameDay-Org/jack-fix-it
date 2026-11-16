@@ -12,7 +12,17 @@ import { arrived, JOB_ID, jobN, NOW, onTheWay, proJob, working } from "../../__t
 import type { ProJob } from "../../phase";
 import { followJob, mayShare, shareJob, SHARING_TASK, sharedJobId, startSharing } from "../sender";
 
-import { consoleText, deliver, fix, LAT, LNG, resetLocation, starts, stops } from "./helpers";
+import {
+  consoleText,
+  deliver,
+  fix,
+  LAT,
+  LNG,
+  permission,
+  resetLocation,
+  starts,
+  stops,
+} from "./helpers";
 
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../__tests__/helpers").apiMock(),
@@ -164,6 +174,7 @@ describe("the location task", () => {
     ["too many pings (429)", new ApiError(429, "rate_limited")],
     ["positions unavailable (503)", new ApiError(503, "location_unavailable")],
     ["a fix the API found too old (422)", new ApiError(422, "validation_error")],
+    ["an access token the client could not use (401)", new ApiError(401, "invalid_token")],
   ])(
     "drops a ping that failed (%s): no retry, no backlog, and sharing goes on",
     async (_c, error) => {
@@ -281,6 +292,17 @@ describe("the location task", () => {
     await shareJob(JOB_ID, 1);
     mockSignOut();
     expect(mayShare(JOB_ID)).toBe(false);
+  });
+
+  it("a job that left the way while its start was under way does not start", async () => {
+    resetLocation("granted");
+    const permissionRead = deferred<ReturnType<typeof permission>>();
+    jest.mocked(Location.getForegroundPermissionsAsync).mockReturnValueOnce(permissionRead.promise);
+    const start = shareJob(JOB_ID, 1);
+    await followJob(arrived()); // queued behind the start: the start re-checks first
+    permissionRead.resolve(permission("granted"));
+    await start;
+    expect(starts()).toBe(0);
   });
 
   it("starts nothing for a session that is over", async () => {

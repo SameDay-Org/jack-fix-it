@@ -80,6 +80,15 @@ export const sharedJobId = (): string | null => shared?.jobId ?? null;
 /** The pro chose to share `jobId` this session, and it has not left the way. */
 export const mayShare = (jobId: string): boolean => chosen.has(jobId) && !ended.has(jobId);
 
+/** `jobId` left the way this session (or the API refused it): nothing can share it any more. */
+export const hasEnded = (jobId: string): boolean => ended.has(jobId);
+
+function endJob(jobId: string): void {
+  if (ended.has(jobId)) return;
+  ended.add(jobId);
+  listeners.forEach((listener) => listener());
+}
+
 const inRange = (value: number | null, max: number): number | null =>
   value !== null && Number.isFinite(value) && value >= 0 && value <= max ? value : null;
 
@@ -123,7 +132,7 @@ async function send(fixes: readonly Location.LocationObject[]): Promise<void> {
   } catch (error) {
     // Refused for this session's job: done with it. The session itself ended (a sign-out, a
     // refresh the server refused): stop, and leave the job to the next session.
-    if (refusal(error) && isCurrentGeneration(current.generation)) ended.add(current.jobId);
+    if (refusal(error) && isCurrentGeneration(current.generation)) endJob(current.jobId);
     if (refusal(error) || error instanceof SessionExpiredError) await stopIf(current);
   } finally {
     sending = false;
@@ -222,7 +231,7 @@ export function stopSharing(): Promise<void> {
  */
 export function followJob(job: ProJob): Promise<void> {
   if (!sharingConfig.enabled || !leftTheWay(job)) return Promise.resolve();
-  ended.add(job.id);
+  endJob(job.id);
   return serially(async () => {
     if (shared?.jobId !== job.id) return;
     setShared(null);

@@ -138,9 +138,15 @@ function applyJob(client: QueryClient, job: ProJob, generation: number): void {
   if (!isCurrentGeneration(generation)) return;
   void followJob(job);
   client.setQueryData(proJobQueryKey(job.id, generation), job);
-  // The list holds the answer too until it is in again: nothing reads the job as it was.
+  // The list holds the answer too until it is in again, as the API would list it (active jobs,
+  // soonest first): nothing reads the job as it was.
   client.setQueryData<ProJob[]>(proJobsQueryKey(generation), (jobs) =>
-    jobs?.map((each) => (each.id === job.id ? job : each)),
+    jobs === undefined
+      ? undefined
+      : soonestFirst([
+          ...jobs.filter(({ id }) => id !== job.id),
+          ...(isActiveJob(job) ? [job] : []),
+        ]),
   );
   void client.invalidateQueries({ queryKey: proJobsQueryKey(generation) });
 }

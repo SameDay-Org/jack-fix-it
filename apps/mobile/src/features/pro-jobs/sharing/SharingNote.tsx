@@ -5,24 +5,25 @@ import { useSessionGeneration } from "@/api";
 import { RetryNotice } from "@/features/opportunities/RetryNotice";
 
 import { ensureLocationOn, useLocationAccess } from "../location";
-import { shareJob, sharedJobId, subscribeSharing } from "./sender";
+import { hasEnded, shareJob, sharedJobId, subscribeSharing } from "./sender";
 
 /**
  * On the way and not shared (#352): one calm line that the customer does not see the pro coming,
  * and the one way to change it. "Share location" records the pro's choice, asks for the "while
  * using" permission (no prompt once given) and, on Android, offers to switch the location on;
  * refused for good, "Open Settings" (sharing starts once the app is back in front with it). The
- * job itself goes on either way.
+ * job itself goes on either way. A job the API refused (cancelled or checked in elsewhere) has no
+ * line: nothing could share it, and the screen catches up on its next read.
  */
 export function SharingNote({ jobId, name }: { jobId: string; name: string }) {
   const { t } = useTranslation();
   const generation = useSessionGeneration();
   const { access, ask, openSettings } = useLocationAccess();
-  const shared = useSyncExternalStore(
+  const quiet = useSyncExternalStore(
     subscribeSharing,
-    useCallback(() => sharedJobId() === jobId, [jobId]),
+    useCallback(() => sharedJobId() === jobId || hasEnded(jobId), [jobId]),
   );
-  if (shared || access === "unknown") return null;
+  if (quiet || access === "unknown") return null;
 
   const blocked = access === "blocked";
   const turnOn = () => {
