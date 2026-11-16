@@ -19,6 +19,7 @@ from typing import Any
 
 import httpx
 import pytest
+from redis.exceptions import RedisError
 from sqlalchemy import URL, delete, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -33,6 +34,7 @@ from app.modules.jobs.service import JobPayoutFacts
 from app.modules.payments import transfers
 from app.modules.payments.models import Payment, PaymentStatus, Transfer, TransferStatus
 from app.modules.payments.service import transfer_group
+from app.modules.payments.transfer_queue import enqueue_transfer_release
 from app.modules.payments.transfer_tasks import release_confirmed_jobs, release_transfer
 from app.modules.payments.transfer_webhooks import (
     TransferEventMalformedError,
@@ -66,6 +68,7 @@ from tests.job_world import (
     make_job,
 )
 from tests.test_quotes_api import set_setting
+from tests.test_requests_api import RecordingQueue
 
 CONFIG = TransferConfig(stuck_after=timedelta(minutes=15))
 NOW = datetime(2030, 2, 1, 12, 0, tzinfo=UTC)
@@ -273,12 +276,15 @@ async def test_release_creates_one_transfer_and_pays_the_job_out(
     clock: Clock,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    job = await confirmed_job(db_session, world)
+    intent = f"pi_probe68{uuid.uuid4().hex[:10]}"
+    job = await confirmed_job(db_session, world, stripe_payment_intent_id=intent)
     caplog.set_level(logging.DEBUG)
 
     outcome = await service(db_session, stripe, clock).release(job.id)
 
     assert outcome is ReleaseOutcome.CREATED
+    # The source charge is the one of the job's own payment.
+    assert stripe.charges == [intent]
     [create] = stripe.creates
     assert create == {
         "amount_cents": PAYOUT,
@@ -379,6 +385,50 @@ async def test_a_held_job_is_not_released(
     assert (await job_row(db_session, job.id)).status is JobStatus.CONFIRMED
 
 
+@pytest.mark.parametrize("earlier", ["failed", "held_back"])
+async def test_a_held_job_with_an_earlier_attempt_is_not_released(
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe: FakeStripeTransfers,
+    clock: Clock,
+    monkeypatch: pytest.MonkeyPatch,
+    earlier: str,
+) -> None:
+    """A hold that starts after a failed or held-back attempt stops the retry too, whoever
+    makes it (the sweep included): the row stays as it was and Stripe is not asked."""
+    job = await confirmed_job(db_session, world)
+    pro = update(ProProfile).where(ProProfile.id == world.pro.profile_id)
+    if earlier == "failed":
+        stripe.errors["create"] = [StripeUnavailableError()]
+        assert await service(db_session, stripe, clock).release(job.id) is ReleaseOutcome.FAILED
+    else:
+        await db_session.execute(pro.values(payouts_enabled=False))
+        await db_session.commit()
+        outcome = await service(db_session, stripe, clock).release(job.id)
+        assert outcome is ReleaseOutcome.PAYOUTS_NOT_ENABLED
+        await db_session.execute(pro.values(payouts_enabled=True))
+        await db_session.commit()
+    before = await transfer_of(db_session, job.id)
+    assert before is not None
+    kept = (before.status, before.last_error_code, before.attempts, before.requested_at)
+    calls = (len(stripe.creates), len(stripe.lists), len(stripe.charges))
+
+    async def hold(session: AsyncSession, facts: JobPayoutFacts) -> bool:
+        return True
+
+    monkeypatch.setattr(transfers, "has_open_hold", hold)
+    clock.now += CONFIG.stuck_after
+
+    assert await service(db_session, stripe, clock).release(job.id) is ReleaseOutcome.HELD
+    await release_confirmed_jobs(worker_ctx(db_session, stripe, transfer_release_batch_size=10_000))
+
+    assert (len(stripe.creates), len(stripe.lists), len(stripe.charges)) == calls
+    after = await transfer_of(db_session, job.id)
+    assert after is not None
+    assert (after.status, after.last_error_code, after.attempts, after.requested_at) == kept
+    assert (await job_row(db_session, job.id)).status is JobStatus.CONFIRMED
+
+
 async def test_has_open_hold_holds_nothing_until_disputes_exist() -> None:
     # TODO(#75): the dispute module replaces this; until then nothing holds a confirmed job.
     facts = JobPayoutFacts(
@@ -432,6 +482,7 @@ async def test_a_payout_that_does_not_match_the_payment_is_never_sent(
     job = await confirmed_job(
         db_session, world, pro_payout_cents=PAYOUT - 100, platform_fee_cents=FEE + 100
     )
+    caplog.set_level(logging.DEBUG)
 
     outcome = await service(db_session, stripe, clock).release(job.id)
 
@@ -441,6 +492,9 @@ async def test_a_payout_that_does_not_match_the_payment_is_never_sent(
     assert [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR] == [
         "transfer_amount_mismatch"
     ]
+    # Ids only: neither amount.
+    assert_no_leak(caplog)
+    assert str(PAYOUT - 100) not in caplog.text + str([r.__dict__ for r in caplog.records])
 
 
 async def test_a_job_without_a_succeeded_payment_is_never_sent(
@@ -650,9 +704,11 @@ async def test_a_lookup_that_cannot_be_matched_creates_nothing(
     world: JobWorld,
     stripe: FakeStripeTransfers,
     clock: Clock,
+    caplog: pytest.LogCaptureFixture,
     case: str,
 ) -> None:
     job = await confirmed_job(db_session, world)
+    caplog.set_level(logging.DEBUG)
     stripe.errors["create"] = [StripeUnavailableError()]
     await service(db_session, stripe, clock).release(job.id)
     group = transfer_group(job.request_id)
@@ -685,6 +741,9 @@ async def test_a_lookup_that_cannot_be_matched_creates_nothing(
     assert row is not None
     assert (row.status, row.last_error_code) == (TransferStatus.FAILED, TRANSFER_NEEDS_REVIEW)
     assert (await job_row(db_session, job.id)).status is JobStatus.CONFIRMED
+    assert "transfer_needs_review" in [r.getMessage() for r in caplog.records]
+    # The reason is a fixed word: no transfer id, account or amount of what Stripe holds.
+    assert_no_leak(caplog)
 
 
 async def test_a_duplicate_staff_reversed_leaves_the_live_transfer_to_adopt(
@@ -767,6 +826,47 @@ async def test_a_made_transfer_holds_its_stripe_id(
     assert violated_constraint(raised.value) == "ck_transfers_made_has_stripe_transfer_id"
 
 
+async def test_a_status_outside_the_four_and_a_shared_stripe_id_are_refused(
+    db_session: AsyncSession, world: JobWorld
+) -> None:
+    rows: list[Transfer] = []
+    for _ in range(2):
+        job = await confirmed_job(db_session, world)
+        payment = (
+            await db_session.scalars(select(Payment).where(Payment.quote_id == job.quote_id))
+        ).one()
+        rows.append(
+            Transfer(
+                job_id=job.id,
+                payment_id=payment.id,
+                pro_id=world.pro.profile_id,
+                amount_cents=PAYOUT,
+                currency="usd",
+                idempotency_key=f"transfer:{job.id}",
+            )
+        )
+    db_session.add_all(rows)
+    await db_session.flush()
+    ids = [row.id for row in rows]
+
+    with pytest.raises(IntegrityError) as raised:
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text("UPDATE transfers SET status = 'paid' WHERE id = :id"), {"id": ids[0]}
+            )
+    assert violated_constraint(raised.value) == "ck_transfers_transfer_status"
+
+    made = text(
+        "UPDATE transfers SET status = 'created', stripe_transfer_id = 'tr_probe68same' "
+        "WHERE id = :id"
+    )
+    await db_session.execute(made, {"id": ids[0]})
+    with pytest.raises(IntegrityError) as raised:
+        async with db_session.begin_nested():
+            await db_session.execute(made, {"id": ids[1]})
+    assert violated_constraint(raised.value) == "uq_transfers_stripe_transfer_id"
+
+
 # The sweep and the task.
 
 
@@ -811,6 +911,41 @@ async def test_due_reads_only_payable_confirmed_jobs_and_respects_the_wait(
     assert {fresh.id, failed.id} <= set(later)
     # Never tried first, the failed one after.
     assert later.index(fresh.id) < later.index(failed.id)
+
+
+async def test_due_takes_a_dead_workers_attempt_once_the_window_has_passed(
+    db_session: AsyncSession, world: JobWorld, stripe: FakeStripeTransfers, clock: Clock
+) -> None:
+    """A worker that died inside its create leaves the row pending, stamped, with no outcome.
+    The sweep is the only caller that comes back to it (a queued run is tried once): it reads
+    the job once TRANSFER_STUCK_PENDING_MINUTES have passed, never before."""
+    job = await confirmed_job(db_session, world)
+
+    async def die() -> None:
+        raise asyncio.CancelledError
+
+    stripe.on_create = die
+    with pytest.raises(asyncio.CancelledError):
+        await service(db_session, stripe, clock).release(job.id)
+    await db_session.rollback()
+    stripe.on_create = None
+    row = await transfer_of(db_session, job.id)
+    assert row is not None
+    assert (row.status, row.last_error_code, row.requested_at) == (
+        TransferStatus.PENDING,
+        None,
+        NOW,
+    )
+
+    clock.now = NOW + CONFIG.stuck_after - timedelta(seconds=1)
+    assert job.id not in await service(db_session, stripe, clock).due(10_000)
+    clock.now = NOW + CONFIG.stuck_after
+    assert job.id in await service(db_session, stripe, clock).due(10_000)
+
+
+def test_the_stuck_window_comes_from_the_settings() -> None:
+    config = TransferConfig.from_settings(make_settings(transfer_stuck_pending_minutes=30))
+    assert config.stuck_after == timedelta(minutes=30)
 
 
 async def test_the_sweep_takes_a_held_back_job_once_its_pro_can_be_paid(
@@ -952,6 +1087,25 @@ async def test_the_task_releases_its_job(
     assert (await job_row(db_session, job.id)).status is JobStatus.PAID_OUT
 
 
+@pytest.mark.parametrize(
+    "queue",
+    [RecordingQueue(failure=RedisError("probe-secret-text-68")), RecordingQueue(hang=True)],
+    ids=["redis_error", "timeout"],
+)
+async def test_a_queue_that_fails_or_hangs_never_fails_the_enqueue(
+    queue: RecordingQueue, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The confirm and the auto-confirm run call it after their commit: a Redis error or a
+    timeout (the builtin TimeoutError) is logged with the job id, and the sweep takes over."""
+    job_id = uuid.uuid4()
+
+    await enqueue_transfer_release(queue, job_id, 0.05)
+
+    [record] = [r for r in caplog.records if r.getMessage() == "transfer_release_enqueue_failed"]
+    assert record.__dict__["job_id"] == str(job_id)
+    assert_no_leak(caplog)
+
+
 # transfer.reversed
 
 
@@ -990,6 +1144,29 @@ async def test_transfer_reversed_marks_the_row_once(
     ]
     assert (await job_row(db_session, job.id)).status is JobStatus.PAID_OUT
     assert_no_leak(caplog)
+
+
+async def test_transfer_reversed_of_an_unknown_transfer_changes_nothing(
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe: FakeStripeTransfers,
+    clock: Clock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A reversal of a transfer no row holds leaves every created row as it is."""
+    job = await confirmed_job(db_session, world)
+    await service(db_session, stripe, clock).release(job.id)
+    made = stripe.by_key[f"transfer:{job.id}"]
+
+    await transfer_reversed(db_session, reversed_event("tr_probe68unknown"), AfterCommit())
+
+    row = await transfer_of(db_session, job.id)
+    assert row is not None
+    assert (row.status, row.stripe_transfer_id) == (TransferStatus.CREATED, made)
+    messages = [r.getMessage() for r in caplog.records]
+    assert [m for m in messages if m.startswith("transfer_reversed")] == [
+        "transfer_reversed_unknown"
+    ]
 
 
 @pytest.mark.parametrize(("transfer_id", "kind"), [(None, "transfer"), ("tr_x", "charge")])
@@ -1039,6 +1216,36 @@ async def test_the_pro_sees_the_payout_of_their_confirmed_job(
     # Another pro never sees it.
     other = await db_client.get(pro_job_path(job), headers=world.other_pro.headers)
     assert other.status_code == 404
+
+
+async def test_the_pro_reads_a_held_back_row_as_pending_and_a_reversal_as_no_payout(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe: FakeStripeTransfers,
+    clock: Clock,
+) -> None:
+    job = await confirmed_job(db_session, world)
+    pro = update(ProProfile).where(ProProfile.id == world.pro.profile_id)
+    await db_session.execute(pro.values(payouts_enabled=False))
+    await db_session.commit()
+    outcome = await service(db_session, stripe, clock).release(job.id)
+    assert outcome is ReleaseOutcome.PAYOUTS_NOT_ENABLED
+
+    held = (await db_client.get(pro_job_path(job), headers=world.pro.headers)).json()
+    assert held["payout"] == {"status": "pending", "amount_cents": PAYOUT}
+    assert PAYOUTS_NOT_ENABLED not in str(held)
+
+    await db_session.execute(pro.values(payouts_enabled=True))
+    await db_session.commit()
+    assert await service(db_session, stripe, clock).release(job.id) is ReleaseOutcome.CREATED
+    made = stripe.by_key[f"transfer:{job.id}"]
+    await transfer_reversed(db_session, reversed_event(made), AfterCommit())
+    await db_session.commit()
+
+    taken_back = (await db_client.get(pro_job_path(job), headers=world.pro.headers)).json()
+    assert taken_back["status"] == JobStatus.PAID_OUT.value
+    assert taken_back["payout"] is None
 
 
 async def test_the_customer_view_gains_nothing(
