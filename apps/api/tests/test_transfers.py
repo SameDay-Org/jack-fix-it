@@ -83,7 +83,8 @@ class FakeStripeTransfers:
     """Records every call and answers as Stripe does: a create with a known idempotency key
     returns the transfer it made first. `errors` makes the next call of an operation raise (the
     list is consumed in order); `lost_answers` makes that many creates make the transfer and
-    then fail as a timeout would; `on_create` runs inside a create, before it answers.
+    then fail as a timeout would; `on_create`, `on_charge` and `on_list` run inside that
+    call, before it answers.
     `list_complete` False: the listing has another page."""
 
     transfers: dict[str, TransferFacts] = field(default_factory=dict)  # by transfer id
@@ -94,6 +95,8 @@ class FakeStripeTransfers:
     errors: dict[str, list[Exception]] = field(default_factory=dict)
     lost_answers: int = 0
     on_create: Callable[[], Awaitable[None]] | None = None
+    on_charge: Callable[[], Awaitable[None]] | None = None
+    on_list: Callable[[], Awaitable[None]] | None = None
     list_complete: bool = True
 
     def _fail(self, operation: str) -> None:
@@ -111,6 +114,8 @@ class FakeStripeTransfers:
     async def charge_of_payment_intent(self, payment_intent_id: str) -> str | None:
         self._fail("charge")
         self.charges.append(payment_intent_id)
+        if self.on_charge is not None:
+            await self.on_charge()
         return CHARGE
 
     async def create_transfer(
@@ -162,6 +167,8 @@ class FakeStripeTransfers:
     async def list_transfers(self, transfer_group: str) -> FoundTransfers:
         self._fail("list")
         self.lists.append(transfer_group)
+        if self.on_list is not None:
+            await self.on_list()
         found = tuple(
             facts
             for transfer_id, facts in self.transfers.items()
@@ -998,6 +1005,32 @@ async def test_the_sweep_pays_out_a_job_whose_row_staff_repaired(
     assert job.id not in await service(db_session, stripe, clock).due(10_000)
 
 
+@pytest.mark.parametrize("refused", ["payout_mismatch", "no_succeeded_payment"])
+async def test_due_skips_a_job_release_would_refuse_before_writing_a_row(
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe: FakeStripeTransfers,
+    clock: Clock,
+    refused: str,
+) -> None:
+    """Such a job has no row, so it would come first in every run (an ERROR each time) and,
+    with a batch of them, hold every payable job up."""
+    if refused == "payout_mismatch":
+        bad = await confirmed_job(
+            db_session, world, pro_payout_cents=PAYOUT - 100, platform_fee_cents=FEE + 100
+        )
+    else:
+        bad = await confirmed_job(db_session, world, status=PaymentStatus.PROCESSING)
+    good = await confirmed_job(db_session, world)
+    assert await service(db_session, stripe, clock).release(bad.id) is (ReleaseOutcome.NEEDS_REVIEW)
+    assert await transfer_of(db_session, bad.id) is None
+
+    due = await service(db_session, stripe, clock).due(10_000)
+
+    assert good.id in due
+    assert bad.id not in due
+
+
 async def test_due_reads_at_most_its_limit(
     db_session: AsyncSession, world: JobWorld, stripe: FakeStripeTransfers, clock: Clock
 ) -> None:
@@ -1343,6 +1376,7 @@ class CommittedWorld:
     sessions: async_sessionmaker[AsyncSession]
     job_id: uuid.UUID
     request_id: uuid.UUID
+    pro_id: uuid.UUID
 
 
 @pytest.fixture
@@ -1417,7 +1451,9 @@ async def committed_world(test_database_url: URL) -> AsyncIterator[CommittedWorl
         session.add(payment)
         await session.commit()
     try:
-        yield CommittedWorld(sessions=sessions, job_id=job.id, request_id=request.id)
+        yield CommittedWorld(
+            sessions=sessions, job_id=job.id, request_id=request.id, pro_id=profile.id
+        )
     finally:
         async with sessions() as session:
             await session.execute(delete(Transfer).where(Transfer.job_id == job.id))
@@ -1452,12 +1488,86 @@ async def test_the_row_is_committed_and_no_lock_held_during_the_stripe_call(
             seen.append((row.status, row.attempts, row.requested_at))
             await other.rollback()
 
+    stripe.on_charge = look
     stripe.on_create = look
     async with world.sessions() as session:
         outcome = await service(session, stripe, clock).release(world.job_id)
 
     assert outcome is ReleaseOutcome.CREATED
-    assert seen == [(TransferStatus.PENDING, 1, NOW)]
+    # In the charge lookup, then in the create.
+    assert seen == [(TransferStatus.PENDING, 1, NOW)] * 2
+
+
+async def test_a_retry_looks_stripe_up_with_its_attempt_committed_and_no_lock_held(
+    committed_world: CommittedWorld, stripe: FakeStripeTransfers, clock: Clock
+) -> None:
+    world = committed_world
+    stripe.errors["create"] = [StripeUnavailableError()]
+    async with world.sessions() as session:
+        first = await service(session, stripe, clock).release(world.job_id)
+    assert first is ReleaseOutcome.FAILED
+    seen: list[tuple[TransferStatus, int, datetime | None]] = []
+
+    async def look() -> None:
+        async with world.sessions() as other:
+            await other.execute(text("SET LOCAL lock_timeout = '1ms'"))
+            await other.execute(
+                select(Job.id).where(Job.id == world.job_id).with_for_update(nowait=True)
+            )
+            row = (
+                await other.scalars(select(Transfer).where(Transfer.job_id == world.job_id))
+            ).one()
+            seen.append((row.status, row.attempts, row.requested_at))
+            await other.rollback()
+
+    stripe.on_list = look
+    clock.now += timedelta(minutes=1)
+    async with world.sessions() as session:
+        again = await service(session, stripe, clock).release(world.job_id)
+
+    assert again is ReleaseOutcome.CREATED
+    assert seen == [(TransferStatus.PENDING, 2, clock.now)]
+
+
+@pytest.mark.parametrize("case", ["payouts_not_enabled", "stripe_error", "needs_review"])
+async def test_an_outcome_without_a_transfer_is_committed(
+    committed_world: CommittedWorld, stripe: FakeStripeTransfers, clock: Clock, case: str
+) -> None:
+    """What a release stores when no transfer is made outlives its session (a worker's
+    session ends without a commit): read back on another connection."""
+    world = committed_world
+
+    async def release() -> ReleaseOutcome:
+        async with world.sessions() as session:
+            return await service(session, stripe, clock).release(world.job_id)
+
+    if case == "payouts_not_enabled":
+        async with world.sessions() as session:
+            await session.execute(
+                update(ProProfile)
+                .where(ProProfile.id == world.pro_id)
+                .values(payouts_enabled=False)
+            )
+            await session.commit()
+        assert await release() is ReleaseOutcome.PAYOUTS_NOT_ENABLED
+        expected = (TransferStatus.PENDING, PAYOUTS_NOT_ENABLED, 0)
+    elif case == "stripe_error":
+        stripe.errors["create"] = [StripeRejectedError(code="insufficient_funds")]
+        assert await release() is ReleaseOutcome.FAILED
+        expected = (TransferStatus.FAILED, "insufficient_funds", 1)
+    else:
+        stripe.errors["create"] = [StripeUnavailableError()]
+        assert await release() is ReleaseOutcome.FAILED
+        stripe.list_complete = False
+        clock.now += timedelta(minutes=1)
+        assert await release() is ReleaseOutcome.NEEDS_REVIEW
+        expected = (TransferStatus.FAILED, TRANSFER_NEEDS_REVIEW, 2)
+
+    async with world.sessions() as other:
+        row = (await other.scalars(select(Transfer).where(Transfer.job_id == world.job_id))).one()
+        status = await other.scalar(select(Job.status).where(Job.id == world.job_id))
+    assert (row.status, row.last_error_code, row.attempts) == expected
+    assert status is JobStatus.CONFIRMED
 
 
 async def test_two_workers_on_one_job_make_one_transfer(
