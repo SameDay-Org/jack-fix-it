@@ -197,16 +197,6 @@ function Status({ payouts, setup, checking, onCheck }: StatusProps) {
   return (
     <>
       <Message title={t(`proPayouts.${status}.title`)} body={t(`proPayouts.${status}.body`)} />
-      {status === "not_started" ? <Asks /> : null}
-      {setup.expired ? (
-        <Notice
-          tone="info"
-          title={t("proPayouts.expired.title")}
-          body={t("proPayouts.expired.body")}
-          testID="payouts-expired"
-        />
-      ) : null}
-      {setup.failure !== null ? <Failure failure={setup.failure} /> : null}
       <Button
         label={t(
           status === "not_started" ? "proPayouts.action.start" : "proPayouts.action.continue",
@@ -216,6 +206,18 @@ function Status({ payouts, setup, checking, onCheck }: StatusProps) {
         onPress={setup.start}
         testID="payouts-setup"
       />
+      {/* Under the button, which never moves: what a press came to shows right below it, and on
+          a short screen the action stays in sight while the details scroll. */}
+      {setup.expired ? (
+        <Notice
+          tone="info"
+          title={t("proPayouts.expired.title")}
+          body={t("proPayouts.expired.body")}
+          testID="payouts-expired"
+        />
+      ) : null}
+      {setup.failure !== null ? <Failure failure={setup.failure} /> : null}
+      {status === "not_started" ? <Asks /> : null}
     </>
   );
 }
@@ -248,7 +250,7 @@ function Enabled() {
   );
 }
 
-/** What Stripe's page will ask for, and who sees it: said before the browser opens. */
+/** What Stripe's page will ask for, and who sees it: on the screen before the browser opens. */
 function Asks() {
   const { t } = useTranslation();
   return (
