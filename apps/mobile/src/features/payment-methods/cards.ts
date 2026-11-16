@@ -57,7 +57,9 @@ export const shortSpokenCard = (t: TFunction, card: SavedCard): string =>
 
 /**
  * A card's age in the wallet, 0 for the oldest. The API lists the newest first, so a card keeps its
- * age when the default moves or a card is added: its color (`cardTone`) stays with it.
+ * age when the default moves or a card is added, and with it its color (`cardTone`). One exception:
+ * the card right behind the front one takes the next color when its own would match the front
+ * card's (`stackTone`), so that card's color can change when the default moves or a card is added.
  */
 export function ageOf(wallet: Wallet, card: Pick<SavedCard, "id">): number {
   const index = wallet.findIndex((saved) => saved.id === card.id);

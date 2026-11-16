@@ -484,6 +484,7 @@
       "title": "Delete {{card}}?",
       "body": "It leaves your wallet for good.",
       "bodyNextDefault": "It leaves your wallet for good. Another card becomes your default.",
+      "bodyMaybeNextDefault": "It leaves your wallet for good. If it's your default, another card becomes your default.",
       "cancel": "Cancel",
       "confirm": "Delete"
     },

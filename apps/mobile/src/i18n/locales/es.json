@@ -484,6 +484,7 @@
       "title": "¿Eliminar {{card}}?",
       "body": "Saldrá de tu billetera definitivamente.",
       "bodyNextDefault": "Saldrá de tu billetera definitivamente. Otra tarjeta pasará a ser la predeterminada.",
+      "bodyMaybeNextDefault": "Saldrá de tu billetera definitivamente. Si es tu tarjeta predeterminada, otra pasará a serlo.",
       "cancel": "Cancelar",
       "confirm": "Eliminar"
     },

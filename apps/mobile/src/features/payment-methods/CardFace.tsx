@@ -26,8 +26,8 @@ const TONES: readonly CardTone[] = [
 ];
 
 /**
- * The tone of a card of this `age` (`ageOf`, 0 for the oldest): the same in the pocket and opened,
- * and the same whichever card is the default.
+ * The tone of a card of this `age` (`ageOf`, 0 for the oldest): the same whichever card is the
+ * default. The pocket and an opened card draw `stackTone`, which shifts one card's tone.
  */
 export const cardTone = (age: number): CardTone => TONES[Math.max(age, 0) % TONES.length];
 

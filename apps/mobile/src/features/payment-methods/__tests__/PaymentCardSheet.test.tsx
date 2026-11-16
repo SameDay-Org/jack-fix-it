@@ -466,8 +466,11 @@ describe("one change of the wallet at a time", () => {
     await act(async () => answer.resolve(serverSetsDefault("pm_master")));
     await act(() => settle());
 
-    expect(screen.getByRole("button", { name: "Delete card" })).toBeEnabled();
+    // The wallet's Add is back; the sheet acted, so its actions stay off while it closes.
     expect(screen.getByTestId("payment-methods-add")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Delete card" })).toBeDisabled();
+    await fireEvent.press(screen.getByRole("button", { name: "Delete card" }));
+    expect(alert).not.toHaveBeenCalled();
   });
 
   it("a delete confirmed while another change started is not sent, and the sheet stays", async () => {
