@@ -26,7 +26,8 @@
     "nav": {
       "label": "Panel",
       "home": "Inicio",
-      "support": "Soporte"
+      "support": "Soporte",
+      "queue": "Cola"
     },
     "roles": {
       "agent": "Agente",
@@ -35,7 +36,7 @@
     "logout": "Cerrar sesión",
     "home": {
       "welcome": "Te damos la bienvenida, {{email}}",
-      "queueSoon": "La cola de operaciones llega pronto. Las nuevas solicitudes aparecerán aquí."
+      "openQueue": "Abrir la cola de operaciones"
     },
     "support": {
       "title": "Soporte",
@@ -104,6 +105,196 @@
           "not_found": "Este ticket ya no existe.",
           "forbidden": "Tu cuenta no puede cambiar tickets.",
           "unavailable": "No pudimos guardar el estado. Vuelve a intentarlo en un momento."
+        }
+      }
+    },
+    "queue": {
+      "title": "Cola de operaciones",
+      "subtitle": "Solicitudes según lo que necesitan ahora. La lista se actualiza sola.",
+      "tabsLabel": "Solicitudes por grupo",
+      "tabs": {
+        "new": "Nuevas",
+        "urgent": "Urgentes",
+        "waiting_customer": "Esperando al cliente",
+        "waiting_pro": "Esperando al profesional",
+        "quote_ready": "Presupuesto listo",
+        "scheduled_today": "Programadas hoy",
+        "problems": "Problemas",
+        "mine": "Mías",
+        "all": "Todas"
+      },
+      "filters": {
+        "label": "Filtrar las solicitudes",
+        "search": "Código de solicitud",
+        "searchPlaceholder": "JF-000124",
+        "status": "Estado",
+        "category": "Categoría",
+        "zip": "ZIP",
+        "assigned": "A cargo de",
+        "any": "Cualquiera",
+        "assignedTo": {
+          "any": "Cualquiera",
+          "me": "Yo",
+          "unassigned": "Nadie"
+        },
+        "apply": "Aplicar",
+        "clear": "Limpiar"
+      },
+      "columns": {
+        "request": "Solicitud",
+        "category": "Categoría y ZIP",
+        "status": "Estado",
+        "firstContact": "Primer contacto",
+        "agent": "A cargo de",
+        "age": "Antigüedad"
+      },
+      "status": {
+        "received": "Recibida",
+        "reviewing": "En revisión",
+        "finding_pro": "Buscando profesional",
+        "quote_ready": "Presupuesto listo",
+        "accepted": "Aceptada",
+        "expired": "Vencida",
+        "cancelled": "Cancelada"
+      },
+      "timer": {
+        "left": "Quedan {{time}}",
+        "late": "{{time}} de retraso",
+        "contacted": "Contactado",
+        "none": "No aplica"
+      },
+      "age": {
+        "minutes": "{{count}} min",
+        "hours": "{{count}} h",
+        "days": "{{count}} d"
+      },
+      "urgent": "Urgente",
+      "unclassified": "Sin clasificar",
+      "noName": "Sin nombre registrado",
+      "unassigned": "Nadie",
+      "agentNoName": "Alguien del equipo",
+      "empty": {
+        "new": "No hay solicitudes nuevas.",
+        "urgent": "Nada urgente.",
+        "waiting_customer": "Nada espera a un cliente.",
+        "waiting_pro": "Nada espera a un profesional.",
+        "quote_ready": "Ningún presupuesto espera respuesta.",
+        "scheduled_today": "No hay trabajos programados hoy.",
+        "problems": "No hay problemas abiertos.",
+        "mine": "No tienes solicitudes a tu cargo.",
+        "all": "Aún no hay solicitudes."
+      },
+      "noMatch": "Ninguna solicitud coincide con estos filtros.",
+      "noMore": "No hay más solicitudes.",
+      "more": "Más solicitudes",
+      "first": "Volver al inicio",
+      "loadError": "No pudimos cargar la cola. Vuelve a intentarlo en un momento.",
+      "retry": "Reintentar"
+    },
+    "requests": {
+      "back": "Cola de operaciones",
+      "notFound": "Esta solicitud no existe.",
+      "loadError": "No pudimos cargar esta solicitud. Vuelve a intentarlo en un momento.",
+      "category": "Categoría",
+      "created": "Creada",
+      "firstContact": "Primer contacto",
+      "lastContact": "Último contacto",
+      "customerSees": "El cliente ve",
+      "nextAction": "Próxima acción",
+      "origin": {
+        "app": "Desde la app",
+        "web": "Desde el sitio web",
+        "phone": "Por teléfono"
+      },
+      "customerStatus": {
+        "requestReceived": "Solicitud recibida",
+        "reviewing": "En revisión",
+        "findingAPro": "Buscando un profesional",
+        "quoteReady": "Presupuesto listo",
+        "scheduled": "Programada",
+        "professionalOnTheWay": "Profesional en camino",
+        "inProgress": "En curso",
+        "waitingForConfirmation": "Esperando confirmación",
+        "completed": "Completada",
+        "needsAttention": "Requiere atención",
+        "cancelled": "Cancelada"
+      },
+      "customer": {
+        "title": "Cliente",
+        "name": "Nombre",
+        "phone": "Teléfono",
+        "noPhone": "Sin teléfono registrado",
+        "email": "Correo",
+        "language": "Idioma",
+        "address": "Dirección",
+        "prefers": "Prefiere",
+        "call": "Llamar",
+        "text": "Enviar SMS",
+        "sendEmail": "Enviar correo"
+      },
+      "assignment": {
+        "title": "Quién la tiene",
+        "nobody": "Nadie tiene esta solicitud.",
+        "you": "Tú tienes esta solicitud.",
+        "heldBy": "{{name}} tiene esta solicitud.",
+        "claim": "Tomar esta solicitud",
+        "release": "Liberar",
+        "saving": "Guardando…",
+        "saved": "Guardado.",
+        "errors": {
+          "held": "Otra persona del equipo tiene esta solicitud ahora.",
+          "not_found": "Esta solicitud ya no existe.",
+          "forbidden": "Tu cuenta no puede cambiar quién tiene una solicitud.",
+          "unavailable": "No pudimos guardar el cambio. Vuelve a intentarlo en un momento."
+        }
+      },
+      "request": {
+        "title": "Solicitud",
+        "preferred": "Día preferido",
+        "period": {
+          "morning": "Mañana",
+          "afternoon": "Tarde",
+          "evening": "Noche",
+          "flexible": "Cualquier hora"
+        },
+        "media": "Fotos y videos",
+        "noMedia": "Sin archivos adjuntos.",
+        "open": {
+          "photo": "Abrir la foto {{number}}",
+          "video": "Abrir el video {{number}}"
+        },
+        "mediaPending": "Aún en preparación: {{count}}",
+        "linksExpire": "Los archivos se abren en una pestaña nueva. Los enlaces funcionan unos minutos: recarga la página si alguno venció."
+      },
+      "quotes": {
+        "title": "Presupuestos",
+        "none": "Aún no hay presupuestos.",
+        "starts": "Inicia",
+        "status": {
+          "pending": "Pendiente",
+          "accepted": "Aceptado",
+          "rejected": "No elegido",
+          "expired": "Vencido",
+          "withdrawn": "Retirado"
+        }
+      },
+      "job": {
+        "title": "Trabajo",
+        "none": "Aún no hay trabajo: la solicitud no está pagada.",
+        "status": "Estado",
+        "scheduled": "Inicio programado",
+        "history": "Historial",
+        "bySystem": "(automático)",
+        "statuses": {
+          "scheduled": "Programado",
+          "on_the_way": "En camino",
+          "in_progress": "En progreso",
+          "completed": "Completado",
+          "confirmed": "Confirmado",
+          "paid_out": "Pagado al profesional",
+          "disputed": "En disputa",
+          "refunded": "Reembolsado",
+          "cancelled": "Cancelado"
         }
       }
     }

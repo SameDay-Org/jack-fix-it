@@ -120,12 +120,12 @@ type PostPath = {
   [P in keyof paths]: paths[P] extends { post: object } ? P : never;
 }[keyof paths];
 
-/** The JSON request body of a POST path, from the OpenAPI schema. */
+/** The JSON request body of a POST path, from the OpenAPI schema; undefined when it takes none. */
 type PostBody<P extends PostPath> = paths[P] extends {
   post: { requestBody: { content: { "application/json": infer Body } } };
 }
   ? Body
-  : never;
+  : undefined;
 
 /** The JSON body of a POST path's 200 or 201 response; undefined for a 204. */
 type PostResponse<P extends PostPath> = paths[P] extends {
@@ -138,7 +138,10 @@ type PostResponse<P extends PostPath> = paths[P] extends {
     ? Body
     : undefined;
 
-/** Server-side POST of a JSON body against the API. Throws ApiError on non-2xx. */
+/**
+ * Server-side POST against the API, with a JSON body when the path takes one (`undefined`
+ * for a path without a body: nothing is sent). Throws ApiError on non-2xx.
+ */
 export async function apiPost<P extends PostPath>(
   path: P,
   body: PostBody<P>,
@@ -146,12 +149,12 @@ export async function apiPost<P extends PostPath>(
 ): Promise<PostResponse<P>> {
   const headers = new Headers(init?.headers);
   headers.set("Accept", "application/json");
-  headers.set("Content-Type", "application/json");
+  if (body !== undefined) headers.set("Content-Type", "application/json");
   const response = await fetch(apiUrl(path, init), {
     ...fetchInit(init),
     method: "POST",
     headers,
-    body: JSON.stringify(body),
+    body: body === undefined ? undefined : JSON.stringify(body),
     cache: "no-store",
     signal: AbortSignal.timeout(apiTimeoutMs()), // body read included, as in apiGet
   });
