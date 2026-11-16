@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { MEDIA } from "../media";
 
 import { createPhone, PHONE, roundedPlane } from "./phone-model";
-import { cameraDistance, median, PROBE } from "./phone-scene";
+import { cameraDistance } from "./phone-scene";
 
 /** The meshes of the phone whose material is a plain (unlit) one: screen layers, island. */
 function unlit(group: ReturnType<typeof createPhone>["group"]): Mesh[] {
@@ -89,12 +89,6 @@ describe("the 3D phone", () => {
 });
 
 describe("the 3D scene's arithmetic", () => {
-  it("takes the median frame gap, so one slow frame (shader compile) does not decide", () => {
-    expect(median([16, 17, 300, 16, 18])).toBe(17);
-    expect(median([10, 20, 30, 40])).toBe(25);
-    expect(PROBE.maxMedianMs).toBeLessThan(50);
-  });
-
   it("moves the camera in as the phone fills more of the view, and back on a narrow canvas", () => {
     expect(cameraDistance(0.95, 0.8)).toBeLessThan(cameraDistance(0.74, 0.8));
     expect(cameraDistance(0.95, 0.3)).toBeGreaterThan(cameraDistance(0.95, 0.8));

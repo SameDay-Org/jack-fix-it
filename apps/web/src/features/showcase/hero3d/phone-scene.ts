@@ -15,6 +15,7 @@ import {
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 
 import { FRONT_POSE, mixPose, poseAt, screenAt, smoothstep, type PhonePose } from "./choreography";
+import { browserProbeHost, probeFrames } from "./frame-probe";
 import { createPhone, PHONE } from "./phone-model";
 
 /**
@@ -26,6 +27,11 @@ import { createPhone, PHONE } from "./phone-model";
  * during the reveal. Nothing is drawn while the canvas is off-screen (IntersectionObserver)
  * or the tab is hidden. The canvas takes no pointer or touch input: a finger on it scrolls
  * the page.
+ *
+ * Before it is handed over, everything the scroll will need is on the GPU (shaders and every
+ * screen capture, one upload per frame), so no screen change stalls a frame later. If the
+ * GPU drops the context before that, creating or probing the scene fails; after it, `onLost`
+ * tells the hero to go back to the CSS phone.
  */
 
 export type PhoneSceneOptions = {
@@ -33,21 +39,18 @@ export type PhoneSceneOptions = {
   /** Site paths of the screen captures, in HERO_SCREEN_IDS order. */
   screens: readonly string[];
   maxPixelRatio: number;
-  /** Called once if the GPU drops the context: the hero goes back to the CSS phone. */
+  /** Called once if the GPU drops the context after the reveal. */
   onLost: () => void;
 };
 
 export type PhoneScene = {
   setProgress(p: number): void;
-  /** Draws frames for a moment and says whether they come fast enough for smooth motion. */
+  /** Draws frames for a moment and says whether they come fast enough (frame-probe.ts). */
   probe(): Promise<boolean>;
   /** Turns the phone from facing the reader (as the CSS phone does) to the scroll's pose. */
   reveal(): void;
   dispose(): void;
 };
-
-/** Frame-time probe: the median gap between frames must stay under `maxMedianMs`. */
-export const PROBE = { frames: 24, maxMedianMs: 45, timeoutMs: 4000 } as const;
 
 const FOV = 28;
 /** Per second: how fast the drawn pose catches up with the scroll's. */
@@ -56,12 +59,6 @@ const REVEAL_MS = 900;
 /** The widest the turned phone gets, as a share of its width, and the room kept at the sides. */
 const TURNED_WIDTH = 1.15;
 const SIDE_ROOM = 0.92;
-
-export function median(values: readonly number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
-}
 
 /**
  * How far the camera stands for the phone to take `fill` of the canvas's height, moved back
@@ -96,6 +93,8 @@ function glareTexture(): CanvasTexture {
   return texture;
 }
 
+const nextFrame = () => new Promise<number>((resolve) => requestAnimationFrame(resolve));
+
 export async function createPhoneScene(options: PhoneSceneOptions): Promise<PhoneScene> {
   const { container, screens, maxPixelRatio, onLost } = options;
 
@@ -106,10 +105,30 @@ export async function createPhoneScene(options: PhoneSceneOptions): Promise<Phon
     failIfMajorPerformanceCaveat: true,
   });
   const canvas = renderer.domElement;
-  const loader = new TextureLoader();
-  let textures: Texture[] = [];
+  let contextLost = false;
+  let handedOver = false;
+  let disposed = false;
+  const lost = (event: Event) => {
+    event.preventDefault();
+    contextLost = true;
+    if (handedOver && !disposed) onLost();
+  };
+  canvas.addEventListener("webglcontextlost", lost);
+  const alive = () => !disposed && !contextLost && !renderer.getContext().isContextLost();
+
+  // Filled in as they are made, so that a failure half-way releases what exists.
+  const textures: Texture[] = [];
+  let release = () => {
+    textures.forEach((texture) => texture.dispose());
+    canvas.removeEventListener("webglcontextlost", lost);
+    renderer.dispose();
+    renderer.forceContextLoss();
+    canvas.remove();
+  };
+
   try {
-    textures = await Promise.all(
+    const loader = new TextureLoader();
+    const loaded = await Promise.all(
       screens.map(async (src) => {
         const texture = await loader.loadAsync(src);
         texture.colorSpace = SRGBColorSpace;
@@ -118,9 +137,10 @@ export async function createPhoneScene(options: PhoneSceneOptions): Promise<Phon
         return texture;
       }),
     );
+    textures.push(...loaded);
+    if (!alive()) throw new Error("The WebGL context was lost while the screens loaded.");
   } catch (error) {
-    renderer.dispose();
-    renderer.forceContextLoss();
+    release();
     throw error;
   }
 
@@ -141,6 +161,7 @@ export async function createPhoneScene(options: PhoneSceneOptions): Promise<Phon
   scene.add(key);
 
   const glare = glareTexture();
+  textures.push(glare);
   const phone = createPhone(glare);
   scene.add(phone.group);
   const camera = new PerspectiveCamera(FOV, 1, 0.1, 50);
@@ -149,7 +170,6 @@ export async function createPhoneScene(options: PhoneSceneOptions): Promise<Phon
   let drawn = 0;
   let revealStart: number | null = null;
   let visible = true;
-  let disposed = false;
   let frame = 0;
   let last = 0;
 
@@ -162,12 +182,10 @@ export async function createPhoneScene(options: PhoneSceneOptions): Promise<Phon
   }
 
   function draw(now: number) {
-    let pose: PhonePose = poseAt(drawn);
-    if (revealStart !== null) {
-      pose = mixPose(FRONT_POSE, pose, smoothstep((now - revealStart) / REVEAL_MS));
-    } else {
-      pose = FRONT_POSE;
-    }
+    const pose: PhonePose =
+      revealStart === null
+        ? FRONT_POSE
+        : mixPose(FRONT_POSE, poseAt(drawn), smoothstep((now - revealStart) / REVEAL_MS));
     phone.group.rotation.set(pose.rotX, pose.rotY, pose.rotZ);
     camera.position.set(0, 0, cameraDistance(pose.fill, camera.aspect));
     camera.lookAt(0, 0, 0);
@@ -198,7 +216,7 @@ export async function createPhoneScene(options: PhoneSceneOptions): Promise<Phon
 
   const resizeObserver = new ResizeObserver(() => {
     resize();
-    if (visible) draw(performance.now());
+    if (visible && !disposed) draw(performance.now());
   });
   const visibility = new IntersectionObserver(([entry]) => {
     visible = entry.isIntersecting;
@@ -206,15 +224,37 @@ export async function createPhoneScene(options: PhoneSceneOptions): Promise<Phon
     if (visible) wake();
   });
 
-  const lost = (event: Event) => {
-    event.preventDefault();
-    if (!disposed) onLost();
+  release = () => {
+    if (frame) cancelAnimationFrame(frame);
+    resizeObserver.disconnect();
+    visibility.disconnect();
+    canvas.removeEventListener("webglcontextlost", lost);
+    phone.dispose();
+    textures.forEach((texture) => texture.dispose());
+    environment.dispose();
+    pmrem.dispose();
+    renderer.dispose();
+    renderer.forceContextLoss();
+    canvas.remove();
+    delete container.dataset.state;
   };
-  canvas.addEventListener("webglcontextlost", lost);
 
-  container.append(canvas);
-  resize();
-  renderer.compile(scene, camera);
+  try {
+    container.append(canvas);
+    resize();
+    renderer.compile(scene, camera);
+    // Every capture on the GPU now, one per frame, while the CSS phone still shows: no upload
+    // stalls a frame when the scroll first brings a screen in.
+    for (const texture of textures) {
+      renderer.initTexture(texture);
+      await nextFrame();
+      if (!alive()) throw new Error("The WebGL context was lost while the screens uploaded.");
+    }
+  } catch (error) {
+    disposed = true;
+    release();
+    throw error;
+  }
   resizeObserver.observe(container);
   visibility.observe(container);
 
@@ -224,34 +264,10 @@ export async function createPhoneScene(options: PhoneSceneOptions): Promise<Phon
       wake();
     },
     probe() {
-      return new Promise<boolean>((resolve) => {
-        const gaps: number[] = [];
-        let previous = 0;
-        let handle = 0;
-        const timer = window.setTimeout(() => {
-          cancelAnimationFrame(handle);
-          resolve(false);
-        }, PROBE.timeoutMs);
-        const step = (now: number) => {
-          if (disposed) {
-            window.clearTimeout(timer);
-            resolve(false);
-            return;
-          }
-          draw(now);
-          if (previous) gaps.push(now - previous);
-          previous = now;
-          if (gaps.length >= PROBE.frames) {
-            window.clearTimeout(timer);
-            resolve(median(gaps) <= PROBE.maxMedianMs);
-            return;
-          }
-          handle = requestAnimationFrame(step);
-        };
-        handle = requestAnimationFrame(step);
-      });
+      return probeFrames(browserProbeHost(window), draw, alive);
     },
     reveal() {
+      handedOver = true;
       drawn = target;
       revealStart = performance.now();
       wake();
@@ -259,19 +275,7 @@ export async function createPhoneScene(options: PhoneSceneOptions): Promise<Phon
     dispose() {
       if (disposed) return;
       disposed = true;
-      if (frame) cancelAnimationFrame(frame);
-      resizeObserver.disconnect();
-      visibility.disconnect();
-      canvas.removeEventListener("webglcontextlost", lost);
-      phone.dispose();
-      textures.forEach((texture) => texture.dispose());
-      glare.dispose();
-      environment.dispose();
-      pmrem.dispose();
-      renderer.dispose();
-      renderer.forceContextLoss();
-      canvas.remove();
-      delete container.dataset.state;
+      release();
     },
   };
 }

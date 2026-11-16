@@ -48,8 +48,8 @@ function afterLoadAndIdle(run: () => void): () => void {
  *
  * Nothing here listens to touch or wheel input or changes the scroll: the browser scrolls as
  * it always does. In `webgl` mode the 3D code (three.js) is fetched only once the page has
- * loaded, the browser is idle and the hero is pinned; until the phone is ready, and whenever
- * it fails, the CSS phone stays.
+ * loaded, the browser is idle, the hero is pinned and the tab is shown; until the phone is ready,
+ * and whenever it fails, the CSS phone stays.
  */
 export function HeroMotion({ children, className, screens }: HeroMotionProps) {
   const stageRef = useRef<HTMLDivElement>(null);
@@ -134,24 +134,34 @@ export function HeroMotion({ children, className, screens }: HeroMotionProps) {
       stage.dataset.gl = "ready";
     };
 
-    // The 3D phone only for a pinned hero: wait for the viewport to allow one if needed.
-    const loadWhenPinned = () => {
-      if (!still.matches) {
+    // The 3D phone only for a pinned hero in a tab the reader sees: a background tab waits,
+    // and fetches nothing, until it is shown.
+    const canLoad = () => !still.matches && document.visibilityState === "visible";
+    let stopWaiting = () => {};
+    const loadWhenShown = () => {
+      if (canLoad()) {
         void load();
         return;
       }
       const onChange = () => {
-        if (still.matches || stopped) return;
-        still.removeEventListener("change", onChange);
+        if (!canLoad()) return;
+        stopWaiting();
         void load();
       };
       still.addEventListener("change", onChange);
+      document.addEventListener("visibilitychange", onChange);
+      stopWaiting = () => {
+        still.removeEventListener("change", onChange);
+        document.removeEventListener("visibilitychange", onChange);
+        stopWaiting = () => {};
+      };
     };
-    const cancelLoad = mode === "webgl" ? afterLoadAndIdle(loadWhenPinned) : () => {};
+    const cancelLoad = mode === "webgl" ? afterLoadAndIdle(loadWhenShown) : () => {};
 
     return () => {
       stopped = true;
       cancelLoad();
+      stopWaiting();
       window.removeEventListener("scroll", schedule);
       window.removeEventListener("resize", schedule);
       still.removeEventListener("change", schedule);

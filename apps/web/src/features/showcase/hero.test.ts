@@ -44,6 +44,25 @@ describe("the hero", () => {
     expect(tag(html, /<section id="top"/)).toContain("still:h-auto");
     expect(tag(html, /group\/hero/)).toContain("still:relative still:top-0 still:h-auto");
     expect(tag(html, /data-hero-canvas/)).toContain("still:hidden");
+    // Turning still after the 3D phone took over (a phone rotated, reduced motion switched
+    // on) brings the CSS phone back; "!" beats the group-data rule that faded it out.
+    const cssPhone = tag(html, /group-data-\[gl=ready\]\/hero:opacity-0/);
+    expect(cssPhone).toContain("still:opacity-100!");
+  });
+
+  it("keeps the page's one h1 for assistive tech at every beat: only its look fades", async () => {
+    const html = await hero("en");
+    const firstBeat = tag(
+      html,
+      /col-start-1 row-start-1[^"]*group-data-\[beat=1\]\/hero:invisible/,
+    );
+    expect(firstBeat).toContain("group-data-[beat=2]/hero:invisible");
+    // The beat (with its link) leaves the tree; the h1 inside it stays visible to it, and its
+    // beat's opacity keeps it out of sight.
+    const h1 = tag(html, /<h1/);
+    expect(h1).toContain("group-data-[beat=1]/hero:visible");
+    expect(h1).toContain("group-data-[beat=2]/hero:visible");
+    expect(firstBeat).toContain("group-data-[beat=1]/hero:opacity-0");
   });
 
   it.each(["en", "es"] as const)(
@@ -95,6 +114,7 @@ describe("the hero", () => {
       expect(screen).not.toContain("fetchPriority");
       expect(screen).toMatch(/class="absolute inset-0 hidden /);
       expect(screen).toContain("group-data-[mode=css]/hero:block");
+      expect(screen).toContain("still:hidden!"); // beats group-data-[mode=css]'s specificity
       expect(screen).toContain(`group-data-[screen=${index + 1}]/hero:opacity-100`);
       expect(screen).toContain(`%2Fshowcase%2Fposters%2F${HERO_SCREEN_IDS[index + 1]}.webp`);
     });
