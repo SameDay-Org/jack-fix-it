@@ -333,8 +333,9 @@ class JobPayouts:
 
     @staticmethod
     def confirmed() -> Subquery:
-        """The id (`job_id`) and pro (`pro_id`) of every confirmed job, as a subquery: the
-        transfer sweep reads the jobs still to pay in its own query."""
+        """The id (`job_id`), pro (`pro_id`), quote (`quote_id`) and frozen payout
+        (`pro_payout_cents`) of every confirmed job, as a subquery: the transfer sweep reads
+        the jobs still to pay in its own query."""
         return JobRepository.confirmed()
 
     async def locked(self, job_id: uuid.UUID) -> JobPayoutFacts | None:

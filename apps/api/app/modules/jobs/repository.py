@@ -23,10 +23,16 @@ class JobRepository:
 
     @staticmethod
     def confirmed() -> Subquery:
-        """The id (`job_id`) and pro (`pro_id`) of every job that is confirmed, so waiting for
-        its transfer (#68), as a subquery for another module's query."""
+        """The id (`job_id`), pro (`pro_id`), quote (`quote_id`) and frozen payout
+        (`pro_payout_cents`) of every job that is confirmed, so waiting for its transfer
+        (#68), as a subquery for another module's query."""
         return (
-            select(Job.id.label("job_id"), Job.pro_id.label("pro_id"))
+            select(
+                Job.id.label("job_id"),
+                Job.pro_id.label("pro_id"),
+                Job.quote_id.label("quote_id"),
+                Job.pro_payout_cents.label("pro_payout_cents"),
+            )
             .where(Job.status == JobStatus.CONFIRMED)
             .subquery()
         )

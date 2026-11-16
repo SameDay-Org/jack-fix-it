@@ -268,18 +268,33 @@ class TransferRepository:
         be tried now (#68's sweep): the job is confirmed (`confirmed`: job_id, pro_id), its pro
         can be paid out (`payable`: pro_id), and it has no transfer row, or one Stripe has not
         made whose latest attempt, if any, started at or before `retry_before`. So an attempt
-        under way is left alone, and a failed one waits its turn. Also a confirmed job whose row
+        under way is left alone, and a failed one waits its turn. A job with no row is due only
+        when release would get past its payment checks (a succeeded payment of the job's quote,
+        with its PaymentIntent and the job's own positive payout): release refuses any other
+        before writing a row (an ERROR for staff, logged when the confirmation's release ran), so
+        it would come first in every run and, with enough of them, hold every other job up.
+        Also a confirmed job whose row
         says created: staff stored the transfer by hand after a review, and release moves the
         job to paid_out. Least recently tried first (never tried before all), then by job id: a
         job that keeps failing goes to the back, so it never holds the others up. Unlocked:
         release checks each job again under its lock."""
+        releasable = (
+            select(Payment.id)
+            .where(
+                Payment.quote_id == confirmed.c.quote_id,
+                Payment.status == PaymentStatus.SUCCEEDED,
+                Payment.stripe_payment_intent_id.is_not(None),
+                Payment.pro_payout_cents == confirmed.c.pro_payout_cents,
+            )
+            .exists()
+        )
         statement = (
             select(confirmed.c.job_id)
             .join(payable, payable.c.pro_id == confirmed.c.pro_id)
             .outerjoin(Transfer, Transfer.job_id == confirmed.c.job_id)
             .where(
                 or_(
-                    Transfer.id.is_(None),
+                    Transfer.id.is_(None) & (confirmed.c.pro_payout_cents > 0) & releasable,
                     Transfer.status.in_(_NOT_MADE)
                     & (Transfer.requested_at.is_(None) | (Transfer.requested_at <= retry_before)),
                     Transfer.status == TransferStatus.CREATED,
