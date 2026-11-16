@@ -31,9 +31,8 @@ const DOCUMENTS = "/pro/documents";
 /**
  * The pro's verification status (`/pro/verification`, #38): Pending (the team reviews the
  * profile and the documents; no date is promised), Approved (what is next: payout setup, a
- * placeholder labelled as not available yet, until #277), or Rejected (the reasons the review
- * gave on the documents, when it gave any, and the way to fix them). The profile's own reason
- * joins it once the API's type has it.
+ * placeholder labelled as not available yet, until #277), or Rejected (the profile's reason, the
+ * reasons the review gave on the documents, when it gave any, and the way to fix them).
  */
 export function VerificationScreen() {
   const { t } = useTranslation();
@@ -139,12 +138,15 @@ function Status({ profile }: { profile: ProProfile }) {
         body={t(`proVerification.${status}.body`)}
       />
       {status === "rejected" ? (
-        <Reasons
-          documents={documents.data}
-          failed={documentsError !== null}
-          busy={documents.isFetching}
-          onRetry={() => void documents.refetch()}
-        />
+        <>
+          <ProfileReason reason={profile.rejection_reason} />
+          <Reasons
+            documents={documents.data}
+            failed={documentsError !== null}
+            busy={documents.isFetching}
+            onRetry={() => void documents.refetch()}
+          />
+        </>
       ) : null}
       {/* The fix first: on a short screen it stays in sight under the reasons. */}
       {status === "rejected" ? (
@@ -198,6 +200,27 @@ function Message({ title, body }: { title: string; body: string }) {
         {title}
       </Text>
       <Text className="text-callout text-gray-500">{body}</Text>
+    </View>
+  );
+}
+
+/**
+ * Why the team rejected the profile (`rejection_reason` on GET /v1/pros/me). Staff wrote it and
+ * the API masked any contact details in it, so it is shown as it came, as plain read-only text
+ * (never parsed, no field look). Without one, a calm line says none was given: nothing is made up.
+ * Read as one element: the label, then the reason.
+ */
+function ProfileReason({ reason }: { reason: string | null }) {
+  const { t } = useTranslation();
+  const given = reason?.trim();
+  return (
+    <View accessible className="gap-1" testID="verification-profile-reason">
+      <Text className="text-footnote text-gray-500">
+        {t("proVerification.rejected.reasonLabel")}
+      </Text>
+      <Text className={given ? "text-body text-navy-900" : "text-body text-gray-500"}>
+        {given || t("proVerification.rejected.noReason")}
+      </Text>
     </View>
   );
 }

@@ -166,6 +166,45 @@ describe("VerificationScreen", () => {
     expect(router.push).toHaveBeenLastCalledWith("/pro/documents");
   });
 
+  it("Rejected: shows the team's reason for the profile as it came, plain and read-only", async () => {
+    // Staff text, contacts already masked by the API: trimmed, never parsed (markup stays text).
+    const reason =
+      "Your bio has a phone number [removed]. Use *only* the app to talk to customers.";
+    await open({ ...REJECTED, rejection_reason: `  ${reason}\n` });
+
+    const block = screen.getByTestId("verification-profile-reason");
+    // Untrimmed, the label and the reason would read with a space between them.
+    expect(block).toHaveTextContent(`Reason from the review team${reason}`);
+    // One element for a screen reader, and nothing in it can be edited or pressed.
+    expect(block.props.accessible).toBe(true);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: /phone number/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Fix documents" })).toBeTruthy();
+  });
+
+  it.each([
+    ["no reason", null],
+    ["a blank reason", " \n "],
+  ])("Rejected with %s: a calm line says none was given", async (_, rejection_reason) => {
+    await open({ ...REJECTED, rejection_reason });
+
+    expect(screen.getByTestId("verification-profile-reason")).toHaveTextContent(
+      "Reason from the review teamNo reason was given.",
+    );
+    expect(screen.getByRole("button", { name: "Fix documents" })).toBeTruthy();
+  });
+
+  it.each([
+    ["Pending", EMPTY_PROFILE],
+    ["Approved", APPROVED],
+  ])("%s: no reason block", async (_, profile) => {
+    await open(profile);
+
+    expect(screen.getByTestId("verification-status")).toBeTruthy();
+    expect(screen.queryByTestId("verification-profile-reason")).toBeNull();
+    expect(screen.queryByText("No reason was given.")).toBeNull();
+  });
+
   it("Rejected with no rejected document: no reason is made up, the fix stays", async () => {
     await open(REJECTED, documents([document({ doc_type: "id", status: "approved" })]));
 
