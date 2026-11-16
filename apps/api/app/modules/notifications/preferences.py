@@ -77,6 +77,8 @@ KIND_GROUP: Final[Mapping[str, PreferenceGroup]] = MappingProxyType(
         "job_confirmed": PreferenceGroup.JOB_UPDATES,  # to a pro (#66, #67)
         # A canceled payment reopened the request's quotes: about the booking, not a new quote.
         "booking_not_completed": PreferenceGroup.JOB_UPDATES,  # to a customer
+        # Stripe enabled an approved pro's payouts (#280): about their account.
+        "payouts_enabled": PreferenceGroup.ACCOUNT_AND_SECURITY,  # to a pro
     }
 )
 
