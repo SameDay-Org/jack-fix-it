@@ -50,6 +50,13 @@ jest.mock("@/features/pro-jobs", () => ({
   YourJobs: () => null,
   useProJobs: (options?: { refetchOnReturn?: boolean }) => mockUseProJobs(options),
 }));
+// "Finish your profile" under the greeting (#36) has its own suite (features/pro-profile); here
+// the card is left out, and a pull refreshes the (stubbed) profile with the list.
+const mockRefetchProfile = jest.fn(() => Promise.resolve());
+jest.mock("@/features/pro-profile", () => ({
+  ProfileChecklistCard: () => null,
+  useMyProProfile: () => ({ refetch: mockRefetchProfile }),
+}));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock("expo-notifications");
 jest.mock(
@@ -162,10 +169,12 @@ describe("ProHomeScreen", () => {
       .mocked(apiGet)
       .mockResolvedValueOnce(page([sentLater, { ...FRESH, viewed: true }, OPENED]));
     mockRefetchJobs.mockClear();
+    mockRefetchProfile.mockClear();
     await act(async () => pullToRefresh());
     await findCard(sentLater.dispatch_id);
-    // The pull refreshes the pro's jobs with the opportunities (#63).
+    // The pull refreshes the pro's jobs with the opportunities (#63), and the profile (#36).
     expect(mockRefetchJobs).toHaveBeenCalledTimes(1);
+    expect(mockRefetchProfile).toHaveBeenCalledTimes(1);
     expect(card(sentLater.dispatch_id).getByText("New", HIDDEN)).toBeTruthy();
     expect(card(FRESH.dispatch_id).queryByText("New", HIDDEN)).toBeNull();
 
