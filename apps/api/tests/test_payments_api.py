@@ -82,6 +82,19 @@ SHEET_KEYS = {
 }
 # What only the pro or the platform may see: never in the customer's response or its schema.
 SPLIT_WORDS = ("payout", "fee", "take_rate")
+
+
+def field_names(value: object) -> set[str]:
+    """Every object key in a JSON value, at any depth."""
+    if isinstance(value, dict):
+        return {str(key) for key in value} | {
+            name for item in value.values() for name in field_names(item)
+        }
+    if isinstance(value, list):
+        return {name for item in value for name in field_names(item)}
+    return set()
+
+
 NOT_AVAILABLE = {
     "error": {"code": "payment_not_available", "message": "This quote cannot be paid right now."}
 }
@@ -975,8 +988,11 @@ async def test_response_never_shows_payout_or_fee(
 
     assert response.status_code == 200, response.text
     assert set(response.json()) == SHEET_KEYS
+    # No field, at any depth, names the split. The field names, not the whole body: the values
+    # are random ids and secrets, and their hex can spell "fee" (cus_fake0fee123, #416).
+    names = field_names(response.json())
+    assert not any(word in name.lower() for name in names for word in SPLIT_WORDS), names
     text = response.text.lower()
-    assert not any(word in text for word in SPLIT_WORDS)
     # The fee and the payout; the body also holds random hex secrets, so not a substring check.
     assert not mentions_number(text, 1501)
     assert not mentions_number(text, 8504)
@@ -984,6 +1000,32 @@ async def test_response_never_shows_payout_or_fee(
     assert set(schema["properties"]) == SHEET_KEYS
     with pytest.raises(ValueError, match="Extra inputs are not permitted"):
         PaymentSheetOut.model_validate({**response.json(), "pro_payout_cents": 1})
+
+
+async def test_an_id_that_spells_fee_is_not_taken_for_one(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    stripe_fake: FakeStripePayments,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The CI flake of #416: a random fake id held "fee" and the whole-body check failed."""
+    create_customer = stripe_fake.create_customer
+
+    async def spelling_fee(*, user_id: str, idempotency_key: str) -> CreatedCustomer:
+        await create_customer(user_id=user_id, idempotency_key=idempotency_key)
+        return CreatedCustomer(customer_id="cus_fake0fee123", request_id="req_fake_customer")
+
+    monkeypatch.setattr(stripe_fake, "create_customer", spelling_fee)
+
+    await test_response_never_shows_payout_or_fee(app, db_client, db_session, world, stripe_fake)
+
+
+def test_a_split_field_is_found_at_any_depth() -> None:
+    names = field_names({"sheet": [{"platform_fee_cents": 1}], "customer_id": "cus_fee"})
+    assert names == {"sheet", "platform_fee_cents", "customer_id"}
+    assert any("fee" in name for name in names)
 
 
 def test_openapi_documents_the_route(app: FastAPI) -> None:

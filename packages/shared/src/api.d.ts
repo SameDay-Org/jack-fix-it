@@ -784,6 +784,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/jobs/{job_id}/transfer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a job's transfer to its pro (staff)
+         * @description Any job's transfer to its pro, for the BDC and admins: the amount (the pro's payout
+         *     frozen at payment), the status, Stripe's transfer id once it is made, the attempts so far
+         *     and the last error code. `transfer` is null until the job's first release, which follows
+         *     its confirmation. Read-only: nothing here releases, retries or reverses a transfer. Every
+         *     read is recorded in the audit log.
+         */
+        get: operations["read_job_transfer_v1_admin_jobs__job_id__transfer_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/me/payment-methods/setup-intent": {
         parameters: {
             query?: never;
@@ -2508,6 +2532,19 @@ export interface components {
             };
         };
         /**
+         * JobPayout
+         * @description The pro's payout for their job (#68), once the job is confirmed.
+         */
+        JobPayout: {
+            /** @description pending: the job is confirmed and the transfer to the pro's account is on its way to being made; created: the transfer was made. */
+            status: components["schemas"]["PayoutStatus"];
+            /**
+             * Amount Cents
+             * @description What the pro receives for the job (its pro_payout_cents), in integer cents.
+             */
+            amount_cents: number;
+        };
+        /**
          * JobPhotoKind
          * @enum {string}
          */
@@ -2635,6 +2672,11 @@ export interface components {
              * Format: date-time
              */
             at: string;
+        };
+        /** JobTransferOut */
+        JobTransferOut: {
+            /** @description The job's transfer; null before the first attempt to release it. */
+            transfer: components["schemas"]["TransferOut"] | null;
         };
         JsonValue: unknown;
         /** LivenessResponse */
@@ -3133,6 +3175,11 @@ export interface components {
              */
             currency: string;
         };
+        /**
+         * PayoutStatus
+         * @enum {string}
+         */
+        PayoutStatus: "pending" | "created";
         /** PayoutsOut */
         PayoutsOut: {
             /** @description not_started: no payout account yet; incomplete: Stripe still needs information; in_review: everything is submitted and Stripe is checking it; enabled: payouts are on. */
@@ -3287,6 +3334,8 @@ export interface components {
              * @description What the pro receives for the job.
              */
             pro_payout_cents: number;
+            /** @description The transfer of that amount to the pro's account: null until the job is confirmed (and for a job that was never confirmed, or whose transfer was reversed). */
+            payout: components["schemas"]["JobPayout"] | null;
             /**
              * Unread Messages
              * @description The customer's chat messages the pro has not marked read (#71).
@@ -4847,6 +4896,84 @@ export interface components {
          * @enum {string}
          */
         TicketTopic: "account" | "payment" | "job" | "safety" | "app_problem" | "other";
+        /**
+         * TransferOut
+         * @description A job's transfer to its pro as staff see it (#68): the row, without the idempotency
+         *     key.
+         */
+        TransferOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /**
+             * Payment Id
+             * Format: uuid
+             */
+            payment_id: string;
+            /**
+             * Pro Id
+             * Format: uuid
+             * @description The pro's profile id.
+             */
+            pro_id: string;
+            /**
+             * Amount Cents
+             * @description The job's pro payout as frozen at payment, in integer cents.
+             */
+            amount_cents: number;
+            /**
+             * Currency
+             * @description Stripe's lower-case currency code.
+             * @example usd
+             */
+            currency: string;
+            /** @description pending: not made yet (last_error_code `payouts_not_enabled` when the pro cannot be paid out yet). created: Stripe made the transfer. failed: the last attempt failed and is tried again. reversed: Stripe reversed the transfer. */
+            status: components["schemas"]["TransferStatus"];
+            /**
+             * Stripe Transfer Id
+             * @description Stripe's id of the transfer, once it is made.
+             */
+            stripe_transfer_id: string | null;
+            /**
+             * Attempts
+             * @description Attempts made with Stripe so far.
+             */
+            attempts: number;
+            /**
+             * Last Error Code
+             * @description Why the last attempt did not make the transfer: a Stripe error code, an error class, `payouts_not_enabled` or `transfer_needs_review`. Never a message.
+             */
+            last_error_code: string | null;
+            /**
+             * Requested At
+             * @description When the latest attempt started.
+             */
+            requested_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * TransferStatus
+         * @description Where the pro's transfer for a job stands (D13.3, #68; internal: the pro sees `pending`
+         *     or `created`, staff see the row).
+         * @enum {string}
+         */
+        TransferStatus: "pending" | "created" | "failed" | "reversed";
         /**
          * UploadPurpose
          * @enum {string}
@@ -7167,6 +7294,64 @@ export interface operations {
             };
             /** @description not_configured: payments are not configured; payments_unavailable: Stripe is not reachable or asked to retry later; nothing changed, retry later. */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_job_transfer_v1_admin_jobs__job_id__transfer_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobTransferOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a malformed id. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

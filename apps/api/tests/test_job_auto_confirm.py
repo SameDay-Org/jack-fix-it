@@ -131,7 +131,17 @@ class World:
 
     def pushed(self) -> set[str]:
         """The jobs of the queued job_confirmed pushes."""
-        return {job_id.removeprefix("push:job_confirmed:") for job_id in self.queue.jobs}
+        prefix = "push:job_confirmed:"
+        return {
+            job_id.removeprefix(prefix) for job_id in self.queue.jobs if job_id.startswith(prefix)
+        }
+
+    def released(self) -> set[str]:
+        """The jobs whose transfer release was queued (#68)."""
+        prefix = "release-transfer:"
+        return {
+            job_id.removeprefix(prefix) for job_id in self.queue.jobs if job_id.startswith(prefix)
+        }
 
     async def state(self, job_id: uuid.UUID) -> tuple[JobStatus, datetime | None, list[JobEvent]]:
         async with self.sessions() as session:
@@ -335,9 +345,11 @@ async def test_overlapping_runs_confirm_each_job_once(
     assert sum(run["confirmed"] for run in runs) == 3
     assert sum(run["skipped"] for run in runs) == 3
     assert all(run["failed"] == 0 for run in runs)
-    # Only the run that confirmed a job pushes it: three enqueues, none deduplicated.
-    assert len(world.queue.before) == 3
+    # Only the run that confirmed a job pushes it and queues its transfer (#68): six
+    # enqueues, none deduplicated.
+    assert len(world.queue.before) == 6
     assert world.pushed() == {str(job.id) for job in jobs}
+    assert world.released() == {str(job.id) for job in jobs}
 
 
 async def test_a_failing_job_does_not_stop_the_batch(
@@ -470,12 +482,14 @@ async def test_the_push_is_queued_after_the_commit(world: World) -> None:
 
     await auto_confirm_jobs(world.context())
 
-    assert seen == [JobStatus.CONFIRMED]
-    [(function, args)] = world.queue.jobs.values()
+    # The push, then the transfer's release (#68): both after the commit.
+    assert seen == [JobStatus.CONFIRMED, JobStatus.CONFIRMED]
+    (function, args), release = world.queue.jobs.values()
     assert function == "send_push"
     assert args[:2] == (str(world.pro_user_id), f"job_confirmed:{job.id}")
     assert args[2:4] == ("push.job_confirmed.title", "push.job_confirmed.body")
     assert args[5] == f"/jobs/{job.id}"
+    assert release == ("release_transfer", (str(job.id),))
 
 
 async def test_a_failed_push_enqueue_never_fails_the_run(
@@ -492,6 +506,9 @@ async def test_a_failed_push_enqueue_never_fails_the_run(
     assert summaries(logs) == [counts(confirmed=2)]
     failed = [r for r in logs.records if r.getMessage() == "push_enqueue_failed"]
     assert len(failed) == 2
+    # The transfers' releases (#68) fail the same way, logged, and the sweep takes the jobs.
+    releases = [r for r in logs.records if r.getMessage() == "transfer_release_enqueue_failed"]
+    assert {r.__dict__["job_id"] for r in releases} == {str(job.id) for job in jobs}
     assert "probe-secret-text-67" not in logs.text
 
 

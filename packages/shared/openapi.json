@@ -2955,6 +2955,85 @@
         }
       }
     },
+    "/v1/admin/jobs/{job_id}/transfer": {
+      "get": {
+        "tags": [
+          "payments"
+        ],
+        "summary": "Read a job's transfer to its pro (staff)",
+        "description": "Any job's transfer to its pro, for the BDC and admins: the amount (the pro's payout\nfrozen at payment), the status, Stripe's transfer id once it is made, the attempts so far\nand the last error code. `transfer` is null until the job's first release, which follows\nits confirmation. Read-only: nothing here releases, retries or reverses a transfer. Every\nread is recorded in the audit log.",
+        "operationId": "read_job_transfer_v1_admin_jobs__job_id__transfer_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobTransferOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a malformed id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/me/payment-methods/setup-intent": {
       "post": {
         "tags": [
@@ -8833,6 +8912,27 @@
         ],
         "title": "JobCategory"
       },
+      "JobPayout": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/PayoutStatus",
+            "description": "pending: the job is confirmed and the transfer to the pro's account is on its way to being made; created: the transfer was made."
+          },
+          "amount_cents": {
+            "type": "integer",
+            "title": "Amount Cents",
+            "description": "What the pro receives for the job (its pro_payout_cents), in integer cents."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "amount_cents"
+        ],
+        "title": "JobPayout",
+        "description": "The pro's payout for their job (#68), once the job is confirmed."
+      },
       "JobPhotoKind": {
         "type": "string",
         "enum": [
@@ -9068,6 +9168,27 @@
         ],
         "title": "JobTimelineEntry",
         "description": "One event of the job's history: what happened and when. No actor, no location."
+      },
+      "JobTransferOut": {
+        "properties": {
+          "transfer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TransferOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The job's transfer; null before the first attempt to release it."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "transfer"
+        ],
+        "title": "JobTransferOut"
       },
       "JsonValue": {},
       "LivenessResponse": {
@@ -10019,6 +10140,14 @@
         "title": "PaymentSheetOut",
         "description": "What the app's Payment Sheet (#59) needs, plus what the customer sees before paying.\nNever the pro's payout or the platform's fee."
       },
+      "PayoutStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "created"
+        ],
+        "title": "PayoutStatus"
+      },
       "PayoutsOut": {
         "properties": {
           "status": {
@@ -10320,6 +10449,17 @@
             "title": "Pro Payout Cents",
             "description": "What the pro receives for the job."
           },
+          "payout": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobPayout"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The transfer of that amount to the pro's account: null until the job is confirmed (and for a job that was never confirmed, or whose transfer was reversed)."
+          },
           "unread_messages": {
             "type": "integer",
             "title": "Unread Messages",
@@ -10344,6 +10484,7 @@
           "confirm_by",
           "photos",
           "pro_payout_cents",
+          "payout",
           "unread_messages"
         ],
         "title": "ProJob",
@@ -13866,6 +14007,130 @@
         ],
         "title": "TicketTopic",
         "description": "What the ticket is about, as the user picked it in the app."
+      },
+      "TransferOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          },
+          "payment_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Payment Id"
+          },
+          "pro_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Pro Id",
+            "description": "The pro's profile id."
+          },
+          "amount_cents": {
+            "type": "integer",
+            "title": "Amount Cents",
+            "description": "The job's pro payout as frozen at payment, in integer cents."
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency",
+            "description": "Stripe's lower-case currency code.",
+            "examples": [
+              "usd"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/TransferStatus",
+            "description": "pending: not made yet (last_error_code `payouts_not_enabled` when the pro cannot be paid out yet). created: Stripe made the transfer. failed: the last attempt failed and is tried again. reversed: Stripe reversed the transfer."
+          },
+          "stripe_transfer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stripe Transfer Id",
+            "description": "Stripe's id of the transfer, once it is made."
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts",
+            "description": "Attempts made with Stripe so far."
+          },
+          "last_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Code",
+            "description": "Why the last attempt did not make the transfer: a Stripe error code, an error class, `payouts_not_enabled` or `transfer_needs_review`. Never a message."
+          },
+          "requested_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested At",
+            "description": "When the latest attempt started."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "job_id",
+          "payment_id",
+          "pro_id",
+          "amount_cents",
+          "currency",
+          "status",
+          "stripe_transfer_id",
+          "attempts",
+          "last_error_code",
+          "requested_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "TransferOut",
+        "description": "A job's transfer to its pro as staff see it (#68): the row, without the idempotency\nkey."
+      },
+      "TransferStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "created",
+          "failed",
+          "reversed"
+        ],
+        "title": "TransferStatus",
+        "description": "Where the pro's transfer for a job stands (D13.3, #68; internal: the pro sees `pending`\nor `created`, staff see the row)."
       },
       "UploadPurpose": {
         "type": "string",

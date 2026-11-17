@@ -77,13 +77,15 @@ class ProPublicDetails:
 @dataclass(frozen=True)
 class PayoutAccount:
     """A pro's payout side (#39): the profile, its Stripe Express account (None until the first
-    onboarding link), when that account's create was attempted (None before the first attempt)
-    and whether payouts are enabled, as last read from Stripe."""
+    onboarding link), when that account's create was attempted (None before the first attempt),
+    whether payouts are enabled, as last read from Stripe, and whether staff approve the pro
+    now (#41): Stripe can keep payouts enabled for a pro staff rejected."""
 
     profile_id: uuid.UUID
     stripe_account_id: str | None
     stripe_account_requested_at: datetime | None
     payouts_enabled: bool
+    approved: bool
 
 
 @dataclass(frozen=True)
@@ -103,6 +105,7 @@ def _payout_account(profile: ProProfile) -> PayoutAccount:
         stripe_account_id=profile.stripe_account_id,
         stripe_account_requested_at=profile.stripe_account_requested_at,
         payouts_enabled=profile.payouts_enabled,
+        approved=profile.verification_status is ProVerificationStatus.APPROVED,
     )
 
 
@@ -117,6 +120,13 @@ class ProService:
         """Each profile's id (`pro_id`) and user id (`user_id`), as a subquery: a job's
         parties resolve in the job's own query (#331)."""
         return ProProfileRepository.users()
+
+    @staticmethod
+    def payable() -> Subquery:
+        """The id (`pro_id`) of every profile a transfer can be made to now (approved by
+        staff, a Stripe account with payouts enabled), as a subquery: the transfer sweep (#68)
+        joins it."""
+        return ProProfileRepository.payable()
 
     @staticmethod
     def photo_keys_among(keys: Collection[str]) -> Select[str | None]:
@@ -168,6 +178,12 @@ class ProService:
         """The user's payout account (#39), or None when they have no profile yet. `lock`: its
         profile row FOR UPDATE until the caller's transaction ends."""
         profile = await self._profiles.get_by_user_id(user_id, lock=lock)
+        return None if profile is None else _payout_account(profile)
+
+    async def payout_account_of_profile(self, pro_id: uuid.UUID) -> PayoutAccount | None:
+        """The profile's payout account as last committed, unlocked: where a job's transfer
+        goes (#68). None when no profile has this id."""
+        profile = await self._profiles.get_by_id(pro_id)
         return None if profile is None else _payout_account(profile)
 
     async def lock_payout_account_by_profile(self, pro_id: uuid.UUID) -> PayoutAccount | None:
