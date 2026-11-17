@@ -14,6 +14,9 @@ export { FrameGlyph, PHOTO_TILE, PhotoTiles } from "./PhotoTiles";
 export type { PhotoTilesProps, RemotePhoto } from "./PhotoTiles";
 export { useMediaAdd } from "./useMediaAdd";
 export { useMediaUpload } from "./useMediaUpload";
+export { singlePhotoStatus, useSinglePhoto } from "./useSinglePhoto";
+export type { SinglePhoto, SinglePhotoOptions } from "./useSinglePhoto";
+export { useStableImageUri } from "./useStableImageUri";
 export type {
   MediaFailure,
   MediaItem,

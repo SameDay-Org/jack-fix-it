@@ -1607,5 +1607,68 @@
       "selectCity": "Select all ZIP codes in {{city}}",
       "clearCity": "Clear all ZIP codes in {{city}}"
     }
+  },
+  "proDocuments": {
+    "menu": "Documents",
+    "title": "Verification documents",
+    "support": "Our team reviews these before you start receiving requests.",
+    "loading": "Loading your documents",
+    "loadFailed": "We couldn't load your documents",
+    "loadBody": "Give it another try in a moment.",
+    "offline": "You're offline. Check your connection and try again.",
+    "refreshFailed": "We couldn't refresh your documents.",
+    "retry": "Try again",
+    "row": "{{name}}: {{status}}",
+    "reason": "Reason: {{reason}}",
+    "expires": "Expires {{date}}",
+    "types": {
+      "id": "Photo ID",
+      "license": "License",
+      "insurance": "Insurance"
+    },
+    "hints": {
+      "id": "A photo of your ID.",
+      "license": "A photo of your trade license.",
+      "insurance": "A photo of your proof of insurance."
+    },
+    "status": {
+      "missing": "Missing",
+      "pending": "In review",
+      "approved": "Approved",
+      "rejected": "Rejected"
+    },
+    "rejected": {
+      "title": "This document was rejected",
+      "noReason": "Send a new photo of it."
+    },
+    "pending": "Sending a new photo replaces the one in review.",
+    "photo": {
+      "label": "Photo of the document",
+      "unavailable": "The document's photo can't be shown right now",
+      "support": "Take a clear photo of the whole document.",
+      "required": "Add a photo of the document first.",
+      "ready": "Photo ready. Submit to send it for review.",
+      "uploading": "Uploading the document photo",
+      "add": "Add photo",
+      "change": "Change photo",
+      "retry": "Try again"
+    },
+    "submit": {
+      "send": "Submit",
+      "replace": "Replace",
+      "sent": "Document sent for review",
+      "check": "Some fields need a look.",
+      "expiry": "Expiry date",
+      "expiryHint": "MM/DD/YYYY",
+      "expiryErrors": {
+        "invalid": "Enter the date as MM/DD/YYYY.",
+        "past": "Enter today's date or a later one."
+      },
+      "failed": {
+        "offline": "You're offline. Check your connection and try again.",
+        "photo": "We couldn't use that photo. Choose another one.",
+        "generic": "We couldn't submit this document. Try again."
+      }
+    }
   }
 }

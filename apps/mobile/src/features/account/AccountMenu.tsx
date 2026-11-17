@@ -10,7 +10,7 @@ import { useSavedAddresses } from "@/features/addresses";
 
 /**
  * The Account tab's short list: Settings, Addresses (a customer's, with how many are saved), Pro
- * profile (a pro's), Help and Legal open their screens; Log out sits apart, has no chevron (it opens nothing) and asks
+ * profile and Documents (a pro's), Help and Legal open their screens; Log out sits apart, has no chevron (it opens nothing) and asks
  * first.
  */
 export function AccountMenu() {
@@ -87,12 +87,20 @@ export function AccountMenu() {
           />
         ) : null}
         {role === "pro" ? (
-          <ListRow
-            label={t("proProfile.menu")}
-            glyph={ACCOUNT_GLYPHS.proProfile}
-            onPress={() => router.push("/pro/profile")}
-            testID="account-pro-profile"
-          />
+          <>
+            <ListRow
+              label={t("proProfile.menu")}
+              glyph={ACCOUNT_GLYPHS.proProfile}
+              onPress={() => router.push("/pro/profile")}
+              testID="account-pro-profile"
+            />
+            <ListRow
+              label={t("proDocuments.menu")}
+              glyph={ACCOUNT_GLYPHS.proDocuments}
+              onPress={() => router.push("/pro/documents")}
+              testID="account-pro-documents"
+            />
+          </>
         ) : null}
         <ListRow
           label={t("account.menu.help")}

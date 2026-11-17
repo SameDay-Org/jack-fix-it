@@ -77,6 +77,24 @@ rules apply.
   review (`GET /v1/admin/pros/{id}`: the legal name and the documents' URLs) writes its row
   through `record_read` and commits it before answering.
 
+## Operations queue (#81)
+
+`/v1/admin/requests` (`app/modules/ops`, staff only, `NoStoreRoute`) is the BDC's queue.
+
+- **Buckets.** A request is in one bucket, computed in SQL by
+  `requests/queue_repository.py::bucket_of`, in this precedence: `problems`, `urgent`, `new`,
+  `waiting_customer`, `waiting_pro`, `quote_ready`, `scheduled_today`, else `other`. What it
+  needs from other modules (the job, its start, the pending quotes, the open tickets, the ZIP)
+  comes in as their subqueries (`QueueSources`): add a bucket there, never a join on another
+  module's table. The thresholds are settings: `OPS_FIRST_CONTACT_SLA_MINUTES`,
+  `OPS_QUOTE_WAITING_MINUTES`, `BUSINESS_TIME_ZONE` ("today" is read by Postgres in that zone).
+- **Contacts.** The list and the summary carry no phone, email, last name or street. Only the
+  card (`GET /v1/admin/requests/{id}`) does, and each card read writes its `audit_log` row
+  (`record_read`) and commits it before answering. Media are the privacy-safe copies only.
+- **Claim / release** change `assigned_agent_id` only, under the request's row lock, each with
+  its `audit_log` row (`record_staff_action`). They never set `first_contact_at` and never
+  touch the status (`RequestStateMachine`).
+
 ## Live position (#350)
 
 The pro's position while on the way (`jobs/location.py`) lives in Redis only: the latest one per

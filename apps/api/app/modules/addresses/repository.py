@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Collection
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select, text, update
+from sqlalchemy import Subquery, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.addresses.models import Address, SavedAddress
@@ -22,6 +22,12 @@ class AddressRepository:
 
     async def get_by_id(self, address_id: uuid.UUID) -> Address | None:
         return await self._session.get(Address, address_id)
+
+    @staticmethod
+    def zips() -> Subquery:
+        """Every address's id (`address_id`) and ZIP as stored (`zip_code`) only, as a
+        subquery for another module's query."""
+        return select(Address.id.label("address_id"), Address.zip_code.label("zip_code")).subquery()
 
     async def zip_codes(self, address_ids: Collection[uuid.UUID]) -> list[tuple[uuid.UUID, str]]:
         """(id, zip_code) only: neither the street nor the city the customer typed is loaded."""
