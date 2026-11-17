@@ -567,6 +567,36 @@ describe("AccountScreen", () => {
     });
   });
 
+  describe("the Payment methods row", () => {
+    it("opens a customer's wallet", async () => {
+      jest.mocked(useSession).mockReturnValue(signedIn({ ...ALEX, role: "customer" }));
+      jest.mocked(apiGet).mockRejectedValue(new Error("offline"));
+      await renderAccount();
+
+      await fireEvent.press(screen.getByRole("button", { name: "Payment methods" }));
+
+      expect(router.push).toHaveBeenCalledWith("/account/payment-methods");
+      // The row asks nothing: the wallet is read when its screen opens.
+      expect(apiGet).not.toHaveBeenCalledWith("/v1/me/payment-methods", expect.anything());
+    });
+
+    it("is not there for a pro, whose payouts are not this wallet", async () => {
+      await renderAccount();
+
+      expect(screen.queryByText("Payment methods")).toBeNull();
+      expect(screen.queryByTestId("account-payment-methods")).toBeNull();
+    });
+
+    it("reads in Spanish", async () => {
+      await i18n.changeLanguage("es");
+      jest.mocked(useSession).mockReturnValue(signedIn({ ...ALEX, role: "customer" }));
+      jest.mocked(apiGet).mockRejectedValue(new Error("offline"));
+      await renderAccount();
+
+      expect(screen.getByRole("button", { name: "Métodos de pago" })).toBeTruthy();
+    });
+  });
+
   describe("the Pro profile row", () => {
     it("opens a pro's profile", async () => {
       await renderAccount();

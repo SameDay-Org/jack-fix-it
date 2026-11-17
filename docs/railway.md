@@ -323,9 +323,12 @@ is missing from either table, so this list cannot fall behind `app/config.py`.
 | `API_INTERNAL_URL`          | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}`                                                           | no     | D3.1 (#22)  |
 | `REFRESH_TOKEN_TTL_SECONDS` | the api's refresh token lifetime (2592000 unless the api sets another); the panel's session cookie lasts as long | no     | D16.1 (#80) |
 | `API_TIMEOUT_MS`            | `5000`: the longest wait on the api for one call, body included                                                  | no     | D16.1 (#80) |
+| `SITE_URL`                  | optional: the site's public origin, e.g. `https://${{RAILWAY_PUBLIC_DOMAIN}}` or the custom domain               | no     | D17 (#403)  |
 
 The web server calls the API over the private network; browsers and the mobile app use the
-api's public domain.
+api's public domain. `SITE_URL` is read when the site is built: it gives the showcase page
+(`/app`, `/es/app`) its canonical, `hreflang` and Open Graph addresses, and without it the
+page carries none of them.
 
 ## Deploys
 
