@@ -19,6 +19,7 @@ import {
   isUuid,
   QUEUE_PATH,
   type RequestCard,
+  requestMediaHref,
 } from "../../queue/queue";
 import { StatusBadge } from "../../queue/status-badge";
 import { claimRequest, releaseRequest } from "../actions";
@@ -293,9 +294,9 @@ export default async function RequestPage({ params }: { params: Promise<{ reques
           ) : (
             <ul className="flex flex-col gap-2">
               {card.media.map((media, index) => (
-                <li key={media.url}>
+                <li key={index}>
                   <a
-                    href={media.url}
+                    href={requestMediaHref(requestId, index)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className={FILE_LINK}
@@ -313,7 +314,7 @@ export default async function RequestPage({ params }: { params: Promise<{ reques
             </ul>
           )}
           {card.media.length > 0 ? (
-            <CardDescription>{t("admin.requests.request.linksExpire")}</CardDescription>
+            <CardDescription>{t("admin.requests.request.filesOpenInNewTab")}</CardDescription>
           ) : null}
         </section>
       </Card>

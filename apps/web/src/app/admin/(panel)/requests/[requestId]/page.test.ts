@@ -110,15 +110,19 @@ describe("request card page", () => {
       "tel:+13055550181",
       "sms:+13055550181",
       "mailto:ana.probe%2B81@example.com",
-      MEDIA_URL,
     ]);
     // The customer's own text is shown as text, line breaks kept by the style: markup stays inert.
     expect(page).toContain("The kitchen faucet drips.\nCall me at 305-555-0181 <b>today</b>.");
     expect(html).toContain("&lt;b&gt;today&lt;/b&gt;");
-    // The media opens in a new tab, with no opener and no referrer for the storage to read.
-    const [media] = page.match(/<a [^>]*href="https:\/\/storage[^>]*>/g) ?? [];
+    // The media opens in a new tab through the panel's own route: the signed storage address
+    // is in no link and nowhere else in the page (Vault round 1 on #418).
+    const [media] = page.match(/<a [^>]*href="\/admin\/requests\/[^"]+\/media\/0"[^>]*>/g) ?? [];
+    expect(media).toContain(`href="/admin/requests/${REQUEST_ID}/media/0"`);
     expect(media).toContain('target="_blank"');
     expect(media).toContain('rel="noopener noreferrer"');
+    expect(page).not.toContain(MEDIA_URL);
+    expect(page).not.toContain("sig=probe");
+    expect(page).not.toContain("storage.test.invalid");
     expect(buttons(page)).toEqual(["Take this request"]);
     expect(page).not.toContain('disabled=""');
     expect(page).not.toContain(ACCESS_TOKEN);

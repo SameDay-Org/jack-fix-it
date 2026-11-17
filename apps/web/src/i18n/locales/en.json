@@ -264,7 +264,7 @@
           "video": "Open video {{number}}"
         },
         "mediaPending": "Still being prepared: {{count}}",
-        "linksExpire": "Files open in a new tab. The links work for a few minutes: reload the page if one has expired."
+        "filesOpenInNewTab": "Files open in a new tab."
       },
       "quotes": {
         "title": "Quotes",

@@ -264,7 +264,7 @@
           "video": "Abrir el video {{number}}"
         },
         "mediaPending": "Aún en preparación: {{count}}",
-        "linksExpire": "Los archivos se abren en una pestaña nueva. Los enlaces funcionan unos minutos: recarga la página si alguno venció."
+        "filesOpenInNewTab": "Los archivos se abren en una pestaña nueva."
       },
       "quotes": {
         "title": "Presupuestos",

@@ -145,6 +145,14 @@ export function requestHref(requestId: string): string {
   return `${REQUESTS_PATH}/${requestId}`;
 }
 
+/**
+ * A request's photo or video, by its position in the card, served by the panel: the storage's
+ * signed address never reaches the browser (`requests/[requestId]/media/[index]/route.ts`).
+ */
+export function requestMediaHref(requestId: string, index: number): string {
+  return `${requestHref(requestId)}/media/${index}`;
+}
+
 /** A category's name in the reader's language, else in English, else its slug. */
 export function categoryName(
   category: { slug: string; names: Record<string, string> },
