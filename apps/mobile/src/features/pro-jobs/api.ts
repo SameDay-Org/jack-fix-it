@@ -16,6 +16,7 @@ import { useRefetchOnReturn } from "@/features/quotes/useRequestQuotes";
 
 import type { CheckInPosition } from "./location";
 import { isActiveJob, soonestFirst, type JobPhotoKind, type ProJob } from "./phase";
+import { followJob } from "./sharing/sender";
 
 const PRO_JOBS = "pro-jobs";
 
@@ -130,12 +131,36 @@ export const isJobGone = (error: unknown): boolean =>
 /**
  * The job as an action answered it, in place at once (the screen under a sheet redraws as the
  * sheet closes), and "Your jobs" asked again. Only for the session the action started in: after a
- * sign-out or another sign-in the answer goes nowhere.
+ * sign-out or another sign-in the answer goes nowhere. A job past the way (the check-in) ends its
+ * location sharing at once, and the list never shows the job as it was before the answer (#352).
  */
 function applyJob(client: QueryClient, job: ProJob, generation: number): void {
   if (!isCurrentGeneration(generation)) return;
+  void followJob(job);
   client.setQueryData(proJobQueryKey(job.id, generation), job);
-  void client.invalidateQueries({ queryKey: proJobsQueryKey(generation) });
+  const listKey = proJobsQueryKey(generation);
+  const list = client.getQueryState<ProJob[]>(listKey);
+  if (list && list.data === undefined && list.fetchStatus === "fetching") {
+    // The list's first read is still under way: it started before this answer, so its jobs must
+    // never land over it (nor stop the sharing the answer allows). TanStack would join it on an
+    // invalidation (it cancels a refetch only once there is data), so it is cancelled first and
+    // the list asked again.
+    void client
+      .cancelQueries({ queryKey: listKey })
+      .then(() => client.invalidateQueries({ queryKey: listKey }));
+    return;
+  }
+  // The list holds the answer too until it is in again, as the API would list it (active jobs,
+  // soonest first): nothing reads the job as it was.
+  client.setQueryData<ProJob[]>(listKey, (jobs) =>
+    jobs === undefined
+      ? undefined
+      : soonestFirst([
+          ...jobs.filter(({ id }) => id !== job.id),
+          ...(isActiveJob(job) ? [job] : []),
+        ]),
+  );
+  void client.invalidateQueries({ queryKey: listKey });
 }
 
 /** The job and the list asked again: an action found the job moved on (409) or gone (404). */

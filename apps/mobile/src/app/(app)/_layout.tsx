@@ -4,6 +4,7 @@ import { View } from "react-native";
 import { useSession } from "@/api";
 import { PanelHandoffProvider } from "@/features/auth";
 import { useOpenPushTaps, usePushRegistration } from "@/features/notifications";
+import { LocationSharing, sharingConfig } from "@/features/pro-jobs/sharing";
 // The options alone: the request barrel registers its draft with the session at import.
 import { requestFlowOptions } from "@/features/request/rise";
 
@@ -25,7 +26,8 @@ export const unstable_settings = { anchor: "(tabs)" };
  * into the flow's first step); the hand-off lives as long as the group, like `(auth)`'s.
  *
  * A tapped push opens here, once the signed-in app is up (`PushTaps`), and this device's push
- * token is kept registered for the signed-in account (`PushRegistration`, #334).
+ * token is kept registered for the signed-in account (`PushRegistration`, #334). A pro's location
+ * is shared while on the way to a job, when the build turns sharing on (`LocationSharing`, #352).
  */
 export default function AppLayout() {
   const { status } = useSession();
@@ -34,6 +36,7 @@ export default function AppLayout() {
     <PanelHandoffProvider>
       <PushTaps />
       <PushRegistration />
+      {sharingConfig.enabled ? <LocationSharing /> : null}
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="request/(flow)" options={requestFlowOptions} />
       </Stack>

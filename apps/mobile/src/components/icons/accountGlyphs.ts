@@ -30,6 +30,16 @@ export const ACCOUNT_GLYPHS = {
       "M12 7.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5",
     ],
   },
+  // A bank card with its stripe: the saved payment methods.
+  paymentMethods: {
+    accent:
+      "M5.5 5.5h13A2.5 2.5 0 0 1 21 8v8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16V8a2.5 2.5 0 0 1 2.5-2.5Z",
+    strokes: [
+      "M5.5 5.5h13A2.5 2.5 0 0 1 21 8v8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16V8a2.5 2.5 0 0 1 2.5-2.5Z",
+      "M3 10h18",
+      "M6.5 15h4",
+    ],
+  },
   // A round speech bubble asking a question.
   help: {
     accent: "M12 3.5a8.5 8.5 0 0 0-7.4 12.7L3.5 20.5l4.3-1.1A8.5 8.5 0 1 0 12 3.5Z",

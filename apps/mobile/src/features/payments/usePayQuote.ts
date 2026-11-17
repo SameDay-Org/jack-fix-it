@@ -19,6 +19,7 @@ import { quotesQueryKey } from "@/features/quotes/useRequestQuotes";
 
 import { openPaymentSheet, type SheetResult } from "./paymentSheet";
 import { rememberSummary, startConfirming } from "./paymentStore";
+import { claimSheet } from "./sheetLock";
 import { jobQueryKey } from "./useRequestJob";
 
 /**
@@ -47,10 +48,6 @@ const SHEET_FAILURES: Record<Extract<SheetResult, { kind: "failed" }>["reason"],
   timeout: "sheetTimeout",
   unavailable: "sheetUnavailable",
 };
-
-// Stripe shows one sheet at a time, whichever card or flow asks: a second ask while one is being
-// prepared or shown is ignored.
-let sheetInUse = false;
 
 function refreshQuotes(queryClient: QueryClient, requestId: string): void {
   void queryClient.invalidateQueries({ queryKey: quotesQueryKey(requestId) });
@@ -121,8 +118,10 @@ export function usePayQuote(requestId: string, quoteId: string) {
   /** Starts a payment; `generation` pins it to the session an earlier step started in (accept). */
   const pay = useCallback(
     async (generation: number = sessionGeneration()) => {
-      if (sheetInUse || !isCurrentGeneration(generation)) return;
-      sheetInUse = true;
+      if (!isCurrentGeneration(generation)) return;
+      // One sheet at a time, whichever card or flow asks: a second ask is ignored.
+      const release = claimSheet();
+      if (!release) return;
       show({ busy: true, failure: null });
       const current = () => isCurrentGeneration(generation);
       const controller = new AbortController();
@@ -162,7 +161,7 @@ export function usePayQuote(requestId: string, quoteId: string) {
         }
       } finally {
         if (leaving.current === controller) leaving.current = null;
-        sheetInUse = false;
+        release();
         if (!current()) show(IDLE);
       }
     },
