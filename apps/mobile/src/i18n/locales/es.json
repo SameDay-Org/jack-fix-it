@@ -578,7 +578,7 @@
     "camera": "Jack usa la cámara para tomar tu foto de perfil y fotos de lo que hay que arreglar.",
     "photos": "Jack usa las fotos que eliges para mostrar lo que hay que arreglar.",
     "motion": "Jack usa el movimiento del teléfono para inclinar tu tarjeta de identificación al moverlo.",
-    "location": "Jack Fix It usa tu ubicación cuando registras tu llegada a un trabajo, para que el cliente sepa que llegaste."
+    "location": "Jack Fix It usa tu ubicación mientras vas en camino a un trabajo, para que el cliente vea que vas llegando, y cuando registras tu llegada, para que sepa que llegaste."
   },
   "quotes": {
     "title": "Tus presupuestos",
@@ -996,6 +996,26 @@
       "photosRequired": "Primero agrega al menos una foto de después.",
       "photosFailed": "No pudimos preparar tus fotos de después. Agrega otra.",
       "savePending": "Primero guarda tus fotos."
+    },
+    "sharing": {
+      "prompt": {
+        "title": "Comparte tu ubicación en camino",
+        "body_one": "Mientras vas en camino, Jack Fix It comparte tu ubicación con {{name}} cada {{count}} segundo, para que vea que vas llegando.",
+        "body_other": "Mientras vas en camino, Jack Fix It comparte tu ubicación con {{name}} cada {{count}} segundos, para que vea que vas llegando.",
+        "stops": "Se detiene en cuanto registras tu llegada o si se cancela el trabajo. Jack Fix It no guarda un historial de dónde has estado.",
+        "continue": "Continuar",
+        "notNow": "Ahora no",
+        "settings": "Abrir Configuración",
+        "blocked": "La ubicación está desactivada para Jack Fix It. Actívala en Configuración, luego vuelve aquí y toca Continuar."
+      },
+      "note": {
+        "message": "Tu ubicación no se comparte con {{name}} mientras vas en camino.",
+        "share": "Compartir ubicación"
+      },
+      "notification": {
+        "title": "Compartiendo tu ubicación",
+        "body": "Solo mientras vas en camino. Se detiene al registrar tu llegada."
+      }
     }
   },
   "quoteForm": {

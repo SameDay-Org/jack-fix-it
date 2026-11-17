@@ -578,7 +578,7 @@
     "camera": "Jack uses the camera to take your profile photo and photos of what needs fixing.",
     "photos": "Jack uses the photos you choose to show what needs fixing.",
     "motion": "Jack uses your phone's motion to tilt your ID card as you move it.",
-    "location": "Jack Fix It uses your location when you check in at a job, so the customer knows you arrived."
+    "location": "Jack Fix It uses your location while you're on the way to a job, so the customer can see you coming, and when you check in, so they know you've arrived."
   },
   "quotes": {
     "title": "Your quotes",
@@ -996,6 +996,26 @@
       "photosRequired": "Add at least one after photo first.",
       "photosFailed": "We couldn't prepare your after photos. Add another one.",
       "savePending": "Save your photos first."
+    },
+    "sharing": {
+      "prompt": {
+        "title": "Share your location on the way",
+        "body_one": "While you're on the way, Jack Fix It shares your location with {{name}} every {{count}} second, so they can see you coming.",
+        "body_other": "While you're on the way, Jack Fix It shares your location with {{name}} every {{count}} seconds, so they can see you coming.",
+        "stops": "It stops as soon as you check in, or if the job is cancelled. Jack Fix It doesn't keep a history of where you've been.",
+        "continue": "Continue",
+        "notNow": "Not now",
+        "settings": "Open Settings",
+        "blocked": "Location is off for Jack Fix It. Turn it on in Settings, then come back here and tap Continue."
+      },
+      "note": {
+        "message": "Your location isn't shared with {{name}} on the way.",
+        "share": "Share location"
+      },
+      "notification": {
+        "title": "Sharing your location",
+        "body": "Only while you're on the way. It stops when you check in."
+      }
     }
   },
   "quoteForm": {
