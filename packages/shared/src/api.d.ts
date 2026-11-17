@@ -485,6 +485,96 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/pros": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List pros by verification status (staff)
+         * @description The pros in one verification status (pending when left out), newest profile first, for
+         *     the BDC and admins: first name and last initial, categories, how many ZIPs they serve and
+         *     their documents by status, plus how many pros each status has. Never an email, a phone, a
+         *     last name or an address.
+         */
+        get: operations["staff_list_pros_v1_admin_pros_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/pros/{pro_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a pro for review (staff)
+         * @description One pro: the profile with the legal name (to match the ID document), the documents with
+         *     short-lived presigned URLs, the types required and missing, and what an approval still
+         *     needs. Every read is recorded in the audit log with the staff member who made it.
+         */
+        get: operations["staff_get_pro_v1_admin_pros__pro_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/pros/{pro_id}/documents/{document_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve or reject a pro's document (staff)
+         * @description Reviews a pending document. A rejection needs a reason, which the pro reads. The same
+         *     decision again answers the document as first decided and changes nothing. Each review is
+         *     recorded in the audit log with the staff member who made it.
+         */
+        post: operations["staff_review_document_v1_admin_pros__pro_id__documents__document_id__review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/pros/{pro_id}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve or reject a pro (staff)
+         * @description Approves or rejects the profile. Only an approved pro (with payouts enabled) receives
+         *     requests. A rejection needs a reason, which the pro reads in GET /v1/pros/me; a rejected
+         *     pro can be approved later. The same decision again changes nothing. Each decision is
+         *     recorded in the audit log with the staff member who made it.
+         */
+        post: operations["staff_decide_pro_v1_admin_pros__pro_id__decision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pros/me/payouts/onboarding-link": {
         parameters: {
             query?: never;
@@ -1402,6 +1492,114 @@ export interface paths {
         patch: operations["staff_set_ticket_status_v1_admin_support_tickets__ticket_id__patch"];
         trace?: never;
     };
+    "/v1/admin/requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The operations queue (staff)
+         * @description The requests for the BDC and admins. Each is in one bucket, by precedence: problems,
+         *     urgent, new, waiting_customer, waiting_pro, quote_ready, scheduled_today. Inside a bucket
+         *     the request waiting longest comes first; `all` lists every request, newest first. Never a
+         *     phone, an email, a last name or a street.
+         */
+        get: operations["staff_list_requests_v1_admin_requests_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/requests/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * How many requests each bucket holds (staff)
+         * @description The count of each bucket and of every request, in one query: light enough to poll.
+         */
+        get: operations["staff_requests_summary_v1_admin_requests_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A request's card (staff)
+         * @description One request for the BDC: the customer's name, phone, email and address, what was
+         *     asked, the privacy-safe media, the quotes, the job and its history. Every read is recorded
+         *     in the audit log with the staff member who made it.
+         */
+        get: operations["staff_get_request_v1_admin_requests__request_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/requests/{request_id}/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take a request (staff)
+         * @description Assigns the request to the caller when nobody holds it. The caller's own claim again
+         *     changes nothing. Taking a request is not the first contact: first_contact_at stays as it
+         *     is. Recorded in the audit log.
+         */
+        post: operations["staff_claim_request_v1_admin_requests__request_id__claim_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/requests/{request_id}/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Let go of a request (staff)
+         * @description Unassigns a request the caller holds; an admin may release anyone's. Releasing a
+         *     request nobody holds changes nothing. Recorded in the audit log.
+         */
+        post: operations["staff_release_request_v1_admin_requests__request_id__release_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/jobs/{job_id}/reviews": {
         parameters: {
             query?: never;
@@ -1516,6 +1714,22 @@ export interface components {
             /** Zip Code */
             zip_code: string;
         };
+        /** ApprovalBlocker */
+        ApprovalBlocker: {
+            kind: components["schemas"]["ApprovalBlockerKind"];
+            /** @description Set for the two document kinds. */
+            doc_type: components["schemas"]["ProDocumentType"] | null;
+        };
+        /**
+         * ApprovalBlockerKind
+         * @enum {string}
+         */
+        ApprovalBlockerKind: "document_missing" | "document_expired" | "no_category" | "no_service_area";
+        /**
+         * AssignedFilter
+         * @enum {string}
+         */
+        AssignedFilter: "me" | "unassigned" | "any";
         /** AuthResponse */
         AuthResponse: {
             user: components["schemas"]["UserOut"];
@@ -1566,6 +1780,129 @@ export interface components {
              * @enum {string}
              */
             type: "boolean";
+        };
+        /**
+         * BucketFilter
+         * @description The list's `bucket`: one of the queue's buckets, or every request.
+         * @enum {string}
+         */
+        BucketFilter: "problems" | "urgent" | "new" | "waiting_customer" | "waiting_pro" | "quote_ready" | "scheduled_today" | "all";
+        /**
+         * CardCustomer
+         * @description Who to call. PII: the card alone carries it.
+         */
+        CardCustomer: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** First Name */
+            first_name: string | null;
+            /** Last Name */
+            last_name: string | null;
+            /**
+             * Phone
+             * @description E.164, when the account has one.
+             */
+            phone: string | null;
+            /** Email */
+            email: string;
+            /**
+             * Language
+             * @description The language the request was written in, e.g. en or es.
+             */
+            language: string;
+        };
+        /** CardJob */
+        CardJob: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            status: components["schemas"]["JobStatus"];
+            /**
+             * Scheduled Start At
+             * @description The accepted quote's start.
+             */
+            scheduled_start_at: string | null;
+            /** Started At */
+            started_at: string | null;
+            /** Completed At */
+            completed_at: string | null;
+            /** Confirmed At */
+            confirmed_at: string | null;
+            /**
+             * Events
+             * @description The job's history, oldest first.
+             */
+            events: components["schemas"]["CardJobEvent"][];
+        };
+        /** CardJobEvent */
+        CardJobEvent: {
+            /** Type */
+            type: string;
+            from_status: components["schemas"]["JobStatus"] | null;
+            to_status: components["schemas"]["JobStatus"] | null;
+            /**
+             * By System
+             * @description True for a change no person made (e.g. auto-confirm).
+             */
+            by_system: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * CardMedia
+         * @description A photo or video's privacy-safe copy: no location or other metadata.
+         */
+        CardMedia: {
+            kind: components["schemas"]["RequestMediaKind"];
+            /** Content Type */
+            content_type: string;
+            /**
+             * Url
+             * @description Presigned GET URL; short-lived.
+             */
+            url: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
+        /** CardQuote */
+        CardQuote: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Pro Name
+             * @description The pro's first name and last initial ("María P.").
+             */
+            pro_name: string | null;
+            /**
+             * Amount Cents
+             * @description The quote's price in USD cents.
+             */
+            amount_cents: number;
+            status: components["schemas"]["QuoteStatus"];
+            /**
+             * Proposed Start At
+             * Format: date-time
+             */
+            proposed_start_at: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** CategoryOut */
         CategoryOut: {
@@ -1807,6 +2144,18 @@ export interface components {
             state: string;
             /** Zips */
             zips: components["schemas"]["ZipOut"][];
+        };
+        /**
+         * ClaimOut
+         * @description Who holds the request after a claim or a release.
+         */
+        ClaimOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            assigned_agent: components["schemas"]["QueueAgent"] | null;
         };
         /**
          * CustomerJob
@@ -3017,6 +3366,11 @@ export interface components {
             years_of_experience: number | null;
             photo: components["schemas"]["PhotoOut"] | null;
             verification_status: components["schemas"]["ProVerificationStatus"];
+            /**
+             * Rejection Reason
+             * @description Why the team rejected the profile, contact details masked; null unless rejected.
+             */
+            rejection_reason: string | null;
             /** Payouts Enabled */
             payouts_enabled: boolean;
             /** Categories */
@@ -3109,10 +3463,144 @@ export interface components {
             member_since: string;
         };
         /**
+         * ProReviewIn
+         * @description Staff's decision on a document or on a profile.
+         */
+        ProReviewIn: {
+            decision: components["schemas"]["ReviewDecision"];
+            /**
+             * Reason
+             * @description Why, as plain text the pro reads (contact details are masked): required with rejected, refused with approved.
+             */
+            reason?: string | null;
+        };
+        /**
          * ProVerificationStatus
          * @enum {string}
          */
         ProVerificationStatus: "pending" | "approved" | "rejected";
+        /** QueueAgent */
+        QueueAgent: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Name
+             * @description The staff member's first name; null without one.
+             */
+            name: string | null;
+        };
+        /**
+         * QueueBucket
+         * @description The one bucket a request is in, by this precedence (the first that matches). `other`:
+         *     none of them (accepted and unpaid, a job on another day, finished, cancelled, expired).
+         * @enum {string}
+         */
+        QueueBucket: "problems" | "urgent" | "new" | "waiting_customer" | "waiting_pro" | "quote_ready" | "scheduled_today" | "other";
+        /**
+         * QueueItem
+         * @description A request in the queue: no phone, email, last name or street.
+         */
+        QueueItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Public Code
+             * @description The code the customer also sees, e.g. JF-000124.
+             */
+            public_code: string;
+            /**
+             * Customer Name
+             * @description First name and last initial ("Ana P."); null when a name is missing or shows a contact detail.
+             */
+            customer_name: string | null;
+            /** @description Null until the request is classified. */
+            category: components["schemas"]["CategorySummary"] | null;
+            /**
+             * Zip Code
+             * @description The 5-digit ZIP of the address.
+             */
+            zip_code: string;
+            status: components["schemas"]["RequestStatus"];
+            /**
+             * Customer Status
+             * @description The glossary i18n key the customer sees.
+             */
+            customer_status: string;
+            origin: components["schemas"]["RequestOrigin"];
+            /** Urgency */
+            urgency: string | null;
+            /** @description The one bucket the request is in, by precedence: problems, urgent, new, waiting_customer, waiting_pro, quote_ready, scheduled_today; other when none applies. */
+            bucket: components["schemas"]["QueueBucket"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * First Contact Due At
+             * Format: date-time
+             * @description created_at plus the first-contact time (OPS_FIRST_CONTACT_SLA_MINUTES).
+             */
+            first_contact_due_at: string;
+            /**
+             * First Contact At
+             * @description Null until the BDC made contact.
+             */
+            first_contact_at: string | null;
+            /** @description Who holds the request, if anyone. */
+            assigned_agent: components["schemas"]["QueueAgent"] | null;
+            /**
+             * Media Count
+             * @description Photos and videos attached.
+             */
+            media_count: number;
+        };
+        /** QueuePage */
+        QueuePage: {
+            /**
+             * Items
+             * @description Inside a bucket: the request waiting longest first. With bucket=all: the newest first.
+             */
+            items: components["schemas"]["QueueItem"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor` for the next page.
+             */
+            next_cursor: string | null;
+        };
+        /**
+         * QueueSummary
+         * @description How many requests each bucket holds now, and every request under `all`.
+         */
+        QueueSummary: {
+            /** Problems */
+            problems: number;
+            /** Urgent */
+            urgent: number;
+            /** New */
+            new: number;
+            /** Waiting Customer */
+            waiting_customer: number;
+            /** Waiting Pro */
+            waiting_pro: number;
+            /** Quote Ready */
+            quote_ready: number;
+            /** Scheduled Today */
+            scheduled_today: number;
+            /** All */
+            all: number;
+            /**
+             * First Contact Sla Minutes
+             * @description The first-contact time in use.
+             */
+            first_contact_sla_minutes: number;
+        };
         /**
          * QuoteCreate
          * @description A pro's fixed-price quote (#50). The server sets the status, the expiry, the pro and the
@@ -3316,6 +3804,109 @@ export interface components {
              */
             last_name?: string | null;
         };
+        /**
+         * RequestCard
+         * @description One request for the BDC: everything in the list, plus who to call and where, what was
+         *     asked, the media, the quotes and the job. Reading it is recorded in the audit log.
+         */
+        RequestCard: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Public Code
+             * @description The code the customer also sees, e.g. JF-000124.
+             */
+            public_code: string;
+            /**
+             * Customer Name
+             * @description First name and last initial ("Ana P."); null when a name is missing or shows a contact detail.
+             */
+            customer_name: string | null;
+            /** @description Null until the request is classified. */
+            category: components["schemas"]["CategorySummary"] | null;
+            /**
+             * Zip Code
+             * @description The 5-digit ZIP of the address.
+             */
+            zip_code: string;
+            status: components["schemas"]["RequestStatus"];
+            /**
+             * Customer Status
+             * @description The glossary i18n key the customer sees.
+             */
+            customer_status: string;
+            origin: components["schemas"]["RequestOrigin"];
+            /** Urgency */
+            urgency: string | null;
+            /** @description The one bucket the request is in, by precedence: problems, urgent, new, waiting_customer, waiting_pro, quote_ready, scheduled_today; other when none applies. */
+            bucket: components["schemas"]["QueueBucket"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * First Contact Due At
+             * Format: date-time
+             * @description created_at plus the first-contact time (OPS_FIRST_CONTACT_SLA_MINUTES).
+             */
+            first_contact_due_at: string;
+            /**
+             * First Contact At
+             * @description Null until the BDC made contact.
+             */
+            first_contact_at: string | null;
+            /** @description Who holds the request, if anyone. */
+            assigned_agent: components["schemas"]["QueueAgent"] | null;
+            /**
+             * Media Count
+             * @description Photos and videos attached.
+             */
+            media_count: number;
+            customer: components["schemas"]["CardCustomer"];
+            /** @description As the customer typed it. */
+            address: components["schemas"]["AddressOut"];
+            /**
+             * Description
+             * @description As the customer typed it: it may hold contacts.
+             */
+            description: string;
+            /** Intake Answers */
+            intake_answers: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Preferred Date */
+            preferred_date: string | null;
+            preferred_period: components["schemas"]["PreferredPeriod"] | null;
+            /** Preferred Contact */
+            preferred_contact: string | null;
+            /** Media */
+            media: components["schemas"]["CardMedia"][];
+            /**
+             * Media Pending
+             * @description Copies still being made; not shown yet.
+             */
+            media_pending: number;
+            /**
+             * Quotes
+             * @description Newest first.
+             */
+            quotes: components["schemas"]["CardQuote"][];
+            /** @description Null until the request is paid. */
+            job: components["schemas"]["CardJob"] | null;
+            /** Next Action */
+            next_action: string | null;
+            /** Last Contact At */
+            last_contact_at: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
         /** RequestCreate */
         RequestCreate: {
             /** Description */
@@ -3349,6 +3940,11 @@ export interface components {
          * @enum {string}
          */
         RequestMediaKind: "photo" | "video";
+        /**
+         * RequestOrigin
+         * @enum {string}
+         */
+        RequestOrigin: "app" | "web" | "phone";
         /** RequestOut */
         RequestOut: {
             /**
@@ -3489,6 +4085,11 @@ export interface components {
              */
             comment_redacted: boolean;
         };
+        /**
+         * ReviewDecision
+         * @enum {string}
+         */
+        ReviewDecision: "approved" | "rejected";
         /** ReviewIn */
         ReviewIn: {
             /**
@@ -3810,6 +4411,223 @@ export interface components {
              * @description Pass as `cursor` for older messages.
              */
             next_cursor: string | null;
+        };
+        /**
+         * StaffDocumentCounts
+         * @description A pro's documents by status, superseded ones left out.
+         */
+        StaffDocumentCounts: {
+            /** Pending */
+            pending: number;
+            /** Approved */
+            approved: number;
+            /** Rejected */
+            rejected: number;
+        };
+        /** StaffDocumentOut */
+        StaffDocumentOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            doc_type: components["schemas"]["ProDocumentType"];
+            status: components["schemas"]["ProDocumentStatus"];
+            /** Rejection Reason */
+            rejection_reason: string | null;
+            /** Expires On */
+            expires_on: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Reviewed At */
+            reviewed_at: string | null;
+            /**
+             * Url
+             * @description Presigned GET URL of the file; short-lived.
+             */
+            url: string;
+            /**
+             * Expires At
+             * Format: date-time
+             * @description When the URL stops working.
+             */
+            expires_at: string;
+        };
+        /**
+         * StaffDocumentReviewOut
+         * @description A document as a review answers it: never its file.
+         */
+        StaffDocumentReviewOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            doc_type: components["schemas"]["ProDocumentType"];
+            status: components["schemas"]["ProDocumentStatus"];
+            /** Rejection Reason */
+            rejection_reason: string | null;
+            /** Expires On */
+            expires_on: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Reviewed At */
+            reviewed_at: string | null;
+        };
+        /**
+         * StaffProDecisionOut
+         * @description A profile as a decision answers it.
+         */
+        StaffProDecisionOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            verification_status: components["schemas"]["ProVerificationStatus"];
+            /** Rejection Reason */
+            rejection_reason: string | null;
+            /** Reviewed At */
+            reviewed_at: string | null;
+        };
+        /**
+         * StaffProItem
+         * @description A pro in the staff list: no email, phone, last name or address.
+         */
+        StaffProItem: {
+            /**
+             * Id
+             * Format: uuid
+             * @description The pro profile's id.
+             */
+            id: string;
+            /**
+             * Name
+             * @description First name and last initial ("María P."); null when a name is missing or shows a contact detail.
+             */
+            name: string | null;
+            verification_status: components["schemas"]["ProVerificationStatus"];
+            /** Payouts Enabled */
+            payouts_enabled: boolean;
+            /** Categories */
+            categories: components["schemas"]["CategorySummary"][];
+            /**
+             * Zip Count
+             * @description How many ZIPs the pro serves.
+             */
+            zip_count: number;
+            documents: components["schemas"]["StaffDocumentCounts"];
+            /**
+             * Submitted At
+             * @description When the oldest document still pending was submitted; null with none.
+             */
+            submitted_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** StaffProOut */
+        StaffProOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            verification_status: components["schemas"]["ProVerificationStatus"];
+            /** Rejection Reason */
+            rejection_reason: string | null;
+            /** Reviewed At */
+            reviewed_at: string | null;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /**
+             * Name
+             * @description First name and last initial ("María P.").
+             */
+            name: string | null;
+            /**
+             * Legal Name
+             * @description First and last name as on the account, to match the ID document; null when the account has neither. Only this detail carries it, never the list.
+             */
+            legal_name: string | null;
+            /** Payouts Enabled */
+            payouts_enabled: boolean;
+            /**
+             * Bio
+             * @description As the pro wrote it: it may hold contact details.
+             */
+            bio: string | null;
+            /** Years Of Experience */
+            years_of_experience: number | null;
+            photo: components["schemas"]["PhotoOut"] | null;
+            /** Categories */
+            categories: components["schemas"]["CategorySummary"][];
+            /** Service Areas */
+            service_areas: components["schemas"]["ServiceAreaOut"][];
+            /**
+             * Documents
+             * @description The latest document of each type, superseded ones left out.
+             */
+            documents: components["schemas"]["StaffDocumentOut"][];
+            /**
+             * History
+             * @description Older reviewed (approved or rejected) documents, newest first.
+             */
+            history: components["schemas"]["StaffDocumentOut"][];
+            /** Required Types */
+            required_types: components["schemas"]["ProDocumentType"][];
+            /**
+             * Missing Types
+             * @description Required types with no pending or approved document.
+             */
+            missing_types: components["schemas"]["ProDocumentType"][];
+            /**
+             * Approval Blockers
+             * @description What an approval still needs; empty when the pro can be approved.
+             */
+            approval_blockers: components["schemas"]["ApprovalBlocker"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** StaffProPage */
+        StaffProPage: {
+            /**
+             * Items
+             * @description Newest profile first.
+             */
+            items: components["schemas"]["StaffProItem"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor` for older profiles.
+             */
+            next_cursor: string | null;
+            counts: components["schemas"]["StaffProStatusCounts"];
+        };
+        /**
+         * StaffProStatusCounts
+         * @description Every pro profile by verification status.
+         */
+        StaffProStatusCounts: {
+            /** Pending */
+            pending: number;
+            /** Approved */
+            approved: number;
+            /** Rejected */
+            rejected: number;
         };
         /** StaffSupportTicketItem */
         StaffSupportTicketItem: {
@@ -5447,6 +6265,251 @@ export interface operations {
                 };
             };
             /** @description invalid_media: file_key is not the caller's own pro_document upload, or is already a document; validation_error: an unknown type, an expiry date in the past, or a field the review sets (status, rejection_reason, reviewed_by...). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_list_pros_v1_admin_pros_get: {
+        parameters: {
+            query?: {
+                /** @description Only pros in this verification status. */
+                status?: components["schemas"]["ProVerificationStatus"];
+                /** @description Page size; capped. */
+                limit?: number | null;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffProPage"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: an unknown status, a bad cursor or limit. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_get_pro_v1_admin_pros__pro_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pro_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffProOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description pro_not_found: no pro profile with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a pro_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_review_document_v1_admin_pros__pro_id__documents__document_id__review_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pro_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProReviewIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffDocumentReviewOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description document_not_found: this pro has no document with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description document_not_pending: the document has another decision already, or was replaced by a newer submission. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: an unknown decision, rejected without a reason, approved with one, a reason empty, blank or longer than 500 characters, another field, or an id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_decide_pro_v1_admin_pros__pro_id__decision_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pro_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProReviewIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffProDecisionOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description pro_not_found: no pro profile with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description pro_not_approvable: an approval while a required document type has no approved, non-expired document, or the pro has no category or no service area; the message lists what is missing. validation_error: an unknown decision, rejected without a reason, approved with one, a reason empty, blank or longer than 500 characters, another field, or an id that is not a UUID. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -8409,6 +9472,307 @@ export interface operations {
                 };
             };
             /** @description validation_error: an unknown status, a field other than status, or a ticket_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_list_requests_v1_admin_requests_get: {
+        parameters: {
+            query?: {
+                /** @description One bucket of the queue, or every request. */
+                bucket?: components["schemas"]["BucketFilter"];
+                /** @description Only requests in this status. */
+                status?: components["schemas"]["RequestStatus"] | null;
+                category_id?: string | null;
+                /** @description A 5-digit ZIP. */
+                zip?: string | null;
+                /** @description Held by the caller, by nobody, or by anyone. */
+                assigned?: components["schemas"]["AssignedFilter"];
+                /** @description Part of a request code (JF-000124). Nothing else is searched. */
+                q?: string | null;
+                /** @description Page size; capped. */
+                limit?: number | null;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueuePage"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: an unknown bucket, status or assigned, a zip that is not 5 digits, a q that is not part of a request code, a bad cursor or limit. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_requests_summary_v1_admin_requests_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueueSummary"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_get_request_v1_admin_requests__request_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestCard"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a request_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_claim_request_v1_admin_requests__request_id__claim_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaimOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_held: another team member holds it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a request_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_release_request_v1_admin_requests__request_id__release_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaimOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_held: another team member holds it (an admin may release it). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a request_id that is not a UUID. */
             422: {
                 headers: {
                     [name: string]: unknown;

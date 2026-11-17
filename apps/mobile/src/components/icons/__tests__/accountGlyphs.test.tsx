@@ -8,8 +8,17 @@ const HIDDEN = { includeHiddenElements: true };
 const NAMES = Object.keys(ACCOUNT_GLYPHS) as AccountGlyphName[];
 
 describe("ACCOUNT_GLYPHS", () => {
-  it("has the Account menu's six glyphs", () => {
-    expect(NAMES).toEqual(["settings", "addresses", "help", "legal", "proProfile", "logOut"]);
+  it("has the Account menu's eight glyphs", () => {
+    expect(NAMES).toEqual([
+      "settings",
+      "addresses",
+      "paymentMethods",
+      "help",
+      "legal",
+      "proProfile",
+      "proDocuments",
+      "logOut",
+    ]);
   });
 
   it.each(NAMES)(

@@ -30,6 +30,16 @@ export const ACCOUNT_GLYPHS = {
       "M12 7.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5",
     ],
   },
+  // A bank card with its stripe: the saved payment methods.
+  paymentMethods: {
+    accent:
+      "M5.5 5.5h13A2.5 2.5 0 0 1 21 8v8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16V8a2.5 2.5 0 0 1 2.5-2.5Z",
+    strokes: [
+      "M5.5 5.5h13A2.5 2.5 0 0 1 21 8v8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16V8a2.5 2.5 0 0 1 2.5-2.5Z",
+      "M3 10h18",
+      "M6.5 15h4",
+    ],
+  },
   // A round speech bubble asking a question.
   help: {
     accent: "M12 3.5a8.5 8.5 0 0 0-7.4 12.7L3.5 20.5l4.3-1.1A8.5 8.5 0 1 0 12 3.5Z",
@@ -58,6 +68,15 @@ export const ACCOUNT_GLYPHS = {
       "M6.5 4h11A1.5 1.5 0 0 1 19 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 18.5v-13A1.5 1.5 0 0 1 6.5 4Z",
       "M12 8a2 2 0 1 0 0 4a2 2 0 1 0 0-4",
       "M8.5 16.5c.5-1.6 1.8-2.5 3.5-2.5s3 .9 3.5 2.5",
+    ],
+  },
+  // A page with a folded corner and a check mark on it: the pro's verification documents.
+  proDocuments: {
+    accent: "M7 3.5h7l4 4v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1Z",
+    strokes: [
+      "M7 3.5h7l4 4v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1Z",
+      "M14 3.5v4h4",
+      "M9 14l2 2 4-4.5",
     ],
   },
   // An open door with an arrow leaving through it.

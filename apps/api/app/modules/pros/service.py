@@ -353,6 +353,7 @@ class ProProfileService:
             years_of_experience=profile.years_of_experience,
             photo=photo,
             verification_status=profile.verification_status,
+            rejection_reason=profile.rejection_reason,
             payouts_enabled=profile.payouts_enabled,
             categories=await self._categories.summaries(
                 await self._profiles.category_ids(profile.id)

@@ -161,6 +161,7 @@
       "addressesNone": "Ninguna guardada todavía",
       "addressesCount_one": "{{count}} guardada",
       "addressesCount_other": "{{count}} guardadas",
+      "paymentMethods": "Métodos de pago",
       "help": "Ayuda",
       "legal": "Legal",
       "logOut": "Cerrar sesión"
@@ -398,6 +399,106 @@
       }
     }
   },
+  "paymentMethods": {
+    "title": "Métodos de pago",
+    "support": "Toca una tarjeta para hacerla predeterminada o eliminarla.",
+    "emptySupport": "Aún no has guardado tarjetas.",
+    "note": "Los datos de la tarjeta van directo a Stripe. Esta app solo recibe la marca, los últimos cuatro dígitos y la fecha de vencimiento.",
+    "default": "Predeterminada",
+    "expires": "Vence {{expiry}}",
+    "seeAll": "Ver todas",
+    "showLess": "Ver menos",
+    "retry": "Reintentar",
+    "refreshFailed": "No pudimos actualizar tus tarjetas. Lo que ves puede no estar al día.",
+    "brand": {
+      "visa": "Visa",
+      "mastercard": "Mastercard",
+      "amex": "American Express",
+      "discover": "Discover",
+      "generic": "Tarjeta"
+    },
+    "spoken": {
+      "card": "{{brand}} terminada en {{last4}}, vence {{month}} {{year}}",
+      "default": "predeterminada",
+      "short": "{{brand}} terminada en {{last4}}"
+    },
+    "pocket": {
+      "defaultSpoken": "Tarjeta predeterminada: {{card}}",
+      "none": "Sin tarjeta predeterminada",
+      "noneHint": "Abre una tarjeta para hacerla predeterminada.",
+      "updating": "Actualizando tu billetera…",
+      "stale": "No pudimos revisar tu tarjeta predeterminada",
+      "add": "Agregar tarjeta",
+      "addHint": "Abre el formulario seguro de Stripe."
+    },
+    "strip": {
+      "hint": "Abre la tarjeta."
+    },
+    "loadFailed": {
+      "generic": "No pudimos cargar tus tarjetas.",
+      "offline": "No tienes conexión. Conéctate para ver tus tarjetas.",
+      "unavailable": "Tus tarjetas no están disponibles ahora. Inténtalo de nuevo en un momento."
+    },
+    "add": {
+      "label": "Agregar tarjeta",
+      "saved": "Tarjeta guardada.",
+      "savedNotDefault": "Tarjeta guardada. No pudimos hacerla predeterminada: abre la tarjeta para intentarlo de nuevo.",
+      "failure": {
+        "offline": {
+          "title": "Sin conexión",
+          "body": "Revisa tu internet e inténtalo de nuevo."
+        },
+        "unavailable": {
+          "title": "No se pueden agregar tarjetas ahora",
+          "body": "No se guardó nada. Inténtalo de nuevo en un momento."
+        },
+        "rateLimited": {
+          "title": "Son muchos intentos seguidos",
+          "body": "No se guardó nada. Inténtalo de nuevo en un momento."
+        },
+        "generic": {
+          "title": "No pudimos empezar a agregar la tarjeta",
+          "body": "No se guardó nada. Inténtalo de nuevo."
+        },
+        "sheetFailed": {
+          "title": "La tarjeta no se guardó",
+          "body": "Inténtalo de nuevo o usa otra tarjeta."
+        },
+        "sheetTimeout": {
+          "title": "Guardar la tarjeta tardó demasiado",
+          "body": "Puede que se haya guardado: revisa tus tarjetas antes de intentarlo de nuevo."
+        },
+        "sheetUnavailable": {
+          "title": "No se pudo abrir el formulario de la tarjeta",
+          "body": "No se guardó nada. Inténtalo de nuevo."
+        }
+      }
+    },
+    "card": {
+      "setDefault": "Usar por defecto",
+      "isDefault": "Esta es tu tarjeta predeterminada.",
+      "delete": "Eliminar tarjeta",
+      "deleteHint": "Pregunta antes de eliminar."
+    },
+    "delete": {
+      "title": "¿Eliminar {{card}}?",
+      "body": "Saldrá de tu billetera definitivamente.",
+      "bodyNextDefault": "Saldrá de tu billetera definitivamente. Otra tarjeta pasará a ser la predeterminada.",
+      "bodyMaybeNextDefault": "Saldrá de tu billetera definitivamente. Si es tu tarjeta predeterminada, otra pasará a serlo.",
+      "cancel": "Cancelar",
+      "confirm": "Eliminar"
+    },
+    "madeDefault": "{{card}} ahora es tu tarjeta predeterminada",
+    "deleted": "{{card}} eliminada",
+    "failed": {
+      "setDefault": "No pudimos hacer predeterminada {{card}}. Inténtalo de nuevo en un momento.",
+      "delete": "No pudimos eliminar {{card}}. Inténtalo de nuevo en un momento.",
+      "offline": "No pudimos confirmar ese cambio. Revisa tu conexión y vuelve a abrir tus tarjetas para ver cómo quedaron.",
+      "rateLimited": "Son muchos cambios seguidos. Inténtalo de nuevo en un momento.",
+      "unavailable": "No se pueden cambiar las tarjetas ahora. Inténtalo de nuevo en un momento.",
+      "gone": "Esa tarjeta ya no está en tu billetera."
+    }
+  },
   "phone": {
     "title": "Verifica tu teléfono",
     "subtitle": "Te enviaremos un código de {{length}} dígitos por SMS a este número.",
@@ -477,7 +578,7 @@
     "camera": "Jack usa la cámara para tomar tu foto de perfil y fotos de lo que hay que arreglar.",
     "photos": "Jack usa las fotos que eliges para mostrar lo que hay que arreglar.",
     "motion": "Jack usa el movimiento del teléfono para inclinar tu tarjeta de identificación al moverlo.",
-    "location": "Jack Fix It usa tu ubicación cuando registras tu llegada a un trabajo, para que el cliente sepa que llegaste."
+    "location": "Jack Fix It usa tu ubicación mientras vas en camino a un trabajo, para que el cliente vea que vas llegando, y cuando registras tu llegada, para que sepa que llegaste."
   },
   "quotes": {
     "title": "Tus presupuestos",
@@ -895,6 +996,26 @@
       "photosRequired": "Primero agrega al menos una foto de después.",
       "photosFailed": "No pudimos preparar tus fotos de después. Agrega otra.",
       "savePending": "Primero guarda tus fotos."
+    },
+    "sharing": {
+      "prompt": {
+        "title": "Comparte tu ubicación en camino",
+        "body_one": "Mientras vas en camino, Jack Fix It comparte tu ubicación con {{name}} cada {{count}} segundo, para que vea que vas llegando.",
+        "body_other": "Mientras vas en camino, Jack Fix It comparte tu ubicación con {{name}} cada {{count}} segundos, para que vea que vas llegando.",
+        "stops": "Se detiene en cuanto registras tu llegada o si se cancela el trabajo. Jack Fix It no guarda un historial de dónde has estado.",
+        "continue": "Continuar",
+        "notNow": "Ahora no",
+        "settings": "Abrir Configuración",
+        "blocked": "La ubicación está desactivada para Jack Fix It. Actívala en Configuración, luego vuelve aquí y toca Continuar."
+      },
+      "note": {
+        "message": "Tu ubicación no se comparte con {{name}} mientras vas en camino.",
+        "share": "Compartir ubicación"
+      },
+      "notification": {
+        "title": "Compartiendo tu ubicación",
+        "body": "Solo mientras vas en camino. Se detiene al registrar tu llegada."
+      }
     }
   },
   "quoteForm": {
@@ -1606,6 +1727,69 @@
       "clear": "Quitar",
       "selectCity": "Seleccionar todos los códigos postales de {{city}}",
       "clearCity": "Quitar todos los códigos postales de {{city}}"
+    }
+  },
+  "proDocuments": {
+    "menu": "Documentos",
+    "title": "Documentos de verificación",
+    "support": "Nuestro equipo los revisa antes de que empieces a recibir solicitudes.",
+    "loading": "Cargando tus documentos",
+    "loadFailed": "No pudimos cargar tus documentos",
+    "loadBody": "Inténtalo de nuevo en un momento.",
+    "offline": "No tienes conexión. Revisa tu conexión e inténtalo de nuevo.",
+    "refreshFailed": "No pudimos actualizar tus documentos.",
+    "retry": "Reintentar",
+    "row": "{{name}}: {{status}}",
+    "reason": "Motivo: {{reason}}",
+    "expires": "Vence el {{date}}",
+    "types": {
+      "id": "Identificación con foto",
+      "license": "Licencia",
+      "insurance": "Seguro"
+    },
+    "hints": {
+      "id": "Una foto de tu identificación.",
+      "license": "Una foto de tu licencia profesional.",
+      "insurance": "Una foto de tu comprobante de seguro."
+    },
+    "status": {
+      "missing": "Falta",
+      "pending": "En revisión",
+      "approved": "Aprobado",
+      "rejected": "Rechazado"
+    },
+    "rejected": {
+      "title": "Este documento fue rechazado",
+      "noReason": "Envía una foto nueva."
+    },
+    "pending": "Si envías una foto nueva, reemplaza la que está en revisión.",
+    "photo": {
+      "label": "Foto del documento",
+      "unavailable": "La foto del documento no se puede mostrar ahora",
+      "support": "Toma una foto clara del documento completo.",
+      "required": "Primero agrega una foto del documento.",
+      "ready": "Foto lista. Envíala para revisión.",
+      "uploading": "Subiendo la foto del documento",
+      "add": "Agregar foto",
+      "change": "Cambiar foto",
+      "retry": "Reintentar"
+    },
+    "submit": {
+      "send": "Enviar",
+      "replace": "Reemplazar",
+      "sent": "Documento enviado para revisión",
+      "check": "Revisa algunos campos.",
+      "expiry": "Fecha de vencimiento",
+      "expiryHint": "MM/DD/AAAA",
+      "expiryErrors": {
+        "invalid": "Escribe la fecha como MM/DD/AAAA.",
+        "past": "Escribe la fecha de hoy o una posterior."
+      },
+      "failed": {
+        "offline": "No tienes conexión. Revisa tu conexión e inténtalo de nuevo.",
+        "photo": "No pudimos usar esa foto. Elige otra.",
+        "generic": "No pudimos enviar este documento. Inténtalo de nuevo."
+      }
     }
   }
 }
