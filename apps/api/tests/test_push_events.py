@@ -72,6 +72,8 @@ CALLERS = (
         "booking_not_completed:{payment_id}",
         "/requests/{request_id}",
     ),
+    # Home: the pro's opportunities show there once payouts are on (#280).
+    Caller("push_payouts_enabled", "pro_user_id", "payouts_enabled:{stripe_event_id}", "/"),
 )
 
 
@@ -189,7 +191,8 @@ async def test_a_valid_push_queues_as_before_and_logs_nothing(
                 sent,
                 f"push.{kind(caller)}.title",
                 f"push.{kind(caller)}.body",
-                {"public_code": PUBLIC_CODE},
+                # The request's code, for the pushes about one (payouts_enabled names none).
+                {"public_code": PUBLIC_CODE} if "public_code" in values else {},
                 caller.link.format(**values),
             ),
         )
