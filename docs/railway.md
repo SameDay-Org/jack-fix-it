@@ -303,6 +303,15 @@ orphan sweep deletes only uploads older than the minimum age. Each service check
 (window at most half the minimum age) against its own values only, so set both as shared
 variables, or the sweep can delete a photo a job just attached (#298).
 
+The worker makes the transfers to the pros (D13.3, #68) with the same `STRIPE_SECRET_KEY` it
+cancels unpaid payments with: a task queued when a job is confirmed, and the
+`release_confirmed_jobs` cron for whatever is left, and the `check_transfer_reversals` cron
+reads made transfers again for a reversal (read-only, on the same settings). Its optional settings have defaults
+(`TRANSFER_RELEASE_SWEEP_MINUTES`, `TRANSFER_RELEASE_SWEEP_TIMEOUT_SECONDS`,
+`TRANSFER_RELEASE_BATCH_SIZE`, `TRANSFER_STUCK_PENDING_MINUTES`; `apps/api/.env.example`
+explains each). The Stripe webhook endpoint must also send `transfer.reversed`, beside the
+`payment_intent.*` events: the API marks a reversed transfer for staff.
+
 `apps/api/tests/test_railway_doc.py` fails when a setting that staging or production requires
 is missing from either table, so this list cannot fall behind `app/config.py`.
 
@@ -314,9 +323,12 @@ is missing from either table, so this list cannot fall behind `app/config.py`.
 | `API_INTERNAL_URL`          | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}`                                                           | no     | D3.1 (#22)  |
 | `REFRESH_TOKEN_TTL_SECONDS` | the api's refresh token lifetime (2592000 unless the api sets another); the panel's session cookie lasts as long | no     | D16.1 (#80) |
 | `API_TIMEOUT_MS`            | `5000`: the longest wait on the api for one call, body included                                                  | no     | D16.1 (#80) |
+| `SITE_URL`                  | optional: the site's public origin, e.g. `https://${{RAILWAY_PUBLIC_DOMAIN}}` or the custom domain               | no     | D17 (#403)  |
 
 The web server calls the API over the private network; browsers and the mobile app use the
-api's public domain.
+api's public domain. `SITE_URL` is read when the site is built: it gives the showcase page
+(`/app`, `/es/app`) its canonical, `hreflang` and Open Graph addresses, and without it the
+page carries none of them.
 
 ## Deploys
 

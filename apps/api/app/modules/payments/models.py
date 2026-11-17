@@ -98,3 +98,77 @@ class Payment(IdTimestampsMixin, Base):
     # searches for the intent instead of creating again. NULL before any attempt, or after
     # staff allowed a new one (scripts/resolve_payment_intent.py).
     payment_intent_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class TransferStatus(StrEnum):
+    """Where the pro's transfer for a job stands (D13.3, #68; internal: the pro sees `pending`
+    or `created`, staff see the row)."""
+
+    # No transfer yet: never attempted (a pro who cannot be paid out yet has
+    # last_error_code `payouts_not_enabled`), or an attempt is under way (requested_at set,
+    # no last_error_code).
+    PENDING = "pending"
+    # Stripe made the transfer: stripe_transfer_id is stored and the job is paid_out.
+    CREATED = "created"
+    # The last attempt ended with an error (last_error_code); it is tried again.
+    FAILED = "failed"
+    # Stripe reversed the transfer (transfer.reversed): staff look at the job.
+    REVERSED = "reversed"
+
+
+# Statuses of a transfer Stripe made: the row holds its id, and nothing creates another.
+MADE_STATUSES: Final = frozenset({TransferStatus.CREATED, TransferStatus.REVERSED})
+# last_error_code holds a Stripe error code, an exception's class name or one of ours: never
+# a message. Stripe's codes are short identifiers; anything longer is cut.
+TRANSFER_ERROR_CODE_LENGTH: Final = 64
+
+
+class Transfer(IdTimestampsMixin, Base):
+    """The transfer to the pro once their job is confirmed (D13.3, #68; ADR 0005): at most one
+    per job, which the unique job_id enforces. It is the guard against paying a job twice,
+    with the Stripe idempotency key derived from the job id.
+
+    The amount is the job's frozen pro_payout_cents, copied when the row is created: never
+    computed again from a rate. The row is committed before any Stripe call, and each attempt
+    (attempts, requested_at) is committed before its call too, so a lost answer leaves a row
+    that says a create may have landed: the next attempt looks the transfer up in Stripe before
+    it creates anything (transfers.py).
+    """
+
+    __tablename__ = "transfers"
+    __table_args__ = (
+        CheckConstraint("amount_cents > 0", name="amount_cents_positive"),
+        CheckConstraint("attempts >= 0", name="attempts_non_negative"),
+        # A transfer Stripe made holds its id.
+        CheckConstraint(
+            "status NOT IN ('created', 'reversed') OR stripe_transfer_id IS NOT NULL",
+            name="made_has_stripe_transfer_id",
+        ),
+    )
+
+    # One transfer per job: the double-pay guard.
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id"), unique=True)
+    payment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("payments.id"), index=True)
+    pro_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("pro_profiles.id"), index=True)
+    amount_cents: Mapped[int]
+    currency: Mapped[str] = mapped_column(String(3))
+    status: Mapped[TransferStatus] = mapped_column(
+        str_enum(TransferStatus, "transfer_status"),
+        server_default=TransferStatus.PENDING.value,
+        index=True,
+    )
+    # NULL until Stripe answered the create (or the lookup found it).
+    stripe_transfer_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    # `transfer:<job id>`: the same for every attempt of this job's transfer.
+    idempotency_key: Mapped[str] = mapped_column(String(255), unique=True)
+    # Stripe attempts started (each committed before its call).
+    attempts: Mapped[int] = mapped_column(server_default="0")
+    last_error_code: Mapped[str | None] = mapped_column(String(TRANSFER_ERROR_CODE_LENGTH))
+    # When the latest attempt started; NULL before the first.
+    requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Once Stripe made the transfer, it is read again by its stored id, for a reversal whose
+    # event came before the id was stored (transfers.py, step 4). When the latest such read
+    # started (the release's own, or the recovery cron's), and when one last succeeded: NULL
+    # until then, so the need for it outlives a failed or cancelled read (#416 r2).
+    reversal_check_tried_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reversal_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

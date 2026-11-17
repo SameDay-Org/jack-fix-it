@@ -379,3 +379,57 @@ class JobPartiesReader:
             chat_open=job.status in CHAT_OPEN,
             reviewable=is_reviewable(job),
         )
+
+
+@dataclass(frozen=True)
+class JobPayoutFacts:
+    """What the transfer to the pro reads of a job (#68): who is paid, for which request and
+    quote, whether the job is confirmed (so waiting for its transfer) and the pro's payout as
+    frozen at payment."""
+
+    job_id: uuid.UUID
+    request_id: uuid.UUID
+    quote_id: uuid.UUID
+    pro_id: uuid.UUID
+    confirmed: bool
+    pro_payout_cents: int
+
+
+class JobPayouts:
+    """A job as its transfer sees it, for the payments module (#68): the read under the job's
+    lock, and the one move a transfer makes, confirmed -> paid_out, through the machine."""
+
+    def __init__(self, session: AsyncSession, pros: ProService) -> None:
+        self._jobs = JobRepository(session)
+        self._machine = JobStateMachine(session, pros)
+
+    @staticmethod
+    def confirmed() -> Subquery:
+        """The id (`job_id`), pro (`pro_id`), quote (`quote_id`) and frozen payout
+        (`pro_payout_cents`) of every confirmed job, as a subquery: the transfer sweep reads
+        the jobs still to pay in its own query."""
+        return JobRepository.confirmed()
+
+    async def locked(self, job_id: uuid.UUID) -> JobPayoutFacts | None:
+        """The job, its row locked FOR UPDATE until the caller's transaction ends (the lock
+        every status change takes), read as last committed; None for an unknown job."""
+        job = await self._jobs.get_for_update(job_id)
+        if job is None:
+            return None
+        return JobPayoutFacts(
+            job_id=job.id,
+            request_id=job.request_id,
+            quote_id=job.quote_id,
+            pro_id=job.pro_id,
+            confirmed=job.status is JobStatus.CONFIRMED,
+            pro_payout_cents=job.pro_payout_cents,
+        )
+
+    async def paid_out(self, job_id: uuid.UUID) -> None:
+        """confirmed -> paid_out as the system, once the transfer to the pro was created: the
+        machine's transition (409 from any other status) with its job_events row. Flushes,
+        never commits."""
+        await self._machine.transition(job_id, JobStatus.PAID_OUT, SYSTEM)
+
+    async def exists(self, job_id: uuid.UUID) -> bool:
+        return await self._jobs.get(job_id) is not None

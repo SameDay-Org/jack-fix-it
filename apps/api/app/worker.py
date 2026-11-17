@@ -17,12 +17,18 @@ from app.integrations.expo_push import ExpoPushSender
 from app.integrations.mapbox import provider_from_settings
 from app.integrations.storage import S3Storage, StorageNotConfiguredError
 from app.integrations.stripe_payments import StripePaymentsClient
+from app.integrations.stripe_transfers import StripeTransfersClient
 from app.modules.addresses.tasks import geocode_address
 from app.modules.chat.tasks import purge_chat_originals
 from app.modules.dispatch.tasks import dispatch_request
 from app.modules.jobs.tasks import auto_confirm_jobs, photo_sanitize_task
 from app.modules.notifications.push_tasks import check_push_receipts, send_push
 from app.modules.payments.tasks import cancel_unpaid_payments
+from app.modules.payments.transfer_tasks import (
+    check_transfer_reversals,
+    release_confirmed_jobs,
+    release_transfer,
+)
 from app.modules.quotes.tasks import expire_quotes
 from app.modules.requests.tasks import sanitize_task
 from app.modules.uploads.tasks import sweep_orphan_uploads
@@ -62,6 +68,13 @@ async def startup(ctx: dict[str, Any]) -> None:
     # Geocode on save (#384). Without MAPBOX_ACCESS_TOKEN it is the stand-in whose every
     # call is unavailable: geocode_address then keeps nothing, and logs it.
     ctx["address_geocoder"] = provider_from_settings(settings)
+    # The same key makes the transfers to the pros (#68): without it no job is released
+    # (release_transfer and release_confirmed_jobs log it), and no reversal is read again.
+    ctx["stripe_transfers"] = (
+        None
+        if settings.stripe_secret_key is None
+        else StripeTransfersClient.from_settings(settings)
+    )
     # Sentinel looks for this line to confirm a worker deploy is healthy.
     logger.info("worker_started", extra={"app_env": settings.app_env})
 
@@ -107,6 +120,9 @@ class WorkerSettings:
         # One try: each run that reaches Mapbox is a billed call, and a geocode that did not
         # happen costs nothing but the route's own geocoding (#384).
         discarding_result(geocode_address, max_tries=1),
+        # One run per queued confirmation; it never raises, and the sweep below takes whatever
+        # a run could not finish.
+        discarding_result(release_transfer, max_tries=1),
     )
     # A cron job keeps no result by default (ARQ's cron keep_result is 0); stated anyway.
     cron_jobs = (
@@ -148,6 +164,22 @@ class WorkerSettings:
             auto_confirm_jobs,
             minute=every(get_settings().job_auto_confirm_sweep_minutes),
             timeout=get_settings().job_auto_confirm_sweep_timeout_seconds,
+            keep_result=0,
+            keep_result_forever=False,
+        ),
+        cron(
+            release_confirmed_jobs,
+            minute=every(get_settings().transfer_release_sweep_minutes),
+            timeout=get_settings().transfer_release_sweep_timeout_seconds,
+            keep_result=0,
+            keep_result_forever=False,
+        ),
+        # The recovery of the transfers' reversal checks (#416 r2), on the release sweep's
+        # cadence and timeout: read-only Stripe calls, never a create.
+        cron(
+            check_transfer_reversals,
+            minute=every(get_settings().transfer_release_sweep_minutes),
+            timeout=get_settings().transfer_release_sweep_timeout_seconds,
             keep_result=0,
             keep_result_forever=False,
         ),

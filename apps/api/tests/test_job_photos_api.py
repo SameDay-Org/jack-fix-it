@@ -1097,7 +1097,9 @@ async def test_pro_job_read_query_count_unchanged(
         counts.append(len(statements))
 
     # develop's count before #343, photos or not: the counts come from the rows already loaded.
-    assert counts == [14, 14]
+    # 15 since #68: one read of the page's transfer rows (the pro's payout), whatever the
+    # number of jobs.
+    assert counts == [15, 15]
 
 
 # Permissions and logs

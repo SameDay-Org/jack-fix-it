@@ -161,6 +161,7 @@
       "addressesNone": "None saved yet",
       "addressesCount_one": "{{count}} saved",
       "addressesCount_other": "{{count}} saved",
+      "paymentMethods": "Payment methods",
       "help": "Help",
       "legal": "Legal",
       "logOut": "Log out"
@@ -398,6 +399,106 @@
       }
     }
   },
+  "paymentMethods": {
+    "title": "Payment methods",
+    "support": "Tap a card to make it your default or to delete it.",
+    "emptySupport": "No cards saved yet.",
+    "note": "Card details go straight to Stripe. This app only receives the brand, the last four digits and the expiry date.",
+    "default": "Default",
+    "expires": "Expires {{expiry}}",
+    "seeAll": "See all",
+    "showLess": "Show less",
+    "retry": "Try again",
+    "refreshFailed": "We couldn't refresh your cards. What you see may be out of date.",
+    "brand": {
+      "visa": "Visa",
+      "mastercard": "Mastercard",
+      "amex": "American Express",
+      "discover": "Discover",
+      "generic": "Card"
+    },
+    "spoken": {
+      "card": "{{brand}} ending {{last4}}, expires {{month}} {{year}}",
+      "default": "default",
+      "short": "{{brand}} ending {{last4}}"
+    },
+    "pocket": {
+      "defaultSpoken": "Default card: {{card}}",
+      "none": "No default card",
+      "noneHint": "Open a card to make it your default.",
+      "updating": "Updating your wallet…",
+      "stale": "Couldn't check your default card",
+      "add": "Add a card",
+      "addHint": "Opens Stripe's secure card form."
+    },
+    "strip": {
+      "hint": "Opens the card."
+    },
+    "loadFailed": {
+      "generic": "We couldn't load your cards.",
+      "offline": "You're offline. Connect to see your cards.",
+      "unavailable": "Your cards aren't available right now. Try again in a moment."
+    },
+    "add": {
+      "label": "Add a card",
+      "saved": "Card saved.",
+      "savedNotDefault": "Card saved. We couldn't make it your default: open the card to try again.",
+      "failure": {
+        "offline": {
+          "title": "No connection",
+          "body": "Check your internet and try again."
+        },
+        "unavailable": {
+          "title": "Cards can't be added right now",
+          "body": "Nothing was saved. Please try again in a moment."
+        },
+        "rateLimited": {
+          "title": "That's a lot of tries at once",
+          "body": "Nothing was saved. Try again in a moment."
+        },
+        "generic": {
+          "title": "We couldn't start adding a card",
+          "body": "Nothing was saved. Please try again."
+        },
+        "sheetFailed": {
+          "title": "The card wasn't saved",
+          "body": "Try again, or use another card."
+        },
+        "sheetTimeout": {
+          "title": "Saving the card took too long",
+          "body": "It may have been saved: check your cards before you try again."
+        },
+        "sheetUnavailable": {
+          "title": "The card form couldn't open",
+          "body": "Nothing was saved. Please try again."
+        }
+      }
+    },
+    "card": {
+      "setDefault": "Set as default",
+      "isDefault": "This is your default card.",
+      "delete": "Delete card",
+      "deleteHint": "Asks before it deletes."
+    },
+    "delete": {
+      "title": "Delete {{card}}?",
+      "body": "It leaves your wallet for good.",
+      "bodyNextDefault": "It leaves your wallet for good. Another card becomes your default.",
+      "bodyMaybeNextDefault": "It leaves your wallet for good. If it's your default, another card becomes your default.",
+      "cancel": "Cancel",
+      "confirm": "Delete"
+    },
+    "madeDefault": "{{card}} is now your default",
+    "deleted": "{{card}} deleted",
+    "failed": {
+      "setDefault": "We couldn't make {{card}} your default. Try again in a moment.",
+      "delete": "We couldn't delete {{card}}. Try again in a moment.",
+      "offline": "We couldn't confirm that change. Check your connection, then open your cards again to see where things stand.",
+      "rateLimited": "That's a lot of changes at once. Try again in a moment.",
+      "unavailable": "Cards can't be changed right now. Try again in a moment.",
+      "gone": "That card isn't in your wallet anymore."
+    }
+  },
   "phone": {
     "title": "Verify your phone",
     "subtitle": "We'll text a {{length}}-digit code to this number.",
@@ -477,7 +578,7 @@
     "camera": "Jack uses the camera to take your profile photo and photos of what needs fixing.",
     "photos": "Jack uses the photos you choose to show what needs fixing.",
     "motion": "Jack uses your phone's motion to tilt your ID card as you move it.",
-    "location": "Jack Fix It uses your location when you check in at a job, so the customer knows you arrived."
+    "location": "Jack Fix It uses your location while you're on the way to a job, so the customer can see you coming, and when you check in, so they know you've arrived."
   },
   "quotes": {
     "title": "Your quotes",
@@ -895,6 +996,26 @@
       "photosRequired": "Add at least one after photo first.",
       "photosFailed": "We couldn't prepare your after photos. Add another one.",
       "savePending": "Save your photos first."
+    },
+    "sharing": {
+      "prompt": {
+        "title": "Share your location on the way",
+        "body_one": "While you're on the way, Jack Fix It shares your location with {{name}} every {{count}} second, so they can see you coming.",
+        "body_other": "While you're on the way, Jack Fix It shares your location with {{name}} every {{count}} seconds, so they can see you coming.",
+        "stops": "It stops as soon as you check in, or if the job is cancelled. Jack Fix It doesn't keep a history of where you've been.",
+        "continue": "Continue",
+        "notNow": "Not now",
+        "settings": "Open Settings",
+        "blocked": "Location is off for Jack Fix It. Turn it on in Settings, then come back here and tap Continue."
+      },
+      "note": {
+        "message": "Your location isn't shared with {{name}} on the way.",
+        "share": "Share location"
+      },
+      "notification": {
+        "title": "Sharing your location",
+        "body": "Only while you're on the way. It stops when you check in."
+      }
     }
   },
   "quoteForm": {

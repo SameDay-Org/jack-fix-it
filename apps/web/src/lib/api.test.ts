@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, apiGet, apiPatch, apiUrl } from "./api";
+import { ApiError, apiGet, apiPatch, apiPost, apiUrl } from "./api";
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -126,5 +126,34 @@ describe("apiPatch", () => {
     await expect(
       apiPatch(TICKET_PATH, { status: "open" }, { params: { ticket_id: TICKET_ID } }),
     ).rejects.toMatchObject(new ApiError(404, "ticket_not_found"));
+  });
+});
+
+describe("apiPost", () => {
+  const REQUEST_ID = "81a0f3a5-1111-4222-8333-944455556681";
+
+  it("sends the JSON body of a path that takes one", async () => {
+    fetchMock.mockResolvedValue(Response.json({ access_token: "a", refresh_token: "r" }));
+
+    await apiPost("/v1/auth/refresh", { refresh_token: "rt" });
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({ refresh_token: "rt" });
+    expect(new Headers(init?.headers).get("Content-Type")).toBe("application/json");
+  });
+
+  it("sends nothing to a path that takes no body", async () => {
+    fetchMock.mockResolvedValue(Response.json({ id: REQUEST_ID, assigned_agent: null }));
+
+    const claimed = await apiPost("/v1/admin/requests/{request_id}/claim", undefined, {
+      params: { request_id: REQUEST_ID },
+    });
+
+    expect(claimed).toEqual({ id: REQUEST_ID, assigned_agent: null });
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe(`http://api.test.invalid:8000/v1/admin/requests/${REQUEST_ID}/claim`);
+    expect(init?.body).toBeUndefined();
+    expect(new Headers(init?.headers).has("Content-Type")).toBe(false);
   });
 });

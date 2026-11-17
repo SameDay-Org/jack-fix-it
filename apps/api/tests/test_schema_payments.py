@@ -21,7 +21,11 @@ from app.modules.users.types import UserRole
 from tests.test_opportunities_api import World, build_world, make_request
 from tests.test_quote_list_api import add_quote, quoting_pro
 
-MIGRATION = Path(__file__).parents[1] / "alembic" / "versions" / "20261106_a7c3e9d14f62_payments.py"
+VERSIONS = Path(__file__).parents[1] / "alembic" / "versions"
+MIGRATION = VERSIONS / "20261106_a7c3e9d14f62_payments.py"
+# Later tables with a foreign key to payments: their migrations go down first and up last,
+# as alembic orders them (transfers, #68).
+DEPENDENTS = (VERSIONS / "20261115_52bb3f92f12b_transfers.py",)
 PAYMENT_CONSTRAINTS = {
     "ck_payments_amount_cents_positive",
     "ck_payments_tax_cents_non_negative",
@@ -36,8 +40,8 @@ PAYMENT_CONSTRAINTS = {
 }
 
 
-def migration() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("payments_migration", MIGRATION)
+def migration(path: Path = MIGRATION) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(f"migration_{path.stem}", path)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -228,10 +232,17 @@ async def test_downgrade_drops_the_table_and_column_and_upgrade_restores_them(
     # Run on the test session's transaction, which is rolled back: Postgres DDL is
     # transactional, so the shared test database keeps its head.
     module = migration()
+    dependents = [migration(path) for path in DEPENDENTS]
 
     def after(step: str, connection: Connection) -> tuple[set[str], set[str]]:
         with Operations.context(MigrationContext.configure(connection)):
+            if step == "downgrade":
+                for dependent in reversed(dependents):
+                    dependent.downgrade()
             getattr(module, step)()
+            if step == "upgrade":
+                for dependent in dependents:
+                    dependent.upgrade()
         return table_names(connection), user_columns(connection)
 
     connection = await db_session.connection()
