@@ -10402,7 +10402,10 @@ export interface operations {
     report_problem_v1_jobs__job_id__dispute_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description A UUID the app makes once per draft and sends again with every retry of it. A retry answers 200 with the report the first call made, as it is now, and writes nothing; the same key with another body, or on another job, answers 409 idempotency_key_reused. With or without it, a job has one report. */
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 job_id: string;
             };
@@ -10414,7 +10417,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description A problem was already reported on this job: that report, unchanged. */
+            /** @description A problem was already reported on this job (a retry with the same Idempotency-Key and body, or another report): that report, unchanged. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10459,7 +10462,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description job_not_disputable: the job is not completed (not done yet, confirmed by the customer or automatically, paid out, refunded or cancelled), or its window to report a problem has passed. */
+            /** @description job_not_disputable: the job is not completed (not done yet, confirmed by the customer or automatically, paid out, refunded or cancelled), or its window to report a problem has passed; idempotency_key_reused: the caller already used this Idempotency-Key with a different body or on another job; nothing was changed. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10468,7 +10471,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description validation_error: an unknown reason_code; a description blank, longer than 2000 characters, holding a NUL, or empty once invisible characters are dropped; photo_keys that are not the caller's own dispute_photo uploads, issued too long ago, repeated, already attached to a report, or more than DISPUTE_PHOTO_MAX_COUNT; an unknown field; a job_id that is not a UUID. */
+            /** @description validation_error: an unknown reason_code; a description blank, longer than 2000 characters, holding a NUL, or empty once invisible characters are dropped; photo_keys that are not the caller's own dispute_photo uploads, issued too long ago, repeated, already attached to a report, or more than DISPUTE_PHOTO_MAX_COUNT; an unknown field; a job_id or an Idempotency-Key that is not a UUID. */
             422: {
                 headers: {
                     [name: string]: unknown;

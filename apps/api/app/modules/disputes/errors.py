@@ -24,6 +24,14 @@ class AlreadyRepliedError(ConflictError):
     message = "You already replied to this problem report."
 
 
+class IdempotencyKeyReusedError(ConflictError):
+    """The customer's Idempotency-Key already made a report from another body, or on another
+    job. Keys are per customer: someone else's key is just a new key."""
+
+    code = "idempotency_key_reused"
+    message = "This Idempotency-Key was already used with a different report."
+
+
 class InvalidDisputeInputError(AppError):
     """What the schema cannot check alone: a text with nothing left once cleaned, photo keys
     that are not the caller's own dispute_photo uploads, too old, repeated, already attached

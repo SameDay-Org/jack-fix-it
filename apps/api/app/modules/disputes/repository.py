@@ -23,6 +23,16 @@ class DisputeRepository:
         )
         return (await self._session.scalars(statement)).one_or_none()
 
+    async def by_idempotency_key(self, opened_by: uuid.UUID, key: uuid.UUID) -> Dispute | None:
+        """The customer's dispute made with `key` (the unique index allows one), as last
+        committed."""
+        statement = (
+            select(Dispute)
+            .where(Dispute.opened_by == opened_by, Dispute.idempotency_key == key)
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
     async def add(self, dispute: Dispute) -> Dispute:
         """Inserts now (flush): a dispute of the same job committed meanwhile fails here, on
         its unique job_id."""

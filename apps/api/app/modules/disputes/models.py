@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Final
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, IdTimestampsMixin, str_enum
@@ -14,6 +14,8 @@ from app.modules.media.safe_status import MediaSafeStatus
 TEXT_MAX_LENGTH: Final = 2000
 # One dispute per job. The name is the naming convention's (its first column).
 ONE_PER_JOB: Final = "uq_disputes_job_id"
+# One dispute per customer and Idempotency-Key: a key never makes a second report.
+IDEMPOTENCY_KEY_INDEX: Final = "uq_disputes_opened_by_idempotency_key"
 
 
 class DisputeReason(StrEnum):
@@ -77,6 +79,13 @@ class Dispute(IdTimestampsMixin, Base):
             "customer_refund_cents IS NULL OR customer_refund_cents >= 0",
             name="customer_refund_non_negative",
         ),
+        Index(
+            IDEMPOTENCY_KEY_INDEX,
+            "opened_by",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+        ),
     )
 
     # One dispute per job: a second report returns this one.
@@ -101,6 +110,11 @@ class Dispute(IdTimestampsMixin, Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     pro_release_cents: Mapped[int | None]
     customer_refund_cents: Mapped[int | None]
+    # The report's Idempotency-Key, NULL without one, and the SHA-256 (hex) of the body it came
+    # with (app.idempotency), so a retry with another body is refused. One dispute per job, so
+    # the key answers for as long as the dispute exists: no window.
+    idempotency_key: Mapped[uuid.UUID | None]
+    idempotency_fingerprint: Mapped[str | None] = mapped_column(String(64))
 
 
 class DisputePhoto(IdTimestampsMixin, Base):

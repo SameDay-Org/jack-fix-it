@@ -11,7 +11,7 @@ release(job_id), in four steps:
 
 1. Under the job's row lock (the one every status change takes), then the transfer row's:
    - the job is confirmed: anything else is left alone (not_confirmed);
-   - nothing holds its money back (has_open_hold: the dispute or problem flag of #75);
+   - nothing holds its money back (has_open_hold: an open dispute, #75);
    - no attempt is under way: a row pending with an attempt stamped less than
      TRANSFER_STUCK_PENDING_MINUTES ago and no outcome is another worker's (in_flight);
    - the job's payment succeeded and froze the same payout as the job did, a positive one;

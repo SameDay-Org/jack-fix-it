@@ -3,7 +3,7 @@ GET /v1/pros/me/jobs/{job_id}/dispute, POST .../reply (the pro)."""
 
 import logging
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
@@ -23,6 +23,7 @@ from app.modules.disputes.models import (
     DisputeStatus,
 )
 from app.modules.disputes.photos import DisputePhotoRows
+from app.modules.disputes.repository import DisputeRepository
 from app.modules.disputes.router import get_dispute_clock
 from app.modules.disputes.service import DisputeConfig
 from app.modules.jobs.confirmation import JobAutoConfirmer
@@ -63,6 +64,12 @@ ALREADY_REPLIED = {
 }
 NO_OPEN_DISPUTE = {
     "error": {"code": "no_open_dispute", "message": "This job has no open problem report."}
+}
+KEY_REUSED = {
+    "error": {
+        "code": "idempotency_key_reused",
+        "message": "This Idempotency-Key was already used with a different report.",
+    }
 }
 
 
@@ -160,11 +167,19 @@ async def completed_job(
 
 
 async def report(
-    client: httpx.AsyncClient, party: Party, job_id: object, /, **body: Any
+    client: httpx.AsyncClient,
+    party: Party,
+    job_id: object,
+    /,
+    key: object = None,
+    **body: Any,
 ) -> httpx.Response:
     body.setdefault("reason_code", "poor_quality")
     body.setdefault("description", DESCRIPTION)
-    return await client.post(path(job_id), json=body, headers=party.headers)
+    headers = dict(party.headers)
+    if key is not None:
+        headers["Idempotency-Key"] = str(key)
+    return await client.post(path(job_id), json=body, headers=headers)
 
 
 async def disputes(session: AsyncSession) -> list[Dispute]:
@@ -179,6 +194,14 @@ async def photos(session: AsyncSession) -> list[DisputePhoto]:
         .execution_options(populate_existing=True)
     )
     return list((await session.scalars(statement)).all())
+
+
+def unsigned(response: httpx.Response) -> dict[str, Any]:
+    """The customer's view without its photo links' expiry, which follows the clock."""
+    body: dict[str, Any] = response.json()
+    for photo in body["dispute"]["photos"]:
+        photo.pop("expires_at")
+    return body
 
 
 def assert_no_leak(text: str) -> None:
@@ -274,6 +297,95 @@ async def test_a_second_report_returns_the_first_unchanged(
     assert len(queue.pushes()) == 1
 
 
+@pytest.mark.parametrize("with_key", [True, False], ids=["key", "no_key"])
+async def test_a_retry_returns_the_report_after_its_photo_keys_aged(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    queue: RecordingQueue,
+    with_key: bool,
+) -> None:
+    # The first answer was lost; the app retries the same body once the keys are too old to
+    # attach anew, while the job is still inside its window.
+    job_id = await completed_job(db_session, world, clock)
+    key = uuid.uuid4() if with_key else None
+    keys = [photo_key(world.customer, clock.now)]
+    first = await report(db_client, world.customer, job_id, key, photo_keys=keys)
+    clock.now += timedelta(minutes=ATTACH_MINUTES, seconds=1)
+
+    again = await report(db_client, world.customer, job_id, key, photo_keys=keys)
+
+    assert (first.status_code, again.status_code) == (201, 200), again.text
+    # The same report; only its photo links are signed again, from the later clock.
+    assert unsigned(again) == unsigned(first)
+    [row] = await disputes(db_session)
+    assert row.idempotency_key == key
+    assert (row.idempotency_fingerprint is not None) is with_key
+    assert len(await photos(db_session)) == 1
+    assert len(queue.pushes()) == 1
+
+
+async def test_a_key_used_with_another_body_or_job_is_refused(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    queue: RecordingQueue,
+) -> None:
+    first_job, second_job = [await completed_job(db_session, world, clock) for _ in range(2)]
+    key = uuid.uuid4()
+    first = await report(db_client, world.customer, first_job, key)
+    assert first.status_code == 201, first.text
+
+    other_body = await report(db_client, world.customer, first_job, key, reason_code="damage")
+    other_job = await report(db_client, world.customer, second_job, key)
+
+    assert (other_body.status_code, other_body.json()) == (409, KEY_REUSED)
+    assert (other_job.status_code, other_job.json()) == (409, KEY_REUSED)
+    [row] = await disputes(db_session)
+    assert row.reason_code is DisputeReason.POOR_QUALITY
+    assert (await job_row(db_session, second_job)).status is JobStatus.COMPLETED
+    assert len(queue.pushes()) == 1
+    # Keys are per customer: the same key from another customer is a new key.
+    their_world = replace(world, customer=world.other_customer)
+    theirs = await completed_job(db_session, their_world, clock)
+    assert (await report(db_client, world.other_customer, theirs, key)).status_code == 201
+
+
+async def test_a_key_taken_meanwhile_by_a_report_on_another_job_is_refused(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_job, second_job = [await completed_job(db_session, world, clock) for _ in range(2)]
+    key = uuid.uuid4()
+    assert (await report(db_client, world.customer, first_job, key)).status_code == 201
+
+    async def not_yet(self: DisputeRepository, opened_by: uuid.UUID, key: uuid.UUID) -> None:
+        return None  # the other report commits after this look: the unique index decides
+
+    monkeypatch.setattr(DisputeRepository, "by_idempotency_key", not_yet)
+    response = await report(db_client, world.customer, second_job, key)
+
+    assert (response.status_code, response.json()) == (409, KEY_REUSED)
+    assert len(await disputes(db_session)) == 1
+    assert (await job_row(db_session, second_job)).status is JobStatus.COMPLETED
+
+
+async def test_an_idempotency_key_that_is_not_a_uuid_is_refused(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld, clock: Clock
+) -> None:
+    job_id = await completed_job(db_session, world, clock)
+
+    response = await report(db_client, world.customer, job_id, "not-a-uuid")
+
+    assert (response.status_code, response.json()) == (422, VALIDATION_ERROR)
+    assert await disputes(db_session) == []
+
+
 @pytest.mark.parametrize(
     ("ago", "window_hours", "allowed"),
     [
@@ -340,9 +452,11 @@ async def test_only_a_completed_job_is_reported(
 async def test_an_auto_confirmed_job_goes_to_support_not_to_a_dispute(
     db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld, clock: Clock
 ) -> None:
-    job_id = await completed_job(db_session, world, clock, WINDOW)
-    confirmed = await JobAutoConfirmer(db_session).confirm_if_due(job_id, clock.now - WINDOW)
+    # Still inside the window by the report's clock: only the job's status refuses it.
+    job_id = await completed_job(db_session, world, clock)
+    confirmed = await JobAutoConfirmer(db_session).confirm_if_due(job_id, clock.now + WINDOW)
     assert confirmed is not None
+    assert (await job_row(db_session, job_id)).status is JobStatus.CONFIRMED
 
     response = await report(db_client, world.customer, job_id)
 
@@ -575,6 +689,45 @@ async def test_no_reply_once_the_dispute_is_resolved(
     )
 
     assert (response.status_code, response.json()) == (409, NO_OPEN_DISPUTE)
+
+
+async def test_a_reply_racing_the_resolution_finds_no_open_dispute(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    job_id = await completed_job(db_session, world, clock)
+    assert (await report(db_client, world.customer, job_id)).status_code == 201
+    set_pro_reply = DisputeRepository.set_pro_reply
+
+    async def resolved_first(
+        self: DisputeRepository, dispute_id: uuid.UUID, reply: str, now: datetime
+    ) -> bool:
+        # An admin resolves the dispute after the reply read it open.
+        await db_session.execute(
+            update(Dispute)
+            .where(Dispute.id == dispute_id)
+            .values(
+                status=DisputeStatus.RESOLVED,
+                resolution=DisputeResolution.RELEASED,
+                resolved_by=world.admin.id,
+                resolved_at=clock.now,
+            )
+        )
+        await db_session.commit()
+        return await set_pro_reply(self, dispute_id, reply, now)
+
+    monkeypatch.setattr(DisputeRepository, "set_pro_reply", resolved_first)
+
+    response = await db_client.post(
+        f"{pro_path(job_id)}/reply", json={"message": REPLY}, headers=world.pro.headers
+    )
+
+    assert (response.status_code, response.json()) == (409, NO_OPEN_DISPUTE)
+    [row] = await disputes(db_session)
+    assert row.pro_reply is None
 
 
 # --- Reading ---------------------------------------------------------------------------------

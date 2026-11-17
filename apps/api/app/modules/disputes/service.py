@@ -9,7 +9,12 @@ the job's money is held until an admin resolves it (#76).
   goes to support instead. Anything else is 409 `job_not_disputable`.
 - Once: one dispute per job (UNIQUE job_id). The report runs under the job's row lock, so a
   second report, one after the other or at the same time, finds the first and returns it
-  unchanged (200; 201 when created). No Idempotency-Key: the job is the key.
+  unchanged (200; 201 when created), whatever its body.
+- Idempotency-Key (the pattern of POST /v1/requests, app.idempotency): optional, a UUID the app
+  makes once per draft. Stored with the body's fingerprint; a repeat with the same body answers
+  the dispute it made, before any check that depends on the time (a retry after the photo keys
+  aged still gets its report). The same key with another body, or on another job, is 409
+  `idempotency_key_reused`. Keys are per customer and never expire: one dispute per job.
 - Atomic: the dispute, its photos and the job's move completed -> disputed (through
   JobStateMachine, the customer as actor, one job_events row) commit together or not at all.
   The disputed job is then held: the auto-confirm reads completed jobs only, release reads
@@ -39,14 +44,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.db import violated_constraint
 from app.errors import NotFoundError
+from app.idempotency import body_fingerprint, same_body
 from app.integrations.storage import StorageProvider
 from app.modules.disputes.errors import (
     AlreadyRepliedError,
+    IdempotencyKeyReusedError,
     InvalidDisputeInputError,
     JobNotDisputableError,
     NoDisputeError,
 )
 from app.modules.disputes.models import (
+    IDEMPOTENCY_KEY_INDEX,
     ONE_PER_JOB,
     TEXT_MAX_LENGTH,
     Dispute,
@@ -78,6 +86,12 @@ logger = logging.getLogger(__name__)
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+@dataclass(frozen=True)
+class _Idempotency:
+    key: uuid.UUID
+    fingerprint: str
 
 
 @dataclass(frozen=True)
@@ -131,14 +145,25 @@ class DisputeService:
         self._signer = DisputePhotoSigner(storage, config.photo_url_ttl_seconds)
 
     async def report(
-        self, user: UserAccount, job_id: uuid.UUID, data: DisputeIn, queue: JobQueue
+        self,
+        user: UserAccount,
+        job_id: uuid.UUID,
+        data: DisputeIn,
+        queue: JobQueue,
+        idempotency_key: uuid.UUID | None = None,
     ) -> tuple[CustomerDisputeView, bool]:
         """The customer's report on their job (see the module doc), and whether it was created
         now (False: an earlier report, returned unchanged). Commits."""
         keys = data.photo_keys
-        # The body's own checks before any query: a huge body never reaches the database.
-        self._check_photo_keys(user, keys)
+        # The body's own checks before any query: a huge body never reaches the database. None
+        # depends on the time, so a retry of a report that was made passes them again.
+        self._check_photo_key_shapes(user, keys)
         description = _clean(data.description)
+        idempotency = (
+            None
+            if idempotency_key is None
+            else _Idempotency(key=idempotency_key, fingerprint=_fingerprint(data))
+        )
         # The caller's own job first, unlocked: nobody else's job row is ever locked here.
         party = await self._jobs.of_party(user.id, job_id)
         if party is None or party.customer_id != user.id:
@@ -146,12 +171,21 @@ class DisputeService:
         job = await self._jobs.locked(job_id)
         if job is None:  # pragma: no cover - jobs are never deleted
             raise NotFoundError
+        if idempotency is not None:
+            keyed = await self._disputes.by_idempotency_key(user.id, idempotency.key)
+            if keyed is not None and (
+                keyed.job_id != job.job_id
+                or not same_body(keyed.idempotency_fingerprint, idempotency.fingerprint)
+            ):
+                logger.info("dispute_idempotency_key_reused", extra={"job_id": str(job_id)})
+                raise IdempotencyKeyReusedError
         existing = await self._disputes.of_job(job.job_id)
         if existing is not None:
             await self._session.commit()  # nothing changed: ends the transaction and its lock
             return await self.customer_view(user, job_id), False
         if not self._disputable(job):
             raise JobNotDisputableError
+        self._check_photo_key_ages(keys)
         if keys and await self._photos.held_keys(keys):
             raise InvalidDisputeInputError
         dispute = Dispute(
@@ -159,6 +193,8 @@ class DisputeService:
             opened_by=user.id,
             reason_code=data.reason_code,
             description=description,
+            idempotency_key=idempotency and idempotency.key,
+            idempotency_fingerprint=idempotency and idempotency.fingerprint,
         )
         now = self._clock()
         try:
@@ -173,12 +209,19 @@ class DisputeService:
                 )
                 for index, key in enumerate(keys)
             ]
-            await self._photos.add_all(photos)
+            # Inserted in key order: two reports racing for the same keys wait on them in one
+            # order, so one gets the unique violation (422), never a deadlock.
+            await self._photos.add_all(sorted(photos, key=lambda photo: photo.file_key))
         except IntegrityError as error:
             await self._session.rollback()
-            if violated_constraint(error) == ONE_PER_JOB:  # pragma: no cover - under the lock
+            constraint = violated_constraint(error)
+            if constraint == ONE_PER_JOB:  # pragma: no cover - under the lock
                 return await self.customer_view(user, job_id), False
-            # Another dispute took one of the keys after the check above.
+            if constraint == IDEMPOTENCY_KEY_INDEX:
+                # A report on another job took this key after the check above (the index held
+                # this insert until it committed).
+                raise IdempotencyKeyReusedError from None
+            # Another dispute took one of the photo keys after the check above.
             raise InvalidDisputeInputError from None
         await self._jobs.disputed(job.job_id, user)
         public_code = await self._requests.public_code(job.request_id)
@@ -271,21 +314,28 @@ class DisputeService:
                 "dispute_replied", extra={"dispute_id": str(dispute.id), "job_id": str(job_id)}
             )
             return await self.pro_view(user, job_id)
-        # A reply is there: this one's earlier send, or another one.
+        # A reply is there (this one's earlier send, or another one), or the dispute was
+        # resolved since it was read.
         await self._session.rollback()
         stored = await self._disputes.of_job(job.job_id)
-        if stored is None or stored.pro_reply != message:
+        if stored is None or stored.status is not DisputeStatus.OPEN:
+            raise NoDisputeError
+        if stored.pro_reply != message:
             raise AlreadyRepliedError
         return await self.pro_view(user, job_id)
 
     # Helpers
 
-    def _check_photo_keys(self, user: UserAccount, keys: list[str]) -> None:
-        """The caller's own dispute_photo uploads, each once, recent enough, not too many."""
+    def _check_photo_key_shapes(self, user: UserAccount, keys: list[str]) -> None:
+        """The caller's own dispute_photo uploads, each once, not too many."""
         if len(keys) > self._config.photo_max or len(set(keys)) != len(keys):
             raise InvalidDisputeInputError
         if any(owned_upload(key, user.id, UploadPurpose.DISPUTE_PHOTO) is None for key in keys):
             raise InvalidDisputeInputError
+
+    def _check_photo_key_ages(self, keys: list[str]) -> None:
+        """Each upload issued at most photo_attach_max_age ago (the orphan sweep's window).
+        Checked for a new report only: a retry of one already made is answered first."""
         oldest = self._clock() - self._config.photo_attach_max_age
         if any((issued := upload_issued_at(key)) is None or issued < oldest for key in keys):
             raise InvalidDisputeInputError
@@ -319,6 +369,15 @@ class DisputeService:
             logger.error(
                 "dispute_photo_sanitize_enqueue_failed", extra={"dispute_id": str(dispute_id)}
             )
+
+
+def _fingerprint(data: DisputeIn) -> str:
+    """The body's fingerprint (app.idempotency). Text with no UTF-8 form is the validation
+    error a report without a key answers too, raised before the key is looked up."""
+    try:
+        return body_fingerprint(data)
+    except UnicodeEncodeError:
+        raise InvalidDisputeInputError from None
 
 
 def _clean(text: str) -> str:

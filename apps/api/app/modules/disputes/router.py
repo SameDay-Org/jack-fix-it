@@ -3,7 +3,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Header, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_app_settings
@@ -52,6 +52,18 @@ def get_dispute_service(
 
 
 Disputes = Annotated[DisputeService, Depends(get_dispute_service)]
+IdempotencyKey = Annotated[
+    uuid.UUID | None,
+    Header(
+        alias="Idempotency-Key",
+        description=(
+            "A UUID the app makes once per draft and sends again with every retry of it. A "
+            "retry answers 200 with the report the first call made, as it is now, and writes "
+            "nothing; the same key with another body, or on another job, answers 409 "
+            "idempotency_key_reused. With or without it, a job has one report."
+        ),
+    ),
+]
 
 _UNAUTHORIZED = _error("invalid_token: missing, invalid or expired token.")
 _TEXT = (
@@ -68,7 +80,10 @@ _TEXT = (
     responses={
         status.HTTP_200_OK: {
             "model": CustomerDisputeView,
-            "description": "A problem was already reported on this job: that report, unchanged.",
+            "description": (
+                "A problem was already reported on this job (a retry with the same "
+                "Idempotency-Key and body, or another report): that report, unchanged."
+            ),
         },
         status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
         status.HTTP_403_FORBIDDEN: _error("forbidden: only customers report a problem."),
@@ -78,13 +93,14 @@ _TEXT = (
         status.HTTP_409_CONFLICT: _error(
             "job_not_disputable: the job is not completed (not done yet, confirmed by the "
             "customer or automatically, paid out, refunded or cancelled), or its window to "
-            "report a problem has passed."
+            "report a problem has passed; idempotency_key_reused: the caller already used this "
+            "Idempotency-Key with a different body or on another job; nothing was changed."
         ),
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
             f"validation_error: an unknown reason_code; a description {_TEXT}; photo_keys "
             "that are not the caller's own dispute_photo uploads, issued too long ago, "
             "repeated, already attached to a report, or more than DISPUTE_PHOTO_MAX_COUNT; an "
-            "unknown field; a job_id that is not a UUID."
+            "unknown field; a job_id or an Idempotency-Key that is not a UUID."
         ),
     },
 )
@@ -95,6 +111,7 @@ async def report_problem(
     disputes: Disputes,
     queue: Annotated[JobQueue, Depends(get_job_queue)],
     response: Response,
+    idempotency_key: IdempotencyKey = None,
 ) -> CustomerDisputeView:
     """The customer reports a problem with their completed job, before its window ends
     (`report_by` in the read): the job moves to disputed (Needs Attention) and its payout to the
@@ -103,7 +120,7 @@ async def report_problem(
 
     Contact details in the description are masked before it is stored; only the masked text is
     kept. The pro is notified; photos are shown to them once their safe copy is ready."""
-    view, created = await disputes.report(user, job_id, data, queue)
+    view, created = await disputes.report(user, job_id, data, queue, idempotency_key)
     if not created:
         response.status_code = status.HTTP_200_OK
     return view

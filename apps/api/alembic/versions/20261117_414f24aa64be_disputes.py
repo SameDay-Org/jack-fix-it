@@ -7,6 +7,7 @@ Create Date: 2026-11-17 20:03:06.815922
 """
 
 from collections.abc import Sequence
+from datetime import datetime
 
 import sqlalchemy as sa
 from alembic import op
@@ -17,8 +18,10 @@ down_revision: str | Sequence[str] | None = "52bb3f92f12b"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+IDEMPOTENCY_KEY_INDEX = "uq_disputes_opened_by_idempotency_key"
 
-def _timestamps() -> list[sa.Column[object]]:
+
+def _timestamps() -> list[sa.Column[datetime]]:
     return [
         sa.Column(
             "created_at",
@@ -56,6 +59,8 @@ def upgrade() -> None:
         sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("pro_release_cents", sa.Integer(), nullable=True),
         sa.Column("customer_refund_cents", sa.Integer(), nullable=True),
+        sa.Column("idempotency_key", sa.Uuid(), nullable=True),
+        sa.Column("idempotency_fingerprint", sa.String(length=64), nullable=True),
         *_timestamps(),
         sa.CheckConstraint(
             "reason_code IN ('work_incomplete', 'poor_quality', 'no_show', 'damage', 'other')",
@@ -107,6 +112,13 @@ def upgrade() -> None:
     )
     op.create_index(op.f("ix_disputes_opened_by"), "disputes", ["opened_by"], unique=False)
     op.create_index(op.f("ix_disputes_status"), "disputes", ["status"], unique=False)
+    op.create_index(
+        IDEMPOTENCY_KEY_INDEX,
+        "disputes",
+        ["opened_by", "idempotency_key"],
+        unique=True,
+        postgresql_where=sa.text("idempotency_key IS NOT NULL"),
+    )
     op.create_table(
         "dispute_photos",
         sa.Column("id", sa.Uuid(), server_default=sa.text("gen_random_uuid()"), nullable=False),
@@ -145,6 +157,7 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_dispute_photos_uploaded_by"), table_name="dispute_photos")
     op.drop_index(op.f("ix_dispute_photos_dispute_id"), table_name="dispute_photos")
     op.drop_table("dispute_photos")
+    op.drop_index(IDEMPOTENCY_KEY_INDEX, table_name="disputes")
     op.drop_index(op.f("ix_disputes_status"), table_name="disputes")
     op.drop_index(op.f("ix_disputes_opened_by"), table_name="disputes")
     op.drop_table("disputes")
