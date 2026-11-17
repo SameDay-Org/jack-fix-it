@@ -151,6 +151,8 @@ const proJob = (overrides: Partial<ProJob> = {}): ProJob => ({
     failed: { before: 0, after: 0 },
   },
   pro_payout_cents: 15_300,
+  // The transfer to the pro (#68): none before the job is confirmed.
+  payout: null,
   unread_messages: 0,
   ...overrides,
 });

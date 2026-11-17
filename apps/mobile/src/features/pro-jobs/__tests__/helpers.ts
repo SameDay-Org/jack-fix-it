@@ -56,6 +56,8 @@ export const proJob = (overrides: Partial<ProJob> = {}): ProJob => ({
   confirm_by: null,
   photos: { before: [], after: [], ...NO_PHOTO_COUNTS },
   pro_payout_cents: 15_300,
+  // The transfer to the pro (#68): none before the job is confirmed.
+  payout: null,
   unread_messages: 0,
   ...overrides,
 });
