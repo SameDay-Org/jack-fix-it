@@ -2,6 +2,8 @@ import "../global.css";
 import "@/i18n";
 // Stripe's saved customer sign-in is reset at every sign-out, even before any payment screen loads.
 import "@/features/payments/sheetCustomer";
+// The pro's location task (#352) is defined before any screen, so a fix the system delivers finds it.
+import "@/features/pro-jobs/sharing/sender";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as SplashScreen from "expo-splash-screen";

@@ -6,6 +6,159 @@
   "landing": {
     "comingSoon": "Our site is on the way."
   },
+  "showcase": {
+    "meta": {
+      "title": "Jack Fix It: the app for whatever happens at home",
+      "description": "Tell Jack what happened, compare fixed-price quotes from verified pros and pay in the app. Your payment is held until you confirm the job is done. Coming soon to iPhone and Android."
+    },
+    "skipToContent": "Skip to content",
+    "homeLabel": "Jack Fix It, back to the top",
+    "nav": {
+      "label": "Page sections",
+      "menu": "Menu",
+      "how": "How it works",
+      "pros": "For pros",
+      "faq": "Questions",
+      "soon": "Coming soon"
+    },
+    "language": {
+      "label": "Language",
+      "en": "English",
+      "es": "Español"
+    },
+    "hero": {
+      "soon": "Coming soon to iPhone and Android",
+      "title": "Whatever happens at home, we <accent>fix</accent> it.",
+      "lead": "Tell Jack. We'll take care of the rest.",
+      "body": "Describe what's going on, compare fixed-price quotes from verified pros and pay in the app. Your payment is held until you confirm the job is done.",
+      "cta": "See how it works"
+    },
+    "how": {
+      "eyebrow": "How it works",
+      "title": "From problem to done, in one app.",
+      "body": "Here's what happens after you tell Jack."
+    },
+    "features": {
+      "describe": {
+        "label": "Describe the problem",
+        "title": "Tell Jack what happened.",
+        "body": "Say it in your own words and add photos or a video. You don't need to know who to call."
+      },
+      "quotes": {
+        "label": "Compare quotes",
+        "title": "Fixed prices, side by side.",
+        "body": "Pros near you answer with one price for the whole job. Check what's included, their rating and the verified seal, then pick."
+      },
+      "pay": {
+        "label": "Pay safely",
+        "title": "Your payment, held until you confirm.",
+        "body": "Pay in the app when you accept a quote. Your pro is paid only after the job is confirmed."
+      },
+      "track": {
+        "label": "Follow your pro live",
+        "title": "See your pro on the way.",
+        "body": "A live map and an arrival time while your pro is on the way, and a notification at every step of the job."
+      },
+      "chat": {
+        "label": "Chat inside the app",
+        "title": "One place to talk.",
+        "body": "Message your pro from the job page. Phone numbers, emails and links stay hidden, so the whole conversation stays in the app."
+      },
+      "reviews": {
+        "label": "Rate the job",
+        "title": "Good work gets noticed.",
+        "body": "When the job is done, you and your pro rate each other. Ratings show on every pro's profile and quotes."
+      },
+      "pros": {
+        "label": "For pros",
+        "title": "New jobs come to you.",
+        "body": "See new requests in your categories and ZIP codes, answer with one fixed price, and get paid when the job is confirmed."
+      }
+    },
+    "soon": {
+      "title": "Coming soon to iPhone and Android.",
+      "body": "We're getting the app ready for the App Store and Google Play. The download links will be on this page.",
+      "ios": "iPhone",
+      "android": "Android",
+      "badge": "Coming soon"
+    },
+    "faq": {
+      "eyebrow": "Support when you need it",
+      "title": "Questions, answered.",
+      "items": {
+        "what": {
+          "question": "What is Jack Fix It?",
+          "answer": "An app for home services. You tell Jack what's going on at home, pros near you answer with fixed-price quotes, and you choose the one that fits. Booking, payment, chat and the job's progress all stay in the app."
+        },
+        "cost": {
+          "question": "Does it cost anything to ask for quotes?",
+          "answer": "No. Sending a request and getting quotes is free. You pay only when you accept a quote, and you see the total, with any tax, before you confirm it."
+        },
+        "paid": {
+          "question": "When does the pro get paid?",
+          "answer": "When the job is confirmed, not when you pay. Once the pro marks the work as done, a confirmation period starts; if no problem is reported before it ends, the job is confirmed automatically and the pro is paid."
+        },
+        "methods": {
+          "question": "How can I pay?",
+          "answer": "By card, or with Apple Pay or Google Pay where your phone offers them. The payment runs on Stripe's secure checkout, so Jack Fix It never stores your card number."
+        },
+        "verified": {
+          "question": "How are pros verified?",
+          "answer": "Before a pro can send you a quote, our team reviews the information and documents they provide and approves their profile. You'll see the green seal next to a verified pro's name."
+        },
+        "privacy": {
+          "question": "Who can see my contact details and address?",
+          "answer": "Pros never see your phone number or email. Before you book, they see only your city and ZIP code; the pro you book gets the full address to do the job. To talk, you both use the chat."
+        },
+        "languages": {
+          "question": "Which languages is the app in?",
+          "answer": "English and Spanish. You choose the language in the app's settings."
+        },
+        "available": {
+          "question": "When can I get the app?",
+          "answer": "Soon. We're getting it ready for iPhone and Android, and the download links will be on this page."
+        },
+        "joinPro": {
+          "question": "I'm a pro. How do I join?",
+          "answer": "You'll create your pro profile in the app: your categories, the ZIP codes you cover, your documents and your payout account. Our team reviews every profile before it starts getting requests."
+        }
+      }
+    },
+    "final": {
+      "title": "Tell Jack. We'll take care of the rest.",
+      "body": "The app is coming soon to iPhone and Android."
+    },
+    "footer": {
+      "legalLabel": "Legal",
+      "terms": "Terms of Service",
+      "privacy": "Privacy Policy",
+      "sampleData": "App screens on this page show sample data.",
+      "rights": "© {{year}} Jack Fix It"
+    },
+    "media": {
+      "home": "The app's home screen: “What's going on at home?” above the service categories.",
+      "describe": "A request in the app: a few questions about the job before it goes to pros.",
+      "quotes": "Quotes in the app, each with its price, how long the job takes, when it starts and what's included.",
+      "pay": "The app asking to confirm that the job is done before the payment is released.",
+      "track": "A map in the app with the pro on the way, the arrival time and the arrival code.",
+      "chat": "A chat between a customer and a pro in the app, with a phone number hidden.",
+      "reviews": "The rating screen in the app: stars for the job, then for communication, quality and punctuality.",
+      "pros": "The pro's home screen in the app, with new opportunities by category and ZIP code."
+    },
+    "legal": {
+      "terms": {
+        "title": "Terms of Service",
+        "lead": "Our Terms of Service will be published here.",
+        "body": "They're being finalized. Once they're ready, you'll be able to read them in full on this page."
+      },
+      "privacy": {
+        "title": "Privacy Policy",
+        "lead": "Our Privacy Policy will be published here.",
+        "body": "It's being finalized. Once it's ready, you'll be able to read it in full on this page."
+      },
+      "back": "Back to the app page"
+    }
+  },
   "admin": {
     "title": "Operations panel",
     "login": {
@@ -26,7 +179,8 @@
     "nav": {
       "label": "Panel",
       "home": "Home",
-      "support": "Support"
+      "support": "Support",
+      "pros": "Pros"
     },
     "roles": {
       "agent": "Agent",
@@ -105,6 +259,119 @@
           "forbidden": "Your account can't change tickets.",
           "unavailable": "We couldn't save the status. Try again in a moment."
         }
+      }
+    },
+    "pros": {
+      "title": "Pros",
+      "subtitle": "Review each pro's documents, then approve or reject the pro. Only approved pros receive requests.",
+      "filter": {
+        "label": "Pros by status"
+      },
+      "status": {
+        "pending": "Pending",
+        "approved": "Approved",
+        "rejected": "Rejected"
+      },
+      "documentStatus": {
+        "pending": "Pending",
+        "approved": "Approved",
+        "rejected": "Rejected",
+        "superseded": "Replaced"
+      },
+      "documentType": {
+        "id": "Photo ID",
+        "license": "License",
+        "insurance": "Insurance"
+      },
+      "documentCount": {
+        "pending": "Pending: {{count}}",
+        "approved": "Approved: {{count}}",
+        "rejected": "Rejected: {{count}}"
+      },
+      "columns": {
+        "pro": "Pro",
+        "categories": "Categories",
+        "zips": "ZIPs",
+        "documents": "Documents",
+        "submitted": "Waiting since"
+      },
+      "noName": "No name on file",
+      "noPayouts": "Payouts not set up",
+      "noCategories": "No categories yet",
+      "noDocuments": "No documents yet",
+      "nothingPending": "Nothing to review",
+      "empty": {
+        "pending": "No pros are waiting for a decision.",
+        "approved": "No approved pros yet.",
+        "rejected": "No rejected pros."
+      },
+      "older": "Older pros",
+      "noOlder": "No older pros.",
+      "newest": "Back to the newest",
+      "loadError": "We couldn't load the pros. Try again in a moment.",
+      "retry": "Try again",
+      "detail": {
+        "back": "All pros",
+        "notFound": "This pro doesn't exist.",
+        "loadError": "We couldn't load this pro. Try again in a moment.",
+        "payouts": "Payouts",
+        "payoutsEnabled": "Set up",
+        "payoutsMissing": "Not set up yet",
+        "experience": "Years of experience",
+        "notGiven": "Not given",
+        "categories": "Categories",
+        "areas": "Service areas",
+        "noAreas": "No service areas yet",
+        "joined": "Profile created",
+        "decided": "Last decision",
+        "reason": "Reason",
+        "bio": "About",
+        "viewPhoto": "Open the profile photo",
+        "documents": "Documents",
+        "filesNote": "Files open in a new tab, through the panel: each opening is recorded.",
+        "required": "Required",
+        "notSubmitted": "Not submitted yet",
+        "submitted": "Submitted",
+        "expires": "Expires",
+        "noExpiry": "No expiry date",
+        "expired": "Expired",
+        "reviewed": "Reviewed",
+        "viewFile": "Open the file ({{type}})",
+        "reviewLabel": "Review: {{type}}",
+        "approveDocument": "Approve",
+        "rejectDocument": "Reject",
+        "history": "Earlier documents",
+        "blockers": {
+          "title": "Before this pro can be approved",
+          "document_missing": "{{type}}: no approved document",
+          "document_expired": "{{type}}: the approved document has expired",
+          "no_category": "The pro has no category",
+          "no_service_area": "The pro has no service area"
+        },
+        "decision": {
+          "title": "Decision",
+          "hint": "An approved pro receives requests once their payouts are set up. The pro can read the reason of a rejection.",
+          "approve": "Approve pro",
+          "reject": "Reject pro",
+          "approveQuestion": "Approve this pro?",
+          "confirmApprove": "Yes, approve",
+          "confirmReject": "Reject with this reason",
+          "cancel": "Cancel",
+          "reasonLabel": "Reason",
+          "reasonHint": "The pro can read this. Up to {{max}} characters.",
+          "saving": "Saving…",
+          "saved": "Saved."
+        },
+        "errors": {
+          "reason_required": "Write a reason of up to {{max}} characters.",
+          "not_found": "This no longer exists. Reload the page.",
+          "already_reviewed": "This document was already reviewed or replaced. Reload the page.",
+          "not_approvable": "This pro can't be approved yet. See what is still needed.",
+          "forbidden": "Your account can't review pros.",
+          "unavailable": "We couldn't save the decision. Try again in a moment."
+        },
+        "legalNameHint": "Name on the account. Compare it with the ID document.",
+        "legalNameMissing": "The account has no full name to compare with the ID document."
       }
     }
   }
