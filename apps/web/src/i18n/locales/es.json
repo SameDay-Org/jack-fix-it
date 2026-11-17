@@ -6,6 +6,159 @@
   "landing": {
     "comingSoon": "Nuestro sitio está en camino."
   },
+  "showcase": {
+    "meta": {
+      "title": "Jack Fix It: la app para lo que pase en casa",
+      "description": "Cuéntale a Jack qué pasó, compara presupuestos de precio fijo de profesionales verificados y paga en la app. Tu pago queda retenido hasta que confirmes que el trabajo está terminado. Muy pronto en iPhone y Android."
+    },
+    "skipToContent": "Saltar al contenido",
+    "homeLabel": "Jack Fix It, volver al inicio",
+    "nav": {
+      "label": "Secciones de la página",
+      "menu": "Menú",
+      "how": "Cómo funciona",
+      "pros": "Para profesionales",
+      "faq": "Preguntas",
+      "soon": "Muy pronto"
+    },
+    "language": {
+      "label": "Idioma",
+      "en": "English",
+      "es": "Español"
+    },
+    "hero": {
+      "soon": "Muy pronto en iPhone y Android",
+      "title": "Pase lo que pase en casa, lo <accent>arreglamos</accent>.",
+      "lead": "Cuéntaselo a Jack. Nosotros nos encargamos del resto.",
+      "body": "Describe lo que pasa, compara presupuestos de precio fijo de profesionales verificados y paga en la app. Tu pago queda retenido hasta que confirmes que el trabajo está terminado.",
+      "cta": "Mira cómo funciona"
+    },
+    "how": {
+      "eyebrow": "Cómo funciona",
+      "title": "Del problema al trabajo terminado, en una sola app.",
+      "body": "Esto es lo que pasa después de contárselo a Jack."
+    },
+    "features": {
+      "describe": {
+        "label": "Describe el problema",
+        "title": "Cuéntale a Jack qué pasó.",
+        "body": "Dilo con tus propias palabras y agrega fotos o un video. No necesitas saber a quién llamar."
+      },
+      "quotes": {
+        "label": "Compara presupuestos",
+        "title": "Precios fijos, lado a lado.",
+        "body": "Los profesionales cercanos responden con un solo precio por todo el trabajo. Revisa qué incluye, su calificación y el sello de verificado, y elige."
+      },
+      "pay": {
+        "label": "Paga con seguridad",
+        "title": "Tu pago, retenido hasta que confirmes.",
+        "body": "Paga en la app cuando aceptas un presupuesto. Tu profesional recibe su pago solo después de que el trabajo se confirma."
+      },
+      "track": {
+        "label": "Sigue a tu profesional en vivo",
+        "title": "Mira a tu profesional en camino.",
+        "body": "Un mapa en vivo y la hora de llegada mientras tu profesional va en camino, y una notificación en cada paso del trabajo."
+      },
+      "chat": {
+        "label": "Chatea dentro de la app",
+        "title": "Un solo lugar para hablar.",
+        "body": "Escríbele a tu profesional desde la página del trabajo. Los teléfonos, correos y enlaces quedan ocultos, así que toda la conversación se queda en la app."
+      },
+      "reviews": {
+        "label": "Califica el trabajo",
+        "title": "El buen trabajo se nota.",
+        "body": "Cuando el trabajo termina, tú y tu profesional se califican entre sí. Las calificaciones aparecen en el perfil y en los presupuestos de cada profesional."
+      },
+      "pros": {
+        "label": "Para profesionales",
+        "title": "Los trabajos nuevos llegan a ti.",
+        "body": "Mira las solicitudes nuevas en tus categorías y códigos postales, responde con un precio fijo y recibe tu pago cuando el trabajo se confirma."
+      }
+    },
+    "soon": {
+      "title": "Muy pronto en iPhone y Android.",
+      "body": "Estamos preparando la app para el App Store y Google Play. Los enlaces de descarga estarán en esta página.",
+      "ios": "iPhone",
+      "android": "Android",
+      "badge": "Muy pronto"
+    },
+    "faq": {
+      "eyebrow": "Apoyo cuando lo necesites",
+      "title": "Preguntas, con respuesta.",
+      "items": {
+        "what": {
+          "question": "¿Qué es Jack Fix It?",
+          "answer": "Una app de servicios para el hogar. Le cuentas a Jack lo que pasa en casa, los profesionales cercanos responden con presupuestos de precio fijo y tú eliges el que te convenga. La reserva, el pago, el chat y el avance del trabajo quedan en la app."
+        },
+        "cost": {
+          "question": "¿Cuesta algo pedir presupuestos?",
+          "answer": "No. Enviar una solicitud y recibir presupuestos es gratis. Solo pagas cuando aceptas un presupuesto, y ves el total, con los impuestos que correspondan, antes de confirmarlo."
+        },
+        "paid": {
+          "question": "¿Cuándo recibe su pago el profesional?",
+          "answer": "Cuando el trabajo se confirma, no cuando tú pagas. Cuando el profesional marca el trabajo como terminado, empieza un período de confirmación; si nadie reporta un problema antes de que termine, el trabajo se confirma automáticamente y el profesional recibe su pago."
+        },
+        "methods": {
+          "question": "¿Cómo puedo pagar?",
+          "answer": "Con tarjeta, o con Apple Pay o Google Pay si tu teléfono los ofrece. El pago se hace en la plataforma segura de Stripe, así que Jack Fix It nunca guarda el número de tu tarjeta."
+        },
+        "verified": {
+          "question": "¿Cómo se verifica a los profesionales?",
+          "answer": "Antes de que un profesional pueda enviarte un presupuesto, nuestro equipo revisa la información y los documentos que presenta y aprueba su perfil. Verás el sello verde junto al nombre de un profesional verificado."
+        },
+        "privacy": {
+          "question": "¿Quién puede ver mis datos de contacto y mi dirección?",
+          "answer": "Los profesionales nunca ven tu teléfono ni tu correo. Antes de que reserves, solo ven tu ciudad y tu código postal; el profesional que reservas recibe la dirección completa para hacer el trabajo. Para hablar, los dos usan el chat."
+        },
+        "languages": {
+          "question": "¿En qué idiomas está la app?",
+          "answer": "En inglés y en español. Eliges el idioma en la configuración de la app."
+        },
+        "available": {
+          "question": "¿Cuándo podré descargar la app?",
+          "answer": "Muy pronto. La estamos preparando para iPhone y Android, y los enlaces de descarga estarán en esta página."
+        },
+        "joinPro": {
+          "question": "Soy profesional. ¿Cómo me uno?",
+          "answer": "Crearás tu perfil profesional en la app: tus categorías, los códigos postales que cubres, tus documentos y tu cuenta de pagos. Nuestro equipo revisa cada perfil antes de que empiece a recibir solicitudes."
+        }
+      }
+    },
+    "final": {
+      "title": "Cuéntaselo a Jack. Nosotros nos encargamos del resto.",
+      "body": "La app llega muy pronto a iPhone y Android."
+    },
+    "footer": {
+      "legalLabel": "Legal",
+      "terms": "Términos de servicio",
+      "privacy": "Política de privacidad",
+      "sampleData": "Las pantallas de la app en esta página muestran datos de ejemplo.",
+      "rights": "© {{year}} Jack Fix It"
+    },
+    "media": {
+      "home": "La pantalla de inicio de la app: “¿Qué está pasando en casa?” sobre las categorías de servicio.",
+      "describe": "Una solicitud en la app: unas preguntas sobre el trabajo antes de enviarla a los profesionales.",
+      "quotes": "Presupuestos en la app, cada uno con su precio, cuánto dura el trabajo, cuándo empieza y qué incluye.",
+      "pay": "La app pide confirmar que el trabajo está terminado antes de liberar el pago.",
+      "track": "Un mapa en la app con el profesional en camino, la hora de llegada y el código de llegada.",
+      "chat": "Un chat entre un cliente y un profesional en la app, con un teléfono oculto.",
+      "reviews": "La pantalla de calificación en la app: estrellas para el trabajo y luego para comunicación, calidad y puntualidad.",
+      "pros": "La pantalla de inicio del profesional en la app, con oportunidades nuevas por categoría y código postal."
+    },
+    "legal": {
+      "terms": {
+        "title": "Términos de servicio",
+        "lead": "Aquí publicaremos nuestros Términos de servicio.",
+        "body": "Los estamos terminando. Cuando estén listos, podrás leerlos completos en esta página."
+      },
+      "privacy": {
+        "title": "Política de privacidad",
+        "lead": "Aquí publicaremos nuestra Política de privacidad.",
+        "body": "La estamos terminando. Cuando esté lista, podrás leerla completa en esta página."
+      },
+      "back": "Volver a la página de la app"
+    }
+  },
   "admin": {
     "title": "Panel de operaciones",
     "login": {
@@ -26,7 +179,9 @@
     "nav": {
       "label": "Panel",
       "home": "Inicio",
-      "support": "Soporte"
+      "support": "Soporte",
+      "queue": "Cola",
+      "pros": "Profesionales"
     },
     "roles": {
       "agent": "Agente",
@@ -35,7 +190,7 @@
     "logout": "Cerrar sesión",
     "home": {
       "welcome": "Te damos la bienvenida, {{email}}",
-      "queueSoon": "La cola de operaciones llega pronto. Las nuevas solicitudes aparecerán aquí."
+      "openQueue": "Abrir la cola de operaciones"
     },
     "support": {
       "title": "Soporte",
@@ -105,6 +260,309 @@
           "forbidden": "Tu cuenta no puede cambiar tickets.",
           "unavailable": "No pudimos guardar el estado. Vuelve a intentarlo en un momento."
         }
+      }
+    },
+    "queue": {
+      "title": "Cola de operaciones",
+      "subtitle": "Solicitudes según lo que necesitan ahora. La lista se actualiza sola.",
+      "tabsLabel": "Solicitudes por grupo",
+      "tabs": {
+        "new": "Nuevas",
+        "urgent": "Urgentes",
+        "waiting_customer": "Esperando al cliente",
+        "waiting_pro": "Esperando al profesional",
+        "quote_ready": "Presupuesto listo",
+        "scheduled_today": "Programadas hoy",
+        "problems": "Problemas",
+        "mine": "Mías",
+        "all": "Todas"
+      },
+      "filters": {
+        "label": "Filtrar las solicitudes",
+        "search": "Código de solicitud",
+        "searchPlaceholder": "JF-000124",
+        "status": "Estado",
+        "category": "Categoría",
+        "zip": "ZIP",
+        "assigned": "A cargo de",
+        "any": "Cualquiera",
+        "assignedTo": {
+          "any": "Cualquiera",
+          "me": "Yo",
+          "unassigned": "Nadie"
+        },
+        "apply": "Aplicar",
+        "clear": "Limpiar"
+      },
+      "columns": {
+        "request": "Solicitud",
+        "category": "Categoría y ZIP",
+        "status": "Estado",
+        "firstContact": "Primer contacto",
+        "agent": "A cargo de",
+        "age": "Antigüedad"
+      },
+      "status": {
+        "received": "Recibida",
+        "reviewing": "En revisión",
+        "finding_pro": "Buscando profesional",
+        "quote_ready": "Presupuesto listo",
+        "accepted": "Aceptada",
+        "expired": "Vencida",
+        "cancelled": "Cancelada"
+      },
+      "timer": {
+        "left": "Quedan {{time}}",
+        "late": "{{time}} de retraso",
+        "contacted": "Contactado",
+        "none": "No aplica"
+      },
+      "age": {
+        "minutes": "{{count}} min",
+        "hours": "{{count}} h",
+        "days": "{{count}} d"
+      },
+      "urgent": "Urgente",
+      "unclassified": "Sin clasificar",
+      "noName": "Sin nombre registrado",
+      "unassigned": "Nadie",
+      "agentNoName": "Alguien del equipo",
+      "empty": {
+        "new": "No hay solicitudes nuevas.",
+        "urgent": "Nada urgente.",
+        "waiting_customer": "Nada espera a un cliente.",
+        "waiting_pro": "Nada espera a un profesional.",
+        "quote_ready": "Ningún presupuesto espera respuesta.",
+        "scheduled_today": "No hay trabajos programados hoy.",
+        "problems": "No hay problemas abiertos.",
+        "mine": "No tienes solicitudes a tu cargo.",
+        "all": "Aún no hay solicitudes."
+      },
+      "noMatch": "Ninguna solicitud coincide con estos filtros.",
+      "noMore": "No hay más solicitudes.",
+      "more": "Más solicitudes",
+      "first": "Volver al inicio",
+      "loadError": "No pudimos cargar la cola. Vuelve a intentarlo en un momento.",
+      "retry": "Reintentar"
+    },
+    "requests": {
+      "back": "Cola de operaciones",
+      "notFound": "Esta solicitud no existe.",
+      "loadError": "No pudimos cargar esta solicitud. Vuelve a intentarlo en un momento.",
+      "category": "Categoría",
+      "created": "Creada",
+      "firstContact": "Primer contacto",
+      "lastContact": "Último contacto",
+      "customerSees": "El cliente ve",
+      "nextAction": "Próxima acción",
+      "origin": {
+        "app": "Desde la app",
+        "web": "Desde el sitio web",
+        "phone": "Por teléfono"
+      },
+      "customerStatus": {
+        "requestReceived": "Solicitud recibida",
+        "reviewing": "En revisión",
+        "findingAPro": "Buscando un profesional",
+        "quoteReady": "Presupuesto listo",
+        "scheduled": "Programada",
+        "professionalOnTheWay": "Profesional en camino",
+        "inProgress": "En curso",
+        "waitingForConfirmation": "Esperando confirmación",
+        "completed": "Completada",
+        "needsAttention": "Requiere atención",
+        "cancelled": "Cancelada"
+      },
+      "customer": {
+        "title": "Cliente",
+        "name": "Nombre",
+        "phone": "Teléfono",
+        "noPhone": "Sin teléfono registrado",
+        "email": "Correo",
+        "language": "Idioma",
+        "address": "Dirección",
+        "prefers": "Prefiere",
+        "call": "Llamar",
+        "text": "Enviar SMS",
+        "sendEmail": "Enviar correo"
+      },
+      "assignment": {
+        "title": "Quién la tiene",
+        "nobody": "Nadie tiene esta solicitud.",
+        "you": "Tú tienes esta solicitud.",
+        "heldBy": "{{name}} tiene esta solicitud.",
+        "claim": "Tomar esta solicitud",
+        "release": "Liberar",
+        "saving": "Guardando…",
+        "saved": "Guardado.",
+        "errors": {
+          "held": "Otra persona del equipo tiene esta solicitud ahora.",
+          "not_found": "Esta solicitud ya no existe.",
+          "forbidden": "Tu cuenta no puede cambiar quién tiene una solicitud.",
+          "unavailable": "No pudimos guardar el cambio. Vuelve a intentarlo en un momento."
+        }
+      },
+      "request": {
+        "title": "Solicitud",
+        "preferred": "Día preferido",
+        "period": {
+          "morning": "Mañana",
+          "afternoon": "Tarde",
+          "evening": "Noche",
+          "flexible": "Cualquier hora"
+        },
+        "media": "Fotos y videos",
+        "noMedia": "Sin archivos adjuntos.",
+        "open": {
+          "photo": "Abrir la foto {{number}}",
+          "video": "Abrir el video {{number}}"
+        },
+        "mediaPending": "Aún en preparación: {{count}}",
+        "filesOpenInNewTab": "Los archivos se abren en una pestaña nueva."
+      },
+      "quotes": {
+        "title": "Presupuestos",
+        "none": "Aún no hay presupuestos.",
+        "starts": "Inicia",
+        "status": {
+          "pending": "Pendiente",
+          "accepted": "Aceptado",
+          "rejected": "No elegido",
+          "expired": "Vencido",
+          "withdrawn": "Retirado"
+        }
+      },
+      "job": {
+        "title": "Trabajo",
+        "none": "Aún no hay trabajo: la solicitud no está pagada.",
+        "status": "Estado",
+        "scheduled": "Inicio programado",
+        "history": "Historial",
+        "bySystem": "(automático)",
+        "statuses": {
+          "scheduled": "Programado",
+          "on_the_way": "En camino",
+          "in_progress": "En progreso",
+          "completed": "Completado",
+          "confirmed": "Confirmado",
+          "paid_out": "Pagado al profesional",
+          "disputed": "En disputa",
+          "refunded": "Reembolsado",
+          "cancelled": "Cancelado"
+        }
+      }
+    },
+    "pros": {
+      "title": "Profesionales",
+      "subtitle": "Revisa los documentos de cada profesional y luego apruébalo o recházalo. Solo los profesionales aprobados reciben solicitudes.",
+      "filter": {
+        "label": "Profesionales por estado"
+      },
+      "status": {
+        "pending": "Pendientes",
+        "approved": "Aprobados",
+        "rejected": "Rechazados"
+      },
+      "documentStatus": {
+        "pending": "Pendiente",
+        "approved": "Aprobado",
+        "rejected": "Rechazado",
+        "superseded": "Reemplazado"
+      },
+      "documentType": {
+        "id": "Identificación con foto",
+        "license": "Licencia",
+        "insurance": "Seguro"
+      },
+      "documentCount": {
+        "pending": "Pendientes: {{count}}",
+        "approved": "Aprobados: {{count}}",
+        "rejected": "Rechazados: {{count}}"
+      },
+      "columns": {
+        "pro": "Profesional",
+        "categories": "Categorías",
+        "zips": "ZIP",
+        "documents": "Documentos",
+        "submitted": "En espera desde"
+      },
+      "noName": "Sin nombre registrado",
+      "noPayouts": "Pagos sin configurar",
+      "noCategories": "Aún sin categorías",
+      "noDocuments": "Aún sin documentos",
+      "nothingPending": "Nada por revisar",
+      "empty": {
+        "pending": "Ningún profesional espera una decisión.",
+        "approved": "Aún no hay profesionales aprobados.",
+        "rejected": "No hay profesionales rechazados."
+      },
+      "older": "Profesionales anteriores",
+      "noOlder": "No hay profesionales anteriores.",
+      "newest": "Volver a los más recientes",
+      "loadError": "No pudimos cargar los profesionales. Vuelve a intentarlo en un momento.",
+      "retry": "Reintentar",
+      "detail": {
+        "back": "Todos los profesionales",
+        "notFound": "Este profesional no existe.",
+        "loadError": "No pudimos cargar este profesional. Vuelve a intentarlo en un momento.",
+        "payouts": "Pagos",
+        "payoutsEnabled": "Configurados",
+        "payoutsMissing": "Aún sin configurar",
+        "experience": "Años de experiencia",
+        "notGiven": "Sin indicar",
+        "categories": "Categorías",
+        "areas": "Zonas de servicio",
+        "noAreas": "Aún sin zonas de servicio",
+        "joined": "Perfil creado",
+        "decided": "Última decisión",
+        "reason": "Motivo",
+        "bio": "Acerca de",
+        "viewPhoto": "Abrir la foto de perfil",
+        "documents": "Documentos",
+        "filesNote": "Los archivos se abren en una pestaña nueva, a través del panel: cada apertura queda registrada.",
+        "required": "Requeridos",
+        "notSubmitted": "Aún sin enviar",
+        "submitted": "Enviado",
+        "expires": "Vence",
+        "noExpiry": "Sin fecha de vencimiento",
+        "expired": "Vencido",
+        "reviewed": "Revisado",
+        "viewFile": "Abrir el archivo ({{type}})",
+        "reviewLabel": "Revisar: {{type}}",
+        "approveDocument": "Aprobar",
+        "rejectDocument": "Rechazar",
+        "history": "Documentos anteriores",
+        "blockers": {
+          "title": "Antes de aprobar a este profesional",
+          "document_missing": "{{type}}: sin documento aprobado",
+          "document_expired": "{{type}}: el documento aprobado venció",
+          "no_category": "El profesional no tiene categoría",
+          "no_service_area": "El profesional no tiene zona de servicio"
+        },
+        "decision": {
+          "title": "Decisión",
+          "hint": "Un profesional aprobado recibe solicitudes cuando sus pagos están configurados. El profesional puede leer el motivo de un rechazo.",
+          "approve": "Aprobar profesional",
+          "reject": "Rechazar profesional",
+          "approveQuestion": "¿Aprobar a este profesional?",
+          "confirmApprove": "Sí, aprobar",
+          "confirmReject": "Rechazar con este motivo",
+          "cancel": "Cancelar",
+          "reasonLabel": "Motivo",
+          "reasonHint": "El profesional puede leerlo. Hasta {{max}} caracteres.",
+          "saving": "Guardando…",
+          "saved": "Guardado."
+        },
+        "errors": {
+          "reason_required": "Escribe un motivo de hasta {{max}} caracteres.",
+          "not_found": "Esto ya no existe. Recarga la página.",
+          "already_reviewed": "Este documento ya fue revisado o reemplazado. Recarga la página.",
+          "not_approvable": "Este profesional aún no puede aprobarse. Revisa lo que falta.",
+          "forbidden": "Tu cuenta no puede revisar profesionales.",
+          "unavailable": "No pudimos guardar la decisión. Vuelve a intentarlo en un momento."
+        },
+        "legalNameHint": "Nombre de la cuenta. Compáralo con el documento de identificación.",
+        "legalNameMissing": "La cuenta no tiene nombre completo para comparar con el documento de identificación."
       }
     }
   }

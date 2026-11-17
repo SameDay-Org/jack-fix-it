@@ -16,11 +16,13 @@ import app.worker as app_worker
 from app.config import Settings, get_settings
 from app.integrations.mapbox import MapboxRouteProvider, UnconfiguredRouteProvider
 from app.integrations.stripe_payments import StripePaymentsClient
+from app.integrations.stripe_transfers import StripeTransfersClient
 from app.modules.chat.tasks import purge_chat_originals
 from app.modules.dispatch.tasks import dispatch_request
 from app.modules.jobs.tasks import auto_confirm_jobs
 from app.modules.notifications.push_tasks import check_push_receipts
 from app.modules.payments.tasks import cancel_unpaid_payments
+from app.modules.payments.transfer_tasks import check_transfer_reversals, release_confirmed_jobs
 from app.modules.quotes.tasks import expire_quotes
 from app.modules.requests.tasks import SANITIZE_SPARE_TRIES
 from app.modules.uploads.tasks import sweep_orphan_uploads
@@ -87,6 +89,8 @@ def test_registration_keeps_names_tries_and_timeouts() -> None:
         "process_stripe_event": (get_settings().stripe_webhook_max_attempts, None),
         # One try: each run that reaches Mapbox is a billed call (#384).
         "geocode_address": (1, None),
+        # One run per queued confirmation (#68): the sweep is its retry.
+        "release_transfer": (1, None),
     }
 
 
@@ -134,6 +138,19 @@ def test_cron_jobs_keep_names_cadences_and_timeouts() -> None:
             get_settings().job_auto_confirm_sweep_timeout_seconds,
             1,
         ),
+        "cron:release_confirmed_jobs": (
+            release_confirmed_jobs,
+            every(get_settings().transfer_release_sweep_minutes),
+            get_settings().transfer_release_sweep_timeout_seconds,
+            1,
+        ),
+        # The reversal check's recovery (#416 r2): the release sweep's cadence and timeout.
+        "cron:check_transfer_reversals": (
+            check_transfer_reversals,
+            every(get_settings().transfer_release_sweep_minutes),
+            get_settings().transfer_release_sweep_timeout_seconds,
+            1,
+        ),
     }
 
 
@@ -167,6 +184,22 @@ def test_worker_registers_cancel_unpaid_payments_without_results(
     assert (job.keep_result_s, job.keep_result_forever) == (0, False)
     assert job.minute == {0, 15, 30, 45}
     assert job.timeout_s == 222
+
+
+def test_worker_registers_release_confirmed_jobs_without_results(
+    worker_module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # #68: the cadence and the timeout come from the settings, read when the worker starts.
+    monkeypatch.setenv("TRANSFER_RELEASE_SWEEP_MINUTES", "20")
+    monkeypatch.setenv("TRANSFER_RELEASE_SWEEP_TIMEOUT_SECONDS", "444")
+    get_settings.cache_clear()
+    module = importlib.reload(worker_module)
+
+    [job] = [j for j in module.WorkerSettings.cron_jobs if j.coroutine is release_confirmed_jobs]
+    assert job.name == "cron:release_confirmed_jobs"
+    assert (job.keep_result_s, job.keep_result_forever) == (0, False)
+    assert job.minute == {0, 20, 40}
+    assert job.timeout_s == 444
 
 
 def test_worker_registers_purge_chat_originals_without_results(
@@ -236,8 +269,8 @@ def test_unpaid_cancel_window_must_be_positive(value: str) -> None:
 async def test_startup_gives_the_sweep_a_stripe_client_only_with_a_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The unpaid payment sweep reads ctx["stripe_payments"]: a client with the secret key,
-    None without it."""
+    """The unpaid payment sweep reads ctx["stripe_payments"] and the transfers to the pros
+    (#68) ctx["stripe_transfers"]: a client with the secret key, None without it."""
     monkeypatch.setattr(app_worker, "configure_logging", lambda level: None)
     monkeypatch.setattr(app_worker, "init_sentry", lambda settings: None)
     contexts: list[dict[str, Any]] = []
@@ -252,6 +285,8 @@ async def test_startup_gives_the_sweep_a_stripe_client_only_with_a_key(
     without_key, with_key = contexts
     assert without_key["stripe_payments"] is None
     assert isinstance(with_key["stripe_payments"], StripePaymentsClient)
+    assert without_key["stripe_transfers"] is None
+    assert isinstance(with_key["stripe_transfers"], StripeTransfersClient)
 
 
 async def test_startup_gives_the_geocode_task_mapbox_only_with_a_token(

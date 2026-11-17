@@ -1,4 +1,5 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
+import { AndroidConfig, withAndroidManifest, type ConfigPlugin } from "expo/config-plugins";
 
 import en from "./src/i18n/locales/en.json";
 import es from "./src/i18n/locales/es.json";
@@ -46,6 +47,46 @@ const PERMISSION_PROMPTS = {
   },
 };
 
+const BOOT_COMPLETED = "android.permission.RECEIVE_BOOT_COMPLETED";
+
+/**
+ * The app's manifest without RECEIVE_BOOT_COMPLETED, removed from the merged manifest too
+ * (`tools:node="remove"`). expo-task-manager declares it, and with it granted it hands the pro's
+ * location fixes to Android's JobScheduler as PERSISTED jobs (`setPersisted(true)`): written to
+ * disk and kept across a reboot until the app reads them. Without it the jobs live in memory
+ * only. Nothing in the app needs it: push messages come from the server, and the one scheduled
+ * local notification (a dev screen's) fires seconds later. Pure, so a test can check the output.
+ */
+export function withoutBootCompleted(
+  manifest: AndroidConfig.Manifest.AndroidManifest,
+): AndroidConfig.Manifest.AndroidManifest {
+  const root = AndroidConfig.Manifest.ensureToolsAvailable(manifest).manifest;
+  const others = (root["uses-permission"] ?? []).filter(
+    (permission) => permission.$["android:name"] !== BOOT_COMPLETED,
+  );
+  return {
+    ...manifest,
+    manifest: {
+      ...root,
+      "uses-permission": [
+        ...others,
+        {
+          $: { "android:name": BOOT_COMPLETED, "tools:node": "remove" } as {
+            "android:name": string;
+          },
+        },
+      ],
+    },
+  };
+}
+
+// A change here needs a new dev build.
+const withNoBootCompleted: ConfigPlugin = (config) =>
+  withAndroidManifest(config, (mod) => {
+    mod.modResults = withoutBootCompleted(mod.modResults);
+    return mod;
+  });
+
 function appVariant(): AppVariant {
   const value = process.env.APP_VARIANT ?? "development";
   if (Object.hasOwn(VARIANTS, value)) return value as AppVariant;
@@ -56,7 +97,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const variant = VARIANTS[appVariant()];
   const appId = `${BASE_APP_ID}${variant.idSuffix}`;
 
-  return {
+  // Keeps the pro's location fixes out of persisted Android jobs (#352): see withoutBootCompleted.
+  return withNoBootCompleted({
     ...config,
     name: `Jack Fix It${variant.nameSuffix}`,
     slug: "jack-fix-it",
@@ -112,11 +154,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ["expo-sensors", { motionPermission: en.permissions.motion }],
       // The share sheet for the card's PNG. Without options the app receives no shares.
       "expo-sharing",
-      // The pro's check-in at a job (#63; a change here needs a new dev build): the location
-      // while the app is in use, read once when the pro checks in. No "always" or background
-      // location (no background mode on iOS, no ACCESS_BACKGROUND_LOCATION or foreground service
-      // on Android) and no temporary full-accuracy prompt. Motion activity stays off on Android;
-      // the iOS motion string is the ID card's, set above.
+      // The pro's location (a change here needs a new dev build): read once at check-in (#63), and
+      // sent every few seconds while on the way to a job (#352), on the "while using" permission
+      // alone. Sharing starts with the app in front, so it goes on in the background and with the
+      // phone locked: iOS through the location background mode (the system shows its location
+      // indicator), Android through a foreground service with its notification (no
+      // ACCESS_BACKGROUND_LOCATION). Never "always", and no temporary full-accuracy prompt. Motion
+      // activity stays off on Android; the iOS motion string is the ID card's, set above.
       [
         "expo-location",
         {
@@ -124,9 +168,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           locationAlwaysAndWhenInUsePermission: false,
           locationAlwaysPermission: false,
           locationFullAccuracyPermission: false,
-          isIosBackgroundLocationEnabled: false,
+          isIosBackgroundLocationEnabled: true,
           isAndroidBackgroundLocationEnabled: false,
-          isAndroidForegroundServiceEnabled: false,
+          isAndroidForegroundServiceEnabled: true,
           isAndroidMotionActivityEnabled: false,
         },
       ],
@@ -160,5 +204,5 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     experiments: { typedRoutes: true },
     // `appleMerchantId` reaches the Payment Sheet through expo-constants (src/features/payments).
     extra: { eas: { projectId: EAS_PROJECT_ID }, appleMerchantId: APPLE_MERCHANT_ID },
-  };
+  });
 };

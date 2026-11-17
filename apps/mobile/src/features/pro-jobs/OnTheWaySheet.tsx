@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
@@ -16,6 +16,7 @@ import { ETA_MAX_MINUTES, ETA_MIN_MINUTES, nextEta, previousEta, proJobsConfig }
 import { customerName } from "./format";
 import { jobStep } from "./phase";
 import { reportStepFailure } from "./failure";
+import { sharingConfig } from "./sharing/config";
 import { useSheetExit } from "./useSheetExit";
 
 const MINUTE_MS = 60_000;
@@ -28,7 +29,8 @@ type Choice = { kind: "preset"; minutes: number } | { kind: "custom" } | null;
  * expects to arrive, from one-tap presets or a custom time from 5 minutes to 4 hours, then one
  * POST. On the way already, it updates only the arrival time ("Update arrival time"). The job
  * screen under it redraws with the answer as it closes. Offline, the sheet stays with the reason;
- * a job that moved on or went away closes it with a toast.
+ * a job that moved on or went away closes it with a toast. Going on the way, the sheet hands over to
+ * the explanation of the location sharing (#352).
  */
 export function OnTheWaySheet() {
   const { t } = useTranslation();
@@ -72,7 +74,14 @@ export function OnTheWaySheet() {
           () => undefined,
         );
         if (updating) announce(t("proJobs.announce.etaUpdated"));
-        if (mounted.current) leave();
+        // Going on the way: the explanation in place of the sheet, whatever the permission says.
+        if (!mounted.current || leaving.current) return;
+        if (!updating && sharingConfig.enabled) {
+          leaving.current = true;
+          router.replace({ pathname: "/jobs/[id]/share-location", params: { id: job.id } });
+          return;
+        }
+        leave();
       } catch (error) {
         const failure = stepFailure(error);
         if (failure === "signedOut") return;

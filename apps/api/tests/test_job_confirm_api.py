@@ -243,12 +243,14 @@ async def test_confirm_pushes_the_pro_once_after_the_commit(
                 {"public_code": request.public_code},
                 f"/jobs/{job.id}",
             ),
-        )
+        ),
+        # The pro's transfer (#68), queued after the same commit.
+        f"release-transfer:{job.id}": ("release_transfer", (str(job.id),)),
     }
-    assert queue.before == ["commit"]  # queued after the confirm's commit, once
+    assert queue.before == ["commit", "commit"]  # both queued after the confirm's commit, once
     again = await db_client.post(confirm_path(job), headers=world.customer.headers)
     assert again.status_code == 200
-    assert len(queue.before) == 1  # a repeat pushes nothing, not even a deduplicated one
+    assert len(queue.before) == 2  # a repeat queues nothing, not even a deduplicated one
 
 
 @pytest.mark.parametrize("status", NOT_CONFIRMABLE)
@@ -283,9 +285,11 @@ async def test_a_failed_push_enqueue_never_fails_the_confirm(
 
     assert response.status_code == 200
     assert response.json()["status"] == "confirmed"
-    assert len(broken.before) == 1  # tried once
+    assert len(broken.before) == 2  # the push and the transfer's release (#68), tried once each
     [record] = [r for r in caplog.records if r.getMessage() == "push_enqueue_failed"]
     assert record.levelno == logging.ERROR
+    [release] = [r for r in caplog.records if r.getMessage() == "transfer_release_enqueue_failed"]
+    assert release.levelno == logging.ERROR
     assert "probe-secret-text-66" not in caplog.text
 
 

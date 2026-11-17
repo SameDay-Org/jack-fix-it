@@ -12,6 +12,7 @@ describe("ACCOUNT_GLYPHS", () => {
     expect(NAMES).toEqual([
       "settings",
       "addresses",
+      "paymentMethods",
       "help",
       "legal",
       "proProfile",

@@ -22,8 +22,9 @@ const STEP_KEY: Record<DocumentState, "stepSent" | "stepRejected" | "stepTodo"> 
 
 /**
  * "Send your documents" on the pro's home (#38): the documents the API requires, each ticked
- * once it is sent, and the way to the documents screen. It shows while one is missing or was
- * rejected, and leaves once all are in. Loading draws its shape; a failure offers a retry.
+ * once it is sent, and the way to the documents screen. It shows while one is missing, was
+ * rejected or expired, and leaves once all are in. Loading draws its shape; a failure offers a
+ * retry.
  */
 export function DocumentsChecklistCard({
   primary = true,
@@ -61,13 +62,17 @@ export function DocumentsChecklistCard({
         sent: checklist.sent,
         total: checklist.rows.length,
       })}
-      steps={checklist.rows.map(({ type, state }) => {
+      steps={checklist.rows.map(({ type, state, expired }) => {
         const name = t(`proDocuments.types.${type}`);
+        // An expired one says what to do: its name alone would read as already sent.
+        const label = expired ? t("proVerification.documents.stepExpired", { name }) : name;
         return {
           id: type,
-          label: name,
+          label,
           done: STEP_KEY[state] === "stepSent",
-          accessibilityLabel: t(`proVerification.documents.${STEP_KEY[state]}`, { name }),
+          accessibilityLabel: expired
+            ? label
+            : t(`proVerification.documents.${STEP_KEY[state]}`, { name }),
         };
       })}
       actionLabel={t("proVerification.documents.action")}

@@ -72,6 +72,15 @@ const flush = () => act(async () => settle());
 const pressed = (testID: string) => act(async () => fireEvent.press(screen.getByTestId(testID)));
 const paths = () => jest.mocked(apiGet).mock.calls.map(([path]) => path as string);
 const labelOf = (testID: string) => screen.getByTestId(testID).props.accessibilityLabel as string;
+/** A UTC date `offset` days from now, as the API writes `expires_on`. */
+const utcDay = (offset: number) =>
+  new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, "YYYY-MM-DD".length);
+/** An approved ID, and an approved insurance that expires on `expires_on`. */
+const withApprovedInsurance = (expires_on: string | null) =>
+  documents([
+    document({ doc_type: "id", status: "approved" }),
+    document({ doc_type: "insurance", status: "approved", expires_on }),
+  ]);
 
 async function open(profile: ProProfile | Error, list: MyDocuments = NOTHING_SENT) {
   server = { profile, documents: list, requests: page([REQUEST]) };
@@ -161,6 +170,34 @@ describe("the pro's home until the pro is approved (#38)", () => {
     expect(screen.queryByTestId("profile-checklist")).toBeNull();
     expect(screen.queryByTestId("documents-checklist")).toBeNull();
     expect(paths()).not.toContain(OPPORTUNITIES);
+  });
+
+  it("an approved insurance past its expiry brings Send your documents back, to renew it", async () => {
+    await open(FULL_PROFILE, withApprovedInsurance(utcDay(-1)));
+
+    expect(await screen.findByTestId("documents-checklist-progress")).toHaveTextContent(
+      "1 of 2 sent",
+    );
+    expect(screen.getByTestId("documents-checklist-insurance")).toHaveTextContent(
+      "Insurance expired: upload a renewed one",
+    );
+    expect(labelOf("documents-checklist-insurance")).toBe(
+      "Insurance expired: upload a renewed one",
+    );
+    expect(labelOf("documents-checklist-id")).toBe("Photo ID: sent");
+    expect(paths()).not.toContain(OPPORTUNITIES);
+  });
+
+  it.each([
+    ["expiring today", () => utcDay(0)],
+    ["with no expiry", () => null],
+  ])("an approved insurance %s keeps Send your documents away", async (_, expiresOn) => {
+    await open(FULL_PROFILE, withApprovedInsurance(expiresOn()));
+
+    await waitFor(() => expect(paths()).toContain(DOCUMENTS));
+    await flush();
+    expect(screen.getByTestId("verification-banner")).toBeTruthy();
+    expect(screen.queryByTestId("documents-checklist")).toBeNull();
   });
 
   it("an approved pro with payouts on sees the requests, and no banner", async () => {

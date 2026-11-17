@@ -148,6 +148,7 @@ function Status({ profile }: { profile: ProProfile }) {
           />
         </>
       ) : null}
+      {documents.data ? <ExpiredDocuments documents={documents.data} /> : null}
       {/* The fix first: on a short screen it stays in sight under the reasons. */}
       {status === "rejected" ? (
         <Button
@@ -221,6 +222,31 @@ function ProfileReason({ reason }: { reason: string | null }) {
       <Text className={given ? "text-body text-navy-900" : "text-body text-gray-500"}>
         {given || t("proVerification.rejected.noReason")}
       </Text>
+    </View>
+  );
+}
+
+/**
+ * The required documents whose approval ran out (`isExpired`): each says it expired and that a
+ * renewed one is needed. The Documents row below counts them as missing and opens the list.
+ */
+function ExpiredDocuments({ documents }: { documents: MyDocuments }) {
+  const { t } = useTranslation();
+  const expired = documentsChecklist(documents).rows.filter((row) => row.expired);
+  if (expired.length === 0) return null;
+  return (
+    <View className="gap-3" testID="verification-expired">
+      {expired.map(({ type }) => (
+        <Notice
+          key={type}
+          tone="info"
+          title={t("proVerification.documents.expiredTitle", {
+            name: t(`proDocuments.types.${type}`),
+          })}
+          body={t("proVerification.documents.expiredBody")}
+          testID={`verification-expired-${type}`}
+        />
+      ))}
     </View>
   );
 }

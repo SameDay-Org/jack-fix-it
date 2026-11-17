@@ -1,4 +1,5 @@
 import { document, documents, NOTHING_SENT } from "../../pro-documents/__tests__/helpers";
+import type { ProDocument } from "../../pro-documents/documents";
 import { EMPTY_PROFILE, FULL_PROFILE } from "../../pro-profile/__tests__/helpers";
 import { awaitsPayouts, documentsChecklist, homeMode, rejectedDocuments } from "../verification";
 
@@ -61,6 +62,56 @@ describe("documentsChecklist", () => {
 
     expect(documentsChecklist(data)).toMatchObject({ sent: 2, complete: true });
     expect(documentsChecklist(data).rows).toHaveLength(2);
+  });
+
+  describe("an approved document past its expiry (before today, UTC)", () => {
+    // 9 PM in Florida on Nov 16 is already Nov 17 in UTC, the day the API reads.
+    const NOW = new Date("2026-11-17T02:00:00Z");
+    const withInsurance = (insurance: Partial<ProDocument>) =>
+      documents([
+        document({ doc_type: "id", status: "approved" }),
+        document({ doc_type: "insurance", status: "approved", ...insurance }),
+      ]);
+
+    it("counts as missing again: its row, the count and the completion", () => {
+      const checklist = documentsChecklist(withInsurance({ expires_on: "2026-11-16" }), NOW);
+
+      expect(checklist).toMatchObject({ sent: 1, complete: false });
+      expect(checklist.rows.map(({ type, state, expired }) => [type, state, expired])).toEqual([
+        ["id", "approved", false],
+        ["insurance", "missing", true],
+      ]);
+    });
+
+    it.each([
+      ["expiring today", "2026-11-17"],
+      ["expiring later", "2027-01-01"],
+      ["with no expiry", null],
+    ])("still counts as sent %s", (_, expires_on) => {
+      const checklist = documentsChecklist(withInsurance({ expires_on }), NOW);
+
+      expect(checklist).toMatchObject({ sent: 2, complete: true });
+      expect(checklist.rows.every(({ expired }) => !expired)).toBe(true);
+    });
+
+    it("applies to an approved document only: one in review keeps waiting for its review", () => {
+      const checklist = documentsChecklist(
+        withInsurance({ status: "pending", expires_on: "2026-11-16" }),
+        NOW,
+      );
+
+      expect(checklist).toMatchObject({ sent: 2, complete: true });
+    });
+
+    it("leaves a type that is not required out", () => {
+      const data = documents([
+        document({ doc_type: "id", status: "approved" }),
+        document({ doc_type: "insurance", status: "approved" }),
+        document({ doc_type: "license", status: "approved", expires_on: "2026-11-16" }),
+      ]);
+
+      expect(documentsChecklist(data, NOW)).toMatchObject({ sent: 2, complete: true });
+    });
   });
 });
 
