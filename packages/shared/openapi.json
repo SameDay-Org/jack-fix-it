@@ -1684,6 +1684,389 @@
         ]
       }
     },
+    "/v1/admin/pros": {
+      "get": {
+        "tags": [
+          "pros"
+        ],
+        "summary": "List pros by verification status (staff)",
+        "description": "The pros in one verification status (pending when left out), newest profile first, for\nthe BDC and admins: first name and last initial, categories, how many ZIPs they serve and\ntheir documents by status, plus how many pros each status has. Never an email, a phone, a\nlast name or an address.",
+        "operationId": "staff_list_pros_v1_admin_pros_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ProVerificationStatus",
+              "description": "Only pros in this verification status.",
+              "default": "pending"
+            },
+            "description": "Only pros in this verification status."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size; capped.",
+              "title": "Limit"
+            },
+            "description": "Page size; capped."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffProPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: an unknown status, a bad cursor or limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/pros/{pro_id}": {
+      "get": {
+        "tags": [
+          "pros"
+        ],
+        "summary": "Read a pro for review (staff)",
+        "description": "One pro: the profile with the legal name (to match the ID document), the documents with\nshort-lived presigned URLs, the types required and missing, and what an approval still\nneeds. Every read is recorded in the audit log with the staff member who made it.",
+        "operationId": "staff_get_pro_v1_admin_pros__pro_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "pro_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Pro Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffProOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a pro_id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "pro_not_found: no pro profile with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/pros/{pro_id}/documents/{document_id}/review": {
+      "post": {
+        "tags": [
+          "pros"
+        ],
+        "summary": "Approve or reject a pro's document (staff)",
+        "description": "Reviews a pending document. A rejection needs a reason, which the pro reads. The same\ndecision again answers the document as first decided and changes nothing. Each review is\nrecorded in the audit log with the staff member who made it.",
+        "operationId": "staff_review_document_v1_admin_pros__pro_id__documents__document_id__review_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "pro_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Pro Id"
+            }
+          },
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Document Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProReviewIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffDocumentReviewOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: an unknown decision, rejected without a reason, approved with one, a reason empty, blank or longer than 500 characters, another field, or an id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "document_not_found: this pro has no document with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "document_not_pending: the document has another decision already, or was replaced by a newer submission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/pros/{pro_id}/decision": {
+      "post": {
+        "tags": [
+          "pros"
+        ],
+        "summary": "Approve or reject a pro (staff)",
+        "description": "Approves or rejects the profile. Only an approved pro (with payouts enabled) receives\nrequests. A rejection needs a reason, which the pro reads in GET /v1/pros/me; a rejected\npro can be approved later. The same decision again changes nothing. Each decision is\nrecorded in the audit log with the staff member who made it.",
+        "operationId": "staff_decide_pro_v1_admin_pros__pro_id__decision_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "pro_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Pro Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProReviewIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffProDecisionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "pro_not_approvable: an approval while a required document type has no approved, non-expired document, or the pro has no category or no service area; the message lists what is missing. validation_error: an unknown decision, rejected without a reason, approved with one, a reason empty, blank or longer than 500 characters, another field, or an id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "pro_not_found: no pro profile with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/pros/me/payouts/onboarding-link": {
       "post": {
         "tags": [
@@ -5904,6 +6287,510 @@
         }
       }
     },
+    "/v1/admin/requests": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "The operations queue (staff)",
+        "description": "The requests for the BDC and admins. Each is in one bucket, by precedence: problems,\nurgent, new, waiting_customer, waiting_pro, quote_ready, scheduled_today. Inside a bucket\nthe request waiting longest comes first; `all` lists every request, newest first. Never a\nphone, an email, a last name or a street.",
+        "operationId": "staff_list_requests_v1_admin_requests_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "bucket",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/BucketFilter",
+              "description": "One bucket of the queue, or every request.",
+              "default": "all"
+            },
+            "description": "One bucket of the queue, or every request."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RequestStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only requests in this status.",
+              "title": "Status"
+            },
+            "description": "Only requests in this status."
+          },
+          {
+            "name": "category_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category Id"
+            }
+          },
+          {
+            "name": "zip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9]{5}$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A 5-digit ZIP.",
+              "title": "Zip"
+            },
+            "description": "A 5-digit ZIP."
+          },
+          {
+            "name": "assigned",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/AssignedFilter",
+              "description": "Held by the caller, by nobody, or by anyone.",
+              "default": "any"
+            },
+            "description": "Held by the caller, by nobody, or by anyone."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9-]{1,16}$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Part of a request code (JF-000124). Nothing else is searched.",
+              "title": "Q"
+            },
+            "description": "Part of a request code (JF-000124). Nothing else is searched."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size; capped.",
+              "title": "Limit"
+            },
+            "description": "Page size; capped."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueuePage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: an unknown bucket, status or assigned, a zip that is not 5 digits, a q that is not part of a request code, a bad cursor or limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/requests/summary": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "How many requests each bucket holds (staff)",
+        "description": "The count of each bucket and of every request, in one query: light enough to poll.",
+        "operationId": "staff_requests_summary_v1_admin_requests_summary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/requests/{request_id}": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "A request's card (staff)",
+        "description": "One request for the BDC: the customer's name, phone, email and address, what was\nasked, the privacy-safe media, the quotes, the job and its history. Every read is recorded\nin the audit log with the staff member who made it.",
+        "operationId": "staff_get_request_v1_admin_requests__request_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestCard"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a request_id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "request_not_found: no request with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/requests/{request_id}/claim": {
+      "post": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Take a request (staff)",
+        "description": "Assigns the request to the caller when nobody holds it. The caller's own claim again\nchanges nothing. Taking a request is not the first contact: first_contact_at stays as it\nis. Recorded in the audit log.",
+        "operationId": "staff_claim_request_v1_admin_requests__request_id__claim_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a request_id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "request_not_found: no request with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "request_held: another team member holds it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/requests/{request_id}/release": {
+      "post": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Let go of a request (staff)",
+        "description": "Unassigns a request the caller holds; an admin may release anyone's. Releasing a\nrequest nobody holds changes nothing. Recorded in the audit log.",
+        "operationId": "staff_release_request_v1_admin_requests__request_id__release_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a request_id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "request_not_found: no request with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "request_held: another team member holds it (an admin may release it).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/jobs/{job_id}/reviews": {
       "post": {
         "tags": [
@@ -6253,6 +7140,49 @@
         ],
         "title": "AddressOut"
       },
+      "ApprovalBlocker": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ApprovalBlockerKind"
+          },
+          "doc_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProDocumentType"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set for the two document kinds."
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "doc_type"
+        ],
+        "title": "ApprovalBlocker"
+      },
+      "ApprovalBlockerKind": {
+        "type": "string",
+        "enum": [
+          "document_missing",
+          "document_expired",
+          "no_category",
+          "no_service_area"
+        ],
+        "title": "ApprovalBlockerKind"
+      },
+      "AssignedFilter": {
+        "type": "string",
+        "enum": [
+          "me",
+          "unassigned",
+          "any"
+        ],
+        "title": "AssignedFilter"
+      },
       "AuthResponse": {
         "properties": {
           "user": {
@@ -6338,6 +7268,290 @@
           "type"
         ],
         "title": "BooleanQuestion"
+      },
+      "BucketFilter": {
+        "type": "string",
+        "enum": [
+          "problems",
+          "urgent",
+          "new",
+          "waiting_customer",
+          "waiting_pro",
+          "quote_ready",
+          "scheduled_today",
+          "all"
+        ],
+        "title": "BucketFilter",
+        "description": "The list's `bucket`: one of the queue's buckets, or every request."
+      },
+      "CardCustomer": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Name"
+          },
+          "last_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Name"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone",
+            "description": "E.164, when the account has one."
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language",
+            "description": "The language the request was written in, e.g. en or es."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "first_name",
+          "last_name",
+          "phone",
+          "email",
+          "language"
+        ],
+        "title": "CardCustomer",
+        "description": "Who to call. PII: the card alone carries it."
+      },
+      "CardJob": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus"
+          },
+          "scheduled_start_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled Start At",
+            "description": "The accepted quote's start."
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/CardJobEvent"
+            },
+            "type": "array",
+            "title": "Events",
+            "description": "The job's history, oldest first."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "scheduled_start_at",
+          "started_at",
+          "completed_at",
+          "confirmed_at",
+          "events"
+        ],
+        "title": "CardJob"
+      },
+      "CardJobEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "from_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "to_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "by_system": {
+            "type": "boolean",
+            "title": "By System",
+            "description": "True for a change no person made (e.g. auto-confirm)."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "from_status",
+          "to_status",
+          "by_system",
+          "created_at"
+        ],
+        "title": "CardJobEvent"
+      },
+      "CardMedia": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/RequestMediaKind"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "Presigned GET URL; short-lived."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "content_type",
+          "url",
+          "expires_at"
+        ],
+        "title": "CardMedia",
+        "description": "A photo or video's privacy-safe copy: no location or other metadata."
+      },
+      "CardQuote": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "pro_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pro Name",
+            "description": "The pro's first name and last initial (\"Mar\u00eda P.\")."
+          },
+          "amount_cents": {
+            "type": "integer",
+            "title": "Amount Cents",
+            "description": "The quote's price in USD cents."
+          },
+          "status": {
+            "$ref": "#/components/schemas/QuoteStatus"
+          },
+          "proposed_start_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Proposed Start At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "pro_name",
+          "amount_cents",
+          "status",
+          "proposed_start_at",
+          "created_at"
+        ],
+        "title": "CardQuote"
       },
       "CategoryOut": {
         "properties": {
@@ -6832,6 +8046,32 @@
           "zips"
         ],
         "title": "CityOut"
+      },
+      "ClaimOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "assigned_agent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QueueAgent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "assigned_agent"
+        ],
+        "title": "ClaimOut",
+        "description": "Who holds the request after a claim or a release."
       },
       "CustomerJob": {
         "properties": {
@@ -9246,6 +10486,18 @@
           "verification_status": {
             "$ref": "#/components/schemas/ProVerificationStatus"
           },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason",
+            "description": "Why the team rejected the profile, contact details masked; null unless rejected."
+          },
           "payouts_enabled": {
             "type": "boolean",
             "title": "Payouts Enabled"
@@ -9271,6 +10523,7 @@
           "years_of_experience",
           "photo",
           "verification_status",
+          "rejection_reason",
           "payouts_enabled",
           "categories",
           "service_areas"
@@ -9444,6 +10697,35 @@
         "title": "ProPublicProfile",
         "description": "The public profile of the pro behind a quote the customer can choose (#53), before\npaying: the card's fields, the bio, the categories and the month the pro joined. Never a\ncontact, a document, the photo, the service areas, payouts or an internal id (the account,\nStripe)."
       },
+      "ProReviewIn": {
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/ReviewDecision"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "minLength": 1,
+                "pattern": "^[^\\x00]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "Why, as plain text the pro reads (contact details are masked): required with rejected, refused with approved."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "decision"
+        ],
+        "title": "ProReviewIn",
+        "description": "Staff's decision on a document or on a profile."
+      },
       "ProVerificationStatus": {
         "type": "string",
         "enum": [
@@ -9452,6 +10734,261 @@
           "rejected"
         ],
         "title": "ProVerificationStatus"
+      },
+      "QueueAgent": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "The staff member's first name; null without one."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "QueueAgent"
+      },
+      "QueueBucket": {
+        "type": "string",
+        "enum": [
+          "problems",
+          "urgent",
+          "new",
+          "waiting_customer",
+          "waiting_pro",
+          "quote_ready",
+          "scheduled_today",
+          "other"
+        ],
+        "title": "QueueBucket",
+        "description": "The one bucket a request is in, by this precedence (the first that matches). `other`:\nnone of them (accepted and unpaid, a job on another day, finished, cancelled, expired)."
+      },
+      "QueueItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "public_code": {
+            "type": "string",
+            "title": "Public Code",
+            "description": "The code the customer also sees, e.g. JF-000124."
+          },
+          "customer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Name",
+            "description": "First name and last initial (\"Ana P.\"); null when a name is missing or shows a contact detail."
+          },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CategorySummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null until the request is classified."
+          },
+          "zip_code": {
+            "type": "string",
+            "title": "Zip Code",
+            "description": "The 5-digit ZIP of the address."
+          },
+          "status": {
+            "$ref": "#/components/schemas/RequestStatus"
+          },
+          "customer_status": {
+            "type": "string",
+            "title": "Customer Status",
+            "description": "The glossary i18n key the customer sees."
+          },
+          "origin": {
+            "$ref": "#/components/schemas/RequestOrigin"
+          },
+          "urgency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Urgency"
+          },
+          "bucket": {
+            "$ref": "#/components/schemas/QueueBucket",
+            "description": "The one bucket the request is in, by precedence: problems, urgent, new, waiting_customer, waiting_pro, quote_ready, scheduled_today; other when none applies."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "first_contact_due_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "First Contact Due At",
+            "description": "created_at plus the first-contact time (OPS_FIRST_CONTACT_SLA_MINUTES)."
+          },
+          "first_contact_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Contact At",
+            "description": "Null until the BDC made contact."
+          },
+          "assigned_agent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QueueAgent"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who holds the request, if anyone."
+          },
+          "media_count": {
+            "type": "integer",
+            "title": "Media Count",
+            "description": "Photos and videos attached."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "public_code",
+          "customer_name",
+          "category",
+          "zip_code",
+          "status",
+          "customer_status",
+          "origin",
+          "urgency",
+          "bucket",
+          "created_at",
+          "first_contact_due_at",
+          "first_contact_at",
+          "assigned_agent",
+          "media_count"
+        ],
+        "title": "QueueItem",
+        "description": "A request in the queue: no phone, email, last name or street."
+      },
+      "QueuePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/QueueItem"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Inside a bucket: the request waiting longest first. With bucket=all: the newest first."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Pass as `cursor` for the next page."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "QueuePage"
+      },
+      "QueueSummary": {
+        "properties": {
+          "problems": {
+            "type": "integer",
+            "title": "Problems"
+          },
+          "urgent": {
+            "type": "integer",
+            "title": "Urgent"
+          },
+          "new": {
+            "type": "integer",
+            "title": "New"
+          },
+          "waiting_customer": {
+            "type": "integer",
+            "title": "Waiting Customer"
+          },
+          "waiting_pro": {
+            "type": "integer",
+            "title": "Waiting Pro"
+          },
+          "quote_ready": {
+            "type": "integer",
+            "title": "Quote Ready"
+          },
+          "scheduled_today": {
+            "type": "integer",
+            "title": "Scheduled Today"
+          },
+          "all": {
+            "type": "integer",
+            "title": "All"
+          },
+          "first_contact_sla_minutes": {
+            "type": "integer",
+            "title": "First Contact Sla Minutes",
+            "description": "The first-contact time in use."
+          }
+        },
+        "type": "object",
+        "required": [
+          "problems",
+          "urgent",
+          "new",
+          "waiting_customer",
+          "waiting_pro",
+          "quote_ready",
+          "scheduled_today",
+          "all",
+          "first_contact_sla_minutes"
+        ],
+        "title": "QueueSummary",
+        "description": "How many requests each bucket holds now, and every request under `all`."
       },
       "QuoteCreate": {
         "properties": {
@@ -9831,6 +11368,259 @@
         ],
         "title": "RegisterRequest"
       },
+      "RequestCard": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "public_code": {
+            "type": "string",
+            "title": "Public Code",
+            "description": "The code the customer also sees, e.g. JF-000124."
+          },
+          "customer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Name",
+            "description": "First name and last initial (\"Ana P.\"); null when a name is missing or shows a contact detail."
+          },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CategorySummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null until the request is classified."
+          },
+          "zip_code": {
+            "type": "string",
+            "title": "Zip Code",
+            "description": "The 5-digit ZIP of the address."
+          },
+          "status": {
+            "$ref": "#/components/schemas/RequestStatus"
+          },
+          "customer_status": {
+            "type": "string",
+            "title": "Customer Status",
+            "description": "The glossary i18n key the customer sees."
+          },
+          "origin": {
+            "$ref": "#/components/schemas/RequestOrigin"
+          },
+          "urgency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Urgency"
+          },
+          "bucket": {
+            "$ref": "#/components/schemas/QueueBucket",
+            "description": "The one bucket the request is in, by precedence: problems, urgent, new, waiting_customer, waiting_pro, quote_ready, scheduled_today; other when none applies."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "first_contact_due_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "First Contact Due At",
+            "description": "created_at plus the first-contact time (OPS_FIRST_CONTACT_SLA_MINUTES)."
+          },
+          "first_contact_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Contact At",
+            "description": "Null until the BDC made contact."
+          },
+          "assigned_agent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QueueAgent"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who holds the request, if anyone."
+          },
+          "media_count": {
+            "type": "integer",
+            "title": "Media Count",
+            "description": "Photos and videos attached."
+          },
+          "customer": {
+            "$ref": "#/components/schemas/CardCustomer"
+          },
+          "address": {
+            "$ref": "#/components/schemas/AddressOut",
+            "description": "As the customer typed it."
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "As the customer typed it: it may hold contacts."
+          },
+          "intake_answers": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Intake Answers"
+          },
+          "preferred_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Date"
+          },
+          "preferred_period": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreferredPeriod"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preferred_contact": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Contact"
+          },
+          "media": {
+            "items": {
+              "$ref": "#/components/schemas/CardMedia"
+            },
+            "type": "array",
+            "title": "Media"
+          },
+          "media_pending": {
+            "type": "integer",
+            "title": "Media Pending",
+            "description": "Copies still being made; not shown yet."
+          },
+          "quotes": {
+            "items": {
+              "$ref": "#/components/schemas/CardQuote"
+            },
+            "type": "array",
+            "title": "Quotes",
+            "description": "Newest first."
+          },
+          "job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CardJob"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null until the request is paid."
+          },
+          "next_action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Action"
+          },
+          "last_contact_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Contact At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "public_code",
+          "customer_name",
+          "category",
+          "zip_code",
+          "status",
+          "customer_status",
+          "origin",
+          "urgency",
+          "bucket",
+          "created_at",
+          "first_contact_due_at",
+          "first_contact_at",
+          "assigned_agent",
+          "media_count",
+          "customer",
+          "address",
+          "description",
+          "intake_answers",
+          "preferred_date",
+          "preferred_period",
+          "preferred_contact",
+          "media",
+          "media_pending",
+          "quotes",
+          "job",
+          "next_action",
+          "last_contact_at",
+          "updated_at"
+        ],
+        "title": "RequestCard",
+        "description": "One request for the BDC: everything in the list, plus who to call and where, what was\nasked, the media, the quotes and the job. Reading it is recorded in the audit log."
+      },
       "RequestCreate": {
         "properties": {
           "description": {
@@ -9921,6 +11711,15 @@
           "video"
         ],
         "title": "RequestMediaKind"
+      },
+      "RequestOrigin": {
+        "type": "string",
+        "enum": [
+          "app",
+          "web",
+          "phone"
+        ],
+        "title": "RequestOrigin"
       },
       "RequestOut": {
         "properties": {
@@ -10206,6 +12005,14 @@
           "comment_redacted"
         ],
         "title": "ReviewCreatedOut"
+      },
+      "ReviewDecision": {
+        "type": "string",
+        "enum": [
+          "approved",
+          "rejected"
+        ],
+        "title": "ReviewDecision"
       },
       "ReviewIn": {
         "properties": {
@@ -11012,6 +12819,536 @@
           "next_cursor"
         ],
         "title": "StaffChatPage"
+      },
+      "StaffDocumentCounts": {
+        "properties": {
+          "pending": {
+            "type": "integer",
+            "title": "Pending"
+          },
+          "approved": {
+            "type": "integer",
+            "title": "Approved"
+          },
+          "rejected": {
+            "type": "integer",
+            "title": "Rejected"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pending",
+          "approved",
+          "rejected"
+        ],
+        "title": "StaffDocumentCounts",
+        "description": "A pro's documents by status, superseded ones left out."
+      },
+      "StaffDocumentOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "doc_type": {
+            "$ref": "#/components/schemas/ProDocumentType"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProDocumentStatus"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          },
+          "expires_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires On"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "Presigned GET URL of the file; short-lived."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At",
+            "description": "When the URL stops working."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "doc_type",
+          "status",
+          "rejection_reason",
+          "expires_on",
+          "created_at",
+          "reviewed_at",
+          "url",
+          "expires_at"
+        ],
+        "title": "StaffDocumentOut"
+      },
+      "StaffDocumentReviewOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "doc_type": {
+            "$ref": "#/components/schemas/ProDocumentType"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProDocumentStatus"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          },
+          "expires_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires On"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "doc_type",
+          "status",
+          "rejection_reason",
+          "expires_on",
+          "created_at",
+          "reviewed_at"
+        ],
+        "title": "StaffDocumentReviewOut",
+        "description": "A document as a review answers it: never its file."
+      },
+      "StaffProDecisionOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "verification_status": {
+            "$ref": "#/components/schemas/ProVerificationStatus"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "verification_status",
+          "rejection_reason",
+          "reviewed_at"
+        ],
+        "title": "StaffProDecisionOut",
+        "description": "A profile as a decision answers it."
+      },
+      "StaffProItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id",
+            "description": "The pro profile's id."
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "First name and last initial (\"Mar\u00eda P.\"); null when a name is missing or shows a contact detail."
+          },
+          "verification_status": {
+            "$ref": "#/components/schemas/ProVerificationStatus"
+          },
+          "payouts_enabled": {
+            "type": "boolean",
+            "title": "Payouts Enabled"
+          },
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/CategorySummary"
+            },
+            "type": "array",
+            "title": "Categories"
+          },
+          "zip_count": {
+            "type": "integer",
+            "title": "Zip Count",
+            "description": "How many ZIPs the pro serves."
+          },
+          "documents": {
+            "$ref": "#/components/schemas/StaffDocumentCounts"
+          },
+          "submitted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submitted At",
+            "description": "When the oldest document still pending was submitted; null with none."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "verification_status",
+          "payouts_enabled",
+          "categories",
+          "zip_count",
+          "documents",
+          "submitted_at",
+          "created_at"
+        ],
+        "title": "StaffProItem",
+        "description": "A pro in the staff list: no email, phone, last name or address."
+      },
+      "StaffProOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "verification_status": {
+            "$ref": "#/components/schemas/ProVerificationStatus"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "First name and last initial (\"Mar\u00eda P.\")."
+          },
+          "legal_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Name",
+            "description": "First and last name as on the account, to match the ID document; null when the account has neither. Only this detail carries it, never the list."
+          },
+          "payouts_enabled": {
+            "type": "boolean",
+            "title": "Payouts Enabled"
+          },
+          "bio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bio",
+            "description": "As the pro wrote it: it may hold contact details."
+          },
+          "years_of_experience": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Years Of Experience"
+          },
+          "photo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhotoOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/CategorySummary"
+            },
+            "type": "array",
+            "title": "Categories"
+          },
+          "service_areas": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceAreaOut"
+            },
+            "type": "array",
+            "title": "Service Areas"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/StaffDocumentOut"
+            },
+            "type": "array",
+            "title": "Documents",
+            "description": "The latest document of each type, superseded ones left out."
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/StaffDocumentOut"
+            },
+            "type": "array",
+            "title": "History",
+            "description": "Older reviewed (approved or rejected) documents, newest first."
+          },
+          "required_types": {
+            "items": {
+              "$ref": "#/components/schemas/ProDocumentType"
+            },
+            "type": "array",
+            "title": "Required Types"
+          },
+          "missing_types": {
+            "items": {
+              "$ref": "#/components/schemas/ProDocumentType"
+            },
+            "type": "array",
+            "title": "Missing Types",
+            "description": "Required types with no pending or approved document."
+          },
+          "approval_blockers": {
+            "items": {
+              "$ref": "#/components/schemas/ApprovalBlocker"
+            },
+            "type": "array",
+            "title": "Approval Blockers",
+            "description": "What an approval still needs; empty when the pro can be approved."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "verification_status",
+          "rejection_reason",
+          "reviewed_at",
+          "user_id",
+          "name",
+          "legal_name",
+          "payouts_enabled",
+          "bio",
+          "years_of_experience",
+          "photo",
+          "categories",
+          "service_areas",
+          "documents",
+          "history",
+          "required_types",
+          "missing_types",
+          "approval_blockers",
+          "created_at"
+        ],
+        "title": "StaffProOut"
+      },
+      "StaffProPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StaffProItem"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Newest profile first."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Pass as `cursor` for older profiles."
+          },
+          "counts": {
+            "$ref": "#/components/schemas/StaffProStatusCounts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor",
+          "counts"
+        ],
+        "title": "StaffProPage"
+      },
+      "StaffProStatusCounts": {
+        "properties": {
+          "pending": {
+            "type": "integer",
+            "title": "Pending"
+          },
+          "approved": {
+            "type": "integer",
+            "title": "Approved"
+          },
+          "rejected": {
+            "type": "integer",
+            "title": "Rejected"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pending",
+          "approved",
+          "rejected"
+        ],
+        "title": "StaffProStatusCounts",
+        "description": "Every pro profile by verification status."
       },
       "StaffSupportTicketItem": {
         "properties": {

@@ -12,6 +12,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
+from sqlalchemy import Subquery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.addresses.errors import (
@@ -66,6 +67,13 @@ class AddressService:
             )
         )
         return address.id
+
+    @staticmethod
+    def zips() -> Subquery:
+        """Each address's id (`address_id`) and ZIP as stored (`zip_code`), as a subquery: the
+        operations queue filters and lists requests by ZIP in its own query (#81). Neither the
+        street nor the city."""
+        return AddressRepository.zips()
 
     async def zip_codes(self, address_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str]:
         """The ZIP per address as stored (5 digits or ZIP+4), nothing else: pros see where a job

@@ -149,6 +149,7 @@ async def test_get_creates_pending_profile_once(
             "years_of_experience": None,
             "photo": None,
             "verification_status": "pending",
+            "rejection_reason": None,
             "payouts_enabled": False,
             "categories": [],
             "service_areas": [],
