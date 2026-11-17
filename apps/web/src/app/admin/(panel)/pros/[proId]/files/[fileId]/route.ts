@@ -58,7 +58,13 @@ export async function GET(_request: Request, { params }: Params): Promise<Respon
 
   let file: Response;
   try {
-    file = await fetch(signed, { cache: "no-store", signal: AbortSignal.timeout(apiTimeoutMs()) });
+    file = await fetch(signed, {
+      cache: "no-store",
+      // Only the address the API just gave: a redirect from the storage is refused before
+      // anything else is asked (it would lead the server to another host).
+      redirect: "error",
+      signal: AbortSignal.timeout(apiTimeoutMs()),
+    });
   } catch {
     return fail(502); // the error may carry the address: it goes no further
   }

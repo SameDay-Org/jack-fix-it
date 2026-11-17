@@ -1,6 +1,11 @@
+import { createServer, type ServerResponse } from "node:http";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FakeCookieJar, RedirectSignal, routeFetch } from "@/lib/test-helpers";
+
+// The real fetch, kept before the tests stub it: the redirect test talks to real listeners.
+const nativeFetch = globalThis.fetch;
 
 const { jar } = vi.hoisted(() => ({ jar: { current: null as unknown } }));
 
@@ -78,6 +83,29 @@ function open(fileId: string, proId = PRO_ID): Promise<Response> {
   return GET(new Request(`http://panel.test/admin/pros/${proId}/files/${fileId}`), {
     params: Promise.resolve({ proId, fileId }),
   });
+}
+
+/** A real HTTP listener on 127.0.0.1 that records every path it is asked for. */
+async function listener(
+  answer: (response: ServerResponse) => void,
+): Promise<{ origin: string; asked: string[]; close: () => Promise<void> }> {
+  const asked: string[] = [];
+  const server = createServer((request, response) => {
+    asked.push(request.url ?? "");
+    answer(response);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (address === null || typeof address === "string") throw new Error("no port");
+  return {
+    origin: `http://127.0.0.1:${address.port}`,
+    asked,
+    close: () =>
+      new Promise((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  };
 }
 
 /** Everything a response shows: its status, headers and body. */
@@ -168,6 +196,41 @@ describe("a pro's file, opened through the panel", () => {
     expect(shown).not.toContain("sig=");
     expect(shown).not.toContain("storage.test.invalid");
   });
+
+  // A pro's files are identity documents: a redirect from the storage must not lead the server
+  // to another host. Real listeners and the real fetch: the other host gets no request at all.
+  it.each([301, 302, 303, 307, 308])(
+    "never follows a %i from the storage: the other host is never asked",
+    async (status) => {
+      const other = await listener((response) => {
+        response.writeHead(200, { "Content-Type": "application/pdf" });
+        response.end(Buffer.from(BYTES));
+      });
+      const storage = await listener((response) => {
+        response.writeHead(status, { Location: `${other.origin}/private` });
+        response.end();
+      });
+      try {
+        const signed = `${storage.origin}/get/u/doc.pdf?sig=redirect-probe`;
+        const api = routeFetch({
+          "/v1/auth/me": () => me("agent"),
+          [PRO]: () => Response.json(pro({ documents: [document({ url: signed })], history: [] })),
+        });
+        fetchMock.mockImplementation((input, init) =>
+          String(input).startsWith(storage.origin) ? nativeFetch(input, init) : api(input, init),
+        );
+
+        const response = await open(DOCUMENT_ID);
+
+        expect(storage.asked).toEqual(["/get/u/doc.pdf?sig=redirect-probe"]);
+        expect(other.asked).toEqual([]);
+        expect(response.status).toBe(502);
+        expect(await everything(response)).not.toContain("sig=");
+      } finally {
+        await Promise.all([storage.close(), other.close()]);
+      }
+    },
+  );
 
   it("answers 502 when the API fails", async () => {
     serve({ detail: () => new Response("", { status: 500 }) });
