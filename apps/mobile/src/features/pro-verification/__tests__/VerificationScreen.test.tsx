@@ -52,6 +52,15 @@ const flush = () => act(async () => settle());
 const pressed = (testID: string) => act(async () => fireEvent.press(screen.getByTestId(testID)));
 const paths = () => jest.mocked(apiGet).mock.calls.map(([path]) => path as string);
 const message = () => screen.getByTestId("verification-message");
+/** A UTC date `offset` days from now, as the API writes `expires_on`. */
+const utcDay = (offset: number) =>
+  new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, "YYYY-MM-DD".length);
+/** An approved ID, and an approved insurance that expires on `expires_on`. */
+const withApprovedInsurance = (expires_on: string | null) =>
+  documents([
+    document({ doc_type: "id", status: "approved" }),
+    document({ doc_type: "insurance", status: "approved", expires_on }),
+  ]);
 
 async function open(profile: ProProfile | Error, list: MyDocuments | Error = NOTHING_SENT) {
   server = { profile, documents: list };
@@ -113,6 +122,32 @@ describe("VerificationScreen", () => {
 
     expect(await screen.findByRole("button", { name: "Pro profile, Complete" })).toBeTruthy();
     expect(await screen.findByRole("button", { name: "Documents, All sent" })).toBeTruthy();
+  });
+
+  it.each([
+    ["Pending", FULL_PROFILE],
+    ["Rejected", REJECTED],
+  ])(
+    "%s with an approved insurance past its expiry: it counts as missing, and says to renew it",
+    async (_, profile) => {
+      await open(profile, withApprovedInsurance(utcDay(-1)));
+
+      expect(await screen.findByRole("button", { name: "Documents, 1 of 2 sent" })).toBeTruthy();
+      expect(screen.getByTestId("verification-expired-insurance")).toHaveTextContent(
+        "Insurance expiredUpload a renewed one. Until then it counts as missing.",
+      );
+      expect(screen.queryByTestId("verification-expired-id")).toBeNull();
+    },
+  );
+
+  it.each([
+    ["expiring today", () => utcDay(0)],
+    ["with no expiry", () => null],
+  ])("an approved insurance %s still counts as sent", async (_, expiresOn) => {
+    await open(FULL_PROFILE, withApprovedInsurance(expiresOn()));
+
+    expect(await screen.findByRole("button", { name: "Documents, All sent" })).toBeTruthy();
+    expect(screen.queryByTestId("verification-expired")).toBeNull();
   });
 
   it("Approved without payouts: what is next, as a placeholder labelled not available", async () => {

@@ -1722,6 +1722,9 @@
       "stepSent": "{{name}}: enviado",
       "stepTodo": "{{name}}: pendiente",
       "stepRejected": "{{name}}: rechazado",
+      "stepExpired": "{{name}}: venció, sube la versión renovada",
+      "expiredTitle": "{{name}}: venció",
+      "expiredBody": "Sube la versión renovada. Hasta entonces cuenta como faltante.",
       "loadFailed": "No pudimos cargar tus documentos."
     },
     "home": {
