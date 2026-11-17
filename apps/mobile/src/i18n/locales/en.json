@@ -161,6 +161,7 @@
       "addressesNone": "None saved yet",
       "addressesCount_one": "{{count}} saved",
       "addressesCount_other": "{{count}} saved",
+      "paymentMethods": "Payment methods",
       "help": "Help",
       "legal": "Legal",
       "logOut": "Log out"
@@ -396,6 +397,106 @@
         "gone": "This address isn't in your address book anymore.",
         "generic": "We couldn't save this address. Try again."
       }
+    }
+  },
+  "paymentMethods": {
+    "title": "Payment methods",
+    "support": "Tap a card to make it your default or to delete it.",
+    "emptySupport": "No cards saved yet.",
+    "note": "Card details go straight to Stripe. This app only receives the brand, the last four digits and the expiry date.",
+    "default": "Default",
+    "expires": "Expires {{expiry}}",
+    "seeAll": "See all",
+    "showLess": "Show less",
+    "retry": "Try again",
+    "refreshFailed": "We couldn't refresh your cards. What you see may be out of date.",
+    "brand": {
+      "visa": "Visa",
+      "mastercard": "Mastercard",
+      "amex": "American Express",
+      "discover": "Discover",
+      "generic": "Card"
+    },
+    "spoken": {
+      "card": "{{brand}} ending {{last4}}, expires {{month}} {{year}}",
+      "default": "default",
+      "short": "{{brand}} ending {{last4}}"
+    },
+    "pocket": {
+      "defaultSpoken": "Default card: {{card}}",
+      "none": "No default card",
+      "noneHint": "Open a card to make it your default.",
+      "updating": "Updating your wallet…",
+      "stale": "Couldn't check your default card",
+      "add": "Add a card",
+      "addHint": "Opens Stripe's secure card form."
+    },
+    "strip": {
+      "hint": "Opens the card."
+    },
+    "loadFailed": {
+      "generic": "We couldn't load your cards.",
+      "offline": "You're offline. Connect to see your cards.",
+      "unavailable": "Your cards aren't available right now. Try again in a moment."
+    },
+    "add": {
+      "label": "Add a card",
+      "saved": "Card saved.",
+      "savedNotDefault": "Card saved. We couldn't make it your default: open the card to try again.",
+      "failure": {
+        "offline": {
+          "title": "No connection",
+          "body": "Check your internet and try again."
+        },
+        "unavailable": {
+          "title": "Cards can't be added right now",
+          "body": "Nothing was saved. Please try again in a moment."
+        },
+        "rateLimited": {
+          "title": "That's a lot of tries at once",
+          "body": "Nothing was saved. Try again in a moment."
+        },
+        "generic": {
+          "title": "We couldn't start adding a card",
+          "body": "Nothing was saved. Please try again."
+        },
+        "sheetFailed": {
+          "title": "The card wasn't saved",
+          "body": "Try again, or use another card."
+        },
+        "sheetTimeout": {
+          "title": "Saving the card took too long",
+          "body": "It may have been saved: check your cards before you try again."
+        },
+        "sheetUnavailable": {
+          "title": "The card form couldn't open",
+          "body": "Nothing was saved. Please try again."
+        }
+      }
+    },
+    "card": {
+      "setDefault": "Set as default",
+      "isDefault": "This is your default card.",
+      "delete": "Delete card",
+      "deleteHint": "Asks before it deletes."
+    },
+    "delete": {
+      "title": "Delete {{card}}?",
+      "body": "It leaves your wallet for good.",
+      "bodyNextDefault": "It leaves your wallet for good. Another card becomes your default.",
+      "bodyMaybeNextDefault": "It leaves your wallet for good. If it's your default, another card becomes your default.",
+      "cancel": "Cancel",
+      "confirm": "Delete"
+    },
+    "madeDefault": "{{card}} is now your default",
+    "deleted": "{{card}} deleted",
+    "failed": {
+      "setDefault": "We couldn't make {{card}} your default. Try again in a moment.",
+      "delete": "We couldn't delete {{card}}. Try again in a moment.",
+      "offline": "We couldn't confirm that change. Check your connection, then open your cards again to see where things stand.",
+      "rateLimited": "That's a lot of changes at once. Try again in a moment.",
+      "unavailable": "Cards can't be changed right now. Try again in a moment.",
+      "gone": "That card isn't in your wallet anymore."
     }
   },
   "phone": {
