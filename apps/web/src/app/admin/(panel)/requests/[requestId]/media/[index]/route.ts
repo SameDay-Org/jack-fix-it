@@ -57,6 +57,9 @@ export async function GET(_request: Request, { params }: Params): Promise<Respon
   try {
     file = await fetch(media.url, {
       cache: "no-store",
+      // Only the address the API just gave: a redirect from the storage is refused before
+      // anything else is asked (it would lead the server to another host).
+      redirect: "error",
       signal: AbortSignal.timeout(apiTimeoutMs()),
     });
   } catch {
