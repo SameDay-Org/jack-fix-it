@@ -1700,7 +1700,9 @@
     "rejected": {
       "title": "Tu verificación no fue aprobada",
       "body": "Revisa tu perfil y tus documentos y envíalos de nuevo.",
-      "fix": "Corregir documentos"
+      "fix": "Corregir documentos",
+      "reasonLabel": "Motivo del equipo de revisión",
+      "noReason": "No se indicó un motivo."
     },
     "information": {
       "profile": "Perfil profesional",

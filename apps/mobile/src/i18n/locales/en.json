@@ -1700,7 +1700,9 @@
     "rejected": {
       "title": "Your verification wasn't approved",
       "body": "Review your profile and your documents, then send them again.",
-      "fix": "Fix documents"
+      "fix": "Fix documents",
+      "reasonLabel": "Reason from the review team",
+      "noReason": "No reason was given."
     },
     "information": {
       "profile": "Pro profile",
