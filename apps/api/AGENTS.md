@@ -201,6 +201,22 @@ them idempotent: they can run twice.
   (`POST /v1/requests/{id}/job/confirm`, #66) or any other status is skipped. One
   `jobs_auto_confirmed` summary per run (confirmed, skipped, failed). The customer's view shows
   the deadline as `confirm_by` while the job is completed.
+- **Transfers to the pros (#68).** `TransferService.release` (`payments/transfers.py`) moves a
+  confirmed job's `pro_payout_cents` to the pro's Express account and the job to `paid_out`:
+  the `transfers` row and its attempt are committed before any Stripe call (one row per job,
+  key `transfer:<job id>`, group `request:<request id>`), and a retry first looks the transfer
+  up in its group. Three callers, one path: the task `release_transfer`, queued after the
+  customer's confirm and each auto-confirm (one try), and the cron `release_confirmed_jobs`
+  (`payments/transfer_tasks.py`) every `TRANSFER_RELEASE_SWEEP_MINUTES`, up to
+  `TRANSFER_RELEASE_BATCH_SIZE` jobs, a run bounded by `TRANSFER_RELEASE_SWEEP_TIMEOUT_SECONDS`,
+  each job in its own session. An attempt with no outcome is another worker's for
+  `TRANSFER_STUCK_PENDING_MINUTES`. One `transfers_released` summary per run (counts by
+  outcome). `has_open_hold` is the dispute module's hook (#75). Once a transfer's id is stored
+  it is read again from Stripe, for a reversal whose event came first; the row keeps that need
+  (`reversal_checked_at` NULL) until a read succeeds, and the cron `check_transfer_reversals`
+  (same cadence, timeout and batch size) reads each such row by its stored id once
+  `TRANSFER_STUCK_PENDING_MINUTES` have passed since its last try, least recently tried first,
+  whatever the job's state. It never creates a transfer (#416 r2).
 
 ## Tests
 

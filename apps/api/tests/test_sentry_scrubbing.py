@@ -521,6 +521,7 @@ async def test_captured_event_has_no_stripe_account_id(sentry_transport: MemoryT
         stripe_account_id=account_id,
         stripe_account_requested_at=None,
         payouts_enabled=False,
+        approved=True,
     )
     service = PayoutsService(
         AsyncMock(spec=AsyncSession),

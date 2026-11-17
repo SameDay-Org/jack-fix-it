@@ -76,6 +76,7 @@ PRO_KEYS = {
     "confirm_by",
     "photos",
     "pro_payout_cents",
+    "payout",
     "unread_messages",
 }
 BASE = "/v1/pros/me/jobs"

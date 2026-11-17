@@ -303,6 +303,15 @@ orphan sweep deletes only uploads older than the minimum age. Each service check
 (window at most half the minimum age) against its own values only, so set both as shared
 variables, or the sweep can delete a photo a job just attached (#298).
 
+The worker makes the transfers to the pros (D13.3, #68) with the same `STRIPE_SECRET_KEY` it
+cancels unpaid payments with: a task queued when a job is confirmed, and the
+`release_confirmed_jobs` cron for whatever is left, and the `check_transfer_reversals` cron
+reads made transfers again for a reversal (read-only, on the same settings). Its optional settings have defaults
+(`TRANSFER_RELEASE_SWEEP_MINUTES`, `TRANSFER_RELEASE_SWEEP_TIMEOUT_SECONDS`,
+`TRANSFER_RELEASE_BATCH_SIZE`, `TRANSFER_STUCK_PENDING_MINUTES`; `apps/api/.env.example`
+explains each). The Stripe webhook endpoint must also send `transfer.reversed`, beside the
+`payment_intent.*` events: the API marks a reversed transfer for staff.
+
 `apps/api/tests/test_railway_doc.py` fails when a setting that staging or production requires
 is missing from either table, so this list cannot fall behind `app/config.py`.
 
