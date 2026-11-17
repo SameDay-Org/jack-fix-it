@@ -222,6 +222,9 @@ describe("request card page", () => {
 
       expect(text(page)).toContain(sentence);
       expect(buttons(page)).toEqual(offered);
+      // The claim control stays on the card even without a button, so a take that lost the
+      // race keeps its announcement after the refresh (Gatekeeper round 1 on #418).
+      expect(page).toContain('role="status"');
     },
   );
 

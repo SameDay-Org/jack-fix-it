@@ -246,15 +246,13 @@ export default async function RequestPage({ params }: { params: Promise<{ reques
                   name: holder.name ?? t("admin.queue.agentNoName"),
                 })}
         </p>
-        {holder === null ? (
-          <ClaimControl action={claimRequest.bind(null, card.id)} kind="claim" text={claimText} />
-        ) : mayRelease ? (
-          <ClaimControl
-            action={releaseRequest.bind(null, card.id)}
-            kind="release"
-            text={claimText}
-          />
-        ) : null}
+        {/* Always the same control in the same place, so its last outcome survives the card's
+            refresh: a take that lost the race keeps its message once the button is gone. */}
+        <ClaimControl
+          action={(mayRelease ? releaseRequest : claimRequest).bind(null, card.id)}
+          kind={holder === null ? "claim" : mayRelease ? "release" : null}
+          text={claimText}
+        />
       </Card>
 
       <Card className="flex flex-col gap-4">
