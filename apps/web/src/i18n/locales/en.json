@@ -180,6 +180,7 @@
       "label": "Panel",
       "home": "Home",
       "support": "Support",
+      "queue": "Queue",
       "pros": "Pros"
     },
     "roles": {
@@ -189,7 +190,7 @@
     "logout": "Log out",
     "home": {
       "welcome": "Welcome, {{email}}",
-      "queueSoon": "The operations queue arrives soon. New requests will show up here."
+      "openQueue": "Open the operations queue"
     },
     "support": {
       "title": "Support",
@@ -258,6 +259,196 @@
           "not_found": "This ticket no longer exists.",
           "forbidden": "Your account can't change tickets.",
           "unavailable": "We couldn't save the status. Try again in a moment."
+        }
+      }
+    },
+    "queue": {
+      "title": "Operations queue",
+      "subtitle": "Requests by what they need next. The list reads itself again on its own.",
+      "tabsLabel": "Requests by bucket",
+      "tabs": {
+        "new": "New",
+        "urgent": "Urgent",
+        "waiting_customer": "Waiting on customer",
+        "waiting_pro": "Waiting on pro",
+        "quote_ready": "Quote ready",
+        "scheduled_today": "Scheduled today",
+        "problems": "Problems",
+        "mine": "Mine",
+        "all": "All"
+      },
+      "filters": {
+        "label": "Filter the requests",
+        "search": "Request code",
+        "searchPlaceholder": "JF-000124",
+        "status": "Status",
+        "category": "Category",
+        "zip": "ZIP",
+        "assigned": "Held by",
+        "any": "Any",
+        "assignedTo": {
+          "any": "Anyone",
+          "me": "Me",
+          "unassigned": "Nobody"
+        },
+        "apply": "Apply",
+        "clear": "Clear"
+      },
+      "columns": {
+        "request": "Request",
+        "category": "Category and ZIP",
+        "status": "Status",
+        "firstContact": "First contact",
+        "agent": "Held by",
+        "age": "Age"
+      },
+      "status": {
+        "received": "Received",
+        "reviewing": "Reviewing",
+        "finding_pro": "Finding a pro",
+        "quote_ready": "Quote ready",
+        "accepted": "Accepted",
+        "expired": "Expired",
+        "cancelled": "Cancelled"
+      },
+      "timer": {
+        "left": "{{time}} left",
+        "late": "{{time}} late",
+        "contacted": "Contacted",
+        "none": "Not needed"
+      },
+      "age": {
+        "minutes": "{{count}} min",
+        "hours": "{{count}} h",
+        "days": "{{count}} d"
+      },
+      "urgent": "Urgent",
+      "unclassified": "Unclassified",
+      "noName": "No name on file",
+      "unassigned": "Nobody",
+      "agentNoName": "A team member",
+      "empty": {
+        "new": "No new requests.",
+        "urgent": "Nothing urgent.",
+        "waiting_customer": "Nothing is waiting on a customer.",
+        "waiting_pro": "Nothing is waiting on a pro.",
+        "quote_ready": "No quotes are waiting for an answer.",
+        "scheduled_today": "No jobs are scheduled today.",
+        "problems": "No open problems.",
+        "mine": "You hold no requests.",
+        "all": "No requests yet."
+      },
+      "noMatch": "No request matches these filters.",
+      "noMore": "No more requests.",
+      "more": "More requests",
+      "first": "Back to the start",
+      "loadError": "We couldn't load the queue. Try again in a moment.",
+      "retry": "Try again"
+    },
+    "requests": {
+      "back": "Operations queue",
+      "notFound": "This request doesn't exist.",
+      "loadError": "We couldn't load this request. Try again in a moment.",
+      "category": "Category",
+      "created": "Created",
+      "firstContact": "First contact",
+      "lastContact": "Last contact",
+      "customerSees": "The customer sees",
+      "nextAction": "Next action",
+      "origin": {
+        "app": "From the app",
+        "web": "From the website",
+        "phone": "By phone"
+      },
+      "customerStatus": {
+        "requestReceived": "Request received",
+        "reviewing": "Reviewing",
+        "findingAPro": "Finding a pro",
+        "quoteReady": "Quote ready",
+        "scheduled": "Scheduled",
+        "professionalOnTheWay": "Professional on the way",
+        "inProgress": "In progress",
+        "waitingForConfirmation": "Waiting for confirmation",
+        "completed": "Completed",
+        "needsAttention": "Needs attention",
+        "cancelled": "Cancelled"
+      },
+      "customer": {
+        "title": "Customer",
+        "name": "Name",
+        "phone": "Phone",
+        "noPhone": "No phone on file",
+        "email": "Email",
+        "language": "Language",
+        "address": "Address",
+        "prefers": "Prefers",
+        "call": "Call",
+        "text": "Text",
+        "sendEmail": "Email"
+      },
+      "assignment": {
+        "title": "Who holds it",
+        "nobody": "Nobody holds this request.",
+        "you": "You hold this request.",
+        "heldBy": "{{name}} holds this request.",
+        "claim": "Take this request",
+        "release": "Release",
+        "saving": "Saving…",
+        "saved": "Saved.",
+        "errors": {
+          "held": "Another team member holds this request now.",
+          "not_found": "This request no longer exists.",
+          "forbidden": "Your account can't change who holds a request.",
+          "unavailable": "We couldn't save the change. Try again in a moment."
+        }
+      },
+      "request": {
+        "title": "Request",
+        "preferred": "Preferred day",
+        "period": {
+          "morning": "Morning",
+          "afternoon": "Afternoon",
+          "evening": "Evening",
+          "flexible": "Any time"
+        },
+        "media": "Photos and videos",
+        "noMedia": "None attached.",
+        "open": {
+          "photo": "Open photo {{number}}",
+          "video": "Open video {{number}}"
+        },
+        "mediaPending": "Still being prepared: {{count}}",
+        "filesOpenInNewTab": "Files open in a new tab."
+      },
+      "quotes": {
+        "title": "Quotes",
+        "none": "No quotes yet.",
+        "starts": "Starts",
+        "status": {
+          "pending": "Pending",
+          "accepted": "Accepted",
+          "rejected": "Not chosen",
+          "expired": "Expired",
+          "withdrawn": "Withdrawn"
+        }
+      },
+      "job": {
+        "title": "Job",
+        "none": "No job yet: the request is not paid.",
+        "status": "Status",
+        "scheduled": "Scheduled start",
+        "history": "History",
+        "bySystem": "(automatic)",
+        "statuses": {
+          "scheduled": "Scheduled",
+          "on_the_way": "On the way",
+          "in_progress": "In progress",
+          "completed": "Completed",
+          "confirmed": "Confirmed",
+          "paid_out": "Paid out",
+          "disputed": "Disputed",
+          "refunded": "Refunded",
+          "cancelled": "Cancelled"
         }
       }
     },
