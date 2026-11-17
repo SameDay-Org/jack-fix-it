@@ -3,6 +3,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
 import { chooseHeroMode, maxPixelRatio, readHeroEnv, STILL_QUERY } from "./hero3d/capabilities";
+import { buildPhone } from "./hero3d/build-phone";
 import { beatAt, dominantScreen, pinProgress } from "./hero3d/choreography";
 import { loadTriggers } from "./hero3d/load-triggers";
 import type { PhoneScene } from "./hero3d/phone-scene";
@@ -112,51 +113,61 @@ export function HeroMotion({ children, className, screens }: HeroMotionProps) {
     let chunk: Promise<typeof import("./hero3d/scene-loader")> | null = null;
     const download = () => (chunk ??= import("./hero3d/scene-loader"));
 
-    const build = async () => {
+    // Downloaded when the page is idle, built on the first intent, both only for a pinned hero
+    // (STILL_QUERY also covers Reduce Motion) in a tab the reader sees (hero3d/load-triggers.ts).
+    // The hero opens the page, so it is always within a screen of the viewport: being near it
+    // is no trigger of its own.
+    const canLoad = () => !stopped && !still.matches && document.visibilityState === "visible";
+
+    // One attempt (hero3d/build-phone.ts): the gate is checked again after every wait; true
+    // once it is over (ready, or the CSS phone for good), false when it paused.
+    const build = async (): Promise<boolean> => {
       const container = stage.querySelector<HTMLElement>("[data-hero-canvas]");
-      if (!container || stopped) return;
-      let created: PhoneScene | null = null;
-      try {
-        const { phoneSceneModule } = await download();
-        if (stopped) return;
-        const { createPhoneScene } = phoneSceneModule(); // evaluates three.js
+      if (!container || stopped) return true;
+      const outcome = await buildPhone({
+        canLoad,
+        stopped: () => stopped,
+        download: async () => {
+          const { phoneSceneModule } = await download();
+          return () => phoneSceneModule().createPhoneScene; // evaluates three.js
+        },
         // Let the browser breathe between evaluating three.js and making the GL context:
         // two shorter tasks instead of one long one.
-        await new Promise((resolve) => window.setTimeout(resolve, 0));
-        if (stopped) return;
-        created = await createPhoneScene({
-          container,
-          screens: screenList.split("\n"),
-          maxPixelRatio: maxPixelRatio(env),
-          onLost: toCss,
-        });
-        const smooth = !stopped && (await created.probe());
-        if (stopped || !smooth) {
-          created.dispose();
-          if (!stopped) toCss();
-          return;
-        }
-      } catch {
-        created?.dispose();
-        if (!stopped) toCss();
-        return;
+        breathe: () => new Promise((resolve) => window.setTimeout(resolve, 0)),
+        create: (createPhoneScene) =>
+          createPhoneScene({
+            container,
+            screens: screenList.split("\n"),
+            maxPixelRatio: maxPixelRatio(env),
+            onLost: toCss,
+          }),
+      });
+      switch (outcome.kind) {
+        case "paused":
+          return false;
+        case "stopped":
+          return true;
+        case "failed":
+          toCss();
+          return true;
+        case "ready":
+          scene = outcome.scene;
+          scene.setProgress(progress);
+          scene.reveal();
+          stage.dataset.gl = "ready";
+          return true;
       }
-      scene = created;
-      scene.setProgress(progress);
-      scene.reveal();
-      stage.dataset.gl = "ready";
     };
 
-    // Downloaded when the page is idle, built on the first intent, both only for a pinned hero
-    // in a tab the reader sees (hero3d/load-triggers.ts). The hero opens the page, so it is
-    // always within a screen of the viewport: being near it is no trigger of its own.
-    const canLoad = () => !stopped && !still.matches && document.visibilityState === "visible";
     const triggers = loadTriggers({
       canLoad,
       download: () => void download().catch(() => {}),
-      build: () => {
-        stopListening();
-        void build();
+      // The listeners stay while a build is paused: a change of visibility or of the media
+      // queries, or the next intent, resumes it.
+      build: async () => {
+        const finished = await build();
+        if (finished) stopListening();
+        return finished;
       },
     });
     const INTENT = ["scroll", "wheel", "touchstart", "pointerdown", "keydown"] as const;
