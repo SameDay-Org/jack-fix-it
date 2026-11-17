@@ -1673,6 +1673,79 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/jobs/{job_id}/dispute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the problem I reported on my job
+         * @description The caller's report on their job, or null, whether they may report one now, and until
+         *     when. The pro's reply is not part of it: it is for the admin who resolves the report.
+         */
+        get: operations["read_my_problem_v1_jobs__job_id__dispute_get"];
+        put?: never;
+        /**
+         * Report a problem with my job
+         * @description The customer reports a problem with their completed job, before its window ends
+         *     (`report_by` in the read): the job moves to disputed (Needs Attention) and its payout to the
+         *     pro is held until an admin resolves it. One report per job: sending again returns the first
+         *     one, unchanged (200).
+         *
+         *     Contact details in the description are masked before it is stored; only the masked text is
+         *     kept. The pro is notified; photos are shown to them once their safe copy is ready.
+         */
+        post: operations["report_problem_v1_jobs__job_id__dispute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pros/me/jobs/{job_id}/dispute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the problem reported on my job
+         * @description The customer's report on the caller's job, or null: the reason, the description as
+         *     stored (masked), the photos' safe copies once ready, and the pro's own reply.
+         */
+        get: operations["read_reported_problem_v1_pros_me_jobs__job_id__dispute_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pros/me/jobs/{job_id}/dispute/reply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reply to the problem reported on my job
+         * @description The pro's one answer to the report, for the admin who resolves it. Sending the same text
+         *     again returns the view unchanged. Contact details are masked before it is stored.
+         */
+        post: operations["reply_to_problem_v1_pros_me_jobs__job_id__dispute_reply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/users/me/rating": {
         parameters: {
             query?: never;
@@ -2182,6 +2255,53 @@ export interface components {
             assigned_agent: components["schemas"]["QueueAgent"] | null;
         };
         /**
+         * CustomerDisputeOut
+         * @description The customer's own report, its description as stored (masked). Their photos show as
+         *     soon as attached: their original until the safe copy is ready.
+         */
+        CustomerDisputeOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            reason_code: components["schemas"]["DisputeReason"];
+            /** Description */
+            description: string;
+            status: components["schemas"]["DisputeStatus"];
+            /** @description How an admin settled it; null while open. */
+            resolution: components["schemas"]["DisputeResolution"] | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Resolved At */
+            resolved_at: string | null;
+            /** Photos */
+            photos: components["schemas"]["DisputePhotoOut"][];
+            /**
+             * Photos Pending
+             * @description Photos whose copy is still being prepared.
+             */
+            photos_pending: number;
+        };
+        /** CustomerDisputeView */
+        CustomerDisputeView: {
+            /** @description null while none was reported. */
+            dispute: components["schemas"]["CustomerDisputeOut"] | null;
+            /**
+             * Can Report
+             * @description Whether the caller may report a problem now: the job is completed, its window is open and no problem was reported.
+             */
+            can_report: boolean;
+            /**
+             * Report By
+             * @description Until when a problem can be reported; null when the job is not completed.
+             */
+            report_by: string | null;
+        };
+        /**
          * CustomerJob
          * @description The customer's job on their request, once paid.
          */
@@ -2338,6 +2458,71 @@ export interface components {
              */
             expo_push_token: string;
         };
+        /** DisputeIn */
+        DisputeIn: {
+            reason_code: components["schemas"]["DisputeReason"];
+            /**
+             * Description
+             * @description What went wrong, as plain text. Contact details are masked before it is stored; only the masked text is kept.
+             */
+            description: string;
+            /**
+             * Photo Keys
+             * @description Keys of the caller's own dispute_photo uploads (POST /v1/uploads), in the order to show them. Optional; at most DISPUTE_PHOTO_MAX_COUNT.
+             */
+            photo_keys?: string[];
+        };
+        /**
+         * DisputePhotoOut
+         * @description One photo of the dispute, signed for a short while.
+         */
+        DisputePhotoOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Content Type
+             * @example image/jpeg
+             */
+            content_type: string;
+            /**
+             * Url
+             * @description A signed GET URL, valid until expires_at.
+             */
+            url: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
+        /**
+         * DisputeReason
+         * @description What the customer says went wrong (#75).
+         * @enum {string}
+         */
+        DisputeReason: "work_incomplete" | "poor_quality" | "no_show" | "damage" | "other";
+        /** DisputeReplyIn */
+        DisputeReplyIn: {
+            /**
+             * Message
+             * @description The pro's answer, as plain text, once. Contact details are masked before it is stored.
+             */
+            message: string;
+        };
+        /**
+         * DisputeResolution
+         * @description How an admin settles a dispute (#76).
+         * @enum {string}
+         */
+        DisputeResolution: "released" | "partial_release" | "refunded";
+        /**
+         * DisputeStatus
+         * @enum {string}
+         */
+        DisputeStatus: "open" | "resolved";
         /** DocumentOut */
         DocumentOut: {
             /**
@@ -3234,6 +3419,54 @@ export interface components {
          * @enum {string}
          */
         PreferredPeriod: "morning" | "afternoon" | "evening" | "flexible";
+        /**
+         * ProDisputeOut
+         * @description The report on the pro's job: the photos' safe copies only, once ready.
+         */
+        ProDisputeOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            reason_code: components["schemas"]["DisputeReason"];
+            /** Description */
+            description: string;
+            status: components["schemas"]["DisputeStatus"];
+            /** @description How an admin settled it; null while open. */
+            resolution: components["schemas"]["DisputeResolution"] | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Resolved At */
+            resolved_at: string | null;
+            /** Photos */
+            photos: components["schemas"]["DisputePhotoOut"][];
+            /**
+             * Photos Pending
+             * @description Photos whose copy is still being prepared.
+             */
+            photos_pending: number;
+            /**
+             * Reply
+             * @description The pro's own answer, once given.
+             */
+            reply: string | null;
+            /** Replied At */
+            replied_at: string | null;
+        };
+        /** ProDisputeView */
+        ProDisputeView: {
+            /** @description null while none was reported. */
+            dispute: components["schemas"]["ProDisputeOut"] | null;
+            /**
+             * Can Reply
+             * @description Whether the pro may still answer: open, no reply yet.
+             */
+            can_reply: boolean;
+        };
         /**
          * ProDocumentStatus
          * @enum {string}
@@ -4954,7 +5187,7 @@ export interface components {
          * UploadPurpose
          * @enum {string}
          */
-        UploadPurpose: "request_media" | "job_photo" | "pro_document" | "profile_photo";
+        UploadPurpose: "request_media" | "job_photo" | "pro_document" | "profile_photo" | "dispute_photo";
         /** UploadRequest */
         UploadRequest: {
             purpose: components["schemas"]["UploadPurpose"];
@@ -10098,6 +10331,273 @@ export interface operations {
                 };
             };
             /** @description validation_error: a job_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_my_problem_v1_jobs__job_id__dispute_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerDisputeView"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job with this id of which the caller is the customer. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a job_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    report_problem_v1_jobs__job_id__dispute_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DisputeIn"];
+            };
+        };
+        responses: {
+            /** @description A problem was already reported on this job: that report, unchanged. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerDisputeView"];
+                };
+            };
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerDisputeView"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers report a problem. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job with this id of which the caller is the customer. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description job_not_disputable: the job is not completed (not done yet, confirmed by the customer or automatically, paid out, refunded or cancelled), or its window to report a problem has passed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: an unknown reason_code; a description blank, longer than 2000 characters, holding a NUL, or empty once invisible characters are dropped; photo_keys that are not the caller's own dispute_photo uploads, issued too long ago, repeated, already attached to a report, or more than DISPUTE_PHOTO_MAX_COUNT; an unknown field; a job_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_reported_problem_v1_pros_me_jobs__job_id__dispute_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProDisputeView"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job with this id of which the caller is the pro. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a job_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    reply_to_problem_v1_pros_me_jobs__job_id__dispute_reply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DisputeReplyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProDisputeView"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job with this id of which the caller is the pro. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description no_open_dispute: no problem was reported on the job, or it is resolved; already_replied: the pro already sent a different reply. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a message blank, longer than 2000 characters, holding a NUL, or empty once invisible characters are dropped; an unknown field; a job_id that is not a UUID. */
             422: {
                 headers: {
                     [name: string]: unknown;

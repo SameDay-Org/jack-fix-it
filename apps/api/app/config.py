@@ -380,6 +380,14 @@ class Settings(BaseSettings):
     job_auto_confirm_after_hours: int = Field(default=48, gt=0)
     job_auto_confirm_sweep_minutes: int = Field(default=15, ge=1, le=60)
     job_auto_confirm_sweep_timeout_seconds: int = Field(default=840, gt=0)
+    # Disputes (#75; Foreman 2026-11-17, Cesar may change it): how many hours after the pro marks
+    # the job done the customer may report a problem. Unset: the confirmation window above. At
+    # most that window (checked below): past it the job is confirmed, and a confirmed job goes to
+    # support (Talk to Jack), not to a dispute.
+    dispute_window_hours: int | None = Field(default=None, gt=0)
+    # The most photos one report holds. They are dispute_photo uploads attached by the same
+    # rule as job photos: issued at most JOB_PHOTO_ATTACH_MAX_AGE_MINUTES before.
+    dispute_photo_max_count: int = Field(default=10, gt=0)
     # The pro's live position while on the way (#350; Cesar 2026-11-10): only the latest one
     # of a job is kept, in Redis only, for this many seconds after its write (it is deleted
     # sooner, when the pro checks in or the job leaves on_the_way).
@@ -631,6 +639,18 @@ class Settings(BaseSettings):
                 "JOB_PHOTO_ATTACH_MAX_AGE_MINUTES must be at most half of "
                 "ORPHAN_UPLOAD_MIN_AGE_HOURS: the sweep must never reach an upload a job "
                 "may still attach"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _dispute_window_inside_confirmation(self) -> Self:
+        if (
+            self.dispute_window_hours is not None
+            and self.dispute_window_hours > self.job_auto_confirm_after_hours
+        ):
+            raise ValueError(
+                "DISPUTE_WINDOW_HOURS must be at most JOB_AUTO_CONFIRM_AFTER_HOURS: a job "
+                "confirmed at the end of that window can no longer be disputed"
             )
         return self
 

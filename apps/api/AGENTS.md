@@ -211,12 +211,20 @@ them idempotent: they can run twice.
   `TRANSFER_RELEASE_BATCH_SIZE` jobs, a run bounded by `TRANSFER_RELEASE_SWEEP_TIMEOUT_SECONDS`,
   each job in its own session. An attempt with no outcome is another worker's for
   `TRANSFER_STUCK_PENDING_MINUTES`. One `transfers_released` summary per run (counts by
-  outcome). `has_open_hold` is the dispute module's hook (#75). Once a transfer's id is stored
+  outcome). `has_open_hold` holds a job with an open dispute (#75): release refuses it and the
+  sweep's query leaves it out. Once a transfer's id is stored
   it is read again from Stripe, for a reversal whose event came first; the row keeps that need
   (`reversal_checked_at` NULL) until a read succeeds, and the cron `check_transfer_reversals`
   (same cadence, timeout and batch size) reads each such row by its stored id once
   `TRANSFER_STUCK_PENDING_MINUTES` have passed since its last try, least recently tried first,
   whatever the job's state. It never creates a transfer (#416 r2).
+- **Disputes (#75).** `DisputeService.report` (`disputes/service.py`): the job's customer
+  reports a problem while the job is `completed` and before `completed_at` plus
+  `DISPUTE_WINDOW_HOURS` (unset: the confirmation window). Under the job's row lock the
+  dispute (UNIQUE `job_id`: a second report returns the first), its photos and the move
+  `completed -> disputed` commit together; then the pro's `job_disputed` push and
+  `sanitize_dispute_photos` (the media copier, as for job photos). Text is redacted
+  (`app.redaction`) and never logged; the pro sees photos' safe copies only and replies once.
 
 ## Tests
 

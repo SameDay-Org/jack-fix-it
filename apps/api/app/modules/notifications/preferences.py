@@ -75,6 +75,7 @@ KIND_GROUP: Final[Mapping[str, PreferenceGroup]] = MappingProxyType(
         "job_started": PreferenceGroup.JOB_UPDATES,  # to a customer
         "job_done": PreferenceGroup.JOB_UPDATES,  # to a customer
         "job_confirmed": PreferenceGroup.JOB_UPDATES,  # to a pro (#66, #67)
+        "job_disputed": PreferenceGroup.JOB_UPDATES,  # to a pro (#75)
         # A canceled payment reopened the request's quotes: about the booking, not a new quote.
         "booking_not_completed": PreferenceGroup.JOB_UPDATES,  # to a customer
     }

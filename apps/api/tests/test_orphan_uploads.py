@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import event
+from sqlalchemy import event, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +31,7 @@ from app.integrations.storage import (
 from app.modules.addresses.models import Address
 from app.modules.categories.models import Category
 from app.modules.categories.service import CategoryService
+from app.modules.disputes.models import Dispute, DisputePhoto, DisputeReason
 from app.modules.jobs.models import Job, JobPhoto, JobPhotoKind
 from app.modules.pros.models import ProDocument, ProDocumentType, ProProfile
 from app.modules.pros.schemas import ProProfileUpdate
@@ -74,6 +75,7 @@ YOUNG = NOW - MIN_AGE + timedelta(minutes=1)
 NOT_UPLOAD_KEYS = {
     "request_media.safe_key",
     "job_photos.safe_key",
+    "dispute_photos.safe_key",
     "service_requests.idempotency_key",
     "support_tickets.idempotency_key",
     # Stripe's idempotency key of a job's transfer to its pro (#68).
@@ -253,6 +255,22 @@ async def attach_job_photo(session: AsyncSession, world: World, key: str) -> Non
     )
 
 
+async def attach_dispute_photo(session: AsyncSession, world: World, key: str) -> None:
+    statement = select(Dispute).where(Dispute.job_id == world.job.id)
+    dispute = (await session.scalars(statement)).one_or_none()
+    if dispute is None:
+        dispute = Dispute(
+            job_id=world.job.id,
+            opened_by=world.customer.id,
+            reason_code=DisputeReason.OTHER,
+            description="Orphan probe",
+        )
+        await add(session, dispute)
+    await add(
+        session, DisputePhoto(dispute_id=dispute.id, file_key=key, uploaded_by=world.customer.id)
+    )
+
+
 @dataclass(frozen=True)
 class Column:
     purpose: UploadPurpose
@@ -267,6 +285,7 @@ COLUMNS = [
     Column(UploadPurpose.PROFILE_PHOTO, lambda w: w.pro.id, attach_photo),
     Column(UploadPurpose.PROFILE_PHOTO, lambda w: w.customer.id, attach_id_photo),
     Column(UploadPurpose.JOB_PHOTO, lambda w: w.pro.id, attach_job_photo),
+    Column(UploadPurpose.DISPUTE_PHOTO, lambda w: w.customer.id, attach_dispute_photo),
 ]
 
 
@@ -309,7 +328,9 @@ async def test_delete_mode_removes_only_old_unreferenced_keys(
     result = await sweeper(sessions_of(db_session), storage).sweep()
 
     assert set(storage.objects) == expected_left
-    assert result == counts(scanned=20, too_young=10, referenced=5, orphaned=5, deleted=5)
+    # Per column: four keys, two young, one referenced, one orphan deleted.
+    n = len(COLUMNS)
+    assert result == counts(scanned=4 * n, too_young=2 * n, referenced=n, orphaned=n, deleted=n)
 
 
 async def test_an_object_exactly_at_the_minimum_age_is_too_young(
@@ -722,12 +743,15 @@ async def test_logs_carry_no_keys_or_user_ids(
     assert not leaks(caplog.records, *secrets)
     [summary] = [r for r in caplog.records if r.message == "orphan_uploads_swept"]
     logged = {name: summary.__dict__[name] for name in SweepCounts.__dataclass_fields__}
+    # Per column: three keys (one referenced, one orphan, one young); then the three extras: two
+    # orphans and one key that does not parse. One delete fails.
+    n = len(COLUMNS)
     assert logged == {
-        "scanned": 18,
-        "too_young": 5,
-        "referenced": 5,
-        "orphaned": 7,
-        "deleted": 6,
+        "scanned": 3 * n + 3,
+        "too_young": n,
+        "referenced": n,
+        "orphaned": n + 2,
+        "deleted": n + 1,
         "unparsed": 1,
         "skipped_purpose": 0,
         "failed": 1,

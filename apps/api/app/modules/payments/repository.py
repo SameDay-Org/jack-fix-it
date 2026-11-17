@@ -321,7 +321,12 @@ class TransferRepository:
         return None if row is None else (row.id, row.job_id)
 
     async def due(
-        self, confirmed: Subquery, payable: Subquery, retry_before: datetime, limit: int
+        self,
+        confirmed: Subquery,
+        payable: Subquery,
+        held: Subquery,
+        retry_before: datetime,
+        limit: int,
     ) -> list[uuid.UUID]:
         """Up to `limit` ids of the confirmed jobs whose transfer is still to be made and may
         be tried now (#68's sweep): the job is confirmed (`confirmed`: job_id, pro_id), its pro
@@ -351,6 +356,8 @@ class TransferRepository:
             select(confirmed.c.job_id)
             .join(payable, payable.c.pro_id == confirmed.c.pro_id)
             .outerjoin(Transfer, Transfer.job_id == confirmed.c.job_id)
+            # A held job (`held`: job_id, an open dispute) is never released (has_open_hold).
+            .where(confirmed.c.job_id.not_in(select(held.c.job_id)))
             .where(
                 or_(
                     Transfer.id.is_(None) & (confirmed.c.pro_payout_cents > 0) & releasable,

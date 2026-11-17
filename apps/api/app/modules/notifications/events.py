@@ -208,6 +208,27 @@ async def push_job_confirmed(
     )
 
 
+async def push_job_disputed(
+    queue: JobQueue,
+    *,
+    pro_user_id: uuid.UUID,
+    job_id: uuid.UUID,
+    public_code: str,
+    timeout_seconds: float,
+) -> None:
+    """To the pro, once the customer reported a problem with the job (#75): one dispute per
+    job, so one message id. Opens the job, where the pro reads the report and replies."""
+    await _push(
+        queue,
+        pro_user_id,
+        message_id=f"job_disputed:{job_id}",
+        kind="job_disputed",
+        params={"public_code": public_code},
+        deep_link=f"/jobs/{job_id}",
+        timeout_seconds=timeout_seconds,
+    )
+
+
 async def push_booking_not_completed(
     queue: JobQueue,
     *,
