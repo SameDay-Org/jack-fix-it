@@ -16,6 +16,7 @@ import {
 } from "@rnmapbox/maps";
 import {
   memo,
+  useCallback,
   useEffect,
   useEffectEvent,
   useMemo,
@@ -64,6 +65,7 @@ import { useVanMotion, type VanFrame } from "./useVanMotion";
 import {
   STALE_OPACITY,
   VanModelAsset,
+  VanModelBoundary,
   vanModelSource,
   vanModelStyle,
   vanRotation,
@@ -235,8 +237,12 @@ export function LiveMap({ fix, stale, active, route, height, cards, onUnavailabl
   // Every camera move that eases takes this long.
   const transitionMs = reduceMotion ? REDUCED_MOTION_MS : CAMERA_TRANSITION_MS;
   const [loaded, setLoaded] = useState(false);
-  // The pro is a 3D van; without its model, the arrow.
+  // The pro is the heading arrow, with the 3D van over it while the app has the model: an error in
+  // the model's part of the tree drops the model, never the arrow (see VanLayer).
   const [vanModel] = useState(vanModelSource);
+  const [modelFailed, setModelFailed] = useState(false);
+  const model = modelFailed ? null : vanModel;
+  const dropModel = useCallback(() => setModelFailed(true), []);
   // The first overview: on once the address is known (at mount or soon after the map loads).
   const [hold, setHold] = useState<"waiting" | "on" | "done">(
     trail.destination !== null ? "on" : "waiting",
@@ -417,7 +423,11 @@ export function LiveMap({ fix, stale, active, route, height, cards, onUnavailabl
           }}
         />
         <MapGlyphs />
-        {vanModel === null ? null : <VanModelAsset source={vanModel} />}
+        {model === null ? null : (
+          <VanModelBoundary onError={dropModel}>
+            <VanModelAsset source={model} />
+          </VanModelBoundary>
+        )}
         {ahead ? (
           <ShapeSource ref={line} id={ROUTE_SOURCE} shape={lineFeature(ahead)}>
             <LineLayer
@@ -458,7 +468,13 @@ export function LiveMap({ fix, stale, active, route, height, cards, onUnavailabl
             />
           </ShapeSource>
         ) : null}
-        <VanLayer ref={van} shape={initial.van} model={vanModel !== null} stale={stale} />
+        <VanLayer
+          ref={van}
+          shape={initial.van}
+          model={model !== null}
+          stale={stale}
+          onModelError={dropModel}
+        />
       </MapView>
       <View
         pointerEvents="box-none"
@@ -495,27 +511,33 @@ function useTrail(path: MeasuredPath | null) {
   return trail;
 }
 
-/** The van, drawn from the native source `useVanMotion` writes to; React never redraws it. */
+/**
+ * The pro, drawn from the native source `useVanMotion` writes to; React never redraws it. The
+ * heading arrow is always there, and the 3D van stands over it (the model layer has no slot, so the
+ * map draws it above the arrow's top slot): its disc shows around the van. The arrow never gives
+ * way to the van because nothing tells the app that the van drew. The map library reports no
+ * model that failed to load or decode (Mapbox writes that to the device log only), and its
+ * rendered-feature queries never return a model layer's feature, even with the van on screen
+ * (checked on Android with rnmapbox 10.3.18). A model that draws nothing leaves the arrow as the
+ * marker. An error thrown in the model's part of the tree stays there (`VanModelBoundary`): the
+ * model goes, the map and the arrow stay.
+ */
 const VanLayer = memo(function VanLayer({
   ref,
   shape,
   model,
   stale,
+  onModelError,
 }: {
   ref: Ref<ShapeSource>;
   shape: ReturnType<typeof vanFeature>;
-  /** Draw the 3D van; false draws the arrow instead. */
+  /** Draw the 3D van over the arrow. */
   model: boolean;
   /** The position is old: the van dims (the arrow reads that from its feature). */
   stale: boolean;
+  /** An error was thrown in the model's part of the tree. */
+  onModelError: () => void;
 }) {
-  if (model) {
-    return (
-      <ShapeSource ref={ref} id={VAN_SOURCE} shape={shape}>
-        <ModelLayer id="jack-van-model" style={vanModelStyle(stale)} />
-      </ShapeSource>
-    );
-  }
   return (
     <ShapeSource ref={ref} id={VAN_SOURCE} shape={shape}>
       <SymbolLayer
@@ -531,6 +553,12 @@ const VanLayer = memo(function VanLayer({
           iconIgnorePlacement: true,
         }}
       />
+      <VanModelBoundary onError={onModelError}>
+        {/* Its source named in so many words: a source passes its id to direct children only. */}
+        {model ? (
+          <ModelLayer id="jack-van-model" sourceID={VAN_SOURCE} style={vanModelStyle(stale)} />
+        ) : null}
+      </VanModelBoundary>
     </ShapeSource>
   );
 });

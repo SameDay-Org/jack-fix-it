@@ -1,5 +1,5 @@
 import { Models, type ModelLayerStyle } from "@rnmapbox/maps";
-import { memo, useMemo } from "react";
+import { Component, memo, useMemo, type ReactNode } from "react";
 import { Image } from "react-native";
 
 import vanAsset from "../../../../assets/models/van.glb";
@@ -61,7 +61,9 @@ const VAN_MODEL_STYLE: ModelLayerStyle = {
   // Said in full: a key that is only left out keeps the value the layer had last.
   modelOpacity: 1,
   modelScale: ["get", "scale"],
-  modelCastShadows: true,
+  // No shadow: over the arrow it stands on, the van's shadow pass paints a pale square on Android
+  // (seen at 320 dp), which costs more than the faint shadow it gives the van on the ground.
+  modelCastShadows: false,
 };
 const STALE_VAN_MODEL_STYLE: ModelLayerStyle = { ...VAN_MODEL_STYLE, modelOpacity: STALE_OPACITY };
 
@@ -70,8 +72,8 @@ export const vanModelStyle = (stale: boolean): ModelLayerStyle =>
   stale ? STALE_VAN_MODEL_STYLE : VAN_MODEL_STYLE;
 
 /**
- * Where the map can read the van's model from, or null when the model is not in the app (the
- * caller draws the arrow instead). A build carries it as a bundled asset, which the map library
+ * Where the map can read the van's model from, or null when the model is not in the app (the map
+ * then shows the arrow alone). A build carries it as a bundled asset, which the map library
  * reads by itself. A development server gives an address with the file's path in its query,
  * and the map tells a model's type by the address's extension: that one is turned into the
  * server's plain address of the same file.
@@ -89,3 +91,31 @@ export const VanModelAsset = memo(function VanModelAsset({ source }: { source: V
   const models = useMemo(() => ({ [VAN_MODEL]: source }), [source]);
   return <Models models={models} />;
 });
+
+/**
+ * Keeps an error thrown in the van model's part of the map (its registration or its layer) inside
+ * that part: it draws nothing from then on and tells the map, which drops the model and keeps the
+ * arrow. Its own log line names the error's class only, never its text. React Native still
+ * reports every error a boundary catches by itself (to the console and the device log, text and
+ * component stack included); this part's props hold no position (the model's address, a fixed
+ * style), so neither report carries the pro's.
+ */
+export class VanModelBoundary extends Component<
+  { onError: () => void; children: ReactNode },
+  { failed: boolean }
+> {
+  override state = { failed: false };
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  override componentDidCatch(error: unknown): void {
+    console.warn(`Van model failed: ${error instanceof Error ? error.name : "unknown"}`);
+    this.props.onError();
+  }
+
+  override render(): ReactNode {
+    return this.state.failed ? null : this.props.children;
+  }
+}

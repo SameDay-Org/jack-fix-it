@@ -171,20 +171,101 @@ describe("LiveMap's van", () => {
     await render(<LiveMap {...props()} />);
     expect(screen.getByTestId("mapbox-Models").props.models).toEqual({ "jack-van-model": 1 });
     const layer = screen.getByTestId(MODEL_LAYER);
-    // A child of the pro's source: the frames' feature places and turns it.
+    // In the pro's source, named in so many words (a boundary stands between them): the frames'
+    // feature places and turns it.
     expect(layer.parent).toBe(screen.getByTestId("mapbox-ShapeSource-jack-van"));
+    expect(layer.props.sourceID).toBe("jack-van");
     expect(layer.props.style).toMatchObject({
       modelId: "jack-van-model",
       modelType: "common-3d",
       modelRotation: ["get", "rotation"],
-      modelCastShadows: true,
+      // Its shadow painted a pale square over the arrow it stands on.
+      modelCastShadows: false,
     });
     expect(layer.props.style.modelOpacity).toBe(1);
     // Its size comes from the feature too, never from a zoom expression in the style (the map
     // works those out at whole zoom levels only).
     expect(layer.props.style.modelScale).toEqual(["get", "scale"]);
     expect(lastVan().properties.scale).toEqual(vanScale(FOLLOW_ZOOM));
-    expect(screen.queryByTestId(ARROW_LAYER)).toBeNull();
+  });
+
+  it("stands on the arrow, which never goes: nothing tells the app that the van drew", async () => {
+    await render(<LiveMap {...props({ fix: fix(at(0, 100), 0, 90) })} />);
+    const source = screen.getByTestId("mapbox-ShapeSource-jack-van");
+    const arrow = screen.getByTestId(ARROW_LAYER);
+    const model = screen.getByTestId(MODEL_LAYER);
+    expect(arrow.parent).toBe(source);
+    // The arrow sits in the map's top slot; the model, in none, is drawn above everything.
+    expect(arrow.props.slot).toBe("top");
+    expect(model.props.slot).toBeUndefined();
+    // Both read the one feature the frames write: they turn and dim together.
+    expect(arrow.props.style).toMatchObject({
+      iconImage: "jack-van-arrow",
+      iconRotate: ["get", "bearing"],
+      iconOpacity: ["get", "opacity"],
+    });
+    expect(lastVan().properties).toMatchObject({ bearing: 90, rotation: [0, 0, 270], opacity: 1 });
+    // No wait for a confirmation that cannot come: still there long after the map loaded.
+    await act(async () => {
+      screen.getByTestId("live-map-view").props.onDidFinishLoadingMap();
+    });
+    await advance(30_000);
+    expect(screen.getByTestId(ARROW_LAYER)).toBeTruthy();
+    expect(screen.getByTestId(MODEL_LAYER)).toBeTruthy();
+  });
+
+  it("keeps the arrow, moving, when the map takes the model's address and draws nothing", async () => {
+    // The native failure the map does not report: a good address, then a file it cannot read.
+    withAsset(SERVED);
+    jest.spyOn(mapbox, "Models").mockImplementation(() => <></>);
+    jest.spyOn(mapbox, "ModelLayer").mockImplementation(() => <></>);
+    await render(<LiveMap {...props()} />);
+    expect(screen.getByTestId("live-map-view")).toBeTruthy();
+    expect(screen.getByTestId(ARROW_LAYER).parent).toBe(
+      screen.getByTestId("mapbox-ShapeSource-jack-van"),
+    );
+    // The map goes on: the next fix glides the arrow there.
+    await screen.rerender(<LiveMap {...props({ fix: fix(at(0, 200), POLL_MS, 0) })} />);
+    await advance(POLL_MS + 2000);
+    expect(distanceM(lastVan().geometry.coordinates, at(0, 200))).toBeLessThan(0.5);
+    expect(screen.getByTestId(ARROW_LAYER)).toBeTruthy();
+  });
+
+  it("keeps an error thrown by the model's layer there: the model goes, map and arrow stay", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    // React reports every error a boundary catches by itself, text included (muted here): in the
+    // app, this part's props hold no position. The boundary's own line is what this test reads.
+    jest.spyOn(console, "error").mockImplementation(() => undefined);
+    jest.spyOn(mapbox, "ModelLayer").mockImplementation(() => {
+      throw new TypeError("feature at -80.111,26.1193 has no rotation");
+    });
+    await render(<LiveMap {...props()} />);
+    expect(screen.getByTestId("live-map-view")).toBeTruthy();
+    expect(screen.getByTestId(ARROW_LAYER)).toBeTruthy();
+    // The whole model goes, its registration too.
+    expect(screen.queryByTestId("mapbox-Models")).toBeNull();
+    // The boundary logs once, by the error's class: never its text (here, a position).
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith("Van model failed: TypeError");
+    // The map goes on.
+    await screen.rerender(<LiveMap {...props({ fix: fix(at(0, 200), POLL_MS, 0) })} />);
+    await advance(POLL_MS + 2000);
+    expect(distanceM(lastVan().geometry.coordinates, at(0, 200))).toBeLessThan(0.5);
+    expect(screen.getByTestId(ARROW_LAYER)).toBeTruthy();
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an error thrown by the model's registration there too: the layer goes with it", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    jest.spyOn(console, "error").mockImplementation(() => undefined);
+    jest.spyOn(mapbox, "Models").mockImplementation(() => {
+      throw new Error("model jack-van-model: bad address");
+    });
+    await render(<LiveMap {...props()} />);
+    expect(screen.getByTestId("live-map-view")).toBeTruthy();
+    expect(screen.getByTestId(ARROW_LAYER)).toBeTruthy();
+    expect(screen.queryByTestId(MODEL_LAYER)).toBeNull();
+    expect(warn).toHaveBeenCalledWith("Van model failed: Error");
   });
 
   it("is its real size from zoom 19.5 in, and twice as large for each level out of it", () => {
