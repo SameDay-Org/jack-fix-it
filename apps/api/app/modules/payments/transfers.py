@@ -42,12 +42,18 @@ release(job_id), in four steps:
 3. Under the same locks again: the transfer's id is stored (created) and the job moves
    confirmed -> paid_out through JobStateMachine as the system (one job_events row), in one
    transaction.
-4. Once that is committed, the transfer is read from Stripe again. A transfer reversed between
-   its create and step 3 (its create answer slow to come back) had its transfer.reversed event
-   find no row with its id, and that event is processed and gone. So a reversal found now is
-   recorded through the webhook's own path (record_reversal); a later event finds the stored
-   id itself, and whichever comes second changes nothing. A failed read is logged for staff
-   (`transfer_reversal_check_failed`); the transfer stays created.
+4. Once that is committed, the transfer is read from Stripe again by its stored id. A
+   transfer reversed between its create and step 3 (its create answer slow to come back) had
+   its transfer.reversed event find no row with its id, and that event is processed and gone.
+   So a reversal found now is recorded through the webhook's own path (record_reversal); a
+   later event finds the stored id itself, and whichever comes second changes nothing. The
+   need for this read is durable (#416 r2): step 3 commits the row with
+   reversal_check_tried_at stamped and reversal_checked_at NULL, and only a read that
+   succeeded stamps reversal_checked_at, in the transaction that records what it found. A read
+   that fails, or never ends (a cancelled task, a dead worker), leaves the row for the
+   recovery cron (check_reversal, from transfer_tasks.py): every created transfer whose check
+   has not succeeded, whatever its job's state, once TRANSFER_STUCK_PENDING_MINUTES have passed
+   since the latest try. It reads by the exact stored id and never creates anything.
 
 A Stripe error leaves the job confirmed and the row failed with Stripe's error code (or the
 error's class name; never its text) for the next try. Stripe keeps a create's own refusal under
@@ -107,6 +113,21 @@ async def has_open_hold(session: AsyncSession, job: JobPayoutFacts) -> bool:
     confirmation window moves the job to disputed, which release never touches.
     """
     return False
+
+
+class ReversalCheckOutcome(StrEnum):
+    """What one recovery read of a stored transfer did (check_reversal)."""
+
+    # Read: not reversed. Stamped as checked.
+    CHECKED = "checked"
+    # Read: reversed, and recorded now (or already by the event). Stamped as checked.
+    REVERSED = "reversed"
+    # Nothing to do: checked already, tried too recently, or not a created transfer.
+    SKIPPED = "skipped"
+    # Stripe refused or could not be reached: tried again later.
+    FAILED = "failed"
+    # No Stripe secret key.
+    NOT_CONFIGURED = "not_configured"
 
 
 class ReleaseOutcome(StrEnum):
@@ -214,6 +235,38 @@ class TransferService:
         )
         await self._session.rollback()
         return job_ids
+
+    async def unchecked_for_reversal(self, limit: int) -> list[uuid.UUID]:
+        """Up to `limit` ids of the created transfers whose reversal check is still to
+        succeed, least recently tried first (TransferRepository.unchecked_for_reversal).
+        Unlocked; ends its transaction."""
+        ids = await self._transfers.unchecked_for_reversal(self._retry_before(), limit)
+        await self._session.rollback()
+        return ids
+
+    async def check_reversal(self, transfer_id: uuid.UUID) -> ReversalCheckOutcome:
+        """The recovery read of step 4 (see the module doc): claims the row's check, reads
+        its stored transfer from Stripe by id, records a reversal it finds. Never creates.
+        Ends every transaction it opens; a Stripe failure is an outcome."""
+        if self._stripe is None:
+            logger.warning(
+                "transfer_stripe_not_configured", extra={"transfer_id": str(transfer_id)}
+            )
+            return ReversalCheckOutcome.NOT_CONFIGURED
+        stripe_transfer_id = await self._transfers.claim_reversal_check(
+            transfer_id, self._clock(), self._retry_before()
+        )
+        if stripe_transfer_id is None:
+            await self._session.rollback()
+            return ReversalCheckOutcome.SKIPPED
+        # The claim is stored before the read: a second worker leaves the row alone.
+        await self._session.commit()
+        return await self._read_reversal(
+            self._stripe, transfer_id, stripe_transfer_id, {"transfer_id": str(transfer_id)}
+        )
+
+    def _retry_before(self) -> datetime:
+        return self._clock() - self._config.stuck_after
 
     async def release(self, job_id: uuid.UUID) -> ReleaseOutcome:
         """Makes the job's transfer to its pro, once (see the module doc). Ends every
@@ -380,7 +433,10 @@ class TransferService:
         """Step 3: the transfer's id stored and the job paid_out, in one transaction; then
         step 4."""
         job = await self._jobs.locked(attempt.job_id)
-        if not await self._transfers.mark_created(attempt.transfer_id, made.transfer_id):
+        stored = await self._transfers.mark_created(
+            attempt.transfer_id, made.transfer_id, self._clock()
+        )
+        if not stored:
             # Another attempt of this job stored it first: the same transfer (one key).
             return await self._leave(ReleaseOutcome.ALREADY_CREATED)
         if job is not None and job.confirmed:
@@ -389,29 +445,33 @@ class TransferService:
             logger.error("transfer_created_job_not_confirmed", extra=attempt.ids)
         await self._session.commit()
         logger.info("transfer_created", extra={**attempt.ids, "stripe_request_id": made.request_id})
-        await self._check_reversal(stripe, attempt, made.transfer_id)
+        await self._read_reversal(stripe, attempt.transfer_id, made.transfer_id, attempt.ids)
         return ReleaseOutcome.CREATED
 
-    async def _check_reversal(
-        self, stripe: StripeTransfers, attempt: _Attempt, stripe_transfer_id: str
-    ) -> None:
-        """Step 4: the stored transfer read again, a reversal recorded (see the module doc).
-        No transaction is open during the read."""
+    async def _read_reversal(
+        self,
+        stripe: StripeTransfers,
+        transfer_id: uuid.UUID,
+        stripe_transfer_id: str,
+        ids: dict[str, str | int],
+    ) -> ReversalCheckOutcome:
+        """Step 4: the stored transfer read again by its id, a reversal recorded and the
+        check stamped as done in one transaction (see the module doc). No transaction is open
+        during the read; a failed read stamps nothing."""
         try:
             current = await stripe.retrieve_transfer(stripe_transfer_id)
         except StripeCallError as error:
-            logger.error(
+            # For staff, and for the recovery cron: the row still says its check is needed.
+            logger.warning(
                 "transfer_reversal_check_failed",
-                extra={
-                    **attempt.ids,
-                    "stripe_request_id": error.request_id,
-                    "stripe_code": error.code,
-                },
+                extra={**ids, "stripe_request_id": error.request_id, "stripe_code": error.code},
             )
-            return
+            return ReversalCheckOutcome.FAILED
         if current.reversed:
-            await record_reversal(self._session, stripe_transfer_id, attempt.ids)
-            await self._session.commit()
+            await record_reversal(self._session, stripe_transfer_id, ids)
+        await self._transfers.mark_reversal_checked(transfer_id, stripe_transfer_id, self._clock())
+        await self._session.commit()
+        return ReversalCheckOutcome.REVERSED if current.reversed else ReversalCheckOutcome.CHECKED
 
     async def _end_failed(self, attempt: _Attempt, code: str) -> None:
         await self._transfers.mark_failed(attempt.transfer_id, attempt.number, code)

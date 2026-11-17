@@ -24,7 +24,11 @@ from app.modules.dispatch.tasks import dispatch_request
 from app.modules.jobs.tasks import auto_confirm_jobs, photo_sanitize_task
 from app.modules.notifications.push_tasks import check_push_receipts, send_push
 from app.modules.payments.tasks import cancel_unpaid_payments
-from app.modules.payments.transfer_tasks import release_confirmed_jobs, release_transfer
+from app.modules.payments.transfer_tasks import (
+    check_transfer_reversals,
+    release_confirmed_jobs,
+    release_transfer,
+)
 from app.modules.quotes.tasks import expire_quotes
 from app.modules.requests.tasks import sanitize_task
 from app.modules.uploads.tasks import sweep_orphan_uploads
@@ -65,7 +69,7 @@ async def startup(ctx: dict[str, Any]) -> None:
     # call is unavailable: geocode_address then keeps nothing, and logs it.
     ctx["address_geocoder"] = provider_from_settings(settings)
     # The same key makes the transfers to the pros (#68): without it no job is released
-    # (release_transfer and release_confirmed_jobs log it).
+    # (release_transfer and release_confirmed_jobs log it), and no reversal is read again.
     ctx["stripe_transfers"] = (
         None
         if settings.stripe_secret_key is None
@@ -165,6 +169,15 @@ class WorkerSettings:
         ),
         cron(
             release_confirmed_jobs,
+            minute=every(get_settings().transfer_release_sweep_minutes),
+            timeout=get_settings().transfer_release_sweep_timeout_seconds,
+            keep_result=0,
+            keep_result_forever=False,
+        ),
+        # The recovery of the transfers' reversal checks (#416 r2), on the release sweep's
+        # cadence and timeout: read-only Stripe calls, never a create.
+        cron(
+            check_transfer_reversals,
             minute=every(get_settings().transfer_release_sweep_minutes),
             timeout=get_settings().transfer_release_sweep_timeout_seconds,
             keep_result=0,

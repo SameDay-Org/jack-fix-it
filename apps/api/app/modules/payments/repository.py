@@ -19,6 +19,21 @@ from app.modules.payments.models import (
 _NOT_MADE: Final = tuple(status for status in TransferStatus if status not in MADE_STATUSES)
 
 
+def _reversal_unchecked(retry_before: datetime) -> tuple[ColumnElement[bool], ...]:
+    """A created transfer, its Stripe id stored, whose reversal check has not succeeded and was
+    last tried at or before `retry_before` (or never). Nothing about its job: by then the job
+    is paid_out, which no release or sweep reads."""
+    return (
+        Transfer.status == TransferStatus.CREATED,
+        Transfer.stripe_transfer_id.is_not(None),
+        Transfer.reversal_checked_at.is_(None),
+        or_(
+            Transfer.reversal_check_tried_at.is_(None),
+            Transfer.reversal_check_tried_at <= retry_before,
+        ),
+    )
+
+
 class PaymentRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -227,9 +242,12 @@ class TransferRepository:
         )
         return (await self._session.scalar(statement)) is not None
 
-    async def mark_created(self, transfer_id: uuid.UUID, stripe_transfer_id: str) -> bool:
-        """Stores the transfer Stripe made unless the row holds one already; False then. The
-        caller commits it together with the job's move to paid_out."""
+    async def mark_created(
+        self, transfer_id: uuid.UUID, stripe_transfer_id: str, now: datetime
+    ) -> bool:
+        """Stores the transfer Stripe made unless the row holds one already; False then. Its
+        reversal check is still to succeed, and the caller's own starts `now`. The caller
+        commits it together with the job's move to paid_out."""
         statement = (
             update(Transfer)
             .where(
@@ -241,10 +259,51 @@ class TransferRepository:
                 status=TransferStatus.CREATED,
                 stripe_transfer_id=stripe_transfer_id,
                 last_error_code=None,
+                reversal_check_tried_at=now,
+                reversal_checked_at=None,
             )
             .returning(Transfer.id)
         )
         return (await self._session.scalar(statement)) is not None
+
+    async def unchecked_for_reversal(self, retry_before: datetime, limit: int) -> list[uuid.UUID]:
+        """Up to `limit` ids of the created transfers whose reversal check has not succeeded
+        and was last tried at or before `retry_before` (or never), least recently tried first,
+        then by id: a check that keeps failing goes to the back. Whatever the job's state: the
+        job is paid_out by then. Unlocked; claim_reversal_check checks each again."""
+        statement = (
+            select(Transfer.id)
+            .where(*_reversal_unchecked(retry_before))
+            .order_by(Transfer.reversal_check_tried_at.asc().nulls_first(), Transfer.id)
+            .limit(limit)
+        )
+        return list((await self._session.scalars(statement)).all())
+
+    async def claim_reversal_check(
+        self, transfer_id: uuid.UUID, now: datetime, retry_before: datetime
+    ) -> str | None:
+        """Stamps a reversal check starting `now` on the row if it still needs one and none
+        started after `retry_before`; its Stripe transfer id then, else None. The UPDATE takes
+        the row's lock, so of two claims the second sees the first's stamp once it commits.
+        The caller commits before reading Stripe."""
+        statement = (
+            update(Transfer)
+            .where(Transfer.id == transfer_id, *_reversal_unchecked(retry_before))
+            .values(reversal_check_tried_at=now)
+            .returning(Transfer.stripe_transfer_id)
+        )
+        return await self._session.scalar(statement)
+
+    async def mark_reversal_checked(
+        self, transfer_id: uuid.UUID, stripe_transfer_id: str, now: datetime
+    ) -> None:
+        """The read of the row's stored transfer succeeded `now` (a reversal it found is
+        recorded in the same transaction). The caller commits."""
+        await self._session.execute(
+            update(Transfer)
+            .where(Transfer.id == transfer_id, Transfer.stripe_transfer_id == stripe_transfer_id)
+            .values(reversal_checked_at=now)
+        )
 
     async def mark_reversed(self, stripe_transfer_id: str) -> tuple[uuid.UUID, uuid.UUID] | None:
         """created -> reversed for the row holding this Stripe transfer; its (id, job id), or

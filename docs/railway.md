@@ -305,7 +305,8 @@ variables, or the sweep can delete a photo a job just attached (#298).
 
 The worker makes the transfers to the pros (D13.3, #68) with the same `STRIPE_SECRET_KEY` it
 cancels unpaid payments with: a task queued when a job is confirmed, and the
-`release_confirmed_jobs` cron for whatever is left. Its optional settings have defaults
+`release_confirmed_jobs` cron for whatever is left, and the `check_transfer_reversals` cron
+reads made transfers again for a reversal (read-only, on the same settings). Its optional settings have defaults
 (`TRANSFER_RELEASE_SWEEP_MINUTES`, `TRANSFER_RELEASE_SWEEP_TIMEOUT_SECONDS`,
 `TRANSFER_RELEASE_BATCH_SIZE`, `TRANSFER_STUCK_PENDING_MINUTES`; `apps/api/.env.example`
 explains each). The Stripe webhook endpoint must also send `transfer.reversed`, beside the

@@ -211,7 +211,12 @@ them idempotent: they can run twice.
   `TRANSFER_RELEASE_BATCH_SIZE` jobs, a run bounded by `TRANSFER_RELEASE_SWEEP_TIMEOUT_SECONDS`,
   each job in its own session. An attempt with no outcome is another worker's for
   `TRANSFER_STUCK_PENDING_MINUTES`. One `transfers_released` summary per run (counts by
-  outcome). `has_open_hold` is the dispute module's hook (#75).
+  outcome). `has_open_hold` is the dispute module's hook (#75). Once a transfer's id is stored
+  it is read again from Stripe, for a reversal whose event came first; the row keeps that need
+  (`reversal_checked_at` NULL) until a read succeeds, and the cron `check_transfer_reversals`
+  (same cadence, timeout and batch size) reads each such row by its stored id once
+  `TRANSFER_STUCK_PENDING_MINUTES` have passed since its last try, least recently tried first,
+  whatever the job's state. It never creates a transfer (#416 r2).
 
 ## Tests
 

@@ -72,6 +72,9 @@ async def test_the_table_has_its_named_constraints_and_indexes(db_session: Async
     assert columns["amount_cents"] == ("INTEGER", False)
     assert columns["stripe_transfer_id"] == ("VARCHAR(255)", True)
     assert columns["requested_at"] == ("TIMESTAMP", True)
+    # The reversal check's stamps (#416 r2): nullable, so the need for a check is the NULL.
+    assert columns["reversal_check_tried_at"] == ("TIMESTAMP", True)
+    assert columns["reversal_checked_at"] == ("TIMESTAMP", True)
 
 
 async def test_the_round_trip_touches_only_the_new_table(db_session: AsyncSession) -> None:

@@ -11,6 +11,14 @@ down), whose attempt failed, whose answer was lost, or whose pro could not be pa
 time is released by a later run, and a job that keeps failing goes to the back of the line and
 never holds the others up.
 
+check_transfer_reversals is the recovery of a transfer's reversal check (#416 r2): on the same
+cadence, timeout and batch size as the release sweep, it reads again, by its stored Stripe id,
+each created transfer whose check after its create did not succeed (a failed read, a cancelled
+task, a dead worker, or a row older than the check), once TRANSFER_STUCK_PENDING_MINUTES have
+passed since the latest try, least recently tried first. Whatever the job's state (it is
+paid_out by then), and it never creates anything: one read, a reversal recorded if Stripe holds
+one, the check stamped. One `transfer_reversals_checked` summary per run.
+
 Both go through TransferService.release with a session of their own per job, so the same checks,
 the same row and the same Stripe key: a task and a sweep, or two sweeps, on one job make one
 transfer. One job's failure, whatever it is, is logged by error class and never stops the next;
@@ -29,7 +37,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.integrations.stripe_transfers import StripeTransfers
-from app.modules.payments.transfers import ReleaseOutcome, TransferConfig, TransferService
+from app.modules.payments.transfers import (
+    ReleaseOutcome,
+    ReversalCheckOutcome,
+    TransferConfig,
+    TransferService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +75,49 @@ async def release_confirmed_jobs(ctx: dict[str, Any]) -> None:
             counts[outcome] = counts.get(outcome, 0) + 1
     finally:
         logger.info("transfers_released", extra={"outcomes": counts})
+
+
+async def check_transfer_reversals(ctx: dict[str, Any]) -> None:
+    """ARQ cron: the recovery read of the transfers whose reversal check is still to succeed
+    (see the module doc)."""
+    sessions: SessionFactory = ctx["session_factory"]
+    settings: Settings = ctx["settings"]
+    counts: dict[str, int] = {}
+    try:
+        try:
+            async with sessions() as session:
+                unchecked = await _service(ctx, session).unchecked_for_reversal(
+                    settings.transfer_release_batch_size
+                )
+        # A batch that cannot be read ends the run; the next run reads it again. By class
+        # only: a database error's text can hold SQL literals.
+        except Exception as error:  # noqa: BLE001
+            logger.error(
+                "transfer_reversal_check_unavailable", extra={"error": type(error).__name__}
+            )
+            return
+        for transfer_id in unchecked:
+            outcome = await _check_one(ctx, transfer_id)
+            counts[outcome] = counts.get(outcome, 0) + 1
+    finally:
+        logger.info("transfer_reversals_checked", extra={"outcomes": counts})
+
+
+async def _check_one(ctx: dict[str, Any], transfer_id: uuid.UUID) -> str:
+    """One transfer in a session of its own. Never raises: returns the check's outcome, or
+    ERRORED for anything it raised."""
+    sessions: SessionFactory = ctx["session_factory"]
+    try:
+        async with sessions() as session:
+            outcome: ReversalCheckOutcome = await _service(ctx, session).check_reversal(transfer_id)
+    # One row's failure never stops the others; its stamp sends it to the back of the line.
+    except Exception as error:  # noqa: BLE001
+        logger.error(
+            "transfer_reversal_check_errored",
+            extra={"transfer_id": str(transfer_id), "error": type(error).__name__},
+        )
+        return ERRORED
+    return outcome.value
 
 
 # What _release_one reports for a release that raised: not one of release's own outcomes.

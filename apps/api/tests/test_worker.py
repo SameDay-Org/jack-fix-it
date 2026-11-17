@@ -22,7 +22,7 @@ from app.modules.dispatch.tasks import dispatch_request
 from app.modules.jobs.tasks import auto_confirm_jobs
 from app.modules.notifications.push_tasks import check_push_receipts
 from app.modules.payments.tasks import cancel_unpaid_payments
-from app.modules.payments.transfer_tasks import release_confirmed_jobs
+from app.modules.payments.transfer_tasks import check_transfer_reversals, release_confirmed_jobs
 from app.modules.quotes.tasks import expire_quotes
 from app.modules.requests.tasks import SANITIZE_SPARE_TRIES
 from app.modules.uploads.tasks import sweep_orphan_uploads
@@ -140,6 +140,13 @@ def test_cron_jobs_keep_names_cadences_and_timeouts() -> None:
         ),
         "cron:release_confirmed_jobs": (
             release_confirmed_jobs,
+            every(get_settings().transfer_release_sweep_minutes),
+            get_settings().transfer_release_sweep_timeout_seconds,
+            1,
+        ),
+        # The reversal check's recovery (#416 r2): the release sweep's cadence and timeout.
+        "cron:check_transfer_reversals": (
+            check_transfer_reversals,
             every(get_settings().transfer_release_sweep_minutes),
             get_settings().transfer_release_sweep_timeout_seconds,
             1,

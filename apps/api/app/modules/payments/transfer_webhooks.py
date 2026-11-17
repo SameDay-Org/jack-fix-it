@@ -7,7 +7,8 @@ created -> reversed, once, and an error is logged with ids for staff: the job st
 reversal. An event for a transfer no row holds changes nothing: not ours, or its create answer
 is not stored yet. In that case the release that stores it reads the transfer from Stripe
 again right after its commit and records the reversal through record_reversal, the same path
-(transfers.py, step 4), so the reversal holds whichever comes first. Only the exact Stripe
+(transfers.py, step 4); if that read fails or never ends, the recovery cron reads it later
+(check_transfer_reversals). So the reversal holds whichever comes first. Only the exact Stripe
 transfer id selects a row: the event's metadata never does.
 
 Stripe has no transfer.failed event in this API version (a transfer is made or refused when it

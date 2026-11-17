@@ -13,7 +13,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -35,7 +35,11 @@ from app.modules.payments import transfers
 from app.modules.payments.models import Payment, PaymentStatus, Transfer, TransferStatus
 from app.modules.payments.service import transfer_group
 from app.modules.payments.transfer_queue import enqueue_transfer_release
-from app.modules.payments.transfer_tasks import release_confirmed_jobs, release_transfer
+from app.modules.payments.transfer_tasks import (
+    check_transfer_reversals,
+    release_confirmed_jobs,
+    release_transfer,
+)
 from app.modules.payments.transfer_webhooks import (
     TransferEventMalformedError,
     transfer_reversed,
@@ -45,6 +49,7 @@ from app.modules.payments.transfers import (
     PRO_NOT_APPROVED,
     TRANSFER_NEEDS_REVIEW,
     ReleaseOutcome,
+    ReversalCheckOutcome,
     TransferConfig,
     TransferService,
 )
@@ -1741,15 +1746,25 @@ async def test_unapproved_pro_cannot_receive_transfer(
     assert (stripe.creates, stripe.charges, stripe.lists) == ([], [], [])
 
 
-async def test_a_failed_reversal_check_leaves_the_transfer_created_and_tells_staff(
+async def recover(
+    session: AsyncSession, stripe: FakeStripeTransfers, clock: Clock
+) -> dict[uuid.UUID, ReversalCheckOutcome]:
+    """One recovery pass as the cron makes it: the unchecked rows, each read once."""
+    unchecked = await service(session, stripe, clock).unchecked_for_reversal(10_000)
+    return {row: await service(session, stripe, clock).check_reversal(row) for row in unchecked}
+
+
+async def test_a_failed_reversal_check_is_kept_and_the_recovery_records_the_reversal(
     db_session: AsyncSession,
     world: JobWorld,
     stripe: FakeStripeTransfers,
     clock: Clock,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Step 4 reads the stored transfer again; when Stripe cannot answer, the transfer stays
-    created and staff get an error with ids only."""
+    """Step 4 cannot read the stored transfer: it stays created and its check stays due (#416
+    r2). Once TRANSFER_STUCK_PENDING_MINUTES have passed, the recovery reads it by its stored id,
+    records the reversal Stripe holds, never creates, and leaves the job paid_out. A checked
+    row is never read again."""
     caplog.set_level(logging.INFO)
     job = await confirmed_job(db_session, world)
     stripe.errors["retrieve"] = [StripeUnavailableError(request_id="req_x")]
@@ -1758,11 +1773,44 @@ async def test_a_failed_reversal_check_leaves_the_transfer_created_and_tells_sta
 
     row = await transfer_of(db_session, job.id)
     assert row is not None
-    assert row.status is TransferStatus.CREATED
+    assert row.stripe_transfer_id is not None
+    # Read before any rollback expires the row.
+    row_id, stripe_id = row.id, row.stripe_transfer_id
+    assert (row.status, row.reversal_check_tried_at, row.reversal_checked_at) == (
+        TransferStatus.CREATED,
+        NOW,
+        None,
+    )
     assert (await job_row(db_session, job.id)).status is JobStatus.PAID_OUT
     [failed] = [r for r in caplog.records if r.getMessage() == "transfer_reversal_check_failed"]
-    assert failed.levelno == logging.ERROR
+    assert failed.levelno == logging.WARNING
     assert_no_leak(caplog)
+    # Tried just now: the recovery waits.
+    assert await recover(db_session, stripe, clock) == {}
+
+    # Stripe reversed it meanwhile (its event was gone before the id was stored).
+    stripe.transfers[stripe_id] = replace(stripe.transfers[stripe_id], reversed=True)
+    clock.now += CONFIG.stuck_after
+
+    assert await recover(db_session, stripe, clock) == {row_id: ReversalCheckOutcome.REVERSED}
+
+    await db_session.refresh(row)
+    assert (row.status, row.reversal_check_tried_at, row.reversal_checked_at) == (
+        TransferStatus.REVERSED,
+        clock.now,
+        clock.now,
+    )
+    # One read that answered (the failed one raised before it was recorded).
+    assert stripe.retrieves == [stripe_id]
+    assert (len(stripe.creates), stripe.lists) == (1, [])
+    assert (await job_row(db_session, job.id)).status is JobStatus.PAID_OUT
+
+    clock.now += CONFIG.stuck_after
+    assert await recover(db_session, stripe, clock) == {}
+    assert await service(db_session, stripe, clock).check_reversal(row_id) is (
+        ReversalCheckOutcome.SKIPPED
+    )
+    assert len(stripe.retrieves) == 1
 
 
 async def test_the_release_reads_the_stored_transfer_again(
@@ -1775,4 +1823,165 @@ async def test_the_release_reads_the_stored_transfer_again(
     row = await transfer_of(db_session, job.id)
     assert row is not None
     assert stripe.retrieves == [row.stripe_transfer_id]
-    assert row.status is TransferStatus.CREATED
+    assert (row.status, row.reversal_check_tried_at, row.reversal_checked_at) == (
+        TransferStatus.CREATED,
+        NOW,
+        NOW,
+    )
+    clock.now += CONFIG.stuck_after
+    assert await recover(db_session, stripe, clock) == {}
+
+
+async def test_the_recovery_reads_never_tried_rows_first_and_a_failing_one_goes_back(
+    db_session: AsyncSession, world: JobWorld, stripe: FakeStripeTransfers, clock: Clock
+) -> None:
+    """Rows made before the check existed (never tried) come first, then the least recently
+    tried; a read that fails is stamped as tried, so it never holds the batch."""
+    jobs = [await confirmed_job(db_session, world) for _ in range(3)]
+    for job in jobs:
+        assert await service(db_session, stripe, clock).release(job.id) is ReleaseOutcome.CREATED
+    never, older, recent = [await transfer_of(db_session, job.id) for job in jobs]
+    assert never is not None
+    assert older is not None
+    assert recent is not None
+    never_id, older_id, recent_id = never.id, older.id, recent.id
+    for row_id, tried in (
+        (never_id, None),
+        (older_id, NOW - 2 * CONFIG.stuck_after),
+        (recent_id, NOW - CONFIG.stuck_after),
+    ):
+        await db_session.execute(
+            update(Transfer)
+            .where(Transfer.id == row_id)
+            .values(reversal_check_tried_at=tried, reversal_checked_at=None)
+        )
+    await db_session.commit()
+
+    unchecked = service(db_session, stripe, clock).unchecked_for_reversal
+    assert await unchecked(10_000) == [never_id, older_id, recent_id]
+    assert await unchecked(2) == [never_id, older_id]
+
+    stripe.errors["retrieve"] = [StripeUnavailableError(request_id="req_x")]
+    check = service(db_session, stripe, clock).check_reversal
+    assert await check(never_id) is ReversalCheckOutcome.FAILED
+    assert await unchecked(10_000) == [older_id, recent_id]
+
+    clock.now += CONFIG.stuck_after
+    assert await unchecked(10_000) == [older_id, recent_id, never_id]
+    assert len(stripe.creates) == 3
+
+
+async def test_the_recovery_without_a_stripe_key_reads_nothing(
+    db_session: AsyncSession, world: JobWorld, stripe: FakeStripeTransfers, clock: Clock
+) -> None:
+    job = await confirmed_job(db_session, world)
+    stripe.errors["retrieve"] = [StripeUnavailableError(request_id="req_x")]
+    assert await service(db_session, stripe, clock).release(job.id) is ReleaseOutcome.CREATED
+    row = await transfer_of(db_session, job.id)
+    assert row is not None
+    clock.now += CONFIG.stuck_after
+
+    outcome = await service(db_session, None, clock).check_reversal(row.id)
+
+    assert outcome is ReversalCheckOutcome.NOT_CONFIGURED
+    await db_session.refresh(row)
+    assert (row.reversal_check_tried_at, row.reversal_checked_at) == (NOW, None)
+
+
+async def test_the_recovery_cron_reads_old_rows_and_one_failure_never_stops_it(
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe: FakeStripeTransfers,
+    clock: Clock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Rows from before the check (both stamps NULL) are read by the first run, on the
+    worker's own clock; a read that raises is logged by class, the other row is still read,
+    and one summary counts the outcomes. The next run leaves the failed row for later."""
+    caplog.set_level(logging.INFO)
+    jobs = [await confirmed_job(db_session, world) for _ in range(2)]
+    for job in jobs:
+        assert await service(db_session, stripe, clock).release(job.id) is ReleaseOutcome.CREATED
+    row_ids = []
+    for job in jobs:
+        row = await transfer_of(db_session, job.id)
+        assert row is not None
+        assert row.stripe_transfer_id is not None
+        row_ids.append(row.id)
+        stripe.transfers[row.stripe_transfer_id] = replace(
+            stripe.transfers[row.stripe_transfer_id], reversed=True
+        )
+        await db_session.execute(
+            update(Transfer)
+            .where(Transfer.id == row.id)
+            .values(reversal_check_tried_at=None, reversal_checked_at=None)
+        )
+    await db_session.commit()
+    stripe.errors["retrieve"] = [RuntimeError("probe-secret-text-68")]
+    ctx = worker_ctx(db_session, stripe, transfer_release_batch_size=10_000)
+
+    await check_transfer_reversals(ctx)
+
+    statuses = {
+        await db_session.scalar(select(Transfer.status).where(Transfer.id == row_id))
+        for row_id in row_ids
+    }
+    assert statuses == {TransferStatus.CREATED, TransferStatus.REVERSED}
+    [summary] = [r for r in caplog.records if r.getMessage() == "transfer_reversals_checked"]
+    assert summary.__dict__["outcomes"] == {"errored": 1, "reversed": 1}
+    assert len(stripe.creates) == 2
+    assert_no_leak(caplog)
+
+    caplog.clear()
+    await check_transfer_reversals(ctx)
+    [summary] = [r for r in caplog.records if r.getMessage() == "transfer_reversals_checked"]
+    assert summary.__dict__["outcomes"] == {}
+
+
+@UNAPPROVED
+async def test_the_sweep_holds_then_pays_an_unapproved_pro_on_committed_rows(
+    committed_world: CommittedWorld,
+    stripe: FakeStripeTransfers,
+    clock: Clock,
+    verification: ProVerificationStatus,
+) -> None:
+    """The Vault's round 2 probe, through the cron on real commits: the job of a pro staff do
+    not approve is held (no Stripe call of any kind, no attempt), then paid once, its frozen
+    amount, after staff approve the pro again."""
+    world = committed_world
+    pro = update(ProProfile).where(ProProfile.id == world.pro_id)
+    async with world.sessions() as session:
+        await session.execute(pro.values(verification_status=verification))
+        await session.commit()
+    async with world.sessions() as session:
+        assert world.job_id not in await service(session, stripe, clock).due(10_000)
+        assert await service(session, stripe, clock).release(world.job_id) is ReleaseOutcome.HELD
+    ctx: dict[str, Any] = {
+        "session_factory": world.sessions,
+        "stripe_transfers": stripe,
+        "settings": make_settings(transfer_release_batch_size=10_000),
+    }
+
+    await release_confirmed_jobs(ctx)
+
+    async with world.sessions() as session:
+        row = await transfer_of(session, world.job_id)
+        assert row is not None
+        assert (row.status, row.last_error_code, row.attempts, row.requested_at) == (
+            TransferStatus.PENDING,
+            PRO_NOT_APPROVED,
+            0,
+            None,
+        )
+        await session.execute(pro.values(verification_status=ProVerificationStatus.APPROVED))
+        await session.commit()
+    assert (stripe.creates, stripe.charges, stripe.lists, stripe.retrieves) == ([], [], [], [])
+
+    await release_confirmed_jobs(ctx)
+
+    async with world.sessions() as session:
+        row = await transfer_of(session, world.job_id)
+    assert row is not None
+    assert (row.status, row.attempts) == (TransferStatus.CREATED, 1)
+    ours = [c for c in stripe.creates if c["metadata"]["job_id"] == str(world.job_id)]
+    assert [c["amount_cents"] for c in ours] == [PAYOUT]

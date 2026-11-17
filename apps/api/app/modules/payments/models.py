@@ -166,3 +166,9 @@ class Transfer(IdTimestampsMixin, Base):
     last_error_code: Mapped[str | None] = mapped_column(String(TRANSFER_ERROR_CODE_LENGTH))
     # When the latest attempt started; NULL before the first.
     requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Once Stripe made the transfer, it is read again by its stored id, for a reversal whose
+    # event came before the id was stored (transfers.py, step 4). When the latest such read
+    # started (the release's own, or the recovery cron's), and when one last succeeded: NULL
+    # until then, so the need for it outlives a failed or cancelled read (#416 r2).
+    reversal_check_tried_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reversal_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

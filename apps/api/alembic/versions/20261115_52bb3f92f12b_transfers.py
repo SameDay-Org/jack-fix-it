@@ -40,6 +40,10 @@ def upgrade() -> None:
         sa.Column("attempts", sa.Integer(), server_default="0", nullable=False),
         sa.Column("last_error_code", sa.String(length=64), nullable=True),
         sa.Column("requested_at", sa.DateTime(timezone=True), nullable=True),
+        # The read of a stored transfer from Stripe, for a reversal: when one last started, and
+        # when one last succeeded (NULL: still needed; the recovery cron reads it, #416 r2).
+        sa.Column("reversal_check_tried_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("reversal_checked_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
