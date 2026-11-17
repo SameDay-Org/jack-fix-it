@@ -179,7 +179,8 @@
     "nav": {
       "label": "Panel",
       "home": "Home",
-      "support": "Support"
+      "support": "Support",
+      "pros": "Pros"
     },
     "roles": {
       "agent": "Agent",
@@ -258,6 +259,119 @@
           "forbidden": "Your account can't change tickets.",
           "unavailable": "We couldn't save the status. Try again in a moment."
         }
+      }
+    },
+    "pros": {
+      "title": "Pros",
+      "subtitle": "Review each pro's documents, then approve or reject the pro. Only approved pros receive requests.",
+      "filter": {
+        "label": "Pros by status"
+      },
+      "status": {
+        "pending": "Pending",
+        "approved": "Approved",
+        "rejected": "Rejected"
+      },
+      "documentStatus": {
+        "pending": "Pending",
+        "approved": "Approved",
+        "rejected": "Rejected",
+        "superseded": "Replaced"
+      },
+      "documentType": {
+        "id": "Photo ID",
+        "license": "License",
+        "insurance": "Insurance"
+      },
+      "documentCount": {
+        "pending": "Pending: {{count}}",
+        "approved": "Approved: {{count}}",
+        "rejected": "Rejected: {{count}}"
+      },
+      "columns": {
+        "pro": "Pro",
+        "categories": "Categories",
+        "zips": "ZIPs",
+        "documents": "Documents",
+        "submitted": "Waiting since"
+      },
+      "noName": "No name on file",
+      "noPayouts": "Payouts not set up",
+      "noCategories": "No categories yet",
+      "noDocuments": "No documents yet",
+      "nothingPending": "Nothing to review",
+      "empty": {
+        "pending": "No pros are waiting for a decision.",
+        "approved": "No approved pros yet.",
+        "rejected": "No rejected pros."
+      },
+      "older": "Older pros",
+      "noOlder": "No older pros.",
+      "newest": "Back to the newest",
+      "loadError": "We couldn't load the pros. Try again in a moment.",
+      "retry": "Try again",
+      "detail": {
+        "back": "All pros",
+        "notFound": "This pro doesn't exist.",
+        "loadError": "We couldn't load this pro. Try again in a moment.",
+        "payouts": "Payouts",
+        "payoutsEnabled": "Set up",
+        "payoutsMissing": "Not set up yet",
+        "experience": "Years of experience",
+        "notGiven": "Not given",
+        "categories": "Categories",
+        "areas": "Service areas",
+        "noAreas": "No service areas yet",
+        "joined": "Profile created",
+        "decided": "Last decision",
+        "reason": "Reason",
+        "bio": "About",
+        "viewPhoto": "Open the profile photo",
+        "documents": "Documents",
+        "filesNote": "Files open in a new tab, through the panel: each opening is recorded.",
+        "required": "Required",
+        "notSubmitted": "Not submitted yet",
+        "submitted": "Submitted",
+        "expires": "Expires",
+        "noExpiry": "No expiry date",
+        "expired": "Expired",
+        "reviewed": "Reviewed",
+        "viewFile": "Open the file ({{type}})",
+        "reviewLabel": "Review: {{type}}",
+        "approveDocument": "Approve",
+        "rejectDocument": "Reject",
+        "history": "Earlier documents",
+        "blockers": {
+          "title": "Before this pro can be approved",
+          "document_missing": "{{type}}: no approved document",
+          "document_expired": "{{type}}: the approved document has expired",
+          "no_category": "The pro has no category",
+          "no_service_area": "The pro has no service area"
+        },
+        "decision": {
+          "title": "Decision",
+          "hint": "An approved pro receives requests once their payouts are set up. The pro can read the reason of a rejection.",
+          "approve": "Approve pro",
+          "reject": "Reject pro",
+          "approveQuestion": "Approve this pro?",
+          "confirmApprove": "Yes, approve",
+          "confirmReject": "Reject with this reason",
+          "cancel": "Cancel",
+          "reasonLabel": "Reason",
+          "reasonHint": "The pro can read this. Up to {{max}} characters.",
+          "saving": "Saving…",
+          "saved": "Saved."
+        },
+        "errors": {
+          "reason_required": "Write a reason of up to {{max}} characters.",
+          "not_found": "This no longer exists. Reload the page.",
+          "already_reviewed": "This document was already reviewed or replaced. Reload the page.",
+          "not_approvable": "This pro can't be approved yet. See what is still needed.",
+          "forbidden": "Your account can't review pros.",
+          "unavailable": "We couldn't save the decision. Try again in a moment."
+        },
+        "legalNameHint": "Name on the account. Compare it with the ID document.",
+        "legalNameMissing": "The account has no full name to compare with the ID document."
       }
     }
   }

@@ -39,7 +39,11 @@ apply.
   not redirect to `/admin/session/refresh` or `/admin/session/end`: Next follows an action's
   redirect on the server and drops its Set-Cookie, so the refresh token would rotate while the
   browser kept the old cookies. `staffActionAuth()` renews or ends the session in place.
-  Support tickets (#274) live in `src/app/admin/(panel)/support/`.
+  Support tickets (#274) live in `src/app/admin/(panel)/support/`, pro approval (#41) in
+  `src/app/admin/(panel)/pros/`. A pro's documents (IDs) and photo open in a new tab through
+  the panel's `pros/[proId]/files/[fileId]` route: it reads the pro through the audited API
+  detail and passes the file on, never cached, so the storage's signed address never reaches
+  the browser (its history, the page's HTML) and never goes into a log or an error.
 - UI kit: shadcn/ui components in `src/components/ui/`, written on the deck tokens (no extra
   color variables: `src/theme/tokens.test.ts` allows only the mobile tokens) with `cn()` from
   `src/lib/utils.ts`. Icons from `lucide-react`. TanStack Table comes with #81.

@@ -1,4 +1,4 @@
-import { House, LifeBuoy, LogOut } from "lucide-react";
+import { BadgeCheck, House, LifeBuoy, LogOut } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,7 @@ import { requireStaff } from "@/lib/session";
 
 import { logout } from "../logout/actions";
 import { NavLink } from "./nav-link";
+import { PROS_PATH } from "./pros/pros";
 import { SUPPORT_PATH } from "./support/tickets";
 
 /**
@@ -27,10 +28,18 @@ export default async function PanelLayout({ children }: { children: ReactNode })
         <p className="text-lg font-bold whitespace-nowrap md:whitespace-normal">
           {t("brand.name")} <span className="text-green-500">{t("admin.title")}</span>
         </p>
-        <nav aria-label={t("admin.nav.label")} className="flex gap-2 md:flex-col">
+        {/* Wraps on a phone: the links in Spanish are wider than a 320 px screen. */}
+        <nav
+          aria-label={t("admin.nav.label")}
+          className="flex flex-wrap gap-2 md:flex-col md:flex-nowrap"
+        >
           <NavLink href="/admin" exact>
             <House aria-hidden className="size-4" />
             {t("admin.nav.home")}
+          </NavLink>
+          <NavLink href={PROS_PATH}>
+            <BadgeCheck aria-hidden className="size-4" />
+            {t("admin.nav.pros")}
           </NavLink>
           <NavLink href={SUPPORT_PATH}>
             <LifeBuoy aria-hidden className="size-4" />
