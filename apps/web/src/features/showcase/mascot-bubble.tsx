@@ -1,11 +1,23 @@
-import { Mascot, type MascotPose } from "@/features/mascot/mascot";
+import type { MascotPose } from "@jack/mascot";
+import { Mascot } from "@jack/mascot/react";
+
 import { cn } from "@/lib/utils";
 
 /**
  * Jack in a round white bubble, standing on its lower edge: decoration beside a section, so
- * it is hidden from assistive tech. `className` gives the bubble its size and its place.
+ * it is hidden from assistive tech. `className` gives the bubble its size and its place. Still
+ * unless `animate` (the idle loops, which the mascot runs only when motion is allowed and it is
+ * on screen): the page animates at most two mascots.
  */
-export function MascotBubble({ pose, className }: { pose: MascotPose; className?: string }) {
+export function MascotBubble({
+  pose,
+  className,
+  animate = false,
+}: {
+  pose: MascotPose;
+  className?: string;
+  animate?: boolean;
+}) {
   return (
     <span
       aria-hidden
@@ -14,7 +26,7 @@ export function MascotBubble({ pose, className }: { pose: MascotPose; className?
         className,
       )}
     >
-      <Mascot pose={pose} className="h-[86%] w-[86%]" />
+      <Mascot pose={pose} className="h-[86%] w-[86%]" animate={animate} />
     </span>
   );
 }

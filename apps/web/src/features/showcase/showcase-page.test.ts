@@ -217,6 +217,13 @@ describe("showcase page", () => {
 
     expect(mascots.length).toBeGreaterThanOrEqual(CUSTOMER_FEATURES.length + 4);
     for (const mascot of mascots) expect(mascot).toContain('aria-hidden="true"');
+    // Two of them move (#404): the hero's wave and the thinking one beside the questions.
+    const moving = mascots.filter((mascot) => mascot.includes("data-motion="));
+    expect(moving.map((mascot) => /data-pose="([^"]*)"/.exec(mascot)?.[1])).toEqual([
+      "wave",
+      "thinking",
+    ]);
+    for (const mascot of moving) expect(mascot).toContain('data-motion="still"');
     // Every landmark that repeats has its own name.
     for (const label of ["Page sections", "Language", "Legal"]) {
       expect(html).toContain(`<nav aria-label="${label}"`);

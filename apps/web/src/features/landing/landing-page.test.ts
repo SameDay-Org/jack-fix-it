@@ -92,6 +92,18 @@ describe("the landing page", () => {
     for (const anchor of anchors) expect(html).toContain(`id="${anchor}"`);
   });
 
+  it("draws Jack from the mascot package and moves only the hero's wave", async () => {
+    const html = await page("en");
+    const mascots = html.match(/<svg[^>]*data-pose="[^"]*"[^>]*>/g) ?? [];
+    // The hero and the four steps of "How it works", all decoration.
+    expect(mascots).toHaveLength(5);
+    for (const mascot of mascots) expect(mascot).toContain('aria-hidden="true"');
+    expect(html.match(/<g data-part="mascot"/g)).toHaveLength(5);
+    const moving = mascots.filter((mascot) => mascot.includes("data-motion="));
+    expect(moving).toHaveLength(1);
+    expect(moving[0]).toMatch(/data-pose="wave"[^>]*data-motion="still"/);
+  });
+
   it.each(["en", "es"] as const)("in %s links only to pages that exist", async (locale) => {
     const html = await page(locale);
     const known = routes();
