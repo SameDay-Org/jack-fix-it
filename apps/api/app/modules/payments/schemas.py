@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.modules.payments.models import TransferStatus
+from app.modules.payments.models import PaymentStatus, RefundStatus, TransferStatus
 
 
 class PaymentCreate(BaseModel):
@@ -76,3 +76,41 @@ class JobTransferOut(BaseModel):
     transfer: TransferOut | None = Field(
         description="The job's transfer; null before the first attempt to release it."
     )
+
+
+class RefundOut(BaseModel):
+    """A refund to the customer as staff see it (#76): the row, without the idempotency key."""
+
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+    id: uuid.UUID
+    amount_cents: int = Field(description="What is refunded, in integer cents.")
+    currency: str = Field(examples=["usd"])
+    status: RefundStatus = Field(
+        description="pending: not made yet, an attempt may be under way. created: Stripe made "
+        "the refund. failed: the last attempt failed. A retry sends the same idempotency key, "
+        "and Stripe answers a refusal it already gave under that key (for 24 h) with the same "
+        "refusal: a retry helps when the call never reached Stripe, or once the key expired."
+    )
+    stripe_refund_id: str | None = Field(description="Stripe's id of the refund, once made.")
+    attempts: int
+    last_error_code: str | None = Field(
+        description="Why the last attempt did not make the refund: a Stripe error code, an "
+        "error class or `refund_needs_review`. Never a message."
+    )
+    requested_at: datetime | None = Field(description="When the latest attempt started.")
+
+
+class PaymentSummaryOut(BaseModel):
+    """A job's payment as staff see it (#76): its amounts, frozen when it was made."""
+
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+    id: uuid.UUID
+    amount_cents: int
+    tax_cents: int
+    customer_total_cents: int
+    platform_fee_cents: int
+    pro_payout_cents: int
+    currency: str
+    status: PaymentStatus

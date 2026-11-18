@@ -76,11 +76,11 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 ),
                 "push.dispute_payout_released.title": "The problem report was resolved",
                 "push.dispute_payout_released.body": (
-                    "Your payout for job {public_code} was released."
+                    "Your payout for job {public_code} is on its way."
                 ),
                 "push.dispute_payout_partly_released.title": "The problem report was resolved",
                 "push.dispute_payout_partly_released.body": (
-                    "Part of your payout for job {public_code} was released."
+                    "Part of your payout for job {public_code} is on its way."
                 ),
                 "push.dispute_payout_refunded.title": "The problem report was resolved",
                 "push.dispute_payout_refunded.body": (
@@ -153,13 +153,13 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 ),
                 "push.dispute_payout_released.title": "Se resolvió el reporte del problema",
                 "push.dispute_payout_released.body": (
-                    "Se liberó tu pago del trabajo {public_code}."
+                    "Tu pago del trabajo {public_code} va en camino."
                 ),
                 "push.dispute_payout_partly_released.title": (
                     "Se resolvió el reporte del problema"
                 ),
                 "push.dispute_payout_partly_released.body": (
-                    "Se liberó parte de tu pago del trabajo {public_code}."
+                    "Parte de tu pago del trabajo {public_code} va en camino."
                 ),
                 "push.dispute_payout_refunded.title": "Se resolvió el reporte del problema",
                 "push.dispute_payout_refunded.body": (

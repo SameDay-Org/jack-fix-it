@@ -24,7 +24,10 @@ A refund, in three steps (no transaction or lock is held across a Stripe call):
 3. Under the same locks, one transaction: the refund stored (created), the dispute resolved,
    the job refunded (full refund), the audit row.
 A Stripe error stores the row failed with Stripe's code (never its text) and answers 502/503:
-the dispute stays open and the job disputed; the same decision tries again.
+the dispute stays open and the job disputed; the same decision tries again. Stripe keeps the
+answer of a request it ran under the key for 24 h, refusals included, so a retry before then gets
+the same refusal: it helps when the call never reached Stripe (network, timeout, 409, 429).
+The refund rows live in payments (RefundLedger, ADR 0003).
 
 Once: a resolved dispute answers the same decision (and split) with where it stands, queueing
 its transfer again (the sweep would too) and pushing nothing; another decision is 409
@@ -72,7 +75,6 @@ from app.modules.disputes.repository import DisputeRepository
 from app.modules.disputes.staff_schemas import (
     DisputeResolutionOut,
     DisputeResolveIn,
-    RefundOut,
     ResolutionDecision,
 )
 from app.modules.jobs.service import JobDisputeFacts, JobDisputes, JobStatus
@@ -85,15 +87,15 @@ from app.modules.notifications.events import (
     push_dispute_refunded,
 )
 from app.modules.payments.errors import PaymentsNotConfiguredError
-from app.modules.payments.models import REFUND_ERROR_CODE_LENGTH, Refund, RefundStatus
 from app.modules.payments.refunds import (
     REFUND_NEEDS_REVIEW,
+    PaymentFacts,
     RefundAttempt,
+    RefundBlocked,
+    RefundLedger,
     RefundNeedsReviewError,
-    dispute_refund_key,
     make_refund,
 )
-from app.modules.payments.repository import PaymentRepository, RefundRepository, TransferRepository
 from app.modules.payments.transfer_queue import enqueue_transfer_release
 from app.modules.payouts.errors import PaymentsProviderError, PaymentsUnavailableError
 from app.modules.pros.service import ProService
@@ -176,18 +178,19 @@ class _Plan:
 
 @dataclass(frozen=True)
 class _Locked:
-    """The dispute and its job under their locks, the job's payment and the decision's plan."""
+    """The dispute and its job under their locks, the job's payment and the decision's plan.
+    `dispute` is an ORM row: read it before the transaction ends (a rollback expires it); the
+    rest are plain values."""
 
     dispute: Dispute
+    dispute_id: uuid.UUID
     job: JobDisputeFacts
-    payment_id: uuid.UUID
-    payment_intent_id: str
-    currency: str
+    payment: PaymentFacts
     plan: _Plan
 
     @property
     def ids(self) -> dict[str, str]:
-        return {"dispute_id": str(self.dispute.id), "job_id": str(self.job.job_id)}
+        return {"dispute_id": str(self.dispute_id), "job_id": str(self.job.job_id)}
 
 
 def _plan(data: DisputeResolveIn, pro_payout_cents: int, customer_total_cents: int) -> _Plan:
@@ -226,9 +229,7 @@ class DisputeResolver:
         self._config = config
         self._clock = clock
         self._disputes = DisputeRepository(session)
-        self._refunds = RefundRepository(session)
-        self._payments = PaymentRepository(session)
-        self._transfers = TransferRepository(session)
+        self._ledger = RefundLedger(session)
         self._jobs = JobDisputes(session, ProService(session))
         self._requests = CustomerRequestReader(session)
         self._audit = AuditService(session)
@@ -247,7 +248,8 @@ class DisputeResolver:
 
     async def _lock(self, dispute_id: uuid.UUID, data: DisputeResolveIn) -> _Locked:
         """The job's row lock, then the dispute's, each read as last committed; the job's
-        payment, checked against the job; the decision's plan. Raises after a rollback."""
+        payment, checked against the job; the decision's plan. Once anything is locked, raises
+        only after a rollback."""
         found = await self._disputes.get(dispute_id)
         if found is None:
             raise NotFoundError
@@ -257,10 +259,10 @@ class DisputeResolver:
             await self._session.rollback()
             raise NotFoundError
         ids = {"dispute_id": str(dispute.id), "job_id": str(job.job_id)}
-        payment = await self._payments.succeeded_of_quote(job.quote_id)
+        payment = await self._ledger.payment_of_quote(job.quote_id)
         if (
             payment is None
-            or payment.stripe_payment_intent_id is None
+            or payment.payment_intent_id is None
             or job.pro_payout_cents <= 0
             or payment.pro_payout_cents != job.pro_payout_cents
             or payment.customer_total_cents < job.pro_payout_cents
@@ -274,20 +276,12 @@ class DisputeResolver:
         except InvalidSplitError:
             await self._session.rollback()
             raise
-        return _Locked(
-            dispute=dispute,
-            job=job,
-            payment_id=payment.id,
-            payment_intent_id=payment.stripe_payment_intent_id,
-            currency=payment.currency,
-            plan=plan,
-        )
+        return _Locked(dispute=dispute, dispute_id=dispute.id, job=job, payment=payment, plan=plan)
 
     async def _replay(self, locked: _Locked, queue: JobQueue) -> DisputeResolutionOut:
         """A resolve of a resolved dispute: the same decision completes what may be missing
         (the transfer); another one is refused."""
         same = _same(locked.dispute, locked.plan)
-        dispute_id = locked.dispute.id
         await self._session.rollback()
         if not same:
             raise DisputeAlreadyResolvedError
@@ -295,13 +289,13 @@ class DisputeResolver:
             await enqueue_transfer_release(
                 queue, locked.job.job_id, self._config.enqueue_timeout_seconds
             )
-        return await self._outcome(dispute_id)
+        return await self._outcome(locked.dispute_id)
 
     async def _release(
         self, admin: UserAccount, locked: _Locked, note: str, queue: JobQueue
     ) -> DisputeResolutionOut:
         """A full release: resolved now, the transfer queued after the commit."""
-        if await self._refunds.by_key_for_update(dispute_refund_key(locked.dispute.id)):
+        if await self._ledger.attempted(locked.dispute_id):
             # A refund was tried for this dispute and may be in Stripe: not paid twice.
             await self._session.rollback()
             raise RefundAlreadyAttemptedError
@@ -325,9 +319,7 @@ class DisputeResolver:
             raise DisputeNeedsReviewError from None
         except StripeCallError as error:
             # Its code, or its class: never its text (stripe_errors.py carries none).
-            await self._end_failed(
-                attempt, (error.code or type(error).__name__)[:REFUND_ERROR_CODE_LENGTH]
-            )
+            await self._end_failed(attempt, error.code or type(error).__name__)
             unavailable = isinstance(error, StripeUnavailableError)
             logger.error(
                 "dispute_refund_stripe_unavailable"
@@ -344,59 +336,33 @@ class DisputeResolver:
 
     async def _start_refund(self, locked: _Locked) -> RefundAttempt:
         """Step 1: the refund row and its attempt, committed before Stripe is called."""
-        if await self._transfers.get_of_job(locked.job.job_id) is not None:
+        if await self._ledger.job_has_transfer(locked.job.job_id):
             # Only a release makes a transfer, and it resolved the dispute: never both.
             await self._session.rollback()
             logger.error("dispute_refund_job_has_transfer", extra=locked.ids)
             raise DisputeNeedsReviewError
-        key = dispute_refund_key(locked.dispute.id)
-        refund = await self._refunds.by_key_for_update(key)
-        if refund is not None and refund.amount_cents != locked.plan.customer_refund_cents:
-            await self._session.rollback()
-            raise RefundAlreadyAttemptedError
-        if refund is not None and self._in_flight(refund):
-            await self._session.rollback()
-            raise ResolutionInProgressError
-        if refund is None:
-            refund = await self._refunds.add(
-                Refund(
-                    job_id=locked.job.job_id,
-                    payment_id=locked.payment_id,
-                    dispute_id=locked.dispute.id,
-                    # Computed from the frozen amounts (_plan), never from the request.
-                    amount_cents=locked.plan.customer_refund_cents,
-                    currency=locked.currency,
-                    idempotency_key=key,
-                )
-            )
-        number = await self._refunds.start_attempt(refund.id, self._clock())
-        if number is None:  # pragma: no cover - created is stored with the resolution, at once
-            await self._session.rollback()
-            raise DisputeNeedsReviewError
-        attempt = RefundAttempt(
-            refund_id=refund.id,
-            dispute_id=locked.dispute.id,
+        started = await self._ledger.start_attempt(
+            dispute_id=locked.dispute_id,
             job_id=locked.job.job_id,
-            payment_id=locked.payment_id,
-            payment_intent_id=locked.payment_intent_id,
-            amount_cents=refund.amount_cents,
-            currency=refund.currency,
-            idempotency_key=key,
-            number=number,
+            payment=locked.payment,
+            # Computed from the frozen amounts (_plan), never from the request.
+            amount_cents=locked.plan.customer_refund_cents,
+            now=self._clock(),
+            stuck_after=self._config.stuck_after,
         )
+        if isinstance(started, RefundBlocked):
+            await self._session.rollback()
+            if started is RefundBlocked.ANOTHER_AMOUNT:
+                raise RefundAlreadyAttemptedError
+            if started is RefundBlocked.IN_FLIGHT:
+                raise ResolutionInProgressError
+            # Not reached: a made refund is stored with the resolution, in one transaction.
+            logger.error("dispute_refund_made_dispute_open", extra=locked.ids)
+            raise DisputeNeedsReviewError
         # Before any Stripe call: the row and its attempt outlive whatever happens next, and
         # the locks end here.
         await self._session.commit()
-        return attempt
-
-    def _in_flight(self, refund: Refund) -> bool:
-        """An attempt was stamped, has no outcome yet, and is too recent to be lost."""
-        return (
-            refund.status is RefundStatus.PENDING
-            and refund.last_error_code is None
-            and refund.requested_at is not None
-            and self._clock() - refund.requested_at < self._config.stuck_after
-        )
+        return started
 
     async def _settle(
         self,
@@ -412,8 +378,8 @@ class DisputeResolver:
             # Another attempt of the same refund (one key) settled it first.
             await self._session.rollback()
             return await self._outcome(attempt.dispute_id)
-        if not await self._refunds.mark_created(attempt.refund_id, made.refund_id):
-            # pragma: no cover - created is stored with the resolution, under these locks
+        if not await self._ledger.created(attempt, made.refund_id):
+            # Not reached: created is stored with the resolution, under these locks.
             await self._session.rollback()
             logger.error("dispute_refund_stored_dispute_open", extra=attempt.ids)
             raise DisputeNeedsReviewError
@@ -432,8 +398,7 @@ class DisputeResolver:
     ) -> DisputeResolutionOut:
         """The dispute resolved, the job refunded (a full refund) and the audit row, committed
         together; then the transfer queued (a release, full or partial) and both sides pushed."""
-        dispute, job, plan = locked.dispute, locked.job, locked.plan
-        dispute_id = dispute.id
+        dispute_id, job, plan = locked.dispute_id, locked.job, locked.plan
         if not await self._disputes.resolve(
             dispute_id,
             resolution=plan.resolution,
@@ -499,7 +464,7 @@ class DisputeResolver:
         return await self._outcome(dispute_id)
 
     async def _end_failed(self, attempt: RefundAttempt, code: str) -> None:
-        await self._refunds.mark_failed(attempt.refund_id, attempt.number, code)
+        await self._ledger.failed(attempt, code)
         await self._session.commit()
 
     async def _outcome(self, dispute_id: uuid.UUID) -> DisputeResolutionOut:
@@ -508,7 +473,7 @@ class DisputeResolver:
         if dispute is None:  # pragma: no cover - disputes are never deleted
             raise NotFoundError
         jobs = await self._jobs.read_many([dispute.job_id])
-        refund = await self._refunds.of_dispute(dispute_id)
+        refund = await self._ledger.of_dispute(dispute_id)
         # Built before the rollback, which expires the rows.
         out = DisputeResolutionOut(
             id=dispute.id,
@@ -519,7 +484,7 @@ class DisputeResolver:
             customer_refund_cents=dispute.customer_refund_cents,
             resolved_at=dispute.resolved_at,
             job_status=jobs[dispute.job_id].status,
-            refund=None if refund is None else RefundOut.model_validate(refund),
+            refund=refund,
         )
         await self._session.rollback()
         return out

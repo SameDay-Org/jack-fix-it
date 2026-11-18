@@ -29,17 +29,14 @@ from app.modules.disputes.models import Dispute, DisputeStatus
 from app.modules.disputes.photos import DisputePhotoSigner
 from app.modules.disputes.repository import DisputePhotoRepository, DisputeRepository
 from app.modules.disputes.staff_schemas import (
-    PaymentSummaryOut,
-    RefundOut,
     StaffDisputeList,
     StaffDisputeOut,
     StaffDisputeSummary,
     StaffJobEventOut,
 )
 from app.modules.jobs.service import JobDisputeFacts, JobDisputes, JobStaffReader
-from app.modules.payments.models import Payment
-from app.modules.payments.repository import PaymentRepository, RefundRepository, TransferRepository
-from app.modules.payments.schemas import TransferOut
+from app.modules.payments.refunds import PaymentFacts, RefundLedger
+from app.modules.payments.transfer_reader import TransferReader
 from app.modules.pros.service import ProService
 from app.modules.requests.service import CustomerRequestReader
 from app.modules.users.service import UserService
@@ -63,9 +60,8 @@ class DisputeStaffReader:
         self._jobs = JobDisputes(session, ProService(session))
         self._job_history = JobStaffReader(session)
         self._requests = CustomerRequestReader(session)
-        self._payments = PaymentRepository(session)
-        self._refunds = RefundRepository(session)
-        self._transfers = TransferRepository(session)
+        self._ledger = RefundLedger(session)
+        self._transfers = TransferReader(session)
         self._users = UserService(session)
         self._audit = AuditService(session)
         self._signer = DisputePhotoSigner(storage, photo_url_ttl_seconds)
@@ -79,7 +75,7 @@ class DisputeStaffReader:
         disputes = await self._disputes.listed(status, size)
         jobs = await self._jobs.read_many({dispute.job_id for dispute in disputes})
         codes = await self._requests.public_codes({job.request_id for job in jobs.values()})
-        payments = await self._payments.succeeded_of_quotes({job.quote_id for job in jobs.values()})
+        payments = await self._ledger.payments_of_quotes({job.quote_id for job in jobs.values()})
         names = await self._users.first_names(
             {job.customer_id for job in jobs.values()} | {job.pro_user_id for job in jobs.values()}
         )
@@ -103,12 +99,13 @@ class DisputeStaffReader:
             raise NotFoundError
         job = (await self._jobs.read_many([dispute.job_id]))[dispute.job_id]
         codes = await self._requests.public_codes([job.request_id])
-        payment = await self._payments.succeeded_of_quote(job.quote_id)
+        payment = await self._ledger.payment_of_quote(job.quote_id)
+        summary_of_payment = await self._ledger.payment_summary(job.quote_id)
         names = await self._users.first_names({job.customer_id, job.pro_user_id})
         photos, pending = self._signer.for_other_side(await self._photos.of_dispute(dispute.id))
         history = await self._job_history.of_request(job.request_id)
-        refund = await self._refunds.of_dispute(dispute.id)
-        transfer = await self._transfers.get_of_job(job.job_id)
+        refund = await self._ledger.of_dispute(dispute.id)
+        transfer = await self._transfers.of_job(job.job_id)
         summary = _summary(dispute, job, codes, payment, names)
         # Built before the commit below: nothing is read from a row after it.
         out = StaffDisputeOut(
@@ -130,9 +127,9 @@ class DisputeStaffReader:
                 )
                 for event in (() if history is None else history.events)
             ],
-            payment=None if payment is None else PaymentSummaryOut.model_validate(payment),
-            refund=None if refund is None else RefundOut.model_validate(refund),
-            transfer=None if transfer is None else TransferOut.model_validate(transfer),
+            payment=summary_of_payment,
+            refund=refund,
+            transfer=transfer,
         )
         try:
             await self._audit.record_read(
@@ -158,7 +155,7 @@ def _summary(
     dispute: Dispute,
     job: JobDisputeFacts,
     codes: Mapping[uuid.UUID, str],
-    payment: Payment | None,
+    payment: PaymentFacts | None,
     names: Mapping[uuid.UUID, str | None],
 ) -> StaffDisputeSummary:
     return StaffDisputeSummary(

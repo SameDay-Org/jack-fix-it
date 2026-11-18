@@ -3489,7 +3489,7 @@ export interface components {
         PaymentStatus: "requires_payment" | "processing" | "succeeded" | "failed" | "canceled";
         /**
          * PaymentSummaryOut
-         * @description The job's payment, frozen when it was made.
+         * @description A job's payment as staff see it (#76): its amounts, frozen when it was made.
          */
         PaymentSummaryOut: {
             /**
@@ -4222,7 +4222,7 @@ export interface components {
         };
         /**
          * RefundOut
-         * @description A dispute's refund to the customer (#76): the row, without the idempotency key.
+         * @description A refund to the customer as staff see it (#76): the row, without the idempotency key.
          */
         RefundOut: {
             /**
@@ -4240,7 +4240,7 @@ export interface components {
              * @example usd
              */
             currency: string;
-            /** @description pending: not made yet, an attempt may be under way. created: Stripe made the refund. failed: the last attempt failed; the same decision tries again. */
+            /** @description pending: not made yet, an attempt may be under way. created: Stripe made the refund. failed: the last attempt failed. A retry sends the same idempotency key, and Stripe answers a refusal it already gave under that key (for 24 h) with the same refusal: a retry helps when the call never reached Stripe, or once the key expired. */
             status: components["schemas"]["RefundStatus"];
             /**
              * Stripe Refund Id
@@ -11236,7 +11236,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description dispute_already_resolved: resolved with another decision or split (the same one again answers 200). refund_already_attempted: a refund of another amount was tried and the dispute is still open; only the same decision may be retried. resolution_in_progress: another resolve is calling Stripe; retry in a few minutes. dispute_needs_review: the job's payment cannot be refunded as is, or Stripe holds refunds that cannot be matched; nothing more is sent to Stripe. */
+            /** @description dispute_already_resolved: resolved with another decision or split (the same one again answers 200). refund_already_attempted: a refund of another amount was tried and the dispute is still open; only the same decision may be retried. resolution_in_progress: another resolve is calling Stripe; retry in a few minutes. dispute_needs_review: the job's payment cannot be refunded as is, or Stripe holds refunds that cannot be matched; nothing is created in Stripe. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11254,7 +11254,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description payments_error: Stripe refused the refund; the dispute stays open and the job disputed, the same decision can be sent again. */
+            /** @description payments_error: Stripe refused the refund; the dispute stays open and the job disputed. The same decision can be sent again, but Stripe answers it with the same refusal for 24 h (one idempotency key per refund). */
             502: {
                 headers: {
                     [name: string]: unknown;

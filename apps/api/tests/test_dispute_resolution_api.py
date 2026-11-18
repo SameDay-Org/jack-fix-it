@@ -18,8 +18,10 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from sqlalchemy import URL, delete, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.db import violated_constraint
 from app.errors import AppError
 from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailableError
 from app.integrations.stripe_refunds import FoundRefunds, RefundFacts, get_stripe_refunds
@@ -822,6 +824,44 @@ async def test_without_stripe_a_refund_is_503_and_a_release_still_resolves(
     assert released.status_code == 200, released.text
 
 
+@pytest.mark.parametrize(("decision", "release"), [("refund", None), ("partial", ODD_RELEASE)])
+async def test_a_job_that_already_has_a_transfer_is_never_refunded(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    refunds: FakeStripeRefunds,
+    decision: str,
+    release: int | None,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A transfer row on a job whose dispute is open (staff repaired one by hand): the pro may
+    be paid already, so nothing is refunded and staff look."""
+    case = await disputed(db_session, world)
+    payment = (
+        await db_session.scalars(select(Payment).where(Payment.request_id == case.request_id))
+    ).one()
+    db_session.add(
+        Transfer(
+            job_id=case.job_id,
+            payment_id=payment.id,
+            pro_id=world.pro.profile_id,
+            amount_cents=PAYOUT,
+            currency="usd",
+            idempotency_key=f"transfer:{case.job_id}",
+        )
+    )
+    await db_session.commit()
+
+    response = await resolve(db_client, world, case, decision, release)
+
+    assert response.status_code == 409, response.text
+    assert response.json()["error"]["code"] == "dispute_needs_review"
+    assert (refunds.creates, refunds.lists) == ([], [])
+    assert await refund_rows(db_session, case) == []
+    assert (await dispute_row(db_session, case)).status is DisputeStatus.OPEN
+    assert "dispute_refund_job_has_transfer" in caplog.text
+
+
 @pytest.mark.parametrize("problem", ["no_payment", "payout_mismatch"])
 async def test_a_payment_that_does_not_match_the_job_needs_review(
     db_client: httpx.AsyncClient,
@@ -845,6 +885,48 @@ async def test_a_payment_that_does_not_match_the_job_needs_review(
     assert response.json()["error"]["code"] == "dispute_needs_review"
     assert (await dispute_row(db_session, case)).status is DisputeStatus.OPEN
     assert refunds.creates == []
+
+
+# --- The refunds table ---------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("values", "constraint"),
+    [
+        ({"idempotency_key": "taken"}, "uq_refunds_idempotency_key"),
+        ({"status": RefundStatus.CREATED}, "ck_refunds_created_has_stripe_refund_id"),
+        ({"amount_cents": 0}, "ck_refunds_amount_cents_positive"),
+        ({"attempts": -1}, "ck_refunds_attempts_non_negative"),
+    ],
+    ids=["one_per_key", "created_without_stripe_id", "zero_amount", "negative_attempts"],
+)
+async def test_the_refunds_table_refuses_what_the_rules_forbid(
+    db_session: AsyncSession, world: JobWorld, values: dict[str, Any], constraint: str
+) -> None:
+    case = await disputed(db_session, world)
+    payment = (
+        await db_session.scalars(select(Payment).where(Payment.request_id == case.request_id))
+    ).one()
+
+    def row(**fields: Any) -> Refund:
+        return Refund(
+            **{
+                "job_id": case.job_id,
+                "payment_id": payment.id,
+                "dispute_id": case.dispute_id,
+                "amount_cents": TOTAL,
+                "currency": "usd",
+                "idempotency_key": f"k-{uuid.uuid4()}",
+                **fields,
+            }
+        )
+
+    db_session.add(row(idempotency_key="taken"))
+    await db_session.flush()
+    db_session.add(row(**values))
+    with pytest.raises(IntegrityError) as raised:
+        await db_session.flush()
+    assert violated_constraint(raised.value) == constraint
 
 
 # --- Who -----------------------------------------------------------------------------------------

@@ -298,7 +298,7 @@ async def read_dispute(
             "tried and the dispute is still open; only the same decision may be retried. "
             "resolution_in_progress: another resolve is calling Stripe; retry in a few "
             "minutes. dispute_needs_review: the job's payment cannot be refunded as is, or "
-            "Stripe holds refunds that cannot be matched; nothing more is sent to Stripe."
+            "Stripe holds refunds that cannot be matched; nothing is created in Stripe."
         ),
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
             "validation_error: a malformed id, an unknown decision, pro_release_cents on a "
@@ -308,7 +308,8 @@ async def read_dispute(
         ),
         status.HTTP_502_BAD_GATEWAY: _error(
             "payments_error: Stripe refused the refund; the dispute stays open and the job "
-            "disputed, the same decision can be sent again."
+            "disputed. The same decision can be sent again, but Stripe answers it with the "
+            "same refusal for 24 h (one idempotency key per refund)."
         ),
         status.HTTP_503_SERVICE_UNAVAILABLE: _error(
             "not_configured: refunds are not configured. payments_unavailable: Stripe is not "

@@ -70,7 +70,8 @@ class RefundAlreadyAttemptedError(ConflictError):
 class DisputeNeedsReviewError(ConflictError):
     """The job's payment cannot be refunded as is (missing, or its frozen amounts do not match
     the job's), or Stripe holds refunds for the dispute that its row cannot be matched with.
-    Nothing more is sent to Stripe; staff look first."""
+    Nothing is created in Stripe (a retry of the same decision only looks again); staff look
+    first."""
 
     code = "dispute_needs_review"
     message = "This dispute needs a review of its payment before it can be resolved."

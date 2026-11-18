@@ -225,6 +225,15 @@ them idempotent: they can run twice.
   `completed -> disputed` commit together; then the pro's `job_disputed` push and
   `sanitize_dispute_photos` (the media copier, as for job photos). Text is redacted
   (`app.redaction`) and never logged; the pro sees photos' safe copies only and replies once.
+- **Dispute resolution (#76).** `DisputeResolver.resolve` (`disputes/resolution.py`, admins
+  only): `release` resolves at once and queues `release_transfer`, which pays the frozen payout
+  and moves the job `disputed -> paid_out` as the deciding admin (`AdminDecision`); `refund`
+  refunds the customer's total and moves the job to `refunded`; `partial` refunds
+  `app.money.partial_refund_cents` and then pays `pro_release_cents` the same way. A refund's
+  row (`refunds`, key `dispute:<id>:refund`, through `payments.refunds.RefundLedger`) and its
+  attempt are committed before Stripe; a retry looks the refund up first. One
+  `dispute.resolve` audit row per resolution (`AuditService.record`); staff reads in
+  `disputes/staff.py` (the detail is audited, `dispute.read`).
 
 ## Stripe webhooks (#40, #280)
 

@@ -21,9 +21,8 @@ from app.modules.disputes.models import (
     DisputeStatus,
 )
 from app.modules.disputes.schemas import DisputePhotoOut
-from app.modules.jobs.models import JobStatus
-from app.modules.payments.models import PaymentStatus, RefundStatus
-from app.modules.payments.schemas import TransferOut
+from app.modules.jobs.service import JobStatus
+from app.modules.payments.schemas import PaymentSummaryOut, RefundOut, TransferOut
 
 Note = Annotated[
     str,
@@ -67,27 +66,6 @@ class DisputeResolveIn(BaseModel):
         if (self.decision is ResolutionDecision.PARTIAL) != (self.pro_release_cents is not None):
             raise ValueError("pro_release_cents is required for partial and refused otherwise")
         return self
-
-
-class RefundOut(_Out):
-    """A dispute's refund to the customer (#76): the row, without the idempotency key."""
-
-    model_config = ConfigDict(extra="forbid", from_attributes=True)
-
-    id: uuid.UUID
-    amount_cents: int = Field(description="What is refunded, in integer cents.")
-    currency: str = Field(examples=["usd"])
-    status: RefundStatus = Field(
-        description="pending: not made yet, an attempt may be under way. created: Stripe made "
-        "the refund. failed: the last attempt failed; the same decision tries again."
-    )
-    stripe_refund_id: str | None = Field(description="Stripe's id of the refund, once made.")
-    attempts: int
-    last_error_code: str | None = Field(
-        description="Why the last attempt did not make the refund: a Stripe error code, an "
-        "error class or `refund_needs_review`. Never a message."
-    )
-    requested_at: datetime | None = Field(description="When the latest attempt started.")
 
 
 class DisputeResolutionOut(_Out):
@@ -143,21 +121,6 @@ class StaffJobEventOut(_Out):
     to_status: JobStatus | None
     by_system: bool
     created_at: datetime
-
-
-class PaymentSummaryOut(_Out):
-    """The job's payment, frozen when it was made."""
-
-    model_config = ConfigDict(extra="forbid", from_attributes=True)
-
-    id: uuid.UUID
-    amount_cents: int
-    tax_cents: int
-    customer_total_cents: int
-    platform_fee_cents: int
-    pro_payout_cents: int
-    currency: str
-    status: PaymentStatus
 
 
 class StaffDisputeOut(StaffDisputeSummary):
