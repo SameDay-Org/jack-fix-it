@@ -526,6 +526,9 @@ def test_customer_quote_has_no_payout_fields(app: FastAPI) -> None:
             "platform_fee_cents",
         },
         ("get", "/v1/pros/me/opportunities/{dispatch_id}"): {"take_rate_bps"},
+        # Staff only (agents and admins): a dispute's money, to resolve it (#76).
+        ("get", "/v1/admin/disputes"): {"pro_payout_cents"},
+        ("get", "/v1/admin/disputes/{dispute_id}"): {"pro_payout_cents", "platform_fee_cents"},
     }
     shown: dict[tuple[str, str], set[str]] = {}
     for path, operations in schema["paths"].items():

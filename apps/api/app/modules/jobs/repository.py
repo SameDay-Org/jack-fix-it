@@ -38,6 +38,27 @@ class JobRepository:
         )
 
     @staticmethod
+    def awaiting_transfer(released_disputes: Subquery) -> Subquery:
+        """The columns of `confirmed` for every job waiting for its transfer: confirmed, or
+        disputed with its dispute resolved by a release (`released_disputes`: job_id, #76)."""
+        return (
+            select(
+                Job.id.label("job_id"),
+                Job.pro_id.label("pro_id"),
+                Job.quote_id.label("quote_id"),
+                Job.pro_payout_cents.label("pro_payout_cents"),
+            )
+            .where(
+                or_(
+                    Job.status == JobStatus.CONFIRMED,
+                    (Job.status == JobStatus.DISPUTED)
+                    & Job.id.in_(select(released_disputes.c.job_id)),
+                )
+            )
+            .subquery()
+        )
+
+    @staticmethod
     def metric_facts() -> Subquery:
         """Every job's id (`job_id`), request (`request_id`), customer (`customer_id`), its
         creation, completion and confirmation times (`created_at`, `completed_at`,
@@ -169,6 +190,20 @@ class JobRepository:
             return None
         job, pro_user_id = row
         return job, pro_user_id
+
+    async def many_with_pro_user(
+        self, job_ids: Collection[uuid.UUID], pros: Subquery
+    ) -> list[tuple[Job, uuid.UUID]]:
+        """The jobs among `job_ids` with their pro's user id (`pros`: `pro_id`, `user_id`), in
+        one statement, unlocked: for staff, who may read any job."""
+        if not job_ids:
+            return []
+        statement = (
+            select(Job, pros.c.user_id)
+            .join(pros, pros.c.pro_id == Job.pro_id)
+            .where(Job.id.in_(job_ids))
+        )
+        return [(job, user_id) for job, user_id in (await self._session.execute(statement)).all()]
 
     async def page_for_pro(
         self,

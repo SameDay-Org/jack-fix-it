@@ -76,6 +76,13 @@ KIND_GROUP: Final[Mapping[str, PreferenceGroup]] = MappingProxyType(
         "job_done": PreferenceGroup.JOB_UPDATES,  # to a customer
         "job_confirmed": PreferenceGroup.JOB_UPDATES,  # to a pro (#66, #67)
         "job_disputed": PreferenceGroup.JOB_UPDATES,  # to a pro (#75)
+        # A dispute's resolution (#76): one kind per decision and side.
+        "dispute_refunded": PreferenceGroup.JOB_UPDATES,  # to a customer
+        "dispute_partly_refunded": PreferenceGroup.JOB_UPDATES,  # to a customer
+        "dispute_closed": PreferenceGroup.JOB_UPDATES,  # to a customer
+        "dispute_payout_released": PreferenceGroup.JOB_UPDATES,  # to a pro
+        "dispute_payout_partly_released": PreferenceGroup.JOB_UPDATES,  # to a pro
+        "dispute_payout_refunded": PreferenceGroup.JOB_UPDATES,  # to a pro
         # A canceled payment reopened the request's quotes: about the booking, not a new quote.
         "booking_not_completed": PreferenceGroup.JOB_UPDATES,  # to a customer
         # Stripe enabled an approved pro's payouts (#280): about their account.

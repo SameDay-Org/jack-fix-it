@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Final
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, IdTimestampsMixin, str_enum
@@ -172,3 +172,125 @@ class Transfer(IdTimestampsMixin, Base):
     # until then, so the need for it outlives a failed or cancelled read (#416 r2).
     reversal_check_tried_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     reversal_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RefundStatus(StrEnum):
+    """Where a refund to the customer stands (#76; internal: staff read the row)."""
+
+    # Stripe holds no refund of ours yet: an attempt is under way (requested_at set, no
+    # last_error_code), or the row was just written and its first attempt is about to start.
+    PENDING = "pending"
+    # Stripe created the refund: stripe_refund_id and stripe_status are stored. Created is not
+    # done: the money is back only once stripe_status is `succeeded` (STRIPE_REFUND_SUCCEEDED),
+    # and Stripe can still fail or cancel it (STRIPE_REFUND_DEAD).
+    CREATED = "created"
+    # The last attempt's call ended with an error (last_error_code) and Stripe holds no refund
+    # of ours that we know of; the same decision tries again.
+    FAILED = "failed"
+
+
+# Statuses of a refund not made yet: an attempt may still be started for it.
+REFUND_NOT_MADE: Final = frozenset({RefundStatus.PENDING, RefundStatus.FAILED})
+# Stripe's own status of a refund (stripe_status, stored as Stripe says it): the money is back
+# only at `succeeded`; `failed` and `canceled` will never give it back; anything else (pending,
+# requires_action, or a status a later API version adds) is not finished.
+STRIPE_REFUND_SUCCEEDED: Final = "succeeded"
+STRIPE_REFUND_DEAD: Final = frozenset({"failed", "canceled"})
+STRIPE_STATUS_LENGTH: Final = 32
+# How final each of Stripe's statuses of a refund is. Stripe moves a refund forward only: not
+# finished, then succeeded, failed or canceled (a succeeded one can still fail, never the other
+# way). A read less final than the row's is older than it (two readers raced): never stored.
+STRIPE_RANK_NONE: Final = 0
+STRIPE_RANK_UNFINISHED: Final = 1
+STRIPE_RANK_SUCCEEDED: Final = 2
+STRIPE_RANK_DEAD: Final = 3
+
+
+def stripe_status_rank(status: str | None) -> int:
+    """How final Stripe's status of a refund is (see STRIPE_RANK_*); unknown is unfinished."""
+    if status is None:
+        return STRIPE_RANK_NONE
+    if status == STRIPE_REFUND_SUCCEEDED:
+        return STRIPE_RANK_SUCCEEDED
+    if status in STRIPE_REFUND_DEAD:
+        return STRIPE_RANK_DEAD
+    return STRIPE_RANK_UNFINISHED
+
+
+# As for transfers: a Stripe error code, an exception's class name or one of ours, cut.
+REFUND_ERROR_CODE_LENGTH: Final = 64
+
+
+class Refund(IdTimestampsMixin, Base):
+    """Money given back to the customer from their job's payment (#76: an admin's dispute
+    resolution, in full or in part): to the original payment method, through Stripe's Refund
+    API. The idempotency key names what the refund is for (`dispute:<id>:refund`), and is
+    unique: one refund per dispute, the guard against refunding it twice.
+
+    The amount is computed by the backend from the frozen payment amounts (disputes.resolution)
+    and copied when the row is created. As for transfers, the row and each attempt (attempts,
+    requested_at) are committed before the Stripe call, so a lost answer leaves a row that says
+    a refund may have been made: the next attempt looks it up in Stripe before creating one.
+
+    Stripe's status of the refund is kept as Stripe says it (stripe_status) and read again
+    (an admin's retry, or Stripe's refund events): what the refund settles waits for
+    `succeeded` (#433 round 1). A dispute's refund also carries the decision it pays for,
+    written once with the row: the admin who took it (initiated_by), the part of the pro's
+    payout released with it, and the admin's note (the dispute's once it settles).
+    """
+
+    __tablename__ = "refunds"
+    __table_args__ = (
+        CheckConstraint("amount_cents > 0", name="amount_cents_positive"),
+        CheckConstraint("attempts >= 0", name="attempts_non_negative"),
+        # A refund Stripe made holds its id.
+        CheckConstraint(
+            "status <> 'created' OR stripe_refund_id IS NOT NULL",
+            name="created_has_stripe_refund_id",
+        ),
+        # Stripe's status is stored with its refund, and only then.
+        CheckConstraint(
+            "(status = 'created') = (stripe_status IS NOT NULL)",
+            name="created_has_stripe_status",
+        ),
+        CheckConstraint(
+            "dispute_id IS NULL OR (initiated_by IS NOT NULL AND pro_release_cents IS NOT NULL"
+            " AND resolution_note IS NOT NULL)",
+            name="dispute_refund_has_decision",
+        ),
+        CheckConstraint(
+            "pro_release_cents IS NULL OR pro_release_cents >= 0",
+            name="pro_release_non_negative",
+        ),
+    )
+
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id"), index=True)
+    payment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("payments.id"), index=True)
+    # The dispute it settles; NULL for a refund of another kind (cancellations, #69).
+    dispute_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("disputes.id"), index=True)
+    amount_cents: Mapped[int]
+    currency: Mapped[str] = mapped_column(String(3))
+    status: Mapped[RefundStatus] = mapped_column(
+        str_enum(RefundStatus, "refund_status"),
+        server_default=RefundStatus.PENDING.value,
+        index=True,
+    )
+    # NULL until Stripe answered the create (or the lookup found the refund).
+    stripe_refund_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    # The same for every attempt of this refund.
+    idempotency_key: Mapped[str] = mapped_column(String(255), unique=True)
+    # Stripe attempts started (each committed before its call).
+    attempts: Mapped[int] = mapped_column(server_default="0")
+    last_error_code: Mapped[str | None] = mapped_column(String(REFUND_ERROR_CODE_LENGTH))
+    # When the latest attempt started; NULL before the first.
+    requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Stripe's status of the refund as last read (pending, requires_action, succeeded, failed,
+    # canceled); NULL until Stripe answered with the refund.
+    stripe_status: Mapped[str | None] = mapped_column(String(STRIPE_STATUS_LENGTH))
+    # The admin whose decision this refund carries out; NULL only for a refund of another kind.
+    initiated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    # The part of the pro's payout the decision releases with this refund: 0 for a full refund.
+    pro_release_cents: Mapped[int | None]
+    # The deciding admin's note (staff only, never logged): the dispute's resolution_note once
+    # the refund settles it.
+    resolution_note: Mapped[str | None] = mapped_column(Text)
