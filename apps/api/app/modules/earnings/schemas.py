@@ -15,9 +15,11 @@ class EarningStatus(StrEnum):
     # The pro marked the job done; the customer has not confirmed it yet (it confirms itself
     # after the confirmation window).
     AWAITING_CONFIRMATION = "awaiting_confirmation"
-    # Confirmed: the transfer to the pro is to be made, or being retried.
+    # Confirmed, or a reported problem an admin decided with a release (all or part of the
+    # payout): the transfer to the pro is to be made, or being retried.
     ON_THE_WAY = "on_the_way"
-    # Held back: the customer reported a problem, or the transfer is under review.
+    # Held back: the customer reported a problem not decided yet, or the transfer is under
+    # review.
     ON_HOLD = "on_hold"
     # Sent to the pro's Stripe account.
     PAID = "paid"

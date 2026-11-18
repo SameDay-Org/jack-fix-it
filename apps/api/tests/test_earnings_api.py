@@ -12,6 +12,12 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.modules.disputes.models import (
+    Dispute,
+    DisputeReason,
+    DisputeResolution,
+    DisputeStatus,
+)
 from app.modules.jobs.models import Job, JobEvent, JobStatus
 from app.modules.payments.models import Transfer, TransferStatus
 from app.rate_limit import get_rate_limiter
@@ -250,6 +256,88 @@ async def test_each_job_reads_its_status_and_the_summary_adds_up(
         "paid": body["summary"]["paid_cents"],
     }
     assert body["next_cursor"] is None
+
+
+def add_dispute(
+    session: AsyncSession,
+    world: JobWorld,
+    job_id: uuid.UUID,
+    resolution: DisputeResolution | None,
+    release: int = 0,
+) -> None:
+    """The job's dispute: open, or resolved by an admin with `resolution` and `release`."""
+    decided: dict[str, Any] = {}
+    if resolution is not None:
+        decided = {
+            "status": DisputeStatus.RESOLVED,
+            "resolution": resolution,
+            "resolved_by": world.admin.id,
+            "resolved_at": T0,
+            "resolution_note": "zq70 note",
+            "pro_release_cents": release,
+            "customer_refund_cents": 0 if resolution is DisputeResolution.RELEASED else 1_000,
+        }
+    session.add(
+        Dispute(
+            job_id=job_id,
+            opened_by=world.customer.id,
+            reason_code=DisputeReason.POOR_QUALITY,
+            description="zq70",
+            **decided,
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("resolution", "release"),
+    [(DisputeResolution.RELEASED, 5_005), (DisputeResolution.PARTIAL_RELEASE, 2_000)],
+    ids=["released", "partly_released"],
+)
+async def test_a_dispute_an_admin_released_is_on_its_way_until_the_transfer_lands(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    resolution: DisputeResolution,
+    release: int,
+) -> None:
+    """After #76: an open dispute holds the job; once an admin released it (all of the payout
+    or part of it), the part released is on its way (the job stays disputed until its transfer
+    lands), then paid."""
+    held = await earning_job(db_session, world, JobStatus.DISPUTED, T0, 5_005)
+    add_dispute(db_session, world, held, None)
+    released = await earning_job(
+        db_session, world, JobStatus.DISPUTED, T0 - timedelta(days=1), 5_005
+    )
+    add_dispute(db_session, world, released, resolution, release)
+    landed = await earning_job(
+        db_session,
+        world,
+        JobStatus.PAID_OUT,
+        T0 - timedelta(days=2),
+        5_005,
+        transfer=TransferStatus.CREATED,
+        paid_at=T0 - timedelta(days=1),
+    )
+    add_dispute(db_session, world, landed, resolution, release)
+    await db_session.execute(
+        update(Transfer).where(Transfer.job_id == landed).values(amount_cents=release)
+    )
+    await db_session.commit()
+
+    body = (await read(db_client, world.pro)).json()
+
+    items = {item["job_id"]: (item["status"], item["amount_cents"]) for item in body["items"]}
+    assert items == {
+        str(held): ("on_hold", 5_005),
+        str(released): ("on_the_way", release),
+        str(landed): ("paid", release),
+    }
+    summary = body["summary"]
+    assert (summary["on_hold_cents"], summary["pending_cents"], summary["paid_cents"]) == (
+        5_005,
+        release,
+        release,
+    )
 
 
 async def test_the_amount_is_the_frozen_payout_never_the_price(

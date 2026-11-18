@@ -131,9 +131,13 @@ class DisputeRepository:
     @staticmethod
     def released_jobs() -> Subquery:
         """The job (`job_id`) of every dispute an admin resolved with a release, full or
-        partial (#76), for another module's query."""
+        partial (#76), and the part of the pro's payout released (`pro_release_cents`), for
+        another module's query."""
         return (
-            select(Dispute.job_id.label("job_id"))
+            select(
+                Dispute.job_id.label("job_id"),
+                Dispute.pro_release_cents.label("pro_release_cents"),
+            )
             .where(Dispute.status == DisputeStatus.RESOLVED, Dispute.resolution.in_(RELEASES))
             .subquery()
         )
