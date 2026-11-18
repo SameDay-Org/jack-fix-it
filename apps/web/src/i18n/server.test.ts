@@ -12,7 +12,7 @@ describe("getT", () => {
   it("keeps concurrent locales independent", async () => {
     const [tEn, tEs] = await Promise.all([getT("en"), getT("es")]);
 
-    expect(tEn("landing.comingSoon")).toBe("Our site is on the way.");
-    expect(tEs("landing.comingSoon")).toBe("Nuestro sitio está en camino.");
+    expect(tEn("landing.nav.services")).toBe("Services");
+    expect(tEs("landing.nav.services")).toBe("Servicios");
   });
 });
