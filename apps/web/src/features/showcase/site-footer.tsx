@@ -4,10 +4,12 @@ import Link from "next/link";
 import type { Locale } from "@/i18n/config";
 import { cn } from "@/lib/utils";
 
-import { LanguageToggle } from "./language-toggle";
-import { ANCHORS, PRIVACY_PATHS, SHOWCASE_PATHS, TERMS_PATHS } from "./routes";
-import { CONTAINER, FOCUS_ON_NAVY } from "./ui";
-import { Wordmark } from "./wordmark";
+import { LanguageToggle } from "@/features/site/language-toggle";
+import { PRIVACY_PATHS, TERMS_PATHS } from "@/features/site/routes";
+
+import { ANCHORS, SHOWCASE_PATHS } from "./routes";
+import { CONTAINER, FOCUS_ON_NAVY } from "@/features/site/ui";
+import { Wordmark } from "@/features/site/wordmark";
 
 const FOOTER_LINK = cn(
   "inline-flex min-h-11 items-center rounded-pill text-base font-semibold underline-offset-4 hover:underline",

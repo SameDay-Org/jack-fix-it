@@ -3,6 +3,13 @@
     "name": "Jack Fix It",
     "tagline": "Pase lo que pase en casa, lo arreglamos."
   },
+  "site": {
+    "language": {
+      "label": "Idioma",
+      "en": "English",
+      "es": "Español"
+    }
+  },
   "landing": {
     "comingSoon": "Nuestro sitio está en camino."
   },
@@ -20,11 +27,6 @@
       "pros": "Para profesionales",
       "faq": "Preguntas",
       "soon": "Muy pronto"
-    },
-    "language": {
-      "label": "Idioma",
-      "en": "English",
-      "es": "Español"
     },
     "hero": {
       "soon": "Muy pronto en iPhone y Android",

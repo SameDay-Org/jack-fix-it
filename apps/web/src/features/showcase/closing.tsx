@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 
 import { MascotBubble } from "./mascot-bubble";
 import { ANCHORS } from "./routes";
-import { CONTAINER, EYEBROW, FOCUS_ON_LIGHT, SECTION_TITLE } from "./ui";
+import { CONTAINER, EYEBROW, FOCUS_ON_LIGHT, SECTION_TITLE } from "@/features/site/ui";
 
 /** The platforms the app is coming to, in the order the notice names them. */
 const PLATFORMS = ["ios", "android"] as const;

@@ -5,10 +5,10 @@ import { cn } from "@/lib/utils";
 import { ComingSoon, Faq, FinalCall } from "./closing";
 import { ForPros, HowItWorks } from "./features";
 import { Hero } from "./hero";
-import { HtmlLang } from "./html-lang";
+import { HtmlLang } from "@/features/site/html-lang";
 import { SiteFooter } from "./site-footer";
 import { SiteHeader } from "./site-header";
-import { FOCUS_ON_LIGHT } from "./ui";
+import { FOCUS_ON_LIGHT } from "@/features/site/ui";
 
 /** Where "Skip to content" lands. */
 const MAIN_ID = "content";

@@ -24,7 +24,7 @@ type LanguageToggleProps = {
 export function LanguageToggle({ t, locale, paths, className }: LanguageToggleProps) {
   return (
     <nav
-      aria-label={t("showcase.language.label")}
+      aria-label={t("site.language.label")}
       className={cn("inline-flex shrink-0 rounded-pill bg-navy-700 p-1", className)}
     >
       {locales.map((value) => (
@@ -42,7 +42,7 @@ export function LanguageToggle({ t, locale, paths, className }: LanguageTogglePr
           )}
         >
           {value.toUpperCase()}
-          <span className="sr-only"> {t(`showcase.language.${value}`)}</span>
+          <span className="sr-only"> {t(`site.language.${value}`)}</span>
         </Link>
       ))}
     </nav>
