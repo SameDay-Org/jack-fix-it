@@ -5,7 +5,13 @@ from datetime import datetime
 from sqlalchemy import Select, Subquery, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.disputes.models import Dispute, DisputePhoto, DisputeStatus
+from app.modules.disputes.models import (
+    RELEASES,
+    Dispute,
+    DisputePhoto,
+    DisputeResolution,
+    DisputeStatus,
+)
 from app.modules.media.safe_status import MediaSafeStatus
 
 
@@ -22,6 +28,68 @@ class DisputeRepository:
             .execution_options(populate_existing=True)
         )
         return (await self._session.scalars(statement)).one_or_none()
+
+    async def get(self, dispute_id: uuid.UUID, *, lock: bool = False) -> Dispute | None:
+        """The dispute as last committed; with `lock`, its row held FOR UPDATE until the
+        transaction ends (take the job's lock first)."""
+        statement = (
+            select(Dispute)
+            .where(Dispute.id == dispute_id)
+            .execution_options(populate_existing=True)
+        )
+        if lock:
+            statement = statement.with_for_update()
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def resolve(
+        self,
+        dispute_id: uuid.UUID,
+        *,
+        resolution: DisputeResolution,
+        note: str,
+        by: uuid.UUID,
+        now: datetime,
+        pro_release_cents: int,
+        customer_refund_cents: int,
+    ) -> bool:
+        """Resolves the dispute if it is still open; False otherwise (nothing written). One
+        statement, so the status and the columns its CHECK ties to it change together."""
+        statement = (
+            update(Dispute)
+            .where(Dispute.id == dispute_id, Dispute.status == DisputeStatus.OPEN)
+            .values(
+                status=DisputeStatus.RESOLVED,
+                resolution=resolution,
+                resolution_note=note,
+                resolved_by=by,
+                resolved_at=now,
+                pro_release_cents=pro_release_cents,
+                customer_refund_cents=customer_refund_cents,
+            )
+            .returning(Dispute.id)
+        )
+        return (await self._session.scalar(statement)) is not None
+
+    async def released_of_job(self, job_id: uuid.UUID) -> Dispute | None:
+        """The job's dispute when an admin resolved it with a release, full or partial (#76)."""
+        statement = (
+            select(Dispute)
+            .where(
+                Dispute.job_id == job_id,
+                Dispute.status == DisputeStatus.RESOLVED,
+                Dispute.resolution.in_(RELEASES),
+            )
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def listed(self, status: DisputeStatus | None, limit: int) -> list[Dispute]:
+        """Up to `limit` disputes (of `status`, or any), oldest first: the longest waiting
+        first."""
+        statement = select(Dispute).order_by(Dispute.created_at, Dispute.id).limit(limit)
+        if status is not None:
+            statement = statement.where(Dispute.status == status)
+        return list((await self._session.scalars(statement)).all())
 
     async def by_idempotency_key(self, opened_by: uuid.UUID, key: uuid.UUID) -> Dispute | None:
         """The customer's dispute made with `key` (the unique index allows one), as last
@@ -57,6 +125,16 @@ class DisputeRepository:
         return (
             select(Dispute.job_id.label("job_id"))
             .where(Dispute.status == DisputeStatus.OPEN)
+            .subquery()
+        )
+
+    @staticmethod
+    def released_jobs() -> Subquery:
+        """The job (`job_id`) of every dispute an admin resolved with a release, full or
+        partial (#76), for another module's query."""
+        return (
+            select(Dispute.job_id.label("job_id"))
+            .where(Dispute.status == DisputeStatus.RESOLVED, Dispute.resolution.in_(RELEASES))
             .subquery()
         )
 

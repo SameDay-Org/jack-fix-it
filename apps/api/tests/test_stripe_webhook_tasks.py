@@ -295,13 +295,17 @@ async def test_concurrent_runs_handle_the_event_once(
     assert len(handler.calls) == 1
 
 
-def test_registered_handlers_are_the_payment_intent_transfer_and_account_ones() -> None:
-    """payment_intent.* (#61), transfer.reversed (#68) and account.updated (#280)."""
+def test_registered_handlers_are_the_payment_intent_transfer_account_and_refund_ones() -> None:
+    """payment_intent.* (#61), transfer.reversed (#68), account.updated (#280) and a dispute
+    refund's events (#433 round 1)."""
     assert sorted(handlers.HANDLERS) == [
         "account.updated",
+        "charge.refund.updated",
         "payment_intent.canceled",
         "payment_intent.payment_failed",
         "payment_intent.processing",
         "payment_intent.succeeded",
+        "refund.failed",
+        "refund.updated",
         "transfer.reversed",
     ]

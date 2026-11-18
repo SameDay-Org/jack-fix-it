@@ -116,6 +116,13 @@ class UserService:
         user = await self._users.get_by_id(user_id)
         return _to_account(user) if user else None
 
+    async def get_current_shared(self, user_id: uuid.UUID) -> UserAccount | None:
+        """The account as last committed, read now (get_by_id answers a copy the session still
+        holds, if any), share-locked until the transaction ends: a role or status change cannot
+        commit before the caller does."""
+        user = await self._users.get_by_id_for_share(user_id)
+        return _to_account(user) if user else None
+
     async def get_by_email(self, email: str) -> UserAccount | None:
         """Exact match: emails are stored lowercase, so pass a normalized email."""
         user = await self._users.get_by_email(email)

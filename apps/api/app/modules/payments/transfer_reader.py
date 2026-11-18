@@ -53,6 +53,12 @@ class TransferReader:
         statuses = await self._transfers.statuses_of_jobs(job_ids)
         return {job_id: _PAYOUT[status] for job_id, status in statuses.items()}
 
+    async def of_job(self, job_id: uuid.UUID) -> TransferOut | None:
+        """The job's transfer row for a staff read another module audits itself (a dispute,
+        #76); None before the job's first release."""
+        transfer = await self._transfers.get_of_job(job_id)
+        return None if transfer is None else TransferOut.model_validate(transfer)
+
     async def staff_transfer(self, staff: UserAccount, job_id: uuid.UUID) -> JobTransferOut:
         """Any job's transfer row for the BDC and admins (None before the job's first
         release); 404 for an unknown job. Read-only, and audited."""

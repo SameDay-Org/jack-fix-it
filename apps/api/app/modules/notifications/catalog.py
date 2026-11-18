@@ -2,7 +2,9 @@
 they carry no personal data: placeholders are limited to PLACEHOLDERS (a test scans for it).
 #55 adds a new request (to a dispatched pro), a new quote (to the customer) and a quote
 accepted (to its pro); #65 the job's steps and a booking whose payment was canceled; #66/#67 the
-job confirmed (to its pro); #280 payouts set up (to an approved pro). The On my
+job confirmed (to its pro); #75 a problem reported (to the pro); #76 its resolution (to both
+sides, one message per decision, never the admin's note); #280 payouts set up (to an approved
+pro). The On my
 way copy points to the app for the arrival code: the code itself never leaves the customer's job
 view. `push.test.*` is a neutral message.
 """
@@ -57,6 +59,33 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "push.booking_not_completed.body": (
                     "The payment for {public_code} did not go through. See your request in the app."
                 ),
+                "push.dispute_refunded.title": "Your payment was refunded",
+                "push.dispute_refunded.body": (
+                    "We refunded your payment for job {public_code}. "
+                    "Your bank may take a few days to show it."
+                ),
+                "push.dispute_partly_refunded.title": "Part of your payment was refunded",
+                "push.dispute_partly_refunded.body": (
+                    "We refunded part of your payment for job {public_code}. "
+                    "Your bank may take a few days to show it."
+                ),
+                "push.dispute_closed.title": "Your problem report was reviewed",
+                "push.dispute_closed.body": (
+                    "We reviewed job {public_code} and closed your report. "
+                    "See the details in the app."
+                ),
+                "push.dispute_payout_released.title": "The problem report was resolved",
+                "push.dispute_payout_released.body": (
+                    "Your payout for job {public_code} is on its way."
+                ),
+                "push.dispute_payout_partly_released.title": "The problem report was resolved",
+                "push.dispute_payout_partly_released.body": (
+                    "Part of your payout for job {public_code} is on its way."
+                ),
+                "push.dispute_payout_refunded.title": "The problem report was resolved",
+                "push.dispute_payout_refunded.body": (
+                    "The customer was refunded for job {public_code}, so it has no payout."
+                ),
                 "push.payouts_enabled.title": "Payouts are set up",
                 "push.payouts_enabled.body": "You can receive requests now.",
             }
@@ -106,6 +135,35 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "push.booking_not_completed.title": "Tu reserva no se completó",
                 "push.booking_not_completed.body": (
                     "El pago de {public_code} no se completó. Mira tu solicitud en la app."
+                ),
+                "push.dispute_refunded.title": "Te reembolsamos el pago",
+                "push.dispute_refunded.body": (
+                    "Reembolsamos tu pago del trabajo {public_code}. "
+                    "Tu banco puede tardar unos días en mostrarlo."
+                ),
+                "push.dispute_partly_refunded.title": "Te reembolsamos parte del pago",
+                "push.dispute_partly_refunded.body": (
+                    "Reembolsamos parte de tu pago del trabajo {public_code}. "
+                    "Tu banco puede tardar unos días en mostrarlo."
+                ),
+                "push.dispute_closed.title": "Revisamos tu reporte",
+                "push.dispute_closed.body": (
+                    "Revisamos el trabajo {public_code} y cerramos tu reporte. "
+                    "Mira los detalles en la app."
+                ),
+                "push.dispute_payout_released.title": "Se resolvió el reporte del problema",
+                "push.dispute_payout_released.body": (
+                    "Tu pago del trabajo {public_code} va en camino."
+                ),
+                "push.dispute_payout_partly_released.title": (
+                    "Se resolvió el reporte del problema"
+                ),
+                "push.dispute_payout_partly_released.body": (
+                    "Parte de tu pago del trabajo {public_code} va en camino."
+                ),
+                "push.dispute_payout_refunded.title": "Se resolvió el reporte del problema",
+                "push.dispute_payout_refunded.body": (
+                    "Se le reembolsó al cliente el trabajo {public_code}, así que no tiene pago."
                 ),
                 "push.payouts_enabled.title": "Tus pagos están listos",
                 "push.payouts_enabled.body": "Ya puedes recibir solicitudes.",

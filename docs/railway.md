@@ -330,7 +330,11 @@ reads made transfers again for a reversal (read-only, on the same settings). Its
 (`TRANSFER_RELEASE_SWEEP_MINUTES`, `TRANSFER_RELEASE_SWEEP_TIMEOUT_SECONDS`,
 `TRANSFER_RELEASE_BATCH_SIZE`, `TRANSFER_STUCK_PENDING_MINUTES`; `apps/api/.env.example`
 explains each). The Stripe webhook endpoint must also send `transfer.reversed`, beside the
-`payment_intent.*` events: the API marks a reversed transfer for staff.
+`payment_intent.*` events: the API marks a reversed transfer for staff. An admin's dispute
+resolution (#76) refunds through the API with the same key; `REFUND_STUCK_PENDING_MINUTES` is
+optional too. The platform webhook endpoint must also send `refund.updated`, `refund.failed`
+and `charge.refund.updated`: a dispute settles only once Stripe says its refund succeeded, and
+the worker reads each refund event's refund from Stripe with the same key (#433).
 
 `apps/api/tests/test_railway_doc.py` fails when a setting that staging or production requires
 is missing from either table, so this list cannot fall behind `app/config.py`.
