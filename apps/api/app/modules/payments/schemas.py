@@ -25,8 +25,16 @@ class PaymentSheetOut(BaseModel):
         "Shown once per call, never logged; the same PaymentIntent on every call for the quote."
     )
     customer_id: str = Field(description="The customer's Stripe Customer id, for the sheet.")
+    customer_session_client_secret: str = Field(
+        description="A CustomerSession's client secret, new on each call: the sheet lists the "
+        "customer's saved cards with it, and Stripe lets it neither remove one nor offer to save "
+        "a new one (cards are added in the wallet). Shown once per call, never logged."
+    )
     ephemeral_key_secret: str = Field(
-        description="A short-lived key that lets the sheet act for the customer; new on each call."
+        deprecated=True,
+        description="Deprecated (#253c): app builds before the CustomerSession pass it to the "
+        "sheet, which then has full rights over the customer's cards. Use "
+        "customer_session_client_secret; this field is removed in a later release.",
     )
     publishable_key: str = Field(
         description="The Stripe publishable key the sheet initializes with (pk_test_ until launch)."

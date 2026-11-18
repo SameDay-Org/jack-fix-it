@@ -2009,6 +2009,19 @@
         "title": "That didn't go through",
         "body": "Something went wrong on our side. Try again in a moment."
       }
+    },
+    "pro": {
+      "title": "The customer reported a problem",
+      "review": "Our team will review both sides.",
+      "photo": "Customer's photo {{index}} of {{total}}",
+      "photosPending_one": "{{count}} more photo is being prepared.",
+      "photosPending_other": "{{count}} more photos are being prepared.",
+      "loadFailed": "We couldn't load the report.",
+      "replyTitle": "Your reply",
+      "replyLabel": "Your reply",
+      "replyHint": "Only the Jack Fix It team reads it. You can send one reply.",
+      "replyMissing": "Write your reply.",
+      "replySend": "Send reply"
     }
   }
 }

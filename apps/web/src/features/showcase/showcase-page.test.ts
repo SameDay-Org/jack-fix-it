@@ -98,9 +98,10 @@ describe("showcase page", () => {
 
   it("shows every screen of the manifest once, each with its text alternative and its size", async () => {
     const html = await page("en");
-    // The hero's phone also holds its other screens, hidden until it animates (hero.test.ts).
+    // The hero's phone also holds its other screens, hidden until it animates (hero.test.ts);
+    // the still mascots are images too (data-pose).
     const images = (html.match(/<img[^>]*>/g) ?? []).filter(
-      (tag) => !tag.includes("data-hero-screen"),
+      (tag) => !tag.includes("data-hero-screen") && !tag.includes("data-pose="),
     );
 
     expect(images).toHaveLength(MEDIA_IDS.length);
@@ -213,10 +214,18 @@ describe("showcase page", () => {
 
   it("keeps decoration out of the accessibility tree", async () => {
     const html = await page("en");
-    const mascots = html.match(/<svg[^>]*data-pose="[^"]*"[^>]*>/g) ?? [];
+    // Two mascots move (#404), drawn inline: the hero's wave and the thinking one beside the
+    // questions. The others stand still as images of the same drawing.
+    const moving = html.match(/<svg[^>]*data-pose="[^"]*"[^>]*>/g) ?? [];
+    const still = html.match(/<img[^>]*data-pose="[^"]*"[^>]*>/g) ?? [];
 
-    expect(mascots.length).toBeGreaterThanOrEqual(CUSTOMER_FEATURES.length + 4);
-    for (const mascot of mascots) expect(mascot).toContain('aria-hidden="true"');
+    expect(moving.length + still.length).toBeGreaterThanOrEqual(CUSTOMER_FEATURES.length + 4);
+    expect(moving.map((mascot) => /data-pose="([^"]*)"/.exec(mascot)?.[1])).toEqual([
+      "wave",
+      "thinking",
+    ]);
+    for (const mascot of moving) expect(mascot).toMatch(/data-motion="still" aria-hidden="true"/);
+    for (const mascot of still) expect(mascot).toContain('alt=""');
     // Every landmark that repeats has its own name.
     for (const label of ["Page sections", "Language", "Legal"]) {
       expect(html).toContain(`<nav aria-label="${label}"`);

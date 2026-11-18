@@ -112,7 +112,8 @@ async def create_setup_intent(
 ) -> SetupIntentOut:
     """What the Payment Sheet needs, in setup mode, to save a card: a new SetupIntent's client
     secret, the caller's Stripe Customer (created on the first call, the same one ever after)
-    and a new ephemeral key for it, and the publishable key. The card data goes from the app to
+    and the publishable key; ephemeral_key_secret is deprecated and always null (#253c: the
+    setup sheet opens without the customer). The card data goes from the app to
     Stripe, never through this API. The body takes no field."""
     return await payment_methods.setup_intent(user)
 

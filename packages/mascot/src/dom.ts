@@ -12,7 +12,7 @@ import { RIGS, rigNode, type PoseRig } from "./rig.ts";
 
 /**
  * Jack without React, in a container element: the same drawing, idle loops and pose changes as
- * `<Mascot>` (react.ts), for the local gallery and for pages without React.
+ * `<LiveMascot>` (react-live.ts), for the local gallery and for pages without React.
  */
 export type MountOptions = {
   pose: MascotPose;

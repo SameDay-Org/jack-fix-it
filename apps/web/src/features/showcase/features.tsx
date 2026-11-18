@@ -1,6 +1,6 @@
+import type { MascotPose } from "@jack/mascot";
 import type { TFunction } from "i18next";
 
-import type { MascotPose } from "@/features/mascot/mascot";
 import { cn } from "@/lib/utils";
 
 import { MascotBubble } from "./mascot-bubble";

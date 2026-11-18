@@ -10,8 +10,9 @@ configured: else 503 not_configured.
   a second tap must not reach Stripe: it waits on the lock and reads the id the first stored.
   A first payment's create (#58) takes no such lock: racing it, one of the two calls is a 503
   to ask again, and one Customer exists either way (the same key). Then a new SetupIntent for
-  the Customer and a new ephemeral key: what the app's Payment Sheet needs, in setup mode, to
-  send the card to Stripe. The publishable key must be set too.
+  the Customer: what the app's Payment Sheet needs, in setup mode, to send the card to Stripe.
+  The sheet opens without the customer, so no ephemeral key is minted (#253c; the response's
+  ephemeral_key_secret is null for one release). The publishable key must be set too.
 - The list: all the customer's cards, the most recently added first, each with `is_default`
   from the Customer's `invoice_settings.default_payment_method`. A user with no Customer has
   no cards, and Stripe is not asked. Stripe is read page by page, at most
@@ -134,21 +135,18 @@ class PaymentMethodService:
 
     async def setup_intent(self, user: UserAccount) -> SetupIntentOut:
         """What the Payment Sheet needs to save a card on the caller: their Stripe Customer
-        (created on first use), a new SetupIntent and a new ephemeral key."""
+        (created on first use) and a new SetupIntent. No ephemeral key (#253c)."""
         payments, methods = self._require_stripe()
         publishable_key = self._require_publishable_key()
         customer_id = await self._customer(payments, user)
         async with self._stripe_call(user, "create_setup_intent"):
             intent = await methods.create_setup_intent(customer_id)
-        async with self._stripe_call(user, "create_ephemeral_key"):
-            ephemeral_key_secret = await payments.create_ephemeral_key(customer_id)
         logger.info(
             "payment_method_setup_intent_issued",
             extra={"user_id": str(user.id), "stripe_request_id": intent.request_id},
         )
         return SetupIntentOut(
             client_secret=intent.client_secret,
-            ephemeral_key_secret=ephemeral_key_secret,
             customer_id=customer_id,
             publishable_key=publishable_key,
         )

@@ -59,6 +59,23 @@ class JobRepository:
         )
 
     @staticmethod
+    def metric_facts() -> Subquery:
+        """Every job's id (`job_id`), request (`request_id`), customer (`customer_id`), its
+        creation, completion and confirmation times (`created_at`, `completed_at`,
+        `confirmed_at`), what the customer was charged (`captured_cents`: the frozen price plus
+        the tax) and the platform's fee (`platform_fee_cents`), for the staff metrics (#84)."""
+        return select(
+            Job.id.label("job_id"),
+            Job.request_id.label("request_id"),
+            Job.customer_id.label("customer_id"),
+            Job.created_at.label("created_at"),
+            Job.completed_at.label("completed_at"),
+            Job.confirmed_at.label("confirmed_at"),
+            (Job.customer_price_cents + Job.tax_cents).label("captured_cents"),
+            Job.platform_fee_cents.label("platform_fee_cents"),
+        ).subquery()
+
+    @staticmethod
     def queue_facts() -> Subquery:
         """Every job's request (`request_id`), id (`job_id`), accepted quote (`quote_id`) and
         status (`job_status`) only, as a subquery for another module's query: one row per

@@ -3,7 +3,7 @@ from collections.abc import Collection, Sequence
 from datetime import datetime
 from typing import NamedTuple
 
-from sqlalchemy import Select, func, select, tuple_, update
+from sqlalchemy import Select, Subquery, func, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.requests.models import (
@@ -39,6 +39,16 @@ class ServiceRequestRepository:
         """Inserts now (flush), so a reused file_key surfaces here as a unique violation."""
         self._session.add_all(media)
         await self._session.flush()
+
+    @staticmethod
+    def metric_facts() -> Subquery:
+        """Every request's id (`request_id`), creation (`created_at`) and first contact by the
+        BDC (`first_contact_at`, #81), for the staff metrics (#84). No customer detail."""
+        return select(
+            ServiceRequest.id.label("request_id"),
+            ServiceRequest.created_at.label("created_at"),
+            ServiceRequest.first_contact_at.label("first_contact_at"),
+        ).subquery()
 
     async def get(self, request_id: uuid.UUID) -> ServiceRequest | None:
         return await self._session.get(ServiceRequest, request_id)

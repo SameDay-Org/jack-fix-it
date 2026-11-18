@@ -770,10 +770,12 @@ export interface paths {
         /**
          * Pay for the quote I accepted
          * @description What the Payment Sheet needs to charge the customer for the quote they accepted: the
-         *     PaymentIntent's client secret, the customer and an ephemeral key for it, the publishable
+         *     PaymentIntent's client secret, the customer and a CustomerSession for it (the sheet lists
+         *     the saved cards, never removes one or offers to save one; the ephemeral key is deprecated),
+         *     the publishable
          *     key, and the amount, the tax and the total shown before paying. The amounts are the
          *     accepted quote's, computed on the server; the body takes no field. The first call creates
-         *     the PaymentIntent; later calls return the same one (a new ephemeral key each time), until
+         *     the PaymentIntent; later calls return the same one (a new session each time), until
          *     the payment succeeds (then the job exists: 409). The pro is checked again on every call:
          *     one who can no longer be hired is a 409, and nothing is created.
          */
@@ -821,7 +823,8 @@ export interface paths {
          * Start adding a card to my wallet
          * @description What the Payment Sheet needs, in setup mode, to save a card: a new SetupIntent's client
          *     secret, the caller's Stripe Customer (created on the first call, the same one ever after)
-         *     and a new ephemeral key for it, and the publishable key. The card data goes from the app to
+         *     and the publishable key; ephemeral_key_secret is deprecated and always null (#253c: the
+         *     setup sheet opens without the customer). The card data goes from the app to
          *     Stripe, never through this API. The body takes no field.
          */
         post: operations["create_setup_intent_v1_me_payment_methods_setup_intent_post"];
@@ -1842,6 +1845,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The dashboard's metrics (staff)
+         * @description The MVP exit metrics over whole days, both inclusive (default: the last
+         *     METRICS_DEFAULT_RANGE_DAYS days, today included). Ratios come with their numerator and
+         *     denominator (null when the denominator is 0), each figure with its formula's key
+         *     (docs/kpis.md), and a per-day series. Aggregates only: no name, contact, address or id.
+         *     Revenue is gross of refunds until they are recorded (`refunds_netted`).
+         */
+        get: operations["read_metrics_v1_admin_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/users/me/rating": {
         parameters: {
             query?: never;
@@ -1906,6 +1933,15 @@ export interface components {
             state: string;
             /** Zip Code */
             zip_code: string;
+        };
+        /** AmountMetric */
+        AmountMetric: {
+            formula: components["schemas"]["MetricFormula"];
+            /**
+             * Value
+             * @description Integer cents (USD).
+             */
+            value: number;
         };
         /** ApprovalBlocker */
         ApprovalBlocker: {
@@ -3056,6 +3092,57 @@ export interface components {
              */
             expires_at: string;
         };
+        /**
+         * MetricFormula
+         * @enum {string}
+         */
+        MetricFormula: "first_response_minutes" | "contact_rate" | "lead_to_job" | "completion_rate" | "customer_rating" | "pro_rating" | "dispute_rate" | "repeat_rate" | "gmv" | "revenue_gross_of_refunds";
+        /** Metrics */
+        Metrics: {
+            avg_first_response_minutes: components["schemas"]["ResponseTimeMetric"];
+            contact_rate: components["schemas"]["RatioMetric"];
+            lead_to_job: components["schemas"]["RatioMetric"];
+            completion_rate: components["schemas"]["RatioMetric"];
+            /** @description How pros rate their customers. */
+            customer_rating_avg: components["schemas"]["RatingMetric"];
+            /** @description How customers rate their pros. */
+            pro_rating_avg: components["schemas"]["RatingMetric"];
+            dispute_rate: components["schemas"]["RatioMetric"];
+            repeat_rate: components["schemas"]["RatioMetric"];
+            gmv_cents: components["schemas"]["AmountMetric"];
+            revenue_cents: components["schemas"]["AmountMetric"];
+        };
+        /** MetricsOut */
+        MetricsOut: {
+            /**
+             * From Date
+             * Format: date
+             * @description The first day read, in `time_zone`.
+             */
+            from_date: string;
+            /**
+             * To Date
+             * Format: date
+             * @description The last day read, in `time_zone` (inclusive).
+             */
+            to_date: string;
+            /**
+             * Time Zone
+             * @example America/New_York
+             */
+            time_zone: string;
+            /**
+             * Refunds Netted
+             * @description Whether revenue_cents is net of refunds. False until #76's refunds land: revenue is then the platform's fee as charged.
+             */
+            refunds_netted: boolean;
+            metrics: components["schemas"]["Metrics"];
+            /**
+             * Series
+             * @description One point per day of the range, in order.
+             */
+            series: components["schemas"]["SeriesPoint"][];
+        };
         /** MultiChoiceQuestion */
         MultiChoiceQuestion: {
             /**
@@ -3449,8 +3536,14 @@ export interface components {
              */
             customer_id: string;
             /**
+             * Customer Session Client Secret
+             * @description A CustomerSession's client secret, new on each call: the sheet lists the customer's saved cards with it, and Stripe lets it neither remove one nor offer to save a new one (cards are added in the wallet). Shown once per call, never logged.
+             */
+            customer_session_client_secret: string;
+            /**
              * Ephemeral Key Secret
-             * @description A short-lived key that lets the sheet act for the customer; new on each call.
+             * @deprecated
+             * @description Deprecated (#253c): app builds before the CustomerSession pass it to the sheet, which then has full rights over the customer's cards. Use customer_session_client_secret; this field is removed in a later release.
              */
             ephemeral_key_secret: string;
             /**
@@ -4182,6 +4275,20 @@ export interface components {
          * @enum {string}
          */
         QuoteStatus: "pending" | "accepted" | "rejected" | "expired" | "withdrawn";
+        /** RatingMetric */
+        RatingMetric: {
+            formula: components["schemas"]["MetricFormula"];
+            /**
+             * Value
+             * @description The mean overall rating (1 to 5), to 2 decimals; null with no review.
+             */
+            value: number | null;
+            /**
+             * Denominator
+             * @description Reviews counted.
+             */
+            denominator: number;
+        };
         /** RatingOut */
         RatingOut: {
             /**
@@ -4194,6 +4301,22 @@ export interface components {
              * @description How many published reviews the caller received. A review the caller has not answered yet is not counted until it is published.
              */
             count: number;
+        };
+        /**
+         * RatioMetric
+         * @description `numerator` of `denominator`, so the panel can show "12 of 40".
+         */
+        RatioMetric: {
+            formula: components["schemas"]["MetricFormula"];
+            /**
+             * Value
+             * @description numerator / denominator, to 4 decimals; null when the denominator is 0.
+             */
+            value: number | null;
+            /** Numerator */
+            numerator: number;
+            /** Denominator */
+            denominator: number;
         };
         /** ReadinessResponse */
         ReadinessResponse: {
@@ -4537,6 +4660,25 @@ export interface components {
          * @enum {string}
          */
         ResolutionDecision: "release" | "partial" | "refund";
+        /** ResponseTimeMetric */
+        ResponseTimeMetric: {
+            formula: components["schemas"]["MetricFormula"];
+            /**
+             * Value
+             * @description The mean, in minutes to 1 decimal; null when no request had a contact.
+             */
+            value: number | null;
+            /**
+             * Median
+             * @description The median, in minutes to 1 decimal.
+             */
+            median: number | null;
+            /**
+             * Denominator
+             * @description Requests of the range with a first contact.
+             */
+            denominator: number;
+        };
         /**
          * ReverseAddressOut
          * @description The US street address at the position, and whether its ZIP is a served area.
@@ -4805,6 +4947,21 @@ export interface components {
             /** @description contact_details_hidden when something in the text was masked (redacted is true): the app tells the sender that contact details are not shared in the chat. Null otherwise. */
             warning: components["schemas"]["ChatWarning"] | null;
         };
+        /** SeriesPoint */
+        SeriesPoint: {
+            /**
+             * Day
+             * Format: date
+             * @description A day in `time_zone`.
+             */
+            day: string;
+            /** Requests Created */
+            requests_created: number;
+            /** Jobs Completed */
+            jobs_completed: number;
+            /** Gmv Cents */
+            gmv_cents: number;
+        };
         /** ServedCheckOut */
         ServedCheckOut: {
             /**
@@ -4843,9 +5000,10 @@ export interface components {
             client_secret: string;
             /**
              * Ephemeral Key Secret
-             * @description A short-lived key that lets the sheet act for the customer; new on each call.
+             * @deprecated
+             * @description Deprecated (#253c): always null. The setup sheet opens without the customer (with a key, Stripe would let it list, remove and reuse saved cards behind the API), so no key is minted; the field stays for one release and is then removed.
              */
-            ephemeral_key_secret: string;
+            ephemeral_key_secret?: string | null;
             /**
              * Customer Id
              * @description The customer's Stripe Customer id, for the sheet.
@@ -11280,6 +11438,69 @@ export interface operations {
             };
             /** @description not_configured: refunds are not configured. payments_unavailable: Stripe is not reachable; the dispute stays open, the same decision can be sent again. */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_metrics_v1_admin_metrics_get: {
+        parameters: {
+            query?: {
+                /** @description The first day, YYYY-MM-DD. */
+                from?: string | null;
+                /** @description The last day, YYYY-MM-DD, inclusive (default: today). */
+                to?: string | null;
+                /** @description An IANA time zone the days are read in (default: BUSINESS_TIME_ZONE). */
+                tz?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricsOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a date that is not YYYY-MM-DD. invalid_range: `from` after `to`, a range longer than METRICS_MAX_RANGE_DAYS days, or `tz` not an IANA time zone. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than METRICS_READ_LIMIT reads in the window; Retry-After says when to try again. */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

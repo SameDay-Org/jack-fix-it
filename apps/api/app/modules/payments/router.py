@@ -14,7 +14,9 @@ from app.modules.payments.schemas import JobTransferOut, PaymentCreate, PaymentS
 from app.modules.payments.service import PaymentsConfig, PaymentService
 from app.modules.payments.transfer_reader import TransferReader
 
-router = APIRouter(prefix="/requests", tags=["payments"])
+# A customer's checkout (#61). Its answer carries a live CustomerSession credential (#253):
+# no HTTP cache may keep it, nor any error of the route.
+router = APIRouter(prefix="/requests", tags=["payments"], route_class=NoStoreRoute)
 # The BDC and admins: a job's transfer to its pro, read-only (#68). Never stored by a cache.
 staff_router = APIRouter(
     prefix="/admin/jobs/{job_id}/transfer", tags=["payments"], route_class=NoStoreRoute
@@ -74,10 +76,12 @@ async def create_payment(
     body: Annotated[PaymentCreate | None, Body()] = None,
 ) -> PaymentSheetOut:
     """What the Payment Sheet needs to charge the customer for the quote they accepted: the
-    PaymentIntent's client secret, the customer and an ephemeral key for it, the publishable
+    PaymentIntent's client secret, the customer and a CustomerSession for it (the sheet lists
+    the saved cards, never removes one or offers to save one; the ephemeral key is deprecated),
+    the publishable
     key, and the amount, the tax and the total shown before paying. The amounts are the
     accepted quote's, computed on the server; the body takes no field. The first call creates
-    the PaymentIntent; later calls return the same one (a new ephemeral key each time), until
+    the PaymentIntent; later calls return the same one (a new session each time), until
     the payment succeeds (then the job exists: 409). The pro is checked again on every call:
     one who can no longer be hired is a 409, and nothing is created."""
     return await payments.payment_sheet(user, request_id, quote_id)

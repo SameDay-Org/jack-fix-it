@@ -52,13 +52,8 @@ const children = (node: MascotNode) =>
     : [];
 
 describe("the poses", () => {
-  it("are the six of the showcase's Mascot component, all drawn", () => {
-    const placeholder = readFileSync(
-      join(here, "../../../apps/web/src/features/mascot/mascot.tsx"),
-      "utf8",
-    );
-    const listed = /MASCOT_POSES = \[([^\]]*)\]/.exec(placeholder)?.[1] ?? "";
-    expect([...listed.matchAll(/"([a-z]+)"/g)].map((match) => match[1])).toEqual([...MASCOT_POSES]);
+  it("are the six of the public contract the pages ask for, all drawn", () => {
+    expect([...MASCOT_POSES]).toEqual(["wave", "point", "celebrate", "peek", "thinking", "tools"]);
     expect([...READY_POSES]).toEqual([...MASCOT_POSES]);
   });
 
