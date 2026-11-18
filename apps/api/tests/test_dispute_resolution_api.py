@@ -124,6 +124,8 @@ class FakeStripeRefunds:
     crashes: int = 0
     status: str = "succeeded"
     on_create: Callable[[], Awaitable[None]] | None = None
+    # Runs inside a retrieve, after Stripe's state was read and before it is answered.
+    on_retrieve: Callable[[], Awaitable[None]] | None = None
     list_complete: bool = True
 
     def _fail(self, operation: str) -> None:
@@ -181,7 +183,10 @@ class FakeStripeRefunds:
     async def retrieve_refund(self, refund_id: str) -> RefundFacts:
         self._fail("retrieve")
         self.retrieves.append(refund_id)
-        return self.refunds[refund_id]
+        read = self.refunds[refund_id]
+        if self.on_retrieve is not None:
+            await self.on_retrieve()
+        return read
 
     def set_status(self, refund_id: str, status: str) -> None:
         """Stripe moves the refund on."""
@@ -1737,6 +1742,78 @@ async def test_a_refund_stripe_fails_after_it_settled_holds_the_partial_payout(
     service = TransferService(db_session, FakeStripeTransfers(), TransferConfig(STUCK), clock)
     assert await service.release(case.job_id) is ReleaseOutcome.HELD
     assert case.job_id not in await service.due(10_000)
+
+
+async def test_an_admin_s_read_overtaken_by_the_settling_event_leaves_it_settled(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    queue: RecordingQueue,
+    refunds: FakeStripeRefunds,
+) -> None:
+    """Every reader reads Stripe before it takes the locks. An admin's read says pending; Stripe
+    then finishes the refund and its event is applied first. The admin's older read never
+    replaces it: the dispute stays settled, and the pro's part is not held."""
+    case = await disputed(db_session, world)
+    refunds.status = "pending"
+    assert (await resolve(db_client, world, case, "partial", ODD_RELEASE)).status_code == 409
+    [made] = refunds.refunds.values()
+
+    async def event_overtakes() -> None:
+        refunds.on_retrieve = None
+        refunds.set_status(made.refund_id, "succeeded")
+        await deliver(
+            db_session, refunds, queue, refund_event("refund.updated", made.refund_id, "pending")
+        )
+
+    refunds.on_retrieve = event_overtakes
+    clock.now += timedelta(minutes=1)
+
+    response = await resolve(db_client, world, case, "partial", ODD_RELEASE)
+
+    assert response.status_code == 200, response.text
+    assert (response.json()["status"], response.json()["refund"]["stripe_status"]) == (
+        "resolved",
+        "succeeded",
+    )
+    [row] = await refund_rows(db_session, case)
+    assert row.stripe_status == "succeeded"
+    assert len(await audits(db_session, case, "dispute.resolve")) == 1
+    assert queued_release(queue, case)
+    await run_transfer(db_session, clock, case)
+
+
+async def test_a_late_read_of_succeeded_never_clears_a_failure_stored_before_it(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    queue: RecordingQueue,
+    refunds: FakeStripeRefunds,
+) -> None:
+    """Stripe failed the refund after it succeeded, and the failure is stored; an event read
+    before the failure (succeeded) is processed after it. The failure stands: staff still see
+    it, and the pro's part stays held."""
+    case = await disputed(db_session, world)
+    assert (await resolve(db_client, world, case, "partial", ODD_RELEASE)).status_code == 200
+    [made] = refunds.refunds.values()
+    succeeded = refunds.refunds[made.refund_id]
+    refunds.set_status(made.refund_id, "failed")
+    await deliver(
+        db_session, refunds, queue, refund_event("refund.failed", made.refund_id, "failed")
+    )
+
+    refunds.refunds[made.refund_id] = succeeded  # what the late reader saw
+    await deliver(
+        db_session, refunds, queue, refund_event("refund.updated", made.refund_id, "succeeded")
+    )
+
+    [row] = await refund_rows(db_session, case)
+    assert row.stripe_status == "failed"
+    assert await staff_flag(db_client, world, case) == (True, True)
+    service = TransferService(db_session, FakeStripeTransfers(), TransferConfig(STUCK), clock)
+    assert await service.release(case.job_id) is ReleaseOutcome.HELD
 
 
 async def test_a_refund_a_lost_answer_left_failed_is_stored_and_never_made_again(

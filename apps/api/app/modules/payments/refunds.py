@@ -29,11 +29,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.integrations.stripe_refunds import RefundFacts, StripeRefunds
 from app.modules.payments.models import (
     REFUND_ERROR_CODE_LENGTH,
+    STRIPE_RANK_DEAD,
+    STRIPE_RANK_SUCCEEDED,
     STRIPE_REFUND_DEAD,
     STRIPE_REFUND_SUCCEEDED,
     Payment,
     Refund,
     RefundStatus,
+    stripe_status_rank,
 )
 from app.modules.payments.repository import PaymentRepository, RefundRepository, TransferRepository
 from app.modules.payments.schemas import PaymentSummaryOut, RefundOut
@@ -128,6 +131,23 @@ class PaymentFacts:
     currency: str
     customer_total_cents: int
     pro_payout_cents: int
+
+
+@dataclass(frozen=True)
+class Observed:
+    """Stripe's status of a refund as the row holds it after a read (RefundLedger.observe):
+    the read's, or the row's when the read is older than it. `changed`: new for the row."""
+
+    status: str
+    changed: bool
+
+    @property
+    def succeeded(self) -> bool:
+        return stripe_status_rank(self.status) == STRIPE_RANK_SUCCEEDED
+
+    @property
+    def dead(self) -> bool:
+        return stripe_status_rank(self.status) == STRIPE_RANK_DEAD
 
 
 @dataclass(frozen=True)
@@ -267,14 +287,21 @@ class RefundLedger:
             attempt.refund_id, attempt.number, code[:REFUND_ERROR_CODE_LENGTH]
         )
 
-    async def observe(self, refund: DisputeRefund, made: RefundFacts) -> bool:
+    async def observe(self, refund: DisputeRefund, made: RefundFacts) -> Observed:
         """Stores the refund Stripe holds for the row (its id, the first time) and Stripe's
-        status of it now. True when that status is new for the row. The caller read `refund`
-        under its lock in this transaction, and checked `made` fits it (refund_fits)."""
+        status of it now, which only moves forward (stripe_status_rank): a read less final than
+        the row's was taken before another reader stored a newer one, and the row's stands. The
+        caller read `refund` under its lock in this transaction, and checked `made` fits it
+        (refund_fits)."""
+        if refund.stripe_status is not None and stripe_status_rank(
+            made.status
+        ) < stripe_status_rank(refund.stripe_status):
+            return Observed(refund.stripe_status, changed=False)
         if not await self._refunds.observe(refund.refund_id, made.refund_id, made.status):
-            # Not reached: the row holds another Stripe refund (refund_fits refuses it).
+            # Not reached: the row holds another Stripe refund (refund_fits refuses it), or a
+            # newer status (checked above, under the row's lock).
             raise RefundNeedsReviewError("another_stripe_refund")
-        return refund.stripe_status != made.status
+        return Observed(made.status, changed=refund.stripe_status != made.status)
 
     async def of_dispute(self, dispute_id: uuid.UUID) -> RefundOut | None:
         refund = await self._refunds.of_dispute(dispute_id)

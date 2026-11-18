@@ -197,6 +197,26 @@ REFUND_NOT_MADE: Final = frozenset({RefundStatus.PENDING, RefundStatus.FAILED})
 STRIPE_REFUND_SUCCEEDED: Final = "succeeded"
 STRIPE_REFUND_DEAD: Final = frozenset({"failed", "canceled"})
 STRIPE_STATUS_LENGTH: Final = 32
+# How final each of Stripe's statuses of a refund is. Stripe moves a refund forward only: not
+# finished, then succeeded, failed or canceled (a succeeded one can still fail, never the other
+# way). A read less final than the row's is older than it (two readers raced): never stored.
+STRIPE_RANK_NONE: Final = 0
+STRIPE_RANK_UNFINISHED: Final = 1
+STRIPE_RANK_SUCCEEDED: Final = 2
+STRIPE_RANK_DEAD: Final = 3
+
+
+def stripe_status_rank(status: str | None) -> int:
+    """How final Stripe's status of a refund is (see STRIPE_RANK_*); unknown is unfinished."""
+    if status is None:
+        return STRIPE_RANK_NONE
+    if status == STRIPE_REFUND_SUCCEEDED:
+        return STRIPE_RANK_SUCCEEDED
+    if status in STRIPE_REFUND_DEAD:
+        return STRIPE_RANK_DEAD
+    return STRIPE_RANK_UNFINISHED
+
+
 # As for transfers: a Stripe error code, an exception's class name or one of ours, cut.
 REFUND_ERROR_CODE_LENGTH: Final = 64
 

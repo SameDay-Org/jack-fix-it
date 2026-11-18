@@ -368,18 +368,21 @@ class RefundSettlement:
         self, locked: Locked, refund: DisputeRefund, read: RefundFacts, actor: RefundActor
     ) -> Application:
         """Stores Stripe's refund and its status on the row (`refund` read under its lock in
-        this transaction, `read` checked to fit it), then: succeeded with the dispute open
+        this transaction, `read` checked to fit it; a read older than the row's status does not
+        replace it: the readers read Stripe before they take the locks), then, by the row's
+        status: succeeded with the dispute open
         settles it (SETTLED, with what to announce after the commit); succeeded with it resolved
         is UNCHANGED; failed or canceled is FAILED (an error logged for staff); anything else is
         PENDING. A status new for the row that settles nothing is audited once
         (dispute.refund_outcome)."""
-        changed = await self._ledger.observe(refund, read)
-        if read.succeeded:
+        # Stripe's status as the row holds it now: a read older than the row's never wins.
+        observed = await self._ledger.observe(refund, read)
+        if observed.succeeded:
             if locked.dispute.status is DisputeStatus.RESOLVED:
                 return Application(Applied.UNCHANGED)
             return Application(Applied.SETTLED, await self._settle(locked, refund, read, actor))
-        if changed:
-            if read.dead:
+        if observed.changed:
+            if observed.dead:
                 # For staff (#434): the money did not go back, and any payout stays held.
                 logger.error(
                     "dispute_refund_failed",
@@ -389,14 +392,14 @@ class RefundSettlement:
                 actor,
                 refund.dispute_id,
                 {
-                    "outcome": "refund_failed" if read.dead else "refund_pending",
+                    "outcome": "refund_failed" if observed.dead else "refund_pending",
                     "refund_id": str(refund.refund_id),
                     "stripe_refund_id": read.refund_id,
-                    "stripe_status": read.status,
+                    "stripe_status": observed.status,
                     "dispute_status": locked.dispute.status.value,
                 },
             )
-        return Application(Applied.FAILED if read.dead else Applied.PENDING)
+        return Application(Applied.FAILED if observed.dead else Applied.PENDING)
 
     async def write_resolution(
         self, locked: Locked, plan: _Plan, *, by: uuid.UUID, note: str

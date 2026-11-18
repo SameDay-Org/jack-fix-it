@@ -3,12 +3,16 @@ from collections.abc import Collection
 from datetime import datetime
 from typing import Final
 
-from sqlalchemy import ColumnElement, Select, Subquery, func, or_, select, update
+from sqlalchemy import ColumnElement, Select, Subquery, case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.payments.models import (
     MADE_STATUSES,
     REFUND_NOT_MADE,
+    STRIPE_RANK_DEAD,
+    STRIPE_RANK_NONE,
+    STRIPE_RANK_SUCCEEDED,
+    STRIPE_RANK_UNFINISHED,
     STRIPE_REFUND_DEAD,
     STRIPE_REFUND_SUCCEEDED,
     UNPAID_STATUSES,
@@ -18,6 +22,7 @@ from app.modules.payments.models import (
     RefundStatus,
     Transfer,
     TransferStatus,
+    stripe_status_rank,
 )
 
 # Statuses of a transfer Stripe has not made: the only ones an attempt may leave or enter.
@@ -459,13 +464,21 @@ class RefundRepository:
         self, refund_id: uuid.UUID, stripe_refund_id: str, stripe_status: str
     ) -> bool:
         """Stores the refund Stripe holds for the row (created, its id) and Stripe's status of
-        it now. False (nothing written) when the row holds another Stripe refund. The caller
-        holds the row's lock and commits it with what the status settles, if anything."""
+        it now. False (nothing written) when the row holds another Stripe refund, or a status
+        more final than this one (stripe_status_rank: the read is older). The caller holds the
+        row's lock and commits it with what the status settles, if anything."""
+        stored_rank = case(
+            (Refund.stripe_status.is_(None), STRIPE_RANK_NONE),
+            (Refund.stripe_status == STRIPE_REFUND_SUCCEEDED, STRIPE_RANK_SUCCEEDED),
+            (Refund.stripe_status.in_(STRIPE_REFUND_DEAD), STRIPE_RANK_DEAD),
+            else_=STRIPE_RANK_UNFINISHED,
+        )
         statement = (
             update(Refund)
             .where(
                 Refund.id == refund_id,
                 Refund.stripe_refund_id.is_(None) | (Refund.stripe_refund_id == stripe_refund_id),
+                stored_rank <= stripe_status_rank(stripe_status),
             )
             .values(
                 status=RefundStatus.CREATED,
