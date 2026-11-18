@@ -7,6 +7,10 @@ flushes the row, and the caller commits both. An audit write that fails, or an o
 no longer an active admin, rolls the change back. A refusal or a dry run writes nothing. Rows
 are append-only (a trigger refuses UPDATE, DELETE and TRUNCATE).
 
+What came of such an action later, when the money moves only once a provider finishes it (a
+dispute's refund, #433 round 1), is recorded through `record_outcome`, under the admin whose
+action it is: no role check again, since the outcome happened whatever their role is now.
+
 Staff reads of what only staff may see are audited too (#72: the originals of redacted chat
 messages): `record_read` writes the row of a read by an active agent or admin, and the caller
 commits it before answering, so nothing is shown unaudited.
@@ -87,6 +91,39 @@ class AuditService:
             before=before,
             after=after,
             reason=operator.reason,
+        )
+
+    async def active_admin(self, user_id: uuid.UUID) -> bool:
+        """Whether the user is an active admin as last committed, read now and share-locked
+        until the caller's transaction ends: an admin demoted or suspended since an earlier
+        check (during a provider call) is seen, and cannot be demoted between this check and
+        the commit of what it guards (#433 round 2)."""
+        return _active_admin(await self._users.get_current_shared(user_id))
+
+    async def record_outcome(
+        self,
+        actor_id: uuid.UUID,
+        action: AuditAction,
+        entity: AuditEntity,
+        before: AuditState,
+        after: AuditState,
+        *,
+        reason: str | None = None,
+    ) -> None:
+        """Adds the row of what came of a money action an active admin already took, and that
+        `record` audited when they took it (#433 round 1: a dispute's refund, which Stripe
+        finishes later), to the caller's transaction and flushes it. `actor_id` is that admin
+        (or the admin acting on it now), taken from the row that holds the action, never from a
+        request. No role check: the outcome happened whatever the admin's role is now, and
+        refusing to record it would leave money moved with no row."""
+        await self._audit.add(
+            actor_user_id=actor_id,
+            action=action.value,
+            entity_type=entity.type.value,
+            entity_id=entity.id,
+            before=before,
+            after=after,
+            reason=reason,
         )
 
     async def record_staff_action(

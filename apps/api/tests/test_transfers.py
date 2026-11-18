@@ -433,6 +433,7 @@ async def test_an_open_dispute_holds_the_job_until_it_is_resolved(
         quote_id=job.quote_id,
         pro_id=world.pro.profile_id,
         confirmed=True,
+        disputed=False,
         pro_payout_cents=PAYOUT,
     )
 

@@ -22,7 +22,7 @@ so the database guard lets the insert through.
 """
 
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Collection
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -98,6 +98,17 @@ class SystemActor:
 
 SYSTEM: Final = SystemActor()
 
+
+@dataclass(frozen=True)
+class AdminDecision:
+    """An admin's recorded decision that is carried out later (#76: a dispute resolved with a
+    release moves its job disputed -> paid_out once the transfer is made; a full refund moves it
+    disputed -> refunded once Stripe gave the money back). Acts as the admin who decided
+    (`admin_id`, kept on the dispute), and the event names them."""
+
+    admin_id: uuid.UUID
+
+
 _ACTOR_KIND_BY_ROLE: Final = {
     UserRole.CUSTOMER: ActorKind.CUSTOMER,
     UserRole.PRO: ActorKind.PRO,
@@ -129,7 +140,7 @@ class JobStateMachine:
         self,
         job_id: uuid.UUID,
         to: JobStatus,
-        actor: UserAccount | SystemActor,
+        actor: UserAccount | SystemActor | AdminDecision,
         *,
         lat: Decimal | None = None,
         lng: Decimal | None = None,
@@ -169,17 +180,21 @@ class JobStateMachine:
                 type=event_type,
                 from_status=from_status,
                 to_status=to,
-                actor_id=None if isinstance(actor, SystemActor) else actor.id,
+                actor_id=_actor_id(actor),
                 lat=lat,
                 lng=lng,
             )
         )
         return to
 
-    async def _actor_kind(self, job: Job, actor: UserAccount | SystemActor) -> ActorKind | None:
+    async def _actor_kind(
+        self, job: Job, actor: UserAccount | SystemActor | AdminDecision
+    ) -> ActorKind | None:
         """The actor's kind for this job. 404 for a customer or pro who is not the job's own."""
         if isinstance(actor, SystemActor):
             return ActorKind.SYSTEM
+        if isinstance(actor, AdminDecision):
+            return ActorKind.ADMIN
         kind = _ACTOR_KIND_BY_ROLE.get(actor.role)
         if kind is ActorKind.CUSTOMER and actor.id != job.customer_id:
             raise NotFoundError
@@ -194,6 +209,14 @@ def job_earning_facts() -> Subquery:
     """Each job's ids, status, completion, the pro's frozen payout and paid-out time, as
     JobRepository.earning_facts names them: a subquery for the pro's earnings (#70)."""
     return JobRepository.earning_facts()
+
+
+def _actor_id(actor: UserAccount | SystemActor | AdminDecision) -> uuid.UUID | None:
+    if isinstance(actor, SystemActor):
+        return None
+    if isinstance(actor, AdminDecision):
+        return actor.admin_id
+    return actor.id
 
 
 def job_metric_facts() -> Subquery:
@@ -396,20 +419,23 @@ class JobPartiesReader:
 @dataclass(frozen=True)
 class JobPayoutFacts:
     """What the transfer to the pro reads of a job (#68): who is paid, for which request and
-    quote, whether the job is confirmed (so waiting for its transfer) and the pro's payout as
-    frozen at payment."""
+    quote, whether the job is confirmed (so waiting for its transfer) or disputed (paid only
+    once an admin resolved its dispute with a release, #76) and the pro's payout as frozen at
+    payment."""
 
     job_id: uuid.UUID
     request_id: uuid.UUID
     quote_id: uuid.UUID
     pro_id: uuid.UUID
     confirmed: bool
+    disputed: bool
     pro_payout_cents: int
 
 
 class JobPayouts:
     """A job as its transfer sees it, for the payments module (#68): the read under the job's
-    lock, and the one move a transfer makes, confirmed -> paid_out, through the machine."""
+    lock, and the one move a transfer makes, confirmed (or disputed, #76) -> paid_out, through
+    the machine."""
 
     def __init__(self, session: AsyncSession, pros: ProService) -> None:
         self._jobs = JobRepository(session)
@@ -421,6 +447,12 @@ class JobPayouts:
         (`pro_payout_cents`) of every confirmed job, as a subquery: the transfer sweep reads
         the jobs still to pay in its own query."""
         return JobRepository.confirmed()
+
+    @staticmethod
+    def awaiting_transfer(released_disputes: Subquery) -> Subquery:
+        """The same columns as `confirmed`, for every job waiting for its transfer: confirmed,
+        or disputed with its dispute resolved by a release (`released_disputes`: job_id, #76)."""
+        return JobRepository.awaiting_transfer(released_disputes)
 
     async def locked(self, job_id: uuid.UUID) -> JobPayoutFacts | None:
         """The job, its row locked FOR UPDATE until the caller's transaction ends (the lock
@@ -434,14 +466,15 @@ class JobPayouts:
             quote_id=job.quote_id,
             pro_id=job.pro_id,
             confirmed=job.status is JobStatus.CONFIRMED,
+            disputed=job.status is JobStatus.DISPUTED,
             pro_payout_cents=job.pro_payout_cents,
         )
 
-    async def paid_out(self, job_id: uuid.UUID) -> None:
-        """confirmed -> paid_out as the system, once the transfer to the pro was created: the
-        machine's transition (409 from any other status) with its job_events row. Flushes,
-        never commits."""
-        await self._machine.transition(job_id, JobStatus.PAID_OUT, SYSTEM)
+    async def paid_out(self, job_id: uuid.UUID, by: SystemActor | AdminDecision = SYSTEM) -> None:
+        """-> paid_out once the transfer to the pro was created: confirmed as the system, or
+        disputed as the admin whose release it carries out (#76). The machine's transition
+        (409 from any other status) with its job_events row. Flushes, never commits."""
+        await self._machine.transition(job_id, JobStatus.PAID_OUT, by)
 
     async def exists(self, job_id: uuid.UUID) -> bool:
         return await self._jobs.get(job_id) is not None
@@ -450,7 +483,8 @@ class JobPayouts:
 @dataclass(frozen=True)
 class JobDisputeFacts:
     """What a dispute reads of a job (#75): its parties, its request (for the push's public
-    code), its status and when the pro marked it done (the dispute window starts there)."""
+    code), its status and when the pro marked it done (the dispute window starts there); for
+    its resolution (#76), the accepted quote (its payment) and the pro's frozen payout."""
 
     job_id: uuid.UUID
     request_id: uuid.UUID
@@ -459,6 +493,8 @@ class JobDisputeFacts:
     pro_user_id: uuid.UUID
     status: JobStatus
     completed_at: datetime | None
+    quote_id: uuid.UUID
+    pro_payout_cents: int
 
 
 class JobDisputes:
@@ -499,6 +535,19 @@ class JobDisputes:
         never commits."""
         await self._machine.transition(job_id, JobStatus.DISPUTED, customer)
 
+    async def read_many(self, job_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, JobDisputeFacts]:
+        """The jobs among `job_ids` by id, for staff (#76), who may read any job. One statement,
+        unlocked."""
+        found = await self._jobs.many_with_pro_user(job_ids, self._pros.users())
+        return {job.id: _dispute_facts(job, pro_user_id) for job, pro_user_id in found}
+
+    async def refunded(self, job_id: uuid.UUID, by: AdminDecision) -> None:
+        """disputed -> refunded once Stripe gave the customer's money back (#76), as the admin
+        whose full-refund decision it carries out (kept on the dispute and its refund, #433
+        round 1): the machine's transition (409 from any other status) with its job_events row.
+        Flushes, never commits."""
+        await self._machine.transition(job_id, JobStatus.REFUNDED, by)
+
 
 def _dispute_facts(job: Job, pro_user_id: uuid.UUID) -> JobDisputeFacts:
     return JobDisputeFacts(
@@ -509,4 +558,6 @@ def _dispute_facts(job: Job, pro_user_id: uuid.UUID) -> JobDisputeFacts:
         pro_user_id=pro_user_id,
         status=job.status,
         completed_at=job.completed_at,
+        quote_id=job.quote_id,
+        pro_payout_cents=job.pro_payout_cents,
     )
