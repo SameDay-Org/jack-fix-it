@@ -40,6 +40,7 @@ import {
   type ShippedSlug,
 } from "./categories";
 import { contactEmail, LANDING_ANCHORS, requestFlowEnabled } from "./config";
+import { organizationJsonLd } from "./json-ld";
 import { LandingFooter } from "./landing-footer";
 import { LandingHeader } from "./landing-header";
 
@@ -291,10 +292,15 @@ function ForPros({ t, locale }: { t: TFunction; locale: Locale }) {
 export async function LandingPage({ locale }: { locale: Locale }) {
   const t = await getT(locale);
   const categories = await loadCategories(locale);
+  const organization = organizationJsonLd(t("brand.name"));
 
   return (
     <div lang={locale}>
       <HtmlLang locale={locale} />
+      {organization ? (
+        // The text is our own JSON, with `<` escaped (json-ld.ts): it cannot close the script.
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: organization }} />
+      ) : null}
       <a
         href={`#${MAIN_ID}`}
         className={cn(
