@@ -489,6 +489,12 @@ class CustomerRequestReader:
             raise NotFoundError
         return request.public_code
 
+    async def category_ids(
+        self, request_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, uuid.UUID | None]:
+        """Each request's category, for a pro's earnings (#70): nothing about the customer."""
+        return await self._requests.category_ids(request_ids)
+
     async def place(self, request_id: uuid.UUID) -> AddressPlace:
         """Where the request takes place, for the route of its job (#351). The caller already
         holds the request's job and checked whose it is: this does not."""

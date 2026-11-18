@@ -16,13 +16,14 @@ import uuid
 from collections.abc import Collection
 from typing import Final
 
+from sqlalchemy import Subquery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.errors import NotFoundError
 from app.modules.audit.service import AuditService
 from app.modules.audit.types import AuditAction, AuditEntity, AuditEntityType
 from app.modules.jobs.service import JobPayouts
-from app.modules.payments.models import TransferStatus
+from app.modules.payments.models import CURRENCY, TransferStatus
 from app.modules.payments.payout_status import PayoutStatus
 from app.modules.payments.repository import TransferRepository
 from app.modules.payments.schemas import JobTransferOut, TransferOut
@@ -38,6 +39,16 @@ _PAYOUT: Final[dict[TransferStatus, PayoutStatus | None]] = {
     TransferStatus.CREATED: PayoutStatus.CREATED,
     TransferStatus.REVERSED: None,
 }
+
+
+# The currency every payment is made in (payments.models.CURRENCY), for other modules.
+PAYMENT_CURRENCY: Final = CURRENCY
+
+
+def transfer_payout_facts() -> Subquery:
+    """Each transfer row's `job_id`, `amount_cents`, `made` and `reversed` (no Stripe id), as a
+    subquery for the pro's earnings (#70): our rows only, never a live Stripe call."""
+    return TransferRepository.payout_facts()
 
 
 class TransferReader:

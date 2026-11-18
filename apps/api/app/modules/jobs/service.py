@@ -190,6 +190,12 @@ class JobStateMachine:
         return kind
 
 
+def job_earning_facts() -> Subquery:
+    """Each job's ids, status, completion, the pro's frozen payout and paid-out time, as
+    JobRepository.earning_facts names them: a subquery for the pro's earnings (#70)."""
+    return JobRepository.earning_facts()
+
+
 @dataclass(frozen=True)
 class NewJob:
     """What a job is created with: its parties and the amounts frozen at payment (#61)."""

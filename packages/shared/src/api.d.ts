@@ -1770,6 +1770,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/pros/me/earnings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My earnings
+         * @description What the caller receives for each of their jobs whose work is done, newest completion
+         *     first, and a summary over all of them: awaiting the customer's confirmation (with when it
+         *     confirms itself at the latest), on its way (confirmed, the transfer to be made), on hold
+         *     (a reported problem, or under review) and paid. The amounts are the payout frozen at
+         *     payment, the "you'll receive" of the quote. The pro is the caller: no id is taken. Never
+         *     the customer's name, contacts or address, the platform's fee, or a Stripe id.
+         */
+        get: operations["read_my_earnings_v1_pros_me_earnings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/users/me/rating": {
         parameters: {
             query?: never;
@@ -2632,6 +2657,91 @@ export interface components {
              * Format: date-time
              */
             expires_at: string;
+        };
+        /** EarningCategory */
+        EarningCategory: {
+            /** Slug */
+            slug: string;
+            /**
+             * Names
+             * @description Display name per locale, e.g. en and es.
+             */
+            names: {
+                [key: string]: string;
+            };
+        };
+        /** EarningItem */
+        EarningItem: {
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /** @description What the job was: the safe title. */
+            category: components["schemas"]["EarningCategory"] | null;
+            /**
+             * Amount Cents
+             * @description What the pro receives, in integer cents.
+             */
+            amount_cents: number;
+            status: components["schemas"]["EarningStatus"];
+            /**
+             * Completed At
+             * Format: date-time
+             */
+            completed_at: string;
+            /**
+             * Paid At
+             * @description When it was paid; null until then.
+             */
+            paid_at: string | null;
+            /**
+             * Expected By
+             * @description awaiting_confirmation only: when the job confirms itself at the latest; null otherwise (the payout's own timing is Stripe's).
+             */
+            expected_by: string | null;
+        };
+        /**
+         * EarningStatus
+         * @description Where a job's money stands, in the pro's words.
+         * @enum {string}
+         */
+        EarningStatus: "awaiting_confirmation" | "on_the_way" | "on_hold" | "paid";
+        /** EarningsPage */
+        EarningsPage: {
+            summary: components["schemas"]["EarningsSummary"];
+            /**
+             * Items
+             * @description Newest completion first.
+             */
+            items: components["schemas"]["EarningItem"][];
+            /**
+             * Next Cursor
+             * @description Pass it as `cursor` for the next page.
+             */
+            next_cursor: string | null;
+        };
+        /**
+         * EarningsSummary
+         * @description All the pro's jobs, not just this page.
+         */
+        EarningsSummary: {
+            /** Awaiting Confirmation Cents */
+            awaiting_confirmation_cents: number;
+            /**
+             * Pending Cents
+             * @description Confirmed, the transfer still to be made.
+             */
+            pending_cents: number;
+            /** On Hold Cents */
+            on_hold_cents: number;
+            /** Paid Cents */
+            paid_cents: number;
+            /**
+             * Currency
+             * @example usd
+             */
+            currency: string;
         };
         /** ErrorDetail */
         ErrorDetail: {
@@ -10698,6 +10808,66 @@ export interface operations {
             };
             /** @description validation_error: a message blank, longer than 2000 characters, holding a NUL, or empty once invisible characters are dropped; an unknown field; a job_id that is not a UUID. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_my_earnings_v1_pros_me_earnings_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                /** @description Capped at the list maximum. */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EarningsPage"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a bad cursor or limit. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than EARNINGS_READ_LIMIT reads in the window; Retry-After says when to try again. */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

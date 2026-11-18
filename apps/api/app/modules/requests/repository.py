@@ -40,6 +40,17 @@ class ServiceRequestRepository:
         self._session.add_all(media)
         await self._session.flush()
 
+    async def category_ids(
+        self, request_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, uuid.UUID | None]:
+        """Each request's category among `request_ids`, in one statement."""
+        if not request_ids:
+            return {}
+        statement = select(ServiceRequest.id, ServiceRequest.category_id).where(
+            ServiceRequest.id.in_(request_ids)
+        )
+        return {row.id: row.category_id for row in await self._session.execute(statement)}
+
     async def get(self, request_id: uuid.UUID) -> ServiceRequest | None:
         return await self._session.get(ServiceRequest, request_id)
 

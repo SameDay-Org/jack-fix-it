@@ -474,6 +474,9 @@ class Settings(BaseSettings):
     business_time_zone: str = Field(
         default="America/New_York", pattern=r"^[A-Za-z_]+(/[A-Za-z0-9_+-]+)*$"
     )
+    # A pro's earnings (#70): reads one pro may make per window.
+    earnings_read_limit: int = Field(default=60, gt=0)
+    earnings_read_window_seconds: int = Field(default=60, gt=0)
     # Reviews (#77): reviews one user may write per window, over all their jobs.
     review_create_limit: int = Field(default=20, gt=0)
     review_create_window_seconds: int = Field(default=3_600, gt=0)

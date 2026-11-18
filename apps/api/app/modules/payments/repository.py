@@ -164,6 +164,18 @@ class TransferRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    @staticmethod
+    def payout_facts() -> Subquery:
+        """Every transfer row's job (`job_id`), amount (`amount_cents`), whether Stripe made it
+        (`made`: created) and whether it was reversed since (`reversed`), for the pro's
+        earnings (#70). Never a Stripe id."""
+        return select(
+            Transfer.job_id.label("job_id"),
+            Transfer.amount_cents.label("amount_cents"),
+            (Transfer.status == TransferStatus.CREATED).label("made"),
+            (Transfer.status == TransferStatus.REVERSED).label("reversed"),
+        ).subquery()
+
     async def get_of_job_for_update(self, job_id: uuid.UUID) -> Transfer | None:
         """The job's transfer row, locked until the transaction ends, read as last committed;
         None before the first release of the job. Take the job's lock first."""

@@ -7550,6 +7550,111 @@
         }
       }
     },
+    "/v1/pros/me/earnings": {
+      "get": {
+        "tags": [
+          "pros"
+        ],
+        "summary": "My earnings",
+        "description": "What the caller receives for each of their jobs whose work is done, newest completion\nfirst, and a summary over all of them: awaiting the customer's confirmation (with when it\nconfirms itself at the latest), on its way (confirmed, the transfer to be made), on hold\n(a reported problem, or under review) and paid. The amounts are the payout frozen at\npayment, the \"you'll receive\" of the quote. The pro is the caller: no id is taken. Never\nthe customer's name, contacts or address, the platform's fee, or a Stripe id.",
+        "operationId": "read_my_earnings_v1_pros_me_earnings_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Capped at the list maximum.",
+              "title": "Limit"
+            },
+            "description": "Capped at the list maximum."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EarningsPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a bad cursor or limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than EARNINGS_READ_LIMIT reads in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/users/me/rating": {
       "get": {
         "tags": [
@@ -9343,6 +9448,185 @@
           "expires_at"
         ],
         "title": "DownloadUrlResponse"
+      },
+      "EarningCategory": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Names",
+            "description": "Display name per locale, e.g. en and es."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "slug",
+          "names"
+        ],
+        "title": "EarningCategory"
+      },
+      "EarningItem": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EarningCategory"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the job was: the safe title."
+          },
+          "amount_cents": {
+            "type": "integer",
+            "title": "Amount Cents",
+            "description": "What the pro receives, in integer cents."
+          },
+          "status": {
+            "$ref": "#/components/schemas/EarningStatus"
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Completed At"
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid At",
+            "description": "When it was paid; null until then."
+          },
+          "expected_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected By",
+            "description": "awaiting_confirmation only: when the job confirms itself at the latest; null otherwise (the payout's own timing is Stripe's)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id",
+          "category",
+          "amount_cents",
+          "status",
+          "completed_at",
+          "paid_at",
+          "expected_by"
+        ],
+        "title": "EarningItem"
+      },
+      "EarningStatus": {
+        "type": "string",
+        "enum": [
+          "awaiting_confirmation",
+          "on_the_way",
+          "on_hold",
+          "paid"
+        ],
+        "title": "EarningStatus",
+        "description": "Where a job's money stands, in the pro's words."
+      },
+      "EarningsPage": {
+        "properties": {
+          "summary": {
+            "$ref": "#/components/schemas/EarningsSummary"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EarningItem"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Newest completion first."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Pass it as `cursor` for the next page."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "summary",
+          "items",
+          "next_cursor"
+        ],
+        "title": "EarningsPage"
+      },
+      "EarningsSummary": {
+        "properties": {
+          "awaiting_confirmation_cents": {
+            "type": "integer",
+            "title": "Awaiting Confirmation Cents"
+          },
+          "pending_cents": {
+            "type": "integer",
+            "title": "Pending Cents",
+            "description": "Confirmed, the transfer still to be made."
+          },
+          "on_hold_cents": {
+            "type": "integer",
+            "title": "On Hold Cents"
+          },
+          "paid_cents": {
+            "type": "integer",
+            "title": "Paid Cents"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency",
+            "examples": [
+              "usd"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "awaiting_confirmation_cents",
+          "pending_cents",
+          "on_hold_cents",
+          "paid_cents",
+          "currency"
+        ],
+        "title": "EarningsSummary",
+        "description": "All the pro's jobs, not just this page."
       },
       "ErrorDetail": {
         "properties": {
