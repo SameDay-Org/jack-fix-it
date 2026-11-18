@@ -21,7 +21,8 @@ while the listing ran is kept. The residual: a row that attaches a key after its
 (or commits after it) points at a deleted file. Only an object older than the minimum age is
 ever in that window; a fresh upload never is.
 
-Job photos (#298) close that window by disjoint ages, with no lock shared with the sweep: a
+Job photos (#298) close that window by disjoint ages, with no lock shared with the sweep (dispute
+photos, #75, by the same rule and setting): a
 job accepts a job_photo key issued at most JOB_PHOTO_ATTACH_MAX_AGE_MINUTES ago (the issue time
 is in the key, uploads/keys.py), at most half of ORPHAN_UPLOAD_MIN_AGE_HOURS (config.py). An
 object is last modified after its key was issued, so one this sweep deletes had its key issued
@@ -61,6 +62,7 @@ from app.integrations.storage import (
     Storage,
     StorageUnavailableError,
 )
+from app.modules.disputes.photos import dispute_photo_keys_among
 from app.modules.jobs.photos import job_photo_keys_among
 from app.modules.pros.service import ProService
 from app.modules.requests.service import media_keys_among
@@ -82,6 +84,7 @@ class ReferencingColumn(StrEnum):
     PRO_PROFILES_PHOTO_KEY = "pro_profiles.photo_key"
     USERS_PHOTO_KEY = "users.photo_key"
     JOB_PHOTOS_FILE_KEY = "job_photos.file_key"
+    DISPUTE_PHOTOS_FILE_KEY = "dispute_photos.file_key"
 
 
 @dataclass(frozen=True)
@@ -105,6 +108,7 @@ REFERENCED_BY: Final[Mapping[UploadPurpose, References]] = {
         frozenset({ReferencingColumn.PRO_PROFILES_PHOTO_KEY, ReferencingColumn.USERS_PHOTO_KEY})
     ),
     UploadPurpose.JOB_PHOTO: References(frozenset({ReferencingColumn.JOB_PHOTOS_FILE_KEY})),
+    UploadPurpose.DISPUTE_PHOTO: References(frozenset({ReferencingColumn.DISPUTE_PHOTOS_FILE_KEY})),
 }
 # Purposes no table references yet: none since job photos (#298).
 SKIPPED: Final[frozenset[UploadPurpose]] = frozenset()
@@ -117,6 +121,7 @@ KEY_STATEMENTS: Final[Mapping[ReferencingColumn, KeyStatement]] = {
     ReferencingColumn.PRO_PROFILES_PHOTO_KEY: ProService.photo_keys_among,
     ReferencingColumn.USERS_PHOTO_KEY: UserService.photo_keys_among,
     ReferencingColumn.JOB_PHOTOS_FILE_KEY: job_photo_keys_among,
+    ReferencingColumn.DISPUTE_PHOTOS_FILE_KEY: dispute_photo_keys_among,
 }
 
 SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]

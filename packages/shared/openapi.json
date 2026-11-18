@@ -7167,6 +7167,389 @@
         }
       }
     },
+    "/v1/jobs/{job_id}/dispute": {
+      "post": {
+        "tags": [
+          "disputes"
+        ],
+        "summary": "Report a problem with my job",
+        "description": "The customer reports a problem with their completed job, before its window ends\n(`report_by` in the read): the job moves to disputed (Needs Attention) and its payout to the\npro is held until an admin resolves it. One report per job: sending again returns the first\none, unchanged (200).\n\nContact details in the description are masked before it is stored; only the masked text is\nkept. The pro is notified; photos are shown to them once their safe copy is ready.",
+        "operationId": "report_problem_v1_jobs__job_id__dispute_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A UUID the app makes once per draft and sends again with every retry of it. A retry answers 200 with the report the first call made, as it is now, and writes nothing; the same key with another body, or on another job, answers 409 idempotency_key_reused. With or without it, a job has one report.",
+              "title": "Idempotency-Key"
+            },
+            "description": "A UUID the app makes once per draft and sends again with every retry of it. A retry answers 200 with the report the first call made, as it is now, and writes nothing; the same key with another body, or on another job, answers 409 idempotency_key_reused. With or without it, a job has one report."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DisputeIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerDisputeView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: an unknown reason_code; a description blank, longer than 2000 characters, holding a NUL, or empty once invisible characters are dropped; photo_keys that are not the caller's own dispute_photo uploads, issued too long ago, repeated, already attached to a report, or more than DISPUTE_PHOTO_MAX_COUNT; an unknown field; a job_id or an Idempotency-Key that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "A problem was already reported on this job (a retry with the same Idempotency-Key and body, or another report): that report, unchanged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerDisputeView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers report a problem.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job with this id of which the caller is the customer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "job_not_disputable: the job is not completed (not done yet, confirmed by the customer or automatically, paid out, refunded or cancelled), or its window to report a problem has passed; idempotency_key_reused: the caller already used this Idempotency-Key with a different body or on another job; nothing was changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "disputes"
+        ],
+        "summary": "Read the problem I reported on my job",
+        "description": "The caller's report on their job, or null, whether they may report one now, and until\nwhen. The pro's reply is not part of it: it is for the admin who resolves the report.",
+        "operationId": "read_my_problem_v1_jobs__job_id__dispute_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerDisputeView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a job_id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job with this id of which the caller is the customer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pros/me/jobs/{job_id}/dispute": {
+      "get": {
+        "tags": [
+          "disputes"
+        ],
+        "summary": "Read the problem reported on my job",
+        "description": "The customer's report on the caller's job, or null: the reason, the description as\nstored (masked), the photos' safe copies once ready, and the pro's own reply.",
+        "operationId": "read_reported_problem_v1_pros_me_jobs__job_id__dispute_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProDisputeView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a job_id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job with this id of which the caller is the pro.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pros/me/jobs/{job_id}/dispute/reply": {
+      "post": {
+        "tags": [
+          "disputes"
+        ],
+        "summary": "Reply to the problem reported on my job",
+        "description": "The pro's one answer to the report, for the admin who resolves it. Sending the same text\nagain returns the view unchanged. Contact details are masked before it is stored.",
+        "operationId": "reply_to_problem_v1_pros_me_jobs__job_id__dispute_reply_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DisputeReplyIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProDisputeView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a message blank, longer than 2000 characters, holding a NUL, or empty once invisible characters are dropped; an unknown field; a job_id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job with this id of which the caller is the pro.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "no_open_dispute: no problem was reported on the job, or it is resolved; already_replied: the pro already sent a different reply.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/users/me/rating": {
       "get": {
         "tags": [
@@ -8253,6 +8636,121 @@
         "title": "ClaimOut",
         "description": "Who holds the request after a claim or a release."
       },
+      "CustomerDisputeOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "reason_code": {
+            "$ref": "#/components/schemas/DisputeReason"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DisputeStatus"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DisputeResolution"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How an admin settled it; null while open."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "photos": {
+            "items": {
+              "$ref": "#/components/schemas/DisputePhotoOut"
+            },
+            "type": "array",
+            "title": "Photos"
+          },
+          "photos_pending": {
+            "type": "integer",
+            "title": "Photos Pending",
+            "description": "Photos whose copy is still being prepared."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "reason_code",
+          "description",
+          "status",
+          "resolution",
+          "created_at",
+          "resolved_at",
+          "photos",
+          "photos_pending"
+        ],
+        "title": "CustomerDisputeOut",
+        "description": "The customer's own report, its description as stored (masked). Their photos show as\nsoon as attached: their original until the safe copy is ready."
+      },
+      "CustomerDisputeView": {
+        "properties": {
+          "dispute": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CustomerDisputeOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null while none was reported."
+          },
+          "can_report": {
+            "type": "boolean",
+            "title": "Can Report",
+            "description": "Whether the caller may report a problem now: the job is completed, its window is open and no problem was reported."
+          },
+          "report_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report By",
+            "description": "Until when a problem can be reported; null when the job is not completed."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "dispute",
+          "can_report",
+          "report_by"
+        ],
+        "title": "CustomerDisputeView"
+      },
       "CustomerJob": {
         "properties": {
           "id": {
@@ -8553,6 +9051,122 @@
           "expo_push_token"
         ],
         "title": "DeviceRemoval"
+      },
+      "DisputeIn": {
+        "properties": {
+          "reason_code": {
+            "$ref": "#/components/schemas/DisputeReason"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "pattern": "^[^\\x00]*$",
+            "title": "Description",
+            "description": "What went wrong, as plain text. Contact details are masked before it is stored; only the masked text is kept."
+          },
+          "photo_keys": {
+            "items": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1
+            },
+            "type": "array",
+            "title": "Photo Keys",
+            "description": "Keys of the caller's own dispute_photo uploads (POST /v1/uploads), in the order to show them. Optional; at most DISPUTE_PHOTO_MAX_COUNT."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason_code",
+          "description"
+        ],
+        "title": "DisputeIn"
+      },
+      "DisputePhotoOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type",
+            "examples": [
+              "image/jpeg"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "A signed GET URL, valid until expires_at."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "content_type",
+          "url",
+          "expires_at"
+        ],
+        "title": "DisputePhotoOut",
+        "description": "One photo of the dispute, signed for a short while."
+      },
+      "DisputeReason": {
+        "type": "string",
+        "enum": [
+          "work_incomplete",
+          "poor_quality",
+          "no_show",
+          "damage",
+          "other"
+        ],
+        "title": "DisputeReason",
+        "description": "What the customer says went wrong (#75)."
+      },
+      "DisputeReplyIn": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "pattern": "^[^\\x00]*$",
+            "title": "Message",
+            "description": "The pro's answer, as plain text, once. Contact details are masked before it is stored."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "DisputeReplyIn"
+      },
+      "DisputeResolution": {
+        "type": "string",
+        "enum": [
+          "released",
+          "partial_release",
+          "refunded"
+        ],
+        "title": "DisputeResolution",
+        "description": "How an admin settles a dispute (#76)."
+      },
+      "DisputeStatus": {
+        "type": "string",
+        "enum": [
+          "open",
+          "resolved"
+        ],
+        "title": "DisputeStatus"
       },
       "DocumentOut": {
         "properties": {
@@ -10297,6 +10911,133 @@
         ],
         "title": "PreferredPeriod",
         "description": "When in the preferred day the customer would like the visit (#237). Pros propose the\nexact start in their quote; the period only refines a preferred date."
+      },
+      "ProDisputeOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "reason_code": {
+            "$ref": "#/components/schemas/DisputeReason"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DisputeStatus"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DisputeResolution"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How an admin settled it; null while open."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "photos": {
+            "items": {
+              "$ref": "#/components/schemas/DisputePhotoOut"
+            },
+            "type": "array",
+            "title": "Photos"
+          },
+          "photos_pending": {
+            "type": "integer",
+            "title": "Photos Pending",
+            "description": "Photos whose copy is still being prepared."
+          },
+          "reply": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply",
+            "description": "The pro's own answer, once given."
+          },
+          "replied_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replied At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "reason_code",
+          "description",
+          "status",
+          "resolution",
+          "created_at",
+          "resolved_at",
+          "photos",
+          "photos_pending",
+          "reply",
+          "replied_at"
+        ],
+        "title": "ProDisputeOut",
+        "description": "The report on the pro's job: the photos' safe copies only, once ready."
+      },
+      "ProDisputeView": {
+        "properties": {
+          "dispute": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProDisputeOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null while none was reported."
+          },
+          "can_reply": {
+            "type": "boolean",
+            "title": "Can Reply",
+            "description": "Whether the pro may still answer: open, no reply yet."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "dispute",
+          "can_reply"
+        ],
+        "title": "ProDisputeView"
       },
       "ProDocumentStatus": {
         "type": "string",
@@ -14138,7 +14879,8 @@
           "request_media",
           "job_photo",
           "pro_document",
-          "profile_photo"
+          "profile_photo",
+          "dispute_photo"
         ],
         "title": "UploadPurpose"
       },

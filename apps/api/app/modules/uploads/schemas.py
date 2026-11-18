@@ -9,6 +9,7 @@ class UploadPurpose(StrEnum):
     JOB_PHOTO = "job_photo"
     PRO_DOCUMENT = "pro_document"
     PROFILE_PHOTO = "profile_photo"
+    DISPUTE_PHOTO = "dispute_photo"
 
 
 class PhotoOut(BaseModel):
