@@ -58,3 +58,23 @@ export function clipboard(): Group {
     { tag: "rect", x: -8, y: 5, width: 12, height: 2.2, rx: 1.1, fill: "gray500" },
   ]);
 }
+
+/** The props a fist can hold, by name: a pose (rig.ts) names one, and stays plain data. */
+export const PROPS = { wrench, toolbox, clipboard } as const;
+
+export type PropName = keyof typeof PROPS;
+
+/**
+ * A lime question mark beside the head, for `thinking`: drawn around (0, 0), about 26 units
+ * tall, with a small dot under it.
+ */
+export function question(): Group {
+  return group("prop-question", [
+    {
+      tag: "path",
+      d: "M-7.5-8.2C-7.5-14.4-3.6-17.5 0.6-17.5C5.4-17.5 8.6-14.4 8.6-10.1C8.6-6.3 6.2-4.5 4-3C2.3-1.9 1.8-1 1.8 0.9V2.6H-3.2V0.5C-3.2-2.7-1.8-4.4 0.4-5.9C2.4-7.3 3.4-8.2 3.4-10C3.4-11.8 2.2-13 0.4-13C-1.6-13-2.8-11.6-2.8-8.6Z",
+      fill: "green500",
+    },
+    { tag: "circle", cx: -0.7, cy: 7.6, r: 2.9, fill: "green500" },
+  ]);
+}

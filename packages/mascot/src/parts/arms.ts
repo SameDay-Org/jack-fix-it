@@ -1,16 +1,18 @@
 import { group, round, type Group, type MascotNode, type RectShape, type Side } from "../shapes.ts";
 import { SHOULDER } from "./body.ts";
+import { PROPS, type PropName } from "./props.ts";
 
 /**
  * The arms, as a small rig: an arm is two angles (the upper arm's and the forearm's, in degrees
  * from hanging straight down, positive away from the body) and a glove. The sleeve is navy, the
- * forearm bare, the work gloves lime. Every pose is these few numbers, not a new drawing.
+ * forearm bare, the work gloves lime. Every pose is these few numbers, not a new drawing, and a
+ * pose change moves them (rig.ts).
  */
 
-export type Glove = "fist" | "open";
+export type Glove = "fist" | "open" | "point";
 
-/** Something held in a fist: drawn with its grip point at (0, 0), turned by `rotate`. */
-export type Held = { node: MascotNode; rotate: number };
+/** A prop held in the fist (props.ts, drawn around its grip point), turned by `rotate`. */
+export type Held = { prop: PropName; rotate: number };
 
 export type ArmPose = {
   upper: number;
@@ -26,7 +28,7 @@ const LOWER = { length: 23, width: 12 } as const;
 /** From the wrist to the middle of the fist, along the forearm. */
 const GRIP = 9.5;
 
-type Point = { x: number; y: number };
+export type Point = { x: number; y: number };
 
 /** Outward is to the viewer's left for the left arm, to the right for the right one. */
 const OUTWARD: Record<Side, number> = { left: -1, right: 1 };
@@ -45,6 +47,11 @@ function along(from: Point, angle: number, length: number, side: Side): Point {
 /** SVG turns clockwise: a limb hanging down, turned by this, points along `angle`. */
 function turn(angle: number, side: Side): number {
   return round(-OUTWARD[side] * angle);
+}
+
+/** Where the elbow is for this arm pose: the forearm turns around it (the idle wave). */
+export function elbowOf(side: Side, pose: Pick<ArmPose, "upper">): Point {
+  return along(SHOULDER[side], pose.upper, UPPER.length, side);
 }
 
 /** A rounded limb from `from`, along `angle`. */
@@ -67,6 +74,15 @@ function limb(
   };
 }
 
+/** The fist: the palm, the thumb on the body's side and the fold of the fingers. */
+function fist(thumb: number): MascotNode[] {
+  return [
+    { tag: "ellipse", cx: thumb * 7.2, cy: 6.4, rx: 3.3, ry: 4.6, fill: "green500" },
+    { tag: "rect", x: -8, y: 2.5, width: 16, height: 14, rx: 6.5, fill: "green500" },
+    { tag: "rect", x: -5, y: 11.6, width: 10, height: 1.7, rx: 0.85, fill: "green700" },
+  ];
+}
+
 /** A glove drawn pointing down from the wrist at (0, 0); the thumb on the body's side. */
 function glove(kind: Glove, side: Side): MascotNode[] {
   const thumb = -OUTWARD[side];
@@ -79,13 +95,21 @@ function glove(kind: Glove, side: Side): MascotNode[] {
     rx: 2.75,
     fill: "green700",
   };
-  if (kind === "fist") {
+  if (kind === "fist") return [cuff, ...fist(thumb)];
+  if (kind === "point") {
+    // A fist with the index finger out, along the forearm.
     return [
       cuff,
-      { tag: "ellipse", cx: thumb * 7.2, cy: 6.4, rx: 3.3, ry: 4.6, fill: "green500" },
-      { tag: "rect", x: -8, y: 2.5, width: 16, height: 14, rx: 6.5, fill: "green500" },
-      // Where the fingers fold.
-      { tag: "rect", x: -5, y: 11.6, width: 10, height: 1.7, rx: 0.85, fill: "green700" },
+      {
+        tag: "rect",
+        x: -thumb * 4.4 - 2.1,
+        y: 9,
+        width: 4.2,
+        height: 17,
+        rx: 2.1,
+        fill: "green500",
+      },
+      ...fist(thumb),
     ];
   }
   const finger = (x: number, length: number): RectShape => ({
@@ -118,25 +142,37 @@ function glove(kind: Glove, side: Side): MascotNode[] {
   ];
 }
 
-/** One arm from its shoulder, with what it holds. */
+/**
+ * One arm from its shoulder, with what it holds. The forearm, the prop and the glove are one
+ * group without a transform of its own (`forearm-<side>`), so a CSS animation can turn it
+ * around the elbow.
+ */
 export function arm(side: Side, pose: ArmPose): Group {
   const shoulder = SHOULDER[side];
-  const elbow = along(shoulder, pose.upper, UPPER.length, side);
+  const elbow = elbowOf(side, pose);
   const wrist = along(elbow, pose.lower, LOWER.length, side);
-  const fist = along(wrist, pose.lower, GRIP, side);
+  const grip = along(wrist, pose.lower, GRIP, side);
   const held: MascotNode[] = pose.hold
     ? [
         group(
           "held",
-          [pose.hold.node],
-          `translate(${fist.x} ${fist.y}) rotate(${pose.hold.rotate})`,
+          [PROPS[pose.hold.prop]()],
+          `translate(${grip.x} ${grip.y}) rotate(${round(pose.hold.rotate)})`,
         ),
       ]
     : [];
   return group(`arm-${side}`, [
-    limb(elbow, pose.lower, LOWER, side, "skin"),
     limb(shoulder, pose.upper, UPPER, side, "navy700"),
-    // The rolled cuff of the sleeve, at the elbow.
+    group(`forearm-${side}`, [
+      limb(elbow, pose.lower, LOWER, side, "skin"),
+      ...held,
+      group(
+        `glove-${pose.glove}`,
+        glove(pose.glove, side),
+        `translate(${wrist.x} ${wrist.y}) rotate(${turn(pose.lower, side)})`,
+      ),
+    ]),
+    // The rolled cuff of the sleeve, at the elbow, over the forearm's start.
     {
       tag: "rect",
       x: round(elbow.x - 9.25),
@@ -147,11 +183,5 @@ export function arm(side: Side, pose: ArmPose): Group {
       fill: "navy900",
       transform: `rotate(${turn(pose.upper, side)} ${elbow.x} ${elbow.y})`,
     },
-    ...held,
-    group(
-      `glove-${pose.glove}`,
-      glove(pose.glove, side),
-      `translate(${wrist.x} ${wrist.y}) rotate(${turn(pose.lower, side)})`,
-    ),
   ]);
 }
