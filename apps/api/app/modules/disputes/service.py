@@ -153,7 +153,9 @@ def released_dispute_jobs() -> Subquery:
 
 
 def dispute_metric_facts() -> Subquery:
-    """Each dispute's `created_at`, as a subquery for the staff metrics' own query (#84)."""
+    """Each dispute's opening, and its resolution and split once resolved, as
+    DisputeRepository.metric_facts names them: a subquery for the staff metrics' own query
+    (#84)."""
     return DisputeRepository.metric_facts()
 
 

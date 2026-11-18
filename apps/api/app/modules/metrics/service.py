@@ -24,10 +24,19 @@ named falls in it.
 7. repeat_rate: among the customers with at least one job confirmed in the range
    (confirmed_at), those with at least two jobs confirmed before the range's end.
 8. gmv_cents: what the customers were charged (the frozen price plus the tax) for the jobs
-   confirmed in the range. revenue_cents: the platform's fee on those jobs, as charged. Refunds
-   are not subtracted yet (`refunds_netted` false; #76 adds the refunds table, then the netting
-   follows). Tips are the pro's in full, so neither figure would include them (none exist yet).
-   A job paid out through a dispute's release was never confirmed, so it is not counted.
+   confirmed in the range; gross, and those jobs only. revenue_cents, net of refunds
+   (`refunds_netted` true): the fee the platform keeps, on two cohorts that never share a job
+   (a disputed job is never confirmed, and the query counts a confirmed one once):
+   - the jobs confirmed in the range: their fee, as charged (frozen at payment);
+   - the disputes an admin resolved in the range (resolved_at; a refund's dispute resolves
+     only once Stripe gave the money back, #76): a release keeps the job's fee; a full refund
+     keeps nothing; a partial keeps what #76's split left the platform, the customer's total
+     minus the pro's part and the refund, as the settlement stored them (app.money
+     .partial_refund_cents made the refund; nothing is recomputed here). Tax is 0 in the MVP
+     (payments TAX_CENTS), so that is the fee; once tax is charged, its share must come out.
+   GMV and revenue cover different jobs on purpose: GMV is what customers paid for confirmed
+   work, revenue what the platform earned. Tips are the pro's in full, so neither figure would
+   include them (none exist yet).
 series: per day of the range, the requests created, the jobs completed and the GMV of the jobs
 confirmed that day.
 
@@ -136,7 +145,7 @@ class MetricsService:
             from_date=days.first,
             to_date=days.last,
             time_zone=days.time_zone,
-            refunds_netted=False,
+            refunds_netted=True,
             metrics=_metrics(snapshot),
             series=[
                 SeriesPoint(
@@ -186,6 +195,6 @@ def _metrics(s: Snapshot) -> Metrics:
         repeat_rate=_ratio(MetricFormula.REPEAT_RATE, s.repeat_customers, s.customers_confirmed),
         gmv_cents=AmountMetric(formula=MetricFormula.GMV, value=s.gmv_cents),
         revenue_cents=AmountMetric(
-            formula=MetricFormula.REVENUE_GROSS_OF_REFUNDS, value=s.revenue_cents
+            formula=MetricFormula.REVENUE_NET_OF_REFUNDS, value=s.revenue_cents
         ),
     )

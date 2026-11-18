@@ -18,12 +18,19 @@ from sqlalchemy import event, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.modules.disputes.models import Dispute, DisputeReason
+from app.modules.disputes.models import (
+    Dispute,
+    DisputeReason,
+    DisputeResolution,
+    DisputeStatus,
+)
 from app.modules.jobs.models import Job, JobStatus
+from app.modules.jobs.transitions import TRANSITIONS
 from app.modules.metrics.router import get_metrics_clock
 from app.modules.metrics.service import MetricsConfig, MetricsService
 from app.modules.requests.models import ServiceRequest
 from app.modules.reviews.models import Review, ReviewAuthorRole
+from app.money import partial_refund_cents
 from tests.conftest import make_settings
 from tests.job_world import (
     CUSTOMER_EMAIL,
@@ -275,7 +282,7 @@ async def test_every_metric_matches_the_hand_computed_figures(
         "2031-03-10",
         ZONE,
     )
-    assert body["refunds_netted"] is False
+    assert body["refunds_netted"] is True
     m = body["metrics"]
     # R1 10, R3 20, R6 60 minutes: mean 30, median 20.
     assert m["avg_first_response_minutes"] == {
@@ -328,7 +335,7 @@ async def test_every_metric_matches_the_hand_computed_figures(
     # Confirmed in the range: J1 (price + tax) and J6.
     assert m["gmv_cents"] == {"formula": "gmv", "value": PRICE + TAX + 10_000}
     assert m["revenue_cents"] == {
-        "formula": "revenue_gross_of_refunds",
+        "formula": "revenue_net_of_refunds",
         "value": FEE + 1_500,
     }
     # Per local day: R1 on the 9th (00:00 EST), R3, R4 (23:59:59 EDT) and R6 on the 10th.
@@ -505,3 +512,175 @@ def test_the_route_is_in_the_schema_with_its_errors(app: FastAPI) -> None:
     operation = app.openapi()["paths"][PATH]["get"]
     assert set(operation["responses"]) >= {"200", "401", "403", "422", "429"}
     assert {parameter["name"] for parameter in operation["parameters"]} == {"from", "to", "tz"}
+
+
+# --- Revenue net of refunds: confirmed jobs and resolved disputes (#76) ---
+
+# 2 and 3 June 2031 in New York (EDT all along): 2031-06-02T04:00Z to 2031-06-04T04:00Z.
+JUNE: Final = {"from": "2031-06-02", "to": "2031-06-03", "tz": ZONE}
+# A partial split as #76 makes it: a payout of 17,000 of 21,400 (fee 4,400, no tax), 8,501
+# of it released.
+PARTIAL_TOTAL: Final = 21_400
+PARTIAL_FEE: Final = 4_400
+PARTIAL_RELEASE: Final = 8_501
+
+
+async def resolved(
+    session: AsyncSession,
+    world: JobWorld,
+    job: Job,
+    resolution: DisputeResolution | None,
+    *,
+    release: int = 0,
+    refund: int = 0,
+    when: str = "2031-06-02T15:00:00",
+) -> None:
+    """The job's dispute, opened before June; resolved at `when` with this split, or open."""
+    values: dict[str, Any] = {}
+    if resolution is not None:
+        values = {
+            "status": DisputeStatus.RESOLVED,
+            "resolution": resolution,
+            "resolved_by": world.admin.id,
+            "resolved_at": at(when),
+            "resolution_note": "zq84 note",
+            "pro_release_cents": release,
+            "customer_refund_cents": refund,
+        }
+    session.add(
+        Dispute(
+            job_id=job.id,
+            opened_by=world.customer.id,
+            reason_code=DisputeReason.POOR_QUALITY,
+            description="zq84",
+            created_at=at("2031-05-25T12:00:00"),
+            **values,
+        )
+    )
+
+
+async def disputed_job(session: AsyncSession, world: JobWorld, price: tuple[int, int, int]) -> Job:
+    """A job completed in May and disputed: never confirmed, as the state machine has it."""
+    return await job_at(
+        session,
+        world,
+        JobStatus.DISPUTED,
+        "2031-05-20T10:00:00",
+        completed="2031-05-24T10:00:00",
+        price=price,
+    )
+
+
+async def test_revenue_is_the_fee_kept_on_confirmed_jobs_and_on_disputes_resolved_in_the_range(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    # Confirmed in the range: its fee, and its captured amount in the GMV.
+    await job_at(
+        db_session,
+        world,
+        JobStatus.CONFIRMED,
+        "2031-05-20T10:00:00",
+        completed="2031-06-01T10:00:00",
+        confirmed="2031-06-02T12:00:00",
+        price=(20_000, 0, 3_000),
+    )
+    # Released in full in the range: the fee is kept.
+    released = await disputed_job(db_session, world, (10_000, 0, 1_500))
+    await resolved(db_session, world, released, DisputeResolution.RELEASED, release=8_500)
+    # Partly released in the range: what #76's split left the platform.
+    partial = await disputed_job(db_session, world, (PARTIAL_TOTAL, 0, PARTIAL_FEE))
+    partial_refund = partial_refund_cents(
+        PARTIAL_TOTAL, PARTIAL_TOTAL - PARTIAL_FEE, PARTIAL_RELEASE
+    )
+    await resolved(
+        db_session,
+        world,
+        partial,
+        DisputeResolution.PARTIAL_RELEASE,
+        release=PARTIAL_RELEASE,
+        refund=partial_refund,
+        when="2031-06-03T15:00:00",
+    )
+    # Refunded in full in the range: nothing is kept.
+    refunded = await disputed_job(db_session, world, (30_000, 0, 4_500))
+    await resolved(
+        db_session,
+        world,
+        refunded,
+        DisputeResolution.REFUNDED,
+        refund=30_000,
+        when="2031-06-03T16:00:00",
+    )
+    # Still open: nothing yet.
+    await resolved(
+        db_session, world, await disputed_job(db_session, world, (9_000, 0, 1_350)), None
+    )
+    # Released the last second before the range (23:59:59 EDT on 1 June), and at the range's
+    # end (00:00 EDT on 4 June): neither in it.
+    for when in ("2031-06-02T03:59:59", "2031-06-04T04:00:00"):
+        outside = await disputed_job(db_session, world, (8_000, 0, 1_200))
+        await resolved(
+            db_session, world, outside, DisputeResolution.RELEASED, release=6_800, when=when
+        )
+    await db_session.commit()
+
+    response = await get(db_client, world, **JUNE)
+
+    assert response.status_code == 200, response.text[:300]
+    body = response.json()
+    assert body["refunds_netted"] is True
+    m = body["metrics"]
+    # The partial keeps 21,400 - 8,501 - 10,699 = 2,200: the fee's share of the release.
+    kept_on_partial = PARTIAL_TOTAL - PARTIAL_RELEASE - partial_refund
+    assert kept_on_partial == 2_200
+    assert m["revenue_cents"] == {
+        "formula": "revenue_net_of_refunds",
+        "value": 3_000 + 1_500 + kept_on_partial + 0,
+    }
+    # GMV is the confirmed job's only: the cohorts differ on purpose.
+    assert m["gmv_cents"] == {"formula": "gmv", "value": 20_000}
+
+
+async def test_a_job_is_counted_once_even_if_its_rows_say_confirmed_and_resolved(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    """The state machine never lets a disputed job be confirmed (next test); should rows ever
+    say both, the job's fee still counts once, as a confirmed job."""
+    both = await job_at(
+        db_session,
+        world,
+        JobStatus.CONFIRMED,
+        "2031-05-20T10:00:00",
+        completed="2031-06-01T10:00:00",
+        confirmed="2031-06-02T12:00:00",
+        price=(10_000, 0, 1_500),
+    )
+    await resolved(db_session, world, both, DisputeResolution.RELEASED, release=8_500)
+    await db_session.commit()
+
+    body = (await get(db_client, world, **JUNE)).json()
+
+    assert body["metrics"]["revenue_cents"]["value"] == 1_500
+
+
+def test_a_disputed_job_is_never_confirmed_nor_a_confirmed_job_disputed() -> None:
+    """The two revenue cohorts cannot share a job: in the state machine (the one table every
+    status change goes through), no path leads from disputed to confirmed or back, and a
+    dispute is opened only on a completed job (completed -> disputed)."""
+
+    def reachable(start: JobStatus) -> set[JobStatus]:
+        seen: set[JobStatus] = set()
+        todo = [start]
+        while todo:
+            status = todo.pop()
+            for source, target in TRANSITIONS:
+                if source is status and target not in seen:
+                    seen.add(target)
+                    todo.append(target)
+        return seen
+
+    assert JobStatus.CONFIRMED not in reachable(JobStatus.DISPUTED)
+    assert JobStatus.DISPUTED not in reachable(JobStatus.CONFIRMED)
+    assert [source for source, target in TRANSITIONS if target is JobStatus.DISPUTED] == [
+        JobStatus.COMPLETED
+    ]
