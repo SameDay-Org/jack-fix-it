@@ -474,6 +474,14 @@ class Settings(BaseSettings):
     business_time_zone: str = Field(
         default="America/New_York", pattern=r"^[A-Za-z_]+(/[A-Za-z0-9_+-]+)*$"
     )
+    # Staff metrics (#84, D16.5): the range GET /v1/admin/metrics reads when none is given (the
+    # days ending today in BUSINESS_TIME_ZONE), the longest it accepts, and reads one staff
+    # member may make per window (the costliest staff read: aggregates over every request
+    # and job of the range).
+    metrics_default_range_days: int = Field(default=30, gt=0)
+    metrics_max_range_days: int = Field(default=366, gt=0)
+    metrics_read_limit: int = Field(default=30, gt=0)
+    metrics_read_window_seconds: int = Field(default=60, gt=0)
     # Reviews (#77): reviews one user may write per window, over all their jobs.
     review_create_limit: int = Field(default=20, gt=0)
     review_create_window_seconds: int = Field(default=3_600, gt=0)

@@ -18,6 +18,7 @@ from app.modules.jobs.router import customer_router as customer_jobs_router
 from app.modules.jobs.router import location_router as job_location_router
 from app.modules.jobs.router import route_router as job_route_router
 from app.modules.jobs.router import router as jobs_router
+from app.modules.metrics.router import staff_router as staff_metrics_router
 from app.modules.notifications.router import router as notification_preferences_router
 from app.modules.ops.router import staff_router as staff_ops_router
 from app.modules.payment_methods.router import router as payment_methods_router
@@ -78,4 +79,5 @@ v1_router.include_router(staff_ops_router)
 v1_router.include_router(reviews_router)
 v1_router.include_router(dispute_customer_router)
 v1_router.include_router(dispute_pro_router)
+v1_router.include_router(staff_metrics_router)
 v1_router.include_router(my_rating_router)

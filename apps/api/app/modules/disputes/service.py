@@ -126,6 +126,11 @@ def open_dispute_jobs() -> Subquery:
     return DisputeRepository.open_jobs()
 
 
+def dispute_metric_facts() -> Subquery:
+    """Each dispute's `created_at`, as a subquery for the staff metrics' own query (#84)."""
+    return DisputeRepository.metric_facts()
+
+
 class DisputeService:
     def __init__(
         self,

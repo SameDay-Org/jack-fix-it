@@ -190,6 +190,12 @@ class JobStateMachine:
         return kind
 
 
+def job_metric_facts() -> Subquery:
+    """Each job's ids, times and money as JobRepository.metric_facts names them, as a subquery
+    for the staff metrics' own query (#84)."""
+    return JobRepository.metric_facts()
+
+
 @dataclass(frozen=True)
 class NewJob:
     """What a job is created with: its parties and the amounts frozen at payment (#61)."""
