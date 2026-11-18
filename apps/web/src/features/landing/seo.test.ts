@@ -5,6 +5,8 @@ import * as englishImage from "@/app/(marketing)/opengraph-image";
 import * as spanishImage from "@/app/(marketing)/es/opengraph-image";
 import robots from "@/app/robots";
 import sitemap from "@/app/sitemap";
+import { legalMetadata } from "@/features/showcase/metadata";
+import { PRIVACY_PATHS, TERMS_PATHS } from "@/features/site/routes";
 import en from "@/i18n/locales/en.json";
 import es from "@/i18n/locales/es.json";
 
@@ -32,15 +34,26 @@ describe("the sitemap", () => {
     expect(sitemap()).toEqual([]);
   });
 
-  it("lists the public pages in both languages, each with its twin", () => {
+  it("lists the indexable public pages in both languages, each with its twin", () => {
     vi.stubEnv("SITE_URL", SITE);
     const entries = sitemap();
     expect(entries.map((entry) => entry.url)).toEqual(
-      ["/", "/es", "/app", "/es/app", "/terms", "/es/terms", "/privacy", "/es/privacy"].map(
-        (path) => new URL(path, SITE).href,
-      ),
+      ["/", "/es", "/app", "/es/app"].map((path) => new URL(path, SITE).href),
     );
     expect(entries[1]?.alternates?.languages).toEqual({ en: `${SITE}/`, es: `${SITE}/es` });
+    expect(entries[2]?.alternates?.languages).toEqual({ en: `${SITE}/app`, es: `${SITE}/es/app` });
+  });
+
+  it("leaves out the legal pages while they are noindex placeholders", async () => {
+    vi.stubEnv("SITE_URL", SITE);
+    const urls = sitemap().map((entry) => entry.url);
+    for (const locale of ["en", "es"] as const) {
+      for (const document of ["terms", "privacy"] as const) {
+        expect((await legalMetadata(locale, document)).robots).toMatchObject({ index: false });
+        const path = (document === "terms" ? TERMS_PATHS : PRIVACY_PATHS)[locale];
+        expect(urls).not.toContain(new URL(path, SITE).href);
+      }
+    }
   });
 });
 
