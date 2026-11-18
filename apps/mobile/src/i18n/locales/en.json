@@ -1928,5 +1928,85 @@
       "body": "Connect a payout account with Stripe to start receiving requests.",
       "action": "Set up payouts"
     }
+  },
+  "disputes": {
+    "entry": "Report a problem",
+    "reason": {
+      "work_incomplete": "The work isn't finished",
+      "poor_quality": "The work isn't done well",
+      "no_show": "The pro didn't show up",
+      "damage": "Something was damaged",
+      "other": "Something else"
+    },
+    "status": {
+      "title": "Report sent",
+      "open": "Open",
+      "resolved": "Resolved",
+      "label": "{{reason}}, {{day}}, {{status}}",
+      "openBody": "Our team is reviewing it and will contact you in the app.",
+      "resolution": {
+        "released": "Our team reviewed the report and the payment for this job was completed.",
+        "partial_release": "Our team reviewed the report and part of your payment went back to your payment method.",
+        "refunded": "Our team reviewed the report and your payment for this job went back to your payment method."
+      },
+      "loadFailed": "We couldn't load your report.",
+      "retry": "Try again"
+    },
+    "report": {
+      "title": "Report a problem",
+      "intro": "Tell us what went wrong with the job. Our team reviews every report.",
+      "reasonLabel": "What went wrong?",
+      "reasonMissing": "Choose what went wrong.",
+      "descriptionLabel": "What happened",
+      "descriptionHint": "Describe the problem in your own words. Leave out phone numbers and emails.",
+      "descriptionMissing": "Describe the problem.",
+      "tooLong_one": "This is {{count}} character too long.",
+      "tooLong_other": "This is {{count}} characters too long.",
+      "photosLabel": "Photos (optional)",
+      "photosWaiting": "Your photos are still uploading. Send once they're done.",
+      "photosFailed": "A photo didn't upload. Try it again or remove it to send.",
+      "next": "Our team reviews your report and contacts you in the app. The payment for this job waits for that review.",
+      "send": "Send report",
+      "retrySend": "Try again",
+      "home": "Go to Home",
+      "talkToJack": "Talk to Jack",
+      "retry": "Try again",
+      "gone": {
+        "title": "This job isn't available",
+        "body": "It may have been removed, or it belongs to another account."
+      },
+      "closed": {
+        "title": "Reporting is closed for this job",
+        "body": "A problem can be reported while a finished job waits for your confirmation. If you still need help, write to us from Talk to Jack."
+      },
+      "loadFailed": {
+        "title": "We couldn't load this job",
+        "body": "Check your connection and try again."
+      }
+    },
+    "sent": {
+      "title": "We got your report",
+      "alreadyTitle": "You reported a problem",
+      "body": "Our team reviews it and contacts you in the app. The payment for this job waits for that review.",
+      "back": "Back to the job"
+    },
+    "failure": {
+      "offline": {
+        "title": "No connection",
+        "body": "What you wrote is still here. Try again when you're back online."
+      },
+      "closed": {
+        "title": "This can't be sent anymore",
+        "body": "Things changed in the meantime. What you see now is up to date."
+      },
+      "invalid": {
+        "title": "Check what you wrote",
+        "body": "Something in it couldn't be accepted. Check it, and any photos, then try again."
+      },
+      "failed": {
+        "title": "That didn't go through",
+        "body": "Something went wrong on our side. Try again in a moment."
+      }
+    }
   }
 }

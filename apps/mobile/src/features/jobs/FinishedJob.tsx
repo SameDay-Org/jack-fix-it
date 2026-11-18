@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui";
 import { chatHref } from "@/features/chat";
+import { reportProblemHref, useCustomerDispute } from "@/features/disputes/api";
 import { bubbleShadow, continuousCorners } from "@/theme";
 
 import { BeforePhotos, PhotoHero } from "./AfterPhotos";
@@ -42,9 +43,9 @@ type FinishedJobProps = {
 /**
  * The pro marked the job done (#66): the whole screen is about checking the work. The after
  * photos are the hero, edge to edge (a tap opens one full screen); the sheet says who finished
- * and asks for a look, with "Problems? Message Dan" into the job's chat (#74; reporting a problem
- * itself is #75), then what was paid and what happened. The confirmation itself is the
- * dock under the page (`ConfirmDock`). Without a photo to show (none listed yet), the drawn map
+ * and asks for a look, with "Problems? Message Dan" into the job's chat (#74), then what was paid
+ * and what happened. The confirmation itself, and reporting a problem instead (#75), are the dock
+ * under the page (`ConfirmDock`). Without a photo to show (none listed yet), the drawn map
  * with its check on the door stands in.
  */
 export function FinishedJob({
@@ -135,9 +136,12 @@ type ConfirmDockProps = {
 };
 
 /**
- * The finished job's one action, docked under the page: "Confirm the job is done", which opens
- * the confirmation sheet, and under it when the job confirms itself if the customer does not
- * answer, in plain words ("Confirms automatically tomorrow at 3:40 PM if you don't answer").
+ * The finished job's action, docked under the page: "Confirm the job is done", which opens the
+ * confirmation sheet; "Report a problem" under it while the API says a report is open and its
+ * own deadline (`report_by`) has not passed (#75: the same window as the confirmation, never
+ * worked out here); then when the job confirms itself if the customer does not answer, in plain
+ * words ("Confirms automatically tomorrow at 3:40 PM if you don't answer"). While the report's
+ * window is unknown (loading, or its read failed), only Confirm shows.
  */
 export function ConfirmDock({ job, requestId, updatedAt, push }: ConfirmDockProps) {
   const { t } = useTranslation();
@@ -146,6 +150,11 @@ export function ConfirmDock({ job, requestId, updatedAt, push }: ConfirmDockProp
   const now = useMinuteClock(updatedAt, confirmBy);
   const deadline = deadlineText(t, job.confirm_by, now);
   const label = useFittingLabel(t("jobs.finished.confirm"));
+  const report = useCustomerDispute(job.id).data;
+  const reportBy = report?.report_by ? Date.parse(report.report_by) : NaN;
+  // Its own clock, anchored at the report's deadline: the entry goes the minute the window ends.
+  const reportNow = useMinuteClock(updatedAt, Number.isFinite(reportBy) ? reportBy : null);
+  const canReport = report?.can_report === true && reportNow < reportBy;
 
   return (
     // The white dock with the bubble's shadow over the page's edge, as on the pro's job screen.
@@ -162,6 +171,14 @@ export function ConfirmDock({ job, requestId, updatedAt, push }: ConfirmDockProp
         onPress={() => push(confirmJobHref(requestId))}
         testID="job-confirm"
       />
+      {canReport ? (
+        <Button
+          label={t("disputes.entry")}
+          variant="ghost"
+          onPress={() => push(reportProblemHref(requestId))}
+          testID="job-report-problem"
+        />
+      ) : null}
       {deadline ? (
         <Text className="text-center text-footnote text-gray-500" testID="job-confirm-deadline">
           {deadline}

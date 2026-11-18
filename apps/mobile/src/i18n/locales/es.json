@@ -1928,5 +1928,85 @@
       "body": "Conecta una cuenta de pagos con Stripe para empezar a recibir solicitudes.",
       "action": "Configurar pagos"
     }
+  },
+  "disputes": {
+    "entry": "Reportar un problema",
+    "reason": {
+      "work_incomplete": "El trabajo no está terminado",
+      "poor_quality": "El trabajo no quedó bien",
+      "no_show": "El profesional no se presentó",
+      "damage": "Algo se dañó",
+      "other": "Otra cosa"
+    },
+    "status": {
+      "title": "Reporte enviado",
+      "open": "Abierto",
+      "resolved": "Resuelto",
+      "label": "{{reason}}, {{day}}, {{status}}",
+      "openBody": "Nuestro equipo lo está revisando y te contactará en la app.",
+      "resolution": {
+        "released": "Nuestro equipo revisó el reporte y el pago de este trabajo se completó.",
+        "partial_release": "Nuestro equipo revisó el reporte y parte de tu pago volvió a tu método de pago.",
+        "refunded": "Nuestro equipo revisó el reporte y tu pago de este trabajo volvió a tu método de pago."
+      },
+      "loadFailed": "No pudimos cargar tu reporte.",
+      "retry": "Intentar de nuevo"
+    },
+    "report": {
+      "title": "Reportar un problema",
+      "intro": "Cuéntanos qué salió mal con el trabajo. Nuestro equipo revisa cada reporte.",
+      "reasonLabel": "¿Qué salió mal?",
+      "reasonMissing": "Elige qué salió mal.",
+      "descriptionLabel": "Qué pasó",
+      "descriptionHint": "Describe el problema con tus palabras. No incluyas teléfonos ni correos.",
+      "descriptionMissing": "Describe el problema.",
+      "tooLong_one": "Tiene {{count}} carácter de más.",
+      "tooLong_other": "Tiene {{count}} caracteres de más.",
+      "photosLabel": "Fotos (opcional)",
+      "photosWaiting": "Tus fotos se están subiendo. Envía cuando terminen.",
+      "photosFailed": "Una foto no se subió. Vuelve a intentarlo o quítala para enviar.",
+      "next": "Nuestro equipo revisa tu reporte y te contacta en la app. El pago de este trabajo espera esa revisión.",
+      "send": "Enviar reporte",
+      "retrySend": "Reintentar",
+      "home": "Ir a Inicio",
+      "talkToJack": "Habla con Jack",
+      "retry": "Reintentar",
+      "gone": {
+        "title": "Este trabajo no está disponible",
+        "body": "Puede que se haya eliminado o que sea de otra cuenta."
+      },
+      "closed": {
+        "title": "Ya no puedes reportar un problema en este trabajo",
+        "body": "Puedes reportar un problema mientras un trabajo terminado espera tu confirmación. Si aún necesitas ayuda, escríbenos desde Habla con Jack."
+      },
+      "loadFailed": {
+        "title": "No pudimos cargar este trabajo",
+        "body": "Revisa tu conexión e inténtalo de nuevo."
+      }
+    },
+    "sent": {
+      "title": "Recibimos tu reporte",
+      "alreadyTitle": "Reportaste un problema",
+      "body": "Nuestro equipo lo revisa y te contacta en la app. El pago de este trabajo espera esa revisión.",
+      "back": "Volver al trabajo"
+    },
+    "failure": {
+      "offline": {
+        "title": "Sin conexión",
+        "body": "Lo que escribiste sigue aquí. Inténtalo de nuevo cuando vuelvas a tener conexión."
+      },
+      "closed": {
+        "title": "Ya no se puede enviar",
+        "body": "Algo cambió mientras tanto. Lo que ves ahora está al día."
+      },
+      "invalid": {
+        "title": "Revisa lo que escribiste",
+        "body": "Algo no se pudo aceptar. Revísalo, y también las fotos, e inténtalo de nuevo."
+      },
+      "failed": {
+        "title": "No se pudo enviar",
+        "body": "Algo salió mal de nuestro lado. Inténtalo de nuevo en un momento."
+      }
+    }
   }
 }
