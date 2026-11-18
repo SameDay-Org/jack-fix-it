@@ -80,7 +80,7 @@ describe("the KPI cards", () => {
       ["Dispute rate", "dispute_rate"],
       ["Repeat rate", "repeat_rate"],
       ["GMV", "gmv"],
-      ["Revenue", "revenue_gross_of_refunds"],
+      ["Revenue", "revenue_net_of_refunds"],
     ]);
   });
 
@@ -153,7 +153,7 @@ describe("the KPI copy", () => {
     "dispute_rate",
     "repeat_rate",
     "gmv",
-    "revenue_gross_of_refunds",
+    "revenue_net_of_refunds",
   ];
 
   it.each([
@@ -172,8 +172,8 @@ describe("the KPI copy", () => {
   });
 
   // The panel is internal, but its words stay neutral: no promise of insurance, warranty,
-  // escrow, a licence or a guarantee. "Refund" appears only where revenue says it is before
-  // refunds.
+  // escrow, a licence or a guarantee. "Refund" appears only where revenue says how refunds
+  // count in it.
   const PROMISES = {
     en: /escrow|guarant|\binsur|licens|warrant|protect|money back|pay safely/i,
     es: /garant|asegurad|\bseguro (de|contra)\b|licencia|protegid|protecci[oó]n|devoluci[oó]n del dinero/i,
@@ -183,7 +183,7 @@ describe("the KPI copy", () => {
     "beforeRefunds",
     "beforeRefundsHelp",
     "formula.completion_rate",
-    "formula.revenue_gross_of_refunds",
+    "formula.revenue_net_of_refunds",
   ];
 
   function strings(value: unknown, prefix = ""): [string, string][] {

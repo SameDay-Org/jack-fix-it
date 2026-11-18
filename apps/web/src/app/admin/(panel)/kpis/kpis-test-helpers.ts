@@ -3,7 +3,7 @@ import type { MetricsOut } from "./kpis";
 
 type Metrics = MetricsOut["metrics"];
 
-/** Three days with some of everything, revenue still before refunds. */
+/** Three days with some of everything, revenue net of refunds as the API answers it. */
 export function metrics(
   extra: Partial<Omit<MetricsOut, "metrics">> & { metrics?: Partial<Metrics> } = {},
 ): MetricsOut {
@@ -12,7 +12,7 @@ export function metrics(
     from_date: "2026-11-16",
     to_date: "2026-11-18",
     time_zone: "America/New_York",
-    refunds_netted: false,
+    refunds_netted: true,
     series: [
       { day: "2026-11-16", requests_created: 14, jobs_completed: 3, gmv_cents: 48_000 },
       { day: "2026-11-17", requests_created: 12, jobs_completed: 5, gmv_cents: 61_250 },
@@ -39,7 +39,7 @@ export function metrics(
       dispute_rate: { formula: "dispute_rate", value: 0.0833, numerator: 1, denominator: 12 },
       repeat_rate: { formula: "repeat_rate", value: 0.25, numerator: 2, denominator: 8 },
       gmv_cents: { formula: "gmv", value: 109_250 },
-      revenue_cents: { formula: "revenue_gross_of_refunds", value: 16_388 },
+      revenue_cents: { formula: "revenue_net_of_refunds", value: 16_388 },
       ...figures,
     },
   };
@@ -73,7 +73,7 @@ export function emptyMetrics(): MetricsOut {
       dispute_rate: ratio("dispute_rate"),
       repeat_rate: ratio("repeat_rate"),
       gmv_cents: { formula: "gmv", value: 0 },
-      revenue_cents: { formula: "revenue_gross_of_refunds", value: 0 },
+      revenue_cents: { formula: "revenue_net_of_refunds", value: 0 },
     },
   });
 }
