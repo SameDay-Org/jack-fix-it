@@ -63,21 +63,24 @@ export function useEarnings() {
 }
 
 /**
- * Asks for the first page again and drops the others: the home only shows the totals, so a return
- * to it never asks for every page the Earnings screen scrolled through.
+ * Asks for the first page again and keeps only that page once it is in: one read, never one per
+ * page the Earnings screen scrolled through (each counts against the API's read limit). The cache
+ * changes in one step when the answer arrives, so no row vanishes while it is on its way. A fetch
+ * already under way is joined, not cancelled. Rejects with the fetch's error.
  */
-export function useRefreshEarningsTotals(): () => Promise<unknown> {
+export function useRefreshFirstPage(): () => Promise<unknown> {
   const client = useQueryClient();
   const generation = useSessionGeneration();
-  return useCallback(() => {
-    const queryKey = earningsQueryKey(generation);
-    client.setQueryData<EarningsPages>(queryKey, (data) =>
-      data && data.pages.length > 1
-        ? { pages: data.pages.slice(0, 1), pageParams: data.pageParams.slice(0, 1) }
-        : data,
-    );
-    return client.refetchQueries({ queryKey, exact: true });
-  }, [client, generation]);
+  return useCallback(
+    () => client.infiniteQuery({ ...earningsQueryOptions(generation), pages: 1 }),
+    [client, generation],
+  );
+}
+
+/** The home's refresh of the wallet totals: the first page only; it never rejects (the card shows its own state). */
+export function useRefreshEarningsTotals(): () => Promise<unknown> {
+  const refresh = useRefreshFirstPage();
+  return useCallback(() => refresh().catch(() => undefined), [refresh]);
 }
 
 /** The newest answer's totals: the summary covers every job, whichever page carried it. */

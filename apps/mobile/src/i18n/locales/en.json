@@ -2027,7 +2027,7 @@
       },
       "on_the_way": {
         "label": "On its way",
-        "body": "Confirmed by the customer. Your payment is on its way."
+        "body": "Confirmed jobs. Your payment is the next step."
       },
       "awaiting_confirmation": {
         "label": "Awaiting customer confirmation",

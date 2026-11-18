@@ -54,7 +54,11 @@ export function EarningRowSkeleton({ testID }: { testID?: string }) {
   const { t } = useTranslation();
   return (
     <Card testID={testID}>
-      <View className="gap-2">
+      <View
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        className="gap-2"
+      >
         <View className="flex-row gap-3">
           <TextSkeleton type="headline" width="60%" className="flex-1" />
           <TextSkeleton type="headline" className="w-1/4" />

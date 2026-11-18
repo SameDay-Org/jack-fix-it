@@ -102,9 +102,7 @@ describe("EarningsScreen", () => {
     // None of these is the sum of the rows on screen ($120.00, $90.50, $45.00, $25.00 apart).
     expect(screen.getByLabelText("Paid, $1,540.00. Sent to your payout account.")).toBeTruthy();
     expect(
-      screen.getByLabelText(
-        "On its way, $90.50. Confirmed by the customer. Your payment is on its way.",
-      ),
+      screen.getByLabelText("On its way, $90.50. Confirmed jobs. Your payment is the next step."),
     ).toBeTruthy();
     expect(
       screen.getByLabelText(
@@ -161,7 +159,7 @@ describe("EarningsScreen", () => {
     expect(earningsCursors(mockApiGet)).toHaveLength(3);
   });
 
-  it("a pull asks again from the first page and keeps each job once", async () => {
+  it("a pull asks for the first page alone, then the next one from its fresh cursor", async () => {
     answers.set(undefined, earningsPage([earning(1)], "c1"));
     answers.set("c1", earningsPage([ON_THE_WAY]));
     await renderWithQuery(<EarningsScreen />);
@@ -169,11 +167,41 @@ describe("EarningsScreen", () => {
     await act(async () => nearEnd());
     await screen.findByTestId(`earning-${jobId(2)}`);
 
+    // One read per pull, however deep the list went: each read counts against the API's limit.
     answers.set(undefined, earningsPage([AWAITING, earning(1)], "c1"));
     await act(async () => pullToRefresh());
     await screen.findByTestId(`earning-${jobId(3)}`);
+    expect(earningsCursors(mockApiGet)).toEqual([undefined, "c1", undefined]);
+    expect(rowIds()).toEqual([3, 1].map((n) => `earning-${jobId(n)}`));
+
+    await act(async () => nearEnd());
+    await screen.findByTestId(`earning-${jobId(2)}`);
     expect(earningsCursors(mockApiGet)).toEqual([undefined, "c1", undefined, "c1"]);
     expect(rowIds()).toEqual([3, 1, 2].map((n) => `earning-${jobId(n)}`));
+  });
+
+  it("nearing the end while a refresh is under way leaves the refresh alone", async () => {
+    answers.set(undefined, earningsPage([earning(1)], "c1"));
+    answers.set("c1", earningsPage([ON_THE_WAY]));
+    await renderWithQuery(<EarningsScreen />);
+    await screen.findByTestId(`earning-${jobId(1)}`);
+
+    const fresh = deferred<unknown>();
+    routeApi(
+      mockApiGet,
+      (cursor) => (cursor === undefined ? fresh.promise : earnings(cursor)),
+      profile,
+    );
+    await act(async () => pullToRefresh());
+    // The next page would cancel the refresh and grow from the old rows: it waits.
+    await act(async () => nearEnd());
+    expect(earningsCursors(mockApiGet)).toEqual([undefined, undefined]);
+
+    await act(async () => fresh.resolve(earningsPage([AWAITING, earning(1)], "c1")));
+    await screen.findByTestId(`earning-${jobId(3)}`);
+    await act(async () => nearEnd());
+    await screen.findByTestId(`earning-${jobId(2)}`);
+    expect(earningsCursors(mockApiGet)).toEqual([undefined, undefined, "c1"]);
   });
 
   it("a next page that fails keeps the rows and retries that cursor", async () => {

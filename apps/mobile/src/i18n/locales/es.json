@@ -2027,7 +2027,7 @@
       },
       "on_the_way": {
         "label": "En camino",
-        "body": "El cliente lo confirmó. Tu pago está en camino."
+        "body": "Trabajos confirmados. Tu pago es el siguiente paso."
       },
       "awaiting_confirmation": {
         "label": "Esperando la confirmación del cliente",

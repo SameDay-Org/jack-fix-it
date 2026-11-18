@@ -5,6 +5,7 @@ import { router } from "expo-router";
 
 import { ApiError, apiGet, useSession } from "@/api";
 
+import { deferred } from "../../../api/__tests__/helpers";
 import { earningsQueryKey, type EarningsPage } from "../api";
 import { EarningsCard } from "../EarningsCard";
 import {
@@ -97,12 +98,17 @@ describe("EarningsCard", () => {
       pages: [earningsPage([earning(1)], "c1"), earningsPage([ON_THE_WAY])],
       pageParams: [undefined, "c1"],
     });
+    const fresh = deferred<EarningsPage>();
+    routeApi(mockApiGet, () => fresh.promise, noProfile);
     await act(async () => navigation.setFocused(true));
     await waitFor(() => expect(earningsCursors(mockApiGet)).toEqual([undefined, undefined]));
-    await waitFor(() =>
-      expect(client.getQueryState(earningsQueryKey(1))?.fetchStatus).toBe("idle"),
-    );
-    const data = client.getQueryData<{ pages: EarningsPage[] }>(earningsQueryKey(1));
-    expect(data?.pages).toHaveLength(1);
+    // Nothing is cut while the answer is on its way: the screen still leaving keeps its rows.
+    const pages = () =>
+      client.getQueryData<{ pages: EarningsPage[] }>(earningsQueryKey(1))?.pages.length;
+    expect(pages()).toBe(2);
+
+    await act(async () => fresh.resolve(earningsPage([earning(1)], "c1")));
+    await waitFor(() => expect(pages()).toBe(1));
+    expect(earningsCursors(mockApiGet)).toEqual([undefined, undefined]);
   });
 });

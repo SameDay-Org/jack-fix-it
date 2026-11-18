@@ -13,7 +13,13 @@ import { useGuardedPush } from "@/features/quotes/navigation";
 import { useRefetchOnReturn, useSettledError } from "@/features/quotes/useRequestQuotes";
 import { tokens } from "@/theme";
 
-import { earningsFailure, earningsSummary, flattenEarnings, useEarnings } from "./api";
+import {
+  earningsFailure,
+  earningsSummary,
+  flattenEarnings,
+  useEarnings,
+  useRefreshFirstPage,
+} from "./api";
 import { EarningRow, EarningRowSkeleton } from "./EarningRow";
 import { EarningsSummary } from "./EarningsSummary";
 
@@ -27,8 +33,9 @@ const Separator = () => <View className="h-3" />;
 
 /**
  * The pro's earnings (#70), pushed from the home's wallet card: the API's totals over all the
- * pro's jobs, then each finished job, newest first, a page per cursor as the pro nears the end,
- * refreshed on pull, focus and foreground. A pro whose payouts are not on is pointed to the setup
+ * pro's jobs, then each finished job, newest first, a page per cursor as the pro nears the end.
+ * A pull (at the top of the list) asks for the first page alone; focus and foreground ask again
+ * for the rows on screen. A pro whose payouts are not on is pointed to the setup
  * first. Every state is designed: skeletons, empty, offline, too many tries, an error with a retry,
  * and a next page that failed under the rows already loaded.
  */
@@ -37,6 +44,7 @@ export function EarningsScreen() {
   const query = useEarnings();
   const { data, error, refetch, isFetching, dataUpdatedAt } = query;
   const { fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError } = query;
+  const refreshFirstPage = useRefreshFirstPage();
   const shownError = useSettledError(data, error);
   useRefetchOnReturn(refetch);
   const [pulling, setPulling] = useState(false);
@@ -46,19 +54,26 @@ export function EarningsScreen() {
   // A pull that fails over rows already on screen keeps them and says why in a toast; with
   // nothing on screen the error state says it instead.
   const refresh = async () => {
+    const shown = data !== undefined;
     setPulling(true);
-    const result = await refetch();
-    setPulling(false);
-    if (result.isError && result.data !== undefined) {
-      if (result.error instanceof SessionExpiredError) return;
-      const message = t(`earnings.refreshFailed.${earningsFailure(result.error)}`);
-      showToast({ message, tone: "danger" });
+    try {
+      await refreshFirstPage();
+    } catch (failed) {
+      if (shown && !(failed instanceof SessionExpiredError)) {
+        showToast({
+          message: t(`earnings.refreshFailed.${earningsFailure(failed)}`),
+          tone: "danger",
+        });
+      }
+    } finally {
+      setPulling(false);
     }
   };
 
-  // Nearing the end asks for the next page once; after a failed page the retry is the pro's.
+  // Nearing the end asks for the next page once. Not while a refresh is under way: the next page
+  // would cancel it and grow from the old rows. After a failed page the retry is the pro's.
   const loadMore = () => {
-    if (hasNextPage && !isFetchingNextPage && !isFetchNextPageError) void fetchNextPage();
+    if (hasNextPage && !isFetching && !isFetchNextPageError) void fetchNextPage();
   };
 
   const failure = earningsFailure(shownError);
@@ -128,8 +143,14 @@ export function EarningsScreen() {
         }
         ListFooterComponent={
           isFetchingNextPage ? (
-            <View className="pt-3">
-              <EarningRowSkeleton testID="earnings-next-page" />
+            <View
+              accessible
+              accessibilityRole="progressbar"
+              accessibilityLabel={t("earnings.loading")}
+              className="pt-3"
+              testID="earnings-next-page"
+            >
+              <EarningRowSkeleton />
             </View>
           ) : isFetchNextPageError ? (
             // The loaded rows stay; the retry asks for the same cursor again.

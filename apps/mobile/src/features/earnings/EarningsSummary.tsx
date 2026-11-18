@@ -15,7 +15,8 @@ const PAID_MIN_SCALE = 0.5;
  * The four totals over all the pro's jobs, as the API sums them (never added up from the loaded
  * rows): what was paid in a navy panel, then what is on its way, awaiting the customer and under
  * review. Each reads as one: "Paid, $120.00. Sent to your payout account." Without a summary yet,
- * the same layout with the amounts as placeholders, read as one "Loading" indicator.
+ * the same layout with the amounts as placeholders, read as one "Loading" indicator (no figure is
+ * a stop of its own then).
  */
 export function EarningsSummary({ summary }: { summary: Summary | undefined }) {
   const { t } = useTranslation();
@@ -36,7 +37,7 @@ export function EarningsSummary({ summary }: { summary: Summary | undefined }) {
       testID={summary === undefined ? "earnings-summary-loading" : "earnings-summary"}
     >
       <View
-        accessible
+        accessible={summary !== undefined}
         accessibilityLabel={label(PAID.key, paid)}
         style={[bubbleShadow, continuousCorners]}
         className="gap-1 rounded-lg bg-navy-900 p-5"
@@ -64,7 +65,7 @@ export function EarningsSummary({ summary }: { summary: Summary | undefined }) {
           return (
             <View
               key={key}
-              accessible
+              accessible={summary !== undefined}
               accessibilityLabel={label(key, value)}
               className="gap-1"
               testID={`earnings-figure-${key}`}
