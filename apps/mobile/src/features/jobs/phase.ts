@@ -203,7 +203,7 @@ export function jobText(
         support: t("jobs.support.finished"),
       };
     case "done":
-      return { headline: t("jobs.headline.done"), support: t("jobs.support.done", { inline }) };
+      return { headline: t("jobs.headline.done"), support: t("jobs.support.done") };
     case "attention":
       return { headline: t("jobs.headline.attention"), support: t("jobs.support.attention") };
     case "cancelled":

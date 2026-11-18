@@ -684,7 +684,7 @@
     "payLabel": "Pagar {{price}} por el presupuesto de {{pro}}",
     "total": "Total {{total}}",
     "breakdown": "{{price}} más {{tax}} de impuestos",
-    "summaryAnnouncement": "Total {{total}}. Abriendo el pago seguro.",
+    "summaryAnnouncement": "Total {{total}}. Abriendo el pago.",
     "notAvailable": "Este presupuesto no se puede pagar ahora. Tus presupuestos están al día.",
     "confirming": {
       "title": "Confirmando tu pago…",
@@ -1201,7 +1201,7 @@
       },
       "proPaid": {
         "question": "¿Cuándo recibe su pago el profesional?",
-        "answer": "Cuando el trabajo se confirma, no cuando tú pagas. Cuando el profesional marca el trabajo como terminado, empieza un período de confirmación; si nadie reporta un problema antes de que termine, el trabajo se confirma automáticamente y el profesional recibe su pago."
+        "answer": "Cuando confirmas que el trabajo está terminado, o cuando se confirma automáticamente al final del período de confirmación, Jack Fix It le paga al profesional."
       },
       "follow": {
         "question": "¿Cómo sigo mi trabajo?",
@@ -1217,7 +1217,7 @@
       },
       "problem": {
         "question": "¿Y si algo no sale bien con el trabajo?",
-        "answer": "Díselo primero a tu profesional por el chat: es la forma más rápida de resolverlo. Si eso no lo soluciona, escríbenos desde Habla con Jack, al final de esta página: el equipo de Jack Fix It revisa lo ocurrido y decide caso por caso, incluido si se devuelve dinero. Mientras haya un problema reportado sin resolver, el profesional no recibe su pago."
+        "answer": "Díselo primero a tu profesional por el chat: es la forma más rápida de resolverlo. Si eso no lo soluciona, escríbenos desde Habla con Jack, al final de esta página. Nuestro equipo lo revisa y te responde."
       },
       "verified": {
         "question": "¿Cómo se verifica a los profesionales?",
@@ -1336,7 +1336,7 @@
       "working": "Empezó: {{time}}",
       "workingNow": "El trabajo está en marcha",
       "finished": "Revisa cómo quedó y luego confirma que está terminado.",
-      "done": "El pago se libera a {{inline}}.",
+      "done": "Este trabajo se completó.",
       "attention": "Se reportó un problema en este trabajo.",
       "cancelled": "No necesitas hacer nada más."
     },
@@ -1430,7 +1430,7 @@
     },
     "confirmSheet": {
       "title": "¿Confirmas que el trabajo está terminado?",
-      "body": "El pago se libera a {{name}}.",
+      "body": "Toca Confirmar cuando {{name}} haya terminado el trabajo.",
       "confirm": "Confirmar",
       "notYet": "Todavía no",
       "offline": "No pudimos conectar con Jack Fix It. Revisa tu conexión e inténtalo de nuevo.",

@@ -684,7 +684,7 @@
     "payLabel": "Pay {{price}} for the quote from {{pro}}",
     "total": "Total {{total}}",
     "breakdown": "{{price}} plus {{tax}} tax",
-    "summaryAnnouncement": "Total {{total}}. Opening the secure payment.",
+    "summaryAnnouncement": "Total {{total}}. Opening payment.",
     "notAvailable": "This quote can't be paid right now. Your quotes are up to date.",
     "confirming": {
       "title": "Confirming your payment…",
@@ -1201,7 +1201,7 @@
       },
       "proPaid": {
         "question": "When does the pro get paid?",
-        "answer": "When the job is confirmed, not when you pay. Once the pro marks the work as done, a confirmation period starts; if no problem is reported before it ends, the job is confirmed automatically and the pro is paid."
+        "answer": "After you confirm the job is done, or once it is confirmed automatically at the end of the confirmation period, Jack Fix It pays the pro."
       },
       "follow": {
         "question": "How do I follow my job?",
@@ -1217,7 +1217,7 @@
       },
       "problem": {
         "question": "What if something isn't right with the job?",
-        "answer": "Tell your pro in the chat first: it's the fastest way to sort things out. If that doesn't settle it, write to us from Talk to Jack, at the end of this page: the Jack Fix It team reviews what happened and decides case by case, including whether any money is returned. While a reported problem is open, the pro isn't paid."
+        "answer": "Tell your pro in the chat first: it's the fastest way to sort things out. If that doesn't settle it, write to us from Talk to Jack, at the end of this page. Our team reviews it and gets back to you."
       },
       "verified": {
         "question": "How are pros verified?",
@@ -1336,7 +1336,7 @@
       "working": "Started at {{time}}",
       "workingNow": "The work is under way",
       "finished": "Take a look at the work, then confirm it's done.",
-      "done": "Payment is released to {{inline}}.",
+      "done": "This job is complete.",
       "attention": "A problem was reported on this job.",
       "cancelled": "Nothing more is needed from you."
     },
@@ -1430,7 +1430,7 @@
     },
     "confirmSheet": {
       "title": "Confirm the job is done?",
-      "body": "Payment is released to {{name}}.",
+      "body": "Tap Confirm when {{name}} has finished the job.",
       "confirm": "Confirm",
       "notYet": "Not yet",
       "offline": "We couldn't reach Jack Fix It. Check your connection and try again.",
