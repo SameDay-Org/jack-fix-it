@@ -1,6 +1,11 @@
 """Stripe webhooks (D7.3, #40): every event recorded once, then handled once by the worker.
 
-Receiving (POST /v1/webhooks/stripe): the signature is verified on the raw body, then the event
+Two endpoints, each verified with its own signing secret (#280): POST /v1/webhooks/stripe for the
+platform's events, POST /v1/webhooks/stripe/connect for the events of the pros' connected
+accounts (Stripe's Connect endpoint; CONNECT_EVENT_TYPES only, any other type there is stored
+as ignored). Both store and handle events the same way.
+
+Receiving: the signature is verified on the raw body, then the event
 is inserted by its Stripe id (ON CONFLICT DO NOTHING, so a redelivery or a concurrent delivery
 finds the first row) and committed. Only then is a pending row queued, under one job id per
 event, so a job already queued or running makes the enqueue a no-op. An event of a type with no
@@ -38,7 +43,7 @@ from app.modules.webhooks.errors import (
     WebhookNotConfiguredError,
 )
 from app.modules.webhooks.events import AfterCommit, AfterCommitAction
-from app.modules.webhooks.handlers import StripeEvent, handler_for
+from app.modules.webhooks.handlers import CONNECT_EVENT_TYPES, StripeEvent, handler_for
 from app.modules.webhooks.models import WebhookEventStatus
 from app.modules.webhooks.repository import WebhookEventRepository
 from app.queue import JobQueue, enqueue
@@ -75,14 +80,29 @@ class WebhookConfig:
     enqueue_timeout_seconds: float
     # Production takes live events only; every other environment takes test events only.
     live: bool
+    # The event types this endpoint takes; None: any type with a handler.
+    event_types: frozenset[str] | None = None
 
     @classmethod
     def from_settings(cls, settings: Settings) -> Self:
+        """The platform endpoint (POST /v1/webhooks/stripe)."""
         return cls(
             secret=settings.stripe_webhook_secret,
             tolerance_seconds=settings.stripe_webhook_tolerance_seconds,
             enqueue_timeout_seconds=settings.job_enqueue_timeout_seconds,
             live=settings.app_env == "production",
+        )
+
+    @classmethod
+    def connect_from_settings(cls, settings: Settings) -> Self:
+        """The Connect endpoint (POST /v1/webhooks/stripe/connect): its own secret, and the
+        connected accounts' event types only (#280)."""
+        return cls(
+            secret=settings.stripe_connect_webhook_secret,
+            tolerance_seconds=settings.stripe_webhook_tolerance_seconds,
+            enqueue_timeout_seconds=settings.job_enqueue_timeout_seconds,
+            live=settings.app_env == "production",
+            event_types=CONNECT_EVENT_TYPES,
         )
 
 
@@ -153,6 +173,8 @@ class StripeWebhookService:
             )
             return WebhookEventStatus.IGNORED
         if handler_for(event.type) is None:
+            return WebhookEventStatus.IGNORED
+        if self._config.event_types is not None and event.type not in self._config.event_types:
             return WebhookEventStatus.IGNORED
         return WebhookEventStatus.PENDING
 

@@ -176,6 +176,16 @@ class ProProfileRepository:
             statement = statement.with_for_update().execution_options(populate_existing=True)
         return await self._session.scalar(statement)
 
+    async def get_by_stripe_account_id(
+        self, account_id: str, *, lock: bool = False
+    ) -> ProProfile | None:
+        """The profile holding this Stripe account (unique). `lock`: FOR UPDATE until the
+        transaction ends."""
+        statement = select(ProProfile).where(ProProfile.stripe_account_id == account_id)
+        if lock:
+            statement = statement.with_for_update().execution_options(populate_existing=True)
+        return await self._session.scalar(statement)
+
     async def set_stripe_account_id(self, pro_id: uuid.UUID, account_id: str) -> None:
         await self._session.execute(
             update(ProProfile)

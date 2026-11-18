@@ -16,13 +16,14 @@ email) at DEBUG, runs at WARNING (app/observability.py).
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import cache
 from typing import Protocol
 
 import stripe
 from starlette.requests import Request
 from stripe.params import AccountListParams
 
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.integrations.stripe_errors import StripeCallError as StripeCallError
 from app.integrations.stripe_errors import StripeRejectedError as StripeRejectedError
 from app.integrations.stripe_errors import StripeUnavailableError as StripeUnavailableError
@@ -60,6 +61,12 @@ class ProfileAccounts:
 
     account_ids: tuple[str, ...]
     complete: bool
+
+
+class AccountReader(Protocol):
+    """Reading an account's state: all the account.updated handler (#280) needs."""
+
+    async def retrieve_account(self, account_id: str) -> AccountState: ...
 
 
 class StripeConnect(Protocol):
@@ -215,3 +222,15 @@ def get_stripe_connect(request: Request) -> StripeConnect | None:
         connect = StripeExpressConnect.from_settings(settings)
         request.app.state.stripe_connect = connect
     return connect
+
+
+@cache
+def worker_stripe_connect() -> StripeConnect | None:
+    """The worker's client: one per process, built on first use like the API's, from the same
+    settings. The account.updated handler (#280) reads accounts with it. None without
+    STRIPE_SECRET_KEY (allowed outside staging and production): the event is then run again
+    later. Tests register a handler bound to a fake instead."""
+    settings = get_settings()
+    if settings.stripe_secret_key is None:
+        return None
+    return StripeExpressConnect.from_settings(settings)

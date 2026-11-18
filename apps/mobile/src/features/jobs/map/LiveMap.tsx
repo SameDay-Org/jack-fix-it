@@ -5,6 +5,7 @@ import {
   Images,
   LineLayer,
   MapView,
+  ModelLayer,
   setAccessToken,
   setTelemetryEnabled,
   ShapeSource,
@@ -15,6 +16,7 @@ import {
 } from "@rnmapbox/maps";
 import {
   memo,
+  useCallback,
   useEffect,
   useEffectEvent,
   useMemo,
@@ -41,6 +43,7 @@ import {
   CAMERA_STEP_MS,
   CAMERA_TRANSITION_MS,
   FAR_M,
+  FOLLOW_ZOOM,
   followPadding,
   followStop,
   OVERVIEW_HOLD_MS,
@@ -59,6 +62,15 @@ import {
 } from "./geo";
 import { routeAhead, sampleGlide, type Fix, type Glide, type VanPose } from "./motion";
 import { useVanMotion, type VanFrame } from "./useVanMotion";
+import {
+  STALE_OPACITY,
+  VanModelAsset,
+  VanModelBoundary,
+  vanModelSource,
+  vanModelStyle,
+  vanRotation,
+  vanScale,
+} from "./VanModel";
 
 // Once, before any map is drawn: the token, then Mapbox's usage and location telemetry off.
 // What still leaves the phone for Mapbox, by design: the SDK's turnstile event (it counts monthly
@@ -89,9 +101,10 @@ const OVERLAY_GAP = 12;
 // The Mapbox wordmark and attribution sit just above the overlay row, where they stay visible.
 const ORNAMENT_GAP = 4;
 const ORNAMENT_SIDE = 16;
-const STALE_OPACITY = 0.45;
 const VAN_SOURCE = "jack-van";
 const ROUTE_SOURCE = "jack-route";
+/** The van is sized again once the camera's zoom moved this much (about 1 % of its size). */
+const ZOOM_STEP = 0.02;
 /** While the van glides, the route's line is cut back to it this often (and where it stops). */
 export const ROUTE_TRIM_MS = 200;
 /** Two rests of the van closer than this are the same place: the line is not drawn again. */
@@ -132,18 +145,24 @@ const { colors } = tokens;
 
 type CameraMode = "overview" | "follow" | "free";
 
-const pointFeature = (point: LngLat, properties: Record<string, number> = {}) => ({
+const pointFeature = (point: LngLat, properties: Record<string, number | number[]> = {}) => ({
   type: "Feature" as const,
   geometry: { type: "Point" as const, coordinates: [point[0], point[1]] },
   properties,
 });
 
 /** The van as the map draws it: where it is, the way it points, dimmed while the fix is old. */
-const vanFeature = (pose: VanPose, stale: boolean) =>
-  pointFeature(pose.point, { bearing: pose.bearing, opacity: stale ? STALE_OPACITY : 1 });
+const vanFeature = (pose: VanPose, stale: boolean, zoom: number) =>
+  pointFeature(pose.point, {
+    bearing: pose.bearing,
+    rotation: vanRotation(pose.bearing),
+    scale: vanScale(zoom),
+    opacity: stale ? STALE_OPACITY : 1,
+  });
 
 /** The van written straight to its native source (GeoJSON text, as the source takes it). */
-const vanShape = (pose: VanPose, stale: boolean) => JSON.stringify(vanFeature(pose, stale));
+const vanShape = (pose: VanPose, stale: boolean, zoom: number) =>
+  JSON.stringify(vanFeature(pose, stale, zoom));
 
 const lineFeature = (points: readonly LngLat[]) => ({
   type: "Feature" as const,
@@ -187,6 +206,8 @@ export function LiveMap({ fix, stale, active, route, height, cards, onUnavailabl
   const van = useRef<ShapeSource>(null);
   const line = useRef<ShapeSource>(null);
   const pose = useRef<VanPose | null>(null);
+  // The camera's zoom as the map last reported it: the van's size on screen follows it.
+  const zoom = useRef(FOLLOW_ZOOM);
   // The camera's heading, from the map's own reports and what was last asked of it.
   const heading = useRef<number | null>(null);
   // The glide the van is on, the one the camera follows, and when the camera's next step is due:
@@ -216,6 +237,12 @@ export function LiveMap({ fix, stale, active, route, height, cards, onUnavailabl
   // Every camera move that eases takes this long.
   const transitionMs = reduceMotion ? REDUCED_MOTION_MS : CAMERA_TRANSITION_MS;
   const [loaded, setLoaded] = useState(false);
+  // The pro is the heading arrow, with the 3D van over it while the app has the model: an error in
+  // the model's part of the tree drops the model, never the arrow (see VanLayer).
+  const [vanModel] = useState(vanModelSource);
+  const [modelFailed, setModelFailed] = useState(false);
+  const model = modelFailed ? null : vanModel;
+  const dropModel = useCallback(() => setModelFailed(true), []);
   // The first overview: on once the address is known (at mount or soon after the map loads).
   const [hold, setHold] = useState<"waiting" | "on" | "done">(
     trail.destination !== null ? "on" : "waiting",
@@ -272,7 +299,7 @@ export function LiveMap({ fix, stale, active, route, height, cards, onUnavailabl
     const { pose: next, glide, now } = frame;
     pose.current = next;
     gliding.current = glide;
-    van.current?.setNativeProps({ id: VAN_SOURCE, shape: vanShape(next, stale) });
+    van.current?.setNativeProps({ id: VAN_SOURCE, shape: vanShape(next, stale, zoom.current) });
     trimRoute(frame);
     if (mode !== "follow" || (glide === followed.current && now < nextStep.current)) return;
     followed.current = glide;
@@ -333,12 +360,23 @@ export function LiveMap({ fix, stale, active, route, height, cards, onUnavailabl
     return () => clearTimeout(timer);
   }, [hold, loaded]);
 
-  // The van dims and lights up again where it stands. A map nobody watches is left alone: its
-  // first frame back draws the van as it should look by then.
-  const restyle = useEffectEvent(() => {
+  // The van drawn again where it stands, as it should look now. A map nobody watches is left
+  // alone: its first frame back draws the van as it should look by then.
+  const redraw = () => {
     if (!active || pose.current === null) return;
-    van.current?.setNativeProps({ id: VAN_SOURCE, shape: vanShape(pose.current, stale) });
-  });
+    van.current?.setNativeProps({
+      id: VAN_SOURCE,
+      shape: vanShape(pose.current, stale, zoom.current),
+    });
+  };
+  // It keeps its size on screen as the camera zooms, for each step of zoom one could see.
+  const rescale = (at: number) => {
+    if (!(Math.abs(at - zoom.current) >= ZOOM_STEP)) return;
+    zoom.current = at;
+    redraw();
+  };
+  // It dims and lights up again with the age of its position.
+  const restyle = useEffectEvent(redraw);
   useEffect(() => restyle(), [stale]);
 
   // Unwatched in the middle of a glide, the frames stop cutting the line: React's own copy takes
@@ -351,7 +389,7 @@ export function LiveMap({ fix, stale, active, route, height, cards, onUnavailabl
   useEffect(() => settle(), [active]);
 
   const [initial] = useState(() => ({
-    van: vanFeature({ point: fix.point, bearing: fix.heading ?? 0 }, stale),
+    van: vanFeature({ point: fix.point, bearing: fix.heading ?? 0 }, stale, FOLLOW_ZOOM),
     camera: followStop(fix.point, fix.heading ?? 0, padding, 0, "none"),
   }));
 
@@ -380,10 +418,16 @@ export function LiveMap({ fix, stale, active, route, height, cards, onUnavailabl
         <CameraGestureObserver
           onCameraChanged={({ nativeEvent }) => {
             heading.current = nativeEvent.properties.heading;
+            rescale(nativeEvent.properties.zoom);
             if (nativeEvent.properties.isUserInteraction && !free) setFree(true);
           }}
         />
         <MapGlyphs />
+        {model === null ? null : (
+          <VanModelBoundary onError={dropModel}>
+            <VanModelAsset source={model} />
+          </VanModelBoundary>
+        )}
         {ahead ? (
           <ShapeSource ref={line} id={ROUTE_SOURCE} shape={lineFeature(ahead)}>
             <LineLayer
@@ -424,7 +468,13 @@ export function LiveMap({ fix, stale, active, route, height, cards, onUnavailabl
             />
           </ShapeSource>
         ) : null}
-        <VanLayer ref={van} shape={initial.van} />
+        <VanLayer
+          ref={van}
+          shape={initial.van}
+          model={model !== null}
+          stale={stale}
+          onModelError={dropModel}
+        />
       </MapView>
       <View
         pointerEvents="box-none"
@@ -461,13 +511,32 @@ function useTrail(path: MeasuredPath | null) {
   return trail;
 }
 
-/** The van, drawn from the native source `useVanMotion` writes to; React never redraws it. */
+/**
+ * The pro, drawn from the native source `useVanMotion` writes to; React never redraws it. The
+ * heading arrow is always there, and the 3D van stands over it (the model layer has no slot, so the
+ * map draws it above the arrow's top slot): its disc shows around the van. The arrow never gives
+ * way to the van because nothing tells the app that the van drew. The map library reports no
+ * model that failed to load or decode (Mapbox writes that to the device log only), and its
+ * rendered-feature queries never return a model layer's feature, even with the van on screen
+ * (checked on Android with rnmapbox 10.3.18). A model that draws nothing leaves the arrow as the
+ * marker. An error thrown in the model's part of the tree stays there (`VanModelBoundary`): the
+ * model goes, the map and the arrow stay.
+ */
 const VanLayer = memo(function VanLayer({
   ref,
   shape,
+  model,
+  stale,
+  onModelError,
 }: {
   ref: Ref<ShapeSource>;
   shape: ReturnType<typeof vanFeature>;
+  /** Draw the 3D van over the arrow. */
+  model: boolean;
+  /** The position is old: the van dims (the arrow reads that from its feature). */
+  stale: boolean;
+  /** An error was thrown in the model's part of the tree. */
+  onModelError: () => void;
 }) {
   return (
     <ShapeSource ref={ref} id={VAN_SOURCE} shape={shape}>
@@ -484,6 +553,12 @@ const VanLayer = memo(function VanLayer({
           iconIgnorePlacement: true,
         }}
       />
+      <VanModelBoundary onError={onModelError}>
+        {/* Its source named in so many words: a source passes its id to direct children only. */}
+        {model ? (
+          <ModelLayer id="jack-van-model" sourceID={VAN_SOURCE} style={vanModelStyle(stale)} />
+        ) : null}
+      </VanModelBoundary>
     </ShapeSource>
   );
 });

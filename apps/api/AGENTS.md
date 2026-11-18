@@ -218,6 +218,18 @@ them idempotent: they can run twice.
   `TRANSFER_STUCK_PENDING_MINUTES` have passed since its last try, least recently tried first,
   whatever the job's state. It never creates a transfer (#416 r2).
 
+## Stripe webhooks (#40, #280)
+
+`POST /v1/webhooks/stripe` (platform events, `STRIPE_WEBHOOK_SECRET`) and
+`POST /v1/webhooks/stripe/connect` (the connected accounts' events, its own
+`STRIPE_CONNECT_WEBHOOK_SECRET`; `CONNECT_EVENT_TYPES` only) verify the signature on the raw
+body, store each event once in `webhook_events` and queue it; the worker runs the handler from
+`webhooks/handlers.py` in a savepoint and commits. A handler never commits, raises to be run
+again, and announces pushes through `AfterCommit`. `account.updated`
+(`payouts/webhook_handlers.py`) never trusts the event: under the profile's row lock it reads
+the account from Stripe (`store_payouts_enabled`, shared with the payouts status) and tells an
+approved pro once payouts turn on. An account no profile holds is acknowledged.
+
 ## Tests
 
 `pytest` with `asyncio_mode = auto`; `tests/conftest.py` builds the app from explicit settings
