@@ -40,6 +40,15 @@ export function axisTicks(max: number, kind: SeriesChartProps["kind"]): number[]
   return Array.from({ length: count + 1 }, (_, index) => index * step);
 }
 
+/**
+ * Where a scrolling chart scrolls so that a point `pointX` px into the drawing sits in the
+ * middle of what shows, never past either end.
+ */
+export function centeredScroll(pointX: number, clientWidth: number, scrollWidth: number): number {
+  const furthest = Math.max(0, scrollWidth - clientWidth);
+  return Math.min(furthest, Math.max(0, Math.round(pointX - clientWidth / 2)));
+}
+
 function formatter(kind: SeriesChartProps["kind"], locale: string, compact: boolean) {
   if (kind === "count")
     return new Intl.NumberFormat(locale, compact ? { notation: "compact" } : {});
@@ -52,8 +61,11 @@ function formatter(kind: SeriesChartProps["kind"], locale: string, compact: bool
 
 /**
  * A line chart of per-day figures, drawn as plain SVG: hairline grid, 2 px lines, an end dot
- * per line with its last value. Hover, or focus and the arrow keys, show every line's value
- * for a day; the page's table holds the same numbers for anyone who cannot use the chart.
+ * per line with its last value. Hover, or focus and the arrow keys, mark a day in the drawing
+ * and write every line's value for it in the readout line above the drawing: outside the part
+ * that scrolls on a narrow screen, so it is always in view. The arrow keys also scroll the
+ * drawing to the day they select. The page's table holds the same numbers for anyone who
+ * cannot use the chart.
  */
 export function SeriesChart({
   days,
@@ -117,6 +129,16 @@ export function SeriesChart({
     if (next === null) return;
     event.preventDefault();
     setActive(next);
+    // On a narrow screen the drawing scrolls sideways: bring the selected day into view (the
+    // arrow keys no longer scroll it themselves). At once under Reduce Motion.
+    const box = event.currentTarget;
+    if (box.scrollWidth > box.clientWidth) {
+      const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+      box.scrollTo({
+        left: centeredScroll(x(next), box.clientWidth, box.scrollWidth),
+        behavior: still ? "auto" : "smooth",
+      });
+    }
   };
 
   const readout =
@@ -142,6 +164,33 @@ export function SeriesChart({
           ))}
         </ul>
       ) : null}
+      {/* The marked day's values, outside the drawing that scrolls: always in view. The live
+          region below says the same to a screen reader. Its height is kept when it is empty. */}
+      <div
+        aria-hidden
+        data-readout
+        data-index={active ?? undefined}
+        className="flex min-h-12 flex-wrap items-center gap-x-4 gap-y-1 text-sm sm:min-h-6"
+      >
+        {active !== null ? (
+          <>
+            <span className="font-semibold text-navy-900">{dayLabel(active)}</span>
+            {series.map((line) => (
+              <span key={line.key} className="inline-flex items-center gap-2">
+                <span
+                  aria-hidden
+                  className="h-0.5 w-3 rounded-full"
+                  style={{ background: line.color }}
+                />
+                <strong className="font-bold text-navy-900 tabular-nums">
+                  {show(line.values[active] ?? 0)}
+                </strong>
+                <span className="text-gray-500">{line.label}</span>
+              </span>
+            ))}
+          </>
+        ) : null}
+      </div>
       <div
         role="group"
         aria-label={label}
@@ -258,7 +307,7 @@ export function SeriesChart({
             );
           })}
           {active !== null ? (
-            <g>
+            <g data-marker>
               <line
                 x1={x(active)}
                 x2={x(active)}
@@ -290,30 +339,6 @@ export function SeriesChart({
             onPointerLeave={() => setActive(null)}
           />
         </svg>
-        {active !== null ? (
-          <div
-            aria-hidden
-            className="pointer-events-none absolute top-2 flex min-w-36 -translate-x-1/2 flex-col gap-1 rounded-md bg-white px-3 py-2 text-sm shadow-[0_8px_24px_rgb(1_23_46/0.16)]"
-            style={{
-              left: Math.min(WIDTH - 80, Math.max(80, x(active))),
-            }}
-          >
-            <span className="text-xs text-gray-500">{dayLabel(active)}</span>
-            {series.map((line) => (
-              <span key={line.key} className="flex items-center gap-2">
-                <span
-                  aria-hidden
-                  className="h-0.5 w-3 rounded-full"
-                  style={{ background: line.color }}
-                />
-                <strong className="font-bold text-navy-900 tabular-nums">
-                  {show(line.values[active] ?? 0)}
-                </strong>
-                <span className="text-gray-500">{line.label}</span>
-              </span>
-            ))}
-          </div>
-        ) : null}
       </div>
       <p id={hintId} className="text-xs text-gray-500">
         {keyboardHint}
