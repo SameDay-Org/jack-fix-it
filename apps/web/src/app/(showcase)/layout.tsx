@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 // The showcase pages are the only ones that load it: the brand's final font is still open.
 // Its space is narrow, so the pages add a little room between words.
 const showcaseFont = localFont({
-  src: "../../features/showcase/fonts/plus-jakarta-sans-latin-wght-normal.woff2",
+  src: "../../features/site/fonts/plus-jakarta-sans-latin-wght-normal.woff2",
   weight: "200 800",
   display: "swap",
   fallback: ["system-ui", "sans-serif"],

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { legalMetadata, showcaseMetadata } from "./metadata";
-import { siteUrl } from "./routes";
+import { siteUrl } from "@/features/site/routes";
 
 afterEach(() => {
   vi.unstubAllEnvs();

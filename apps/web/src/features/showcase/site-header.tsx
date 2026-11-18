@@ -3,11 +3,11 @@ import type { TFunction } from "i18next";
 import type { Locale } from "@/i18n/config";
 import { cn } from "@/lib/utils";
 
-import { LanguageToggle } from "./language-toggle";
-import { type MenuLink, MobileMenu } from "./mobile-menu";
+import { LanguageToggle } from "@/features/site/language-toggle";
+import { type MenuLink, MobileMenu } from "@/features/site/mobile-menu";
 import { ANCHORS, SHOWCASE_PATHS } from "./routes";
-import { CONTAINER, FOCUS_ON_NAVY } from "./ui";
-import { Wordmark } from "./wordmark";
+import { CONTAINER, FOCUS_ON_NAVY } from "@/features/site/ui";
+import { Wordmark } from "@/features/site/wordmark";
 
 /**
  * The page's header, kept in view while scrolling: the brand (back to the top), the links to

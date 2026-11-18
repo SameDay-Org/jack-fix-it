@@ -3,7 +3,9 @@ import type { Metadata } from "next";
 import { defaultLocale, type Locale } from "@/i18n/config";
 import { getT } from "@/i18n/server";
 
-import { SHOWCASE_PATHS, siteUrl } from "./routes";
+import { siteUrl } from "@/features/site/routes";
+
+import { SHOWCASE_PATHS } from "./routes";
 
 /** Open Graph's name for each language of the page (the product serves the United States). */
 const OG_LOCALES: Record<Locale, string> = { en: "en_US", es: "es_US" };

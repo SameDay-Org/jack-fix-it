@@ -11,7 +11,7 @@ import { MascotBubble } from "./mascot-bubble";
 import { MEDIA } from "./media";
 import { PhoneFrame } from "./phone-frame";
 import { ANCHORS } from "./routes";
-import { CONTAINER, FOCUS_ON_NAVY, PRIMARY_ACTION } from "./ui";
+import { CONTAINER, FOCUS_ON_NAVY, PRIMARY_ACTION } from "@/features/site/ui";
 
 /** How wide the hero's phone is drawn: the `sizes` of its screen images. */
 const PHONE_SIZES = "(min-width: 1024px) 360px, (min-width: 640px) 288px, 60vw";
