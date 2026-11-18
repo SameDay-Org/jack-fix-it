@@ -42,8 +42,15 @@ class AuditAction(StrEnum):
     REQUEST_RELEASE = "service_request.release"
     # A staff read of a dispute: both sides' text and the photos' URLs (#76).
     DISPUTE_READ = "dispute.read"
-    # An admin resolved a dispute: released, partly released or refunded money (#76).
+    # An admin resolved a dispute: released, partly released or refunded money (#76). For a
+    # refund, written when Stripe says the money is back, in the transaction that settles.
     DISPUTE_RESOLVE = "dispute.resolve"
+    # An admin asked for a dispute's refund: a Stripe attempt, or a read of the refund Stripe
+    # holds. Committed before Stripe is called (#433 round 1 B2).
+    DISPUTE_REFUND_REQUEST = "dispute.refund_request"
+    # What came of it when it did not settle the dispute: a call that failed or never
+    # answered, a refund Stripe has not finished, failed or canceled (#433 round 1 B2).
+    DISPUTE_REFUND_OUTCOME = "dispute.refund_outcome"
 
 
 class AuditEntityType(StrEnum):

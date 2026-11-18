@@ -12,7 +12,9 @@ release(job_id), in four steps:
 1. Under the job's row lock (the one every status change takes), then the transfer row's:
    - the job is confirmed, or disputed with its dispute resolved by an admin's release, full
      or partial (#76): anything else is left alone (not_confirmed);
-   - nothing holds its money back (has_open_hold: an open dispute, #75);
+   - nothing holds its money back (has_open_hold: an open dispute, #75, or a dispute refund
+     Stripe has not finished, #433 round 1: a partial release pays the pro only once the
+     customer's part is back, and never while Stripe fails or cancels it);
    - no attempt is under way: a row pending with an attempt stamped less than
      TRANSFER_STUCK_PENDING_MINUTES ago and no outcome is another worker's (in_flight);
    - the job's payment succeeded and froze the same payout as the job did, a positive one;
@@ -75,6 +77,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Final
 
+from sqlalchemy import Subquery, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -94,7 +97,11 @@ from app.modules.payments.models import (
     Transfer,
     TransferStatus,
 )
-from app.modules.payments.repository import PaymentRepository, TransferRepository
+from app.modules.payments.repository import (
+    PaymentRepository,
+    RefundRepository,
+    TransferRepository,
+)
 from app.modules.payments.service import transfer_group
 from app.modules.payments.transfer_webhooks import record_reversal
 from app.modules.pros.service import ProService
@@ -114,13 +121,26 @@ def transfer_idempotency_key(job_id: uuid.UUID) -> str:
 
 
 async def has_open_hold(session: AsyncSession, job: JobPayoutFacts) -> bool:
-    """Whether something holds the job's money back: an open dispute (#75). Such a job is
-    never released, by any path, and the sweep's query leaves it out (open_dispute_jobs).
+    """Whether something holds the job's money back: an open dispute (#75), or a dispute
+    refund Stripe has not finished (#433 round 1: anything but `succeeded`, failed or canceled
+    included). Such a job is never released, by any path, and the sweep's query leaves it out
+    (_held_jobs).
 
     A report moves the job completed -> disputed, which release never reads either; the hold
-    is what keeps the money back whatever the job's status, until an admin resolves it (#76).
+    is what keeps the money back whatever the job's status, until an admin resolves it (#76)
+    and Stripe gave the customer's part back.
     """
-    return await has_open_dispute(session, job.job_id)
+    return await has_open_dispute(session, job.job_id) or await RefundRepository(
+        session
+    ).unsettled_of_job(job.job_id)
+
+
+def _held_jobs() -> Subquery:
+    """The job (`job_id`) of every job has_open_hold holds, for the sweep's query."""
+    open_disputes = open_dispute_jobs()
+    return union(
+        select(open_disputes.c.job_id), RefundRepository.unsettled_dispute_jobs()
+    ).subquery()
 
 
 class ReversalCheckOutcome(StrEnum):
@@ -242,7 +262,7 @@ class TransferService:
         job_ids = await self._transfers.due(
             self._jobs.awaiting_transfer(released_dispute_jobs()),
             self._pros.payable(),
-            open_dispute_jobs(),
+            _held_jobs(),
             self._clock() - self._config.stuck_after,
             limit,
         )

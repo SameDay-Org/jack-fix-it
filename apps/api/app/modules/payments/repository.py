@@ -3,12 +3,14 @@ from collections.abc import Collection
 from datetime import datetime
 from typing import Final
 
-from sqlalchemy import ColumnElement, Subquery, func, or_, select, update
+from sqlalchemy import ColumnElement, Select, Subquery, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.payments.models import (
     MADE_STATUSES,
     REFUND_NOT_MADE,
+    STRIPE_REFUND_DEAD,
+    STRIPE_REFUND_SUCCEEDED,
     UNPAID_STATUSES,
     Payment,
     PaymentStatus,
@@ -370,7 +372,8 @@ class TransferRepository:
             select(confirmed.c.job_id)
             .join(payable, payable.c.pro_id == confirmed.c.pro_id)
             .outerjoin(Transfer, Transfer.job_id == confirmed.c.job_id)
-            # A held job (`held`: job_id, an open dispute) is never released (has_open_hold).
+            # A held job (`held`: job_id; an open dispute, or a dispute refund Stripe has not
+            # finished) is never released (has_open_hold).
             .where(confirmed.c.job_id.not_in(select(held.c.job_id)))
             .where(
                 or_(
@@ -452,19 +455,58 @@ class RefundRepository:
         )
         return (await self._session.scalar(statement)) is not None
 
-    async def mark_created(self, refund_id: uuid.UUID, stripe_refund_id: str) -> bool:
-        """Stores the refund Stripe made unless the row holds one already; False then. The
-        caller commits it with what the refund settles."""
+    async def observe(
+        self, refund_id: uuid.UUID, stripe_refund_id: str, stripe_status: str
+    ) -> bool:
+        """Stores the refund Stripe holds for the row (created, its id) and Stripe's status of
+        it now. False (nothing written) when the row holds another Stripe refund. The caller
+        holds the row's lock and commits it with what the status settles, if anything."""
         statement = (
             update(Refund)
             .where(
                 Refund.id == refund_id,
-                Refund.status.in_(REFUND_NOT_MADE),
-                Refund.stripe_refund_id.is_(None),
+                Refund.stripe_refund_id.is_(None) | (Refund.stripe_refund_id == stripe_refund_id),
             )
             .values(
-                status=RefundStatus.CREATED, stripe_refund_id=stripe_refund_id, last_error_code=None
+                status=RefundStatus.CREATED,
+                stripe_refund_id=stripe_refund_id,
+                stripe_status=stripe_status,
+                last_error_code=None,
             )
             .returning(Refund.id)
         )
         return (await self._session.scalar(statement)) is not None
+
+    async def by_stripe_id(self, stripe_refund_id: str) -> Refund | None:
+        """The row holding this Stripe refund, unlocked, read as last committed."""
+        statement = (
+            select(Refund)
+            .where(Refund.stripe_refund_id == stripe_refund_id)
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def dead_of_disputes(self, dispute_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+        """The disputes among these whose refund Stripe failed or canceled."""
+        if not dispute_ids:
+            return set()
+        statement = select(Refund.dispute_id).where(
+            Refund.dispute_id.in_(dispute_ids), Refund.stripe_status.in_(STRIPE_REFUND_DEAD)
+        )
+        return {dispute_id for dispute_id in await self._session.scalars(statement) if dispute_id}
+
+    async def unsettled_of_job(self, job_id: uuid.UUID) -> bool:
+        """Whether the job has a dispute refund Stripe has not finished (not `succeeded`)."""
+        statement = select(
+            RefundRepository.unsettled_dispute_jobs().where(Refund.job_id == job_id).exists()
+        )
+        return bool(await self._session.scalar(statement))
+
+    @staticmethod
+    def unsettled_dispute_jobs() -> Select[uuid.UUID]:
+        """The job of every dispute refund whose money Stripe has not given back (anything but
+        `succeeded`, none read yet included): its payout stays held (payments.transfers)."""
+        return select(Refund.job_id.label("job_id")).where(
+            Refund.dispute_id.is_not(None),
+            Refund.stripe_status.is_distinct_from(STRIPE_REFUND_SUCCEEDED),
+        )

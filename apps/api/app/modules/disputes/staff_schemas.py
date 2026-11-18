@@ -109,6 +109,11 @@ class StaffDisputeSummary(_Out):
     currency: str | None
     opened_at: datetime = Field(description="When the customer reported it: its age.")
     resolved_at: datetime | None
+    refund_failed: bool = Field(
+        description="Stripe failed or canceled the decision's refund: the money did not go "
+        "back, the dispute stays open (or, resolved, needs a look) and any payout it decided "
+        "stays held. Staff repair it."
+    )
 
 
 class StaffDisputeList(_Out):

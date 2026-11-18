@@ -1,12 +1,16 @@
 """An admin resolves a dispute (#76): release, partial or full refund, with Stripe faked.
 
-Most tests run through the API on the rolled-back test session. The last two use real commits
-on separate connections (what another connection sees during the Stripe call, and two admins
-at once); they never resolve, so they write no audit row (append-only) and clean up after
-themselves.
+Most tests run through the API on the rolled-back test session; Stripe's refund events run
+their handler on it too. The committed tests use real commits on separate connections (what
+another connection sees during the Stripe call, two admins at once, the worker running an
+event again); their audit writes are recorded instead of written (audit_log is append-only, so
+a committed row could never be cleaned up: the rows themselves are proven on the rolled-back
+session), and they clean up after themselves.
 """
 
 import asyncio
+import dataclasses
+import json
 import logging
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
@@ -16,23 +20,31 @@ from typing import Any, Final
 
 import httpx
 import pytest
+from arq import Retry
 from fastapi import FastAPI
 from sqlalchemy import URL, delete, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.config import Settings
 from app.db import violated_constraint
 from app.errors import AppError
 from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailableError
 from app.integrations.stripe_refunds import FoundRefunds, RefundFacts, get_stripe_refunds
 from app.modules.addresses.models import Address
 from app.modules.audit.models import AuditLog
+from app.modules.audit.service import AuditService
 from app.modules.disputes.models import (
     Dispute,
     DisputePhoto,
     DisputeReason,
     DisputeResolution,
     DisputeStatus,
+)
+from app.modules.disputes.refund_webhooks import (
+    REFUND_EVENT_TYPES,
+    RefundEventMalformedError,
+    refund_event_handler,
 )
 from app.modules.disputes.resolution import DisputeResolver, ResolutionConfig
 from app.modules.disputes.router import get_dispute_clock
@@ -48,8 +60,13 @@ from app.modules.quotes.models import Quote, QuoteStatus
 from app.modules.requests.models import RequestOrigin, RequestStatus, ServiceRequest
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole, UserStatus
+from app.modules.webhooks import handlers
+from app.modules.webhooks.events import AfterCommit, StripeEvent
+from app.modules.webhooks.models import WebhookEvent, WebhookEventStatus
+from app.modules.webhooks.tasks import process_stripe_event
 from app.money import partial_refund_cents
 from app.queue import get_job_queue
+from tests.conftest import make_settings
 from tests.helpers import as_status_writer
 from tests.job_world import (
     CUSTOMER_FIRST,
@@ -58,12 +75,15 @@ from tests.job_world import (
     PRICE,
     TAX,
     JobWorld,
+    Party,
     build_world,
     events,
+    headers_for,
     job_row,
 )
 from tests.job_world import make_job as make_world_job
 from tests.test_disputes_api import FakeStorage, RecordingQueue
+from tests.test_stripe_webhooks_api import _serving, sign
 from tests.test_transfers import ACCOUNT, FakeStripeTransfers, add_payment
 
 NOW: Final = datetime(2030, 3, 1, 12, 0, tzinfo=UTC)
@@ -77,22 +97,32 @@ ODD_RELEASE: Final = 8_501
 ODD_REFUND: Final = 10_699
 # Stripe objects the fake makes; none may reach a log.
 LEAKS: Final = ("re_probe76", "pi_probe68", NOTE)
+WEBHOOK_SECRET: Final = "whsec_test_fixture_value_not_real_433"
+
+
+class SimulatedCrash(BaseException):
+    """The API process dying right after Stripe made the refund: nothing of ours runs after."""
 
 
 @dataclass
 class FakeStripeRefunds:
     """Records every call and answers as Stripe does: a create with a known idempotency key
-    returns the refund it made first. `errors` makes the next call of an operation raise (in
-    order); `lost_answers` makes that many creates make the refund and then fail as a timeout
-    would; `on_create` runs inside the create, before it answers."""
+    returns the refund it made first, with `status` as Stripe's status of a new refund. `errors`
+    makes the next call of an operation raise (in order); `lost_answers` makes that many creates
+    make the refund and then fail as a timeout would; `crashes` makes that many creates make
+    the refund and then end the process (SimulatedCrash); `on_create` runs inside the create,
+    before it answers."""
 
     refunds: dict[str, RefundFacts] = field(default_factory=dict)
     intents: dict[str, str] = field(default_factory=dict)  # refund id -> PaymentIntent
     by_key: dict[str, str] = field(default_factory=dict)
     creates: list[dict[str, Any]] = field(default_factory=list)
     lists: list[str] = field(default_factory=list)
+    retrieves: list[str] = field(default_factory=list)
     errors: dict[str, list[Exception]] = field(default_factory=dict)
     lost_answers: int = 0
+    crashes: int = 0
+    status: str = "succeeded"
     on_create: Callable[[], Awaitable[None]] | None = None
     list_complete: bool = True
 
@@ -135,15 +165,27 @@ class FakeStripeRefunds:
                     amount_cents=amount_cents,
                     currency="usd",
                     dispute_id=dict(metadata).get("dispute_id"),
-                    live=True,
+                    status=self.status,
                     request_id="req_fake_refund",
                 ),
                 payment_intent_id,
             )
+        if self.crashes:
+            self.crashes -= 1
+            raise SimulatedCrash
         if self.lost_answers:
             self.lost_answers -= 1
             raise StripeUnavailableError(request_id="req_lost")
         return self.refunds[refund_id]
+
+    async def retrieve_refund(self, refund_id: str) -> RefundFacts:
+        self._fail("retrieve")
+        self.retrieves.append(refund_id)
+        return self.refunds[refund_id]
+
+    def set_status(self, refund_id: str, status: str) -> None:
+        """Stripe moves the refund on."""
+        self.refunds[refund_id] = dataclasses.replace(self.refunds[refund_id], status=status)
 
     async def list_refunds(self, payment_intent_id: str) -> FoundRefunds:
         self._fail("list")
@@ -346,7 +388,6 @@ async def test_a_release_resolves_now_and_the_transfer_pays_the_pro_in_full(
         "job_id": str(case.job_id),
         "pro_release_cents": PAYOUT,
         "customer_refund_cents": 0,
-        "stripe_refund_id": None,
     }
 
     # The queued task: the pro's payout in full, and the job paid out as the admin.
@@ -394,8 +435,15 @@ async def test_a_full_refund_gives_the_customer_total_back_and_no_transfer(
         1,
         case.dispute_id,
     )
-    stripe_refund_id = refund.stripe_refund_id
+    stripe_refund_id, refund_id = refund.stripe_refund_id, refund.id
+    assert refund.stripe_status == "succeeded"
+    assert (refund.initiated_by, refund.pro_release_cents, refund.resolution_note) == (
+        world.admin.id,
+        0,
+        NOTE,
+    )
     assert body["refund"]["stripe_refund_id"] == stripe_refund_id
+    assert body["refund"]["stripe_status"] == "succeeded"
     [last] = [e for e in await events(db_session, case.job_id) if e.to_status is JobStatus.REFUNDED]
     assert (last.from_status, last.to_status, last.actor_id) == (
         JobStatus.DISPUTED,
@@ -411,9 +459,29 @@ async def test_a_full_refund_gives_the_customer_total_back_and_no_transfer(
         (str(world.customer.id), f"dispute_refunded:{case.job_id}"),
         (str(world.pro.id), f"dispute_payout_refunded:{case.job_id}"),
     ]
+    [request] = await audits(db_session, case, "dispute.refund_request")
+    assert (request.actor_user_id, request.reason) == (world.admin.id, NOTE)
+    assert request.after == {
+        "step": "create",
+        "resolution": "refunded",
+        "job_id": str(case.job_id),
+        "pro_release_cents": 0,
+        "customer_refund_cents": TOTAL,
+        "refund_id": str(refund_id),
+        "idempotency_key": f"dispute:{case.dispute_id}:refund",
+        "attempt": 1,
+        "stripe_refund_id": None,
+        "initiated_by": str(world.admin.id),
+        "recovery": False,
+    }
     [audit] = await audits(db_session, case, "dispute.resolve")
+    assert (audit.actor_user_id, audit.reason) == (world.admin.id, NOTE)
     assert audit.after["stripe_refund_id"] == stripe_refund_id
     assert audit.after["customer_refund_cents"] == TOTAL
+    assert (audit.after["stripe_status"], audit.after["recovery"]) == ("succeeded", False)
+    assert audit.after["initiated_by"] == str(world.admin.id)
+    # Settled at once: no outcome to record.
+    assert await audits(db_session, case, "dispute.refund_outcome") == []
     assert_no_leak(caplog)
 
 
@@ -654,6 +722,15 @@ async def test_a_failed_refund_leaves_the_dispute_open_and_the_same_decision_ret
     [row] = await refund_rows(db_session, case)
     assert (row.status, row.last_error_code, row.attempts) == (RefundStatus.FAILED, stored, 1)
     assert await audits(db_session, case, "dispute.resolve") == []
+    [outcome] = await audits(db_session, case, "dispute.refund_outcome")
+    assert (outcome.actor_user_id, outcome.reason) == (world.admin.id, NOTE)
+    assert outcome.after == {
+        "outcome": "rejected" if status == 502 else "unavailable",
+        "code": stored,
+        "refund_id": str(row.id),
+        "attempt": 1,
+        "stripe_event_id": None,
+    }
     assert queue.jobs == {}
 
     clock.now += timedelta(minutes=1)  # a failed attempt is not under way: no wait
@@ -681,10 +758,17 @@ async def test_a_lost_refund_answer_is_adopted_without_a_second_refund(
     refunds.lost_answers = 1
 
     lost = await resolve(db_client, world, case, "partial", ODD_RELEASE)
+
+    assert lost.status_code == 503
+    [request] = await audits(db_session, case, "dispute.refund_request")
+    [outcome] = await audits(db_session, case, "dispute.refund_outcome")
+    assert (request.actor_user_id, request.after["attempt"]) == (world.admin.id, 1)
+    assert (outcome.actor_user_id, outcome.after["outcome"]) == (world.admin.id, "unavailable")
+
     clock.now += timedelta(minutes=1)
     adopted = await resolve(db_client, world, case, "partial", ODD_RELEASE)
 
-    assert (lost.status_code, adopted.status_code) == (503, 200)
+    assert adopted.status_code == 200
     assert len(refunds.creates) == 1  # found in the listing, never made again
     [made] = refunds.refunds.values()
     [row] = await refund_rows(db_session, case)
@@ -713,6 +797,9 @@ async def test_a_refund_under_way_holds_off_another_resolve_until_it_is_stale(
             idempotency_key=f"dispute:{case.dispute_id}:refund",
             attempts=1,
             requested_at=NOW,
+            initiated_by=world.admin.id,
+            pro_release_cents=0,
+            resolution_note=NOTE,
         )
     )
     await db_session.commit()
@@ -754,7 +841,7 @@ async def test_once_a_refund_was_tried_only_that_decision_may_be_retried(
     assert queue.jobs == {}
 
 
-@pytest.mark.parametrize("case_name", ["several", "not_live", "other_amount", "more_pages"])
+@pytest.mark.parametrize("case_name", ["several", "other_amount", "more_pages"])
 async def test_stripe_refunds_that_cannot_be_matched_create_nothing(
     db_client: httpx.AsyncClient,
     db_session: AsyncSession,
@@ -771,23 +858,18 @@ async def test_stripe_refunds_that_cannot_be_matched_create_nothing(
         amount_cents=TOTAL,
         currency="usd",
         dispute_id=str(case.dispute_id),
-        live=True,
+        status="succeeded",
         request_id=None,
     )
     if case_name == "several":
         refunds.add(facts, case.payment_intent_id)
         refunds.add(
-            RefundFacts("re_probe76y", TOTAL, "usd", str(case.dispute_id), True, None),
-            case.payment_intent_id,
-        )
-    elif case_name == "not_live":
-        refunds.add(
-            RefundFacts("re_probe76z", TOTAL, "usd", str(case.dispute_id), False, None),
+            RefundFacts("re_probe76y", TOTAL, "usd", str(case.dispute_id), "failed", None),
             case.payment_intent_id,
         )
     elif case_name == "other_amount":
         refunds.add(
-            RefundFacts("re_probe76w", TOTAL - 1, "usd", str(case.dispute_id), True, None),
+            RefundFacts("re_probe76w", TOTAL - 1, "usd", str(case.dispute_id), "succeeded", None),
             case.payment_intent_id,
         )
     else:
@@ -894,11 +976,34 @@ async def test_a_payment_that_does_not_match_the_job_needs_review(
     ("values", "constraint"),
     [
         ({"idempotency_key": "taken"}, "uq_refunds_idempotency_key"),
-        ({"status": RefundStatus.CREATED}, "ck_refunds_created_has_stripe_refund_id"),
+        (
+            {"status": RefundStatus.CREATED, "stripe_status": "succeeded"},
+            "ck_refunds_created_has_stripe_refund_id",
+        ),
+        (
+            {"status": RefundStatus.CREATED, "stripe_refund_id": "re_probe76c"},
+            "ck_refunds_created_has_stripe_status",
+        ),
+        ({"stripe_status": "pending"}, "ck_refunds_created_has_stripe_status"),
+        ({"initiated_by": None}, "ck_refunds_dispute_refund_has_decision"),
+        ({"pro_release_cents": None}, "ck_refunds_dispute_refund_has_decision"),
+        ({"resolution_note": None}, "ck_refunds_dispute_refund_has_decision"),
+        ({"pro_release_cents": -1}, "ck_refunds_pro_release_non_negative"),
         ({"amount_cents": 0}, "ck_refunds_amount_cents_positive"),
         ({"attempts": -1}, "ck_refunds_attempts_non_negative"),
     ],
-    ids=["one_per_key", "created_without_stripe_id", "zero_amount", "negative_attempts"],
+    ids=[
+        "one_per_key",
+        "created_without_stripe_id",
+        "created_without_stripe_status",
+        "stripe_status_before_created",
+        "no_initiating_admin",
+        "no_release",
+        "no_note",
+        "negative_release",
+        "zero_amount",
+        "negative_attempts",
+    ],
 )
 async def test_the_refunds_table_refuses_what_the_rules_forbid(
     db_session: AsyncSession, world: JobWorld, values: dict[str, Any], constraint: str
@@ -917,6 +1022,9 @@ async def test_the_refunds_table_refuses_what_the_rules_forbid(
                 "amount_cents": TOTAL,
                 "currency": "usd",
                 "idempotency_key": f"k-{uuid.uuid4()}",
+                "initiated_by": world.admin.id,
+                "pro_release_cents": 0,
+                "resolution_note": NOTE,
                 **fields,
             }
         )
@@ -1005,6 +1113,7 @@ async def test_staff_read_the_list_and_an_audited_dispute_in_full(
     ).one()
     assert item["public_code"] == code
     assert item["customer_first_name"] == CUSTOMER_FIRST
+    assert item["refund_failed"] is False
     assert (item["customer_total_cents"], item["pro_payout_cents"]) == (TOTAL, PAYOUT)
     assert (item["status"], item["job_status"], item["reason_code"]) == (
         "open",
@@ -1074,6 +1183,9 @@ class CommittedCase:
     case: Case
     admin: UserAccount
     other_admin: UserAccount
+    # (actor, action) of each audit row asked for, in order.
+    audited: list[tuple[uuid.UUID, str]]
+    event_rows: list[uuid.UUID]
 
 
 def _account(user: User) -> UserAccount:
@@ -1089,9 +1201,25 @@ def _account(user: User) -> UserAccount:
 
 
 @pytest.fixture
-async def committed_case(test_database_url: URL) -> AsyncIterator[CommittedCase]:
-    """A disputed job with its payment and open dispute, and two admins, on real commits.
-    The tests never resolve it (no audit row, which cannot be deleted); all is deleted after."""
+async def committed_case(
+    test_database_url: URL, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[CommittedCase]:
+    """A disputed job with its payment and open dispute, and two admins, on real commits. The
+    audit writes are recorded, not written (append-only rows could never be deleted); all is
+    deleted after."""
+    audited: list[tuple[uuid.UUID, str]] = []
+
+    async def record(self: AuditService, operator: Any, action: Any, *args: Any) -> None:
+        audited.append((operator.user_id, action.value))
+
+    async def record_outcome(
+        self: AuditService, actor_id: uuid.UUID, action: Any, *args: Any, **kwargs: Any
+    ) -> None:
+        audited.append((actor_id, action.value))
+
+    monkeypatch.setattr(AuditService, "record", record)
+    monkeypatch.setattr(AuditService, "record_outcome", record_outcome)
+    event_rows: list[uuid.UUID] = []
     engine = create_async_engine(test_database_url)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     tag = uuid.uuid4().hex[:12]
@@ -1180,9 +1308,12 @@ async def committed_case(test_database_url: URL) -> AsyncIterator[CommittedCase]
             case=Case(job.id, dispute.id, request.id, f"pi_probe68{tag}"),
             admin=_account(admins[0]),
             other_admin=_account(admins[1]),
+            audited=audited,
+            event_rows=event_rows,
         )
     finally:
         async with sessions() as session:
+            await session.execute(delete(WebhookEvent).where(WebhookEvent.id.in_(event_rows)))
             await session.execute(delete(Refund).where(Refund.job_id == job.id))
             await session.execute(delete(Dispute).where(Dispute.id == dispute.id))
             await session.execute(delete(Payment).where(Payment.id == payment.id))
@@ -1213,10 +1344,12 @@ async def test_the_refund_row_is_committed_before_stripe_and_no_lock_is_held(
     committed_case: CommittedCase,
 ) -> None:
     """Committed intent first: during the Stripe call another connection sees the pending row
-    with its attempt, and takes the job's and the dispute's locks at once."""
+    with its attempt, and takes the job's and the dispute's locks at once; the request's audit
+    row was asked for in that transaction, before the call (B2)."""
     world = committed_case
     stripe = FakeStripeRefunds()
     seen: list[tuple[RefundStatus, int, int]] = []
+    audited_before_call: list[list[tuple[uuid.UUID, str]]] = []
 
     async def look() -> None:
         async with world.sessions() as other:
@@ -1234,7 +1367,8 @@ async def test_the_refund_row_is_committed_before_stripe_and_no_lock_is_held(
             ).one()
             seen.append((row.status, row.attempts, row.amount_cents))
             await other.rollback()
-        # Stripe refuses it, so nothing is resolved (and no audit row is written).
+        audited_before_call.append(list(world.audited))
+        # Stripe refuses it, so nothing is resolved.
         raise StripeRejectedError(code="probe_refused")
 
     stripe.on_create = look
@@ -1245,6 +1379,12 @@ async def test_the_refund_row_is_committed_before_stripe_and_no_lock_is_held(
             )
 
     assert seen == [(RefundStatus.PENDING, 1, TOTAL)]
+    assert audited_before_call == [[(world.admin.id, "dispute.refund_request")]]
+    # The refusal is recorded before the answer, under the same admin.
+    assert world.audited == [
+        (world.admin.id, "dispute.refund_request"),
+        (world.admin.id, "dispute.refund_outcome"),
+    ]
 
 
 async def test_a_second_admin_waits_for_the_first_ones_lock_and_one_decision_wins(
@@ -1311,3 +1451,540 @@ async def test_a_second_admin_waits_for_the_first_ones_lock_and_one_decision_win
     assert status is DisputeStatus.OPEN
     # One attempt, the refund's: the release never reached Stripe.
     assert [(row.status, row.attempts) for row in rows] == [(RefundStatus.FAILED, 1)]
+
+
+# --- Stripe's status of the refund: settled only at succeeded (#433 round 1 B1) ----------------
+
+
+@pytest.fixture
+def settings() -> Settings:
+    # The platform endpoint's signing secret, for the signed refund events below.
+    return make_settings(stripe_webhook_secret=WEBHOOK_SECRET)
+
+
+def refund_event(event_type: str, refund_id: str, payload_status: str) -> StripeEvent:
+    """A refund event as the route stores it. The payload's status is what the event says,
+    which the handler never reads."""
+    event_id = f"evt_test76{uuid.uuid4().hex[:12]}"
+    return StripeEvent(
+        stripe_event_id=event_id,
+        event_type=event_type,
+        livemode=False,
+        created=NOW,
+        payload={
+            "id": event_id,
+            "object": "event",
+            "type": event_type,
+            "data": {"object": {"id": refund_id, "object": "refund", "status": payload_status}},
+        },
+    )
+
+
+async def deliver(
+    session: AsyncSession, stripe: FakeStripeRefunds, queue: RecordingQueue, event: StripeEvent
+) -> AfterCommit:
+    """The event run as the worker runs it, on the rolled-back session: the handler of its
+    (registered) type bound to the fake, the commit, then what it announced."""
+    assert event.event_type in handlers.HANDLERS
+    after = AfterCommit()
+    await refund_event_handler(lambda: stripe)(session, event, after)
+    await session.commit()
+    for action in after.actions:
+        await action(queue, 1.0)
+    return after
+
+
+async def add_admin(session: AsyncSession) -> Party:
+    user = User(email=f"a76-{uuid.uuid4().hex[:8]}@x.com", password_hash="x", role=UserRole.ADMIN)
+    session.add(user)
+    await session.flush()
+    admin = Party(user.id, headers_for(user.id, UserRole.ADMIN))
+    await session.commit()
+    return admin
+
+
+def admin_account(world: JobWorld) -> UserAccount:
+    return UserAccount(
+        id=world.admin.id,
+        email="admin@x.com",
+        role=UserRole.ADMIN,
+        locale="en",
+        status=UserStatus.ACTIVE,
+        public_code="ZQ76ZQ77",
+        created_at=NOW,
+    )
+
+
+async def staff_flag(client: httpx.AsyncClient, world: JobWorld, case: Case) -> tuple[bool, bool]:
+    """refund_failed as the staff list and the detail show it."""
+    listed = await client.get("/v1/admin/disputes", headers=world.agent.headers)
+    detail = await client.get(f"/v1/admin/disputes/{case.dispute_id}", headers=world.agent.headers)
+    [item] = [d for d in listed.json()["disputes"] if d["id"] == str(case.dispute_id)]
+    return item["refund_failed"], detail.json()["refund_failed"]
+
+
+@pytest.mark.parametrize("unfinished", ["pending", "requires_action"])
+@pytest.mark.parametrize(("decision", "release"), [("refund", None), ("partial", ODD_RELEASE)])
+async def test_a_refund_stripe_has_not_finished_settles_nothing_until_a_retry_finds_it_done(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    queue: RecordingQueue,
+    refunds: FakeStripeRefunds,
+    decision: str,
+    release: int | None,
+    unfinished: str,
+) -> None:
+    case = await disputed(db_session, world)
+    refunds.status = unfinished
+
+    sent = await resolve(db_client, world, case, decision, release)
+
+    assert sent.status_code == 409, sent.text
+    assert sent.json()["error"]["code"] == "refund_pending"
+    assert (await dispute_row(db_session, case)).status is DisputeStatus.OPEN
+    assert (await job_row(db_session, case.job_id)).status is JobStatus.DISPUTED
+    assert queue.jobs == {}  # no transfer, no message
+    [made] = refunds.refunds.values()
+    [row] = await refund_rows(db_session, case)
+    assert (row.status, row.stripe_refund_id, row.stripe_status) == (
+        RefundStatus.CREATED,
+        made.refund_id,
+        unfinished,
+    )
+    assert await audits(db_session, case, "dispute.resolve") == []
+    [outcome] = await audits(db_session, case, "dispute.refund_outcome")
+    assert (outcome.actor_user_id, outcome.after["outcome"], outcome.after["stripe_status"]) == (
+        world.admin.id,
+        "refund_pending",
+        unfinished,
+    )
+    held = TransferService(db_session, FakeStripeTransfers(), TransferConfig(STUCK), clock)
+    assert await held.release(case.job_id) is ReleaseOutcome.HELD
+
+    # Still not finished: read again by its id; nothing created, nothing new to record.
+    clock.now += timedelta(minutes=1)
+    again = await resolve(db_client, world, case, decision, release)
+
+    assert (again.status_code, again.json()["error"]["code"]) == (409, "refund_pending")
+    assert (len(refunds.creates), refunds.lists, refunds.retrieves) == (1, [], [made.refund_id])
+    assert len(await audits(db_session, case, "dispute.refund_outcome")) == 1
+    assert queue.jobs == {}
+
+    refunds.set_status(made.refund_id, "succeeded")
+    done = await resolve(db_client, world, case, decision, release)
+
+    assert done.status_code == 200, done.text
+    assert done.json()["job_status"] == ("refunded" if decision == "refund" else "disputed")
+    assert done.json()["refund"]["stripe_status"] == "succeeded"
+    assert len(refunds.creates) == 1
+    assert queued_release(queue, case) is (decision == "partial")
+    assert len(pushed(queue)) == 2
+    [settled] = await audits(db_session, case, "dispute.resolve")
+    assert (settled.actor_user_id, settled.after["recovery"]) == (world.admin.id, False)
+    requests = await audits(db_session, case, "dispute.refund_request")
+    assert sorted(str(request.after["step"]) for request in requests) == [
+        "create",
+        "recheck",
+        "recheck",
+    ]
+
+
+@pytest.mark.parametrize(("decision", "release"), [("refund", None), ("partial", ODD_RELEASE)])
+async def test_stripe_s_refund_event_settles_the_decision_once_stripe_finished_it(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    queue: RecordingQueue,
+    refunds: FakeStripeRefunds,
+    caplog: pytest.LogCaptureFixture,
+    decision: str,
+    release: int | None,
+) -> None:
+    caplog.set_level(logging.INFO)
+    case = await disputed(db_session, world)
+    refunds.status = "pending"
+    assert (await resolve(db_client, world, case, decision, release)).status_code == 409
+    [made] = refunds.refunds.values()
+    refunds.set_status(made.refund_id, "succeeded")
+    # Sent before Stripe finished, it arrives late and says pending: Stripe is read instead.
+    event = refund_event("charge.refund.updated", made.refund_id, "pending")
+
+    await deliver(db_session, refunds, queue, event)
+
+    dispute = await dispute_row(db_session, case)
+    assert (dispute.status, dispute.resolved_by, dispute.resolution_note) == (
+        DisputeStatus.RESOLVED,
+        world.admin.id,
+        NOTE,
+    )
+    assert (dispute.pro_release_cents, dispute.customer_refund_cents) == (
+        (0, TOTAL) if decision == "refund" else (ODD_RELEASE, ODD_REFUND)
+    )
+    assert refunds.retrieves == [made.refund_id]
+    assert queued_release(queue, case) is (decision == "partial")
+    assert len(pushed(queue)) == 2
+    [settled] = await audits(db_session, case, "dispute.resolve")
+    # Under the admin whose decision it is, naming the event that settled it.
+    assert (settled.actor_user_id, settled.reason) == (world.admin.id, None)
+    assert (settled.after["stripe_event_id"], settled.after["recovery"]) == (
+        event.stripe_event_id,
+        False,
+    )
+    if decision == "refund":
+        assert (await job_row(db_session, case.job_id)).status is JobStatus.REFUNDED
+        [last] = [
+            e for e in await events(db_session, case.job_id) if e.to_status is JobStatus.REFUNDED
+        ]
+        assert last.actor_id == world.admin.id
+    else:
+        # The customer's part is back: the pro's part may go now.
+        await run_transfer(db_session, clock, case)
+
+    # The same event again, then an older one (out of order): the same state, nothing twice.
+    queue.jobs.clear()
+    again = await deliver(db_session, refunds, queue, event)
+    older = await deliver(
+        db_session, refunds, queue, refund_event("refund.updated", made.refund_id, "pending")
+    )
+
+    assert (again.actions, older.actions, queue.jobs) == ((), (), {})
+    assert len(await audits(db_session, case, "dispute.resolve")) == 1
+    assert (await dispute_row(db_session, case)).status is DisputeStatus.RESOLVED
+    assert_no_leak(caplog)
+
+
+@pytest.mark.parametrize(
+    ("event_type", "dead"), [("refund.failed", "failed"), ("refund.updated", "canceled")]
+)
+async def test_a_refund_stripe_fails_keeps_the_dispute_open_for_staff_and_the_payout_held(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    queue: RecordingQueue,
+    refunds: FakeStripeRefunds,
+    caplog: pytest.LogCaptureFixture,
+    event_type: str,
+    dead: str,
+) -> None:
+    case = await disputed(db_session, world)
+    refunds.status = "pending"
+    assert (await resolve(db_client, world, case, "partial", ODD_RELEASE)).status_code == 409
+    [made] = refunds.refunds.values()
+    refunds.set_status(made.refund_id, dead)
+
+    await deliver(db_session, refunds, queue, refund_event(event_type, made.refund_id, dead))
+
+    assert (await dispute_row(db_session, case)).status is DisputeStatus.OPEN
+    assert (await job_row(db_session, case.job_id)).status is JobStatus.DISPUTED
+    assert queue.jobs == {}  # no transfer, no message
+    [row] = await refund_rows(db_session, case)
+    assert (row.status, row.stripe_status) == (RefundStatus.CREATED, dead)
+    outcomes = await audits(db_session, case, "dispute.refund_outcome")
+    assert sorted(str(outcome.after["outcome"]) for outcome in outcomes) == [
+        "refund_failed",
+        "refund_pending",
+    ]
+    [failed] = [outcome for outcome in outcomes if outcome.after["outcome"] == "refund_failed"]
+    assert (failed.actor_user_id, failed.after["stripe_status"]) == (world.admin.id, dead)
+    [logged] = [r for r in caplog.records if r.getMessage() == "dispute_refund_failed"]
+    assert logged.levelno == logging.ERROR
+    assert await staff_flag(db_client, world, case) == (True, True)
+
+    # The decision stays as it is (staff repair it, #434), and Stripe is asked nothing more.
+    creates, retrieves = len(refunds.creates), list(refunds.retrieves)
+    clock.now += timedelta(minutes=1)
+    same = await resolve(db_client, world, case, "partial", ODD_RELEASE)
+    other = await resolve(db_client, world, case, "release")
+
+    assert (same.status_code, same.json()["error"]["code"]) == (409, "refund_failed")
+    assert (other.status_code, other.json()["error"]["code"]) == (409, "refund_already_attempted")
+    assert (len(refunds.creates), refunds.retrieves) == (creates, retrieves)
+    assert await audits(db_session, case, "dispute.resolve") == []
+    service = TransferService(db_session, FakeStripeTransfers(), TransferConfig(STUCK), clock)
+    assert await service.release(case.job_id) is ReleaseOutcome.HELD
+    assert case.job_id not in await service.due(10_000)
+
+
+async def test_a_refund_stripe_fails_after_it_settled_holds_the_partial_payout(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    queue: RecordingQueue,
+    refunds: FakeStripeRefunds,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Stripe can fail a refund after it succeeded: the decision stays (the dispute is
+    resolved), but the pro's part is not paid while the customer's did not come back."""
+    case = await disputed(db_session, world)
+    assert (await resolve(db_client, world, case, "partial", ODD_RELEASE)).status_code == 200
+    [made] = refunds.refunds.values()
+    refunds.set_status(made.refund_id, "failed")
+
+    await deliver(
+        db_session, refunds, queue, refund_event("charge.refund.updated", made.refund_id, "failed")
+    )
+
+    assert (await dispute_row(db_session, case)).status is DisputeStatus.RESOLVED
+    [row] = await refund_rows(db_session, case)
+    assert row.stripe_status == "failed"
+    assert "dispute_refund_failed" in caplog.text
+    assert await staff_flag(db_client, world, case) == (True, True)
+    service = TransferService(db_session, FakeStripeTransfers(), TransferConfig(STUCK), clock)
+    assert await service.release(case.job_id) is ReleaseOutcome.HELD
+    assert case.job_id not in await service.due(10_000)
+
+
+async def test_a_refund_a_lost_answer_left_failed_is_stored_and_never_made_again(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    queue: RecordingQueue,
+    refunds: FakeStripeRefunds,
+) -> None:
+    case = await disputed(db_session, world)
+    refunds.status = "failed"
+    refunds.lost_answers = 1
+    assert (await resolve(db_client, world, case, "refund")).status_code == 503
+    clock.now += timedelta(minutes=1)
+
+    response = await resolve(db_client, world, case, "refund")
+
+    assert (response.status_code, response.json()["error"]["code"]) == (409, "refund_failed")
+    assert len(refunds.creates) == 1  # found in the listing, never made again
+    [row] = await refund_rows(db_session, case)
+    assert (row.status, row.stripe_status) == (RefundStatus.CREATED, "failed")
+    assert (await dispute_row(db_session, case)).status is DisputeStatus.OPEN
+    assert queue.jobs == {}
+
+
+async def test_an_event_for_a_refund_no_dispute_holds_is_acknowledged(
+    db_session: AsyncSession,
+    queue: RecordingQueue,
+    refunds: FakeStripeRefunds,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    event = refund_event("refund.updated", "re_probe76unknown", "succeeded")
+
+    after = await deliver(db_session, refunds, queue, event)
+
+    assert (after.actions, refunds.retrieves) == ((), [])
+    [record] = [r for r in caplog.records if r.getMessage() == "refund_event_unknown_refund"]
+    assert (record.__dict__["stripe_event_id"], record.__dict__["event_type"]) == (
+        event.stripe_event_id,
+        "refund.updated",
+    )
+    assert_no_leak(caplog)
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"object": {"id": "re_probe76m", "object": "charge"}},
+        {"object": {"object": "refund"}},
+        {},
+    ],
+    ids=["not_a_refund", "no_id", "no_object"],
+)
+async def test_a_refund_event_without_a_refund_is_malformed(
+    db_session: AsyncSession, refunds: FakeStripeRefunds, data: dict[str, Any]
+) -> None:
+    event = StripeEvent("evt_test76m", "refund.updated", False, NOW, {"data": data})
+
+    with pytest.raises(RefundEventMalformedError):
+        await refund_event_handler(lambda: refunds)(db_session, event, AfterCommit())
+
+    assert refunds.retrieves == []
+
+
+@pytest.mark.parametrize("event_type", REFUND_EVENT_TYPES)
+async def test_refund_events_are_taken_only_signed_and_queued_for_their_handler(
+    app: FastAPI, test_database_url: URL, event_type: str
+) -> None:
+    async with _serving(app, test_database_url) as webhook:
+        event_id = webhook.new_id()
+        body = json.dumps(
+            {
+                "id": event_id,
+                "object": "event",
+                "type": event_type,
+                "livemode": False,
+                "created": 1_761_000_000,
+                "api_version": "2026-10-28",
+                "data": {"object": {"id": "re_probe76sig", "object": "refund"}},
+            }
+        ).encode()
+
+        forged = await webhook.post(body, signature=sign(body, "whsec_test_someone_else"))
+        assert (forged.status_code, forged.json()["error"]["code"]) == (400, "invalid_signature")
+        assert await webhook.rows(event_id) == []
+
+        signed = await webhook.post(body, signature=sign(body, WEBHOOK_SECRET))
+        assert signed.status_code == 200, signed.text
+        [row] = await webhook.rows(event_id)
+        # Handled, not ignored: queued for the worker.
+        assert row.status is WebhookEventStatus.PENDING
+
+
+# --- Who asked: audited before Stripe (#433 round 1 B2) -----------------------------------------
+
+
+async def test_a_crash_after_stripe_leaves_the_request_audited_and_a_recovery_is_its_own(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    queue: RecordingQueue,
+    refunds: FakeStripeRefunds,
+) -> None:
+    case = await disputed(db_session, world)
+    refunds.crashes = 1
+
+    with pytest.raises(SimulatedCrash):
+        await resolver(db_session, refunds).resolve(
+            admin_account(world), case.dispute_id, REFUND, queue
+        )
+
+    # Stripe made the refund and nothing of ours ran after: the request is on record.
+    assert len(refunds.refunds) == 1
+    [row] = await refund_rows(db_session, case)
+    assert (row.status, row.attempts, row.initiated_by) == (
+        RefundStatus.PENDING,
+        1,
+        world.admin.id,
+    )
+    [request] = await audits(db_session, case, "dispute.refund_request")
+    assert (request.actor_user_id, request.reason) == (world.admin.id, NOTE)
+    assert request.after == {
+        "step": "create",
+        "resolution": "refunded",
+        "job_id": str(case.job_id),
+        "pro_release_cents": 0,
+        "customer_refund_cents": TOTAL,
+        "refund_id": str(row.id),
+        "idempotency_key": f"dispute:{case.dispute_id}:refund",
+        "attempt": 1,
+        "stripe_refund_id": None,
+        "initiated_by": str(world.admin.id),
+        "recovery": False,
+    }
+
+    # Another admin, once that attempt is stale: the refund is found, and settled as the
+    # first admin's decision, the second admin's part audited as their recovery.
+    other = await add_admin(db_session)
+    clock.now = NOW + STUCK
+    recovered = await db_client.post(
+        resolve_path(case),
+        json={"decision": "refund", "note": "zq76 recovery"},
+        headers=other.headers,
+    )
+
+    assert recovered.status_code == 200, recovered.text
+    assert len(refunds.creates) == 1
+    dispute = await dispute_row(db_session, case)
+    assert (dispute.resolved_by, dispute.resolution_note) == (world.admin.id, NOTE)
+    requests = await audits(db_session, case, "dispute.refund_request")
+    assert sorted(
+        (str(r.actor_user_id), r.after["recovery"], r.after["initiated_by"]) for r in requests
+    ) == sorted(
+        [
+            (str(world.admin.id), False, str(world.admin.id)),
+            (str(other.id), True, str(world.admin.id)),
+        ]
+    )
+    [settled] = await audits(db_session, case, "dispute.resolve")
+    assert (settled.actor_user_id, settled.reason) == (other.id, "zq76 recovery")
+    assert (settled.after["recovery"], settled.after["initiated_by"]) == (True, str(world.admin.id))
+    [last] = [e for e in await events(db_session, case.job_id) if e.to_status is JobStatus.REFUNDED]
+    assert last.actor_id == world.admin.id
+
+
+async def test_a_stripe_failure_reading_the_refund_runs_the_event_again_then_it_settles(
+    committed_case: CommittedCase, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The worker on real commits: Stripe failing to answer the read writes nothing and asks
+    for a later run, which settles the dispute and pushes only after its commit."""
+    world = committed_case
+    stripe = FakeStripeRefunds()
+    stripe_refund_id = f"re_probe76{uuid.uuid4().hex[:10]}"
+    stripe.add(
+        RefundFacts(stripe_refund_id, TOTAL, "usd", str(world.case.dispute_id), "succeeded", None),
+        world.case.payment_intent_id,
+    )
+    stripe.errors["retrieve"] = [StripeUnavailableError(request_id="req_read")]
+    monkeypatch.setitem(handlers.HANDLERS, "refund.updated", refund_event_handler(lambda: stripe))
+    event = refund_event("refund.updated", stripe_refund_id, "succeeded")
+    async with world.sessions() as session:
+        payment_id = await session.scalar(
+            select(Payment.id).where(Payment.request_id == world.case.request_id)
+        )
+        assert payment_id is not None
+        session.add(
+            Refund(
+                job_id=world.case.job_id,
+                payment_id=payment_id,
+                dispute_id=world.case.dispute_id,
+                amount_cents=TOTAL,
+                currency="usd",
+                idempotency_key=f"dispute:{world.case.dispute_id}:refund",
+                status=RefundStatus.CREATED,
+                stripe_refund_id=stripe_refund_id,
+                stripe_status="pending",
+                attempts=1,
+                requested_at=NOW,
+                initiated_by=world.admin.id,
+                pro_release_cents=0,
+                resolution_note=NOTE,
+            )
+        )
+        row = WebhookEvent(
+            stripe_event_id=event.stripe_event_id,
+            event_type=event.event_type,
+            livemode=False,
+            stripe_created_at=NOW,
+            status=WebhookEventStatus.PENDING,
+            attempts=0,
+            payload=dict(event.payload),
+        )
+        session.add(row)
+        await session.commit()
+    world.event_rows.append(row.id)
+    queue = RecordingQueue()
+    ctx: dict[str, Any] = {
+        "settings": make_settings(),
+        "session_factory": world.sessions,
+        "job_try": 1,
+        "redis": queue,
+    }
+
+    with pytest.raises(Retry):
+        await process_stripe_event(ctx, str(row.id))
+
+    async with world.sessions() as session:
+        stored = await session.get(WebhookEvent, row.id)
+        status = await session.scalar(
+            select(Dispute.status).where(Dispute.id == world.case.dispute_id)
+        )
+    assert stored is not None
+    assert (stored.status, stored.attempts) == (WebhookEventStatus.PENDING, 1)
+    assert status is DisputeStatus.OPEN
+    assert (world.audited, queue.jobs) == ([], {})
+
+    ctx["job_try"] = 2
+    assert await process_stripe_event(ctx, str(row.id)) == "processed"
+
+    async with world.sessions() as session:
+        dispute = (
+            await session.scalars(select(Dispute).where(Dispute.id == world.case.dispute_id))
+        ).one()
+        job_status = await session.scalar(select(Job.status).where(Job.id == world.case.job_id))
+    assert (dispute.status, dispute.resolved_by) == (DisputeStatus.RESOLVED, world.admin.id)
+    assert job_status is JobStatus.REFUNDED
+    assert stripe.retrieves == [stripe_refund_id]
+    assert world.audited == [(world.admin.id, "dispute.resolve")]
+    assert len(queue.pushes()) == 2

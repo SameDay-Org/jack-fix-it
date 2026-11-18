@@ -87,12 +87,19 @@ class RefundOut(BaseModel):
     amount_cents: int = Field(description="What is refunded, in integer cents.")
     currency: str = Field(examples=["usd"])
     status: RefundStatus = Field(
-        description="pending: not made yet, an attempt may be under way. created: Stripe made "
-        "the refund. failed: the last attempt failed. A retry sends the same idempotency key, "
-        "and Stripe answers a refusal it already gave under that key (for 24 h) with the same "
+        description="pending: Stripe holds no refund of ours yet, an attempt may be under way. "
+        "created: Stripe holds the refund; stripe_status says whether the money is back. "
+        "failed: the last attempt's call failed. A retry sends the same idempotency key, and "
+        "Stripe answers a refusal it already gave under that key (for 24 h) with the same "
         "refusal: a retry helps when the call never reached Stripe, or once the key expired."
     )
     stripe_refund_id: str | None = Field(description="Stripe's id of the refund, once made.")
+    stripe_status: str | None = Field(
+        description="Stripe's status of the refund as last read, as Stripe says it: succeeded "
+        "(the money is back: only then is the dispute settled), pending or requires_action "
+        "(not finished: the dispute stays open), failed or canceled (it never will be: staff "
+        "repair it). Null until Stripe answered with the refund."
+    )
     attempts: int
     last_error_code: str | None = Field(
         description="Why the last attempt did not make the refund: a Stripe error code, an "

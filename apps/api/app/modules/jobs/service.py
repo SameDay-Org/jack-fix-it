@@ -101,9 +101,10 @@ SYSTEM: Final = SystemActor()
 
 @dataclass(frozen=True)
 class AdminDecision:
-    """An admin's recorded decision that a worker carries out later (#76: a dispute resolved
-    with a release moves its job disputed -> paid_out once the transfer is made). Acts as the
-    admin who decided (`admin_id`, kept on the dispute), and the event names them."""
+    """An admin's recorded decision that is carried out later (#76: a dispute resolved with a
+    release moves its job disputed -> paid_out once the transfer is made; a full refund moves it
+    disputed -> refunded once Stripe gave the money back). Acts as the admin who decided
+    (`admin_id`, kept on the dispute), and the event names them."""
 
     admin_id: uuid.UUID
 
@@ -528,11 +529,12 @@ class JobDisputes:
         found = await self._jobs.many_with_pro_user(job_ids, self._pros.users())
         return {job.id: _dispute_facts(job, pro_user_id) for job, pro_user_id in found}
 
-    async def refunded(self, job_id: uuid.UUID, admin: UserAccount) -> None:
-        """disputed -> refunded, the admin who resolved the dispute with a full refund as actor
-        (#76): the machine's transition (409 from any other status, 403 for anyone but an
-        admin) with its job_events row. Flushes, never commits."""
-        await self._machine.transition(job_id, JobStatus.REFUNDED, admin)
+    async def refunded(self, job_id: uuid.UUID, by: AdminDecision) -> None:
+        """disputed -> refunded once Stripe gave the customer's money back (#76), as the admin
+        whose full-refund decision it carries out (kept on the dispute and its refund, #433
+        round 1): the machine's transition (409 from any other status) with its job_events row.
+        Flushes, never commits."""
+        await self._machine.transition(job_id, JobStatus.REFUNDED, by)
 
 
 def _dispute_facts(job: Job, pro_user_id: uuid.UUID) -> JobDisputeFacts:

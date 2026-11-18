@@ -39,6 +39,10 @@ def upgrade() -> None:
         sa.Column("attempts", sa.Integer(), server_default="0", nullable=False),
         sa.Column("last_error_code", sa.String(length=64), nullable=True),
         sa.Column("requested_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("stripe_status", sa.String(length=32), nullable=True),
+        sa.Column("initiated_by", sa.Uuid(), nullable=True),
+        sa.Column("pro_release_cents", sa.Integer(), nullable=True),
+        sa.Column("resolution_note", sa.Text(), nullable=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -59,10 +63,26 @@ def upgrade() -> None:
             "status <> 'created' OR stripe_refund_id IS NOT NULL",
             name=op.f("ck_refunds_created_has_stripe_refund_id"),
         ),
+        sa.CheckConstraint(
+            "(status = 'created') = (stripe_status IS NOT NULL)",
+            name=op.f("ck_refunds_created_has_stripe_status"),
+        ),
+        sa.CheckConstraint(
+            "dispute_id IS NULL OR (initiated_by IS NOT NULL AND pro_release_cents IS NOT NULL"
+            " AND resolution_note IS NOT NULL)",
+            name=op.f("ck_refunds_dispute_refund_has_decision"),
+        ),
+        sa.CheckConstraint(
+            "pro_release_cents IS NULL OR pro_release_cents >= 0",
+            name=op.f("ck_refunds_pro_release_non_negative"),
+        ),
         sa.CheckConstraint("amount_cents > 0", name=op.f("ck_refunds_amount_cents_positive")),
         sa.CheckConstraint("attempts >= 0", name=op.f("ck_refunds_attempts_non_negative")),
         sa.ForeignKeyConstraint(
             ["dispute_id"], ["disputes.id"], name=op.f("fk_refunds_dispute_id_disputes")
+        ),
+        sa.ForeignKeyConstraint(
+            ["initiated_by"], ["users.id"], name=op.f("fk_refunds_initiated_by_users")
         ),
         sa.ForeignKeyConstraint(["job_id"], ["jobs.id"], name=op.f("fk_refunds_job_id_jobs")),
         sa.ForeignKeyConstraint(
