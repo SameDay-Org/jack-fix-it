@@ -17,9 +17,9 @@ export type SeriesChartProps = {
   area?: boolean;
 };
 
-// The drawing's own units: the SVG is this size, so its text stays at 12 px. A narrower
-// screen scrolls it sideways.
-const WIDTH = 720;
+// The drawing's own units: the SVG is this size, so its text stays at 12 px. It fills the
+// panel's card at 1280 px; a narrower screen scrolls it sideways.
+const WIDTH = 880;
 const HEIGHT = 220;
 const PLOT = { left: 64, right: 56, top: 16, bottom: 32 };
 const PLOT_WIDTH = WIDTH - PLOT.left - PLOT.right;
@@ -166,7 +166,8 @@ export function SeriesChart({
                 x2={WIDTH - PLOT.right}
                 y1={y(tick)}
                 y2={y(tick)}
-                stroke="var(--color-gray-50)"
+                stroke="var(--color-gray-500)"
+                strokeOpacity={0.15}
                 strokeWidth={1}
               />
               <text
