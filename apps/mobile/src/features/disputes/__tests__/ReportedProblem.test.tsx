@@ -79,8 +79,10 @@ const wrapper = ({ children }: { children: ReactNode }) => (
   </SafeAreaProvider>
 );
 
+/** Renders the block once its read has answered and been drawn (a notify tick after the cache). */
 async function renderBlock() {
   await render(<ReportedProblem jobId={JOB_ID} />, { wrapper });
+  await waitFor(() => expect(screen.queryByTestId("pro-job-report-loading")).toBeNull());
   await act(settle);
 }
 
@@ -215,7 +217,9 @@ describe("ReportedProblem", () => {
     const before = reads();
     await answer(0, errorResponse(409, "already_replied"));
     await waitFor(() => expect(reads()).toBeGreaterThan(before));
-    expect(screen.getByTestId("pro-job-report-reply-sent")).toHaveTextContent(/The first answer\./);
+    expect(await screen.findByTestId("pro-job-report-reply-sent")).toHaveTextContent(
+      /The first answer\./,
+    );
     expect(screen.queryByText(/already replied/)).toBeNull();
   });
 
@@ -238,8 +242,7 @@ describe("ReportedProblem", () => {
     );
     view = { dispute: dispute(), can_reply: true };
     await fireEvent.press(screen.getByTestId("pro-job-report-error"));
-    await act(settle);
-    expect(screen.getByTestId("pro-job-report-description")).toBeTruthy();
+    expect(await screen.findByTestId("pro-job-report-description")).toBeTruthy();
   });
 
   it("speaks Spanish", async () => {
