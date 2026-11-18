@@ -159,11 +159,47 @@ describe("money", () => {
 
 describe("the refund's state", () => {
   it.each([
-    [null, null],
-    [refund({ status: "created" }), null],
-    [refund({ status: "pending" }), "pending"],
-    [refund({ status: "failed", last_error_code: "card_declined" }), "failed"],
-  ] as const)("of %o is %s", (value, state) => {
+    ["no refund", null, null],
+    ["Stripe gave the money back", refund({ status: "created", stripe_status: "succeeded" }), null],
+    [
+      "Stripe holds it, unfinished",
+      refund({ status: "created", stripe_status: "pending" }),
+      "pending",
+    ],
+    [
+      "Stripe waits on an action",
+      refund({ status: "created", stripe_status: "requires_action" }),
+      "pending",
+    ],
+    ["Stripe failed it", refund({ status: "created", stripe_status: "failed" }), "failed"],
+    ["Stripe canceled it", refund({ status: "created", stripe_status: "canceled" }), "failed"],
+    [
+      "an attempt is under way",
+      refund({ status: "pending", stripe_status: null, stripe_refund_id: null }),
+      "pending",
+    ],
+    [
+      "the last call failed",
+      refund({
+        status: "failed",
+        stripe_status: null,
+        stripe_refund_id: null,
+        last_error_code: "card_declined",
+      }),
+      "attempt_failed",
+    ],
+    // Stripe's word on the money wins over the last call's.
+    [
+      "a later call failed, the money is back",
+      refund({ status: "failed", stripe_status: "succeeded" }),
+      null,
+    ],
+    [
+      "a status Stripe may add later",
+      refund({ status: "created", stripe_status: "something_new" }),
+      null,
+    ],
+  ] as const)("when %s is %s", (_case, value, state) => {
     expect(refundState(value)).toBe(state);
   });
 });

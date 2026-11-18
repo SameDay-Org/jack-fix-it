@@ -108,12 +108,38 @@ export function amountError(cents: number | null, payoutCents: number): AmountEr
   return null;
 }
 
-/** What the page says about the decision's refund: still under way, failed, or none to say. */
-export type RefundState = "pending" | "failed" | null;
+/**
+ * What the page says about the decision's refund:
+ * - `failed`: Stripe failed or canceled it, the money did not go back (staff repair it);
+ * - `pending`: Stripe has not finished it, or an attempt is under way (the dispute stays open);
+ * - `attempt_failed`: the last attempt's call failed (Stripe refused it, or did not answer);
+ * - null: no refund, or the money is back.
+ * Stripe's own status (`stripe_status`) comes first: it is the only one that says where the
+ * money is.
+ */
+export type RefundState = "pending" | "failed" | "attempt_failed" | null;
+
+/** Stripe's refund statuses the panel names; any other is shown by the row's own status. */
+export const STRIPE_REFUND_STATUSES = [
+  "succeeded",
+  "pending",
+  "requires_action",
+  "failed",
+  "canceled",
+] as const;
+export type StripeRefundStatus = (typeof STRIPE_REFUND_STATUSES)[number];
+
+export function stripeRefundStatus(refund: Refund): StripeRefundStatus | null {
+  return STRIPE_REFUND_STATUSES.find((status) => status === refund.stripe_status) ?? null;
+}
 
 export function refundState(refund: Refund | null): RefundState {
   if (!refund) return null;
-  if (refund.status === "failed") return "failed";
+  const stripe = stripeRefundStatus(refund);
+  if (stripe === "failed" || stripe === "canceled") return "failed";
+  if (stripe === "pending" || stripe === "requires_action") return "pending";
+  if (stripe === "succeeded") return null;
+  if (refund.status === "failed") return "attempt_failed";
   if (refund.status === "pending") return "pending";
   return null;
 }

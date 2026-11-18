@@ -19,7 +19,7 @@ import {
   listHref,
   toFilter,
 } from "./disputes";
-import { StatusBadge } from "./status-badge";
+import { RefundFailedChip, StatusBadge } from "./status-badge";
 
 const PILL_LINK =
   "inline-flex h-9 items-center rounded-pill bg-white px-4 text-sm font-semibold text-navy-900 shadow-sm outline-none hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2";
@@ -219,6 +219,9 @@ function rowCells(dispute: DisputeItem, t: T, locale: string) {
             ? t(`admin.disputes.resolution.${dispute.resolution}`)
             : t(`admin.disputes.status.${dispute.status}`)}
         </StatusBadge>
+        {dispute.refund_failed ? (
+          <RefundFailedChip>{t("admin.disputes.refundFailed")}</RefundFailedChip>
+        ) : null}
       </span>
     ),
   };

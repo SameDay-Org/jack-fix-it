@@ -139,33 +139,78 @@ describe("dispute page", () => {
     );
   });
 
-  it("puts a banner over a refund still being processed", async () => {
-    api(() =>
-      Response.json(dispute({ refund: refund({ status: "pending", amount_cents: 7_220 }) })),
-    );
-    const page = await render();
-    expect(page).toMatch(/<section aria-labelledby="refund-banner" data-refund="pending"/);
-    expect(page).toContain("A refund is being processed");
-    expect(page).toContain("Stripe hasn't confirmed the refund of $72.20 yet.");
-    expect(page).toContain("$72.20</span> · Being processed");
-  });
-
-  it("puts a red banner over a failed refund, with Stripe's code", async () => {
+  it("puts a banner over a refund Stripe has not finished", async () => {
     api(() =>
       Response.json(
-        dispute({ refund: refund({ status: "failed", last_error_code: "charge_disputed" }) }),
+        dispute({
+          refund: refund({ status: "created", stripe_status: "pending", amount_cents: 7_220 }),
+        }),
+      ),
+    );
+    const page = await render();
+    expect(page).toMatch(
+      /<section aria-labelledby="refund-banner" data-refund="pending" class="[^"]*bg-warning/,
+    );
+    expect(page).toContain("A refund is being processed");
+    expect(page).toContain("Stripe hasn't finished the refund of $72.20 yet.");
+    expect(page).toContain("$72.20</span> · Processing at Stripe");
+  });
+
+  it("puts the same banner over an attempt still under way, before Stripe holds a refund", async () => {
+    api(() =>
+      Response.json(
+        dispute({
+          refund: refund({ status: "pending", stripe_status: null, stripe_refund_id: null }),
+        }),
+      ),
+    );
+    const page = await render();
+    expect(page).toContain('data-refund="pending"');
+    expect(page).toContain("$132.50</span> · Being processed");
+  });
+
+  it("puts a red banner over a refund Stripe failed: the money did not go back", async () => {
+    api(() =>
+      Response.json(
+        dispute({
+          refund_failed: true,
+          refund: refund({ status: "created", stripe_status: "failed" }),
+        }),
       ),
     );
     const page = await render();
     expect(page).toMatch(/data-refund="failed" class="[^"]*bg-danger/);
     expect(page).toContain("The refund failed");
-    expect(page).toContain("ask an engineer to check Stripe");
+    expect(page).toContain("the money did not go back to the customer");
+    expect(page).toContain("Ask an engineer to repair it in Stripe.");
+    expect(page).toContain("· Failed at Stripe");
+  });
+
+  it("says when the last refund attempt did not go through, with Stripe's code", async () => {
+    api(() =>
+      Response.json(
+        dispute({
+          refund: refund({
+            status: "failed",
+            stripe_status: null,
+            stripe_refund_id: null,
+            last_error_code: "charge_disputed",
+          }),
+        }),
+      ),
+    );
+    const page = await render();
+    expect(page).toMatch(/data-refund="attempt_failed" class="[^"]*bg-warning/);
+    expect(page).toContain("The last refund attempt didn't go through");
+    expect(page).toContain("send the same decision again, or ask an engineer to check Stripe");
     expect(page).toContain("Stripe code: charge_disputed");
   });
 
-  it("puts no banner over a refund that was made", async () => {
+  it("puts no banner over a refund Stripe made", async () => {
     api(() => Response.json(dispute({ refund: refund({ status: "created" }) })));
-    expect(await render()).not.toContain("refund-banner");
+    const page = await render();
+    expect(page).not.toContain("refund-banner");
+    expect(page).toContain("$132.50</span> · Refunded");
   });
 
   it("lists the job's history", async () => {
@@ -259,7 +304,7 @@ describe("dispute page", () => {
   });
 
   it("speaks Spanish", async () => {
-    api(() => Response.json(dispute({ refund: refund({ status: "pending" }) })), {
+    api(() => Response.json(dispute({ refund: refund({ stripe_status: "pending" }) })), {
       locale: "es",
     });
     const page = await render();

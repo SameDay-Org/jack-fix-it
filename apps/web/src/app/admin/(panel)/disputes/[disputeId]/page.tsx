@@ -21,6 +21,7 @@ import {
   photoHref,
   refundState,
   RESOLVE_ERRORS,
+  stripeRefundStatus,
 } from "../disputes";
 import { StatusBadge } from "../status-badge";
 import { ResolveControl, type ResolveControlText } from "./resolve-control";
@@ -159,10 +160,10 @@ function DisputeView({
               : "flex gap-3 rounded-lg bg-warning p-4 text-navy-900"
           }
         >
-          {refund === "failed" ? (
-            <AlertTriangle aria-hidden className="mt-0.5 size-5 shrink-0" />
-          ) : (
+          {refund === "pending" ? (
             <Clock aria-hidden className="mt-0.5 size-5 shrink-0" />
+          ) : (
+            <AlertTriangle aria-hidden className="mt-0.5 size-5 shrink-0" />
           )}
           <div className="flex flex-col gap-1">
             <h2 id="refund-banner" className="font-bold">
@@ -264,7 +265,7 @@ function DisputeView({
                     {money(dispute.refund.amount_cents)}
                   </span>
                   {" · "}
-                  {t(`admin.disputes.detail.money.refundStatus.${dispute.refund.status}`)}
+                  {refundLabel(dispute.refund, t)}
                 </span>
                 {dispute.refund.last_error_code ? (
                   <span className="text-xs text-gray-500">
@@ -389,6 +390,14 @@ function DisputeView({
       ) : null}
     </>
   );
+}
+
+/** Where the refund stands: Stripe's own status once it has one, else the row's. */
+function refundLabel(refund: NonNullable<Dispute["refund"]>, t: T): string {
+  const stripe = stripeRefundStatus(refund);
+  return stripe
+    ? t(`admin.disputes.detail.money.stripeStatus.${stripe}`)
+    : t(`admin.disputes.detail.money.refundStatus.${refund.status}`);
 }
 
 /** A side's text as stored, never as HTML: React writes it as text. */

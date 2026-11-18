@@ -39,6 +39,7 @@ export function summary(extra: Partial<DisputeItem> = {}): DisputeItem {
     currency: "usd",
     opened_at: hoursAgo(3),
     resolved_at: null,
+    refund_failed: false,
     ...extra,
   };
 }
@@ -50,6 +51,7 @@ export function refund(extra: Partial<Refund> = {}): Refund {
     currency: "usd",
     status: "created",
     stripe_refund_id: "re_probe",
+    stripe_status: "succeeded",
     attempts: 1,
     last_error_code: null,
     requested_at: hoursAgo(1),

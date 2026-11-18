@@ -732,10 +732,7 @@
       },
       "noName": "Sin nombre",
       "notOnRecord": "Sin registro",
-      "refundChip": {
-        "pending": "Reembolso en curso",
-        "failed": "Reembolso fallido"
-      },
+      "refundFailed": "Reembolso fallido",
       "loading": "Cargando las disputas…",
       "loadError": "No pudimos cargar las disputas.",
       "retry": "Intentar de nuevo",
@@ -796,16 +793,27 @@
             "created": "Hecho",
             "failed": "Falló, se intenta de nuevo",
             "reversed": "Revertido"
+          },
+          "stripeStatus": {
+            "succeeded": "Reembolsado",
+            "pending": "En proceso en Stripe",
+            "requires_action": "En espera en Stripe",
+            "failed": "Falló en Stripe",
+            "canceled": "Cancelado en Stripe"
           }
         },
         "banner": {
           "pending": {
             "title": "Un reembolso está en proceso",
-            "body": "Stripe aún no confirma el reembolso de {{amount}}. La disputa sigue abierta hasta entonces: vuelve a revisar en unos minutos."
+            "body": "Stripe aún no termina el reembolso de {{amount}}. La disputa sigue abierta hasta entonces: vuelve a revisar en unos minutos."
           },
           "failed": {
             "title": "El reembolso falló",
-            "body": "Stripe no pudo reembolsar {{amount}}. La disputa sigue abierta y el pago al profesional queda retenido: pide a un ingeniero que revise Stripe."
+            "body": "Stripe falló o canceló el reembolso de {{amount}}: el dinero no volvió al cliente y el pago al profesional queda retenido. Pide a un ingeniero que lo repare en Stripe."
+          },
+          "attempt_failed": {
+            "title": "El último intento de reembolso no se completó",
+            "body": "Stripe rechazó el reembolso de {{amount}} o no respondió. La disputa sigue abierta: envía la misma decisión de nuevo, o pide a un ingeniero que revise Stripe."
           }
         },
         "timeline": {

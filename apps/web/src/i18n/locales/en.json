@@ -732,10 +732,7 @@
       },
       "noName": "No name",
       "notOnRecord": "Not on record",
-      "refundChip": {
-        "pending": "Refund pending",
-        "failed": "Refund failed"
-      },
+      "refundFailed": "Refund failed",
       "loading": "Loading disputes…",
       "loadError": "We couldn't load the disputes.",
       "retry": "Try again",
@@ -796,16 +793,27 @@
             "created": "Made",
             "failed": "Failed, tried again",
             "reversed": "Reversed"
+          },
+          "stripeStatus": {
+            "succeeded": "Refunded",
+            "pending": "Processing at Stripe",
+            "requires_action": "Waiting at Stripe",
+            "failed": "Failed at Stripe",
+            "canceled": "Canceled at Stripe"
           }
         },
         "banner": {
           "pending": {
             "title": "A refund is being processed",
-            "body": "Stripe hasn't confirmed the refund of {{amount}} yet. The dispute stays open until it does: check back in a few minutes."
+            "body": "Stripe hasn't finished the refund of {{amount}} yet. The dispute stays open until it does: check back in a few minutes."
           },
           "failed": {
             "title": "The refund failed",
-            "body": "Stripe couldn't refund {{amount}}. The dispute stays open and the pro's payout stays on hold: ask an engineer to check Stripe."
+            "body": "Stripe failed or canceled the refund of {{amount}}: the money did not go back to the customer, and the pro's payout stays on hold. Ask an engineer to repair it in Stripe."
+          },
+          "attempt_failed": {
+            "title": "The last refund attempt didn't go through",
+            "body": "Stripe refused the refund of {{amount}} or did not answer. The dispute stays open: send the same decision again, or ask an engineer to check Stripe."
           }
         },
         "timeline": {

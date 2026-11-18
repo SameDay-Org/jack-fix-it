@@ -176,6 +176,21 @@ describe("disputes page", () => {
     expect(page).toContain("Nov 18, 2026");
   });
 
+  it("marks a dispute whose refund Stripe failed, in the table and in its card", async () => {
+    api(() =>
+      Response.json({
+        disputes: [THREE[0], summary({ ...THREE[1], refund_failed: true }), THREE[2]],
+      }),
+    );
+    const page = await render();
+    const chips = [...page.matchAll(/<span class="([^"]*)" data-refund="failed">([^<]*)</g)];
+    expect(chips.map(([, , text]) => text)).toEqual(["Refund failed", "Refund failed"]);
+    expect(chips[0]?.[1]).toContain("bg-danger");
+    const table = page.slice(page.indexOf("<table"), page.indexOf("</table>"));
+    const row = table.slice(table.indexOf("JFX-MID2"), table.indexOf("JFX-NEW3"));
+    expect(row).toContain("Refund failed");
+  });
+
   it("marks the chosen view", async () => {
     api(() => Response.json({ disputes: [] }));
     const page = await render({ status: "resolved" });
