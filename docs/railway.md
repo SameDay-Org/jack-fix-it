@@ -350,6 +350,8 @@ is missing from either table, so this list cannot fall behind `app/config.py`.
 | `SITE_URL`                  | optional: the site's public origin, e.g. `https://${{RAILWAY_PUBLIC_DOMAIN}}` or the custom domain                                | no     | D17 (#403)  |
 | `BUSINESS_TIME_ZONE`        | optional, mirrors the api's `BUSINESS_TIME_ZONE` (unset: its default, `America/New_York`): the KPI page's presets end today there | no     | D16.5 (#84) |
 | `METRICS_MAX_RANGE_DAYS`    | optional, mirrors the api's `METRICS_MAX_RANGE_DAYS` (unset: its default, `366`): the longest range the KPI page asks for         | no     | D16.5 (#84) |
+| `DISPUTE_AGE_WARN_HOURS`    | optional: the hours after which an open dispute's age turns amber in the panel (unset: `24`)                                      | no     | #83         |
+| `DISPUTE_AGE_LATE_HOURS`    | optional: the hours after which it turns red (unset: `48`; ignored with the amber one unless it is larger)                        | no     | #83         |
 
 The web server calls the API over the private network; browsers and the mobile app use the
 api's public domain. `SITE_URL` is read when the site is built: it gives the showcase page
