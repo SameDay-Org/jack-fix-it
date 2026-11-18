@@ -192,16 +192,20 @@ describe("the landing page", () => {
 });
 
 describe("the landing's copy", () => {
-  const forbidden: Record<Locale, RegExp> = {
-    en: /guarant|insur|licens|escrow|refund|protect|warrant|\bfree\b|\bvoice\b|\bheld\b|\bhold\b|review|rating|\d+\s*%|\$\d/i,
-    es: /garant|asegurad|seguro (de|contra)|licencia|reembols|protegid|gratis|gratuit|\bvoz\b|retenid|reseña|calificaci|\d+\s*%|\$\d/i,
+  // The legal text rules (insurance, warranty, escrow, licence, refund, payment promises, where
+  // "verified" may appear) are the shared public-copy policy's: i18n/public-copy.test.ts reads
+  // the landing too. Here, what the landing must not offer because the product does not have it:
+  // voice input, reviews or ratings, a customer sign-in, prices, anything "free".
+  const absent: Record<Locale, RegExp> = {
+    en: /\bfree\b|\bvoice\b|review|rating|sign[ -]?in|log[ -]?in|\d+\s*%|\$\d/i,
+    es: /gratis|gratuit|\bvoz\b|reseña|calificaci|inici(a|ar) sesi[oó]n|\d+\s*%|\$\d/i,
   };
 
-  it.each(["en", "es"] as const)("in %s promises nothing the legal text rules forbid", (locale) => {
+  it.each(["en", "es"] as const)("in %s offers nothing the product does not have", (locale) => {
     const strings = (value: unknown): string[] =>
       typeof value === "string" ? [value] : Object.values(value as object).flatMap(strings);
     for (const text of strings(CATALOGS[locale].landing))
-      expect(text, text).not.toMatch(forbidden[locale]);
+      expect(text, text).not.toMatch(absent[locale]);
   });
 });
 
