@@ -35,7 +35,7 @@ from app.modules.disputes.staff_schemas import (
     StaffJobEventOut,
 )
 from app.modules.jobs.service import JobDisputeFacts, JobDisputes, JobStaffReader
-from app.modules.payments.refunds import PaymentFacts, RefundLedger
+from app.modules.payments.refunds import STRIPE_REFUND_FAILED, PaymentFacts, RefundLedger
 from app.modules.payments.transfer_reader import TransferReader
 from app.modules.pros.service import ProService
 from app.modules.requests.service import CustomerRequestReader
@@ -70,7 +70,7 @@ class DisputeStaffReader:
 
     async def listed(self, status: DisputeStatus | None, limit: int | None) -> StaffDisputeList:
         """Disputes of `status` (or any), oldest first. `limit` above the maximum is capped.
-        Five statements, whatever the page's size."""
+        Six statements, whatever the page's size."""
         size = min(limit or self._list_default_limit, self._list_max_limit)
         disputes = await self._disputes.listed(status, size)
         jobs = await self._jobs.read_many({dispute.job_id for dispute in disputes})
@@ -79,6 +79,7 @@ class DisputeStaffReader:
         names = await self._users.first_names(
             {job.customer_id for job in jobs.values()} | {job.pro_user_id for job in jobs.values()}
         )
+        failed = await self._ledger.failed_of_disputes([dispute.id for dispute in disputes])
         items = [
             _summary(
                 dispute,
@@ -86,6 +87,7 @@ class DisputeStaffReader:
                 codes,
                 payments.get(jobs[dispute.job_id].quote_id),
                 names,
+                refund_failed=dispute.id in failed,
             )
             for dispute in disputes
         ]
@@ -106,7 +108,14 @@ class DisputeStaffReader:
         history = await self._job_history.of_request(job.request_id)
         refund = await self._ledger.of_dispute(dispute.id)
         transfer = await self._transfers.of_job(job.job_id)
-        summary = _summary(dispute, job, codes, payment, names)
+        summary = _summary(
+            dispute,
+            job,
+            codes,
+            payment,
+            names,
+            refund_failed=refund is not None and refund.stripe_status in STRIPE_REFUND_FAILED,
+        )
         # Built before the commit below: nothing is read from a row after it.
         out = StaffDisputeOut(
             **summary.model_dump(),
@@ -157,6 +166,8 @@ def _summary(
     codes: Mapping[uuid.UUID, str],
     payment: PaymentFacts | None,
     names: Mapping[uuid.UUID, str | None],
+    *,
+    refund_failed: bool,
 ) -> StaffDisputeSummary:
     return StaffDisputeSummary(
         id=dispute.id,
@@ -175,4 +186,5 @@ def _summary(
         currency=None if payment is None else payment.currency,
         opened_at=dispute.created_at,
         resolved_at=dispute.resolved_at,
+        refund_failed=refund_failed,
     )

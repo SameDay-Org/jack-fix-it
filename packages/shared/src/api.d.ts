@@ -4240,13 +4240,18 @@ export interface components {
              * @example usd
              */
             currency: string;
-            /** @description pending: not made yet, an attempt may be under way. created: Stripe made the refund. failed: the last attempt failed. A retry sends the same idempotency key, and Stripe answers a refusal it already gave under that key (for 24 h) with the same refusal: a retry helps when the call never reached Stripe, or once the key expired. */
+            /** @description pending: Stripe holds no refund of ours yet, an attempt may be under way. created: Stripe holds the refund; stripe_status says whether the money is back. failed: the last attempt's call failed. A retry sends the same idempotency key, and Stripe answers a refusal it already gave under that key (for 24 h) with the same refusal: a retry helps when the call never reached Stripe, or once the key expired. */
             status: components["schemas"]["RefundStatus"];
             /**
              * Stripe Refund Id
              * @description Stripe's id of the refund, once made.
              */
             stripe_refund_id: string | null;
+            /**
+             * Stripe Status
+             * @description Stripe's status of the refund as last read, as Stripe says it: succeeded (the money is back: only then is the dispute settled), pending or requires_action (not finished: the dispute stays open), failed or canceled (it never will be: staff repair it). Null until Stripe answered with the refund.
+             */
+            stripe_status: string | null;
             /** Attempts */
             attempts: number;
             /**
@@ -4984,6 +4989,11 @@ export interface components {
             /** Resolved At */
             resolved_at: string | null;
             /**
+             * Refund Failed
+             * @description Stripe failed or canceled the decision's refund: the money did not go back, the dispute stays open (or, resolved, needs a look) and any payout it decided stays held. Staff repair it.
+             */
+            refund_failed: boolean;
+            /**
              * Description
              * @description The customer's text, as stored (masked).
              */
@@ -5071,6 +5081,11 @@ export interface components {
             opened_at: string;
             /** Resolved At */
             resolved_at: string | null;
+            /**
+             * Refund Failed
+             * @description Stripe failed or canceled the decision's refund: the money did not go back, the dispute stays open (or, resolved, needs a look) and any payout it decided stays held. Staff repair it.
+             */
+            refund_failed: boolean;
         };
         /**
          * StaffDocumentCounts

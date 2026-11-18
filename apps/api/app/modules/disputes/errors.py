@@ -67,6 +67,30 @@ class RefundAlreadyAttemptedError(ConflictError):
     message = "A refund was already attempted for this dispute; retry the same decision."
 
 
+class RefundPendingError(ConflictError):
+    """Stripe accepted the decision's refund and has not finished it (#433 round 1): the
+    dispute stays open, and nothing it settles happens (no job change, no transfer, no message)
+    until Stripe says the money is back. The same decision again reads the refund from Stripe
+    once more and settles the dispute if it is done; Stripe's own refund events settle it too."""
+
+    code = "refund_pending"
+    message = (
+        "The refund was sent and the payment provider has not finished it yet. The dispute "
+        "stays open until it does; send the same decision again later to check."
+    )
+
+
+class RefundFailedError(ConflictError):
+    """Stripe failed or canceled the decision's refund (#433 round 1): the money did not go
+    back. The dispute stays open and any payout it decided stays held; staff repair it (#434)."""
+
+    code = "refund_failed"
+    message = (
+        "The payment provider could not complete this refund. The dispute stays open for "
+        "staff to repair."
+    )
+
+
 class DisputeNeedsReviewError(ConflictError):
     """The job's payment cannot be refunded as is (missing, or its frozen amounts do not match
     the job's), or Stripe holds refunds for the dispute that its row cannot be matched with.

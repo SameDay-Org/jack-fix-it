@@ -12768,7 +12768,7 @@
           },
           "status": {
             "$ref": "#/components/schemas/RefundStatus",
-            "description": "pending: not made yet, an attempt may be under way. created: Stripe made the refund. failed: the last attempt failed. A retry sends the same idempotency key, and Stripe answers a refusal it already gave under that key (for 24 h) with the same refusal: a retry helps when the call never reached Stripe, or once the key expired."
+            "description": "pending: Stripe holds no refund of ours yet, an attempt may be under way. created: Stripe holds the refund; stripe_status says whether the money is back. failed: the last attempt's call failed. A retry sends the same idempotency key, and Stripe answers a refusal it already gave under that key (for 24 h) with the same refusal: a retry helps when the call never reached Stripe, or once the key expired."
           },
           "stripe_refund_id": {
             "anyOf": [
@@ -12781,6 +12781,18 @@
             ],
             "title": "Stripe Refund Id",
             "description": "Stripe's id of the refund, once made."
+          },
+          "stripe_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stripe Status",
+            "description": "Stripe's status of the refund as last read, as Stripe says it: succeeded (the money is back: only then is the dispute settled), pending or requires_action (not finished: the dispute stays open), failed or canceled (it never will be: staff repair it). Null until Stripe answered with the refund."
           },
           "attempts": {
             "type": "integer",
@@ -12820,6 +12832,7 @@
           "currency",
           "status",
           "stripe_refund_id",
+          "stripe_status",
           "attempts",
           "last_error_code",
           "requested_at"
@@ -14534,6 +14547,11 @@
             ],
             "title": "Resolved At"
           },
+          "refund_failed": {
+            "type": "boolean",
+            "title": "Refund Failed",
+            "description": "Stripe failed or canceled the decision's refund: the money did not go back, the dispute stays open (or, resolved, needs a look) and any payout it decided stays held. Staff repair it."
+          },
           "description": {
             "type": "string",
             "title": "Description",
@@ -14657,6 +14675,7 @@
           "currency",
           "opened_at",
           "resolved_at",
+          "refund_failed",
           "description",
           "pro_reply",
           "pro_replied_at",
@@ -14800,6 +14819,11 @@
               }
             ],
             "title": "Resolved At"
+          },
+          "refund_failed": {
+            "type": "boolean",
+            "title": "Refund Failed",
+            "description": "Stripe failed or canceled the decision's refund: the money did not go back, the dispute stays open (or, resolved, needs a look) and any payout it decided stays held. Staff repair it."
           }
         },
         "additionalProperties": false,
@@ -14820,7 +14844,8 @@
           "customer_refund_cents",
           "currency",
           "opened_at",
-          "resolved_at"
+          "resolved_at",
+          "refund_failed"
         ],
         "title": "StaffDisputeSummary",
         "description": "One line of the staff list."
