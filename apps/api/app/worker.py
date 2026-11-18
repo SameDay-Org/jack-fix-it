@@ -21,6 +21,7 @@ from app.integrations.stripe_transfers import StripeTransfersClient
 from app.modules.addresses.tasks import geocode_address
 from app.modules.chat.tasks import purge_chat_originals
 from app.modules.dispatch.tasks import dispatch_request
+from app.modules.disputes.tasks import dispute_photo_sanitize_task
 from app.modules.jobs.tasks import auto_confirm_jobs, photo_sanitize_task
 from app.modules.notifications.push_tasks import check_push_receipts, send_push
 from app.modules.payments.tasks import cancel_unpaid_payments
@@ -113,6 +114,7 @@ class WorkerSettings:
         discarding_result(send_push, max_tries=get_settings().push_max_attempts),
         sanitize_task(get_settings()),
         photo_sanitize_task(get_settings()),
+        dispute_photo_sanitize_task(get_settings()),
         # A run per handler attempt: a failing event is failed on its last one.
         discarding_result(
             process_stripe_event, max_tries=get_settings().stripe_webhook_max_attempts

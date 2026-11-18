@@ -1,16 +1,16 @@
-import { defaultLocale } from "@/i18n/config";
-import { getT } from "@/i18n/server";
+import type { Metadata } from "next";
 
-// Placeholder until the landing page (D17.1). No call to action: the request flow does not exist yet.
-export default async function LandingPage() {
-  const t = await getT(defaultLocale);
+import { LandingPage } from "@/features/landing/landing-page";
+import { landingMetadata } from "@/features/landing/metadata";
 
-  return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-5 bg-gray-50 px-6 text-center">
-      <span aria-hidden className="h-1 w-12 rounded-full bg-green-500" />
-      <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">{t("brand.name")}</h1>
-      <p className="max-w-xl text-lg sm:text-xl">{t("brand.tagline")}</p>
-      <p className="text-sm text-gray-500">{t("landing.comingSoon")}</p>
-    </main>
-  );
+// Built once, refreshed every hour: the services grid reads the categories from the API at most
+// once an hour for all visitors (a literal: Next reads it before running any code).
+export const revalidate = 3600;
+
+export function generateMetadata(): Promise<Metadata> {
+  return landingMetadata("en");
+}
+
+export default function Page() {
+  return <LandingPage locale="en" />;
 }

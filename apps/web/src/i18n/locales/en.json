@@ -11,7 +11,119 @@
     }
   },
   "landing": {
-    "comingSoon": "Our site is on the way."
+    "meta": {
+      "title": "Jack Fix It · Whatever happens at home, we fix it.",
+      "description": "Tell Jack what's going on at home, compare fixed-price quotes from pros near you and follow the job in the app."
+    },
+    "skipToContent": "Skip to content",
+    "homeLabel": "Jack Fix It, back to the top",
+    "nav": {
+      "label": "Sections",
+      "services": "Services",
+      "how": "How it works",
+      "getApp": "Get the app",
+      "menu": "Menu"
+    },
+    "hero": {
+      "eyebrow": "Home services",
+      "titleLead": "Whatever happens at home,",
+      "titleAccent": "we fix it.",
+      "body": "Tell Jack what's going on. Pros near you send fixed-price quotes, you pick one, and you follow the job in the app from start to finish.",
+      "getApp": "Get the app",
+      "explore": "Explore services",
+      "badgesLabel": "What you get",
+      "badges": {
+        "verified": "Verified information where applicable",
+        "scheduling": "Easy scheduling",
+        "payment": "Secure payment experience",
+        "support": "Support when you need it"
+      }
+    },
+    "requestFlow": {
+      "title": "What's going on at home?",
+      "cta": "Tell Jack What Happened"
+    },
+    "how": {
+      "eyebrow": "How it works",
+      "title": "From what happened to done.",
+      "steps": {
+        "tell": {
+          "title": "Tell Jack",
+          "body": "Say what's going on at home in your own words, and add photos or a video in the app."
+        },
+        "match": {
+          "title": "We find the right pro",
+          "body": "Pros near you who do that kind of job send fixed-price quotes. You compare them and pick one."
+        },
+        "done": {
+          "title": "Get it done",
+          "body": "Your pro comes when you agreed. You follow the job in the app and confirm it when it's done."
+        },
+        "support": {
+          "title": "Support when you need it",
+          "body": "A question or a problem? Real people on our team answer you in the app."
+        }
+      }
+    },
+    "services": {
+      "eyebrow": "Services",
+      "title": "What can we help with?",
+      "body": "Pick a category in the app, or just describe what's going on.",
+      "names": {
+        "house-cleaning": "House Cleaning",
+        "handyman": "Handyman",
+        "painting": "Painting",
+        "lawn-landscaping": "Lawn & Landscaping",
+        "moving-assembly": "Moving & Assembly"
+      },
+      "lines": {
+        "house-cleaning": "Regular or one-time cleaning for your home.",
+        "handyman": "Small repairs and odd jobs, several in one request.",
+        "painting": "Rooms, walls and touch-ups.",
+        "lawn-landscaping": "Mowing, trimming and yard care.",
+        "moving-assembly": "Furniture assembly and help with a move."
+      },
+      "other": "Tell Jack what you need."
+    },
+    "trust": {
+      "eyebrow": "Why Jack",
+      "title": "Help at home, without the hassle.",
+      "items": {
+        "whoToCall": {
+          "title": "No need to know who to call",
+          "body": "Describe the problem. Pros who do that kind of work answer you."
+        },
+        "onePlace": {
+          "title": "Everything in one place",
+          "body": "Quotes, scheduling, payment and messages, all in the app."
+        },
+        "people": {
+          "title": "Real people when you need them",
+          "body": "Our team answers your questions in the app."
+        },
+        "records": {
+          "title": "Clear service records",
+          "body": "Every quote, message and step of the job stays saved in the app."
+        }
+      }
+    },
+    "pros": {
+      "eyebrow": "For professionals",
+      "title": "Work that comes to you.",
+      "body": "Get requests from homeowners near you, send fixed-price quotes and run your jobs from the app.",
+      "points": {
+        "leads": "No paying for leads.",
+        "paid": "You're paid when the job happens."
+      },
+      "link": "See the app for pros"
+    },
+    "footer": {
+      "label": "Legal and contact",
+      "terms": "Terms",
+      "privacy": "Privacy",
+      "contact": "Contact",
+      "rights": "© {{year}} Jack Fix It. All rights reserved."
+    }
   },
   "showcase": {
     "meta": {

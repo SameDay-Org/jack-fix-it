@@ -433,3 +433,68 @@ class JobPayouts:
 
     async def exists(self, job_id: uuid.UUID) -> bool:
         return await self._jobs.get(job_id) is not None
+
+
+@dataclass(frozen=True)
+class JobDisputeFacts:
+    """What a dispute reads of a job (#75): its parties, its request (for the push's public
+    code), its status and when the pro marked it done (the dispute window starts there)."""
+
+    job_id: uuid.UUID
+    request_id: uuid.UUID
+    customer_id: uuid.UUID
+    pro_id: uuid.UUID
+    pro_user_id: uuid.UUID
+    status: JobStatus
+    completed_at: datetime | None
+
+
+class JobDisputes:
+    """A job as its dispute sees it, for the disputes module (#75): the read under the job's
+    lock, the parties' read, and the one move a report makes, completed -> disputed, through
+    the machine with the customer as actor."""
+
+    def __init__(self, session: AsyncSession, pros: ProService) -> None:
+        self._jobs = JobRepository(session)
+        self._pros = pros
+        self._machine = JobStateMachine(session, pros)
+
+    async def locked(self, job_id: uuid.UUID) -> JobDisputeFacts | None:
+        """The job, its row locked FOR UPDATE until the caller's transaction ends (the lock
+        every status change takes), read as last committed; None for an unknown job."""
+        job = await self._jobs.get_for_update(job_id)
+        if job is None:
+            return None
+        pro_user_id = await self._pros.user_id_of(job.pro_id)
+        if pro_user_id is None:  # pragma: no cover - jobs.pro_id is a foreign key
+            return None
+        return _dispute_facts(job, pro_user_id)
+
+    async def of_party(self, user_id: uuid.UUID, job_id: uuid.UUID) -> JobDisputeFacts | None:
+        """The job when `user_id` is its customer or its pro; None for a job of others and an
+        unknown one alike, through one statement (#331). Unlocked."""
+        found = await self._jobs.get_with_pro_user(
+            job_id, self._pros.users(), participant=user_id, lock=False
+        )
+        if found is None:
+            return None
+        job, pro_user_id = found
+        return _dispute_facts(job, pro_user_id)
+
+    async def disputed(self, job_id: uuid.UUID, customer: UserAccount) -> None:
+        """completed -> disputed, the customer as actor: the machine's transition (409 from any
+        other status, 403 for anyone but the job's customer) with its job_events row. Flushes,
+        never commits."""
+        await self._machine.transition(job_id, JobStatus.DISPUTED, customer)
+
+
+def _dispute_facts(job: Job, pro_user_id: uuid.UUID) -> JobDisputeFacts:
+    return JobDisputeFacts(
+        job_id=job.id,
+        request_id=job.request_id,
+        customer_id=job.customer_id,
+        pro_id=job.pro_id,
+        pro_user_id=pro_user_id,
+        status=job.status,
+        completed_at=job.completed_at,
+    )

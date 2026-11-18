@@ -174,6 +174,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           isAndroidMotionActivityEnabled: false,
         },
       ],
+      // Stripe's hosted payout setup opens in the system's browser session (#277; added there,
+      // which needs a new dev build). No options: the launcher-activity experiment stays off.
+      "expo-web-browser",
       // The Payment Sheet (#59; a change here needs a new dev build): Apple Pay's merchant id in
       // the iOS entitlements, Google Pay's wallet flag in the Android manifest. iOS resolves the
       // Stripe SDK through CocoaPods: Swift Package Manager would need dynamic frameworks for

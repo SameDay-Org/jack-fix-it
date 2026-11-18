@@ -29,6 +29,12 @@ from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailabl
 from app.integrations.stripe_transfers import FoundTransfers, TransferFacts
 from app.modules.addresses.models import Address
 from app.modules.audit.models import AuditLog
+from app.modules.disputes.models import (
+    Dispute,
+    DisputeReason,
+    DisputeResolution,
+    DisputeStatus,
+)
 from app.modules.jobs.models import Job, JobEvent, JobStatus
 from app.modules.jobs.service import JobPayoutFacts
 from app.modules.payments import transfers
@@ -404,6 +410,54 @@ async def test_a_held_job_is_not_released(
     assert (await job_row(db_session, job.id)).status is JobStatus.CONFIRMED
 
 
+async def test_an_open_dispute_holds_the_job_until_it_is_resolved(
+    db_session: AsyncSession, world: JobWorld, stripe: FakeStripeTransfers, clock: Clock
+) -> None:
+    """The real hook (#75): a job with an open dispute is held by release and left out of the
+    sweep, with no Stripe call; once the dispute is resolved (#76) it is released. Reached only
+    through a data state the report never makes (it moves the job to disputed): the hook holds
+    whatever the job's status."""
+    job = await confirmed_job(db_session, world)
+    dispute = Dispute(
+        job_id=job.id,
+        opened_by=world.customer.id,
+        reason_code=DisputeReason.DAMAGE,
+        description="Held probe",
+    )
+    db_session.add(dispute)
+    await db_session.commit()
+    dispute_id = dispute.id
+    facts = JobPayoutFacts(
+        job_id=job.id,
+        request_id=job.request_id,
+        quote_id=job.quote_id,
+        pro_id=world.pro.profile_id,
+        confirmed=True,
+        pro_payout_cents=PAYOUT,
+    )
+
+    assert await transfers.has_open_hold(db_session, facts) is True
+    assert job.id not in await service(db_session, stripe, clock).due(10_000)
+    assert await service(db_session, stripe, clock).release(job.id) is ReleaseOutcome.HELD
+    assert (stripe.creates, stripe.charges, stripe.lists) == ([], [], [])
+
+    await db_session.execute(
+        update(Dispute)
+        .where(Dispute.id == dispute_id)
+        .values(
+            status=DisputeStatus.RESOLVED,
+            resolution=DisputeResolution.RELEASED,
+            resolved_by=world.admin.id,
+            resolved_at=NOW,
+        )
+    )
+    await db_session.commit()
+
+    assert await transfers.has_open_hold(db_session, facts) is False
+    assert job.id in await service(db_session, stripe, clock).due(10_000)
+    assert await service(db_session, stripe, clock).release(job.id) is ReleaseOutcome.CREATED
+
+
 @pytest.mark.parametrize("earlier", ["failed", "held_back"])
 async def test_a_held_job_with_an_earlier_attempt_is_not_released(
     db_session: AsyncSession,
@@ -446,19 +500,6 @@ async def test_a_held_job_with_an_earlier_attempt_is_not_released(
     assert after is not None
     assert (after.status, after.last_error_code, after.attempts, after.requested_at) == kept
     assert (await job_row(db_session, job.id)).status is JobStatus.CONFIRMED
-
-
-async def test_has_open_hold_holds_nothing_until_disputes_exist() -> None:
-    # TODO(#75): the dispute module replaces this; until then nothing holds a confirmed job.
-    facts = JobPayoutFacts(
-        job_id=uuid.uuid4(),
-        request_id=uuid.uuid4(),
-        quote_id=uuid.uuid4(),
-        pro_id=uuid.uuid4(),
-        confirmed=True,
-        pro_payout_cents=PAYOUT,
-    )
-    assert await transfers.has_open_hold(None, facts) is False  # type: ignore[arg-type]  # unused
 
 
 async def test_the_amount_is_the_frozen_payout_never_the_current_rate(
