@@ -88,6 +88,17 @@ class PayoutAccount:
     approved: bool
 
 
+@dataclass(frozen=True)
+class ConnectedPro:
+    """The pro whose profile holds a Stripe Express account (#280): its payout side, who
+    hears about it (the user) and whether they may receive requests once payouts are
+    enabled (approved)."""
+
+    account: PayoutAccount
+    user_id: uuid.UUID
+    approved: bool
+
+
 def _payout_account(profile: ProProfile) -> PayoutAccount:
     return PayoutAccount(
         profile_id=profile.id,
@@ -180,6 +191,19 @@ class ProService:
         ends; None when no profile has this id (staff recovery, #39)."""
         profile = await self._profiles.get_by_id(pro_id, lock=True)
         return None if profile is None else _payout_account(profile)
+
+    async def lock_connected_pro(self, stripe_account_id: str) -> ConnectedPro | None:
+        """The pro holding this Stripe Express account, its profile row FOR UPDATE until the
+        caller's transaction ends (the lock the payouts status takes, #39); None when no
+        profile holds it (#280)."""
+        profile = await self._profiles.get_by_stripe_account_id(stripe_account_id, lock=True)
+        if profile is None:
+            return None
+        return ConnectedPro(
+            account=_payout_account(profile),
+            user_id=profile.user_id,
+            approved=profile.verification_status is ProVerificationStatus.APPROVED,
+        )
 
     async def mark_stripe_account_requested(self, pro_id: uuid.UUID) -> None:
         """Stamps the profile's account-create attempt now; the caller holds the row lock and

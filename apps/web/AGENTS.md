@@ -73,6 +73,20 @@ apply.
     browser, and a client component does not import `cn` (it would ship tailwind-merge).
     `pnpm --filter @jack/web check:bundle`, after a build, fails when the page's first-load
     JavaScript passes 150 KB gzip; CI runs it.
+  - The hero is pinned for one and a half screens of scrolling (`hero.tsx`). Its three
+    headline beats and the phone's screens follow the scroll (`hero3d/choreography.ts`); the
+    browser's scrolling is never changed. `hero-motion.tsx` picks the mode
+    (`hero3d/capabilities.ts`): reduced motion, no script or a short viewport get a plain hero
+    (the `still` variant of `globals.css`); a low-end device or a slow connection get the CSS
+    phone; others get the 3D phone (three.js). Its chunk is downloaded once the page is idle,
+    but three.js is evaluated and WebGL set up only on the reader's first intent (a scroll, a
+    touch, a key: `hero3d/load-triggers.ts`, `hero3d/scene-loader.ts`), both only for a
+    pinned hero in a visible tab. Choosing the mode makes no WebGL context (too expensive at
+    page start). It falls back to the CSS phone when WebGL 2 is missing or software-only, when
+    its frames are slow (`hero3d/frame-probe.ts`, visible time only) or the GPU drops it.
+    `check:bundle` fails when three.js reaches the first load, and measures the lazy 3D chunk
+    against a 200 KB gzip budget. The phone is built in code, with no model file
+    (`hero3d/MODEL.md`).
   - `SITE_URL` (optional, read at build time) gives the page its canonical, `hreflang` and
     Open Graph addresses; without it the page has none.
 - The mascot is `src/features/mascot/mascot.tsx`: `<Mascot pose size title className>` with

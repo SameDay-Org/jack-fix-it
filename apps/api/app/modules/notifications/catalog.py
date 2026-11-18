@@ -2,7 +2,7 @@
 they carry no personal data: placeholders are limited to PLACEHOLDERS (a test scans for it).
 #55 adds a new request (to a dispatched pro), a new quote (to the customer) and a quote
 accepted (to its pro); #65 the job's steps and a booking whose payment was canceled; #66/#67 the
-job confirmed (to its pro). The On my
+job confirmed (to its pro); #280 payouts set up (to an approved pro). The On my
 way copy points to the app for the arrival code: the code itself never leaves the customer's job
 view. `push.test.*` is a neutral message.
 """
@@ -57,6 +57,8 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "push.booking_not_completed.body": (
                     "The payment for {public_code} did not go through. See your request in the app."
                 ),
+                "push.payouts_enabled.title": "Payouts are set up",
+                "push.payouts_enabled.body": "You can receive requests now.",
             }
         ),
         "es": MappingProxyType(
@@ -105,6 +107,8 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "push.booking_not_completed.body": (
                     "El pago de {public_code} no se completó. Mira tu solicitud en la app."
                 ),
+                "push.payouts_enabled.title": "Tus pagos están listos",
+                "push.payouts_enabled.body": "Ya puedes recibir solicitudes.",
             }
         ),
     }

@@ -98,7 +98,10 @@ describe("showcase page", () => {
 
   it("shows every screen of the manifest once, each with its text alternative and its size", async () => {
     const html = await page("en");
-    const images = html.match(/<img[^>]*>/g) ?? [];
+    // The hero's phone also holds its other screens, hidden until it animates (hero.test.ts).
+    const images = (html.match(/<img[^>]*>/g) ?? []).filter(
+      (tag) => !tag.includes("data-hero-screen"),
+    );
 
     expect(images).toHaveLength(MEDIA_IDS.length);
     for (const id of MEDIA_IDS) {

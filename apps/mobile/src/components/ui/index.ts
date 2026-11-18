@@ -10,6 +10,12 @@ export { ChatBubble } from "./ChatBubble";
 export { ReceiptTicks } from "./ReceiptTicks";
 export type { ReceiptState, ReceiptTicksProps } from "./ReceiptTicks";
 export type { ChatBubbleProps, ChatBubbleSide } from "./ChatBubble";
+export { ChecklistCard, ChecklistCardSkeleton } from "./ChecklistCard";
+export type {
+  ChecklistCardProps,
+  ChecklistCardSkeletonProps,
+  ChecklistStep,
+} from "./ChecklistCard";
 export { Chip, ChipSkeleton } from "./Chip";
 export type { ChipProps, ChipSkeletonProps } from "./Chip";
 export { ChoiceCard } from "./ChoiceCard";

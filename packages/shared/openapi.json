@@ -5314,8 +5314,109 @@
           "webhooks"
         ],
         "summary": "Receive a Stripe event",
-        "description": "Stripe's only entry point. No access token: the Stripe-Signature HMAC over the raw body\nis the credential. Each event is stored once by its id and handled by the worker; a\nduplicate delivery answers 200 too. Any non-2xx makes Stripe deliver the event again.",
+        "description": "The platform's events. No access token: the Stripe-Signature HMAC over the raw body\n(STRIPE_WEBHOOK_SECRET) is the credential. Each event is stored once by its id and handled\nby the worker; a duplicate delivery answers 200 too. Any non-2xx makes Stripe deliver the\nevent again.",
         "operationId": "receive_stripe_event_v1_webhooks_stripe_post",
+        "parameters": [
+          {
+            "name": "Stripe-Signature",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Stripe-Signature"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookReceived"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_signature: Stripe-Signature is missing, does not match the body or is too old; invalid_payload: the signed body is not a Stripe event.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "payload_too_large: the body is too large.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error: the event could not be stored or queued; Stripe delivers it again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not_configured: the signing secret is not set; Stripe delivers it again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "description": "The event exactly as Stripe sent it; the signature covers these bytes.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/stripe/connect": {
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Receive a Stripe Connect event",
+        "description": "The events of the pros' connected accounts (#280), from Stripe's Connect endpoint, which\nsigns with its own secret (STRIPE_CONNECT_WEBHOOK_SECRET): a platform-signed body is\nrefused here, and a Connect-signed one on the platform route. Only account.updated is\nhandled; any other type is stored as ignored. Otherwise as the platform route.",
+        "operationId": "receive_stripe_connect_event_v1_webhooks_stripe_connect_post",
         "parameters": [
           {
             "name": "Stripe-Signature",

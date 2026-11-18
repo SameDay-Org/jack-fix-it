@@ -251,6 +251,27 @@ async def push_booking_not_completed(
     )
 
 
+async def push_payouts_enabled(
+    queue: JobQueue,
+    *,
+    pro_user_id: uuid.UUID,
+    stripe_event_id: str,
+    timeout_seconds: float,
+) -> None:
+    """To an approved pro, once Stripe enabled their payouts (#280): from now on they receive
+    requests. Named by the Stripe event that turned payouts on, so that event announces once;
+    opens home, where their opportunities show."""
+    await _push(
+        queue,
+        pro_user_id,
+        message_id=f"payouts_enabled:{stripe_event_id}",
+        kind="payouts_enabled",
+        params={},
+        deep_link="/",
+        timeout_seconds=timeout_seconds,
+    )
+
+
 async def _job_push(
     queue: JobQueue,
     customer_id: uuid.UUID,
