@@ -16,6 +16,7 @@ import { ApiError, apiGet, apiPost, NetworkError, SessionExpiredError, useSessio
 import { dismissToast, toastStore } from "@/components/ui/toast";
 
 import { deferred, settle } from "../../../api/__tests__/helpers";
+import type { ProDisputeView } from "../../disputes/api";
 import { formatTimeOfDay } from "../../opportunities/format";
 import { formatLocale } from "../../quotes/format";
 import { proJobQueryKey } from "../api";
@@ -682,5 +683,47 @@ describe("the chat with the customer (#74)", () => {
     await open(proJob({ status: "cancelled", address: null }));
 
     expect(screen.getByTestId("chat-entry").props.accessibilityLabel).toBe("View messages");
+  });
+});
+
+describe("the customer's report on the job (#75)", () => {
+  const DISPUTE = "/v1/pros/me/jobs/{job_id}/dispute";
+  const report: ProDisputeView = {
+    dispute: {
+      id: "0f8fad5b-d9cb-469f-a165-70867728950e",
+      reason_code: "no_show",
+      description: "Nobody came.",
+      status: "open",
+      resolution: null,
+      created_at: new Date().toISOString(),
+      resolved_at: null,
+      photos: [],
+      photos_pending: 0,
+      reply: null,
+      replied_at: null,
+    },
+    can_reply: true,
+  };
+
+  /** Answers the job, and the report on it, by path. */
+  async function openWithReport(job: ProJob) {
+    jest
+      .mocked(apiGet)
+      .mockImplementation(async (path: string) => (path === DISPUTE ? report : job));
+    await renderWithQuery(<ProJobScreen />);
+    await screen.findByTestId("pro-job-title");
+  }
+
+  it("shows the report and its reply box on a disputed job", async () => {
+    await openWithReport(proJob({ status: "disputed" }));
+    expect(await screen.findByText("The customer reported a problem")).toBeTruthy();
+    expect(screen.getByTestId("pro-job-report-reply-input")).toBeTruthy();
+    expect(jest.mocked(apiGet).mock.calls.map(([path]) => path)).toContain(DISPUTE);
+  });
+
+  it("asks for no report on a job that is not disputed", async () => {
+    await openWithReport(proJob({ status: "completed" }));
+    expect(screen.queryByTestId("pro-job-report")).toBeNull();
+    expect(jest.mocked(apiGet).mock.calls.map(([path]) => path)).not.toContain(DISPUTE);
   });
 });
