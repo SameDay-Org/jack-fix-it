@@ -285,6 +285,10 @@ class Settings(BaseSettings):
     # (Stripe's default tolerance), the largest body read, and the worker's handling: the runs
     # of one event before it is failed, and the delay before a retry, times the attempt number.
     stripe_webhook_secret: SecretStr | None = None
+    # The Connect endpoint's own signing secret (#280): Stripe signs its connected accounts'
+    # events (account.updated) with it, at POST /v1/webhooks/stripe/connect. Optional like the
+    # one above: without it that route answers 503 and Stripe retries.
+    stripe_connect_webhook_secret: SecretStr | None = None
     stripe_webhook_tolerance_seconds: int = Field(default=300, gt=0)
     stripe_webhook_max_body_bytes: int = Field(default=524_288, gt=0)
     stripe_webhook_max_attempts: int = Field(default=5, gt=0)
@@ -543,6 +547,7 @@ class Settings(BaseSettings):
         "resend_api_key",
         "email_from",
         "stripe_webhook_secret",
+        "stripe_connect_webhook_secret",
         "expo_access_token",
         "google_maps_api_key",
         "stripe_secret_key",

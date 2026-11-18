@@ -13,7 +13,9 @@ make the account while recovering from an incident), so the attempt stays unreso
 staff store its account or allow a new one with scripts/resolve_payout_account.py, which goes
 through adopt_account and allow_new_account here. The status reads the account from Stripe, the
 row locked over the read, and keeps pro_profiles.payouts_enabled current: dispatch and quote
-acceptance read that column (context doc section 5).
+acceptance read that column (context doc section 5). Stripe's account.updated event (#280,
+webhook_handlers.py) runs the same read and store (`store_payouts_enabled`), so the column follows
+the account without the pro opening the app.
 
 Logs carry the profile id and Stripe's request id and error code: never the email, an account
 id, a link or a Stripe response.
@@ -32,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS, Settings
 from app.integrations.stripe_connect import (
+    AccountReader,
     AccountState,
     StripeConnect,
     StripeRejectedError,
@@ -105,6 +108,19 @@ class PayoutsConfig:
                 seconds=settings.stripe_account_reconcile_after_seconds
             ),
         )
+
+
+async def store_payouts_enabled(
+    pros: ProService, stripe: AccountReader, account: PayoutAccount, stripe_account_id: str
+) -> tuple[AccountState, bool]:
+    """The account read from Stripe now, and its payouts_enabled stored on the profile;
+    (state, changed). Stored against the row, not a value read before the call: the UPDATE
+    writes only a change. The caller holds the profile row's lock over this call and owns the
+    transaction: nothing here commits or rolls back, and Stripe's errors (StripeCallError)
+    propagate before anything is written."""
+    state = await stripe.retrieve_account(stripe_account_id)
+    changed = await pros.set_payouts_enabled(account.profile_id, state.payouts_enabled)
+    return state, changed
 
 
 class PayoutsService:
@@ -319,10 +335,9 @@ class PayoutsService:
             enabled = account is not None and account.payouts_enabled
             return PayoutsOut(status=PayoutsStatus.NOT_STARTED, payouts_enabled=enabled)
         async with self._stripe_call(account.profile_id, "retrieve_account"):
-            state = await stripe.retrieve_account(account.stripe_account_id)
-        # Against the stored row, not the value read before the call: the UPDATE writes only a
-        # change.
-        changed = await self._pros.set_payouts_enabled(account.profile_id, state.payouts_enabled)
+            state, changed = await store_payouts_enabled(
+                self._pros, stripe, account, account.stripe_account_id
+            )
         await self._session.commit()
         if changed:
             logger.info(

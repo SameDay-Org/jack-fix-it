@@ -1338,11 +1338,35 @@ export interface paths {
         put?: never;
         /**
          * Receive a Stripe event
-         * @description Stripe's only entry point. No access token: the Stripe-Signature HMAC over the raw body
-         *     is the credential. Each event is stored once by its id and handled by the worker; a
-         *     duplicate delivery answers 200 too. Any non-2xx makes Stripe deliver the event again.
+         * @description The platform's events. No access token: the Stripe-Signature HMAC over the raw body
+         *     (STRIPE_WEBHOOK_SECRET) is the credential. Each event is stored once by its id and handled
+         *     by the worker; a duplicate delivery answers 200 too. Any non-2xx makes Stripe deliver the
+         *     event again.
          */
         post: operations["receive_stripe_event_v1_webhooks_stripe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhooks/stripe/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive a Stripe Connect event
+         * @description The events of the pros' connected accounts (#280), from Stripe's Connect endpoint, which
+         *     signs with its own secret (STRIPE_CONNECT_WEBHOOK_SECRET): a platform-signed body is
+         *     refused here, and a Connect-signed one on the platform route. Only account.updated is
+         *     handled; any other type is stored as ignored. Otherwise as the platform route.
+         */
+        post: operations["receive_stripe_connect_event_v1_webhooks_stripe_connect_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8942,6 +8966,78 @@ export interface operations {
         };
     };
     receive_stripe_event_v1_webhooks_stripe_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Stripe-Signature"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The event exactly as Stripe sent it; the signature covers these bytes. */
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookReceived"];
+                };
+            };
+            /** @description invalid_signature: Stripe-Signature is missing, does not match the body or is too old; invalid_payload: the signed body is not a Stripe event. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description payload_too_large: the body is too large. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description internal_error: the event could not be stored or queued; Stripe delivers it again. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_configured: the signing secret is not set; Stripe delivers it again. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    receive_stripe_connect_event_v1_webhooks_stripe_connect_post: {
         parameters: {
             query?: never;
             header?: {

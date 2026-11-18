@@ -80,6 +80,7 @@ environment as **shared variables** referenced from both services, so the two ne
 | `S3_SECRET_ACCESS_KEY`             | required                                                                    | yes             | D6.2 (#35) |
 | `S3_REGION`                        | `auto` (the default) for Cloudflare R2                                      | no              | D6.2 (#35) |
 | `STRIPE_WEBHOOK_SECRET`            | optional until the Stripe endpoint exists; unset, the webhook gives 503     | yes             | D7.3 (#40) |
+| `STRIPE_CONNECT_WEBHOOK_SECRET`    | the Connect endpoint's own secret; unset, `/stripe/connect` gives 503       | yes             | #280       |
 | `GOOGLE_MAPS_API_KEY`              | optional until #14; without it `POST /v1/geo/reverse` answers 503           | yes             | #215       |
 | `STRIPE_SECRET_KEY`                | required; `sk_test_` until launch: a live key works in production only      | yes             | D7.1 (#39) |
 | `STRIPE_PUBLISHABLE_KEY`           | only a `pk_` key (`pk_test_` until launch); unset, payment gives 503        | no              | #58        |
@@ -98,6 +99,24 @@ environment as **shared variables** referenced from both services, so the two ne
 "Required" means the API refuses to start in staging and production without it (the settings
 validators in `apps/api/app/config.py`). Every other setting has a working default; the
 non-secret ones are listed in `apps/api/.env.example`.
+
+#### Stripe webhooks (#40, #280)
+
+Two endpoints in the Stripe Dashboard (Developers > Webhooks), each with its own signing
+secret; each route accepts only its own:
+
+- **Platform:** `https://<api domain>/v1/webhooks/stripe`, events from this account:
+  `payment_intent.processing`, `payment_intent.succeeded`, `payment_intent.payment_failed`,
+  `payment_intent.canceled`. Its secret is `STRIPE_WEBHOOK_SECRET`.
+- **Connect** ("Events on Connected accounts"):
+  `https://<api domain>/v1/webhooks/stripe/connect`, event `account.updated`. Its secret is
+  `STRIPE_CONNECT_WEBHOOK_SECRET`. The worker then reads the pro's Express account from
+  Stripe and stores `payouts_enabled`, so an approved pro receives requests as soon as
+  Stripe enables their payouts, and hears it by push. Any other event type sent there is
+  stored as ignored.
+
+Without a secret its route answers 503 and Stripe retries. Create the Connect endpoint after
+the API that has the route is deployed.
 
 #### Chat originals (#72)
 
