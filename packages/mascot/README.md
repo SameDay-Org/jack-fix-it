@@ -10,13 +10,13 @@ round head on a small body so that he reads at 32 px as well as at 256 px.
   one side and a flat brim.
 - **Face:** round, warm mid skin tone, short dark hair at the temples, two dark eyes with one
   highlight each, light brows, a small nose, blush on the cheeks. Expressions: neutral, smile,
-  happy (laughing, eyes closed) and thinking (for the next poses).
+  happy (laughing, eyes closed) and thinking.
 - **Clothes:** a navy work shirt (`navy700`) with an open collar, a seam and a small lime patch
   with the "J" of Jack Fix It on the chest; a navy tool belt with a lime buckle, a pouch and a
   hammer in its loop; grey work trousers; tan work boots on dark soles.
-- **Hands:** lime work gloves with darker cuffs, as a fist or an open hand.
+- **Hands:** lime work gloves with darker cuffs, as a fist, an open hand or pointing.
 - **Props:** an open-end wrench, a lime toolbox and a clipboard with a ticked list, in the same
-  style, each drawn around the point a fist holds.
+  style, each drawn around the point a fist holds, and a lime question mark for `thinking`.
 
 ## An original character
 
@@ -53,25 +53,51 @@ from a navy surface.
   shapes (`path`, `circle`, `ellipse`, `rect`) in a 200 x 200 box: no strokes, no gradients,
   no images, no text.
 - `src/parts/`: the reusable parts (head, face expressions, hat, body, arms, props). An arm is
-  a small rig: two angles and a glove; a pose only sets numbers.
-- `src/poses.ts`: the poses. `MASCOT_POSES` is the public contract of the showcase's `Mascot`
-  component (wave, point, celebrate, peek, thinking, tools; a test keeps both lists equal).
-  Ready now: **wave**, **celebrate**, **tools**. Point, peek and thinking come with the
-  animation (PR 2); the showcase switches to this package after #420 (PR 3).
+  a small rig: two angles and a glove (fist, open or pointing), and maybe a prop it holds.
+- `src/rig.ts`: a pose as plain numbers and names (`PoseRig`: expression, head tilt, a lean of
+  the whole body, the two arms, a question mark), drawn by `rigNode` and blended by
+  `interpolateRig` (numbers move, the face, gloves and props change halfway).
+- `src/poses.ts`: the six poses of the public contract of the showcase's `Mascot` component
+  (a test keeps both lists equal): **wave**, **point**, **celebrate**, **peek** (leaning in
+  from the right edge, the box cuts the rest), **thinking** (a fist under the chin, a question
+  mark) and **tools**.
 - `src/render.ts`: an SVG string renderer (standalone files, the gallery, tests).
-- `src/react.ts` (`@jack/mascot/react`): `<Mascot pose size title className>`, with the props
-  of the showcase's component. With `title` it is an image (`role="img"`, named by its title);
-  without it is decoration (`aria-hidden`).
+- `src/react.ts` (`@jack/mascot/react`): `<Mascot pose size title className animate>`, with
+  the props of the showcase's component. With `title` it is an image (`role="img"`, named by
+  its title); without it is decoration (`aria-hidden`).
+- `src/dom.ts` (`@jack/mascot/dom`): the same without React, in a container element (the
+  gallery uses it).
 - **The app** will map the same tree to `react-native-svg` (`G`, `Path`, `Circle`, `Ellipse`,
   `Rect` take the same attributes), so both draw the same Jack.
 
+## Motion
+
+`src/motion.ts`, no animation library:
+
+- **Idle loops** in CSS on named groups: breathing (`upper`), a blink (`eyes`, not when the eyes
+  are already closed laughing) and, in `wave`, a small wave (the forearm turning around its
+  elbow). All of it sits inside `@media (prefers-reduced-motion: no-preference)` and applies only
+  while the SVG says `data-motion="running"`.
+- **States:** `still` (the server's markup, no JavaScript, `animate={false}`, Reduce Motion),
+  `paused` (the tab is hidden or the mascot is off screen, by `IntersectionObserver`) and
+  `running`. Only the page's script turns it `running`, so nothing moves off screen or without
+  a script.
+- **A pose change** (a new `pose` prop) moves the same layers frame by frame for 480 ms while
+  running; otherwise it shows the new pose at once and asks for no frame.
+- **No layout shift:** the size and the view box never change.
+
 ## Scripts
 
-- `pnpm --filter @jack/mascot preview`: serves the gallery (the parts, then the poses at 32, 64,
-  128 and 256 px on white, light gray and navy) on a free local port. Local only: there is no
-  route for it in the site.
-- `pnpm --filter @jack/mascot build`: writes each pose to `dist/poses/<pose>.svg` (and a titled
-  copy) and `dist/gallery.html`, and fails when a pose is over 30 KB (they are 6 to 7 KB).
+- `pnpm --filter @jack/mascot preview`: serves the gallery on a free local port: every part
+  close up, the six poses at 32, 64, 128 and 256 px on white, light gray and navy, then the
+  motion (the idle loops, every pose change, a Reduce Motion toggle and a mascot below the fold
+  that waits until it is on screen). The motion section's script is the package's own code,
+  served with its types stripped. Local only: there is no route for it in the site.
+- `pnpm --filter @jack/mascot build`: writes each pose to `dist/poses/<pose>.svg` (still), a
+  titled copy and `<pose>-animated.svg` (with the idle CSS: a file has no script, so it runs
+  wherever it is shown unless motion is reduced), and `dist/gallery.html` (its motion section
+  needs the preview server). Fails when a still pose is over 30 KB or an animated one over
+  60 KB (they are 6 to 8 KB).
 - `pnpm --filter @jack/mascot test`, `typecheck`.
 
 The scripts run TypeScript with Node's own type stripping (no build step): the sources use
