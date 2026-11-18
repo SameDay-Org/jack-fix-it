@@ -13,7 +13,8 @@
   "landing": {
     "meta": {
       "title": "Jack Fix It · Whatever happens at home, we fix it.",
-      "description": "Tell Jack what's going on at home, compare fixed-price quotes from pros near you and follow the job in the app."
+      "description": "Tell Jack what's going on at home, compare fixed-price quotes from pros near you and follow the job in the app.",
+      "ogAlt": "The Jack Fix It name and its line “Whatever happens at home, we fix it.” on navy."
     },
     "skipToContent": "Skip to content",
     "homeLabel": "Jack Fix It, back to the top",
