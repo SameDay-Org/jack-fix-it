@@ -32,6 +32,8 @@ const PAGES = {
   "/es": "server/app/es.html",
   "/app": "server/app/app.html",
   "/es/app": "server/app/es/app.html",
+  "/for-pros": "server/app/for-pros.html",
+  "/es/for-pros": "server/app/es/for-pros.html",
 };
 
 const STATIC_SCRIPT = /^\/_next\/(static\/[^"?#]+\.js)(?:[?#].*)?$/;

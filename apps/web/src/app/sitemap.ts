@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 
-import { LANDING_PATHS, SHOWCASE_PATHS, siteUrl } from "@/features/site/routes";
+import { FOR_PROS_PATHS, LANDING_PATHS, SHOWCASE_PATHS, siteUrl } from "@/features/site/routes";
 import { locales } from "@/i18n/config";
 
 /**
@@ -16,7 +16,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
   const base = siteUrl();
   if (!base) return [];
   const at = (path: string) => new URL(path, base).href;
-  return [LANDING_PATHS, SHOWCASE_PATHS].flatMap((paths) =>
+  return [LANDING_PATHS, SHOWCASE_PATHS, FOR_PROS_PATHS].flatMap((paths) =>
     locales.map((locale) => ({
       url: at(paths[locale]),
       alternates: {

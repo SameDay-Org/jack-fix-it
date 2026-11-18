@@ -122,6 +122,29 @@ describe("the landing page", () => {
     }
   });
 
+  it.each([
+    ["en", "/for-pros", "/app#pros"],
+    ["es", "/es/for-pros", "/es/app#pros"],
+  ] as const)(
+    "in %s links to the page for professionals from its header, its pros block and its footer",
+    async (locale, forPros, appForPros) => {
+      const html = await page(locale);
+      const part = (open: RegExp, close: string) => {
+        const start = html.search(open);
+        return html.slice(start, html.indexOf(close, start));
+      };
+      const link = new RegExp(`<a [^>]*href="${forPros}"`);
+      expect(part(/<header\b/, "</header>")).toMatch(link);
+      const block = part(/<section id="pros"/, "</section>");
+      expect(block).toMatch(link);
+      // The block's second way keeps the app's part for pros.
+      expect(block).toContain(`href="${appForPros}"`);
+      expect(part(/<footer\b/, "</footer>")).toMatch(link);
+      // A real page, not a dead link.
+      expect(routes()).toContain(forPros);
+    },
+  );
+
   it("shows the API's categories, in the reader's language, a new one with the general line", async () => {
     fetchMock.mockImplementation(
       routeFetch({

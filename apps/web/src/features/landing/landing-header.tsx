@@ -3,7 +3,7 @@ import Link from "next/link";
 
 import { LanguageToggle } from "@/features/site/language-toggle";
 import { type MenuLink, MobileMenu } from "@/features/site/mobile-menu";
-import { LANDING_PATHS, SHOWCASE_PATHS } from "@/features/site/routes";
+import { FOR_PROS_PATHS, LANDING_PATHS, SHOWCASE_PATHS } from "@/features/site/routes";
 import { CONTAINER, FOCUS_ON_NAVY } from "@/features/site/ui";
 import { Wordmark } from "@/features/site/wordmark";
 import type { Locale } from "@/i18n/config";
@@ -16,24 +16,51 @@ const NAV_LINK = cn(
   FOCUS_ON_NAVY,
 );
 
+/** The pages that share this header: the landing (#85) and the page for professionals (#88). */
+export type SitePage = "landing" | "forPros";
+
+/** The page's own sections, in its header. */
+const SECTIONS = {
+  landing: [
+    [LANDING_ANCHORS.services, "landing.nav.services"],
+    [LANDING_ANCHORS.how, "landing.nav.how"],
+  ],
+  forPros: [
+    ["how", "forPros.nav.how"],
+    ["faq", "forPros.nav.faq"],
+  ],
+} as const satisfies Record<SitePage, readonly (readonly [string, string])[]>;
+
 /**
- * The landing's header, kept in view while scrolling: the brand (back to the top), the links to
- * the services and how it works, the language switch and the way to the app. No "Sign in" (there
- * is no web sign-in for customers) and no "For pros" page yet (#88). Below `lg` the links fold
- * into a menu.
+ * The public pages' header, kept in view while scrolling: the brand (the landing's top), the
+ * page's own sections, the page for professionals (from the landing), the language switch and
+ * the way to the app. No "Sign in": there is no web sign-in for customers or pros. Below `lg`
+ * the links fold into a menu.
  */
-export function LandingHeader({ t, locale }: { t: TFunction; locale: Locale }) {
-  const sections: MenuLink[] = [
-    { href: `#${LANDING_ANCHORS.services}`, label: t("landing.nav.services") },
-    { href: `#${LANDING_ANCHORS.how}`, label: t("landing.nav.how") },
-  ];
+export function LandingHeader({
+  t,
+  locale,
+  page = "landing",
+}: {
+  t: TFunction;
+  locale: Locale;
+  page?: SitePage;
+}) {
+  const sections: MenuLink[] = SECTIONS[page].map(([anchor, key]) => ({
+    href: `#${anchor}`,
+    label: t(key),
+  }));
+  if (page === "landing") {
+    sections.push({ href: FOR_PROS_PATHS[locale], label: t("landing.nav.forPros") });
+  }
   const app: MenuLink = { href: SHOWCASE_PATHS[locale], label: t("landing.nav.getApp") };
+  const home = page === "landing" ? `#${LANDING_ANCHORS.top}` : LANDING_PATHS[locale];
 
   return (
     <header className="sticky top-0 z-40 bg-navy-900/95 text-white backdrop-blur-md">
       <div className={cn(CONTAINER, "flex h-16 items-center gap-2 sm:gap-4")}>
         <a
-          href={`#${LANDING_ANCHORS.top}`}
+          href={home}
           aria-label={t("landing.homeLabel")}
           className={cn(
             "mr-auto rounded-pill text-xl font-extrabold tracking-tight whitespace-nowrap",
@@ -49,7 +76,11 @@ export function LandingHeader({ t, locale }: { t: TFunction; locale: Locale }) {
             </a>
           ))}
         </nav>
-        <LanguageToggle t={t} locale={locale} paths={LANDING_PATHS} />
+        <LanguageToggle
+          t={t}
+          locale={locale}
+          paths={page === "landing" ? LANDING_PATHS : FOR_PROS_PATHS}
+        />
         <Link
           href={app.href}
           prefetch={false}
