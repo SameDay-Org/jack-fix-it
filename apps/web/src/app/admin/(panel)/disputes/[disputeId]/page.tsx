@@ -234,25 +234,27 @@ function DisputeView({
 
       <Card className="flex flex-col gap-4">
         <CardTitle>{t("admin.disputes.detail.money.title")}</CardTitle>
-        {dispute.payment ? (
-          <dl className={DL}>
-            <dt className={TERM}>{t("admin.disputes.detail.money.customerTotal")}</dt>
-            <dd className="font-semibold tabular-nums">
-              {money(dispute.payment.customer_total_cents)}
-            </dd>
-            <dt className={TERM}>{t("admin.disputes.detail.money.tax")}</dt>
-            <dd className="tabular-nums">{money(dispute.payment.tax_cents)}</dd>
-            <dt className={TERM}>{t("admin.disputes.detail.money.proPayout")}</dt>
-            <dd className="tabular-nums">{money(dispute.payment.pro_payout_cents)}</dd>
-            <dt className={TERM}>{t("admin.disputes.detail.money.platformFee")}</dt>
-            <dd className="tabular-nums">{money(dispute.payment.platform_fee_cents)}</dd>
-            <dt className={TERM}>{t("admin.disputes.detail.money.payment")}</dt>
-            <dd>{t(`admin.disputes.detail.money.paymentStatus.${dispute.payment.status}`)}</dd>
-          </dl>
-        ) : (
+        {dispute.payment ? null : (
           <p className="text-sm font-semibold">{t("admin.disputes.detail.money.noPayment")}</p>
         )}
+        {/* One list, so every value starts on the same line. */}
         <dl className={DL}>
+          {dispute.payment ? (
+            <>
+              <dt className={TERM}>{t("admin.disputes.detail.money.customerTotal")}</dt>
+              <dd className="font-semibold tabular-nums">
+                {money(dispute.payment.customer_total_cents)}
+              </dd>
+              <dt className={TERM}>{t("admin.disputes.detail.money.tax")}</dt>
+              <dd className="tabular-nums">{money(dispute.payment.tax_cents)}</dd>
+              <dt className={TERM}>{t("admin.disputes.detail.money.proPayout")}</dt>
+              <dd className="tabular-nums">{money(dispute.payment.pro_payout_cents)}</dd>
+              <dt className={TERM}>{t("admin.disputes.detail.money.platformFee")}</dt>
+              <dd className="tabular-nums">{money(dispute.payment.platform_fee_cents)}</dd>
+              <dt className={TERM}>{t("admin.disputes.detail.money.payment")}</dt>
+              <dd>{t(`admin.disputes.detail.money.paymentStatus.${dispute.payment.status}`)}</dd>
+            </>
+          ) : null}
           <dt className={TERM}>{t("admin.disputes.detail.money.refund")}</dt>
           <dd>
             {dispute.refund ? (

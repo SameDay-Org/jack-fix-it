@@ -179,7 +179,11 @@ export default async function DisputesPage({
                     </div>
                     <p className="text-sm">{cell.reason}</p>
                     <p className="text-sm">{cell.parties}</p>
-                    <p className="text-sm tabular-nums">{cell.money}</p>
+                    <p className="text-sm tabular-nums">
+                      {/* The table's column header, which a card has not. */}
+                      <span className="text-gray-500">{t("admin.disputes.columns.money")}: </span>
+                      {cell.money}
+                    </p>
                     <div>{age(dispute)}</div>
                   </Card>
                 </li>
