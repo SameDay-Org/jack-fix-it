@@ -770,10 +770,12 @@ export interface paths {
         /**
          * Pay for the quote I accepted
          * @description What the Payment Sheet needs to charge the customer for the quote they accepted: the
-         *     PaymentIntent's client secret, the customer and an ephemeral key for it, the publishable
+         *     PaymentIntent's client secret, the customer and a CustomerSession for it (the sheet lists
+         *     the saved cards, never removes one or offers to save one; the ephemeral key is deprecated),
+         *     the publishable
          *     key, and the amount, the tax and the total shown before paying. The amounts are the
          *     accepted quote's, computed on the server; the body takes no field. The first call creates
-         *     the PaymentIntent; later calls return the same one (a new ephemeral key each time), until
+         *     the PaymentIntent; later calls return the same one (a new session each time), until
          *     the payment succeeds (then the job exists: 409). The pro is checked again on every call:
          *     one who can no longer be hired is a 409, and nothing is created.
          */
@@ -821,7 +823,8 @@ export interface paths {
          * Start adding a card to my wallet
          * @description What the Payment Sheet needs, in setup mode, to save a card: a new SetupIntent's client
          *     secret, the caller's Stripe Customer (created on the first call, the same one ever after)
-         *     and a new ephemeral key for it, and the publishable key. The card data goes from the app to
+         *     and the publishable key; ephemeral_key_secret is deprecated and always null (#253c: the
+         *     setup sheet opens without the customer). The card data goes from the app to
          *     Stripe, never through this API. The body takes no field.
          */
         post: operations["create_setup_intent_v1_me_payment_methods_setup_intent_post"];
@@ -3329,8 +3332,14 @@ export interface components {
              */
             customer_id: string;
             /**
+             * Customer Session Client Secret
+             * @description A CustomerSession's client secret, new on each call: the sheet lists the customer's saved cards with it, and Stripe lets it neither remove one nor offer to save a new one (cards are added in the wallet). Shown once per call, never logged.
+             */
+            customer_session_client_secret: string;
+            /**
              * Ephemeral Key Secret
-             * @description A short-lived key that lets the sheet act for the customer; new on each call.
+             * @deprecated
+             * @description Deprecated (#253c): app builds before the CustomerSession pass it to the sheet, which then has full rights over the customer's cards. Use customer_session_client_secret; this field is removed in a later release.
              */
             ephemeral_key_secret: string;
             /**
@@ -4634,9 +4643,10 @@ export interface components {
             client_secret: string;
             /**
              * Ephemeral Key Secret
-             * @description A short-lived key that lets the sheet act for the customer; new on each call.
+             * @deprecated
+             * @description Deprecated (#253c): always null. The setup sheet opens without the customer (with a key, Stripe would let it list, remove and reuse saved cards behind the API), so no key is minted; the field stays for one release and is then removed.
              */
-            ephemeral_key_secret: string;
+            ephemeral_key_secret?: string | null;
             /**
              * Customer Id
              * @description The customer's Stripe Customer id, for the sheet.

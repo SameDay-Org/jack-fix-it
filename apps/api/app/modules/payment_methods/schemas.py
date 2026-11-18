@@ -17,8 +17,12 @@ class SetupIntentOut(BaseModel):
         description="The SetupIntent's client secret: the sheet confirms the card with it. "
         "Shown once per call, never logged; a new SetupIntent on every call."
     )
-    ephemeral_key_secret: str = Field(
-        description="A short-lived key that lets the sheet act for the customer; new on each call."
+    ephemeral_key_secret: str | None = Field(
+        default=None,
+        deprecated=True,
+        description="Deprecated (#253c): always null. The setup sheet opens without the "
+        "customer (with a key, Stripe would let it list, remove and reuse saved cards behind "
+        "the API), so no key is minted; the field stays for one release and is then removed.",
     )
     customer_id: str = Field(description="The customer's Stripe Customer id, for the sheet.")
     publishable_key: str = Field(

@@ -2825,7 +2825,7 @@
           "payments"
         ],
         "summary": "Pay for the quote I accepted",
-        "description": "What the Payment Sheet needs to charge the customer for the quote they accepted: the\nPaymentIntent's client secret, the customer and an ephemeral key for it, the publishable\nkey, and the amount, the tax and the total shown before paying. The amounts are the\naccepted quote's, computed on the server; the body takes no field. The first call creates\nthe PaymentIntent; later calls return the same one (a new ephemeral key each time), until\nthe payment succeeds (then the job exists: 409). The pro is checked again on every call:\none who can no longer be hired is a 409, and nothing is created.",
+        "description": "What the Payment Sheet needs to charge the customer for the quote they accepted: the\nPaymentIntent's client secret, the customer and a CustomerSession for it (the sheet lists\nthe saved cards, never removes one or offers to save one; the ephemeral key is deprecated),\nthe publishable\nkey, and the amount, the tax and the total shown before paying. The amounts are the\naccepted quote's, computed on the server; the body takes no field. The first call creates\nthe PaymentIntent; later calls return the same one (a new session each time), until\nthe payment succeeds (then the job exists: 409). The pro is checked again on every call:\none who can no longer be hired is a 409, and nothing is created.",
         "operationId": "create_payment_v1_requests__request_id__quotes__quote_id__payment_post",
         "security": [
           {
@@ -3040,7 +3040,7 @@
           "payment-methods"
         ],
         "summary": "Start adding a card to my wallet",
-        "description": "What the Payment Sheet needs, in setup mode, to save a card: a new SetupIntent's client\nsecret, the caller's Stripe Customer (created on the first call, the same one ever after)\nand a new ephemeral key for it, and the publishable key. The card data goes from the app to\nStripe, never through this API. The body takes no field.",
+        "description": "What the Payment Sheet needs, in setup mode, to save a card: a new SetupIntent's client\nsecret, the caller's Stripe Customer (created on the first call, the same one ever after)\nand the publishable key; ephemeral_key_secret is deprecated and always null (#253c: the\nsetup sheet opens without the customer). The card data goes from the app to\nStripe, never through this API. The body takes no field.",
         "operationId": "create_setup_intent_v1_me_payment_methods_setup_intent_post",
         "responses": {
           "200": {
@@ -10705,10 +10705,16 @@
             "title": "Customer Id",
             "description": "The customer's Stripe Customer id, for the sheet."
           },
+          "customer_session_client_secret": {
+            "type": "string",
+            "title": "Customer Session Client Secret",
+            "description": "A CustomerSession's client secret, new on each call: the sheet lists the customer's saved cards with it, and Stripe lets it neither remove one nor offer to save a new one (cards are added in the wallet). Shown once per call, never logged."
+          },
           "ephemeral_key_secret": {
             "type": "string",
             "title": "Ephemeral Key Secret",
-            "description": "A short-lived key that lets the sheet act for the customer; new on each call."
+            "description": "Deprecated (#253c): app builds before the CustomerSession pass it to the sheet, which then has full rights over the customer's cards. Use customer_session_client_secret; this field is removed in a later release.",
+            "deprecated": true
           },
           "publishable_key": {
             "type": "string",
@@ -10744,6 +10750,7 @@
         "required": [
           "payment_intent_client_secret",
           "customer_id",
+          "customer_session_client_secret",
           "ephemeral_key_secret",
           "publishable_key",
           "amount_cents",
@@ -13631,9 +13638,17 @@
             "description": "The SetupIntent's client secret: the sheet confirms the card with it. Shown once per call, never logged; a new SetupIntent on every call."
           },
           "ephemeral_key_secret": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Ephemeral Key Secret",
-            "description": "A short-lived key that lets the sheet act for the customer; new on each call."
+            "description": "Deprecated (#253c): always null. The setup sheet opens without the customer (with a key, Stripe would let it list, remove and reuse saved cards behind the API), so no key is minted; the field stays for one release and is then removed.",
+            "deprecated": true
           },
           "customer_id": {
             "type": "string",
@@ -13650,7 +13665,6 @@
         "type": "object",
         "required": [
           "client_secret",
-          "ephemeral_key_secret",
           "customer_id",
           "publishable_key"
         ],

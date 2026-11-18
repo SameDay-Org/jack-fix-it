@@ -73,6 +73,7 @@ CONFIG = PaymentsConfig(publishable_key=PUBLISHABLE_KEY, intent_reconcile_after=
 SHEET_KEYS = {
     "payment_intent_client_secret",
     "customer_id",
+    "customer_session_client_secret",
     "ephemeral_key_secret",
     "publishable_key",
     "amount_cents",
@@ -124,6 +125,7 @@ REAL_CUSTOMER = "cus_sentry_fixture0123"
 REAL_INTENT = "pi_sentry_fixture0123"
 REAL_CLIENT_SECRET = f"{REAL_INTENT}_secret_sentryfixture"
 REAL_EPHEMERAL_SECRET = "ek_test_sentry_fixture_secret"
+REAL_SESSION_SECRET = "cuss_secret_sentryfixture0123"
 
 
 @dataclass
@@ -147,6 +149,7 @@ class FakeStripePayments:
     intent_calls: list[dict[str, object]] = field(default_factory=list)
     retrieved: list[str] = field(default_factory=list)
     ephemeral_keys: list[str] = field(default_factory=list)  # the customer of each
+    customer_sessions: list[str] = field(default_factory=list)  # the customer of each
     errors: dict[str, Exception] = field(default_factory=dict)
     on_create_customer: Callable[[], Awaitable[None]] | None = None
     on_create_intent: Callable[[], Awaitable[None]] | None = None
@@ -253,6 +256,12 @@ class FakeStripePayments:
         if facts is None:
             raise StripeRejectedError(request_id="req_fake_missing", code="resource_missing")
         return facts
+
+    async def create_customer_session(self, customer_id: str) -> str:
+        if "create_customer_session" in self.errors:
+            raise self.errors["create_customer_session"]
+        self.customer_sessions.append(customer_id)
+        return f"cuss_secret_fake{len(self.customer_sessions)}_{uuid.uuid4().hex[:8]}"
 
     async def create_ephemeral_key(self, customer_id: str) -> str:
         if "create_ephemeral_key" in self.errors:
@@ -506,6 +515,8 @@ async def test_payment_requires_the_accepted_quote(
     for quote_id in (pending, open_quote, other_accepted, accepted):
         assert await payments_of(db_session, quote_id) == []
     assert (stripe_fake.customer_calls, stripe_fake.intent_calls) == ([], [])
+    # No session for anyone (#253c): a stranger never gets one on someone else's customer.
+    assert (stripe_fake.customer_sessions, stripe_fake.ephemeral_keys) == ([], [])
     assert await statuses(db_session, request_id) == (
         RequestStatus.ACCEPTED,
         {accepted: QuoteStatus.ACCEPTED, pending: QuoteStatus.PENDING},
@@ -534,6 +545,7 @@ async def test_non_customers_are_refused(
         assert (response.status_code, response.json()) == (401, INVALID_TOKEN)
     assert await payments_of(db_session, quote_id) == []
     assert stripe_fake.intent_calls == []
+    assert (stripe_fake.customer_sessions, stripe_fake.ephemeral_keys) == ([], [])
 
 
 async def test_malformed_ids_422(db_client: httpx.AsyncClient, world: World) -> None:
@@ -602,7 +614,8 @@ async def test_payment_is_idempotent_per_quote(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A second call returns the same PaymentIntent, read back from Stripe by its stored id,
-    with a new ephemeral key; one row, one customer, one create."""
+    with a new CustomerSession (and the deprecated ephemeral key); one row, one customer, one
+    create."""
     request_id, quote_id, _ = await accepted_request(db_session, world)
 
     with caplog.at_level(logging.INFO):
@@ -613,9 +626,11 @@ async def test_payment_is_idempotent_per_quote(
     one, two = first.json(), second.json()
     assert one["payment_intent_client_secret"] == two["payment_intent_client_secret"]
     assert one["customer_id"] == two["customer_id"]
-    assert one["ephemeral_key_secret"] != two["ephemeral_key_secret"]
-    assert {k: v for k, v in one.items() if k != "ephemeral_key_secret"} == {
-        k: v for k, v in two.items() if k != "ephemeral_key_secret"
+    per_call = {"customer_session_client_secret", "ephemeral_key_secret"}
+    for key in per_call:
+        assert one[key] != two[key]
+    assert {k: v for k, v in one.items() if k not in per_call} == {
+        k: v for k, v in two.items() if k not in per_call
     }
     [payment] = await payments_of(db_session, quote_id)
     [intent_id] = stripe_fake.intents
@@ -624,6 +639,7 @@ async def test_payment_is_idempotent_per_quote(
     assert stripe_fake.retrieved == [intent_id]
     assert len(stripe_fake.customer_calls) == 1
     assert stripe_fake.ephemeral_keys == [one["customer_id"]] * 2
+    assert stripe_fake.customer_sessions == [one["customer_id"]] * 2
     assert len(events(caplog, "payment_created")) == 1
     assert len(events(caplog, "payment_intent_created")) == 1
     assert len(events(caplog, "payment_sheet_issued")) == 2
@@ -871,12 +887,20 @@ async def test_stripe_errors_map_to_503_and_502(
         [payment] = await payments_of(db_session, quote_id)
         assert payment.stripe_payment_intent_id is None
 
-        # On the ephemeral key: the intent id is stored and kept.
-        stripe_fake.errors = {"create_ephemeral_key": unavailable}
+        # On the CustomerSession, then on the ephemeral key: the intent id is stored and kept.
+        stripe_fake.errors = {"create_customer_session": unavailable}
         response = await pay(db_client, world, request_id, quote_id)
         assert (response.status_code, response.json()) == (503, UNAVAILABLE)
         [payment] = await payments_of(db_session, quote_id)
         [intent_id] = stripe_fake.intents
+        assert payment.stripe_payment_intent_id == intent_id
+        stripe_fake.errors = {"create_customer_session": rejected}
+        response = await pay(db_client, world, request_id, quote_id)
+        assert (response.status_code, response.json()) == (502, PROVIDER_ERROR)
+        stripe_fake.errors = {"create_ephemeral_key": unavailable}
+        response = await pay(db_client, world, request_id, quote_id)
+        assert (response.status_code, response.json()) == (503, UNAVAILABLE)
+        [payment] = await payments_of(db_session, quote_id)
         assert payment.stripe_payment_intent_id == intent_id
         stripe_fake.errors = {"create_ephemeral_key": rejected}
         response = await pay(db_client, world, request_id, quote_id)
@@ -900,12 +924,14 @@ async def test_stripe_errors_map_to_503_and_502(
     assert [extra_of(r)["operation"] for r in unavailable_logs] == [
         "create_customer",
         "create_payment_intent",
+        "create_customer_session",
         "create_ephemeral_key",
         "retrieve_payment_intent",
     ]
     assert [extra_of(r)["operation"] for r in rejected_logs] == [
         "create_customer",
         "create_payment_intent",
+        "create_customer_session",
         "create_ephemeral_key",
         "retrieve_payment_intent",
     ]
@@ -1065,6 +1091,17 @@ def stripe_answers() -> Callable[[httpx.Request], httpx.Response]:
             return httpx.Response(200, json={"id": REAL_CUSTOMER, "object": "customer"})
         if path in ("/v1/payment_intents", f"/v1/payment_intents/{REAL_INTENT}"):
             return httpx.Response(200, json=intent)
+        if path == "/v1/customer_sessions":
+            return httpx.Response(
+                200,
+                json={
+                    "object": "customer_session",
+                    "client_secret": REAL_SESSION_SECRET,
+                    "customer": REAL_CUSTOMER,
+                    "expires_at": 1_900_000_000,
+                    "livemode": False,
+                },
+            )
         if path == "/v1/ephemeral_keys" and calls[path] == 1:
             return httpx.Response(
                 200,
@@ -1137,8 +1174,16 @@ async def test_payment_logs_and_sentry_carry_no_secrets(
     assert first.status_code == 200, first.text
     assert first.json()["payment_intent_client_secret"] == REAL_CLIENT_SECRET
     assert first.json()["ephemeral_key_secret"] == REAL_EPHEMERAL_SECRET
+    assert first.json()["customer_session_client_secret"] == REAL_SESSION_SECRET
     assert (second.status_code, second.json()) == (502, PROVIDER_ERROR)
-    leaks = (REAL_CUSTOMER, REAL_INTENT, REAL_CLIENT_SECRET, REAL_EPHEMERAL_SECRET, EMAIL)
+    leaks = (
+        REAL_CUSTOMER,
+        REAL_INTENT,
+        REAL_CLIENT_SECRET,
+        REAL_EPHEMERAL_SECRET,
+        REAL_SESSION_SECRET,
+        EMAIL,
+    )
     logs = rendered(caplog)
     for leak in leaks:
         assert leak not in logs, leak
@@ -1159,7 +1204,8 @@ async def test_payment_logs_and_sentry_carry_no_secrets(
         assert event["extra"]["user_id"] == str(world.customer_id)
         crumbs = event["breadcrumbs"]["values"]
         # The breadcrumbs are the failing request's own (the second call: the retrieve, whose
-        # URL names the PaymentIntent, and the refused ephemeral key); the id is filtered.
+        # URL names the PaymentIntent, the session and the refused ephemeral key); the id is
+        # filtered.
         stripe_urls = {
             c["data"]["url"]
             for c in crumbs
@@ -1167,6 +1213,7 @@ async def test_payment_logs_and_sentry_carry_no_secrets(
         }
         assert stripe_urls == {
             "https://api.stripe.com/v1/payment_intents/pi_[Filtered]",
+            "https://api.stripe.com/v1/customer_sessions",
             "https://api.stripe.com/v1/ephemeral_keys",
         }
 

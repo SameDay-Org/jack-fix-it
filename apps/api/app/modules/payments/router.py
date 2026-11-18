@@ -74,10 +74,12 @@ async def create_payment(
     body: Annotated[PaymentCreate | None, Body()] = None,
 ) -> PaymentSheetOut:
     """What the Payment Sheet needs to charge the customer for the quote they accepted: the
-    PaymentIntent's client secret, the customer and an ephemeral key for it, the publishable
+    PaymentIntent's client secret, the customer and a CustomerSession for it (the sheet lists
+    the saved cards, never removes one or offers to save one; the ephemeral key is deprecated),
+    the publishable
     key, and the amount, the tax and the total shown before paying. The amounts are the
     accepted quote's, computed on the server; the body takes no field. The first call creates
-    the PaymentIntent; later calls return the same one (a new ephemeral key each time), until
+    the PaymentIntent; later calls return the same one (a new session each time), until
     the payment succeeds (then the job exists: 409). The pro is checked again on every call:
     one who can no longer be hired is a 409, and nothing is created."""
     return await payments.payment_sheet(user, request_id, quote_id)
