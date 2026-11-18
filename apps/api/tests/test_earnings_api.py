@@ -7,13 +7,15 @@ from typing import Any, Final
 
 import httpx
 import pytest
+from fastapi import FastAPI
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.modules.jobs.models import Job, JobEvent, JobStatus
 from app.modules.payments.models import Transfer, TransferStatus
-from tests.conftest import make_settings
+from app.rate_limit import get_rate_limiter
+from tests.conftest import InMemoryRateLimiter, make_settings
 from tests.job_world import (
     CUSTOMER_EMAIL,
     CUSTOMER_FIRST,
@@ -355,7 +357,14 @@ async def test_only_pros_read_and_every_answer_is_no_store(
 
 
 @pytest.mark.parametrize("settings", [make_settings(earnings_read_limit=2)])
-async def test_reads_are_limited_per_pro(db_client: httpx.AsyncClient, world: JobWorld) -> None:
+async def test_reads_are_limited_per_pro(
+    app: FastAPI, db_client: httpx.AsyncClient, world: JobWorld
+) -> None:
+    # One fixed window for the whole test: on the real clock, a slow run can cross the end of a
+    # window between two reads and start counting again.
+    limiter = InMemoryRateLimiter(clock=lambda: T0.timestamp())
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+
     answers = [await read(db_client, world.pro) for _ in range(3)]
 
     assert [answer.status_code for answer in answers] == [200, 200, 429]
