@@ -66,6 +66,11 @@ PURPOSES: Final[dict[UploadPurpose, PurposeRule]] = {
         roles=frozenset({UserRole.CUSTOMER, UserRole.PRO}),
         content_types=dict.fromkeys(_IMAGE_TYPES, SizeClass.IMAGE),
     ),
+    # The customer's photos of a problem with a job (#75).
+    UploadPurpose.DISPUTE_PHOTO: PurposeRule(
+        roles=frozenset({UserRole.CUSTOMER}),
+        content_types=dict.fromkeys(_IMAGE_TYPES, SizeClass.IMAGE),
+    ),
 }
 
 # u/<user id>/<purpose>/<32 hex><extension>, nothing else: no "..", no extra segment.

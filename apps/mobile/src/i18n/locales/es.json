@@ -1816,12 +1816,7 @@
     "approved": {
       "title": "Estás aprobado",
       "ready": "Las solicitudes nuevas cerca de ti aparecen en Inicio.",
-      "payouts": "Falta un paso para que te lleguen solicitudes: configurar los pagos.",
-      "placeholder": {
-        "title": "Configuración de pagos",
-        "badge": "Aún no disponible",
-        "body": "Aquí configurarás cómo recibes tus pagos. Aún no está disponible en la app."
-      }
+      "payouts": "Falta un paso para que te lleguen solicitudes: configurar los pagos."
     },
     "rejected": {
       "title": "Tu verificación no fue aprobada",
@@ -1852,6 +1847,86 @@
       "loading": "Cargando tu cuenta",
       "loadFailed": "No pudimos cargar tu cuenta. Inténtalo de nuevo en un momento.",
       "offline": "No tienes conexión. Revisa tu conexión e inténtalo de nuevo."
+    }
+  },
+  "proPayouts": {
+    "title": "Pagos",
+    "menu": "Pagos",
+    "retry": "Reintentar",
+    "loading": "Cargando el estado de tus pagos",
+    "status": {
+      "not_started": "Sin configurar",
+      "incomplete": "En curso",
+      "in_review": "En revisión",
+      "enabled": "Activos"
+    },
+    "not_started": {
+      "title": "Configura cómo recibes tus pagos",
+      "body": "Jack Fix It te paga a través de Stripe. Necesitas una cuenta de pagos para que te lleguen solicitudes."
+    },
+    "incomplete": {
+      "title": "Stripe necesita más información",
+      "body": "Continúa donde lo dejaste para activar tus pagos."
+    },
+    "in_review": {
+      "title": "Stripe está revisando tus datos",
+      "body": "Ya está todo enviado. El resultado aparecerá aquí; por ahora no tienes que hacer nada más.",
+      "check": "Revisar de nuevo"
+    },
+    "enabled": {
+      "title": "Tus pagos están activos",
+      "approved": "Ya puedes recibir solicitudes. Las nuevas cerca de ti aparecen en Inicio.",
+      "notApproved": "Ya puedes recibir pagos. Las solicitudes te llegarán cuando se apruebe tu verificación.",
+      "body": "Ya puedes recibir pagos por tus trabajos."
+    },
+    "asks": {
+      "title": "Qué te pedirá Stripe",
+      "bank": "Una cuenta bancaria, donde llegan tus pagos",
+      "identity": "Tu identidad, para confirmar que eres tú",
+      "privacy": "Stripe recopila y guarda estos datos. Jack Fix It nunca los ve."
+    },
+    "action": {
+      "start": "Configurar pagos",
+      "continue": "Continuar configuración"
+    },
+    "expired": {
+      "title": "Esa página de configuración venció",
+      "body": "Abre una nueva para continuar donde lo dejaste."
+    },
+    "failure": {
+      "offline": {
+        "title": "No tienes conexión",
+        "body": "Revisa tu conexión e inténtalo de nuevo."
+      },
+      "busy": {
+        "title": "Espera un momento",
+        "body": "Abriste la página de configuración varias veces seguidas. Inténtalo de nuevo en un momento."
+      },
+      "review": {
+        "title": "Tu cuenta de pagos necesita una revisión",
+        "body": "Nuestro equipo de soporte tiene que revisarla antes de que puedas continuar. Contáctanos para que podamos ayudarte.",
+        "contact": "Contactar a soporte"
+      },
+      "unavailable": {
+        "title": "La configuración de pagos no está disponible ahora",
+        "body": "No se cambió nada. Inténtalo de nuevo en un momento."
+      },
+      "generic": {
+        "title": "No pudimos abrir la configuración de pagos",
+        "body": "Inténtalo de nuevo en un momento."
+      }
+    },
+    "load": {
+      "title": "No pudimos cargar el estado de tus pagos",
+      "offline": "No tienes conexión. Revisa tu conexión e inténtalo de nuevo.",
+      "unavailable": "Los pagos no están disponibles ahora. Inténtalo de nuevo en un momento.",
+      "generic": "Inténtalo de nuevo en un momento.",
+      "stale": "No pudimos actualizar el estado de tus pagos."
+    },
+    "card": {
+      "title": "Completa la configuración de pagos",
+      "body": "Conecta una cuenta de pagos con Stripe para empezar a recibir solicitudes.",
+      "action": "Configurar pagos"
     }
   }
 }

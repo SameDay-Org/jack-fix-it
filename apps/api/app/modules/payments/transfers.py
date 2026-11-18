@@ -11,7 +11,7 @@ release(job_id), in four steps:
 
 1. Under the job's row lock (the one every status change takes), then the transfer row's:
    - the job is confirmed: anything else is left alone (not_confirmed);
-   - nothing holds its money back (has_open_hold: the dispute or problem flag of #75);
+   - nothing holds its money back (has_open_hold: an open dispute, #75);
    - no attempt is under way: a row pending with an attempt stamped less than
      TRANSFER_STUCK_PENDING_MINUTES ago and no outcome is another worker's (in_flight);
    - the job's payment succeeded and froze the same payout as the job did, a positive one;
@@ -78,6 +78,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.integrations.stripe_errors import StripeCallError, StripeUnavailableError
 from app.integrations.stripe_transfers import StripeTransfers, TransferFacts
+from app.modules.disputes.service import has_open_dispute, open_dispute_jobs
 from app.modules.jobs.service import JobPayoutFacts, JobPayouts
 from app.modules.payments.models import (
     MADE_STATUSES,
@@ -105,14 +106,13 @@ def transfer_idempotency_key(job_id: uuid.UUID) -> str:
 
 
 async def has_open_hold(session: AsyncSession, job: JobPayoutFacts) -> bool:
-    """Whether something holds the job's money back: an open dispute or problem flag. Such a
-    job is never released, by any path.
+    """Whether something holds the job's money back: an open dispute (#75). Such a job is
+    never released, by any path, and the sweep's query leaves it out (open_dispute_jobs).
 
-    TODO(#75): the dispute module fills this in (and keeps held jobs out of the sweep's
-    query). Until then nothing can hold a confirmed job: a problem reported in the
-    confirmation window moves the job to disputed, which release never touches.
+    A report moves the job completed -> disputed, which release never reads either; the hold
+    is what keeps the money back whatever the job's status, until an admin resolves it (#76).
     """
-    return False
+    return await has_open_dispute(session, job.job_id)
 
 
 class ReversalCheckOutcome(StrEnum):
@@ -230,6 +230,7 @@ class TransferService:
         job_ids = await self._transfers.due(
             self._jobs.confirmed(),
             self._pros.payable(),
+            open_dispute_jobs(),
             self._clock() - self._config.stuck_after,
             limit,
         )

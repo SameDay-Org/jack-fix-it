@@ -11,6 +11,8 @@ from app.modules.chat.router import router as chat_router
 from app.modules.chat.router import staff_router as staff_chat_router
 from app.modules.devices.router import router as devices_router
 from app.modules.dispatch.router import router as opportunities_router
+from app.modules.disputes.router import customer_router as dispute_customer_router
+from app.modules.disputes.router import pro_router as dispute_pro_router
 from app.modules.geo.router import router as geo_router
 from app.modules.jobs.router import customer_router as customer_jobs_router
 from app.modules.jobs.router import location_router as job_location_router
@@ -74,4 +76,6 @@ v1_router.include_router(support_router)
 v1_router.include_router(staff_support_router)
 v1_router.include_router(staff_ops_router)
 v1_router.include_router(reviews_router)
+v1_router.include_router(dispute_customer_router)
+v1_router.include_router(dispute_pro_router)
 v1_router.include_router(my_rating_router)

@@ -30,7 +30,7 @@ export const homeMode = (profile: ProProfile): HomeMode =>
 
 /**
  * An approved pro receives requests only once payouts are on as well. Until then that is the
- * step left, and the app has no screen for it yet (#277).
+ * step left: the payout screen (#277).
  */
 export const awaitsPayouts = (profile: ProProfile): boolean =>
   profile.verification_status === "approved" && !profile.payouts_enabled;
