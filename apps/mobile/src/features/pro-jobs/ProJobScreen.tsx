@@ -22,6 +22,7 @@ import {
 import { announce } from "@/components/ui/focus";
 import { BackButton } from "@/features/auth/components/BackButton";
 import { ChatEntry } from "@/features/chat";
+import { ReportedProblem } from "@/features/disputes/ReportedProblem";
 import { useInForeground } from "@/features/jobs/api";
 import { categoryLabel, categoryTileProps, formatTimeOfDay } from "@/features/opportunities/format";
 import { RetryNotice } from "@/features/opportunities/RetryNotice";
@@ -187,6 +188,8 @@ export function ProJobScreen() {
               <SharingNote jobId={data.id} name={nameOf(t, data)} />
             ) : null}
             <JobHero job={data} now={dataUpdatedAt} />
+            {/* The customer's report and the pro's one reply, while it is open (#75). */}
+            {data.status === "disputed" ? <ReportedProblem jobId={data.id} /> : null}
             {/* Rating the customer opens once the job is confirmed (#77). */}
             <RateEntry jobId={data.id} side="pro" enabled={RATEABLE.includes(data.status)} />
             <JobFacts job={data} />

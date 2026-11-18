@@ -16,6 +16,8 @@ import { refreshCustomerJob } from "@/features/jobs/api";
 
 export type CustomerDisputeView = ApiSchema<"CustomerDisputeView">;
 export type CustomerDispute = ApiSchema<"CustomerDisputeOut">;
+export type ProDisputeView = ApiSchema<"ProDisputeView">;
+export type ProDispute = ApiSchema<"ProDisputeOut">;
 export type DisputeReason = CustomerDispute["reason_code"];
 export type DisputeResolution = NonNullable<CustomerDispute["resolution"]>;
 
@@ -94,10 +96,10 @@ export async function reportProblem(
 }
 
 /**
- * Why a report did not go, as the screen says it. `null`: the session ended and the signed-out
- * handling takes over. `closed`: the API refused it for the job's state (a report no longer
- * possible, or one already made with this draft's key): the screen reads the report again and
- * shows it as it is.
+ * Why a report or a reply did not go, as the screen says it. `null`: the session ended and the
+ * signed-out handling takes over. `closed`: the API refused it for the state of things (a report
+ * no longer possible, or one already made with this draft's key; a reply already given, or the
+ * report resolved): the screen reads the report again and shows it as it is.
  */
 export type SendFailure = "offline" | "closed" | "invalid" | "failed";
 
@@ -109,4 +111,46 @@ export function sendFailureOf(error: unknown): SendFailure | null {
     if (error.status === 422) return "invalid";
   }
   return "failed";
+}
+
+/** The report on the pro's job, with the photos' safe copies only and the pro's own reply. */
+export const proDisputeKey = (jobId: string, generation: number) =>
+  ["pro-dispute", jobId, generation] as const;
+
+export const proDisputeQueryOptions = (jobId: string, generation: number) =>
+  queryOptions({
+    queryKey: proDisputeKey(jobId, generation),
+    queryFn: ({ signal }) =>
+      apiGet("/v1/pros/me/jobs/{job_id}/dispute", {
+        auth: true,
+        signal,
+        generation,
+        params: { job_id: jobId },
+      }),
+    retry: false,
+  });
+
+export function useProDispute(jobId: string, { enabled = true } = {}) {
+  const generation = useSessionGeneration();
+  const signedIn = useSession().status === "signedIn";
+  return useQuery({ ...proDisputeQueryOptions(jobId, generation), enabled: enabled && signedIn });
+}
+
+/**
+ * The pro's one reply, for the admin who resolves the report. Sending the same text again answers
+ * the view unchanged, so a retry after a lost answer is safe. A plain call, as `reportProblem`.
+ */
+export async function replyToProblem(
+  client: QueryClient,
+  jobId: string,
+  message: string,
+  generation: number,
+): Promise<ProDisputeView> {
+  const view = await apiPost(
+    "/v1/pros/me/jobs/{job_id}/dispute/reply",
+    { message },
+    { auth: true, generation, params: { job_id: jobId } },
+  );
+  if (isCurrentGeneration(generation)) client.setQueryData(proDisputeKey(jobId, generation), view);
+  return view;
 }

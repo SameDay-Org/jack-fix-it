@@ -7,7 +7,7 @@ import { StatusBadge, TextSkeleton, type StatusTone } from "@/components/ui";
 import { sentDay } from "@/features/history/format";
 import type { CustomerJob } from "@/features/jobs/phase";
 
-import { useCustomerDispute, type CustomerDispute } from "./api";
+import { useCustomerDispute, type CustomerDispute, type ProDispute } from "./api";
 
 const STATUS_TONE: Record<CustomerDispute["status"], StatusTone> = {
   open: "warning",
@@ -31,10 +31,10 @@ export function reportOutcome(t: TFunction, dispute: CustomerDispute): string {
 }
 
 type ReportSummaryProps = {
-  dispute: CustomerDispute;
+  dispute: CustomerDispute | ProDispute;
   /** When the report's answer arrived: "Today" is never worded against an older clock. */
   now: number;
-  /** The line under the reason: where it stands. */
+  /** The line under the reason: where it stands for the customer; nothing for the pro. */
   outcome?: string;
   testID: string;
 };

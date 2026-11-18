@@ -2007,6 +2007,19 @@
         "title": "No se pudo enviar",
         "body": "Algo salió mal de nuestro lado. Inténtalo de nuevo en un momento."
       }
+    },
+    "pro": {
+      "title": "El cliente reportó un problema",
+      "review": "Nuestro equipo revisará ambas partes.",
+      "photo": "Foto del cliente {{index}} de {{total}}",
+      "photosPending_one": "Se está preparando {{count}} foto más.",
+      "photosPending_other": "Se están preparando {{count}} fotos más.",
+      "loadFailed": "No pudimos cargar el reporte.",
+      "replyTitle": "Tu respuesta",
+      "replyLabel": "Tu respuesta",
+      "replyHint": "Solo el equipo de Jack Fix It la lee. Puedes enviar una sola respuesta.",
+      "replyMissing": "Escribe tu respuesta.",
+      "replySend": "Enviar respuesta"
     }
   }
 }
