@@ -8,29 +8,75 @@ import es from "./locales/es.json";
  * protegido" and "garantia" are internal flow names. The app describes what the customer does and
  * what the app does instead.
  *
- * Every string in both catalogs is scanned for these words. A string may use one only when this
- * file names that key and that word, with why it is not a promise: a neutral status after a staff
- * decision, or a word that is not about money at all.
+ * Every string in both catalogs is scanned for these words. Spanish mirrors every English term
+ * (`MIRRORS` proves it). A string may use one only through an entry of `EXCEPTIONS`.
  */
 const FORBIDDEN: Record<"en" | "es", RegExp> = {
-  en: /\b(held|hold(?:s|ing)?|escrow\w*|guarantee\w*|warrant(?:y|ies)|protect(?:ed|ion|s|ing)?|refund\w*|money back|pay safely|releas(?:e|ed|es|ing)|insured|licensed)\b/giu,
-  es: /(?<!\p{L})(retenid[oa]s?|reten(?:er|emos|ción)|retiene|garant\p{L}*|protegid[oa]s?|proteg(?:e|emos)|protecci[oó]n|reembols\p{L}*|liber(?:a|ado|ada|ados|adas|ar|amos)|devol\p{L}* (?:tu|el|su) dinero|paga con seguridad|asegurad[oa]s?|licenciad[oa]s?)(?!\p{L})/giu,
+  en: /\b(held|hold(?:s|ing)?|escrow\w*|custod(?:y|ial)|guarantee\w*|warrant(?:y|ies)|protect(?:ed|ion|s|ing)?|refund\w*|money back|pay safely|releas(?:e|ed|es|ing)|insured|licensed)\b/giu,
+  es: /(?<!\p{L})(reten\p{L}*|retien\p{L}*|retuv\p{L}*|escrow\p{L}*|fideicomis\p{L}*|custodi\p{L}*|garant\p{L}*|proteg\p{L}*|protecci[oó]n|reembols\p{L}*|reintegr\p{L}*|(?:devol|devuelv)\p{L}* (?:\p{L}+ ){0,2}dinero|paga(?:r|s)? (?:con seguridad|de (?:forma|manera) segura|seguro)|liber(?:a|á|ó|e|en|an|ad[oa]s?|ar\p{L}*|amos|aci[oó]n)|asegurad[oa]s?|licenciad[oa]s?|con licencia)(?!\p{L})/giu,
 };
 
-/** Key → the words it may use, and why each is not a promise. */
-const ALLOWED: Record<"en" | "es", Record<string, { words: string[]; why: string }>> = {
-  en: {
-    "proJobs.screen.copyHint": {
-      words: ["hold"],
-      why: "a gesture: press and hold the address",
-    },
-    "proJobs.photos.full": {
-      words: ["holds"],
-      why: "how many photos a job takes, not money",
-    },
-  },
-  es: {},
+type Exception = {
+  language: "en" | "es";
+  /** The exact catalog key, never a prefix. */
+  key: string;
+  /** The one forbidden word the phrase holds. */
+  word: string;
+  /** The exact text around the word: only this is skipped, so the word stays forbidden elsewhere. */
+  phrase: string;
+  why: string;
 };
+
+/** The reviewed neutral uses of a forbidden word: neither is about money. */
+const EXCEPTIONS: readonly Exception[] = [
+  {
+    language: "en",
+    key: "proJobs.screen.copyHint",
+    word: "hold",
+    phrase: "Press and hold",
+    why: "a gesture: press and hold the address",
+  },
+  {
+    language: "en",
+    key: "proJobs.photos.full",
+    word: "holds",
+    phrase: "the most this job holds",
+    why: "how many photos a job takes, not money",
+  },
+];
+
+/**
+ * Where the app talks about the customer's money: the confirm sheet and the job's status line (both
+ * said "Payment is released"), the pay panel and its announcement, the wallet, quotes and payouts,
+ * and every FAQ answer. No string under these prefixes can ever become an exception.
+ */
+const PROMISE_KEYS = [
+  "jobs.confirmSheet.",
+  "jobs.support.",
+  "jobs.paid.",
+  "payment.",
+  "paymentMethods.",
+  "quotes.",
+  "quoteForm.",
+  "help.faq.",
+] as const;
+
+/** Each English term the rule names, and its Spanish mirrors: both matchers must catch them. */
+const MIRRORS: readonly (readonly [string, readonly string[]])[] = [
+  ["held", ["retenido", "retenemos", "retiene", "retuvimos"]],
+  ["holding", ["retención"]],
+  ["escrow", ["escrow", "fideicomiso", "custodia"]],
+  ["custody", ["custodia", "custodiado"]],
+  ["guarantee", ["garantía", "garantizado"]],
+  ["warranty", ["garantía"]],
+  ["protected", ["protegido", "protección", "protegemos"]],
+  ["refund", ["reembolso", "reintegro"]],
+  ["money back", ["te devolvemos tu dinero", "devolución del dinero"]],
+  ["pay safely", ["paga con seguridad", "paga de forma segura"]],
+  ["released", ["liberado", "se libera", "liberamos", "liberación"]],
+  ["insured", ["asegurado"]],
+  ["licensed", ["licenciado", "con licencia"]],
+];
 
 function flatten(value: unknown, prefix = ""): Record<string, string> {
   if (typeof value !== "object" || value === null) return { [prefix]: String(value) };
@@ -43,34 +89,69 @@ function flatten(value: unknown, prefix = ""): Record<string, string> {
   );
 }
 
-/** Every `key: word` the rule forbids in a catalog, minus what `ALLOWED` names for that key. */
-function violations(language: "en" | "es", catalog: unknown): string[] {
-  const found: string[] = [];
-  for (const [key, text] of Object.entries(flatten(catalog))) {
-    const allowed = ALLOWED[language][key]?.words ?? [];
-    for (const match of text.matchAll(FORBIDDEN[language])) {
-      const word = match[0].toLowerCase();
-      if (!allowed.includes(word)) found.push(`${key}: ${word}`);
-    }
-  }
-  return found;
+function forbiddenWords(language: "en" | "es", text: string): string[] {
+  return [...text.matchAll(FORBIDDEN[language])].map((match) => match[0].toLowerCase());
 }
 
+/** Every `key: word` the rule forbids in a catalog, once each exception's phrase is skipped. */
+function violations(language: "en" | "es", catalog: unknown): string[] {
+  return Object.entries(flatten(catalog)).flatMap(([key, text]) => {
+    const rest = EXCEPTIONS.filter((e) => e.language === language && e.key === key).reduce(
+      (left, e) => left.split(e.phrase).join(" "),
+      text,
+    );
+    return forbiddenWords(language, rest).map((word) => `${key}: ${word}`);
+  });
+}
+
+const CATALOGS = { en, es } as const;
+
 describe("legal copy", () => {
-  it.each([
-    ["en", en],
-    ["es", es],
-  ] as const)("%s promises no held, released or guaranteed money", (language, catalog) => {
-    expect(violations(language, catalog)).toEqual([]);
+  it.each(["en", "es"] as const)(
+    "%s promises no held, released or guaranteed money",
+    (language) => {
+      expect(violations(language, CATALOGS[language])).toEqual([]);
+    },
+  );
+
+  it("an exception is one reviewed phrase, still in its string, holding exactly its word", () => {
+    for (const { language, key, word, phrase } of EXCEPTIONS) {
+      const text = flatten(CATALOGS[language])[key];
+      expect({ key, inString: text?.includes(phrase) }).toEqual({ key, inString: true });
+      expect({ key, words: forbiddenWords(language, phrase) }).toEqual({ key, words: [word] });
+    }
   });
 
-  it.each(["en", "es"] as const)("%s allows a word only where it is still used", (language) => {
-    const strings = flatten(language === "en" ? en : es);
-    for (const [key, { words }] of Object.entries(ALLOWED[language])) {
-      const text = strings[key] ?? "";
-      const used = [...text.matchAll(FORBIDDEN[language])].map((m) => m[0].toLowerCase());
-      expect({ key, words: words.filter((word) => used.includes(word)) }).toEqual({ key, words });
+  it("a customer promise key can never be an exception", () => {
+    const promises = EXCEPTIONS.filter(({ key }) => PROMISE_KEYS.some((p) => key.startsWith(p)));
+    expect(promises.map(({ language, key }) => `${language} ${key}`)).toEqual([]);
+  });
+
+  it.each(["en", "es"] as const)("%s still has every promise key prefix", (language) => {
+    const keys = Object.keys(flatten(CATALOGS[language]));
+    const missing = PROMISE_KEYS.filter((prefix) => !keys.some((key) => key.startsWith(prefix)));
+    expect(missing).toEqual([]);
+  });
+
+  it.each(MIRRORS)("catches %s in EN and its Spanish mirrors", (english, spanish) => {
+    expect(violations("en", { probe: `Your money is ${english}.` })).not.toEqual([]);
+    for (const term of spanish) {
+      expect({ term, found: violations("es", { probe: `Tu pago: ${term}.` }) }).not.toEqual({
+        term,
+        found: [],
+      });
     }
+  });
+
+  it.each([
+    ["Tu pago queda en escrow.", "escrow"],
+    ["Tu pago queda en fideicomiso.", "fideicomiso"],
+  ])("es catches %s in payment.notAvailable", (text, word) => {
+    const strings = flatten(es);
+    expect(strings["payment.notAvailable"]).toBeDefined();
+    expect(violations("es", { ...strings, "payment.notAvailable": text })).toEqual([
+      `payment.notAvailable: ${word}`,
+    ]);
   });
 
   it.each([
@@ -81,5 +162,12 @@ describe("legal copy", () => {
     ["es", "Tu pago queda retenido y protegido, con garantía de reembolso.", "retenido"],
   ] as const)("catches %s: %s", (language, text, word) => {
     expect(violations(language, { probe: text })).toContain(`probe: ${word}`);
+  });
+
+  it("an exception skips its phrase only, not the word elsewhere in the string", () => {
+    const text = "We hold your payment. Press and hold the address to copy it.";
+    expect(violations("en", { "proJobs.screen.copyHint": text })).toEqual([
+      "proJobs.screen.copyHint: hold",
+    ]);
   });
 });
