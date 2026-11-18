@@ -128,7 +128,7 @@
   "showcase": {
     "meta": {
       "title": "Jack Fix It: the app for whatever happens at home",
-      "description": "Tell Jack what happened, compare fixed-price quotes from verified pros and pay in the app. Your payment is held until you confirm the job is done. Coming soon to iPhone and Android."
+      "description": "Tell Jack what happened, compare fixed-price quotes from verified pros and pay in the app. You confirm when the job is done. Coming soon to iPhone and Android."
     },
     "skipToContent": "Skip to content",
     "homeLabel": "Jack Fix It, back to the top",
@@ -144,7 +144,7 @@
       "soon": "Coming soon to iPhone and Android",
       "title": "Whatever happens at home, we <accent>fix</accent> it.",
       "lead": "Tell Jack. We'll take care of the rest.",
-      "body": "Describe what's going on, compare fixed-price quotes from verified pros and pay in the app. Your payment is held until you confirm the job is done.",
+      "body": "Describe what's going on, compare fixed-price quotes from verified pros and pay in the app. You confirm when the job is done.",
       "cta": "See how it works",
       "beats": {
         "quotes": {
@@ -152,8 +152,8 @@
           "body": "Describe what's going on in your own words. Verified pros send you fixed-price quotes to compare."
         },
         "pay": {
-          "title": "Pay safely. <accent>Follow</accent> your pro.",
-          "body": "Your payment is held until you confirm the job is done, and the map shows your pro on the way."
+          "title": "Pay in the app. <accent>Follow</accent> your pro.",
+          "body": "Pay in the app and confirm when the job is done. The map shows your pro on the way."
         }
       }
     },
@@ -174,9 +174,9 @@
         "body": "Pros near you answer with one price for the whole job. Check what's included, their rating and the verified seal, then pick."
       },
       "pay": {
-        "label": "Pay safely",
-        "title": "Your payment, held until you confirm.",
-        "body": "Pay in the app when you accept a quote. Your pro is paid only after the job is confirmed."
+        "label": "Pay in the app",
+        "title": "A secure payment experience.",
+        "body": "Pay in the app when you accept a quote. When the work is finished, you confirm the job in the app."
       },
       "track": {
         "label": "Follow your pro live",
@@ -220,7 +220,7 @@
         },
         "paid": {
           "question": "When does the pro get paid?",
-          "answer": "When the job is confirmed, not when you pay. Once the pro marks the work as done, a confirmation period starts; if no problem is reported before it ends, the job is confirmed automatically and the pro is paid."
+          "answer": "After the job, through the app. Once the pro marks the work as done, you confirm the job in the app."
         },
         "methods": {
           "question": "How can I pay?",
@@ -263,7 +263,7 @@
       "home": "The app's home screen: “What's going on at home?” above the service categories.",
       "describe": "A request in the app: a few questions about the job before it goes to pros.",
       "quotes": "Quotes in the app, each with its price, how long the job takes, when it starts and what's included.",
-      "pay": "The app asking to confirm that the job is done before the payment is released.",
+      "pay": "The app asking you to confirm that the job is done.",
       "track": "A map in the app with the pro on the way, the arrival time and the arrival code.",
       "chat": "A chat between a customer and a pro in the app, with a phone number hidden.",
       "reviews": "The rating screen in the app: stars for the job, then for communication, quality and punctuality.",

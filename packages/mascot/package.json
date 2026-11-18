@@ -1,0 +1,35 @@
+{
+  "name": "@jack/mascot",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Jack, the Jack Fix It mascot (#404): parts and poses as data, an SVG renderer and a React component for the web.",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./react": {
+      "types": "./src/react.ts",
+      "default": "./src/react.ts"
+    }
+  },
+  "scripts": {
+    "build": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/build.ts",
+    "preview": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/preview.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "react": ">=19"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/react": "~19.3.0",
+    "@types/react-dom": "~19.3.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "typescript": "~6.0.3",
+    "vitest": "5.0.5"
+  }
+}

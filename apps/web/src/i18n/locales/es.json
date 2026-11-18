@@ -128,7 +128,7 @@
   "showcase": {
     "meta": {
       "title": "Jack Fix It: la app para lo que pase en casa",
-      "description": "Cuéntale a Jack qué pasó, compara presupuestos de precio fijo de profesionales verificados y paga en la app. Tu pago queda retenido hasta que confirmes que el trabajo está terminado. Muy pronto en iPhone y Android."
+      "description": "Cuéntale a Jack qué pasó, compara presupuestos de precio fijo de profesionales verificados y paga en la app. Tú confirmas cuando el trabajo está terminado. Muy pronto en iPhone y Android."
     },
     "skipToContent": "Saltar al contenido",
     "homeLabel": "Jack Fix It, volver al inicio",
@@ -144,7 +144,7 @@
       "soon": "Muy pronto en iPhone y Android",
       "title": "Pase lo que pase en casa, lo <accent>arreglamos</accent>.",
       "lead": "Cuéntaselo a Jack. Nosotros nos encargamos del resto.",
-      "body": "Describe lo que pasa, compara presupuestos de precio fijo de profesionales verificados y paga en la app. Tu pago queda retenido hasta que confirmes que el trabajo está terminado.",
+      "body": "Describe lo que pasa, compara presupuestos de precio fijo de profesionales verificados y paga en la app. Tú confirmas cuando el trabajo está terminado.",
       "cta": "Mira cómo funciona",
       "beats": {
         "quotes": {
@@ -152,8 +152,8 @@
           "body": "Describe lo que pasa con tus palabras. Profesionales verificados te envían presupuestos de precio fijo para comparar."
         },
         "pay": {
-          "title": "Paga con tranquilidad. <accent>Sigue</accent> a tu profesional.",
-          "body": "Tu pago queda retenido hasta que confirmes que el trabajo está terminado, y el mapa te muestra a tu profesional en camino."
+          "title": "Paga en la app. <accent>Sigue</accent> a tu profesional.",
+          "body": "Paga en la app y confirma cuando el trabajo esté terminado. El mapa te muestra a tu profesional en camino."
         }
       }
     },
@@ -174,9 +174,9 @@
         "body": "Los profesionales cercanos responden con un solo precio por todo el trabajo. Revisa qué incluye, su calificación y el sello de verificado, y elige."
       },
       "pay": {
-        "label": "Paga con seguridad",
-        "title": "Tu pago, retenido hasta que confirmes.",
-        "body": "Paga en la app cuando aceptas un presupuesto. Tu profesional recibe su pago solo después de que el trabajo se confirma."
+        "label": "Paga en la app",
+        "title": "Una experiencia de pago segura.",
+        "body": "Paga en la app cuando aceptas un presupuesto. Cuando el trabajo termina, lo confirmas en la app."
       },
       "track": {
         "label": "Sigue a tu profesional en vivo",
@@ -220,7 +220,7 @@
         },
         "paid": {
           "question": "¿Cuándo recibe su pago el profesional?",
-          "answer": "Cuando el trabajo se confirma, no cuando tú pagas. Cuando el profesional marca el trabajo como terminado, empieza un período de confirmación; si nadie reporta un problema antes de que termine, el trabajo se confirma automáticamente y el profesional recibe su pago."
+          "answer": "Después del trabajo, a través de la app. Cuando el profesional marca el trabajo como terminado, tú lo confirmas en la app."
         },
         "methods": {
           "question": "¿Cómo puedo pagar?",
@@ -263,7 +263,7 @@
       "home": "La pantalla de inicio de la app: “¿Qué está pasando en casa?” sobre las categorías de servicio.",
       "describe": "Una solicitud en la app: unas preguntas sobre el trabajo antes de enviarla a los profesionales.",
       "quotes": "Presupuestos en la app, cada uno con su precio, cuánto dura el trabajo, cuándo empieza y qué incluye.",
-      "pay": "La app pide confirmar que el trabajo está terminado antes de liberar el pago.",
+      "pay": "La app te pide confirmar que el trabajo está terminado.",
       "track": "Un mapa en la app con el profesional en camino, la hora de llegada y el código de llegada.",
       "chat": "Un chat entre un cliente y un profesional en la app, con un teléfono oculto.",
       "reviews": "La pantalla de calificación en la app: estrellas para el trabajo y luego para comunicación, calidad y puntualidad.",
