@@ -345,6 +345,8 @@ is missing from either table, so this list cannot fall behind `app/config.py`.
 | `REFRESH_TOKEN_TTL_SECONDS` | the api's refresh token lifetime (2592000 unless the api sets another); the panel's session cookie lasts as long | no     | D16.1 (#80) |
 | `API_TIMEOUT_MS`            | `5000`: the longest wait on the api for one call, body included                                                  | no     | D16.1 (#80) |
 | `SITE_URL`                  | optional: the site's public origin, e.g. `https://${{RAILWAY_PUBLIC_DOMAIN}}` or the custom domain               | no     | D17 (#403)  |
+| `DISPUTE_AGE_WARN_HOURS`    | optional: the hours after which an open dispute's age turns amber in the panel (unset: `24`)                     | no     | #83         |
+| `DISPUTE_AGE_LATE_HOURS`    | optional: the hours after which it turns red (unset: `48`; ignored with the amber one unless it is larger)       | no     | #83         |
 
 The web server calls the API over the private network; browsers and the mobile app use the
 api's public domain. `SITE_URL` is read when the site is built: it gives the showcase page
