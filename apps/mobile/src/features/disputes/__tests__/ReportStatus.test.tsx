@@ -114,7 +114,7 @@ describe("ReportStatus", () => {
     await render(<ReportStatus job={DISPUTED} />, { wrapper });
     await act(settle);
     expect(screen.getByText("Report sent")).toBeTruthy();
-    expect(screen.getByLabelText("The work isn't finished, Today, Open")).toBeTruthy();
+    expect(await screen.findByLabelText("The work isn't finished, Today, Open")).toBeTruthy();
     expect(screen.getByTestId("job-report-summary-outcome")).toHaveTextContent(
       "Our team is reviewing it and will contact you in the app.",
     );
@@ -138,7 +138,7 @@ describe("ReportStatus", () => {
     });
     await render(<ReportStatus job={customerJob({ status: "paid_out" })} />, { wrapper });
     await act(settle);
-    expect(screen.getByLabelText("The work isn't finished, Today, Resolved")).toBeTruthy();
+    expect(await screen.findByLabelText("The work isn't finished, Today, Resolved")).toBeTruthy();
     expect(screen.getByTestId("job-report-summary-outcome")).toHaveTextContent(words);
     expect(screen.queryByText(/\$/)).toBeNull();
   });
@@ -152,28 +152,27 @@ describe("ReportStatus", () => {
       held.resolve(jsonResponse(200, { dispute: dispute(), can_report: false, report_by: null }));
       await settle();
     });
-    expect(screen.getByTestId("job-report-summary")).toBeTruthy();
+    expect(await screen.findByTestId("job-report-summary")).toBeTruthy();
   });
 
   it("says a failed read, and reads again on a tap", async () => {
     answer = () => Promise.resolve(errorResponse(503, "unavailable"));
     await render(<ReportStatus job={DISPUTED} />, { wrapper });
     await act(settle);
-    expect(screen.getByTestId("job-report-error")).toHaveTextContent(
+    expect(await screen.findByTestId("job-report-error")).toHaveTextContent(
       "We couldn't load your report. Try again",
     );
     answer = respond({ dispute: dispute(), can_report: false, report_by: null });
     const before = reads();
     await fireEvent.press(screen.getByTestId("job-report-error"));
-    await act(settle);
-    expect(reads()).toBe(before + 1);
-    expect(screen.getByTestId("job-report-summary")).toBeTruthy();
+    await waitFor(() => expect(reads()).toBe(before + 1));
+    expect(await screen.findByTestId("job-report-summary")).toBeTruthy();
   });
 
   it("reads the report again when the job's status moves on under it", async () => {
     const rendered = await render(<ReportStatus job={DISPUTED} />, { wrapper });
     await act(settle);
-    expect(screen.getByLabelText("The work isn't finished, Today, Open")).toBeTruthy();
+    expect(await screen.findByLabelText("The work isn't finished, Today, Open")).toBeTruthy();
     answer = respond({
       dispute: dispute({
         status: "resolved",
@@ -185,16 +184,15 @@ describe("ReportStatus", () => {
     });
     const before = reads();
     await rendered.rerender(<ReportStatus job={{ ...DISPUTED, status: "refunded" }} />);
-    await act(settle);
-    expect(reads()).toBe(before + 1);
-    expect(screen.getByLabelText("The work isn't finished, Today, Resolved")).toBeTruthy();
+    await waitFor(() => expect(reads()).toBe(before + 1));
+    expect(await screen.findByLabelText("The work isn't finished, Today, Resolved")).toBeTruthy();
   });
 
   it("draws nothing when no report was made", async () => {
     answer = respond({ dispute: null, can_report: false, report_by: null });
     await render(<ReportStatus job={customerJob({ status: "paid_out" })} />, { wrapper });
     await act(settle);
-    expect(screen.queryByTestId("job-report")).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId("job-report")).toBeNull());
   });
 });
 
@@ -228,7 +226,7 @@ describe("Report a problem in the confirm dock", () => {
     answer = reportable(3_600_000);
     await renderDock();
     expect(screen.getByTestId("job-confirm")).toBeTruthy();
-    await fireEvent.press(screen.getByRole("button", { name: "Report a problem" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Report a problem" }));
     expect(push).toHaveBeenCalledWith({
       pathname: "/requests/[id]/report",
       params: { id: REQUEST_ID },
@@ -258,7 +256,7 @@ describe("Report a problem in the confirm dock", () => {
   it("takes it away when the API's deadline passes on screen", async () => {
     answer = reportable(1_500);
     await renderDock();
-    expect(screen.getByTestId("job-report-problem")).toBeTruthy();
+    expect(await screen.findByTestId("job-report-problem")).toBeTruthy();
     await waitFor(() => expect(screen.queryByTestId("job-report-problem")).toBeNull(), {
       timeout: 4_000,
     });
