@@ -217,7 +217,7 @@ describe("a paid request says it is booked once (#324)", () => {
     expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledTimes(2);
     expect(AccessibilityInfo.announceForAccessibility).toHaveBeenNthCalledWith(
       1,
-      "Total $180.50. Opening the secure payment.",
+      "Total $180.50. Opening payment.",
     );
     expect(AccessibilityInfo.announceForAccessibility).toHaveBeenLastCalledWith(
       "You're booked. Your payment is confirmed.",

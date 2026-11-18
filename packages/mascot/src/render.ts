@@ -11,7 +11,15 @@ export type SvgOptions = {
   titleId?: string;
   /** A crop of the 200 x 200 box, to show one part close up (the gallery's parts sheet). */
   viewBox?: string;
+  /** Animated output (motion.ts): the root's class, its motion state and its idle CSS. */
+  motion?: { scope: string; state: "still" | "paused" | "running"; css: string };
 };
+
+/** The idle CSS is generated from numbers and names; it never holds markup. */
+function styleElement(css: string): string {
+  if (css.includes("<")) throw new Error("CSS with markup in it");
+  return `<style>${css}</style>`;
+}
 
 /** A shape's attributes, in the order they are written, with its tone resolved. */
 export function shapeAttributes(shape: Shape): [string, string | number][] {
@@ -76,11 +84,14 @@ export function renderSvg(node: MascotNode, options: SvgOptions = {}): string {
     ["viewBox", options.viewBox ?? VIEW_BOX],
   ];
   if (size !== undefined) root.push(["width", size], ["height", size]);
+  const { motion } = options;
+  if (motion) root.push(["class", motion.scope], ["data-motion", motion.state]);
+  const style = motion ? styleElement(motion.css) : "";
   if (title) {
     const id = options.titleId ?? "jack-mascot-title";
     root.push(["role", "img"], ["aria-labelledby", id]);
-    return `<svg${attributes(root)}><title id="${escape(id)}">${escape(title)}</title>${nodeToSvg(node)}</svg>`;
+    return `<svg${attributes(root)}><title id="${escape(id)}">${escape(title)}</title>${style}${nodeToSvg(node)}</svg>`;
   }
   root.push(["aria-hidden", "true"], ["focusable", "false"]);
-  return `<svg${attributes(root)}>${nodeToSvg(node)}</svg>`;
+  return `<svg${attributes(root)}>${style}${nodeToSvg(node)}</svg>`;
 }
