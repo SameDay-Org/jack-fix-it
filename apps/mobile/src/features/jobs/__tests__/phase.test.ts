@@ -259,7 +259,7 @@ describe("jobText", () => {
     ["arrived", "Dan has arrived", "Checked in at 1:55 PM"],
     ["working", "Dan is working", "Started at 1:50 PM"],
     ["finished", "Dan marked the job done", "Take a look at the work, then confirm it's done."],
-    ["done", "Job confirmed", "Payment is released to Dan."],
+    ["done", "Job confirmed", "This job is complete."],
     ["attention", "This job needs attention", "A problem was reported on this job."],
     ["cancelled", "This job was cancelled", "Nothing more is needed from you."],
   ])("%s: %s / %s", (phase, headline, support) => {
@@ -297,7 +297,7 @@ describe("jobText", () => {
     ).toBe("Your pro marked the job done");
     expect(
       jobText(t, { ...JOBS.done, pro: { ...JOBS.done.pro, name: null } }, NOW, CLOSE, EN).support,
-    ).toBe("Payment is released to your pro.");
+    ).toBe("This job is complete.");
   });
 
   it("speaks Spanish", async () => {

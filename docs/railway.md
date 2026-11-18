@@ -36,10 +36,11 @@ names, so set **Config-as-code file path** in every service's settings.
   no healthcheck. It runs no migrations. A worker task that needs a new table must ship after
   the migration that creates it.
 - **web** uses the repo root as its root directory because the build installs the whole pnpm
-  workspace (`@jack/shared` is a workspace package). Node comes from `.nvmrc`, pnpm from
-  `packageManager`.
+  workspace (`@jack/shared` and `@jack/mascot` are workspace packages). Node comes from `.nvmrc`,
+  pnpm from `packageManager`.
 - Watch patterns (in the config files) stop unrelated changes from redeploying a service:
-  api and worker `/apps/api/**`; web `/apps/web/**`, `/packages/shared/**`, `/pnpm-lock.yaml`.
+  api and worker `/apps/api/**`; web `/apps/web/**`, `/packages/shared/**`, `/packages/mascot/**`,
+  `/pnpm-lock.yaml`.
 
 ## Variables
 

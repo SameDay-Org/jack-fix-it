@@ -83,7 +83,7 @@ export function Faq({ t }: { t: TFunction }) {
           <h2 id="faq-title" className={SECTION_TITLE}>
             {t("showcase.faq.title")}
           </h2>
-          <MascotBubble pose="thinking" className="mt-4 hidden size-32 lg:flex" />
+          <MascotBubble pose="thinking" animate className="mt-4 hidden size-32 lg:flex" />
         </div>
         <div className="flex flex-col gap-3">
           {FAQ_ITEMS.map((item) => (

@@ -684,7 +684,7 @@
     "payLabel": "Pay {{price}} for the quote from {{pro}}",
     "total": "Total {{total}}",
     "breakdown": "{{price}} plus {{tax}} tax",
-    "summaryAnnouncement": "Total {{total}}. Opening the secure payment.",
+    "summaryAnnouncement": "Total {{total}}. Opening payment.",
     "notAvailable": "This quote can't be paid right now. Your quotes are up to date.",
     "confirming": {
       "title": "Confirming your payment…",
@@ -1201,7 +1201,7 @@
       },
       "proPaid": {
         "question": "When does the pro get paid?",
-        "answer": "When the job is confirmed, not when you pay. Once the pro marks the work as done, a confirmation period starts; if no problem is reported before it ends, the job is confirmed automatically and the pro is paid."
+        "answer": "After you confirm the job is done, or once it is confirmed automatically at the end of the confirmation period, Jack Fix It pays the pro."
       },
       "follow": {
         "question": "How do I follow my job?",
@@ -1217,7 +1217,7 @@
       },
       "problem": {
         "question": "What if something isn't right with the job?",
-        "answer": "Tell your pro in the chat first: it's the fastest way to sort things out. If that doesn't settle it, write to us from Talk to Jack, at the end of this page: the Jack Fix It team reviews what happened and decides case by case, including whether any money is returned. While a reported problem is open, the pro isn't paid."
+        "answer": "Tell your pro in the chat first: it's the fastest way to sort things out. If that doesn't settle it, write to us from Talk to Jack, at the end of this page. Our team reviews it and gets back to you."
       },
       "verified": {
         "question": "How are pros verified?",
@@ -1336,7 +1336,7 @@
       "working": "Started at {{time}}",
       "workingNow": "The work is under way",
       "finished": "Take a look at the work, then confirm it's done.",
-      "done": "Payment is released to {{inline}}.",
+      "done": "This job is complete.",
       "attention": "A problem was reported on this job.",
       "cancelled": "Nothing more is needed from you."
     },
@@ -1430,7 +1430,7 @@
     },
     "confirmSheet": {
       "title": "Confirm the job is done?",
-      "body": "Payment is released to {{name}}.",
+      "body": "Tap Confirm when {{name}} has finished the job.",
       "confirm": "Confirm",
       "notYet": "Not yet",
       "offline": "We couldn't reach Jack Fix It. Check your connection and try again.",
@@ -1927,6 +1927,101 @@
       "title": "Finish payout setup",
       "body": "Connect a payout account with Stripe to start receiving requests.",
       "action": "Set up payouts"
+    }
+  },
+  "disputes": {
+    "entry": "Report a problem",
+    "entryFailed": "We couldn't check if you can report a problem.",
+    "reason": {
+      "work_incomplete": "The work isn't finished",
+      "poor_quality": "The work isn't done well",
+      "no_show": "The pro didn't show up",
+      "damage": "Something was damaged",
+      "other": "Something else"
+    },
+    "status": {
+      "title": "Report sent",
+      "open": "Open",
+      "resolved": "Resolved",
+      "label": "{{reason}}, {{day}}, {{status}}",
+      "openBody": "Our team is reviewing it and will contact you in the app.",
+      "resolution": {
+        "released": "Our team reviewed the report and the payment for this job was completed.",
+        "partial_release": "Our team reviewed the report and part of your payment went back to your payment method.",
+        "refunded": "Our team reviewed the report and your payment for this job went back to your payment method."
+      },
+      "loadFailed": "We couldn't load your report.",
+      "updateFailed": "We couldn't update this report.",
+      "retry": "Try again"
+    },
+    "report": {
+      "title": "Report a problem",
+      "intro": "Tell us what went wrong with the job. Our team reviews every report.",
+      "reasonLabel": "What went wrong?",
+      "reasonMissing": "Choose what went wrong.",
+      "descriptionLabel": "What happened",
+      "descriptionHint": "Describe the problem in your own words. Leave out phone numbers and emails.",
+      "descriptionMissing": "Describe the problem.",
+      "tooLong_one": "This is {{count}} character too long.",
+      "tooLong_other": "This is {{count}} characters too long.",
+      "photosLabel": "Photos (optional)",
+      "photosWaiting": "Your photos are still uploading. Send once they're done.",
+      "photosFailed": "A photo didn't upload. Try it again or remove it to send.",
+      "next": "Our team reviews your report and contacts you in the app. The payment for this job waits for that review.",
+      "send": "Send report",
+      "retrySend": "Try again",
+      "home": "Go to Home",
+      "talkToJack": "Talk to Jack",
+      "retry": "Try again",
+      "gone": {
+        "title": "This job isn't available",
+        "body": "It may have been removed, or it belongs to another account."
+      },
+      "closed": {
+        "title": "Reporting is closed for this job",
+        "body": "A problem can be reported while a finished job waits for your confirmation. If you still need help, write to us from Talk to Jack."
+      },
+      "loadFailed": {
+        "title": "We couldn't load this job",
+        "body": "Check your connection and try again."
+      }
+    },
+    "sent": {
+      "title": "We got your report",
+      "alreadyTitle": "You reported a problem",
+      "body": "Our team reviews it and contacts you in the app. The payment for this job waits for that review.",
+      "back": "Back to the job"
+    },
+    "failure": {
+      "offline": {
+        "title": "No connection",
+        "body": "What you wrote is still here. Try again when you're back online."
+      },
+      "closed": {
+        "title": "This can't be sent anymore",
+        "body": "Things changed in the meantime. What you see now is up to date."
+      },
+      "invalid": {
+        "title": "Check what you wrote",
+        "body": "Something in it couldn't be accepted. Check it, and any photos, then try again."
+      },
+      "failed": {
+        "title": "That didn't go through",
+        "body": "Something went wrong on our side. Try again in a moment."
+      }
+    },
+    "pro": {
+      "title": "The customer reported a problem",
+      "review": "Our team will review both sides.",
+      "photo": "Customer's photo {{index}} of {{total}}",
+      "photosPending_one": "{{count}} more photo is being prepared.",
+      "photosPending_other": "{{count}} more photos are being prepared.",
+      "loadFailed": "We couldn't load the report.",
+      "replyTitle": "Your reply",
+      "replyLabel": "Your reply",
+      "replyHint": "Only the Jack Fix It team reads it. You can send one reply.",
+      "replyMissing": "Write your reply.",
+      "replySend": "Send reply"
     }
   }
 }

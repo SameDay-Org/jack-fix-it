@@ -1,3 +1,4 @@
+import type { MascotPose } from "@jack/mascot";
 import type { TFunction } from "i18next";
 import {
   BadgeCheck,
@@ -18,8 +19,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
-import { Mascot, type MascotPose } from "@/features/mascot/mascot";
 import { HtmlLang } from "@/features/site/html-lang";
+import { MascotImage } from "@/features/site/mascot-image";
 import { SHOWCASE_PATHS } from "@/features/site/routes";
 import {
   CONTAINER,
@@ -40,6 +41,7 @@ import {
   type ShippedSlug,
 } from "./categories";
 import { contactEmail, LANDING_ANCHORS, requestFlowEnabled } from "./config";
+import { organizationJsonLd } from "./json-ld";
 import { LandingFooter } from "./landing-footer";
 import { LandingHeader } from "./landing-header";
 
@@ -151,9 +153,10 @@ function Hero({ t, locale }: { t: TFunction; locale: Locale }) {
             ))}
           </ul>
         </div>
-        {/* On navy, Jack stands on a light bubble (packages/mascot README). */}
+        {/* On navy, Jack stands on a light bubble (packages/mascot README). Still: drawn inline
+            to move, he made the HTML one network round trip longer before the first paint. */}
         <div className="mx-auto hidden rounded-full bg-gray-50 p-8 lg:block">
-          <Mascot pose="wave" size={240} />
+          <MascotImage pose="wave" size={240} />
         </div>
       </div>
     </section>
@@ -185,7 +188,7 @@ function HowItWorks({ t }: { t: TFunction }) {
         <ol className="mt-12 grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
           {STEPS.map(([id, pose], index) => (
             <li key={id} className="flex flex-col items-start gap-3">
-              <Mascot pose={pose} size={112} className="rounded-3xl bg-gray-50" />
+              <MascotImage pose={pose} size={112} className="rounded-3xl bg-gray-50" />
               <p className={cn(EYEBROW, "text-green-700")}>{index + 1}</p>
               <h3 className="text-xl font-bold">{t(`landing.how.steps.${id}.title`)}</h3>
               <p className="leading-relaxed text-gray-500">{t(`landing.how.steps.${id}.body`)}</p>
@@ -291,10 +294,15 @@ function ForPros({ t, locale }: { t: TFunction; locale: Locale }) {
 export async function LandingPage({ locale }: { locale: Locale }) {
   const t = await getT(locale);
   const categories = await loadCategories(locale);
+  const organization = organizationJsonLd(t("brand.name"));
 
   return (
     <div lang={locale}>
       <HtmlLang locale={locale} />
+      {organization ? (
+        // The text is our own JSON, with `<` escaped (json-ld.ts): it cannot close the script.
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: organization }} />
+      ) : null}
       <a
         href={`#${MAIN_ID}`}
         className={cn(

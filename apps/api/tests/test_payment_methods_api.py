@@ -316,11 +316,14 @@ async def test_setup_intent_creates_the_customer_once_and_returns_what_the_sheet
         {"user_id": str(user_id), "idempotency_key": f"customer:{user_id}"}
     ]
     assert body["customer_id"] == again["customer_id"] == await stored_customer(db_session, user_id)
-    # A new SetupIntent and a new ephemeral key on every call, both for that customer.
+    # A new SetupIntent on every call, for that customer.
     assert body["client_secret"] != again["client_secret"]
-    assert body["ephemeral_key_secret"] != again["ephemeral_key_secret"]
     assert fakes.methods.calls == [("create_setup_intent", body["customer_id"])] * 2
-    assert fakes.payments.ephemeral_keys == [body["customer_id"]] * 2
+    # No ephemeral key (#253c): the setup sheet opens without the customer. The deprecated
+    # field stays for one release, null.
+    assert fakes.payments.ephemeral_keys == []
+    assert body["ephemeral_key_secret"] is None
+    assert again["ephemeral_key_secret"] is None
 
 
 async def test_setup_intent_reuses_the_customer_a_payment_created(
@@ -346,7 +349,7 @@ async def test_setup_intent_takes_no_customer_from_the_client(
 
     assert response.json()["customer_id"] == ana_customer
     assert fakes.methods.calls == [("create_setup_intent", ana_customer)]
-    assert fakes.payments.ephemeral_keys == [ana_customer]
+    assert fakes.payments.ephemeral_keys == []
 
 
 async def test_two_first_setup_intents_at_once_make_one_customer(
@@ -1251,11 +1254,10 @@ async def test_the_longest_id_stripe_allows_is_accepted(
 # AC4: Stripe failing
 
 
-SETUP_OPERATIONS = ("create_customer", "create_setup_intent", "create_ephemeral_key")
+SETUP_OPERATIONS = ("create_customer", "create_setup_intent")
 FAILURES = [
     ("setup", "create_customer"),
     ("setup", "create_setup_intent"),
-    ("setup", "create_ephemeral_key"),
     ("list", "list_cards"),
     ("list", "default_payment_method"),
     ("default", "retrieve_card"),
@@ -1424,7 +1426,6 @@ async def test_no_secret_or_card_data_in_logs(
     for piece in (
         SECRET_SENTINEL,
         setup.json()["client_secret"],
-        setup.json()["ephemeral_key_secret"],
         customer_id,
         PUBLISHABLE_KEY,
         BRAND_SENTINEL,
@@ -1588,3 +1589,19 @@ def test_openapi_documents_every_error_and_only_the_wallet_fields(app: FastAPI) 
     assert set(schemas["SetupIntentOut"]["properties"]) == SETUP_KEYS
     listed = responses(BASE, "get")["200"]["content"]["application/json"]["schema"]
     assert listed["items"] == {"$ref": "#/components/schemas/PaymentMethodOut"}
+
+
+async def test_the_setup_intent_ephemeral_key_is_deprecated_in_the_schema(
+    db_client: httpx.AsyncClient,
+) -> None:
+    """#253c: the field stays one release, documented as deprecated, so the regenerated types
+    mark it; the payment sheet's own ephemeral key is deprecated beside its CustomerSession."""
+    schema = (await db_client.get("/openapi.json")).json()["components"]["schemas"]
+
+    setup = schema["SetupIntentOut"]["properties"]["ephemeral_key_secret"]
+    sheet = schema["PaymentSheetOut"]["properties"]
+
+    assert setup["deprecated"] is True
+    assert sheet["ephemeral_key_secret"]["deprecated"] is True
+    assert "deprecated" not in sheet["customer_session_client_secret"]
+    assert "customer_session_client_secret" in schema["PaymentSheetOut"]["required"]
