@@ -8,9 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.payments.models import (
     MADE_STATUSES,
+    REFUND_NOT_MADE,
     UNPAID_STATUSES,
     Payment,
     PaymentStatus,
+    Refund,
+    RefundStatus,
     Transfer,
     TransferStatus,
 )
@@ -80,6 +83,17 @@ class PaymentRepository:
             Payment.quote_id == quote_id, Payment.status == PaymentStatus.SUCCEEDED
         )
         return (await self._session.scalars(statement)).one_or_none()
+
+    async def succeeded_of_quotes(
+        self, quote_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, Payment]:
+        """succeeded_of_quote for each of `quote_ids` that has one, by quote, in one statement."""
+        if not quote_ids:
+            return {}
+        statement = select(Payment).where(
+            Payment.quote_id.in_(quote_ids), Payment.status == PaymentStatus.SUCCEEDED
+        )
+        return {payment.quote_id: payment for payment in await self._session.scalars(statement)}
 
     async def unpaid_due(
         self, created_before: datetime, after: uuid.UUID | None, limit: int
@@ -370,3 +384,87 @@ class TransferRepository:
             .limit(limit)
         )
         return list((await self._session.scalars(statement)).all())
+
+
+class RefundRepository:
+    """The refunds table (#76). Status writes are statements, never attribute assignments (the
+    single-writer guard), each conditional on the status it leaves."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def by_key_for_update(self, idempotency_key: str) -> Refund | None:
+        """The refund made under this key, locked until the transaction ends, read as last
+        committed; None before the first attempt. Take the job's lock first."""
+        statement = (
+            select(Refund)
+            .where(Refund.idempotency_key == idempotency_key)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def of_dispute(self, dispute_id: uuid.UUID) -> Refund | None:
+        """The dispute's refund (one at most: its key is unique), unlocked."""
+        statement = (
+            select(Refund)
+            .where(Refund.dispute_id == dispute_id)
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def add(self, refund: Refund) -> Refund:
+        """Inserts the row now (flush), so a second row under the key surfaces here."""
+        self._session.add(refund)
+        await self._session.flush()
+        return refund
+
+    async def start_attempt(self, refund_id: uuid.UUID, now: datetime) -> int | None:
+        """Stamps a Stripe attempt starting at `now` and returns its number: pending, no error
+        code, one more attempt. None (nothing written) once Stripe made the refund. The caller
+        holds the row's lock and commits before the Stripe call."""
+        statement = (
+            update(Refund)
+            .where(Refund.id == refund_id, Refund.status.in_(REFUND_NOT_MADE))
+            .values(
+                status=RefundStatus.PENDING,
+                last_error_code=None,
+                requested_at=now,
+                attempts=Refund.attempts + 1,
+            )
+            .returning(Refund.attempts)
+        )
+        return await self._session.scalar(statement)
+
+    async def mark_failed(self, refund_id: uuid.UUID, attempt: int, code: str) -> bool:
+        """Ends attempt number `attempt` as failed with `code`. False (nothing written) when a
+        later attempt started meanwhile or the refund was stored."""
+        statement = (
+            update(Refund)
+            .where(
+                Refund.id == refund_id,
+                Refund.attempts == attempt,
+                Refund.status == RefundStatus.PENDING,
+                Refund.stripe_refund_id.is_(None),
+            )
+            .values(status=RefundStatus.FAILED, last_error_code=code)
+            .returning(Refund.id)
+        )
+        return (await self._session.scalar(statement)) is not None
+
+    async def mark_created(self, refund_id: uuid.UUID, stripe_refund_id: str) -> bool:
+        """Stores the refund Stripe made unless the row holds one already; False then. The
+        caller commits it with what the refund settles."""
+        statement = (
+            update(Refund)
+            .where(
+                Refund.id == refund_id,
+                Refund.status.in_(REFUND_NOT_MADE),
+                Refund.stripe_refund_id.is_(None),
+            )
+            .values(
+                status=RefundStatus.CREATED, stripe_refund_id=stripe_refund_id, last_error_code=None
+            )
+            .returning(Refund.id)
+        )
+        return (await self._session.scalar(statement)) is not None

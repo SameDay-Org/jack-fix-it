@@ -1770,6 +1770,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/disputes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List disputes (staff)
+         * @description Disputes for the BDC and admins, oldest first (the longest waiting on top): the
+         *     request's public code, the reason, the money, the parties' first names, when it was
+         *     opened, and how it was resolved. No text, no photo: those are in the audited detail.
+         */
+        get: operations["list_disputes_v1_admin_disputes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/disputes/{dispute_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a dispute (staff)
+         * @description A dispute in full: both sides' text as stored (contact details masked), the photos'
+         *     safe copies (signed URLs), the job's history, its payment, refund and transfer, and the
+         *     resolution with its note. Every read is recorded in the audit log.
+         */
+        get: operations["read_dispute_v1_admin_disputes__dispute_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/disputes/{dispute_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve a dispute (admin)
+         * @description Settles the dispute once. `release`: the pro is paid their payout in full; the job
+         *     moves to paid_out once the transfer is made. `refund`: the customer's total, tax included,
+         *     goes back to their payment method; the job moves to refunded; no transfer. `partial`: the
+         *     pro is paid `pro_release_cents` and the customer gets back the share of their total that
+         *     is not released (rounded half up to the cent); the platform keeps the rest. The amounts
+         *     come from the job's frozen payment, never from the client beyond `pro_release_cents`.
+         *     Sending the same decision again completes what is missing and changes nothing else; a
+         *     different one after the resolution is a 409. Both sides are notified, never with the
+         *     note, which is kept with the dispute and in the audit log.
+         */
+        post: operations["resolve_dispute_v1_admin_disputes__dispute_id__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/users/me/rating": {
         parameters: {
             query?: never;
@@ -2542,6 +2614,54 @@ export interface components {
          * @enum {string}
          */
         DisputeResolution: "released" | "partial_release" | "refunded";
+        /**
+         * DisputeResolutionOut
+         * @description Where the dispute stands after a resolve (#76).
+         */
+        DisputeResolutionOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            status: components["schemas"]["DisputeStatus"];
+            resolution: components["schemas"]["DisputeResolution"] | null;
+            /**
+             * Pro Release Cents
+             * @description What the pro is paid; null while open.
+             */
+            pro_release_cents: number | null;
+            /**
+             * Customer Refund Cents
+             * @description What the customer gets back; null while open.
+             */
+            customer_refund_cents: number | null;
+            /** Resolved At */
+            resolved_at: string | null;
+            /** @description disputed until the money moved: paid_out once the transfer to the pro is made (a release, full or partial), refunded at once for a full refund. */
+            job_status: components["schemas"]["JobStatus"];
+            /** @description The refund, when the decision has one. */
+            refund: components["schemas"]["RefundOut"] | null;
+        };
+        /** DisputeResolveIn */
+        DisputeResolveIn: {
+            decision: components["schemas"]["ResolutionDecision"];
+            /**
+             * Pro Release Cents
+             * @description partial only (required there, refused otherwise): the part of the pro's payout to release, in integer cents, more than 0 and less than the payout. The customer's refund is computed from it on the server.
+             */
+            pro_release_cents?: number | null;
+            /**
+             * Note
+             * @description Why, for the record (staff only: never shown to the customer or the pro, never logged). Kept with the dispute and in the audit log.
+             */
+            note: string;
+        };
         /**
          * DisputeStatus
          * @enum {string}
@@ -3361,6 +3481,37 @@ export interface components {
             currency: string;
         };
         /**
+         * PaymentStatus
+         * @description Where a payment stands (internal; the customer sees the request's status). Created
+         *     `requires_payment`; the payment webhooks (#61) move it on from the PaymentIntent's events.
+         * @enum {string}
+         */
+        PaymentStatus: "requires_payment" | "processing" | "succeeded" | "failed" | "canceled";
+        /**
+         * PaymentSummaryOut
+         * @description The job's payment, frozen when it was made.
+         */
+        PaymentSummaryOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Amount Cents */
+            amount_cents: number;
+            /** Tax Cents */
+            tax_cents: number;
+            /** Customer Total Cents */
+            customer_total_cents: number;
+            /** Platform Fee Cents */
+            platform_fee_cents: number;
+            /** Pro Payout Cents */
+            pro_payout_cents: number;
+            /** Currency */
+            currency: string;
+            status: components["schemas"]["PaymentStatus"];
+        };
+        /**
          * PayoutStatus
          * @enum {string}
          */
@@ -4069,6 +4220,52 @@ export interface components {
              */
             refresh_token: string;
         };
+        /**
+         * RefundOut
+         * @description A dispute's refund to the customer (#76): the row, without the idempotency key.
+         */
+        RefundOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Amount Cents
+             * @description What is refunded, in integer cents.
+             */
+            amount_cents: number;
+            /**
+             * Currency
+             * @example usd
+             */
+            currency: string;
+            /** @description pending: not made yet, an attempt may be under way. created: Stripe made the refund. failed: the last attempt failed; the same decision tries again. */
+            status: components["schemas"]["RefundStatus"];
+            /**
+             * Stripe Refund Id
+             * @description Stripe's id of the refund, once made.
+             */
+            stripe_refund_id: string | null;
+            /** Attempts */
+            attempts: number;
+            /**
+             * Last Error Code
+             * @description Why the last attempt did not make the refund: a Stripe error code, an error class or `refund_needs_review`. Never a message.
+             */
+            last_error_code: string | null;
+            /**
+             * Requested At
+             * @description When the latest attempt started.
+             */
+            requested_at: string | null;
+        };
+        /**
+         * RefundStatus
+         * @description Where a refund to the customer stands (#76; internal: staff read the row).
+         * @enum {string}
+         */
+        RefundStatus: "pending" | "created" | "failed";
         /** RegionOut */
         RegionOut: {
             /** Region */
@@ -4328,6 +4525,13 @@ export interface components {
             /** Media Count */
             media_count: number;
         };
+        /**
+         * ResolutionDecision
+         * @description What the admin decides (#76): the pro paid in full, the customer refunded in full, or a
+         *     split of the two.
+         * @enum {string}
+         */
+        ResolutionDecision: "release" | "partial" | "refund";
         /**
          * ReverseAddressOut
          * @description The US street address at the position, and whether its ZIP is a served area.
@@ -4718,6 +4922,156 @@ export interface components {
              */
             next_cursor: string | null;
         };
+        /** StaffDisputeList */
+        StaffDisputeList: {
+            /**
+             * Disputes
+             * @description Oldest first.
+             */
+            disputes: components["schemas"]["StaffDisputeSummary"][];
+        };
+        /**
+         * StaffDisputeOut
+         * @description A dispute in full for staff (#76). Reading it is recorded in the audit log.
+         */
+        StaffDisputeOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /**
+             * Public Code
+             * @description The request's public code.
+             * @example JFX-7Q2K
+             */
+            public_code: string;
+            status: components["schemas"]["DisputeStatus"];
+            reason_code: components["schemas"]["DisputeReason"];
+            resolution: components["schemas"]["DisputeResolution"] | null;
+            job_status: components["schemas"]["JobStatus"];
+            /** Customer First Name */
+            customer_first_name: string | null;
+            /** Pro First Name */
+            pro_first_name: string | null;
+            /**
+             * Customer Total Cents
+             * @description What the customer paid, tax included; null when the job's payment is missing (a dispute that needs review).
+             */
+            customer_total_cents: number | null;
+            /**
+             * Pro Payout Cents
+             * @description The pro's payout frozen at payment.
+             */
+            pro_payout_cents: number;
+            /** Pro Release Cents */
+            pro_release_cents: number | null;
+            /** Customer Refund Cents */
+            customer_refund_cents: number | null;
+            /** Currency */
+            currency: string | null;
+            /**
+             * Opened At
+             * Format: date-time
+             * @description When the customer reported it: its age.
+             */
+            opened_at: string;
+            /** Resolved At */
+            resolved_at: string | null;
+            /**
+             * Description
+             * @description The customer's text, as stored (masked).
+             */
+            description: string;
+            /**
+             * Pro Reply
+             * @description The pro's one answer, as stored (masked).
+             */
+            pro_reply: string | null;
+            /** Pro Replied At */
+            pro_replied_at: string | null;
+            /**
+             * Resolution Note
+             * @description The resolving admin's note (staff only).
+             */
+            resolution_note: string | null;
+            /** Resolved By */
+            resolved_by: string | null;
+            /**
+             * Photos
+             * @description The safe copies, once ready.
+             */
+            photos: components["schemas"]["DisputePhotoOut"][];
+            /** Photos Pending */
+            photos_pending: number;
+            /**
+             * Events
+             * @description The job's history, oldest first.
+             */
+            events: components["schemas"]["StaffJobEventOut"][];
+            payment: components["schemas"]["PaymentSummaryOut"] | null;
+            refund: components["schemas"]["RefundOut"] | null;
+            transfer: components["schemas"]["TransferOut"] | null;
+        };
+        /**
+         * StaffDisputeSummary
+         * @description One line of the staff list.
+         */
+        StaffDisputeSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /**
+             * Public Code
+             * @description The request's public code.
+             * @example JFX-7Q2K
+             */
+            public_code: string;
+            status: components["schemas"]["DisputeStatus"];
+            reason_code: components["schemas"]["DisputeReason"];
+            resolution: components["schemas"]["DisputeResolution"] | null;
+            job_status: components["schemas"]["JobStatus"];
+            /** Customer First Name */
+            customer_first_name: string | null;
+            /** Pro First Name */
+            pro_first_name: string | null;
+            /**
+             * Customer Total Cents
+             * @description What the customer paid, tax included; null when the job's payment is missing (a dispute that needs review).
+             */
+            customer_total_cents: number | null;
+            /**
+             * Pro Payout Cents
+             * @description The pro's payout frozen at payment.
+             */
+            pro_payout_cents: number;
+            /** Pro Release Cents */
+            pro_release_cents: number | null;
+            /** Customer Refund Cents */
+            customer_refund_cents: number | null;
+            /** Currency */
+            currency: string | null;
+            /**
+             * Opened At
+             * Format: date-time
+             * @description When the customer reported it: its age.
+             */
+            opened_at: string;
+            /** Resolved At */
+            resolved_at: string | null;
+        };
         /**
          * StaffDocumentCounts
          * @description A pro's documents by status, superseded ones left out.
@@ -4785,6 +5139,20 @@ export interface components {
             created_at: string;
             /** Reviewed At */
             reviewed_at: string | null;
+        };
+        /** StaffJobEventOut */
+        StaffJobEventOut: {
+            /** Type */
+            type: string;
+            from_status: components["schemas"]["JobStatus"] | null;
+            to_status: components["schemas"]["JobStatus"] | null;
+            /** By System */
+            by_system: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /**
          * StaffProDecisionOut
@@ -5158,7 +5526,7 @@ export interface components {
             pro_id: string;
             /**
              * Amount Cents
-             * @description The job's pro payout as frozen at payment, in integer cents.
+             * @description The job's pro payout as frozen at payment (or the part of it an admin released on a dispute, #76), in integer cents.
              */
             amount_cents: number;
             /**
@@ -10698,6 +11066,205 @@ export interface operations {
             };
             /** @description validation_error: a message blank, longer than 2000 characters, holding a NUL, or empty once invisible characters are dropped; an unknown field; a job_id that is not a UUID. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_disputes_v1_admin_disputes_get: {
+        parameters: {
+            query?: {
+                /** @description open or resolved; every dispute when absent. */
+                status?: components["schemas"]["DisputeStatus"] | null;
+                /** @description At most this many (capped at REQUEST_LIST_MAX_LIMIT). */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffDisputeList"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a bad status or limit. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_dispute_v1_admin_disputes__dispute_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dispute_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffDisputeOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no dispute with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a malformed id. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    resolve_dispute_v1_admin_disputes__dispute_id__resolve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dispute_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DisputeResolveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisputeResolutionOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only admins resolve disputes. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no dispute with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description dispute_already_resolved: resolved with another decision or split (the same one again answers 200). refund_already_attempted: a refund of another amount was tried and the dispute is still open; only the same decision may be retried. resolution_in_progress: another resolve is calling Stripe; retry in a few minutes. dispute_needs_review: the job's payment cannot be refunded as is, or Stripe holds refunds that cannot be matched; nothing more is sent to Stripe. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a malformed id, an unknown decision, pro_release_cents on a release or a refund (or missing on a partial), or a blank note (at most 1000 characters). invalid_split: pro_release_cents is not more than 0 and less than the pro's payout. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description payments_error: Stripe refused the refund; the dispute stays open and the job disputed, the same decision can be sent again. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_configured: refunds are not configured. payments_unavailable: Stripe is not reachable; the dispute stays open, the same decision can be sent again. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

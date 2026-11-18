@@ -489,6 +489,10 @@ class CustomerRequestReader:
             raise NotFoundError
         return request.public_code
 
+    async def public_codes(self, request_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """The public code of each request among `request_ids`, for staff lists (#76)."""
+        return await self._requests.public_codes(request_ids)
+
     async def place(self, request_id: uuid.UUID) -> AddressPlace:
         """Where the request takes place, for the route of its job (#351). The caller already
         holds the request's job and checked whose it is: this does not."""

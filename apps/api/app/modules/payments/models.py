@@ -172,3 +172,66 @@ class Transfer(IdTimestampsMixin, Base):
     # until then, so the need for it outlives a failed or cancelled read (#416 r2).
     reversal_check_tried_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     reversal_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RefundStatus(StrEnum):
+    """Where a refund to the customer stands (#76; internal: staff read the row)."""
+
+    # Not made yet: an attempt is under way (requested_at set, no last_error_code), or the row
+    # was just written and its first attempt is about to start.
+    PENDING = "pending"
+    # Stripe made the refund: stripe_refund_id is stored.
+    CREATED = "created"
+    # The last attempt ended with an error (last_error_code); the same decision tries again.
+    FAILED = "failed"
+
+
+# Statuses of a refund not made yet: an attempt may still be started for it.
+REFUND_NOT_MADE: Final = frozenset({RefundStatus.PENDING, RefundStatus.FAILED})
+# As for transfers: a Stripe error code, an exception's class name or one of ours, cut.
+REFUND_ERROR_CODE_LENGTH: Final = 64
+
+
+class Refund(IdTimestampsMixin, Base):
+    """Money given back to the customer from their job's payment (#76: an admin's dispute
+    resolution, in full or in part): to the original payment method, through Stripe's Refund
+    API. The idempotency key names what the refund is for (`dispute:<id>:refund`), and is
+    unique: one refund per dispute, the guard against refunding it twice.
+
+    The amount is computed by the backend from the frozen payment amounts (disputes.resolution)
+    and copied when the row is created. As for transfers, the row and each attempt (attempts,
+    requested_at) are committed before the Stripe call, so a lost answer leaves a row that says
+    a refund may have been made: the next attempt looks it up in Stripe before creating one.
+    """
+
+    __tablename__ = "refunds"
+    __table_args__ = (
+        CheckConstraint("amount_cents > 0", name="amount_cents_positive"),
+        CheckConstraint("attempts >= 0", name="attempts_non_negative"),
+        # A refund Stripe made holds its id.
+        CheckConstraint(
+            "status <> 'created' OR stripe_refund_id IS NOT NULL",
+            name="created_has_stripe_refund_id",
+        ),
+    )
+
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id"), index=True)
+    payment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("payments.id"), index=True)
+    # The dispute it settles; NULL for a refund of another kind (cancellations, #69).
+    dispute_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("disputes.id"), index=True)
+    amount_cents: Mapped[int]
+    currency: Mapped[str] = mapped_column(String(3))
+    status: Mapped[RefundStatus] = mapped_column(
+        str_enum(RefundStatus, "refund_status"),
+        server_default=RefundStatus.PENDING.value,
+        index=True,
+    )
+    # NULL until Stripe answered the create (or the lookup found the refund).
+    stripe_refund_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    # The same for every attempt of this refund.
+    idempotency_key: Mapped[str] = mapped_column(String(255), unique=True)
+    # Stripe attempts started (each committed before its call).
+    attempts: Mapped[int] = mapped_column(server_default="0")
+    last_error_code: Mapped[str | None] = mapped_column(String(REFUND_ERROR_CODE_LENGTH))
+    # When the latest attempt started; NULL before the first.
+    requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

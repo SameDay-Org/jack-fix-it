@@ -43,6 +43,15 @@ class ServiceRequestRepository:
     async def get(self, request_id: uuid.UUID) -> ServiceRequest | None:
         return await self._session.get(ServiceRequest, request_id)
 
+    async def public_codes(self, request_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """Each request's public code among `request_ids`, in one statement."""
+        if not request_ids:
+            return {}
+        statement = select(ServiceRequest.id, ServiceRequest.public_code).where(
+            ServiceRequest.id.in_(request_ids)
+        )
+        return {row.id: row.public_code for row in await self._session.execute(statement)}
+
     async def by_idempotency_key(
         self, customer_id: uuid.UUID, key: uuid.UUID
     ) -> ServiceRequest | None:

@@ -40,6 +40,10 @@ class AuditAction(StrEnum):
     # A staff member took a request, or let go of one (#81).
     REQUEST_CLAIM = "service_request.claim"
     REQUEST_RELEASE = "service_request.release"
+    # A staff read of a dispute: both sides' text and the photos' URLs (#76).
+    DISPUTE_READ = "dispute.read"
+    # An admin resolved a dispute: released, partly released or refunded money (#76).
+    DISPUTE_RESOLVE = "dispute.resolve"
 
 
 class AuditEntityType(StrEnum):
@@ -49,6 +53,7 @@ class AuditEntityType(StrEnum):
     JOB = "job"
     SUPPORT_TICKET = "support_ticket"
     SERVICE_REQUEST = "service_request"
+    DISPUTE = "dispute"
 
 
 @dataclass(frozen=True)

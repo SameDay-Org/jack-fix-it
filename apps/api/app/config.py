@@ -78,6 +78,9 @@ STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS = 86_400
 # The Stripe calls one attempt at a job's transfer makes at most (#68): the lookup of an
 # earlier attempt's transfer, the payment's charge, the create.
 TRANSFER_ATTEMPT_STRIPE_CALLS = 3
+# The Stripe calls one attempt at a dispute's refund makes at most (#76): the lookup of an
+# earlier attempt's refund, the create.
+REFUND_ATTEMPT_STRIPE_CALLS = 2
 # Upper bound on passwords (NIST 800-63B allows a cap); also bounds the Argon2 input.
 PASSWORD_MAX_LENGTH = 128
 
@@ -366,6 +369,12 @@ class Settings(BaseSettings):
     # two tries of a job that failed. It must outlast the Stripe calls of one attempt (checked
     # below).
     transfer_stuck_pending_minutes: int = Field(default=15, gt=0)
+    # A dispute's refund (#76): an attempt stamped with no outcome recorded is taken to be under
+    # way for this many minutes, and another resolve of the dispute meanwhile is a 409. Past
+    # them it is lost (a request cut off, an answer that never arrived): the next attempt looks
+    # the refund up in Stripe before it creates anything. It must outlast the Stripe calls of
+    # one attempt (checked below).
+    refund_stuck_pending_minutes: int = Field(default=15, gt=0)
     # Job execution (D12.2, #63): wrong arrival codes a pro may enter at check-in before the
     # code locks and the BDC is alerted (Cesar, 2026-10-29: 5).
     arrival_code_max_attempts: int = Field(default=5, gt=0)
@@ -765,6 +774,23 @@ class Settings(BaseSettings):
         if self.transfer_stuck_pending_minutes * 60 < 2 * longest:
             raise ValueError(
                 "TRANSFER_STUCK_PENDING_MINUTES must be at least twice the longest Stripe "
+                f"attempt ({longest:.0f} s with STRIPE_TIMEOUT_SECONDS and "
+                "STRIPE_MAX_NETWORK_RETRIES)"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _refund_attempt_outlasts_its_stripe_calls(self) -> Self:
+        # As for transfers: an attempt still running when it is taken for lost would have a
+        # second resolve calling Stripe for the same refund.
+        longest = (
+            REFUND_ATTEMPT_STRIPE_CALLS
+            * (self.stripe_max_network_retries + 1)
+            * self.stripe_timeout_seconds
+        )
+        if self.refund_stuck_pending_minutes * 60 < 2 * longest:
+            raise ValueError(
+                "REFUND_STUCK_PENDING_MINUTES must be at least twice the longest Stripe "
                 f"attempt ({longest:.0f} s with STRIPE_TIMEOUT_SECONDS and "
                 "STRIPE_MAX_NETWORK_RETRIES)"
             )

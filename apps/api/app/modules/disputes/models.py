@@ -41,6 +41,12 @@ class DisputeResolution(StrEnum):
     REFUNDED = "refunded"
 
 
+# Resolutions that pay the pro (all or part of their payout): the job's transfer follows.
+RELEASES: Final = frozenset({DisputeResolution.RELEASED, DisputeResolution.PARTIAL_RELEASE})
+# The longest note an admin writes on a resolution, in characters (#76).
+NOTE_MAX_LENGTH: Final = 1000
+
+
 class Dispute(IdTimestampsMixin, Base):
     """A problem the customer reported with a completed job, inside its confirmation window
     (#75): at most one per job. While it is open the job is disputed and its money is held

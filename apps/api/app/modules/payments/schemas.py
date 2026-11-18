@@ -48,7 +48,8 @@ class TransferOut(BaseModel):
     payment_id: uuid.UUID
     pro_id: uuid.UUID = Field(description="The pro's profile id.")
     amount_cents: int = Field(
-        description="The job's pro payout as frozen at payment, in integer cents."
+        description="The job's pro payout as frozen at payment (or the part of it an admin "
+        "released on a dispute, #76), in integer cents."
     )
     currency: str = Field(examples=["usd"], description="Stripe's lower-case currency code.")
     status: TransferStatus = Field(

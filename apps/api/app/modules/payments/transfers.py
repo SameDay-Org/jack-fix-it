@@ -10,13 +10,15 @@ left behind. Any number of them, in any order, make one transfer.
 release(job_id), in four steps:
 
 1. Under the job's row lock (the one every status change takes), then the transfer row's:
-   - the job is confirmed: anything else is left alone (not_confirmed);
+   - the job is confirmed, or disputed with its dispute resolved by an admin's release, full
+     or partial (#76): anything else is left alone (not_confirmed);
    - nothing holds its money back (has_open_hold: an open dispute, #75);
    - no attempt is under way: a row pending with an attempt stamped less than
      TRANSFER_STUCK_PENDING_MINUTES ago and no outcome is another worker's (in_flight);
    - the job's payment succeeded and froze the same payout as the job did, a positive one;
    - the transfer row exists, or is created now: one per job (unique job_id), with the amount
-     copied from the job's frozen pro_payout_cents, never computed from a rate;
+     copied from the job's frozen pro_payout_cents, never computed from a rate (a released
+     dispute's pro_release_cents: the payout in full, or the part the admin released);
    - staff approve the pro now (#41): else the row stays pending with `pro_not_approved`
      (held) and no Stripe call is made, whether or not Stripe still has their payouts enabled;
      the sweep takes the job again once staff approve them again;
@@ -40,8 +42,8 @@ release(job_id), in four steps:
    key for every attempt of the job, so Stripe itself answers a repeated create with the first
    one's transfer while it keeps the key (24 h).
 3. Under the same locks again: the transfer's id is stored (created) and the job moves
-   confirmed -> paid_out through JobStateMachine as the system (one job_events row), in one
-   transaction.
+   confirmed -> paid_out through JobStateMachine as the system (disputed -> paid_out as the
+   admin who resolved the dispute), one job_events row, in one transaction.
 4. Once that is committed, the transfer is read from Stripe again by its stored id. A
    transfer reversed between its create and step 3 (its create answer slow to come back) had
    its transfer.reversed event find no row with its id, and that event is processed and gone.
@@ -78,8 +80,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.integrations.stripe_errors import StripeCallError, StripeUnavailableError
 from app.integrations.stripe_transfers import StripeTransfers, TransferFacts
-from app.modules.disputes.service import has_open_dispute, open_dispute_jobs
-from app.modules.jobs.service import JobPayoutFacts, JobPayouts
+from app.modules.disputes.service import (
+    ReleasedDispute,
+    has_open_dispute,
+    open_dispute_jobs,
+    released_dispute,
+    released_dispute_jobs,
+)
+from app.modules.jobs.service import AdminDecision, JobPayoutFacts, JobPayouts
 from app.modules.payments.models import (
     MADE_STATUSES,
     TRANSFER_ERROR_CODE_LENGTH,
@@ -180,6 +188,9 @@ class _Attempt:
     destination: str
     payment_intent_id: str
     number: int
+    # The admin whose release of the job's dispute this transfer carries out (#76); None for a
+    # confirmed job.
+    decided_by: uuid.UUID | None = None
 
     @property
     def ids(self) -> dict[str, str | int]:
@@ -225,10 +236,11 @@ class TransferService:
         self._jobs = JobPayouts(session, self._pros)
 
     async def due(self, limit: int) -> list[uuid.UUID]:
-        """Up to `limit` ids of the confirmed jobs the sweep may try now, least recently
-        tried first (TransferRepository.due). Unlocked; ends its transaction."""
+        """Up to `limit` ids of the jobs the sweep may try now (confirmed, or disputed and
+        released by an admin), least recently tried first (TransferRepository.due). Unlocked;
+        ends its transaction."""
         job_ids = await self._transfers.due(
-            self._jobs.confirmed(),
+            self._jobs.awaiting_transfer(released_dispute_jobs()),
             self._pros.payable(),
             open_dispute_jobs(),
             self._clock() - self._config.stuck_after,
@@ -305,15 +317,19 @@ class TransferService:
         """Step 1: the checks under the job's lock, the row, and the attempt stamped and
         committed. An outcome when no Stripe call is to be made."""
         job = await self._jobs.locked(job_id)
-        if job is None or not job.confirmed:
+        if job is None or not (job.confirmed or job.disputed):
             return await self._leave(ReleaseOutcome.NOT_CONFIRMED)
         ids = {"job_id": str(job.job_id), "pro_id": str(job.pro_id)}
         if await has_open_hold(self._session, job):
             logger.info("transfer_held", extra=ids)
             return await self._leave(ReleaseOutcome.HELD)
+        # A disputed job is paid only as an admin released it (#76): refunded, it never is.
+        decision = await released_dispute(self._session, job.job_id) if job.disputed else None
+        if job.disputed and decision is None:
+            return await self._leave(ReleaseOutcome.NOT_CONFIRMED)
         transfer = await self._transfers.get_of_job_for_update(job.job_id)
         if transfer is not None and transfer.status in MADE_STATUSES:
-            return await self._already_made(job, transfer)
+            return await self._already_made(job, transfer, decision)
         if transfer is not None and self._in_flight(transfer):
             return await self._leave(ReleaseOutcome.IN_FLIGHT)
         payment = await self._payments.succeeded_of_quote(job.quote_id)
@@ -321,11 +337,13 @@ class TransferService:
             logger.error("transfer_payment_missing", extra=ids)
             return await self._leave(ReleaseOutcome.NEEDS_REVIEW)
         # The job's frozen payout, never a rate: it must be what the payment froze too, and
-        # what an earlier release of this job stored.
-        amount_cents = job.pro_payout_cents
+        # what an earlier release of this job stored. A released dispute pays the part of it
+        # the admin released (all of it for a full release), never more.
+        amount_cents = job.pro_payout_cents if decision is None else decision.pro_release_cents
         if (
             amount_cents <= 0
-            or amount_cents != payment.pro_payout_cents
+            or job.pro_payout_cents != payment.pro_payout_cents
+            or amount_cents > job.pro_payout_cents
             or (transfer is not None and transfer.amount_cents != amount_cents)
         ):
             logger.error("transfer_amount_mismatch", extra={**ids, "payment_id": str(payment.id)})
@@ -369,6 +387,7 @@ class TransferService:
             destination=destination,
             payment_intent_id=payment.stripe_payment_intent_id,
             number=number,
+            decided_by=None if decision is None else decision.resolved_by,
         )
         # Before any Stripe call: the row and its attempt outlive whatever happens next, and
         # the locks end here.
@@ -384,16 +403,18 @@ class TransferService:
             and self._clock() - transfer.requested_at < self._config.stuck_after
         )
 
-    async def _already_made(self, job: JobPayoutFacts, transfer: Transfer) -> ReleaseOutcome:
-        """The row holds a transfer Stripe made, and the job is still confirmed: a created one
-        only misses the job's move (its transaction is the one that stores the transfer, so
-        this is a row staff repaired by hand after a review; the sweep reads these); a reversed
-        one is staff's."""
+    async def _already_made(
+        self, job: JobPayoutFacts, transfer: Transfer, decision: ReleasedDispute | None
+    ) -> ReleaseOutcome:
+        """The row holds a transfer Stripe made, and the job is still confirmed (or disputed
+        and released): a created one only misses the job's move (its transaction is the one
+        that stores the transfer, so this is a row staff repaired by hand after a review; the
+        sweep reads these); a reversed one is staff's."""
         ids = {"job_id": str(job.job_id), "transfer_id": str(transfer.id)}
         if transfer.status is not TransferStatus.CREATED:
             logger.error("transfer_reversed_job_confirmed", extra=ids)
             return await self._leave(ReleaseOutcome.NEEDS_REVIEW)
-        await self._jobs.paid_out(job.job_id)
+        await self._paid_out(job, None if decision is None else decision.resolved_by)
         await self._session.commit()
         logger.warning("transfer_job_paid_out_late", extra=ids)
         return ReleaseOutcome.ALREADY_CREATED
@@ -440,8 +461,8 @@ class TransferService:
         if not stored:
             # Another attempt of this job stored it first: the same transfer (one key).
             return await self._leave(ReleaseOutcome.ALREADY_CREATED)
-        if job is not None and job.confirmed:
-            await self._jobs.paid_out(job.job_id)
+        if job is not None and (job.confirmed or job.disputed):
+            await self._paid_out(job, attempt.decided_by)
         else:  # pragma: no cover - only release moves a confirmed job, under this lock
             logger.error("transfer_created_job_not_confirmed", extra=attempt.ids)
         await self._session.commit()
@@ -473,6 +494,14 @@ class TransferService:
         await self._transfers.mark_reversal_checked(transfer_id, stripe_transfer_id, self._clock())
         await self._session.commit()
         return ReversalCheckOutcome.REVERSED if current.reversed else ReversalCheckOutcome.CHECKED
+
+    async def _paid_out(self, job: JobPayoutFacts, decided_by: uuid.UUID | None) -> None:
+        """The job's move to paid_out: as the system for a confirmed job, as the admin whose
+        release it carries out for a disputed one (the machine refuses anything else)."""
+        if job.disputed and decided_by is not None:
+            await self._jobs.paid_out(job.job_id, AdminDecision(decided_by))
+        else:
+            await self._jobs.paid_out(job.job_id)
 
     async def _end_failed(self, attempt: _Attempt, code: str) -> None:
         await self._transfers.mark_failed(attempt.transfer_id, attempt.number, code)
