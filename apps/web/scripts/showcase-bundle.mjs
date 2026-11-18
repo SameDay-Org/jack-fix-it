@@ -6,13 +6,24 @@
 // `nomodule` polyfill file that only old browsers run), gzips each one and fails when a
 // page's sum is over the budget. It also fails when it finds no script at all: then the build
 // output changed shape and the guard would be measuring nothing.
-import { readFileSync } from "node:fs";
+//
+// The 3D hero (#403 PR 2) must stay out of the first load: the guard fails when a first-load
+// script holds three.js, and measures the lazy chunk that does against its own budget. It
+// fails when no chunk holds it either: the lazy import is gone, or the marker changed.
+import { readdirSync, readFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 
 const BUILD_DIR = new URL("../.next/", import.meta.url);
 
 // The brief's performance budget: 150 KB of gzipped JavaScript on first load.
 const BUDGET_BYTES = 150 * 1024;
+
+// The 3D hero's chunk, fetched once the page has loaded: three.js and the scene (143 KB gzip
+// when it was added). The budget keeps it from growing unnoticed.
+const LAZY_3D_BUDGET_BYTES = 200 * 1024;
+
+// A string three.js keeps in its minified code (its renderer's warnings).
+const THREE_MARKER = "THREE.WebGLRenderer";
 
 /** The showcase pages and their prerendered HTML in the build output. */
 const PAGES = {
@@ -58,10 +69,16 @@ for (const [route, htmlPath] of Object.entries(PAGES)) {
     failed = true;
     continue;
   }
-  const sizes = scripts.map((file) => ({
-    file,
-    gzip: gzipSync(readFileSync(new URL(file, BUILD_DIR))).byteLength,
-  }));
+  const sizes = scripts.map((file) => {
+    const code = readFileSync(new URL(file, BUILD_DIR));
+    return { file, gzip: gzipSync(code).byteLength, three: code.includes(THREE_MARKER) };
+  });
+  for (const { file } of sizes.filter(({ three }) => three)) {
+    console.error(
+      `${route}: ${file} is first-load JavaScript and holds three.js: the 3D hero must load later.`,
+    );
+    failed = true;
+  }
   const total = sizes.reduce((sum, { gzip }) => sum + gzip, 0);
   const over = total > BUDGET_BYTES;
   failed ||= over;
@@ -74,6 +91,33 @@ for (const [route, htmlPath] of Object.entries(PAGES)) {
       console.log(`  ${kilobytes(gzip).padStart(9)}  ${file}`);
     }
   }
+}
+
+// The lazy 3D chunk(s): every built chunk that holds three.js.
+const chunksDir = new URL("static/chunks/", BUILD_DIR);
+let lazy = [];
+try {
+  lazy = readdirSync(chunksDir, { recursive: true })
+    .filter((name) => String(name).endsWith(".js"))
+    .map((name) => ({ name: String(name), code: readFileSync(new URL(String(name), chunksDir)) }))
+    .filter(({ code }) => code.includes(THREE_MARKER))
+    .map(({ name, code }) => ({ name, gzip: gzipSync(code).byteLength }));
+} catch {
+  // No chunks directory: reported below as no 3D chunk.
+}
+if (lazy.length === 0) {
+  console.error(
+    "3D hero: no built chunk holds three.js; the lazy import is gone or the marker changed.",
+  );
+  failed = true;
+} else {
+  const total = lazy.reduce((sum, { gzip }) => sum + gzip, 0);
+  const over = total > LAZY_3D_BUDGET_BYTES;
+  failed ||= over;
+  console.log(
+    `3D hero (lazy, after the page): ${kilobytes(total)} gzip in ${lazy.length} file${lazy.length > 1 ? "s" : ""} ` +
+      `(budget ${kilobytes(LAZY_3D_BUDGET_BYTES)}) ${over ? "OVER BUDGET" : "ok"}`,
+  );
 }
 
 process.exit(failed ? 1 : 0);

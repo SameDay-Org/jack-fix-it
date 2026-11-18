@@ -1,4 +1,5 @@
 import { getImageProps } from "next/image";
+import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -14,6 +15,8 @@ type PhoneFrameProps = {
   eager?: boolean;
   /** Sets the phone's width; its height follows the screen's own proportions. */
   className?: string;
+  /** Drawn over the screen, inside its rounded glass (the hero's other screens). */
+  overlay?: ReactNode;
 };
 
 const BUTTON = "absolute w-[1.3cqw] bg-gray-500";
@@ -28,7 +31,14 @@ const BUTTON = "absolute w-[1.3cqw] bg-gray-500";
  * (`getImageProps`: the optimized `srcset`, the reserved size, lazy loading), so the page
  * gets the optimized images without the image component's client code.
  */
-export function PhoneFrame({ media, alt, sizes, eager = false, className }: PhoneFrameProps) {
+export function PhoneFrame({
+  media,
+  alt,
+  sizes,
+  eager = false,
+  className,
+  overlay,
+}: PhoneFrameProps) {
   const { props: screen } = getImageProps({
     src: media.poster.src,
     width: media.poster.width,
@@ -63,6 +73,7 @@ export function PhoneFrame({ media, alt, sizes, eager = false, className }: Phon
             {/* eslint-disable-next-line @next/next/no-img-element -- these are next/image's own
                 attributes (getImageProps): its optimized srcset without its client component */}
             <img {...screen} alt={alt} className="block h-auto w-full" />
+            {overlay}
             {/* The camera island, then a faint reflection across the glass. */}
             <span
               aria-hidden

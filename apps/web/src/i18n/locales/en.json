@@ -31,7 +31,17 @@
       "title": "Whatever happens at home, we <accent>fix</accent> it.",
       "lead": "Tell Jack. We'll take care of the rest.",
       "body": "Describe what's going on, compare fixed-price quotes from verified pros and pay in the app. Your payment is held until you confirm the job is done.",
-      "cta": "See how it works"
+      "cta": "See how it works",
+      "beats": {
+        "quotes": {
+          "title": "Say it once. Get <accent>fixed prices</accent>.",
+          "body": "Describe what's going on in your own words. Verified pros send you fixed-price quotes to compare."
+        },
+        "pay": {
+          "title": "Pay safely. <accent>Follow</accent> your pro.",
+          "body": "Your payment is held until you confirm the job is done, and the map shows your pro on the way."
+        }
+      }
     },
     "how": {
       "eyebrow": "How it works",
