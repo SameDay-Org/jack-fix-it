@@ -1931,6 +1931,7 @@
   },
   "disputes": {
     "entry": "Report a problem",
+    "entryFailed": "We couldn't check if you can report a problem.",
     "reason": {
       "work_incomplete": "The work isn't finished",
       "poor_quality": "The work isn't done well",
@@ -1950,6 +1951,7 @@
         "refunded": "Our team reviewed the report and your payment for this job went back to your payment method."
       },
       "loadFailed": "We couldn't load your report.",
+      "updateFailed": "We couldn't update this report.",
       "retry": "Try again"
     },
     "report": {

@@ -1,5 +1,5 @@
 import type { Href } from "expo-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Pressable, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui";
 import { cx } from "@/components/ui/cx";
 import { chatHref } from "@/features/chat";
 import { reportProblemHref, useCustomerDispute } from "@/features/disputes/api";
+import { RetryLine } from "@/features/disputes/RetryLine";
 import { bubbleShadow, continuousCorners } from "@/theme";
 
 import { BeforePhotos, PhotoHero } from "./AfterPhotos";
@@ -142,7 +143,9 @@ type ConfirmDockProps = {
  * own deadline (`report_by`) has not passed (#75: the same window as the confirmation, never
  * worked out here); then when the job confirms itself if the customer does not answer, in plain
  * words ("Confirms automatically tomorrow at 3:40 PM if you don't answer"). While the report's
- * window is unknown (loading, or its read failed), only Confirm shows.
+ * window is unknown, Report a problem is left out: loading, or a failed read, which says so in its
+ * place with a retry. Every new answer for the job (a pull, the screen's return, the automatic
+ * confirmation coming due) reads the window again, so a failed read is never the last word.
  */
 export function ConfirmDock({ job, requestId, updatedAt, push }: ConfirmDockProps) {
   const { t } = useTranslation();
@@ -151,7 +154,18 @@ export function ConfirmDock({ job, requestId, updatedAt, push }: ConfirmDockProp
   const now = useMinuteClock(updatedAt, confirmBy);
   const deadline = deadlineText(t, job.confirm_by, now);
   const label = useFittingLabel(t("jobs.finished.confirm"));
-  const report = useCustomerDispute(job.id).data;
+  const {
+    data: report,
+    isError: reportFailed,
+    isFetching: reportChecking,
+    refetch: checkReport,
+  } = useCustomerDispute(job.id);
+  const checkedWith = useRef(updatedAt);
+  useEffect(() => {
+    if (checkedWith.current === updatedAt) return;
+    checkedWith.current = updatedAt;
+    void checkReport();
+  }, [updatedAt, checkReport]);
   const reportBy = report?.report_by ? Date.parse(report.report_by) : NaN;
   // Its own clock, anchored at the report's deadline: the entry goes the minute the window ends.
   const reportNow = useMinuteClock(updatedAt, Number.isFinite(reportBy) ? reportBy : null);
@@ -173,6 +187,15 @@ export function ConfirmDock({ job, requestId, updatedAt, push }: ConfirmDockProp
         testID="job-confirm"
       />
       {canReport ? <ReportAction onPress={() => push(reportProblemHref(requestId))} /> : null}
+      {report === undefined && reportFailed ? (
+        <RetryLine
+          centered
+          message={t("disputes.entryFailed")}
+          busy={reportChecking}
+          onRetry={() => void checkReport()}
+          testID="job-report-check-failed"
+        />
+      ) : null}
       {deadline ? (
         <Text className="text-center text-footnote text-gray-500" testID="job-confirm-deadline">
           {deadline}

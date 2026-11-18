@@ -1931,6 +1931,7 @@
   },
   "disputes": {
     "entry": "Reportar un problema",
+    "entryFailed": "No pudimos comprobar si puedes reportar un problema.",
     "reason": {
       "work_incomplete": "El trabajo no está terminado",
       "poor_quality": "El trabajo no quedó bien",
@@ -1950,6 +1951,7 @@
         "refunded": "Nuestro equipo revisó el reporte y tu pago de este trabajo volvió a tu método de pago."
       },
       "loadFailed": "No pudimos cargar tu reporte.",
+      "updateFailed": "No pudimos actualizar este reporte.",
       "retry": "Intentar de nuevo"
     },
     "report": {
