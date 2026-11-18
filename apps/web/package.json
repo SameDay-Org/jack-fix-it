@@ -12,6 +12,7 @@
     "check:bundle": "node scripts/showcase-bundle.mjs"
   },
   "dependencies": {
+    "@jack/mascot": "workspace:*",
     "@jack/shared": "workspace:*",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",

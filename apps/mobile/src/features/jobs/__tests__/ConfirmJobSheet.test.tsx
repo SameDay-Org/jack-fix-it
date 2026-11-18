@@ -82,12 +82,12 @@ afterEach(async () => {
 });
 
 describe("ConfirmJobSheet (#66)", () => {
-  it("says what confirming does, with Confirm and Not yet", async () => {
+  it("asks to confirm once the pro has finished, with Confirm and Not yet", async () => {
     await open();
 
     expect(screen.getByText("Confirm the job is done?")).toBeTruthy();
     expect(screen.getByTestId("confirm-job-body").props.children).toBe(
-      "Payment is released to Dan.",
+      "Tap Confirm when Dan has finished the job.",
     );
     expect(screen.getByRole("button", { name: "Confirm" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Not yet" })).toBeTruthy();
@@ -275,7 +275,9 @@ describe("ConfirmJobSheet (#66)", () => {
     await open();
 
     expect(screen.getByText("¿Confirmas que el trabajo está terminado?")).toBeTruthy();
-    expect(screen.getByTestId("confirm-job-body").props.children).toBe("El pago se libera a Dan.");
+    expect(screen.getByTestId("confirm-job-body").props.children).toBe(
+      "Toca Confirmar cuando Dan haya terminado el trabajo.",
+    );
     expect(screen.getByRole("button", { name: "Confirmar" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Todavía no" })).toBeTruthy();
   });

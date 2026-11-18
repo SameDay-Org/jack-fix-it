@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // The mascot (#404) is a workspace package shipped as TypeScript source.
+  transpilePackages: ["@jack/mascot"],
   images: {
     // Next's default widths plus 480: the showcase's phone screens (#403) are about 240 CSS px
     // wide on a phone, so a 2x display gets a 480 px file instead of the 640 px one.

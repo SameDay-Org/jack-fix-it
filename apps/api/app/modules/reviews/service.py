@@ -33,6 +33,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import Subquery
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -82,6 +83,12 @@ class ReviewConfig:
     @classmethod
     def from_settings(cls, settings: Settings) -> "ReviewConfig":
         return cls(publish_after=timedelta(days=settings.review_publish_after_days))
+
+
+def review_metric_facts() -> Subquery:
+    """Each review's `created_at`, `overall` and `about_pro`, as a subquery for the staff
+    metrics' own query (#84)."""
+    return ReviewRepository.metric_facts()
 
 
 class ReviewService:

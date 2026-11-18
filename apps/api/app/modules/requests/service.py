@@ -34,7 +34,7 @@ from typing import Final
 
 from pydantic import JsonValue
 from redis.exceptions import RedisError
-from sqlalchemy import Select
+from sqlalchemy import Select, Subquery
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -461,6 +461,12 @@ def _has_nul(value: JsonValue) -> bool:
     if isinstance(value, list):
         return any(_has_nul(item) for item in value)
     return False
+
+
+def request_metric_facts() -> Subquery:
+    """Each request's `request_id`, `created_at` and `first_contact_at`, as a subquery for the
+    staff metrics' own query (#84)."""
+    return ServiceRequestRepository.metric_facts()
 
 
 class CustomerRequestReader:

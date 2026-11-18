@@ -6,11 +6,22 @@ from sqlalchemy import ColumnElement, Subquery, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.modules.reviews.models import Review
+from app.modules.reviews.models import Review, ReviewAuthorRole
 
 
 class ReviewRepository:
     """Queries only: reviews."""
+
+    @staticmethod
+    def metric_facts() -> Subquery:
+        """Every review's time (`created_at`), overall rating (`overall`) and whether it rates
+        a pro (`about_pro`: written by the customer) or a customer (written by the pro), for
+        the staff metrics (#84). Published or not: staff read an aggregate, never a review."""
+        return select(
+            Review.created_at.label("created_at"),
+            Review.overall.label("overall"),
+            (Review.author_role == ReviewAuthorRole.CUSTOMER).label("about_pro"),
+        ).subquery()
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session

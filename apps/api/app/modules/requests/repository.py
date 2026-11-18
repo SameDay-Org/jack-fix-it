@@ -3,7 +3,7 @@ from collections.abc import Collection, Sequence
 from datetime import datetime
 from typing import NamedTuple
 
-from sqlalchemy import Select, func, select, tuple_, update
+from sqlalchemy import Select, Subquery, func, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.requests.models import (
@@ -50,6 +50,16 @@ class ServiceRequestRepository:
             ServiceRequest.id.in_(request_ids)
         )
         return {row.id: row.category_id for row in await self._session.execute(statement)}
+
+    @staticmethod
+    def metric_facts() -> Subquery:
+        """Every request's id (`request_id`), creation (`created_at`) and first contact by the
+        BDC (`first_contact_at`, #81), for the staff metrics (#84). No customer detail."""
+        return select(
+            ServiceRequest.id.label("request_id"),
+            ServiceRequest.created_at.label("created_at"),
+            ServiceRequest.first_contact_at.label("first_contact_at"),
+        ).subquery()
 
     async def get(self, request_id: uuid.UUID) -> ServiceRequest | None:
         return await self._session.get(ServiceRequest, request_id)
