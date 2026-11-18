@@ -2010,5 +2010,76 @@
         "body": "Something went wrong on our side. Try again in a moment."
       }
     }
+  },
+  "earnings": {
+    "title": "Earnings",
+    "jobs": "Jobs",
+    "loading": "Loading your earnings",
+    "retry": "Try again",
+    "card": {
+      "title": "Earnings",
+      "error": "Your total didn't load. Open to try again."
+    },
+    "figure": {
+      "paid": {
+        "label": "Paid",
+        "body": "Sent to your payout account."
+      },
+      "on_the_way": {
+        "label": "On its way",
+        "body": "Confirmed by the customer. Your payment is on its way."
+      },
+      "awaiting_confirmation": {
+        "label": "Awaiting customer confirmation",
+        "body": "Jobs you finished that the customer hasn't confirmed yet."
+      },
+      "on_hold": {
+        "label": "Under review",
+        "body": "Our team is looking at these jobs."
+      }
+    },
+    "status": {
+      "paid": "Paid",
+      "on_the_way": "On its way",
+      "awaiting_confirmation": "Awaiting confirmation",
+      "on_hold": "Under review"
+    },
+    "row": {
+      "noCategory": "Job",
+      "paidOn": "Paid on {{date}}",
+      "completed": "Completed {{date}}",
+      "confirmedBy": "Usually confirmed by {{date}}"
+    },
+    "empty": {
+      "title": "No earnings yet",
+      "body": "Your earnings will show here after your first finished job."
+    },
+    "failure": {
+      "offline": {
+        "title": "You're offline",
+        "body": "Check your connection and try again."
+      },
+      "busy": {
+        "title": "Give it a moment",
+        "body": "You've checked your earnings a few times in a row. Try again in a moment."
+      },
+      "generic": {
+        "title": "Your earnings didn't load",
+        "body": "Something went wrong on our side. Try again."
+      }
+    },
+    "refreshFailed": {
+      "offline": "You're offline. These are your earnings as last loaded.",
+      "busy": "Give it a moment, then pull to refresh again.",
+      "generic": "Your earnings didn't refresh. Pull to try again."
+    },
+    "more": {
+      "failed": "More jobs didn't load."
+    },
+    "payouts": {
+      "title": "Set up payouts to get paid",
+      "body": "Connect a payout account with Stripe so we can send you your earnings.",
+      "action": "Set up payouts"
+    }
   }
 }

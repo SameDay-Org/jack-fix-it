@@ -2010,5 +2010,76 @@
         "body": "Algo salió mal de nuestro lado. Inténtalo de nuevo en un momento."
       }
     }
+  },
+  "earnings": {
+    "title": "Ganancias",
+    "jobs": "Trabajos",
+    "loading": "Cargando tus ganancias",
+    "retry": "Reintentar",
+    "card": {
+      "title": "Ganancias",
+      "error": "No pudimos cargar tu total. Ábrelo para intentarlo de nuevo."
+    },
+    "figure": {
+      "paid": {
+        "label": "Pagado",
+        "body": "Enviado a tu cuenta de pagos."
+      },
+      "on_the_way": {
+        "label": "En camino",
+        "body": "El cliente lo confirmó. Tu pago está en camino."
+      },
+      "awaiting_confirmation": {
+        "label": "Esperando la confirmación del cliente",
+        "body": "Trabajos que terminaste y que el cliente aún no confirma."
+      },
+      "on_hold": {
+        "label": "En revisión",
+        "body": "Nuestro equipo está revisando estos trabajos."
+      }
+    },
+    "status": {
+      "paid": "Pagado",
+      "on_the_way": "En camino",
+      "awaiting_confirmation": "Esperando confirmación",
+      "on_hold": "En revisión"
+    },
+    "row": {
+      "noCategory": "Trabajo",
+      "paidOn": "Pagado el {{date}}",
+      "completed": "Completado el {{date}}",
+      "confirmedBy": "Suele confirmarse para el {{date}}"
+    },
+    "empty": {
+      "title": "Aún no hay ganancias",
+      "body": "Tus ganancias aparecerán aquí después de tu primer trabajo terminado."
+    },
+    "failure": {
+      "offline": {
+        "title": "No tienes conexión",
+        "body": "Revisa tu conexión e inténtalo de nuevo."
+      },
+      "busy": {
+        "title": "Espera un momento",
+        "body": "Consultaste tus ganancias varias veces seguidas. Inténtalo de nuevo en un momento."
+      },
+      "generic": {
+        "title": "No pudimos cargar tus ganancias",
+        "body": "Algo salió mal de nuestro lado. Inténtalo de nuevo."
+      }
+    },
+    "refreshFailed": {
+      "offline": "No tienes conexión. Estas son tus ganancias tal como se cargaron la última vez.",
+      "busy": "Espera un momento y vuelve a deslizar para actualizar.",
+      "generic": "No pudimos actualizar tus ganancias. Desliza hacia abajo para intentarlo de nuevo."
+    },
+    "more": {
+      "failed": "No pudimos cargar más trabajos."
+    },
+    "payouts": {
+      "title": "Configura tus pagos para cobrar",
+      "body": "Conecta una cuenta de pagos con Stripe para que podamos enviarte tus ganancias.",
+      "action": "Configurar pagos"
+    }
   }
 }
