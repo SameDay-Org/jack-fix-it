@@ -78,6 +78,7 @@ NOT_UPLOAD_KEYS = {
     "dispute_photos.safe_key",
     "service_requests.idempotency_key",
     "support_tickets.idempotency_key",
+    "disputes.idempotency_key",
     # Stripe's idempotency key of a job's transfer to its pro (#68).
     "transfers.idempotency_key",
 }
