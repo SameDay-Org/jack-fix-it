@@ -83,8 +83,13 @@ from a navy surface.
   `running`. Only the page's script turns it `running`, so nothing moves off screen or without
   a script.
 - **A pose change** (a new `pose` prop) moves the same layers frame by frame for 480 ms while
-  running; otherwise it shows the new pose at once and asks for no frame.
+  running; otherwise it shows the new pose at once and asks for no frame (also when `animate`
+  turns off in the same render).
 - **No layout shift:** the size and the view box never change.
+- **Only through the runtime:** Jack moves only in a page, through the `animate` prop of
+  `@jack/mascot/react` or `@jack/mascot/dom`, which own the Reduce Motion, hidden-tab and
+  off-screen gates. The build writes no animated file: a standalone SVG has no script, so
+  nothing would keep it still without JavaScript or off screen.
 
 ## Scripts
 
@@ -93,11 +98,11 @@ from a navy surface.
   motion (the idle loops, every pose change, a Reduce Motion toggle and a mascot below the fold
   that waits until it is on screen). The motion section's script is the package's own code,
   served with its types stripped. Local only: there is no route for it in the site.
-- `pnpm --filter @jack/mascot build`: writes each pose to `dist/poses/<pose>.svg` (still), a
-  titled copy and `<pose>-animated.svg` (with the idle CSS: a file has no script, so it runs
-  wherever it is shown unless motion is reduced), and `dist/gallery.html` (its motion section
-  needs the preview server). Fails when a still pose is over 30 KB or an animated one over
-  60 KB (they are 6 to 8 KB).
+- `pnpm --filter @jack/mascot build`: writes each pose to `dist/poses/<pose>.svg` and a titled
+  copy, both still, and `dist/gallery.html` (its motion section needs the preview server).
+  Fails when a pose is over 30 KB (they are 6.4 to 7.3 KB). `scripts/build.test.ts` runs this
+  build and checks that nothing in its output moves. The animated markup the runtime draws in
+  a page stays under 60 KB (`mascot.test.ts`).
 - `pnpm --filter @jack/mascot test`, `typecheck`.
 
 The scripts run TypeScript with Node's own type stripping (no build step): the sources use

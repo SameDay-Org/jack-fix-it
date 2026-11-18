@@ -1,20 +1,24 @@
 /**
- * `pnpm --filter @jack/mascot build`: writes each pose as a standalone SVG file (dist/poses/):
- * `<pose>.svg` (still, decorative), `<pose>-titled.svg` (still, with its accessible name) and
- * `<pose>-animated.svg` (the idle loops in CSS, off under Reduce Motion), and the gallery
- * (dist/gallery.html: its motion section needs the preview server). Fails when a file is over
- * its size budget.
+ * `pnpm --filter @jack/mascot build`: writes each pose as a standalone, still SVG file
+ * (dist/poses/): `<pose>.svg` (decorative) and `<pose>-titled.svg` (with its accessible name),
+ * and the gallery (dist/gallery.html: its motion section needs the preview server). Fails when a
+ * file is over its size budget. An optional argument writes to another directory instead of
+ * dist/ (the build-output test does).
+ *
+ * No animated file: a standalone file has no script, so nothing would keep it still without
+ * JavaScript, off screen or in a hidden tab. Jack moves only through the package's runtime (the
+ * `animate` prop of `@jack/mascot/react`, or `@jack/mascot/dom`), which owns those gates.
  */
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ANIMATED_POSE_BUDGET_BYTES, POSE_BUDGET_BYTES } from "../src/budget.ts";
-import { idleCss, poseNode, READY_POSES, renderSvg, RIGS } from "../src/index.ts";
+import { POSE_BUDGET_BYTES } from "../src/budget.ts";
+import { poseNode, READY_POSES, renderSvg } from "../src/index.ts";
 import { galleryHtml } from "./gallery.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const dist = join(root, "dist");
+const dist = resolve(process.argv[2] ?? join(root, "dist"));
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(join(dist, "poses"), { recursive: true });
 
@@ -36,10 +40,6 @@ for (const pose of READY_POSES) {
     renderSvg(poseNode(pose), { title: `Jack, ${pose}` }),
     POSE_BUDGET_BYTES,
   );
-  // A file has no script to pause it off screen: it simply runs, unless motion is reduced.
-  const scope = `jack-${pose}`;
-  const motion = { scope, state: "running" as const, css: idleCss(scope, RIGS[pose]) };
-  write(`${pose}-animated.svg`, renderSvg(poseNode(pose), { motion }), ANIMATED_POSE_BUDGET_BYTES);
 }
 writeFileSync(join(dist, "gallery.html"), galleryHtml());
 console.log("gallery.html written");
