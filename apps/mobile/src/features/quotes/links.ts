@@ -3,6 +3,7 @@ import { useLocalSearchParams, useNavigation } from "expo-router";
 import { useEffect } from "react";
 
 import { handleStripeReturn, isStripeReturn } from "@/features/payments/stripeReturn";
+import { isPayoutsReturn, payoutsReturnRoute } from "@/features/payouts/links";
 
 import { isUuid, profileHref, useGuardedPush } from "./navigation";
 
@@ -51,7 +52,9 @@ function profileLink(rest: string): { requestId: string; quoteId: string } | nul
  * over itself (`useProfileFromLink`), the same stack a card's tap builds. The initial URL keeps
  * the anchor and passes through, like every other input, exactly as it came. A bank's 3-D Secure
  * return (`stripe-redirect`, #59) goes to Stripe's sheet and nowhere in the router: a running app
- * stays where it is (an empty path is ignored), a cold start opens the app's root. Never throws:
+ * stays where it is (an empty path is ignored), a cold start opens the app's root. The return
+ * from Stripe's payout setup (`payouts?result=…`, #277) opens the payout screen, whether the app
+ * was running or not: there the status is asked for again. Never throws:
  * a throw here would drop the link.
  */
 export function redirectSystemPath({ path, initial }: { path: string; initial: boolean }): string {
@@ -60,6 +63,9 @@ export function redirectSystemPath({ path, initial }: { path: string; initial: b
     if (split && isStripeReturn(split.rest)) {
       handleStripeReturn(path);
       return initial ? split.prefix : "";
+    }
+    if (split && isPayoutsReturn(split.rest)) {
+      return `${split.prefix}${payoutsReturnRoute(split.rest)}`;
     }
     if (initial) return path;
     const link = split && profileLink(split.rest);

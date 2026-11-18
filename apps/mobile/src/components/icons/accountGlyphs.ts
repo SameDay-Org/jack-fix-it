@@ -79,6 +79,17 @@ export const ACCOUNT_GLYPHS = {
       "M9 14l2 2 4-4.5",
     ],
   },
+  // A banknote: a rounded bill with a coin's circle in the middle, the pro's payouts.
+  proPayouts: {
+    accent:
+      "M4.5 7h15A1.5 1.5 0 0 1 21 8.5v7a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 15.5v-7A1.5 1.5 0 0 1 4.5 7Z",
+    strokes: [
+      "M4.5 7h15A1.5 1.5 0 0 1 21 8.5v7a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 15.5v-7A1.5 1.5 0 0 1 4.5 7Z",
+      "M12 9.75a2.25 2.25 0 1 0 0 4.5a2.25 2.25 0 1 0 0-4.5",
+      "M6.5 12h.5",
+      "M17 12h.5",
+    ],
+  },
   // An open door with an arrow leaving through it.
   logOut: {
     accent: "M5.5 5a1 1 0 0 1 1-1h6.5v16H6.5a1 1 0 0 1-1-1Z",

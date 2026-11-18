@@ -6,6 +6,7 @@ import { RefreshControl, ScrollView, View } from "react-native";
 import { NetworkError, useSessionGeneration } from "@/api";
 import { Card, ChecklistCardSkeleton, TextSkeleton } from "@/components/ui";
 import { RetryNotice } from "@/features/opportunities/RetryNotice";
+import { PayoutSetupCard } from "@/features/payouts";
 import { myDocumentsQueryKey } from "@/features/pro-documents/api";
 import { profileChecklist, ProfileChecklistCard, type ProProfile } from "@/features/pro-profile";
 import { PROFILE_STEPS } from "@/features/pro-profile/completeness";
@@ -13,7 +14,6 @@ import { useSettledError } from "@/features/quotes/useRequestQuotes";
 import { tokens } from "@/theme";
 
 import { DocumentsChecklistCard } from "./DocumentsChecklistCard";
-import { PayoutSetupPlaceholder } from "./PayoutSetupPlaceholder";
 import { awaitsPayouts } from "./verification";
 import { VerificationBanner } from "./VerificationBanner";
 
@@ -37,8 +37,8 @@ export type ProOnboardingProps = {
 /**
  * The pro's home until the pro is approved and can be paid (#38), in place of the new requests:
  * where the review stands, then what is left to do: "Finish your profile" and "Send your
- * documents", each gone once done, or, once approved, payout setup as a labelled placeholder
- * (#277). No request is listed, and none is asked for. While the profile is not
+ * documents", each gone once done, or, once approved, "Finish payout setup", which opens the
+ * payout screen (#277). No request is listed, and none is asked for. While the profile is not
  * known the home draws the shape of this (never a list that might not apply), and a profile that
  * did not load says so with a retry.
  */
@@ -90,8 +90,9 @@ export function ProOnboarding({
           <VerificationBanner profile={profile} />
           <ProfileChecklistCard />
           {awaitsPayouts(profile) ? (
-            // The review is over: what is left is payout setup, which the app does not have yet.
-            <PayoutSetupPlaceholder />
+            // The review is over: what is left is payout setup. One primary action on the home:
+            // the profile's while it is shown, then this one.
+            <PayoutSetupCard primary={profileChecklist(profile).complete} />
           ) : (
             // One primary action on the home: the profile's while it is shown, then this one.
             <DocumentsChecklistCard primary={profileChecklist(profile).complete} />
