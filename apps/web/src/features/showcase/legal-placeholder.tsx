@@ -5,11 +5,13 @@ import type { Locale } from "@/i18n/config";
 import { getT } from "@/i18n/server";
 import { cn } from "@/lib/utils";
 
-import { HtmlLang } from "./html-lang";
-import { LanguageToggle } from "./language-toggle";
-import { PRIVACY_PATHS, SHOWCASE_PATHS, TERMS_PATHS } from "./routes";
-import { CONTAINER, FOCUS_ON_LIGHT, FOCUS_ON_NAVY } from "./ui";
-import { Wordmark } from "./wordmark";
+import { HtmlLang } from "@/features/site/html-lang";
+import { LanguageToggle } from "@/features/site/language-toggle";
+import { PRIVACY_PATHS, TERMS_PATHS } from "@/features/site/routes";
+
+import { SHOWCASE_PATHS } from "./routes";
+import { CONTAINER, FOCUS_ON_LIGHT, FOCUS_ON_NAVY } from "@/features/site/ui";
+import { Wordmark } from "@/features/site/wordmark";
 
 const PATHS = { terms: TERMS_PATHS, privacy: PRIVACY_PATHS } as const;
 

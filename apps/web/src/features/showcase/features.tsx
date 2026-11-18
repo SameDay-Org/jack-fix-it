@@ -7,7 +7,7 @@ import { MascotBubble } from "./mascot-bubble";
 import { MEDIA, type MediaId } from "./media";
 import { PhoneFrame } from "./phone-frame";
 import { ANCHORS } from "./routes";
-import { CONTAINER, EYEBROW, SECTION_TITLE } from "./ui";
+import { CONTAINER, EYEBROW, SECTION_TITLE } from "@/features/site/ui";
 
 type Feature<Id extends MediaId = MediaId> = {
   /** Its strings (`showcase.features.<id>`) and its screen in the media manifest. */
