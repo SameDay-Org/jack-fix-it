@@ -7550,6 +7550,133 @@
         }
       }
     },
+    "/v1/admin/metrics": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "The dashboard's metrics (staff)",
+        "description": "The MVP exit metrics over whole days, both inclusive (default: the last\nMETRICS_DEFAULT_RANGE_DAYS days, today included). Ratios come with their numerator and\ndenominator (null when the denominator is 0), each figure with its formula's key\n(docs/kpis.md), and a per-day series. Aggregates only: no name, contact, address or id.\nRevenue is gross of refunds until they are recorded (`refunds_netted`).",
+        "operationId": "read_metrics_v1_admin_metrics_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The first day, YYYY-MM-DD.",
+              "title": "From"
+            },
+            "description": "The first day, YYYY-MM-DD."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The last day, YYYY-MM-DD, inclusive (default: today).",
+              "title": "To"
+            },
+            "description": "The last day, YYYY-MM-DD, inclusive (default: today)."
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64,
+                  "pattern": "^[A-Za-z_]+(/[A-Za-z0-9_+-]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "An IANA time zone the days are read in (default: BUSINESS_TIME_ZONE).",
+              "title": "Tz"
+            },
+            "description": "An IANA time zone the days are read in (default: BUSINESS_TIME_ZONE)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a date that is not YYYY-MM-DD. invalid_range: `from` after `to`, a range longer than METRICS_MAX_RANGE_DAYS days, or `tz` not an IANA time zone.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than METRICS_READ_LIMIT reads in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/users/me/rating": {
       "get": {
         "tags": [
@@ -7702,6 +7829,25 @@
           "zip_code"
         ],
         "title": "AddressOut"
+      },
+      "AmountMetric": {
+        "properties": {
+          "formula": {
+            "$ref": "#/components/schemas/MetricFormula"
+          },
+          "value": {
+            "type": "integer",
+            "title": "Value",
+            "description": "Integer cents (USD)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "formula",
+          "value"
+        ],
+        "title": "AmountMetric"
       },
       "ApprovalBlocker": {
         "properties": {
@@ -9956,6 +10102,123 @@
         ],
         "title": "MediaOut"
       },
+      "MetricFormula": {
+        "type": "string",
+        "enum": [
+          "first_response_minutes",
+          "contact_rate",
+          "lead_to_job",
+          "completion_rate",
+          "customer_rating",
+          "pro_rating",
+          "dispute_rate",
+          "repeat_rate",
+          "gmv",
+          "revenue_gross_of_refunds"
+        ],
+        "title": "MetricFormula"
+      },
+      "Metrics": {
+        "properties": {
+          "avg_first_response_minutes": {
+            "$ref": "#/components/schemas/ResponseTimeMetric"
+          },
+          "contact_rate": {
+            "$ref": "#/components/schemas/RatioMetric"
+          },
+          "lead_to_job": {
+            "$ref": "#/components/schemas/RatioMetric"
+          },
+          "completion_rate": {
+            "$ref": "#/components/schemas/RatioMetric"
+          },
+          "customer_rating_avg": {
+            "$ref": "#/components/schemas/RatingMetric",
+            "description": "How pros rate their customers."
+          },
+          "pro_rating_avg": {
+            "$ref": "#/components/schemas/RatingMetric",
+            "description": "How customers rate their pros."
+          },
+          "dispute_rate": {
+            "$ref": "#/components/schemas/RatioMetric"
+          },
+          "repeat_rate": {
+            "$ref": "#/components/schemas/RatioMetric"
+          },
+          "gmv_cents": {
+            "$ref": "#/components/schemas/AmountMetric"
+          },
+          "revenue_cents": {
+            "$ref": "#/components/schemas/AmountMetric"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "avg_first_response_minutes",
+          "contact_rate",
+          "lead_to_job",
+          "completion_rate",
+          "customer_rating_avg",
+          "pro_rating_avg",
+          "dispute_rate",
+          "repeat_rate",
+          "gmv_cents",
+          "revenue_cents"
+        ],
+        "title": "Metrics"
+      },
+      "MetricsOut": {
+        "properties": {
+          "from_date": {
+            "type": "string",
+            "format": "date",
+            "title": "From Date",
+            "description": "The first day read, in `time_zone`."
+          },
+          "to_date": {
+            "type": "string",
+            "format": "date",
+            "title": "To Date",
+            "description": "The last day read, in `time_zone` (inclusive)."
+          },
+          "time_zone": {
+            "type": "string",
+            "title": "Time Zone",
+            "examples": [
+              "America/New_York"
+            ]
+          },
+          "refunds_netted": {
+            "type": "boolean",
+            "title": "Refunds Netted",
+            "description": "Whether revenue_cents is net of refunds. False until #76's refunds land: revenue is then the platform's fee as charged."
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/Metrics"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesPoint"
+            },
+            "type": "array",
+            "title": "Series",
+            "description": "One point per day of the range, in order."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "from_date",
+          "to_date",
+          "time_zone",
+          "refunds_netted",
+          "metrics",
+          "series"
+        ],
+        "title": "MetricsOut"
+      },
       "MultiChoiceQuestion": {
         "properties": {
           "key": {
@@ -12190,6 +12453,38 @@
         "title": "QuoteStatus",
         "description": "Internal states (docs/glossary.md). Transitions belong to the state machine (#60)."
       },
+      "RatingMetric": {
+        "properties": {
+          "formula": {
+            "$ref": "#/components/schemas/MetricFormula"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value",
+            "description": "The mean overall rating (1 to 5), to 2 decimals; null with no review."
+          },
+          "denominator": {
+            "type": "integer",
+            "title": "Denominator",
+            "description": "Reviews counted."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "formula",
+          "value",
+          "denominator"
+        ],
+        "title": "RatingMetric"
+      },
       "RatingOut": {
         "properties": {
           "average": {
@@ -12217,6 +12512,43 @@
           "count"
         ],
         "title": "RatingOut"
+      },
+      "RatioMetric": {
+        "properties": {
+          "formula": {
+            "$ref": "#/components/schemas/MetricFormula"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value",
+            "description": "numerator / denominator, to 4 decimals; null when the denominator is 0."
+          },
+          "numerator": {
+            "type": "integer",
+            "title": "Numerator"
+          },
+          "denominator": {
+            "type": "integer",
+            "title": "Denominator"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "formula",
+          "value",
+          "numerator",
+          "denominator"
+        ],
+        "title": "RatioMetric",
+        "description": "`numerator` of `denominator`, so the panel can show \"12 of 40\"."
       },
       "ReadinessResponse": {
         "properties": {
@@ -12898,6 +13230,51 @@
         ],
         "title": "RequestSummary"
       },
+      "ResponseTimeMetric": {
+        "properties": {
+          "formula": {
+            "$ref": "#/components/schemas/MetricFormula"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value",
+            "description": "The mean, in minutes to 1 decimal; null when no request had a contact."
+          },
+          "median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median",
+            "description": "The median, in minutes to 1 decimal."
+          },
+          "denominator": {
+            "type": "integer",
+            "title": "Denominator",
+            "description": "Requests of the range with a first contact."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "formula",
+          "value",
+          "median",
+          "denominator"
+        ],
+        "title": "ResponseTimeMetric"
+      },
       "ReverseAddressOut": {
         "properties": {
           "line1": {
@@ -13569,6 +13946,37 @@
           "warning"
         ],
         "title": "SentMessageOut"
+      },
+      "SeriesPoint": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day",
+            "description": "A day in `time_zone`."
+          },
+          "requests_created": {
+            "type": "integer",
+            "title": "Requests Created"
+          },
+          "jobs_completed": {
+            "type": "integer",
+            "title": "Jobs Completed"
+          },
+          "gmv_cents": {
+            "type": "integer",
+            "title": "Gmv Cents"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "day",
+          "requests_created",
+          "jobs_completed",
+          "gmv_cents"
+        ],
+        "title": "SeriesPoint"
       },
       "ServedCheckOut": {
         "properties": {
