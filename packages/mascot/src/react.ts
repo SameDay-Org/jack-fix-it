@@ -69,12 +69,17 @@ export function Mascot({
   const [motion, setMotion] = useState<MotionState>("still");
   const [rig, setRig] = useState<PoseRig>(RIGS[pose]);
   const motionRef = useRef(motion);
+  const animateRef = useRef(animate);
   const rigRef = useRef(rig);
   const shownPose = useRef(pose);
 
   useEffect(() => {
     motionRef.current = motion;
   }, [motion]);
+  // Before the pose effect below: `motion` only follows `animate` one render later.
+  useEffect(() => {
+    animateRef.current = animate;
+  }, [animate]);
   useEffect(() => {
     rigRef.current = rig;
   }, [rig]);
@@ -92,7 +97,7 @@ export function Mascot({
     return transition({
       from: rigRef.current,
       to: RIGS[pose],
-      canRun: () => motionRef.current === "running",
+      canRun: () => animateRef.current && motionRef.current === "running",
       frames: FRAMES,
       onFrame: setRig,
     });
