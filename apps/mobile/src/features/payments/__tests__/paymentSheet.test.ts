@@ -8,6 +8,7 @@ import {
 
 import { deferred } from "../../../api/__tests__/helpers";
 import { openPaymentSheet, openSetupSheet } from "../paymentSheet";
+import type { PaymentSheetOut } from "../paymentStore";
 import { resetSheetCustomer } from "../sheetCustomer";
 import { SHEET } from "./helpers";
 
@@ -40,6 +41,23 @@ beforeEach(() => {
   jest.mocked(resetPaymentSheetCustomer).mockReset().mockResolvedValue(null);
 });
 
+/** Spies on every console method, so a test can read what was logged. */
+const spyOnConsole = () =>
+  (["log", "info", "warn", "error", "debug"] as const).map((method) =>
+    jest.spyOn(console, method).mockImplementation(),
+  );
+/** Every console call of the spies, with an Error's name, message and stack spelled out. */
+const linesOf = (spies: ReturnType<typeof spyOnConsole>) =>
+  spies.flatMap((spy) =>
+    spy.mock.calls.map((args) =>
+      JSON.stringify(args, (_key, value: unknown) =>
+        value instanceof Error
+          ? { name: value.name, message: value.message, stack: value.stack }
+          : value,
+      ),
+    ),
+  );
+
 const sdkCalls = () => ({
   stripe: jest.mocked(initStripe).mock.calls.length,
   sheet: jest.mocked(initPaymentSheet).mock.calls.length,
@@ -65,17 +83,77 @@ describe("openPaymentSheet", () => {
     );
   });
 
-  it("still opens with the customer: their id, the ephemeral key and the PaymentIntent", async () => {
+  it("opens with the customer through the CustomerSession, never the deprecated ephemeral key", async () => {
     await expect(open()).resolves.toEqual({ kind: "paid" });
     const params = jest.mocked(initPaymentSheet).mock.calls[0][0];
     expect(params).toMatchObject({
       customerId: "cus_jack",
-      customerEphemeralKeySecret: "ek_test_789",
+      customerSessionClientSecret: "cuss_secret_789",
       paymentIntentClientSecret: "pi_123_secret_456",
       merchantDisplayName: "Jack Fix It",
       allowsDelayedPaymentMethods: false,
     });
+    // The API still sends the old key for one release (#436): a sheet given it has full rights.
+    expect(params).not.toHaveProperty("customerEphemeralKeySecret");
+    expect(JSON.stringify(params)).not.toContain(SHEET.ephemeral_key_secret);
     expect(params).not.toHaveProperty("setupIntentClientSecret");
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["empty", ""],
+  ])(
+    "an API without the session's secret (%s) gets the calm failure and opens nothing",
+    async (_, secret) => {
+      const old = {
+        ...SHEET,
+        customer_session_client_secret: secret,
+      } as unknown as PaymentSheetOut;
+      await expect(
+        openPaymentSheet(old, { merchantName: "Jack Fix It", stillWanted: () => true }),
+      ).resolves.toEqual({ kind: "failed", reason: "unavailable" });
+      expect(sdkCalls()).toEqual(NONE);
+      expect(resetPaymentSheetCustomer).not.toHaveBeenCalled();
+    },
+  );
+
+  it("logs no secret of the sheet, whether it opens, fails or cannot open", async () => {
+    const spies = spyOnConsole();
+    try {
+      // Stripe's errors may quote what it was given: their text is never logged either.
+      jest
+        .mocked(initPaymentSheet)
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({
+          error: {
+            code: PaymentSheetError.Failed,
+            message: `No such customer session: ${SHEET.customer_session_client_secret}`,
+          },
+        });
+      jest.mocked(presentPaymentSheet).mockResolvedValueOnce({
+        error: { code: PaymentSheetError.Failed, message: `Declined for ${SHEET.customer_id}` },
+      });
+      await expect(open()).resolves.toEqual({ kind: "failed", reason: "failed" });
+      await expect(open()).resolves.toEqual({ kind: "failed", reason: "unavailable" });
+      jest
+        .mocked(initStripe)
+        .mockRejectedValueOnce(new Error(`Invalid key ${SHEET.publishable_key}`));
+      await expect(open()).resolves.toEqual({ kind: "failed", reason: "unavailable" });
+
+      const secrets = [
+        SHEET.customer_session_client_secret,
+        SHEET.payment_intent_client_secret,
+        SHEET.ephemeral_key_secret,
+        SHEET.customer_id,
+        SHEET.publishable_key,
+      ];
+      const leaks = linesOf(spies).flatMap((line) =>
+        secrets.filter((secret) => line.includes(secret)).map((secret) => ({ secret, line })),
+      );
+      expect(leaks).toEqual([]);
+    } finally {
+      spies.forEach((spy) => spy.mockRestore());
+    }
   });
 
   it("a live key uses Google Pay's production wallet", async () => {
@@ -154,10 +232,11 @@ describe("openSetupSheet", () => {
   // Recognizable values: the sheet's result and the console never carry one of them.
   const SETUP = {
     client_secret: "seti_123_secret_456",
-    ephemeral_key_secret: "ek_test_789",
     customer_id: "cus_jack",
     publishable_key: "pk_test_jack",
   };
+  /** What an API from before #253c still put in the answer: the sheet must never use it. */
+  const OLD_KEY = "ek_test_789";
   // What the mocked Stripe errors say. Their text may describe the card or carry a secret: only an
   // error's code decides the result, and the text reaches neither the caller nor the console.
   const STRIPE_SAYS = {
@@ -173,27 +252,14 @@ describe("openSetupSheet", () => {
   const save = (stillWanted = () => true) =>
     openSetupSheet(SETUP, { merchantName: "Jack Fix It", stillWanted });
 
-  const spyOnConsole = () =>
-    (["log", "info", "warn", "error", "debug"] as const).map((method) =>
-      jest.spyOn(console, method).mockImplementation(),
-    );
   let consoleSpies: ReturnType<typeof spyOnConsole> = [];
   beforeEach(() => {
     consoleSpies = spyOnConsole();
   });
   afterEach(() => consoleSpies.forEach((spy) => spy.mockRestore()));
 
-  /** Every console call of the test so far, with an Error's name, message and stack spelled out. */
-  const logged = () =>
-    consoleSpies.flatMap((spy) =>
-      spy.mock.calls.map((args) =>
-        JSON.stringify(args, (_key, value: unknown) =>
-          value instanceof Error
-            ? { name: value.name, message: value.message, stack: value.stack }
-            : value,
-        ),
-      ),
-    );
+  /** Every console call of the test so far. */
+  const logged = () => linesOf(consoleSpies);
   /** Fails with each console line that carries a value of SETUP or what Stripe said. */
   const expectNothingLogged = () =>
     expect(
@@ -203,7 +269,13 @@ describe("openSetupSheet", () => {
     ).toEqual([]);
 
   it("opens the sheet in setup mode without the customer: a SetupIntent, no wallet and no payment", async () => {
-    await expect(save()).resolves.toEqual({ kind: "saved" });
+    // Even an older API's key, still in the answer, is left out.
+    await expect(
+      openSetupSheet(
+        { ...SETUP, ephemeral_key_secret: OLD_KEY },
+        { merchantName: "Jack Fix It", stillWanted: () => true },
+      ),
+    ).resolves.toEqual({ kind: "saved" });
 
     expect(initStripe).toHaveBeenCalledWith(
       expect.objectContaining({ publishableKey: "pk_test_jack", urlScheme: "jackfixit" }),
@@ -219,7 +291,8 @@ describe("openSetupSheet", () => {
     expect(params).not.toHaveProperty("customerId");
     expect(params).not.toHaveProperty("customerEphemeralKeySecret");
     expect(JSON.stringify(params)).not.toContain(SETUP.customer_id);
-    expect(JSON.stringify(params)).not.toContain(SETUP.ephemeral_key_secret);
+    expect(params).not.toHaveProperty("customerSessionClientSecret");
+    expect(JSON.stringify(params)).not.toContain(OLD_KEY);
     expect(params.paymentIntentClientSecret).toBeUndefined();
     // Apple Pay and Google Pay are not saved cards.
     expect(params.applePay).toBeUndefined();
