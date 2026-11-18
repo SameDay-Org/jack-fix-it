@@ -14,7 +14,9 @@ from app.modules.payments.schemas import JobTransferOut, PaymentCreate, PaymentS
 from app.modules.payments.service import PaymentsConfig, PaymentService
 from app.modules.payments.transfer_reader import TransferReader
 
-router = APIRouter(prefix="/requests", tags=["payments"])
+# A customer's checkout (#61). Its answer carries a live CustomerSession credential (#253):
+# no HTTP cache may keep it, nor any error of the route.
+router = APIRouter(prefix="/requests", tags=["payments"], route_class=NoStoreRoute)
 # The BDC and admins: a job's transfer to its pro, read-only (#68). Never stored by a cache.
 staff_router = APIRouter(
     prefix="/admin/jobs/{job_id}/transfer", tags=["payments"], route_class=NoStoreRoute

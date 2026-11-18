@@ -548,6 +548,27 @@ async def test_non_customers_are_refused(
     assert (stripe_fake.customer_sessions, stripe_fake.ephemeral_keys) == ([], [])
 
 
+async def test_every_checkout_answer_is_no_store(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    stripe_fake: FakeStripePayments,
+) -> None:
+    """The answer carries a live CustomerSession credential (#253): no HTTP cache may keep it,
+    nor any error of the route (#437, Vault round 1)."""
+    request_id, quote_id, _ = await accepted_request(db_session, world)
+
+    paid = await pay(db_client, world, request_id, quote_id)
+    anonymous = await db_client.post(payment_path(request_id, quote_id))
+    invalid = await pay(db_client, world, request_id, quote_id, json={"amount_cents": 1})
+
+    assert paid.status_code == 200, paid.text
+    assert paid.json()["customer_session_client_secret"]
+    assert (anonymous.status_code, invalid.status_code) == (401, 422)
+    for response in (paid, anonymous, invalid):
+        assert response.headers["cache-control"] == "no-store"
+
+
 async def test_malformed_ids_422(db_client: httpx.AsyncClient, world: World) -> None:
     for url in (
         f"/v1/requests/not-a-uuid/quotes/{uuid.uuid4()}/payment",
