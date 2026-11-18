@@ -1,4 +1,5 @@
 import type { TFunction } from "i18next";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Pressable, Text, View } from "react-native";
 
@@ -70,12 +71,20 @@ export function ReportSummary({ dispute, now, outcome, testID }: ReportSummaryPr
 /**
  * "Report sent" on the customer's job screen (#75): the report the customer made, while it is
  * open and once an admin resolved it. Loading draws its lines' place; a failed read says so with a
- * retry, and the job stays usable around it.
+ * retry, and the job stays usable around it. The job's status moving on (disputed to paid out or
+ * refunded) is the resolution landing: the report is read again then, even with the block on
+ * screen all along.
  */
 export function ReportStatus({ job }: { job: CustomerJob }) {
   const { t } = useTranslation();
   const { data, isError, isFetching, refetch, dataUpdatedAt } = useCustomerDispute(job.id);
   const dispute = data?.dispute ?? null;
+  const seenStatus = useRef(job.status);
+  useEffect(() => {
+    if (seenStatus.current === job.status) return;
+    seenStatus.current = job.status;
+    void refetch();
+  }, [job.status, refetch]);
   if (data && dispute === null) return null;
 
   return (

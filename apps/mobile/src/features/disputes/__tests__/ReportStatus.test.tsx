@@ -170,6 +170,26 @@ describe("ReportStatus", () => {
     expect(screen.getByTestId("job-report-summary")).toBeTruthy();
   });
 
+  it("reads the report again when the job's status moves on under it", async () => {
+    const rendered = await render(<ReportStatus job={DISPUTED} />, { wrapper });
+    await act(settle);
+    expect(screen.getByLabelText("The work isn't finished, Today, Open")).toBeTruthy();
+    answer = respond({
+      dispute: dispute({
+        status: "resolved",
+        resolution: "refunded",
+        resolved_at: new Date().toISOString(),
+      }),
+      can_report: false,
+      report_by: null,
+    });
+    const before = reads();
+    await rendered.rerender(<ReportStatus job={{ ...DISPUTED, status: "refunded" }} />);
+    await act(settle);
+    expect(reads()).toBe(before + 1);
+    expect(screen.getByLabelText("The work isn't finished, Today, Resolved")).toBeTruthy();
+  });
+
   it("draws nothing when no report was made", async () => {
     answer = respond({ dispute: null, can_report: false, report_by: null });
     await render(<ReportStatus job={customerJob({ status: "paid_out" })} />, { wrapper });

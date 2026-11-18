@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 import type { ReactNode } from "react";
+import { AccessibilityInfo } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { router } from "expo-router";
 
@@ -191,15 +192,19 @@ describe("ReportProblemScreen", () => {
   });
 
   it("asks for a reason and a description at the fields, and sends nothing", async () => {
+    const announce = jest.spyOn(AccessibilityInfo, "announceForAccessibilityWithOptions");
     await renderScreen();
     await send();
     expect(screen.getByTestId("report-reason-error")).toHaveTextContent("Choose what went wrong.");
+    // The form brings the first missing field into view and says what it needs.
+    expect(announce).toHaveBeenLastCalledWith("Choose what went wrong.", { queue: true });
     expect(screen.getByText("Describe the problem.")).toBeTruthy();
     // Spaces alone are no description.
     await fireEvent.press(screen.getByRole("radio", { name: "Something else" }));
     await fireEvent.changeText(screen.getByTestId("report-description"), "   ");
     await send();
     expect(screen.getByText("Describe the problem.")).toBeTruthy();
+    expect(announce).toHaveBeenLastCalledWith("Describe the problem.", { queue: true });
     expect(postCalls()).toHaveLength(0);
   });
 

@@ -5,6 +5,7 @@ import { Pressable, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui";
+import { cx } from "@/components/ui/cx";
 import { chatHref } from "@/features/chat";
 import { reportProblemHref, useCustomerDispute } from "@/features/disputes/api";
 import { bubbleShadow, continuousCorners } from "@/theme";
@@ -171,20 +172,37 @@ export function ConfirmDock({ job, requestId, updatedAt, push }: ConfirmDockProp
         onPress={() => push(confirmJobHref(requestId))}
         testID="job-confirm"
       />
-      {canReport ? (
-        <Button
-          label={t("disputes.entry")}
-          variant="ghost"
-          onPress={() => push(reportProblemHref(requestId))}
-          testID="job-report-problem"
-        />
-      ) : null}
+      {canReport ? <ReportAction onPress={() => push(reportProblemHref(requestId))} /> : null}
       {deadline ? (
         <Text className="text-center text-footnote text-gray-500" testID="job-confirm-deadline">
           {deadline}
         </Text>
       ) : null}
     </View>
+  );
+}
+
+/**
+ * "Report a problem", the dock's quieter second action, drawn as the kit's ghost button. Not the
+ * kit's `Button`, whose label is one line by contract: at a large font, or in Spanish, these words
+ * wrap instead of being cut short. The label spans the action's width, so it is never measured
+ * as one line by a fraction and cut.
+ */
+function ReportAction({ onPress }: { onPress: () => void }) {
+  const { t } = useTranslation();
+  const [pressed, setPressed] = useState(false);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      onPressIn={() => setPressed(true)}
+      onPressOut={() => setPressed(false)}
+      style={continuousCorners}
+      className={cx("min-h-12 justify-center rounded-pill px-5", pressed && "bg-navy-900/10")}
+      testID="job-report-problem"
+    >
+      <Text className="text-center text-headline text-navy-900">{t("disputes.entry")}</Text>
+    </Pressable>
   );
 }
 

@@ -1,9 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { uuid } from "expo";
 import { router, useLocalSearchParams } from "expo-router";
-import { useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { KeyboardAvoidingView, ScrollView, Text, View } from "react-native";
+import { useReducedMotion } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { sessionGeneration } from "@/api";
@@ -194,6 +195,10 @@ function ReportForm({ jobId, requestId, onSent, onClosed }: ReportFormProps) {
   const [failure, setFailure] = useState<SendFailure | null>(null);
   const sending = useRef(false);
   const media = useMediaUpload({ purpose: "dispute_photo", max: disputePhotoMax });
+  const reduceMotion = useReducedMotion();
+  const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
+  // Where the reason and the description start in the form, to scroll to what is missing.
+  const at = useRef({ reason: 0, description: 0 });
 
   const text = description.trim();
   const over = text.length - DESCRIPTION_MAX;
@@ -201,9 +206,23 @@ function ReportForm({ jobId, requestId, onSent, onClosed }: ReportFormProps) {
   const photosFailed = media.items.some((item) => item.status === "failed");
   const complete = reason !== null && text.length > 0 && over <= 0;
 
+  /** Brings the first field Send found missing into view, and says what it needs. */
+  const showMissing = () => {
+    const field = reason === null ? "reason" : "description";
+    scroll.current?.scrollTo({ y: at.current[field], animated: !reduceMotion });
+    announce(
+      reason === null
+        ? t("disputes.report.reasonMissing")
+        : over > 0
+          ? t("disputes.report.tooLong", { count: over })
+          : t("disputes.report.descriptionMissing"),
+    );
+  };
+
   const submit = async () => {
     setChecked(true);
-    if (sending.current || !complete || reason === null || photosWaiting || photosFailed) return;
+    if (!complete || reason === null) return showMissing();
+    if (sending.current || photosWaiting || photosFailed) return;
     sending.current = true;
     setBusy(true);
     setFailure(null);
@@ -230,6 +249,7 @@ function ReportForm({ jobId, requestId, onSent, onClosed }: ReportFormProps) {
       className="flex-1"
     >
       <ScrollView
+        ref={scroll}
         contentContainerClassName="flex-grow gap-6 px-4 pb-6 pt-2"
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
@@ -238,7 +258,10 @@ function ReportForm({ jobId, requestId, onSent, onClosed }: ReportFormProps) {
         <BackButton fallbackHref={jobHref(requestId)} />
         <Header title={t("disputes.report.title")} intro={t("disputes.report.intro")} />
 
-        <View className="gap-3">
+        <View
+          className="gap-3"
+          onLayout={(event) => (at.current.reason = event.nativeEvent.layout.y)}
+        >
           <Text className="text-headline text-navy-900">{t("disputes.report.reasonLabel")}</Text>
           {checked && reason === null ? (
             <Text className="text-footnote text-danger" testID="report-reason-error">
@@ -266,24 +289,26 @@ function ReportForm({ jobId, requestId, onSent, onClosed }: ReportFormProps) {
 
         {/* No native length limit: a long paste is never cut behind the customer's back. Past
             the limit the field says by how much, and Send waits. */}
-        <Input
-          label={t("disputes.report.descriptionLabel")}
-          value={description}
-          onChangeText={setDescription}
-          hint={t("disputes.report.descriptionHint")}
-          error={
-            over > 0
-              ? t("disputes.report.tooLong", { count: over })
-              : checked && text.length === 0
-                ? t("disputes.report.descriptionMissing")
-                : undefined
-          }
-          multiline
-          counter={lengthCounter(t, text.length, DESCRIPTION_MAX)}
-          autoCapitalize="sentences"
-          disabled={busy}
-          testID="report-description"
-        />
+        <View onLayout={(event) => (at.current.description = event.nativeEvent.layout.y)}>
+          <Input
+            label={t("disputes.report.descriptionLabel")}
+            value={description}
+            onChangeText={setDescription}
+            hint={t("disputes.report.descriptionHint")}
+            error={
+              over > 0
+                ? t("disputes.report.tooLong", { count: over })
+                : checked && text.length === 0
+                  ? t("disputes.report.descriptionMissing")
+                  : undefined
+            }
+            multiline
+            counter={lengthCounter(t, text.length, DESCRIPTION_MAX)}
+            autoCapitalize="sentences"
+            disabled={busy}
+            testID="report-description"
+          />
+        </View>
 
         <View className="gap-3">
           <Text className="text-headline text-navy-900">{t("disputes.report.photosLabel")}</Text>
