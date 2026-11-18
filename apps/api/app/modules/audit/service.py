@@ -93,6 +93,13 @@ class AuditService:
             reason=operator.reason,
         )
 
+    async def active_admin(self, user_id: uuid.UUID) -> bool:
+        """Whether the user is an active admin as last committed, read now and share-locked
+        until the caller's transaction ends: an admin demoted or suspended since an earlier
+        check (during a provider call) is seen, and cannot be demoted between this check and
+        the commit of what it guards (#433 round 2)."""
+        return _active_admin(await self._users.get_current_shared(user_id))
+
     async def record_outcome(
         self,
         actor_id: uuid.UUID,

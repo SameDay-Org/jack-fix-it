@@ -77,6 +77,17 @@ class UserRepository:
         result = await self._session.scalars(statement)
         return result.one_or_none()
 
+    async def get_by_id_for_share(self, user_id: uuid.UUID) -> User | None:
+        """FOR SHARE until the transaction ends, read as last committed (never the session's
+        copy): a change to the row waits for this transaction."""
+        statement = (
+            select(User)
+            .where(User.id == user_id)
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
     async def get_by_id_for_update(self, user_id: uuid.UUID) -> User | None:
         """FOR NO KEY UPDATE until the transaction ends, read as last committed."""
         statement = (
