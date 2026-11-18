@@ -27,8 +27,9 @@ const entry = (id: FaqId, section: FaqSection): FaqEntry => ({
  * under `help.faq.<id>` in en.json and es.json (faq.test.ts fails on strings no entry shows).
  *
  * The answers state only what the product docs decide and the app does today. The cancellation and
- * refund rule (#3) and the problem window (#4) are still open, so `cancel` and `problem` say the
- * team decides case by case; no answer names a price, a fee or a number of hours. Contacts are
+ * refund rule (#3) and the problem window (#4) are still open, so `cancel` says the team decides
+ * case by case and `problem` that the team reviews it; no answer names a price, a fee or a number
+ * of hours, or says that money is held, released or returned (legal copy rule). Contacts are
  * never exchanged: `chat` and `privacy` send people to the job's chat, which opens after booking.
  */
 export const FAQ: readonly FaqEntry[] = [

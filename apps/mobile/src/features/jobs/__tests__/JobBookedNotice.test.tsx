@@ -155,7 +155,7 @@ describe("JobBookedNotice (#64)", () => {
   it.each([
     ["cancelled", "This job was cancelled", "Nothing more is needed from you."],
     ["disputed", "This job needs attention", "A problem was reported on this job."],
-    ["confirmed", "Job confirmed", "Payment is released to Dan."],
+    ["confirmed", "Job confirmed", "This job is complete."],
   ] as const)(
     "a %s job is not 'booked': the notice says where it ended",
     async (status, title, line) => {

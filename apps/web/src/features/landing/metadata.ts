@@ -8,11 +8,17 @@ import { getT } from "@/i18n/server";
 /** The landing page's metadata in one language (features/site/metadata.ts). */
 export async function landingMetadata(locale: Locale): Promise<Metadata> {
   const t = await getT(locale);
-  return localizedMetadata({
-    locale,
-    paths: LANDING_PATHS,
-    title: t("landing.meta.title"),
-    description: t("landing.meta.description"),
-    siteName: t("brand.name"),
-  });
+  const title = t("landing.meta.title");
+  const description = t("landing.meta.description");
+  return {
+    ...localizedMetadata({
+      locale,
+      paths: LANDING_PATHS,
+      title,
+      description,
+      siteName: t("brand.name"),
+    }),
+    // A large card on X; its image is the page's Open Graph image (opengraph-image.tsx).
+    twitter: { card: "summary_large_image", title, description },
+  };
 }

@@ -907,7 +907,7 @@ describe("JobScreen, the finished job (#66)", () => {
     expect(announced()).toEqual([]);
     await setFocused(true);
     expect(announced()).toEqual(["Thanks! Job confirmed"]);
-    expect(screen.getByTestId("job-support").props.children).toBe("Payment is released to Dan.");
+    expect(screen.getByTestId("job-support").props.children).toBe("This job is complete.");
     expect(screen.queryByTestId("job-confirm-dock")).toBeNull();
     expect(grows()).toHaveLength(1);
 

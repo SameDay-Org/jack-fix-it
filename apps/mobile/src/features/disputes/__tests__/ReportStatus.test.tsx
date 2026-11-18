@@ -188,6 +188,38 @@ describe("ReportStatus", () => {
     expect(await screen.findByLabelText("The work isn't finished, Today, Resolved")).toBeTruthy();
   });
 
+  it("says a failed read again over the report it keeps, and its retry shows the outcome", async () => {
+    const rendered = await render(<ReportStatus job={DISPUTED} />, { wrapper });
+    await act(settle);
+    expect(await screen.findByLabelText("The work isn't finished, Today, Open")).toBeTruthy();
+    expect(screen.queryByTestId("job-report-error")).toBeNull();
+    answer = () => Promise.resolve(errorResponse(503, "unavailable"));
+    const before = reads();
+    await rendered.rerender(<ReportStatus job={{ ...DISPUTED, status: "refunded" }} />);
+    await waitFor(() => expect(reads()).toBe(before + 1));
+    // The report it had stays on screen, under a line that says it could not be updated.
+    expect(await screen.findByTestId("job-report-error")).toHaveTextContent(
+      "We couldn't update this report. Try again",
+    );
+    expect(screen.getByTestId("job-report-summary")).toBeTruthy();
+    answer = respond({
+      dispute: dispute({
+        status: "resolved",
+        resolution: "refunded",
+        resolved_at: new Date().toISOString(),
+      }),
+      can_report: false,
+      report_by: null,
+    });
+    await fireEvent.press(screen.getByTestId("job-report-error"));
+    await waitFor(() => expect(reads()).toBe(before + 2));
+    expect(await screen.findByLabelText("The work isn't finished, Today, Resolved")).toBeTruthy();
+    expect(screen.getByTestId("job-report-summary-outcome")).toHaveTextContent(
+      "Our team reviewed the report and your payment for this job went back to your payment method.",
+    );
+    expect(screen.queryByTestId("job-report-error")).toBeNull();
+  });
+
   it("draws nothing when no report was made", async () => {
     answer = respond({ dispute: null, can_report: false, report_by: null });
     await render(<ReportStatus job={customerJob({ status: "paid_out" })} />, { wrapper });
@@ -208,13 +240,15 @@ describe("Report a problem in the confirm dock", () => {
     );
   });
 
-  const renderDock = async () => {
-    await render(
-      <ConfirmDock job={FINISHED} requestId={REQUEST_ID} updatedAt={Date.now()} push={push} />,
-      { wrapper },
-    );
+  const dock = (updatedAt: number) => (
+    <ConfirmDock job={FINISHED} requestId={REQUEST_ID} updatedAt={updatedAt} push={push} />
+  );
+  const renderDock = async (updatedAt = Date.now()) => {
+    const rendered = await render(dock(updatedAt), { wrapper });
     await act(settle);
+    return rendered;
   };
+  const unavailable = () => Promise.resolve(errorResponse(503, "unavailable"));
   const reportable = (msAhead: number) =>
     respond({
       dispute: null,
@@ -233,11 +267,21 @@ describe("Report a problem in the confirm dock", () => {
     });
   });
 
-  it("leaves it out when the API says no report can be made", async () => {
-    answer = respond({ dispute: null, can_report: false, report_by: null });
+  it.each([
+    ["no deadline", null],
+    ["a deadline still ahead", 3_600_000],
+  ] as const)("leaves it out when the API says no report can be made: %s", async (_, ahead) => {
+    answer = respond({
+      dispute: null,
+      can_report: false,
+      report_by: ahead === null ? null : new Date(Date.now() + ahead).toISOString(),
+    });
     await renderDock();
+    await waitFor(() => expect(reads()).toBe(1));
+    await act(settle);
     expect(screen.getByTestId("job-confirm")).toBeTruthy();
     expect(screen.queryByTestId("job-report-problem")).toBeNull();
+    expect(screen.queryByTestId("job-report-check-failed")).toBeNull();
   });
 
   it("leaves it out while the window is unknown: loading, or a failed read", async () => {
@@ -245,12 +289,42 @@ describe("Report a problem in the confirm dock", () => {
     answer = () => held.promise;
     await renderDock();
     expect(screen.queryByTestId("job-report-problem")).toBeNull();
+    expect(screen.queryByTestId("job-report-check-failed")).toBeNull();
     await act(async () => {
       held.resolve(errorResponse(503, "unavailable"));
       await settle();
     });
+    expect(await screen.findByTestId("job-report-check-failed")).toHaveTextContent(
+      "We couldn't check if you can report a problem. Try again",
+    );
     expect(screen.queryByTestId("job-report-problem")).toBeNull();
     expect(screen.getByTestId("job-confirm")).toBeTruthy();
+  });
+
+  it("reads the window again on Try again, and offers the report once it is open", async () => {
+    answer = unavailable;
+    await renderDock();
+    const retry = await screen.findByTestId("job-report-check-failed");
+    answer = reportable(3_600_000);
+    await fireEvent.press(retry);
+    await waitFor(() => expect(reads()).toBe(2));
+    expect(await screen.findByTestId("job-report-problem")).toBeTruthy();
+    expect(screen.queryByTestId("job-report-check-failed")).toBeNull();
+  });
+
+  it("reads the window again when the job is read again, and offers the report", async () => {
+    const first = Date.now();
+    answer = unavailable;
+    const rendered = await renderDock(first);
+    expect(await screen.findByTestId("job-report-check-failed")).toBeTruthy();
+    await rendered.rerender(dock(first));
+    await act(settle);
+    expect(reads()).toBe(1);
+    answer = reportable(3_600_000);
+    await rendered.rerender(dock(first + 1_000));
+    await waitFor(() => expect(reads()).toBe(2));
+    expect(await screen.findByTestId("job-report-problem")).toBeTruthy();
+    expect(screen.queryByTestId("job-report-check-failed")).toBeNull();
   });
 
   it("takes it away when the API's deadline passes on screen", async () => {
