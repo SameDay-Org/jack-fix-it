@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
 
 import { sessionGeneration } from "@/api";
 import { Button, Input, Notice, TextSkeleton } from "@/components/ui";
@@ -19,12 +19,15 @@ import {
 } from "./api";
 import { REPLY_MAX } from "./config";
 import { ReportSummary } from "./ReportStatus";
+import { RetryLine } from "./RetryLine";
 
 /**
  * "The customer reported a problem" on the pro's job screen (#75), for a disputed job: the
  * reason, the customer's words as the API stored them (contact details masked), the photos'
  * privacy-safe copies (never an original), where it stands, and the pro's one reply for the team
- * that reviews both sides. Once sent, the reply shows read-only.
+ * that reviews both sides. Once sent, the reply shows read-only. A read again that fails (after a
+ * refused reply, or for an expired photo) keeps what the block had, under a line that says it could
+ * not be updated, with a retry.
  */
 export function ReportedProblem({ jobId }: { jobId: string }) {
   const { t } = useTranslation();
@@ -44,6 +47,14 @@ export function ReportedProblem({ jobId }: { jobId: string }) {
       </View>
       {dispute && data ? (
         <>
+          {isError ? (
+            <RetryLine
+              message={t("disputes.status.updateFailed")}
+              busy={isFetching}
+              onRetry={() => void refetch()}
+              testID="pro-job-report-error"
+            />
+          ) : null}
           <ReportSummary dispute={dispute} now={dataUpdatedAt} testID="pro-job-report-summary" />
           <Text className="text-body text-navy-900" testID="pro-job-report-description">
             {dispute.description}
@@ -70,21 +81,12 @@ export function ReportedProblem({ jobId }: { jobId: string }) {
           />
         </>
       ) : isError ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ busy: isFetching }}
-          disabled={isFetching}
-          onPress={() => void refetch()}
-          className="min-h-12 justify-center self-start"
+        <RetryLine
+          message={t("disputes.pro.loadFailed")}
+          busy={isFetching}
+          onRetry={() => void refetch()}
           testID="pro-job-report-error"
-        >
-          <Text className="text-callout text-gray-500">
-            {`${t("disputes.pro.loadFailed")} `}
-            <Text className="font-semibold text-navy-900 underline">
-              {t("disputes.status.retry")}
-            </Text>
-          </Text>
-        </Pressable>
+        />
       ) : (
         <View className="gap-2" testID="pro-job-report-loading">
           <TextSkeleton type="headline" width="60%" />

@@ -223,6 +223,32 @@ describe("ReportedProblem", () => {
     expect(screen.queryByText(/already replied/)).toBeNull();
   });
 
+  it("says when the read after a 409 fails, and its retry shows the reply already given", async () => {
+    await renderBlock();
+    expect(screen.queryByTestId("pro-job-report-error")).toBeNull();
+    await fireEvent.changeText(field(), "Another answer.");
+    await send();
+    view = "down";
+    const before = reads();
+    await answer(0, errorResponse(409, "already_replied"));
+    await waitFor(() => expect(reads()).toBe(before + 1));
+    // What the block had stays, under a line that says it could not be updated.
+    expect(await screen.findByTestId("pro-job-report-error")).toHaveTextContent(
+      "We couldn't update this report. Try again",
+    );
+    expect(screen.getByTestId("pro-job-report-summary")).toBeTruthy();
+    view = {
+      dispute: dispute({ reply: "The first answer.", replied_at: new Date().toISOString() }),
+      can_reply: false,
+    };
+    await fireEvent.press(screen.getByTestId("pro-job-report-error"));
+    await waitFor(() => expect(reads()).toBe(before + 2));
+    expect(await screen.findByTestId("pro-job-report-reply-sent")).toHaveTextContent(
+      /The first answer\./,
+    );
+    expect(screen.queryByTestId("pro-job-report-error")).toBeNull();
+  });
+
   it("offers no box once the report is resolved without a reply", async () => {
     view = {
       dispute: dispute({ status: "resolved", resolution: "released", resolved_at: later }),
