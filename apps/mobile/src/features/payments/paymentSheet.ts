@@ -115,17 +115,26 @@ async function runSheet(
   }
 }
 
-/** The sheet that takes a payment for a quote (#59): see `runSheet` for what it promises. */
+/**
+ * The sheet that takes a payment for a quote (#59): see `runSheet` for what it promises. It opens
+ * with the customer through a CustomerSession (#253c): the sheet lists the cards the wallet lists,
+ * and Stripe's server lets it neither remove one nor offer to save a new one (cards are added in the
+ * wallet). An answer without the session's secret comes from an API older than this app: the sheet
+ * does not open (`unavailable`), and the answer's deprecated ephemeral key, which would give the
+ * sheet full rights over the customer's cards, is never used.
+ */
 export function openPaymentSheet(
   sheet: PaymentSheetOut,
   options: SheetOptions,
 ): Promise<SheetResult> {
+  const customerSession = sheet.customer_session_client_secret;
+  if (!customerSession) return Promise.resolve({ kind: "failed", reason: "unavailable" });
   return runSheet(
     sheet.publishable_key,
     (shared) => ({
       ...shared,
       customerId: sheet.customer_id,
-      customerEphemeralKeySecret: sheet.ephemeral_key_secret,
+      customerSessionClientSecret: customerSession,
       paymentIntentClientSecret: sheet.payment_intent_client_secret,
       allowsDelayedPaymentMethods: false,
       applePay: paymentConfig.appleMerchantId
@@ -146,11 +155,12 @@ export function openPaymentSheet(
  * Apple Pay or Google Pay here: a wallet is not a saved card. The card goes from the sheet to
  * Stripe; this code only learns how the sheet ended.
  *
- * It opens without the customer (no customer id, no ephemeral key): the API created the SetupIntent
- * on the customer, so Stripe attaches the card it confirms to them all the same. Given the customer,
- * Stripe's sheet would also list their saved cards, let them remove one (a detach that skips the
- * API's delete and its choice of the next default) or pick one again ("saved" with no new card).
- * Without it the sheet is only the form for a new card, and the wallet changes only through the API.
+ * It opens without the customer (no customer id, and no key: the API no longer mints one, #253c).
+ * The API created the SetupIntent on the customer, so Stripe attaches the card it confirms to them
+ * all the same. Given the customer, Stripe's sheet would also list their saved cards, let them
+ * remove one (a detach that skips the API's delete and its choice of the next default) or pick one
+ * again ("saved" with no new card). Without it the sheet is only the form for a new card, and the
+ * wallet changes only through the API.
  */
 export async function openSetupSheet(
   setup: SetupIntentOut,
