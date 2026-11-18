@@ -13,7 +13,8 @@
   "landing": {
     "meta": {
       "title": "Jack Fix It · Pase lo que pase en casa, lo arreglamos.",
-      "description": "Cuéntale a Jack qué pasa en casa, compara presupuestos de precio fijo de profesionales cercanos y sigue el trabajo en la app."
+      "description": "Cuéntale a Jack qué pasa en casa, compara presupuestos de precio fijo de profesionales cercanos y sigue el trabajo en la app.",
+      "ogAlt": "El nombre Jack Fix It y su frase “Pase lo que pase en casa, lo arreglamos.” sobre azul marino."
     },
     "skipToContent": "Saltar al contenido",
     "homeLabel": "Jack Fix It, volver arriba",

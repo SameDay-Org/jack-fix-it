@@ -25,7 +25,7 @@ type Retryable = "offline" | "failed";
 
 /**
  * "Confirm the job is done?" (`/requests/[id]/confirm`, a fit-to-contents sheet over the finished
- * job, #66): it says what confirming does (the payment is released to the pro), then posts once,
+ * job, #66): it asks the customer to confirm once the pro has finished, then posts once,
  * however fast the taps. The answer decides the rest:
  * - confirmed: a success haptic, the sheet closes over the confirmed job (the screen under it
  *   turns as it closes, and says "Thanks! Job confirmed" aloud);
