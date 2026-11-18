@@ -48,7 +48,8 @@ const EXCEPTIONS: readonly Exception[] = [
 /**
  * Where the app talks about the customer's money: the confirm sheet and the job's status line (both
  * said "Payment is released"), the pay panel and its announcement, the wallet, quotes and payouts,
- * and every FAQ answer. No string under these prefixes can ever become an exception.
+ * every FAQ answer, and a reported problem and how it was resolved. No string under these prefixes
+ * can ever become an exception.
  */
 const PROMISE_KEYS = [
   "jobs.confirmSheet.",
@@ -59,6 +60,7 @@ const PROMISE_KEYS = [
   "quotes.",
   "quoteForm.",
   "help.faq.",
+  "disputes.",
 ] as const;
 
 /** Each English term the rule names, and its Spanish mirrors: both matchers must catch them. */
@@ -104,6 +106,13 @@ function violations(language: "en" | "es", catalog: unknown): string[] {
   });
 }
 
+/** The exceptions that sit under a promise key, as `language key`: there must be none. */
+function exceptedPromises(exceptions: readonly Exception[]): string[] {
+  return exceptions
+    .filter(({ key }) => PROMISE_KEYS.some((prefix) => key.startsWith(prefix)))
+    .map(({ language, key }) => `${language} ${key}`);
+}
+
 const CATALOGS = { en, es } as const;
 
 describe("legal copy", () => {
@@ -123,8 +132,18 @@ describe("legal copy", () => {
   });
 
   it("a customer promise key can never be an exception", () => {
-    const promises = EXCEPTIONS.filter(({ key }) => PROMISE_KEYS.some((p) => key.startsWith(p)));
-    expect(promises.map(({ language, key }) => `${language} ${key}`)).toEqual([]);
+    expect(exceptedPromises(EXCEPTIONS)).toEqual([]);
+  });
+
+  it("an exception under a reported problem's words fails, as under any promise key", () => {
+    const sent: Exception = {
+      language: "en",
+      key: "disputes.sent.body",
+      word: "refund",
+      phrase: "a refund",
+      why: "probe",
+    };
+    expect(exceptedPromises([...EXCEPTIONS, sent])).toEqual(["en disputes.sent.body"]);
   });
 
   it.each(["en", "es"] as const)("%s still has every promise key prefix", (language) => {
