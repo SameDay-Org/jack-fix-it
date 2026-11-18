@@ -337,13 +337,15 @@ is missing from either table, so this list cannot fall behind `app/config.py`.
 
 ### web
 
-| Variable                    | Value                                                                                                            | Secret | Source      |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------ | ----------- |
-| `APP_ENV`                   | `staging` or `production` (only production is indexable)                                                         | no     | D3.1 (#22)  |
-| `API_INTERNAL_URL`          | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}`                                                           | no     | D3.1 (#22)  |
-| `REFRESH_TOKEN_TTL_SECONDS` | the api's refresh token lifetime (2592000 unless the api sets another); the panel's session cookie lasts as long | no     | D16.1 (#80) |
-| `API_TIMEOUT_MS`            | `5000`: the longest wait on the api for one call, body included                                                  | no     | D16.1 (#80) |
-| `SITE_URL`                  | optional: the site's public origin, e.g. `https://${{RAILWAY_PUBLIC_DOMAIN}}` or the custom domain               | no     | D17 (#403)  |
+| Variable                    | Value                                                                                                                             | Secret | Source      |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------ | ----------- |
+| `APP_ENV`                   | `staging` or `production` (only production is indexable)                                                                          | no     | D3.1 (#22)  |
+| `API_INTERNAL_URL`          | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}`                                                                            | no     | D3.1 (#22)  |
+| `REFRESH_TOKEN_TTL_SECONDS` | the api's refresh token lifetime (2592000 unless the api sets another); the panel's session cookie lasts as long                  | no     | D16.1 (#80) |
+| `API_TIMEOUT_MS`            | `5000`: the longest wait on the api for one call, body included                                                                   | no     | D16.1 (#80) |
+| `SITE_URL`                  | optional: the site's public origin, e.g. `https://${{RAILWAY_PUBLIC_DOMAIN}}` or the custom domain                                | no     | D17 (#403)  |
+| `BUSINESS_TIME_ZONE`        | optional, mirrors the api's `BUSINESS_TIME_ZONE` (unset: its default, `America/New_York`): the KPI page's presets end today there | no     | D16.5 (#84) |
+| `METRICS_MAX_RANGE_DAYS`    | optional, mirrors the api's `METRICS_MAX_RANGE_DAYS` (unset: its default, `366`): the longest range the KPI page asks for         | no     | D16.5 (#84) |
 
 The web server calls the API over the private network; browsers and the mobile app use the
 api's public domain. `SITE_URL` is read when the site is built: it gives the showcase page
