@@ -59,7 +59,7 @@ function refreshQuotes(queryClient: QueryClient, requestId: string): void {
 
 /**
  * Pays for the accepted quote: asks the API for the sheet (`POST …/payment`, safe to repeat: the
- * same PaymentIntent with a new ephemeral key), opens Stripe's Payment Sheet, and records a
+ * same PaymentIntent with a new CustomerSession), opens Stripe's Payment Sheet, and records a
  * payment the sheet reports as done so the card can confirm it (`startConfirming`). Every step
  * belongs to the session the tap started in: after a sign-out or another sign-in nothing more is
  * sent or opened, and a late answer changes nothing. The sheet only opens while the card is still
