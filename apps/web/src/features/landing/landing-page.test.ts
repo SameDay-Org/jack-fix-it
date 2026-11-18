@@ -92,16 +92,23 @@ describe("the landing page", () => {
     for (const anchor of anchors) expect(html).toContain(`id="${anchor}"`);
   });
 
-  it("draws Jack from the mascot package and moves only the hero's wave", async () => {
+  it("draws Jack from the mascot package as still images, none of him in the HTML", async () => {
     const html = await page("en");
-    const mascots = html.match(/<svg[^>]*data-pose="[^"]*"[^>]*>/g) ?? [];
-    // The hero and the four steps of "How it works", all decoration.
-    expect(mascots).toHaveLength(5);
-    for (const mascot of mascots) expect(mascot).toContain('aria-hidden="true"');
-    expect(html.match(/<g data-part="mascot"/g)).toHaveLength(5);
-    const moving = mascots.filter((mascot) => mascot.includes("data-motion="));
-    expect(moving).toHaveLength(1);
-    expect(moving[0]).toMatch(/data-pose="wave"[^>]*data-motion="still"/);
+    // Drawn inline to move, the hero's Jack made the HTML a network round trip longer before
+    // the first paint, so every mascot here is an image of the package's drawing.
+    expect(html).not.toMatch(/<svg[^>]*data-pose=|data-part=|data-motion/);
+    const images = html.match(/<img[^>]*data-pose="[^"]*"[^>]*>/g) ?? [];
+    expect(images.map((image) => /data-pose="([^"]*)"/.exec(image)?.[1])).toEqual([
+      "wave",
+      "thinking",
+      "point",
+      "tools",
+      "celebrate",
+    ]);
+    for (const image of images) expect(image).toMatch(/src="\/mascot\/[a-z]+\.svg" alt=""/);
+    // All lazy: the hero's is hidden on a phone, and a preload would fetch it there anyway.
+    expect(html).not.toContain('rel="preload" as="image"');
+    expect(images.every((image) => image.includes('loading="lazy"'))).toBe(true);
   });
 
   it.each(["en", "es"] as const)("in %s links only to pages that exist", async (locale) => {
