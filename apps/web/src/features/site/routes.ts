@@ -1,5 +1,8 @@
 import type { Locale } from "@/i18n/config";
 
+/** The showcase page (#403), in each language. English has no prefix; Spanish lives under `/es`. */
+export const SHOWCASE_PATHS: Record<Locale, string> = { en: "/app", es: "/es/app" };
+
 /** The legal pages the footer links to: placeholders until the texts are approved (#10). */
 export const TERMS_PATHS: Record<Locale, string> = { en: "/terms", es: "/es/terms" };
 export const PRIVACY_PATHS: Record<Locale, string> = { en: "/privacy", es: "/es/privacy" };
