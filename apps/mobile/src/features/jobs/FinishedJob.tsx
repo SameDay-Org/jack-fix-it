@@ -1,11 +1,14 @@
 import type { Href } from "expo-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Pressable, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui";
+import { cx } from "@/components/ui/cx";
 import { chatHref } from "@/features/chat";
+import { reportProblemHref, useCustomerDispute } from "@/features/disputes/api";
+import { RetryLine } from "@/features/disputes/RetryLine";
 import { bubbleShadow, continuousCorners } from "@/theme";
 
 import { BeforePhotos, PhotoHero } from "./AfterPhotos";
@@ -42,9 +45,9 @@ type FinishedJobProps = {
 /**
  * The pro marked the job done (#66): the whole screen is about checking the work. The after
  * photos are the hero, edge to edge (a tap opens one full screen); the sheet says who finished
- * and asks for a look, with "Problems? Message Dan" into the job's chat (#74; reporting a problem
- * itself is #75), then what was paid and what happened. The confirmation itself is the
- * dock under the page (`ConfirmDock`). Without a photo to show (none listed yet), the drawn map
+ * and asks for a look, with "Problems? Message Dan" into the job's chat (#74), then what was paid
+ * and what happened. The confirmation itself, and reporting a problem instead (#75), are the dock
+ * under the page (`ConfirmDock`). Without a photo to show (none listed yet), the drawn map
  * with its check on the door stands in.
  */
 export function FinishedJob({
@@ -135,9 +138,14 @@ type ConfirmDockProps = {
 };
 
 /**
- * The finished job's one action, docked under the page: "Confirm the job is done", which opens
- * the confirmation sheet, and under it when the job confirms itself if the customer does not
- * answer, in plain words ("Confirms automatically tomorrow at 3:40 PM if you don't answer").
+ * The finished job's action, docked under the page: "Confirm the job is done", which opens the
+ * confirmation sheet; "Report a problem" under it while the API says a report is open and its
+ * own deadline (`report_by`) has not passed (#75: the same window as the confirmation, never
+ * worked out here); then when the job confirms itself if the customer does not answer, in plain
+ * words ("Confirms automatically tomorrow at 3:40 PM if you don't answer"). While the report's
+ * window is unknown, Report a problem is left out: loading, or a failed read, which says so in its
+ * place with a retry. Every new answer for the job (a pull, the screen's return, the automatic
+ * confirmation coming due) reads the window again, so a failed read is never the last word.
  */
 export function ConfirmDock({ job, requestId, updatedAt, push }: ConfirmDockProps) {
   const { t } = useTranslation();
@@ -146,6 +154,22 @@ export function ConfirmDock({ job, requestId, updatedAt, push }: ConfirmDockProp
   const now = useMinuteClock(updatedAt, confirmBy);
   const deadline = deadlineText(t, job.confirm_by, now);
   const label = useFittingLabel(t("jobs.finished.confirm"));
+  const {
+    data: report,
+    isError: reportFailed,
+    isFetching: reportChecking,
+    refetch: checkReport,
+  } = useCustomerDispute(job.id);
+  const checkedWith = useRef(updatedAt);
+  useEffect(() => {
+    if (checkedWith.current === updatedAt) return;
+    checkedWith.current = updatedAt;
+    void checkReport();
+  }, [updatedAt, checkReport]);
+  const reportBy = report?.report_by ? Date.parse(report.report_by) : NaN;
+  // Its own clock, anchored at the report's deadline: the entry goes the minute the window ends.
+  const reportNow = useMinuteClock(updatedAt, Number.isFinite(reportBy) ? reportBy : null);
+  const canReport = report?.can_report === true && reportNow < reportBy;
 
   return (
     // The white dock with the bubble's shadow over the page's edge, as on the pro's job screen.
@@ -162,12 +186,46 @@ export function ConfirmDock({ job, requestId, updatedAt, push }: ConfirmDockProp
         onPress={() => push(confirmJobHref(requestId))}
         testID="job-confirm"
       />
+      {canReport ? <ReportAction onPress={() => push(reportProblemHref(requestId))} /> : null}
+      {report === undefined && reportFailed ? (
+        <RetryLine
+          centered
+          message={t("disputes.entryFailed")}
+          busy={reportChecking}
+          onRetry={() => void checkReport()}
+          testID="job-report-check-failed"
+        />
+      ) : null}
       {deadline ? (
         <Text className="text-center text-footnote text-gray-500" testID="job-confirm-deadline">
           {deadline}
         </Text>
       ) : null}
     </View>
+  );
+}
+
+/**
+ * "Report a problem", the dock's quieter second action, drawn as the kit's ghost button. Not the
+ * kit's `Button`, whose label is one line by contract: at a large font, or in Spanish, these words
+ * wrap instead of being cut short. The label spans the action's width, so it is never measured
+ * as one line by a fraction and cut.
+ */
+function ReportAction({ onPress }: { onPress: () => void }) {
+  const { t } = useTranslation();
+  const [pressed, setPressed] = useState(false);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      onPressIn={() => setPressed(true)}
+      onPressOut={() => setPressed(false)}
+      style={continuousCorners}
+      className={cx("min-h-12 justify-center rounded-pill px-5", pressed && "bg-navy-900/10")}
+      testID="job-report-problem"
+    >
+      <Text className="text-center text-headline text-navy-900">{t("disputes.entry")}</Text>
+    </Pressable>
   );
 }
 

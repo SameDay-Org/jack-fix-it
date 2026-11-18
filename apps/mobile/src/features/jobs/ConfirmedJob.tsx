@@ -12,6 +12,7 @@ import Animated, {
 
 import { ControlIcon } from "@/components/icons";
 import { ChatEntry } from "@/features/chat";
+import { hasReport, ReportStatus } from "@/features/disputes/ReportStatus";
 import { RateEntry } from "@/features/reviews";
 import { tokens } from "@/theme";
 
@@ -104,6 +105,7 @@ export function ConfirmedJob({
           status={job.status}
           unread={job.unread_messages}
         />
+        {hasReport(job) ? <ReportStatus job={job} /> : null}
         <PaidRow job={job} />
         <BeforePhotos photos={job.photos} updatedAt={updatedAt} refetch={refetch} />
         <JobTimeline items={timelineOf(t, job, now)} />

@@ -8,6 +8,7 @@ import { apiGet, SessionExpiredError, useSessionGeneration } from "@/api";
 import { Button, Milestones, Screen, showToast, Skeleton, TextSkeleton } from "@/components/ui";
 import { announce } from "@/components/ui/focus";
 import { ChatEntry } from "@/features/chat";
+import { hasReport, ReportStatus } from "@/features/disputes/ReportStatus";
 import { useRefreshExpiredMedia } from "@/features/opportunities/useOpportunity";
 import { isUuid, useGuardedPush } from "@/features/quotes/navigation";
 import { useSettledError } from "@/features/quotes/useRequestQuotes";
@@ -69,9 +70,10 @@ const jobProfileHref = (requestId: string, quoteId: string) => ({
  * pro (to their profile), what was paid and what happened so far. It keeps itself fresh
  * (`useCustomerJob`) and pulls to refresh. A request with no job yet (the payment has not created
  * it) shows that and keeps asking. The chat with the pro opens from under the pro (#74);
- * problems and cancelling are not built yet, so nothing here offers them. Once the pro marks the
- * job done the screen turns to checking the work and confirming it (`FinishedJob` with its
- * `ConfirmDock`, #66), then to the confirmed job (`ConfirmedJob`).
+ * cancelling is not built yet, so nothing here offers it. Once the pro marks the job done the
+ * screen turns to checking the work and confirming it, or reporting a problem (`FinishedJob` with
+ * its `ConfirmDock`, #66, #75), then to the confirmed job (`ConfirmedJob`). A reported job shows
+ * its report and where it stands (`ReportStatus`).
  */
 export function JobScreen() {
   const { t } = useTranslation();
@@ -368,6 +370,7 @@ function JobContent({ job, requestId, updatedAt, refetch, text, now }: JobConten
             unread={job.unread_messages}
           />
         </View>
+        {hasReport(job) ? <ReportStatus job={job} /> : null}
         <PaidRow job={job} />
         <JobPhotos photos={job.photos} updatedAt={updatedAt} refetch={refetch} />
         <JobTimeline items={timelineOf(t, job, now)} />
