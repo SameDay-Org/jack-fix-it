@@ -53,15 +53,20 @@ Stripe, in three calls:
   allow_new_intent here). A payment_intent.* event for the lost intent can adopt it before a
   payment call or staff do, from its metadata (#296, reconciliation.py).
   Stripe showing it succeeded or canceled: 409 payment_not_available, the row left to #61;
-- an ephemeral key for the customer, new on every call.
+- a CustomerSession for the customer, new on every call (#253c): the sheet may list their
+  saved cards, never remove one or offer to save a new one (stripe_payments.py
+  MOBILE_PAYMENT_ELEMENT_FEATURES). No idempotency key of ours: a session is a short-lived
+  grant, and a retry simply gets a new one. For one release, a legacy ephemeral key too
+  (deprecated: app builds before the session read it; a cleanup issue removes it).
 The response is what the Payment Sheet needs plus what the customer sees: the amount, the tax
 and the total; never the pro's payout or the platform's fee.
 
 Stripe unreachable, a 409, 429 or 5xx: 503 payments_unavailable; any other 4xx: 502
 payments_error. Nothing stored changes on either (the transaction is rolled back), and the
 payment row and its create time stay for the retry. Logs carry ids only (payment, quote,
-request, the customer's user id, Stripe's request id and error code): never a client secret,
-an ephemeral key, a customer id or a PaymentIntent id.
+request, the customer's user id, Stripe's request id and error code): never a client secret
+(the PaymentIntent's or the CustomerSession's), an ephemeral key, a customer id or a
+PaymentIntent id.
 """
 
 import logging
@@ -257,12 +262,16 @@ class PaymentService:
         payment = await self._payment(user, request_id, quote_id)
         customer_id = await self._customer(stripe, user, payment)
         intent = await self._payment_intent(stripe, payment, customer_id)
+        async with self._stripe_call(payment, "create_customer_session"):
+            customer_session_client_secret = await stripe.create_customer_session(customer_id)
+        # Deprecated (#253c): for app builds before the CustomerSession, one release.
         async with self._stripe_call(payment, "create_ephemeral_key"):
             ephemeral_key_secret = await stripe.create_ephemeral_key(customer_id)
         logger.info("payment_sheet_issued", extra=payment.ids)
         return PaymentSheetOut(
             payment_intent_client_secret=intent.client_secret,
             customer_id=customer_id,
+            customer_session_client_secret=customer_session_client_secret,
             ephemeral_key_secret=ephemeral_key_secret,
             publishable_key=publishable_key,
             amount_cents=payment.amount_cents,

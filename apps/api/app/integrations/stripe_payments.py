@@ -5,9 +5,12 @@ the platform account, with no `transfer_data` or `on_behalf_of` (separate charge
 the money stays on the platform balance, and the transfer to the pro follows the confirmation),
 captured automatically (no pre-authorization), with `automatic_payment_methods` enabled and
 redirects off, so the sheet offers card, Apple Pay and Google Pay. Each customer gets one Stripe
-Customer, which the sheet reaches through an ephemeral key created with the SDK's pinned API
-version. Calls go through the official SDK's async client on httpx (timeout and retries from
-settings): no synchronous call blocks the event loop.
+Customer. The sheet reaches it through a CustomerSession (#253c): Stripe's server then lets the
+sheet list the customer's saved cards and do nothing else with them (MOBILE_PAYMENT_ELEMENT:
+no removal, no "save this card" box; cards are added in the wallet only). A legacy ephemeral key
+(full rights over the Customer) is still minted for one release, for app builds that read it.
+Calls go through the official SDK's async client on httpx (timeout and retries from settings):
+no synchronous call blocks the event loop.
 
 A PaymentIntent left unpaid past PAYMENT_UNPAID_CANCEL_AFTER_SECONDS is canceled (#297,
 `cancellation_reason` abandoned). Stripe refuses to cancel an intent that is processing,
@@ -19,12 +22,14 @@ its PaymentIntent again with Stripe Search on the metadata payment_id (one page 
 PAYMENT_INTENT_SEARCH_LIMIT); Search is eventually consistent, so an empty answer proves nothing.
 
 What leaves this module is typed and minimal: a customer's id, a PaymentIntent's id, client
-secret and status, an ephemeral key's secret, and what recovery compares with the payment row
+secret and status, a CustomerSession's and an ephemeral key's secret, and what recovery
+compares with the payment row
 (amount, currency, customer, metadata payment_id). Stripe's errors become `StripeUnavailableError`
 (network, timeout, 409, 429, 5xx) or `StripeRejectedError` (any other 4xx), each carrying only
 Stripe's request id and error code (stripe_errors.py): an SDK error's text can name the customer
 or the PaymentIntent, so it is never chained or logged. The `stripe` logger runs at WARNING
-(app/observability.py), and Sentry filters `cus_`, `pi_` and `ek_` ids from URLs and messages.
+(app/observability.py), and Sentry filters `cus_`, `cuss_`, `pi_` and `ek_` ids from URLs and
+messages.
 """
 
 import uuid
@@ -36,10 +41,14 @@ import stripe
 from starlette.requests import Request
 from stripe.params import (
     CustomerCreateParams,
+    CustomerSessionCreateParams,
     EphemeralKeyCreateParams,
     PaymentIntentCancelParams,
     PaymentIntentCreateParams,
     PaymentIntentSearchParams,
+)
+from stripe.params import (
+    CustomerSessionCreateParamsComponentsMobilePaymentElementFeatures as SheetFeatures,
 )
 
 from app.config import Settings
@@ -53,6 +62,17 @@ PAYMENT_INTENT_UNEXPECTED_STATE = "payment_intent_unexpected_state"
 # One search page: more than one match is already an answer (ambiguous), so a single page
 # of this size counts them for the log.
 PAYMENT_INTENT_SEARCH_LIMIT = 10
+# What the Payment Sheet may do with the customer's saved cards (#253c), enforced by Stripe's
+# server on both platforms: list every card the wallet lists (whatever its allow_redisplay),
+# never remove one (the wallet's delete keeps the default rule), never offer to save a new one
+# (cards are added through the wallet's SetupIntent, which keeps the first-card default rule).
+# Typed by the SDK: a misspelled feature fails mypy, and the wrapper test pins the form sent.
+MOBILE_PAYMENT_ELEMENT_FEATURES: SheetFeatures = {
+    "payment_method_remove": "disabled",
+    "payment_method_redisplay": "enabled",
+    "payment_method_allow_redisplay_filters": ["always", "limited", "unspecified"],
+    "payment_method_save": "disabled",
+}
 
 
 @dataclass(frozen=True)
@@ -122,8 +142,14 @@ class StripePayments(Protocol):
         """The intent's amount, currency, customer and metadata payment_id (staff recovery)."""
         ...
 
+    async def create_customer_session(self, customer_id: str) -> str:
+        """A new CustomerSession's client secret for the customer, for the Payment Sheet: the
+        mobile payment element with MOBILE_PAYMENT_ELEMENT_FEATURES."""
+        ...
+
     async def create_ephemeral_key(self, customer_id: str) -> str:
-        """A new ephemeral key's secret for the customer, for the Payment Sheet."""
+        """A new ephemeral key's secret for the customer, for the Payment Sheet of app builds
+        that predate the CustomerSession (deprecated, #253c)."""
         ...
 
     async def cancel_payment_intent(self, payment_intent_id: str, *, idempotency_key: str) -> bool:
@@ -226,6 +252,31 @@ class StripePaymentsClient:
         except stripe.StripeError as error:
             raise_typed(error)
         return _facts(intent)
+
+    async def create_customer_session(self, customer_id: str) -> str:
+        params: CustomerSessionCreateParams = {
+            "customer": customer_id,
+            "components": {
+                "mobile_payment_element": {
+                    "enabled": True,
+                    "features": MOBILE_PAYMENT_ELEMENT_FEATURES,
+                }
+            },
+        }
+        try:
+            # No idempotency key of ours: a session is a short-lived grant made per call, and a
+            # replayed one could be expired. The SDK adds its own key for its retries.
+            session = await self._client.v1.customer_sessions.create_async(params=params)
+        except stripe.StripeError as error:
+            raise_typed(error)
+        # Read defensively, as the ephemeral key's: a body without it raises instead of
+        # answering.
+        secret: str | None = getattr(session, "client_secret", None)
+        if secret is None:
+            raise StripeRejectedError(
+                request_id=_request_id(session), code="customer_session_no_secret"
+            )
+        return secret
 
     async def create_ephemeral_key(self, customer_id: str) -> str:
         params: EphemeralKeyCreateParams = {"customer": customer_id}
