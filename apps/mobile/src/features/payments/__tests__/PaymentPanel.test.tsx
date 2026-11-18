@@ -169,7 +169,7 @@ describe("paying an accepted quote", () => {
       jest.mocked(presentPaymentSheet).mock.invocationCallOrder[0],
     );
     expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith(
-      "Total $180.50. Opening the secure payment.",
+      "Total $180.50. Opening payment.",
     );
 
     // Paid: the card confirms it, asking for the job every 2 s.

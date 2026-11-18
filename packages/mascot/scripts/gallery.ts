@@ -1,6 +1,8 @@
 /**
- * The mascot's gallery page (#404): every part, then the poses at 32, 64, 128 and 256 px on
- * white, light gray and navy. Static HTML with the SVGs inline; no script, no network.
+ * The mascot's gallery page (#404): every part, the six poses at 32, 64, 128 and 256 px on
+ * white, light gray and navy (static SVG inline), then the motion: the idle loops, the pose
+ * changes, a Reduce Motion toggle and the pause off screen. The motion section needs the module
+ * script the preview serves (`/scripts/demo.ts`); everything above it is plain HTML.
  */
 import {
   arm,
@@ -20,6 +22,7 @@ import {
   PALETTE,
   patch,
   poseNode,
+  question,
   READY_POSES,
   renderSvg,
   shirt,
@@ -74,9 +77,15 @@ export function galleryHtml(): string {
       arm("left", { upper: 14, lower: 8, glove: "fist", layer: "back" }),
       "42 96 50 76",
     ],
+    [
+      "arm (pointing)",
+      arm("right", { upper: 74, lower: 88, glove: "point", layer: "back" }),
+      "118 88 82 46",
+    ],
     ["wrench", wrench(), PROP_CROP],
     ["toolbox", toolbox(), PROP_CROP],
     ["clipboard", clipboard(), PROP_CROP],
+    ["question mark", question(), "-20 -24 40 40"],
   ];
   const poses = BACKGROUNDS.map(
     (bg) => `
@@ -113,18 +122,54 @@ export function galleryHtml(): string {
   figcaption { font-size: 12px; opacity: 0.8; }
   .poses { padding: 24px; }
   .row { display: flex; align-items: flex-end; gap: 28px; margin-bottom: 24px; }
+  .motion { padding: 24px; background: ${PALETTE.gray50}; }
+  .demos { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+  .demo { background: ${PALETTE.white}; border-radius: 16px; padding: 16px; width: 288px; }
+  .stage { width: 256px; height: 256px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  button { font: inherit; padding: 6px 12px; border-radius: 999px; border: 1px solid ${PALETTE.navy700}; background: ${PALETTE.white}; color: ${PALETTE.navy900}; cursor: pointer; }
+  button[aria-pressed="true"] { background: ${PALETTE.green500}; border-color: ${PALETTE.green700}; }
+  output { display: block; margin-top: 8px; font-weight: 600; }
+  .spacer { height: 1400px; display: flex; align-items: flex-end; justify-content: center; color: ${PALETTE.gray500}; }
 </style>
 </head>
 <body>
 <header>
   <h1>Jack, the Jack Fix It mascot</h1>
-  <p>#404 PR 1: the parts and three poses. Local preview, not part of the site.</p>
+  <p>#404: the parts, the six poses and the motion. Local preview, not part of the site.</p>
 </header>
 <section class="parts" id="parts">
   <h2>Parts</h2>
   <div class="grid">${parts.map(([name, node, crop]) => partTile(name, node, crop)).join("")}</div>
 </section>
 ${poses}
+<section class="motion" id="motion">
+  <h2>Motion</h2>
+  <p>
+    <label><input type="checkbox" id="reduce"> Reduce Motion (as if the reader asked for it)</label>
+    <span id="reduce-system"></span>
+  </p>
+  <div class="demos">
+    <div class="demo" id="demo-idle">
+      <h3>Idle loops</h3>
+      <div class="stage" data-demo="idle" data-pose="wave"></div>
+      <output data-status-for="idle">still</output>
+    </div>
+    <div class="demo" id="demo-transition">
+      <h3>Pose changes</h3>
+      <div class="stage" data-demo="transition" data-pose="wave"></div>
+      <div class="controls">${READY_POSES.map((pose) => `<button type="button" data-to="${pose}" aria-pressed="${pose === "wave"}">${pose}</button>`).join("")}</div>
+      <output data-status-for="transition">still</output>
+    </div>
+  </div>
+  <div class="spacer"><p>Scroll on: the mascot below is paused until it is on screen.</p></div>
+  <div class="demo" id="demo-offscreen">
+    <h3>Off screen until here</h3>
+    <div class="stage" data-demo="offscreen" data-pose="celebrate"></div>
+    <output data-status-for="offscreen">still</output>
+  </div>
+</section>
+<script type="module" src="/scripts/demo.ts"></script>
 </body>
 </html>
 `;

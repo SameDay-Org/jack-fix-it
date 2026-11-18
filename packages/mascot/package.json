@@ -12,6 +12,10 @@
     "./react": {
       "types": "./src/react.ts",
       "default": "./src/react.ts"
+    },
+    "./dom": {
+      "types": "./src/dom.ts",
+      "default": "./src/dom.ts"
     }
   },
   "scripts": {
