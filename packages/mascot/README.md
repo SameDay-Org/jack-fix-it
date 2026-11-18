@@ -57,14 +57,20 @@ from a navy surface.
 - `src/rig.ts`: a pose as plain numbers and names (`PoseRig`: expression, head tilt, a lean of
   the whole body, the two arms, a question mark), drawn by `rigNode` and blended by
   `interpolateRig` (numbers move, the face, gloves and props change halfway).
-- `src/poses.ts`: the six poses of the public contract of the showcase's `Mascot` component
-  (a test keeps both lists equal): **wave**, **point**, **celebrate**, **peek** (leaning in
+- `src/poses.ts`: the six poses of the public contract the pages ask for (a test pins the
+  list): **wave**, **point**, **celebrate**, **peek** (leaning in
   from the right edge, the box cuts the rest), **thinking** (a fist under the chin, a question
   mark) and **tools**.
 - `src/render.ts`: an SVG string renderer (standalone files, the gallery, tests).
-- `src/react.ts` (`@jack/mascot/react`): `<Mascot pose size title className animate>`, with
-  the props of the showcase's component. With `title` it is an image (`role="img"`, named by
-  its title); without it is decoration (`aria-hidden`).
+- `src/react.ts` (`@jack/mascot/react`): `<Mascot pose size title className animate>`, the
+  one the site uses. With `title` it is an image (`role="img"`, named by its title); without it
+  is decoration (`aria-hidden`). It is not a client module: drawn in a Server Component, the
+  page ships none of Jack's drawing or poses. When animated, its one client piece is
+  `src/react-motion.ts`, an empty group inside the SVG that runs the motion rules of
+  `src/watch.ts` (which imports nothing).
+- `src/react-live.ts` (`@jack/mascot/react-live`): `<LiveMascot>`, the same props, for a mascot
+  whose `pose` changes on the page: it moves from one pose to the next. A client component, so
+  its page ships the drawing and every pose.
 - `src/dom.ts` (`@jack/mascot/dom`): the same without React, in a container element (the
   gallery uses it).
 - **The app** will map the same tree to `react-native-svg` (`G`, `Path`, `Circle`, `Ellipse`,
@@ -82,13 +88,14 @@ from a navy surface.
   `paused` (the tab is hidden or the mascot is off screen, by `IntersectionObserver`) and
   `running`. Only the page's script turns it `running`, so nothing moves off screen or without
   a script.
-- **A pose change** (a new `pose` prop) moves the same layers frame by frame for 480 ms while
-  running; otherwise it shows the new pose at once and asks for no frame (also when `animate`
-  turns off in the same render).
+- **A pose change** (a new `pose` prop of `LiveMascot`, or the DOM API) moves the same layers
+  frame by frame for 480 ms while running; otherwise it shows the new pose at once and asks for
+  no frame (also when `LiveMascot`'s `animate` turns off in the same render). `Mascot` shows a
+  new pose at once.
 - **No layout shift:** the size and the view box never change.
 - **Only through the runtime:** Jack moves only in a page, through the `animate` prop of
-  `@jack/mascot/react` or `@jack/mascot/dom`, which own the Reduce Motion, hidden-tab and
-  off-screen gates. The build writes no animated file: a standalone SVG has no script, so
+  `@jack/mascot/react`, `@jack/mascot/react-live` or `@jack/mascot/dom`, which own the Reduce
+  Motion, hidden-tab and off-screen gates. The build writes no animated file: a standalone SVG has no script, so
   nothing would keep it still without JavaScript or off screen.
 
 ## Scripts
