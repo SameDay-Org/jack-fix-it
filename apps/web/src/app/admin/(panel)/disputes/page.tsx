@@ -146,7 +146,7 @@ export default async function DisputesPage({
                   const cell = cells(dispute);
                   return (
                     <tr key={dispute.id} className="align-middle">
-                      <th scope="row" className="px-4 py-3 font-normal">
+                      <th scope="row" className="px-4 py-3 font-normal whitespace-nowrap">
                         <Link href={disputeHref(dispute.id)} className={ROW_LINK}>
                           {dispute.public_code}
                         </Link>
