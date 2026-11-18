@@ -47,10 +47,11 @@ describe("the preview server", () => {
   });
 
   it("serves the package's modules as JavaScript, their types stripped", () => {
-    const module = respond("/src/motion.ts");
+    const module = respond("/src/watch.ts");
     expect(module).toMatchObject({ status: 200, type: "text/javascript; charset=utf-8" });
     expect(module.body).toContain("export function motionState(");
     expect(module.body).not.toMatch(/: MotionInputs\)|export type MotionState/);
+    expect(respond("/src/motion.ts").status).toBe(200);
     expect(respond("/src/parts/arms.ts").status).toBe(200);
     expect(respond("/scripts/demo.ts").status).toBe(200);
   });
