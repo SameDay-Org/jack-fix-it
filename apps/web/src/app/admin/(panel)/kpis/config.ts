@@ -1,26 +1,29 @@
 /**
- * The KPI page's settings, mirrored from the API's (server side only, never a literal):
- * the business time zone the presets end "today" in, and the longest range the API reads.
+ * The KPI page's settings, mirrored from the API's (server side only). Both are optional: a
+ * variable missing on the web service, or one that cannot be read, falls back to the API's own
+ * default, so it never breaks the page.
  */
 
-/** BUSINESS_TIME_ZONE: the API's, an IANA zone such as America/New_York. */
+/** The API's default BUSINESS_TIME_ZONE (apps/api/app/config.py, `business_time_zone`). */
+export const DEFAULT_BUSINESS_TIME_ZONE = "America/New_York";
+
+/** The API's default METRICS_MAX_RANGE_DAYS (apps/api/app/config.py, `metrics_max_range_days`). */
+export const DEFAULT_METRICS_MAX_RANGE_DAYS = 366;
+
+/** BUSINESS_TIME_ZONE when it names an IANA zone, else the API's default. */
 export function businessTimeZone(): string {
   const zone = process.env.BUSINESS_TIME_ZONE ?? "";
-  const invalid = new Error("BUSINESS_TIME_ZONE is not set to an IANA time zone");
-  if (!zone) throw invalid;
+  if (!zone) return DEFAULT_BUSINESS_TIME_ZONE;
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: zone });
+    return zone;
   } catch {
-    throw invalid;
+    return DEFAULT_BUSINESS_TIME_ZONE;
   }
-  return zone;
 }
 
-/** METRICS_MAX_RANGE_DAYS: the API's longest range, in days. */
+/** METRICS_MAX_RANGE_DAYS when it is a positive whole number, else the API's default. */
 export function metricsMaxRangeDays(): number {
   const days = Number(process.env.METRICS_MAX_RANGE_DAYS);
-  if (!Number.isInteger(days) || days <= 0) {
-    throw new Error("METRICS_MAX_RANGE_DAYS is not set to a positive whole number");
-  }
-  return days;
+  return Number.isInteger(days) && days > 0 ? days : DEFAULT_METRICS_MAX_RANGE_DAYS;
 }

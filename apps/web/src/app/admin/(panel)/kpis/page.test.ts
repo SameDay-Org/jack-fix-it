@@ -99,6 +99,20 @@ describe("the KPI page", () => {
     expect(count(html, 'aria-current="true"')).toBe(1);
   });
 
+  it("works without the two settings on the web service, with the API's defaults", async () => {
+    vi.stubEnv("BUSINESS_TIME_ZONE", "");
+    vi.stubEnv("METRICS_MAX_RANGE_DAYS", "");
+    api(() => Response.json(metrics()));
+
+    const html = await render({ days: "7" });
+
+    expect(metricsRequests().map((url) => url.search)).toEqual(["?from=2026-11-12&to=2026-11-18"]);
+    expect(html).toContain("1 h 05 min");
+    expect(await render({ from: "2025-11-17", to: "2026-11-18" })).toContain(
+      en.admin.kpis.range.invalid.replace("{{max}}", "366"),
+    );
+  });
+
   it("passes a custom range on as typed", async () => {
     api(() => Response.json(metrics()));
 

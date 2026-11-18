@@ -1,10 +1,19 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import en from "@/i18n/locales/en.json";
 import es from "@/i18n/locales/es.json";
 import { getT } from "@/i18n/server";
 
-import { businessTimeZone, metricsMaxRangeDays } from "./config";
+import {
+  businessTimeZone,
+  DEFAULT_BUSINESS_TIME_ZONE,
+  DEFAULT_METRICS_MAX_RANGE_DAYS,
+  metricsMaxRangeDays,
+} from "./config";
 import {
   durationParts,
   formatDuration,
@@ -16,6 +25,8 @@ import {
 } from "./kpis";
 import { emptyMetrics, metrics } from "./kpis-test-helpers";
 import { axisTicks } from "./series-chart";
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -201,14 +212,25 @@ describe("the KPI settings", () => {
     expect(metricsMaxRangeDays()).toBe(120);
   });
 
-  it.each(["", "Mars/Olympus", "not a zone"])("refuse a time zone of %j", (zone) => {
-    vi.stubEnv("BUSINESS_TIME_ZONE", zone);
-    expect(() => businessTimeZone()).toThrow(/BUSINESS_TIME_ZONE/);
+  it.each(["", "Mars/Olympus", "not a zone"])(
+    "fall back to the API's time zone for %j: a missing variable breaks nothing",
+    (zone) => {
+      vi.stubEnv("BUSINESS_TIME_ZONE", zone);
+      expect(businessTimeZone()).toBe(DEFAULT_BUSINESS_TIME_ZONE);
+    },
+  );
+
+  it.each(["", "0", "-3", "1.5", "lots"])("fall back to the API's longest range for %j", (days) => {
+    vi.stubEnv("METRICS_MAX_RANGE_DAYS", days);
+    expect(metricsMaxRangeDays()).toBe(DEFAULT_METRICS_MAX_RANGE_DAYS);
   });
 
-  it.each(["", "0", "-3", "1.5", "lots"])("refuse a longest range of %j", (days) => {
-    vi.stubEnv("METRICS_MAX_RANGE_DAYS", days);
-    expect(() => metricsMaxRangeDays()).toThrow(/METRICS_MAX_RANGE_DAYS/);
+  it("default to exactly the API's own defaults", () => {
+    const api = readFileSync(join(here, "../../../../../../api/app/config.py"), "utf8");
+    const zone = /business_time_zone: str = Field\(\s*default="([^"]+)"/.exec(api)?.[1];
+    const days = /metrics_max_range_days: int = Field\(default=(\d+)/.exec(api)?.[1];
+    expect(zone).toBe(DEFAULT_BUSINESS_TIME_ZONE);
+    expect(Number(days)).toBe(DEFAULT_METRICS_MAX_RANGE_DAYS);
   });
 });
 
