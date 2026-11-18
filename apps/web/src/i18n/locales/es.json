@@ -307,6 +307,7 @@
       "support": "Soporte",
       "queue": "Cola",
       "pros": "Profesionales",
+      "disputes": "Disputas",
       "kpis": "Indicadores"
     },
     "roles": {
@@ -802,6 +803,207 @@
       "rateLimited": "Demasiadas consultas en poco tiempo. Espera un minuto y vuelve a intentarlo.",
       "retry": "Reintentar",
       "loading": "Cargando las cifras…"
+    },
+    "disputes": {
+      "title": "Disputas",
+      "subtitle": "Problemas que los clientes reportaron en trabajos terminados, primero los que más esperan.",
+      "filter": {
+        "label": "Estado",
+        "open": "Abiertas",
+        "resolved": "Resueltas"
+      },
+      "columns": {
+        "request": "Solicitud",
+        "reason": "Motivo",
+        "parties": "Cliente y profesional",
+        "money": "Pagó el cliente / pago al profesional",
+        "age": "Abierta",
+        "status": "Estado"
+      },
+      "reason": {
+        "work_incomplete": "Trabajo sin terminar",
+        "poor_quality": "Mala calidad",
+        "no_show": "El profesional no llegó",
+        "damage": "Daños",
+        "other": "Otro"
+      },
+      "status": {
+        "open": "Abierta",
+        "resolved": "Resuelta"
+      },
+      "resolution": {
+        "released": "Pagado al profesional",
+        "partial_release": "Dividido",
+        "refunded": "Reembolso total"
+      },
+      "age": {
+        "minutes": "Abierta hace {{count}} min",
+        "hours": "Abierta hace {{count}} h",
+        "days": "Abierta hace {{count}} d",
+        "warn": "espera larga",
+        "late": "atrasada"
+      },
+      "noName": "Sin nombre",
+      "notOnRecord": "Sin registro",
+      "refundFailed": "Reembolso fallido",
+      "loading": "Cargando las disputas…",
+      "loadError": "No pudimos cargar las disputas.",
+      "retry": "Intentar de nuevo",
+      "empty": {
+        "open": "No hay disputas abiertas.",
+        "resolved": "Todavía no hay disputas resueltas."
+      },
+      "detail": {
+        "back": "Todas las disputas",
+        "title": "Disputa {{code}}",
+        "loading": "Cargando la disputa…",
+        "notFound": "No encontramos esta disputa.",
+        "loadError": "No pudimos cargar esta disputa.",
+        "reason": "Motivo",
+        "opened": "Abierta",
+        "job": "Trabajo",
+        "customer": "Cliente",
+        "pro": "Profesional",
+        "customerReport": "El reporte del cliente",
+        "proReply": "La respuesta del profesional",
+        "noReply": "El profesional no ha respondido.",
+        "replied": "Respondió",
+        "photos": {
+          "title": "Fotos",
+          "alt": "Foto {{n}} del reporte",
+          "open": "Abrir la foto {{n}}",
+          "none": "Este reporte no tiene fotos.",
+          "pending": "Fotos que aún se revisan: {{count}}."
+        },
+        "money": {
+          "title": "Dinero",
+          "customerTotal": "Pagó el cliente",
+          "tax": "De eso, impuestos",
+          "proPayout": "Pago al profesional",
+          "platformFee": "Comisión de la plataforma",
+          "payment": "Pago",
+          "refund": "Reembolso",
+          "transfer": "Pago al profesional",
+          "proRelease": "Pagado al profesional",
+          "customerRefund": "Reembolsado al cliente",
+          "noPayment": "No hay un pago registrado para este trabajo: hay que revisarlo antes de resolver la disputa.",
+          "none": "Ninguno",
+          "stripeCode": "Código de Stripe: {{code}}",
+          "paymentStatus": {
+            "requires_payment": "Sin pagar",
+            "processing": "En proceso",
+            "succeeded": "Pagado",
+            "failed": "Falló",
+            "canceled": "Cancelado"
+          },
+          "refundStatus": {
+            "pending": "En proceso",
+            "created": "Hecho",
+            "failed": "Falló"
+          },
+          "transferStatus": {
+            "pending": "Aún no se hizo",
+            "created": "Hecho",
+            "failed": "Falló, se intenta de nuevo",
+            "reversed": "Revertido"
+          },
+          "stripeStatus": {
+            "succeeded": "Reembolsado",
+            "pending": "En proceso en Stripe",
+            "requires_action": "En espera en Stripe",
+            "failed": "Falló en Stripe",
+            "canceled": "Cancelado en Stripe"
+          }
+        },
+        "banner": {
+          "pending": {
+            "title": "Un reembolso está en proceso",
+            "body": "Stripe aún no termina el reembolso de {{amount}}. La disputa sigue abierta hasta entonces: vuelve a revisar en unos minutos."
+          },
+          "failed": {
+            "title": "El reembolso falló",
+            "body": "Stripe falló o canceló el reembolso de {{amount}}: el dinero no volvió al cliente y el pago al profesional queda retenido. Pide a un ingeniero que lo repare en Stripe."
+          },
+          "attempt_failed": {
+            "title": "El último intento de reembolso no se completó",
+            "body": "Stripe rechazó el reembolso de {{amount}} o no respondió. La disputa sigue abierta: envía la misma decisión de nuevo, o pide a un ingeniero que revise Stripe."
+          }
+        },
+        "timeline": {
+          "title": "Historial del trabajo",
+          "bySystem": "por el sistema"
+        },
+        "resolution": {
+          "title": "Resolución",
+          "decision": "Decisión",
+          "resolvedAt": "Resuelta",
+          "resolvedBy": "Por",
+          "you": "Tú",
+          "note": "Nota (solo para el equipo)"
+        },
+        "adminOnly": "Solo los administradores pueden resolver disputas."
+      },
+      "resolve": {
+        "title": "Resolver",
+        "decisionLabel": "Decisión",
+        "decisions": {
+          "release": {
+            "label": "Pagar al profesional",
+            "hint": "El profesional recibe todo su pago. El cliente no recibe nada de vuelta."
+          },
+          "partial": {
+            "label": "Dividir",
+            "hint": "Una parte del pago va al profesional. El cliente recibe de vuelta el resto de lo que pagó, según nuestro cálculo."
+          },
+          "refund": {
+            "label": "Reembolsar todo al cliente",
+            "hint": "El cliente recibe de vuelta todo lo que pagó, con impuestos. El profesional no recibe nada."
+          }
+        },
+        "decisionError": "Elige una decisión.",
+        "amountLabel": "Monto para el profesional",
+        "amountHint": "En dólares: más de $0 y menos que el pago al profesional ({{payout}}).",
+        "amountErrors": {
+          "format": "Escribe el monto en dólares, por ejemplo 45.50.",
+          "zero": "El monto debe ser mayor que $0.",
+          "not_less": "El monto debe ser menor que el pago al profesional ({{payout}})."
+        },
+        "noteLabel": "Nota (solo para el equipo)",
+        "noteHint": "Por qué lo decidiste. El cliente y el profesional nunca la ven.",
+        "noteError": "Escribe una nota.",
+        "review": "Revisar la decisión",
+        "confirmTitle": "Confirma la decisión",
+        "totals": "El cliente pagó {{total}}, pago al profesional {{payout}}.",
+        "sentences": {
+          "release": "Pagar al profesional todo su pago.",
+          "partial": "Pagar {{amount}} al profesional; el cliente recibe de vuelta el resto, según nuestro cálculo.",
+          "refund": "Reembolsar todo al cliente. No se puede deshacer."
+        },
+        "codeLabel": "Escribe {{code}} para confirmar",
+        "codeHint": "El código de la solicitud, como aparece arriba en la página.",
+        "submit": "Confirmar",
+        "back": "Volver",
+        "resolving": "Resolviendo…",
+        "resolved": "Disputa resuelta.",
+        "errors": {
+          "forbidden": "Solo los administradores pueden resolver disputas.",
+          "not_found": "No encontramos esta disputa.",
+          "dispute_already_resolved": "Esta disputa ya se resolvió con otra decisión. La página ahora la muestra.",
+          "resolution_in_progress": "Esta disputa se está resolviendo en este momento. Vuelve a revisar en unos minutos.",
+          "refund_already_attempted": "Ya se intentó un reembolso para esta disputa: pide a un ingeniero que revise Stripe.",
+          "refund_pending": "Un reembolso está en proceso. Vuelve a revisar en unos minutos.",
+          "refund_failed": "Stripe no pudo completar el reembolso. La disputa sigue abierta: pide a un ingeniero que revise Stripe.",
+          "dispute_needs_review": "El pago de esta disputa necesita una revisión antes de resolverla: pide a un ingeniero que lo revise.",
+          "invalid_split": "El monto debe ser mayor que $0 y menor que el pago al profesional.",
+          "validation_error": "Revisa la decisión, el monto y la nota, y vuelve a intentarlo.",
+          "payments_error": "Stripe rechazó el reembolso. La disputa sigue abierta: pide a un ingeniero que revise Stripe antes de volver a intentarlo.",
+          "payments_unavailable": "Stripe no responde: vuelve a intentarlo en unos minutos.",
+          "not_configured": "Los reembolsos no están configurados en este servidor: avisa a un ingeniero.",
+          "offline": "No tienes conexión. Conéctate y vuelve a intentarlo.",
+          "unconfirmed": "No pudimos confirmar el resultado. Revisa la disputa antes de volver a intentarlo.",
+          "unavailable": "Algo salió mal. Revisa la disputa antes de volver a intentarlo."
+        }
+      }
     }
   }
 }

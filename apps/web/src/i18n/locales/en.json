@@ -307,6 +307,7 @@
       "support": "Support",
       "queue": "Queue",
       "pros": "Pros",
+      "disputes": "Disputes",
       "kpis": "KPIs"
     },
     "roles": {
@@ -802,6 +803,207 @@
       "rateLimited": "Too many reads in a short time. Wait a minute, then try again.",
       "retry": "Try again",
       "loading": "Loading the figures…"
+    },
+    "disputes": {
+      "title": "Disputes",
+      "subtitle": "Problems customers reported on finished jobs, the longest waiting first.",
+      "filter": {
+        "label": "Status",
+        "open": "Open",
+        "resolved": "Resolved"
+      },
+      "columns": {
+        "request": "Request",
+        "reason": "Reason",
+        "parties": "Customer and pro",
+        "money": "Customer paid / pro payout",
+        "age": "Opened",
+        "status": "Status"
+      },
+      "reason": {
+        "work_incomplete": "Work not finished",
+        "poor_quality": "Poor quality",
+        "no_show": "Pro didn't show up",
+        "damage": "Damage",
+        "other": "Other"
+      },
+      "status": {
+        "open": "Open",
+        "resolved": "Resolved"
+      },
+      "resolution": {
+        "released": "Released to the pro",
+        "partial_release": "Split",
+        "refunded": "Refunded in full"
+      },
+      "age": {
+        "minutes": "Opened {{count}} min ago",
+        "hours": "Opened {{count}} h ago",
+        "days": "Opened {{count}} d ago",
+        "warn": "waiting long",
+        "late": "overdue"
+      },
+      "noName": "No name",
+      "notOnRecord": "Not on record",
+      "refundFailed": "Refund failed",
+      "loading": "Loading disputes…",
+      "loadError": "We couldn't load the disputes.",
+      "retry": "Try again",
+      "empty": {
+        "open": "No open disputes.",
+        "resolved": "No resolved disputes yet."
+      },
+      "detail": {
+        "back": "All disputes",
+        "title": "Dispute {{code}}",
+        "loading": "Loading the dispute…",
+        "notFound": "We couldn't find this dispute.",
+        "loadError": "We couldn't load this dispute.",
+        "reason": "Reason",
+        "opened": "Opened",
+        "job": "Job",
+        "customer": "Customer",
+        "pro": "Pro",
+        "customerReport": "The customer's report",
+        "proReply": "The pro's reply",
+        "noReply": "The pro hasn't replied.",
+        "replied": "Replied",
+        "photos": {
+          "title": "Photos",
+          "alt": "Photo {{n}} of the report",
+          "open": "Open photo {{n}}",
+          "none": "No photos with this report.",
+          "pending": "Photos still being checked: {{count}}."
+        },
+        "money": {
+          "title": "Money",
+          "customerTotal": "Customer paid",
+          "tax": "Of which tax",
+          "proPayout": "Pro payout",
+          "platformFee": "Platform fee",
+          "payment": "Payment",
+          "refund": "Refund",
+          "transfer": "Payout to the pro",
+          "proRelease": "Released to the pro",
+          "customerRefund": "Refunded to the customer",
+          "noPayment": "No payment on record for this job: it needs a review before it can be resolved.",
+          "none": "None",
+          "stripeCode": "Stripe code: {{code}}",
+          "paymentStatus": {
+            "requires_payment": "Not paid",
+            "processing": "Processing",
+            "succeeded": "Paid",
+            "failed": "Failed",
+            "canceled": "Canceled"
+          },
+          "refundStatus": {
+            "pending": "Being processed",
+            "created": "Made",
+            "failed": "Failed"
+          },
+          "transferStatus": {
+            "pending": "Not made yet",
+            "created": "Made",
+            "failed": "Failed, tried again",
+            "reversed": "Reversed"
+          },
+          "stripeStatus": {
+            "succeeded": "Refunded",
+            "pending": "Processing at Stripe",
+            "requires_action": "Waiting at Stripe",
+            "failed": "Failed at Stripe",
+            "canceled": "Canceled at Stripe"
+          }
+        },
+        "banner": {
+          "pending": {
+            "title": "A refund is being processed",
+            "body": "Stripe hasn't finished the refund of {{amount}} yet. The dispute stays open until it does: check back in a few minutes."
+          },
+          "failed": {
+            "title": "The refund failed",
+            "body": "Stripe failed or canceled the refund of {{amount}}: the money did not go back to the customer, and the pro's payout stays on hold. Ask an engineer to repair it in Stripe."
+          },
+          "attempt_failed": {
+            "title": "The last refund attempt didn't go through",
+            "body": "Stripe refused the refund of {{amount}} or did not answer. The dispute stays open: send the same decision again, or ask an engineer to check Stripe."
+          }
+        },
+        "timeline": {
+          "title": "Job history",
+          "bySystem": "by the system"
+        },
+        "resolution": {
+          "title": "Resolution",
+          "decision": "Decision",
+          "resolvedAt": "Resolved",
+          "resolvedBy": "By",
+          "you": "You",
+          "note": "Note (staff only)"
+        },
+        "adminOnly": "Only admins can resolve disputes."
+      },
+      "resolve": {
+        "title": "Resolve",
+        "decisionLabel": "Decision",
+        "decisions": {
+          "release": {
+            "label": "Release the payout to the pro",
+            "hint": "The pro gets their whole payout. The customer gets nothing back."
+          },
+          "partial": {
+            "label": "Split",
+            "hint": "Part of the payout goes to the pro. The customer gets the rest of their payment back, by our calculation."
+          },
+          "refund": {
+            "label": "Refund the customer in full",
+            "hint": "The customer gets their whole payment back, tax included. The pro gets nothing."
+          }
+        },
+        "decisionError": "Choose a decision.",
+        "amountLabel": "Amount released to the pro",
+        "amountHint": "In dollars: more than $0 and less than the pro's payout ({{payout}}).",
+        "amountErrors": {
+          "format": "Write the amount in dollars, like 45.50.",
+          "zero": "The amount must be more than $0.",
+          "not_less": "The amount must be less than the pro's payout ({{payout}})."
+        },
+        "noteLabel": "Note (staff only)",
+        "noteHint": "Why you decided this. The customer and the pro never see it.",
+        "noteError": "Write a note.",
+        "review": "Review the decision",
+        "confirmTitle": "Confirm the decision",
+        "totals": "Customer paid {{total}}, pro payout {{payout}}.",
+        "sentences": {
+          "release": "Release the payout to the pro.",
+          "partial": "Release {{amount}} to the pro; the customer gets the remainder back by our calculation.",
+          "refund": "Refund the customer in full. This cannot be undone."
+        },
+        "codeLabel": "Type {{code}} to confirm",
+        "codeHint": "The request code, as shown at the top of the page.",
+        "submit": "Confirm",
+        "back": "Back",
+        "resolving": "Resolving…",
+        "resolved": "Dispute resolved.",
+        "errors": {
+          "forbidden": "Only admins can resolve disputes.",
+          "not_found": "We couldn't find this dispute.",
+          "dispute_already_resolved": "This dispute was already resolved with another decision. The page now shows it.",
+          "resolution_in_progress": "This dispute is being resolved right now. Check back in a few minutes.",
+          "refund_already_attempted": "A refund for this dispute was already attempted: ask an engineer to check Stripe.",
+          "refund_pending": "A refund is being processed. Check back in a few minutes.",
+          "refund_failed": "Stripe couldn't complete the refund. The dispute stays open: ask an engineer to check Stripe.",
+          "dispute_needs_review": "This dispute's payment needs a review before it can be resolved: ask an engineer to check it.",
+          "invalid_split": "The amount must be more than $0 and less than the pro's payout.",
+          "validation_error": "Check the decision, the amount and the note, then try again.",
+          "payments_error": "Stripe refused the refund. The dispute stays open: ask an engineer to check Stripe before trying again.",
+          "payments_unavailable": "Stripe is not answering: try again in a few minutes.",
+          "not_configured": "Refunds are not set up on this server: ask an engineer.",
+          "offline": "You're offline. Connect, then try again.",
+          "unconfirmed": "We couldn't confirm the result. Check the dispute before trying again.",
+          "unavailable": "Something went wrong. Check the dispute before trying again."
+        }
+      }
     }
   }
 }

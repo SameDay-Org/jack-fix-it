@@ -1,4 +1,4 @@
-import { BadgeCheck, ChartLine, House, LifeBuoy, ListTodo, LogOut } from "lucide-react";
+import { BadgeCheck, ChartLine, House, LifeBuoy, ListTodo, LogOut, Scale } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -8,6 +8,7 @@ import { getT } from "@/i18n/server";
 import { requireStaff } from "@/lib/session";
 
 import { logout } from "../logout/actions";
+import { DISPUTES_PATH } from "./disputes/disputes";
 import { KPIS_PATH } from "./kpis/range";
 import { NavLink } from "./nav-link";
 import { PROS_PATH } from "./pros/pros";
@@ -50,6 +51,10 @@ export default async function PanelLayout({ children }: { children: ReactNode })
           <NavLink href={SUPPORT_PATH}>
             <LifeBuoy aria-hidden className="size-4" />
             {t("admin.nav.support")}
+          </NavLink>
+          <NavLink href={DISPUTES_PATH}>
+            <Scale aria-hidden className="size-4" />
+            {t("admin.nav.disputes")}
           </NavLink>
           <NavLink href={KPIS_PATH}>
             <ChartLine aria-hidden className="size-4" />

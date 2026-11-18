@@ -58,7 +58,7 @@ describe("the panel shell", () => {
       expect(classes?.split(" ")).toEqual(
         expect.arrayContaining(["flex", "flex-wrap", "md:flex-col", "md:flex-nowrap"]),
       );
-      expect(links?.match(/<a /g)).toHaveLength(5);
+      expect(links?.match(/<a /g)).toHaveLength(6);
       expect(links).toMatch(/<a aria-current="page" [^>]*href="\/admin\/queue"/);
     },
   );
@@ -78,6 +78,23 @@ describe("the panel shell", () => {
     expect(links).toContain("Soporte");
     expect(links).toMatch(/<a aria-current="page" [^>]*href="\/admin\/pros"/);
   });
+
+  it.each([
+    ["agent", "en", "Disputes"],
+    ["admin", "en", "Disputes"],
+    ["agent", "es", "Disputas"],
+    ["admin", "es", "Disputas"],
+  ] as const)(
+    "links the disputes for an %s (%s), marked when open",
+    async (role, locale, label) => {
+      path.current = "/admin/disputes/2a7d0c4e-1111-4222-8333-944455556666";
+      const html = await render(role, locale);
+      const links = /<nav [^>]*>(.*?)<\/nav>/.exec(html)?.[1] ?? "";
+      expect(links).toMatch(
+        new RegExp(`<a aria-current="page" [^>]*href="/admin/disputes"[^>]*>.*?${label}</a>`),
+      );
+    },
+  );
 
   it.each([
     ["agent", "en", "KPIs"],
