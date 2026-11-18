@@ -1,7 +1,7 @@
 import localFont from "next/font/local";
 
 // Plus Jakarta Sans, served from this site (license and source: ./fonts), for the public pages
-// (the showcase now, the landing next); the staff panel keeps the system font. Its space is narrow,
+// (the landing and the showcase); the staff panel keeps the system font. Its space is narrow,
 // so the pages add a little room between words.
 export const siteFont = localFont({
   src: "./fonts/plus-jakarta-sans-latin-wght-normal.woff2",

@@ -17,6 +17,7 @@ describe("ACCOUNT_GLYPHS", () => {
       "legal",
       "proProfile",
       "proDocuments",
+      "proPayouts",
       "logOut",
     ]);
   });

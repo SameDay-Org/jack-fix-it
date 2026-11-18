@@ -1,6 +1,10 @@
 import type { Locale } from "@/i18n/config";
 
-/** The showcase page (#403), in each language. English has no prefix; Spanish lives under `/es`. */
+/**
+ * The site's public pages, in each language. English has no prefix; Spanish lives under `/es`.
+ * The landing (#85) sells the service; the showcase (#403) shows the app.
+ */
+export const LANDING_PATHS: Record<Locale, string> = { en: "/", es: "/es" };
 export const SHOWCASE_PATHS: Record<Locale, string> = { en: "/app", es: "/es/app" };
 
 /** The legal pages the footer links to: placeholders until the texts are approved (#10). */

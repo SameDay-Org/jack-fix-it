@@ -1,7 +1,8 @@
-// The first-load JavaScript of the showcase page, against its budget (#403).
+// The first-load JavaScript of the public pages (the showcase, #403, and the landing, #85),
+// against their budget.
 //
 // Run after `next build` (`pnpm --filter @jack/web check:bundle`). It reads the prerendered
-// HTML of each showcase page, takes the scripts that HTML loads in a current browser (a chunk
+// HTML of each public page, takes the scripts that HTML loads in a current browser (a chunk
 // fetched later by a lazy import, such as the 3D hero, is not in it, and neither is the
 // `nomodule` polyfill file that only old browsers run), gzips each one and fails when a
 // page's sum is over the budget. It also fails when it finds no script at all: then the build
@@ -25,8 +26,10 @@ const LAZY_3D_BUDGET_BYTES = 200 * 1024;
 // A string three.js keeps in its minified code (its renderer's warnings).
 const THREE_MARKER = "THREE.WebGLRenderer";
 
-/** The showcase pages and their prerendered HTML in the build output. */
+/** The public pages and their prerendered HTML in the build output. */
 const PAGES = {
+  "/": "server/app/index.html",
+  "/es": "server/app/es.html",
   "/app": "server/app/app.html",
   "/es/app": "server/app/es/app.html",
 };

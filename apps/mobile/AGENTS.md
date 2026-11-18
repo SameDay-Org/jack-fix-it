@@ -161,8 +161,23 @@ options={sheetOptions([0.5, 0.95])} />`, or `"fitToContents"`), rendering `Sheet
   (`VerificationBanner`, which opens `/pro/verification`), "Finish your profile" and "Send your
   documents" (`DocumentsChecklistCard`), each gone once done, and no opportunity is asked for.
   The profile is asked for again on every return to the home. `VerificationScreen` shows Pending
-  (no date promised), Approved (payout setup as a placeholder labelled "Not available yet" until #277)
-  or Rejected (the rejected documents' reasons and "Fix documents"). `ChecklistCard` is in the kit.
+  (no date promised), Approved ("Finish payout setup", which opens `/pro/payouts`) or Rejected (the
+  rejected documents' reasons and "Fix documents"). `ChecklistCard` is in the kit.
+- Pro payouts (#277): `src/features/payouts`, route `/pro/payouts`, opened from "Finish payout
+  setup" (`PayoutSetupCard`: the home and the verification screen of an approved pro without
+  payouts) and from Account > Payouts. `usePayoutsStatus` reads `GET /v1/pros/me/payouts` (Stripe
+  is read on every call, so only this screen asks: on open, on focus, on foreground; callers that
+  ask together share one request) and asks for the profile again when its `payouts_enabled`
+  differs, which is what opens the home. "Set up payouts" / "Continue setup"
+  (`usePayoutSetup`) POSTs for a single-use link and hands it straight to `openSetupPage`
+  (`expo-web-browser`'s `openAuthSessionAsync`, a native module: the system's browser session,
+  never a WebView of ours). The link exists in that one call only: no query, state, screen or log
+  holds it (the mutation keeps how the page was left; `gcTime: 0`). The API's return and refresh
+  pages send the browser to `jackfixit://payouts?result=return|refresh` (`payouts/links.ts`),
+  which ends the session and, through `redirectSystemPath`, opens `/pro/payouts?result=…`: the
+  status is asked for again; an expired link says so and waits for the next press (never a second
+  link by itself). 429, 409 `payouts_needs_review` (with "Contact support") and 502/503 show calm
+  notices, never the raw error.
 - Strings: `src/i18n/locales/{en,es}.json` through `useTranslation()`. Signed out, the device
   language picks the catalog (English is the fallback); signed in, the account's saved `locale`
   does (`features/account/AccountLanguage.tsx`), and Settings changes it (`LanguageSection`).

@@ -11,7 +11,119 @@
     }
   },
   "landing": {
-    "comingSoon": "Nuestro sitio está en camino."
+    "meta": {
+      "title": "Jack Fix It · Pase lo que pase en casa, lo arreglamos.",
+      "description": "Cuéntale a Jack qué pasa en casa, compara presupuestos de precio fijo de profesionales cercanos y sigue el trabajo en la app."
+    },
+    "skipToContent": "Saltar al contenido",
+    "homeLabel": "Jack Fix It, volver arriba",
+    "nav": {
+      "label": "Secciones",
+      "services": "Servicios",
+      "how": "Cómo funciona",
+      "getApp": "Obtén la app",
+      "menu": "Menú"
+    },
+    "hero": {
+      "eyebrow": "Servicios para el hogar",
+      "titleLead": "Pase lo que pase en casa,",
+      "titleAccent": "lo arreglamos.",
+      "body": "Cuéntale a Jack qué pasa. Profesionales cercanos te envían presupuestos de precio fijo, tú eliges uno y sigues el trabajo en la app de principio a fin.",
+      "getApp": "Obtén la app",
+      "explore": "Ver servicios",
+      "badgesLabel": "Lo que obtienes",
+      "badges": {
+        "verified": "Información verificada cuando corresponde",
+        "scheduling": "Agendamiento fácil",
+        "payment": "Experiencia de pago segura",
+        "support": "Apoyo cuando lo necesites"
+      }
+    },
+    "requestFlow": {
+      "title": "¿Qué está pasando en casa?",
+      "cta": "Cuéntale a Jack lo que pasó"
+    },
+    "how": {
+      "eyebrow": "Cómo funciona",
+      "title": "Del problema al trabajo terminado.",
+      "steps": {
+        "tell": {
+          "title": "Cuéntale a Jack",
+          "body": "Di con tus palabras qué pasa en casa y agrega fotos o un video en la app."
+        },
+        "match": {
+          "title": "Encontramos al profesional indicado",
+          "body": "Profesionales cercanos que hacen ese tipo de trabajo te envían presupuestos de precio fijo. Los comparas y eliges uno."
+        },
+        "done": {
+          "title": "Trabajo hecho",
+          "body": "Tu profesional llega cuando lo acordaron. Sigues el trabajo en la app y lo confirmas cuando termina."
+        },
+        "support": {
+          "title": "Apoyo cuando lo necesites",
+          "body": "¿Una pregunta o un problema? Personas reales de nuestro equipo te responden en la app."
+        }
+      }
+    },
+    "services": {
+      "eyebrow": "Servicios",
+      "title": "¿En qué te ayudamos?",
+      "body": "Elige una categoría en la app, o simplemente describe lo que pasa.",
+      "names": {
+        "house-cleaning": "Limpieza del hogar",
+        "handyman": "Reparaciones generales",
+        "painting": "Pintura",
+        "lawn-landscaping": "Jardinería y paisajismo",
+        "moving-assembly": "Mudanzas y montaje"
+      },
+      "lines": {
+        "house-cleaning": "Limpieza regular o de una sola vez para tu hogar.",
+        "handyman": "Pequeñas reparaciones y arreglos, varios en una sola solicitud.",
+        "painting": "Habitaciones, paredes y retoques.",
+        "lawn-landscaping": "Corte de césped, poda y cuidado del jardín.",
+        "moving-assembly": "Armado de muebles y ayuda con una mudanza."
+      },
+      "other": "Cuéntale a Jack lo que necesitas."
+    },
+    "trust": {
+      "eyebrow": "Por qué Jack",
+      "title": "Ayuda en casa, sin complicaciones.",
+      "items": {
+        "whoToCall": {
+          "title": "No necesitas saber a quién llamar",
+          "body": "Describe el problema. Te responden profesionales que hacen ese tipo de trabajo."
+        },
+        "onePlace": {
+          "title": "Todo en un solo lugar",
+          "body": "Presupuestos, agenda, pago y mensajes, todo en la app."
+        },
+        "people": {
+          "title": "Personas reales cuando las necesites",
+          "body": "Nuestro equipo responde tus preguntas en la app."
+        },
+        "records": {
+          "title": "Registros claros del servicio",
+          "body": "Cada presupuesto, mensaje y paso del trabajo queda guardado en la app."
+        }
+      }
+    },
+    "pros": {
+      "eyebrow": "Para profesionales",
+      "title": "Trabajo que llega a ti.",
+      "body": "Recibe solicitudes de clientes cercanos, envía presupuestos de precio fijo y maneja tus trabajos desde la app.",
+      "points": {
+        "leads": "Sin pagar por clientes potenciales.",
+        "paid": "Recibes tu pago cuando el trabajo se hace."
+      },
+      "link": "Ver la app para profesionales"
+    },
+    "footer": {
+      "label": "Legal y contacto",
+      "terms": "Términos",
+      "privacy": "Privacidad",
+      "contact": "Contacto",
+      "rights": "© {{year}} Jack Fix It. Todos los derechos reservados."
+    }
   },
   "showcase": {
     "meta": {
