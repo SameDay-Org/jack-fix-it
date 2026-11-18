@@ -57,7 +57,7 @@ describe("showcase page", () => {
     expect(html.match(/<h1/g)).toHaveLength(1);
     expect(textOf(html, "hero-title")).toBe("Whatever happens at home, we fix it.");
     expect(html).toMatch(/<span class="text-green-500">fix<\/span>/);
-    expect(html).toContain("Your payment is held until you confirm the job is done.");
+    expect(html).toContain("You confirm when the job is done.");
 
     const order = [
       "hero-title",
@@ -243,10 +243,16 @@ describe("showcase copy", () => {
 
   it.each(["en", "es"] as const)("%s keeps the wording the brief asks for", (locale) => {
     const copy = CATALOGS[locale].showcase;
-    const held = { en: "held until you confirm", es: "retenido hasta que confirmes" }[locale];
+    // What the customer does, never money held for them (the legal text rules, 2026-11-17).
+    const confirm = {
+      en: "You confirm when the job is done.",
+      es: "Tú confirmas cuando el trabajo está terminado.",
+    }[locale];
 
-    expect(copy.hero.body).toContain(held);
-    expect(copy.features.pay.title).toContain(held);
+    expect(copy.hero.body).toContain(confirm);
+    expect(copy.features.pay.title).toBe(
+      { en: "A secure payment experience.", es: "Una experiencia de pago segura." }[locale],
+    );
     // The approved phrase for help, word for word as the app has it.
     expect(copy.faq.eyebrow).toBe(
       { en: "Support when you need it", es: "Apoyo cuando lo necesites" }[locale],
