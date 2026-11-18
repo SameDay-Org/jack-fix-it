@@ -260,7 +260,8 @@ describe("ReportProblemScreen", () => {
     await fill();
     await send();
     await answer(0, jsonResponse(201, { dispute: dispute(), can_report: false, report_by: null }));
-    expect(screen.getByTestId("report-sent")).toBeTruthy();
+    // The answer lands in the cache; the screen draws it on the next notify tick.
+    expect(await screen.findByTestId("report-sent")).toBeTruthy();
     expect(screen.getByText("We got your report")).toBeTruthy();
     expect(
       screen.getByText(
@@ -298,7 +299,7 @@ describe("ReportProblemScreen", () => {
     view = { dispute: null, can_report: false, report_by: null };
     await answer(0, errorResponse(409, "job_not_disputable"));
     await waitFor(() => expect(reads()).toBeGreaterThan(before));
-    expect(screen.getByText("Reporting is closed for this job")).toBeTruthy();
+    expect(await screen.findByText("Reporting is closed for this job")).toBeTruthy();
     // The API's own message never reaches the screen.
     expect(screen.queryByText(/can no longer be reported/)).toBeNull();
   });
