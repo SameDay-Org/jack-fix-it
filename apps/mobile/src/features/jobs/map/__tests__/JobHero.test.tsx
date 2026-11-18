@@ -1,7 +1,7 @@
 import "@/i18n";
 
 import { act, screen } from "@testing-library/react-native";
-import { AppState as appStateApi, type AppStateStatus } from "react-native";
+import { AppState as appStateApi, Image, type AppStateStatus } from "react-native";
 import { useReducedMotion as reduceMotionMock } from "react-native-reanimated";
 
 import { ApiError, apiGet, NetworkError } from "@/api";
@@ -296,10 +296,17 @@ describe("JobHero's live map", () => {
 });
 
 describe("JobHero's placeholders", () => {
-  it("without a Mapbox token: a calm card, and nothing is asked for", async () => {
+  it("without a Mapbox token: a calm card, no map and no van model, and nothing is asked for", async () => {
     Object.assign(liveMapConfig, { accessToken: null });
+    // The van's model is in the app: only the missing token keeps it off the screen.
+    jest
+      .spyOn(Image, "resolveAssetSource")
+      .mockReturnValue({ uri: "assets_models_van", width: 0, height: 0, scale: 1 });
     await renderWithQuery(hero("onTheWay"));
     expect(screen.getByTestId("live-map-placeholder-unavailable")).toBeTruthy();
+    expect(screen.queryByTestId("live-map-view")).toBeNull();
+    expect(screen.queryByTestId("mapbox-Models")).toBeNull();
+    expect(screen.queryByTestId("mapbox-ModelLayer-jack-van-model")).toBeNull();
     expect(screen.getByText("The live map isn't available")).toBeTruthy();
     await advance(POLL_MS * 2);
     expect(get).not.toHaveBeenCalled();

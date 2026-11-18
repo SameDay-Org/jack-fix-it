@@ -25,7 +25,10 @@
       "/dist-ci/",
       "/__tests__/helpers.ts$"
     ],
-    "resolver": "react-native-reanimated/jest/resolver"
+    "resolver": "react-native-reanimated/jest/resolver",
+    "transform": {
+      "^.+\\.glb$": "jest-expo/src/preset/assetFileTransformer.js"
+    }
   },
   "dependencies": {
     "@jack/shared": "workspace:*",
