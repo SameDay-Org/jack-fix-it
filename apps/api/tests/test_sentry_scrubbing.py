@@ -625,3 +625,19 @@ def test_before_breadcrumb_and_before_send_redact_saved_card_ids() -> None:
     # Only a whole id: a word that merely contains a prefix stays.
     plain: Any = {"type": "default", "message": "3pm_today reseti_x"}
     assert before_breadcrumb(plain, {})["message"] == "3pm_today reseti_x"
+
+
+def test_before_breadcrumb_and_before_send_redact_customer_session_secrets() -> None:
+    """A CustomerSession's client secret (cuss_, #253c) goes the same way: the old pattern read
+    `cus_` only, which `cuss_` does not start with."""
+    crumb: Any = {"type": "default", "message": "sheet with cuss_secret_Abc123 for cus_1Abc"}
+    assert before_breadcrumb(crumb, {})["message"] == (
+        "sheet with cuss_[Filtered] for cus_[Filtered]"
+    )
+    event: Any = {"request": {"url": "https://api.example.invalid/v1/x/cuss_secret_Abc123"}}
+    assert before_send(event, {})["request"]["url"] == (
+        "https://api.example.invalid/v1/x/cuss_[Filtered]"
+    )
+    # Only a whole id: a word that merely contains the prefix stays.
+    plain: Any = {"type": "default", "message": "discuss_this"}
+    assert before_breadcrumb(plain, {})["message"] == "discuss_this"

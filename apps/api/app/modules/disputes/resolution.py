@@ -47,6 +47,16 @@ initiated_by, whoever settles it. An admin who sends the same decision again for
 another admin's refund left open is audited under their own id, `recovery` true and the
 deciding admin named; Stripe's event settles under the deciding admin, naming the event.
 
+Authorization at settling time (#433 round 2): an admin's request is checked before Stripe (the
+request's audit row) and again in the settling transaction, after Stripe answered and before
+anything settles (AuditService.active_admin: the account as last committed, share-locked until
+the commit). An admin demoted or suspended meanwhile gets 403 and nothing settles: no dispute
+resolved, no job moved, no transfer queued, no push, no dispute.resolve row. What Stripe said
+is still stored on the refund row (the refund stays recoverable: another admin's same decision,
+or Stripe's event, settles it), and the refusal is audited (dispute.refund_outcome,
+`admin_not_active`). Stripe's event has no acting admin: it completes the request the deciding
+admin was authorized for when it was audited, before Stripe, with no check again.
+
 Once: a resolved dispute answers the same decision (and split) with where it stands, queueing
 its transfer again (the sweep would too) and pushing nothing; another decision is 409
 dispute_already_resolved. While the dispute is open with a refund row, only the same decision
@@ -243,6 +253,11 @@ class RefundActor:
     reason: str | None = None
     stripe_event_id: str | None = None
 
+    @property
+    def system(self) -> bool:
+        """Stripe's event settles it: no admin acts now (`user_id` is the deciding admin)."""
+        return self.stripe_event_id is not None
+
 
 class Applied(StrEnum):
     """What Stripe's status of a dispute's refund did (RefundSettlement.apply)."""
@@ -255,6 +270,8 @@ class Applied(StrEnum):
     FAILED = "failed"
     # Succeeded, and the dispute was resolved already: nothing to do.
     UNCHANGED = "unchanged"
+    # The acting admin is no longer an active admin: Stripe's word stored, nothing settled.
+    NOT_AUTHORIZED = "not_authorized"
 
 
 @dataclass(frozen=True)
@@ -369,14 +386,35 @@ class RefundSettlement:
     ) -> Application:
         """Stores Stripe's refund and its status on the row (`refund` read under its lock in
         this transaction, `read` checked to fit it; a read older than the row's status does not
-        replace it: the readers read Stripe before they take the locks), then, by the row's
-        status: succeeded with the dispute open
+        replace it: the readers read Stripe before they take the locks). An admin's request
+        whose admin is no longer an active admin then stops (NOT_AUTHORIZED, audited); else, by
+        the row's status: succeeded with the dispute open
         settles it (SETTLED, with what to announce after the commit); succeeded with it resolved
         is UNCHANGED; failed or canceled is FAILED (an error logged for staff); anything else is
         PENDING. A status new for the row that settles nothing is audited once
         (dispute.refund_outcome)."""
         # Stripe's status as the row holds it now: a read older than the row's never wins.
         observed = await self._ledger.observe(refund, read)
+        # An admin's request is authorized again here, after Stripe and before anything
+        # settles (round 2). Stripe's event is not: it has no acting admin, and completes the
+        # request the deciding admin was authorized for, and audited, before Stripe was called.
+        if not actor.system and not await self._audit.active_admin(actor.user_id):
+            logger.warning(
+                "dispute_resolve_admin_not_active",
+                extra={**refund.ids, "admin_id": str(actor.user_id)},
+            )
+            await self.record_outcome(
+                actor,
+                refund.dispute_id,
+                {
+                    "outcome": "admin_not_active",
+                    "refund_id": str(refund.refund_id),
+                    "stripe_refund_id": read.refund_id,
+                    "stripe_status": observed.status,
+                    "dispute_status": locked.dispute.status.value,
+                },
+            )
+            return Application(Applied.NOT_AUTHORIZED)
         if observed.succeeded:
             if locked.dispute.status is DisputeStatus.RESOLVED:
                 return Application(Applied.UNCHANGED)
@@ -470,6 +508,8 @@ class RefundSettlement:
                 "stripe_status": read.status,
                 "initiated_by": str(refund.initiated_by),
                 "recovery": actor.user_id != refund.initiated_by,
+                # True: Stripe's event settled the deciding admin's audited request.
+                "system": actor.system,
                 "stripe_event_id": actor.stripe_event_id,
             },
             reason=actor.reason,
@@ -732,7 +772,10 @@ class DisputeResolver:
                 "dispute_refund_needs_review", extra={**refund.ids, "reason": error.reason}
             )
             raise DisputeNeedsReviewError from None
+        # Committed whatever came of it: Stripe's word, and the refusal's audit row too.
         await self._session.commit()
+        if applied.applied is Applied.NOT_AUTHORIZED:
+            raise ForbiddenError
         if applied.applied is Applied.PENDING:
             raise RefundPendingError
         if applied.applied is Applied.FAILED:

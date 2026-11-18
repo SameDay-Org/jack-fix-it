@@ -23,7 +23,7 @@ import pytest
 from arq import Retry
 from fastapi import FastAPI
 from sqlalchemy import URL, delete, select, text, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import Settings
@@ -34,6 +34,7 @@ from app.integrations.stripe_refunds import FoundRefunds, RefundFacts, get_strip
 from app.modules.addresses.models import Address
 from app.modules.audit.models import AuditLog
 from app.modules.audit.service import AuditService
+from app.modules.audit.types import AuditAction
 from app.modules.disputes.models import (
     Dispute,
     DisputePhoto,
@@ -1981,6 +1982,45 @@ async def test_a_crash_after_stripe_leaves_the_request_audited_and_a_recovery_is
     assert last.actor_id == world.admin.id
 
 
+async def test_a_demotion_waits_for_the_settlement_its_admin_was_checked_for(
+    committed_case: CommittedCase, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real commits: once the settling transaction checked the admin, their account is
+    share-locked until it commits, so a demotion from another connection cannot land between
+    the check and the settlement: it waits (here: gives up after its lock timeout)."""
+    world = committed_case
+    attempts: list[str] = []
+
+    async def record_outcome(
+        self: AuditService, actor_id: uuid.UUID, action: AuditAction, *args: Any, **kwargs: Any
+    ) -> None:
+        world.audited.append((actor_id, action.value))
+        if action is not AuditAction.DISPUTE_RESOLVE:
+            return
+        # Inside the settling transaction, after the check: another connection demotes.
+        async with world.sessions() as other:
+            await other.execute(text("SET LOCAL lock_timeout = '100ms'"))
+            try:
+                await other.execute(
+                    text("UPDATE users SET role = 'agent' WHERE id = :id"),
+                    {"id": world.admin.id},
+                )
+                attempts.append("demoted")
+            except DBAPIError:
+                attempts.append("waited")
+            await other.rollback()
+
+    monkeypatch.setattr(AuditService, "record_outcome", record_outcome)
+    async with world.sessions() as session:
+        out = await resolver(session, FakeStripeRefunds()).resolve(
+            world.admin, world.case.dispute_id, REFUND, RecordingQueue()
+        )
+
+    assert out.status is DisputeStatus.RESOLVED
+    assert attempts == ["waited"]
+    assert world.audited[-1] == (world.admin.id, "dispute.resolve")
+
+
 async def test_a_stripe_failure_reading_the_refund_runs_the_event_again_then_it_settles(
     committed_case: CommittedCase, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2065,3 +2105,218 @@ async def test_a_stripe_failure_reading_the_refund_runs_the_event_again_then_it_
     assert stripe.retrieves == [stripe_refund_id]
     assert world.audited == [(world.admin.id, "dispute.resolve")]
     assert len(queue.pushes()) == 2
+
+
+# --- Who settles: the active admin re-checked at settling time (#433 round 2) -----------------
+
+
+async def set_account(
+    session: AsyncSession, user_id: uuid.UUID, *, role: str | None = None, status: str | None = None
+) -> None:
+    """Another connection's change to the account, committed. Raw SQL: a copy of the user
+    the session may hold is left as it was, as another connection's change would leave it."""
+    await session.execute(
+        text(
+            "UPDATE users SET role = COALESCE(:role, role), status = COALESCE(:status, status)"
+            " WHERE id = :id"
+        ),
+        {"role": role, "status": status, "id": user_id},
+    )
+    await session.commit()
+
+
+async def assert_nothing_settled(
+    session: AsyncSession, case: Case, queue: RecordingQueue, made_id: str, by: uuid.UUID
+) -> None:
+    """403's state: the dispute open, the job disputed, nothing queued or pushed, no
+    dispute.resolve row; Stripe's word kept on the row; the refusal audited under `by`."""
+    assert (await dispute_row(session, case)).status is DisputeStatus.OPEN
+    assert (await job_row(session, case.job_id)).status is JobStatus.DISPUTED
+    assert queue.jobs == {}
+    assert await audits(session, case, "dispute.resolve") == []
+    [row] = await refund_rows(session, case)
+    assert (row.status, row.stripe_refund_id, row.stripe_status) == (
+        RefundStatus.CREATED,
+        made_id,
+        "succeeded",
+    )
+    refused = [
+        outcome
+        for outcome in await audits(session, case, "dispute.refund_outcome")
+        if outcome.after["outcome"] == "admin_not_active"
+    ]
+    assert [(outcome.actor_user_id, outcome.after["stripe_status"]) for outcome in refused] == [
+        (by, "succeeded")
+    ]
+
+
+@pytest.mark.parametrize(
+    "change", [{"role": "agent"}, {"status": "suspended"}], ids=["demoted", "suspended"]
+)
+@pytest.mark.parametrize(("decision", "release"), [("refund", None), ("partial", ODD_RELEASE)])
+async def test_an_admin_demoted_during_the_stripe_call_settles_nothing(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    queue: RecordingQueue,
+    refunds: FakeStripeRefunds,
+    decision: str,
+    release: int | None,
+    change: dict[str, str],
+) -> None:
+    case = await disputed(db_session, world)
+
+    async def demote() -> None:
+        await set_account(
+            db_session, world.admin.id, role=change.get("role"), status=change.get("status")
+        )
+
+    refunds.on_create = demote
+
+    response = await resolve(db_client, world, case, decision, release)
+
+    assert (response.status_code, response.json()["error"]["code"]) == (403, "forbidden")
+    [made] = refunds.refunds.values()
+    await assert_nothing_settled(db_session, case, queue, made.refund_id, world.admin.id)
+    # The request was authorized and audited before Stripe: that row stays.
+    [request] = await audits(db_session, case, "dispute.refund_request")
+    assert request.actor_user_id == world.admin.id
+
+    # Recoverable: another admin's same decision reads the refund and settles it.
+    other = await add_admin(db_session)
+    clock.now += timedelta(minutes=1)
+    recovered = await db_client.post(
+        resolve_path(case),
+        json={"decision": decision, "note": NOTE, "pro_release_cents": release}
+        if release
+        else {"decision": decision, "note": NOTE},
+        headers=other.headers,
+    )
+    assert recovered.status_code == 200, recovered.text
+    assert len(refunds.creates) == 1
+    dispute = await dispute_row(db_session, case)
+    assert (dispute.status, dispute.resolved_by) == (DisputeStatus.RESOLVED, world.admin.id)
+    [settled] = await audits(db_session, case, "dispute.resolve")
+    assert (settled.actor_user_id, settled.after["recovery"], settled.after["system"]) == (
+        other.id,
+        True,
+        False,
+    )
+    assert queued_release(queue, case) is (decision == "partial")
+
+
+async def test_an_admin_demoted_during_a_retry_s_read_settles_nothing(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    queue: RecordingQueue,
+    refunds: FakeStripeRefunds,
+) -> None:
+    """The retry path: Stripe has finished the refund, and the admin asking to settle it is
+    demoted while Stripe is read."""
+    case = await disputed(db_session, world)
+    refunds.status = "pending"
+    assert (await resolve(db_client, world, case, "partial", ODD_RELEASE)).status_code == 409
+    [made] = refunds.refunds.values()
+    refunds.set_status(made.refund_id, "succeeded")
+    other = await add_admin(db_session)
+
+    async def demote() -> None:
+        refunds.on_retrieve = None
+        await set_account(db_session, other.id, role="agent")
+
+    refunds.on_retrieve = demote
+    clock.now += timedelta(minutes=1)
+
+    response = await db_client.post(
+        resolve_path(case),
+        json={"decision": "partial", "pro_release_cents": ODD_RELEASE, "note": NOTE},
+        headers=other.headers,
+    )
+
+    assert (response.status_code, response.json()["error"]["code"]) == (403, "forbidden")
+    assert refunds.retrieves == [made.refund_id]
+    await assert_nothing_settled(db_session, case, queue, made.refund_id, other.id)
+
+
+@pytest.mark.parametrize(("decision", "release"), [("refund", None), ("partial", ODD_RELEASE)])
+async def test_stripe_s_event_settles_the_request_of_an_admin_demoted_since(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    queue: RecordingQueue,
+    refunds: FakeStripeRefunds,
+    decision: str,
+    release: int | None,
+) -> None:
+    """The money moved after the admin was authorized, and audited, before Stripe: the event
+    completes it under that admin, with no check again."""
+    case = await disputed(db_session, world)
+    refunds.status = "pending"
+    assert (await resolve(db_client, world, case, decision, release)).status_code == 409
+    [made] = refunds.refunds.values()
+    await set_account(db_session, world.admin.id, role="agent")
+    refunds.set_status(made.refund_id, "succeeded")
+    event = refund_event("refund.updated", made.refund_id, "succeeded")
+
+    await deliver(db_session, refunds, queue, event)
+
+    dispute = await dispute_row(db_session, case)
+    assert (dispute.status, dispute.resolved_by) == (DisputeStatus.RESOLVED, world.admin.id)
+    [settled] = await audits(db_session, case, "dispute.resolve")
+    assert (settled.actor_user_id, settled.after["system"], settled.after["stripe_event_id"]) == (
+        world.admin.id,
+        True,
+        event.stripe_event_id,
+    )
+    assert settled.after["initiated_by"] == str(world.admin.id)
+    assert queued_release(queue, case) is (decision == "partial")
+    assert len(pushed(queue)) == 2
+
+
+@pytest.mark.parametrize(
+    ("restored", "status"), [(False, 403), (True, 200)], ids=["demoted", "demoted_and_restored"]
+)
+async def test_the_role_at_settling_time_decides_when_two_admins_change_places(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    queue: RecordingQueue,
+    refunds: FakeStripeRefunds,
+    restored: bool,
+    status: int,
+) -> None:
+    """During the admin's Stripe call, they are demoted and an agent is promoted (and, in the
+    second case, the admin is restored before settling): the role as committed when the
+    decision settles is what counts, not the one at the request's start."""
+    case = await disputed(db_session, world)
+
+    async def swap() -> None:
+        await set_account(db_session, world.admin.id, role="agent")
+        await set_account(db_session, world.agent.id, role="admin")
+        if restored:
+            await set_account(db_session, world.admin.id, role="admin")
+
+    refunds.on_create = swap
+
+    first = await resolve(db_client, world, case, "refund")
+
+    assert first.status_code == status, first.text
+    if restored:
+        assert (await dispute_row(db_session, case)).status is DisputeStatus.RESOLVED
+        return
+    [made] = refunds.refunds.values()
+    await assert_nothing_settled(db_session, case, queue, made.refund_id, world.admin.id)
+    # The promoted one may settle it now.
+    clock.now += timedelta(minutes=1)
+    promoted = await db_client.post(
+        resolve_path(case),
+        json={"decision": "refund", "note": NOTE},
+        headers=headers_for(world.agent.id, UserRole.ADMIN),
+    )
+    assert promoted.status_code == 200, promoted.text
+    [settled] = await audits(db_session, case, "dispute.resolve")
+    assert (settled.actor_user_id, settled.after["recovery"]) == (world.agent.id, True)

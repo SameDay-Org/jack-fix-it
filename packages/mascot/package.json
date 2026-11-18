@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "sideEffects": false,
   "description": "Jack, the Jack Fix It mascot (#404): parts and poses as data, an SVG renderer and a React component for the web.",
   "exports": {
     ".": {
@@ -12,6 +13,10 @@
     "./react": {
       "types": "./src/react.ts",
       "default": "./src/react.ts"
+    },
+    "./react-live": {
+      "types": "./src/react-live.ts",
+      "default": "./src/react-live.ts"
     },
     "./dom": {
       "types": "./src/dom.ts",

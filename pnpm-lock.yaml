@@ -173,6 +173,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@jack/mascot':
+        specifier: workspace:*
+        version: link:../../packages/mascot
       '@jack/shared':
         specifier: workspace:*
         version: link:../../packages/shared

@@ -307,7 +307,8 @@
       "support": "Soporte",
       "queue": "Cola",
       "pros": "Profesionales",
-      "disputes": "Disputas"
+      "disputes": "Disputas",
+      "kpis": "Indicadores"
     },
     "roles": {
       "agent": "Agente",
@@ -690,6 +691,118 @@
         "legalNameHint": "Nombre de la cuenta. Compáralo con el documento de identificación.",
         "legalNameMissing": "La cuenta no tiene nombre completo para comparar con el documento de identificación."
       }
+    },
+    "kpis": {
+      "title": "Indicadores",
+      "subtitle": "Cómo fueron las solicitudes, los trabajos y los pagos en un período de días.",
+      "range": {
+        "label": "Período",
+        "presets": {
+          "7": "Últimos 7 días",
+          "30": "Últimos 30 días",
+          "90": "Últimos 90 días"
+        },
+        "custom": "Período personalizado",
+        "from": "Desde",
+        "to": "Hasta",
+        "apply": "Mostrar",
+        "updating": "Actualizando…",
+        "errors": {
+          "missing": "Elige una fecha de inicio y una de fin.",
+          "order": "Elige una fecha de inicio igual o anterior a la de fin.",
+          "length": "Elige un período de {{max}} días o menos."
+        },
+        "invalid": "No se pueden leer estas fechas. Elige una fecha de inicio igual o anterior a la de fin, de {{max}} días como máximo.",
+        "showing": "del {{from}} al {{to}}",
+        "timeZone": "Días completos en la hora de {{zone}}."
+      },
+      "figures": "Cifras",
+      "cards": {
+        "firstResponse": {
+          "title": "Primera respuesta",
+          "description": "Tiempo medio desde una solicitud nueva hasta el primer contacto del BDC."
+        },
+        "contactRate": {
+          "title": "Tasa de contacto",
+          "description": "Solicitudes que el BDC contactó."
+        },
+        "leadToJob": {
+          "title": "De solicitud a trabajo",
+          "description": "Solicitudes que se convirtieron en un trabajo."
+        },
+        "completionRate": {
+          "title": "Tasa de finalización",
+          "description": "Trabajos que se completaron."
+        },
+        "customerRating": {
+          "title": "Calificación de clientes",
+          "description": "Cómo califican los profesionales a sus clientes."
+        },
+        "proRating": {
+          "title": "Calificación de profesionales",
+          "description": "Cómo califican los clientes a sus profesionales."
+        },
+        "disputeRate": {
+          "title": "Tasa de disputas",
+          "description": "Problemas reportados por trabajo completado."
+        },
+        "repeatRate": {
+          "title": "Tasa de repetición",
+          "description": "Clientes que volvieron para otro trabajo."
+        },
+        "gmv": {
+          "title": "GMV",
+          "description": "Lo que se cobró a los clientes."
+        },
+        "revenue": {
+          "title": "Ingresos",
+          "description": "La comisión de la plataforma."
+        }
+      },
+      "noData": "Sin datos todavía",
+      "ofTotal": "{{numerator}} de {{denominator}}",
+      "median": "Mediana {{value}}",
+      "requestsCounted": "Solicitudes contadas: {{count}}",
+      "reviewsCounted": "Reseñas contadas: {{count}}",
+      "outOfFive": "de 5",
+      "duration": {
+        "underMinute": "< 1 min",
+        "minutes": "{{minutes}} min",
+        "hours": "{{hours}} h {{minutes}} min"
+      },
+      "howCalculated": "¿Cómo se calcula?",
+      "beforeRefunds": "Antes de reembolsos",
+      "beforeRefundsHelp": "Los reembolsos todavía no se restan.",
+      "formula": {
+        "first_response_minutes": "Solicitudes creadas en el período que tienen un primer contacto del BDC: la media y la mediana del tiempo desde la solicitud hasta ese primer contacto. Se cuentan esas solicitudes.",
+        "contact_rate": "Solicitudes creadas en el período que tienen un primer contacto (hecho en cualquier momento después) ÷ solicitudes creadas en el período.",
+        "lead_to_job": "Solicitudes creadas en el período que tienen un trabajo, en cualquier estado ÷ solicitudes creadas en el período.",
+        "completion_rate": "Trabajos creados en el período (pagados y agendados) que llegaron a “completado” ÷ trabajos creados en el período. Un trabajo confirmado, pagado al profesional, en disputa o reembolsado pasó por “completado” y cuenta. Un trabajo cancelado antes de empezar cuenta solo en el denominador.",
+        "customer_rating": "La calificación general media (1–5) de las reseñas que los profesionales escribieron sobre sus clientes en el período, publicadas o no.",
+        "pro_rating": "La calificación general media (1–5) de las reseñas que los clientes escribieron sobre sus profesionales en el período, publicadas o no.",
+        "dispute_rate": "Problemas reportados (disputas abiertas) en el período ÷ trabajos completados en el período (por fecha de finalización).",
+        "repeat_rate": "Entre los clientes con al menos un trabajo confirmado en el período, la parte que tiene al menos dos trabajos confirmados antes del fin del período.",
+        "gmv": "Lo que se cobró a los clientes (el precio fijado del trabajo más impuestos) por los trabajos confirmados en el período. Un trabajo pagado al profesional por la liberación de una disputa nunca se confirmó y no cuenta.",
+        "revenue_gross_of_refunds": "La comisión de la plataforma (el porcentaje fijado al pagar) sobre los trabajos confirmados en el período, tal como se cobró. Los reembolsos todavía no se restan."
+      },
+      "series": {
+        "title": "Por día",
+        "activity": "Solicitudes y trabajos completados",
+        "gmv": "GMV por día",
+        "requestsCreated": "Solicitudes creadas",
+        "jobsCompleted": "Trabajos completados",
+        "gmvShort": "GMV",
+        "day": "Día",
+        "showTable": "Mostrar tabla",
+        "tableCaption": "Por día, del {{from}} al {{to}}",
+        "keyboardHint": "Usa las flechas izquierda y derecha para leer cada día."
+      },
+      "empty": "Todavía no hay solicitudes ni trabajos en este período.",
+      "emptyHint": "Prueba un período más largo.",
+      "loadError": "No se pudieron cargar las cifras.",
+      "rateLimited": "Demasiadas consultas en poco tiempo. Espera un minuto y vuelve a intentarlo.",
+      "retry": "Reintentar",
+      "loading": "Cargando las cifras…"
     },
     "disputes": {
       "title": "Disputas",

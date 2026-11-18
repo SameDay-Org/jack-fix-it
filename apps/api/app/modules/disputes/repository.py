@@ -115,6 +115,11 @@ class DisputeRepository:
         return (await self._session.scalar(statement)) is not None
 
     @staticmethod
+    def metric_facts() -> Subquery:
+        """Every dispute's opening time (`created_at`), for the staff metrics (#84)."""
+        return select(Dispute.created_at.label("created_at")).subquery()
+
+    @staticmethod
     def open_jobs() -> Subquery:
         """The job (`job_id`) of every open dispute, for another module's query."""
         return (

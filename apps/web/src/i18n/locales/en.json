@@ -307,7 +307,8 @@
       "support": "Support",
       "queue": "Queue",
       "pros": "Pros",
-      "disputes": "Disputes"
+      "disputes": "Disputes",
+      "kpis": "KPIs"
     },
     "roles": {
       "agent": "Agent",
@@ -690,6 +691,118 @@
         "legalNameHint": "Name on the account. Compare it with the ID document.",
         "legalNameMissing": "The account has no full name to compare with the ID document."
       }
+    },
+    "kpis": {
+      "title": "KPIs",
+      "subtitle": "How requests, jobs and payments went over a range of days.",
+      "range": {
+        "label": "Date range",
+        "presets": {
+          "7": "Last 7 days",
+          "30": "Last 30 days",
+          "90": "Last 90 days"
+        },
+        "custom": "Custom range",
+        "from": "From",
+        "to": "To",
+        "apply": "Show",
+        "updating": "Updating…",
+        "errors": {
+          "missing": "Choose a start date and an end date.",
+          "order": "Choose a start date on or before the end date.",
+          "length": "Choose a range of {{max}} days or less."
+        },
+        "invalid": "These dates can't be read. Choose a start date on or before the end date, {{max}} days at most.",
+        "showing": "{{from}} to {{to}}",
+        "timeZone": "Whole days in {{zone}} time."
+      },
+      "figures": "Figures",
+      "cards": {
+        "firstResponse": {
+          "title": "First response",
+          "description": "Mean time from a new request to the BDC's first contact."
+        },
+        "contactRate": {
+          "title": "Contact rate",
+          "description": "Requests the BDC contacted."
+        },
+        "leadToJob": {
+          "title": "Lead to job",
+          "description": "Requests that became a job."
+        },
+        "completionRate": {
+          "title": "Completion rate",
+          "description": "Jobs that were completed."
+        },
+        "customerRating": {
+          "title": "Customer rating",
+          "description": "How pros rate their customers."
+        },
+        "proRating": {
+          "title": "Pro rating",
+          "description": "How customers rate their pros."
+        },
+        "disputeRate": {
+          "title": "Dispute rate",
+          "description": "Problems reported per completed job."
+        },
+        "repeatRate": {
+          "title": "Repeat rate",
+          "description": "Customers who came back for another job."
+        },
+        "gmv": {
+          "title": "GMV",
+          "description": "What customers were charged."
+        },
+        "revenue": {
+          "title": "Revenue",
+          "description": "The platform's fee."
+        }
+      },
+      "noData": "No data yet",
+      "ofTotal": "{{numerator}} of {{denominator}}",
+      "median": "Median {{value}}",
+      "requestsCounted": "Requests counted: {{count}}",
+      "reviewsCounted": "Reviews counted: {{count}}",
+      "outOfFive": "out of 5",
+      "duration": {
+        "underMinute": "< 1 min",
+        "minutes": "{{minutes}} min",
+        "hours": "{{hours}} h {{minutes}} min"
+      },
+      "howCalculated": "How is this calculated?",
+      "beforeRefunds": "Before refunds",
+      "beforeRefundsHelp": "Refunds are not subtracted yet.",
+      "formula": {
+        "first_response_minutes": "Requests created in the range that have a first contact by the BDC: the mean and the median of the time from the request to that first contact. Counted: those requests.",
+        "contact_rate": "Requests created in the range that have a first contact (made at any time since) ÷ requests created in the range.",
+        "lead_to_job": "Requests created in the range that have a job, whatever its status ÷ requests created in the range.",
+        "completion_rate": "Jobs created in the range (paid and scheduled) that reached “completed” ÷ jobs created in the range. A job that was confirmed, paid out, disputed or refunded passed through “completed” and counts. A job cancelled before it started counts only below the line.",
+        "customer_rating": "The mean overall rating (1–5) of the reviews pros wrote about their customers in the range, published or not.",
+        "pro_rating": "The mean overall rating (1–5) of the reviews customers wrote about their pros in the range, published or not.",
+        "dispute_rate": "Problems reported (disputes opened) in the range ÷ jobs completed in the range (by completion time).",
+        "repeat_rate": "Among the customers with at least one job confirmed in the range, the share with at least two jobs confirmed before the range's end.",
+        "gmv": "What customers were charged (the job's set price plus tax) for the jobs confirmed in the range. A job paid out through a dispute's release was never confirmed and is not counted.",
+        "revenue_gross_of_refunds": "The platform's fee (the take rate set at payment) on the jobs confirmed in the range, as charged. Refunds are not subtracted yet."
+      },
+      "series": {
+        "title": "Per day",
+        "activity": "Requests and completed jobs",
+        "gmv": "GMV per day",
+        "requestsCreated": "Requests created",
+        "jobsCompleted": "Jobs completed",
+        "gmvShort": "GMV",
+        "day": "Day",
+        "showTable": "Show table",
+        "tableCaption": "Per day, {{from}} to {{to}}",
+        "keyboardHint": "Use the left and right arrow keys to read each day."
+      },
+      "empty": "No requests or jobs in this range yet.",
+      "emptyHint": "Try a longer range.",
+      "loadError": "The figures could not be loaded.",
+      "rateLimited": "Too many reads in a short time. Wait a minute, then try again.",
+      "retry": "Try again",
+      "loading": "Loading the figures…"
     },
     "disputes": {
       "title": "Disputes",

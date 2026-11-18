@@ -175,6 +175,7 @@ export function Hero({ t }: { t: TFunction }) {
                 {/* It greets with the first headline, then leaves the stage to the phone. */}
                 <MascotBubble
                   pose="wave"
+                  animate
                   className="absolute z-10 transition-opacity duration-500 group-data-[beat=1]/hero:opacity-0 group-data-[beat=2]/hero:opacity-0 short:hidden still:flex bottom-[12%] -left-[3.5rem] size-16 sm:-left-[5rem] sm:size-20 lg:bottom-[8%] lg:-left-[6.5rem] lg:size-28 still:bottom-40 still:-left-[4.5rem] still:size-20 sm:still:-left-[5.5rem] sm:still:size-24 lg:still:bottom-14 lg:still:-left-[7.5rem] lg:still:size-32"
                 />
               </div>
