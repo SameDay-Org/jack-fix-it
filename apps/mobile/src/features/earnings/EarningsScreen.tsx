@@ -62,6 +62,7 @@ export function EarningsScreen() {
   };
 
   const failure = earningsFailure(shownError);
+  const noJobs = data !== undefined && items.length === 0;
   const header = (
     <View className="gap-6 pb-6 pt-2">
       <View className="gap-2">
@@ -71,7 +72,10 @@ export function EarningsScreen() {
         </Text>
       </View>
       <PayoutNudge />
-      {data === undefined && shownError !== null ? null : <EarningsSummary summary={summary} />}
+      {/* No totals over a failure, nor before any finished job: they would all read $0.00. */}
+      {(data === undefined && shownError !== null) || noJobs ? null : (
+        <EarningsSummary summary={summary} />
+      )}
       {items.length > 0 ? (
         <Text accessibilityRole="header" className="text-headline text-navy-900">
           {t("earnings.jobs")}

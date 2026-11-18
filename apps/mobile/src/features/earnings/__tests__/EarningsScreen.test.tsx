@@ -205,6 +205,8 @@ describe("EarningsScreen", () => {
       screen.getByText("Your earnings will show here after your first finished job."),
     ).toBeTruthy();
     expect(screen.queryByText("Jobs")).toBeNull();
+    // Four $0.00 totals would push the message below the fold: the empty state stands alone.
+    expect(screen.queryByTestId("earnings-summary")).toBeNull();
   });
 
   it.each([
