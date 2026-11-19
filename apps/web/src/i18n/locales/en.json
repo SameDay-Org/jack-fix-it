@@ -6,6 +6,7 @@
   "site": {
     "language": {
       "label": "Language",
+      "footerLabel": "Language (footer)",
       "en": "English",
       "es": "Español"
     },
@@ -430,6 +431,7 @@
       "body": "The app is coming soon to iPhone and Android."
     },
     "footer": {
+      "sectionsLabel": "Page sections (footer)",
       "legalLabel": "Legal",
       "terms": "Terms of Service",
       "privacy": "Privacy Policy",

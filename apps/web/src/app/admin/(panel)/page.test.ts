@@ -61,7 +61,7 @@ describe("panel home", () => {
 
     const page = decoded(renderToStaticMarkup(await PanelHome()));
 
-    expect(page).toContain("Welcome, Sam<");
+    expect(page).toMatch(/<h1[^>]*>Welcome, Sam<\/h1>/); // the page's one h1 (pre-QA, axe)
     expect(page).not.toContain("staff.probe@example.com");
   });
 

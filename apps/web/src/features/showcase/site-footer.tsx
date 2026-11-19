@@ -33,7 +33,7 @@ export function SiteFooter({ t, locale, year }: { t: TFunction; locale: Locale; 
             <p className="text-base">{t("brand.tagline")}</p>
           </div>
           <div className="flex flex-wrap gap-x-16 gap-y-8">
-            <nav aria-label={t("showcase.nav.label")}>
+            <nav aria-label={t("showcase.footer.sectionsLabel")}>
               <ul className="flex flex-col">
                 <li>
                   <a href={`#${ANCHORS.how}`} className={FOOTER_LINK}>
@@ -73,7 +73,12 @@ export function SiteFooter({ t, locale, year }: { t: TFunction; locale: Locale; 
             <p>{t("showcase.footer.rights", { year })}</p>
             <p>{t("showcase.footer.sampleData")}</p>
           </div>
-          <LanguageToggle t={t} locale={locale} paths={SHOWCASE_PATHS} />
+          <LanguageToggle
+            t={t}
+            locale={locale}
+            paths={SHOWCASE_PATHS}
+            label={t("site.language.footerLabel")}
+          />
         </div>
       </div>
     </footer>

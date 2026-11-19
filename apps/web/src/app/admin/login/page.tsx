@@ -1,4 +1,4 @@
-import { Card, CardDescription, CardTitle } from "@/components/ui/card";
+import { Card, CardDescription } from "@/components/ui/card";
 import { defaultLocale } from "@/i18n/config";
 import { getT } from "@/i18n/server";
 import { RETURN_PARAM, safeReturnPath } from "@/lib/return-path";
@@ -24,7 +24,8 @@ export default async function LoginPage({
         </p>
         <Card className="flex flex-col gap-6 rounded-xl p-8">
           <div className="flex flex-col gap-1">
-            <CardTitle>{t("admin.login.title")}</CardTitle>
+            {/* The page's one h1 (#493); CardTitle would make it an h2. */}
+            <h1 className="text-xl font-bold">{t("admin.login.title")}</h1>
             <CardDescription>{t("admin.login.subtitle")}</CardDescription>
           </div>
           <LoginForm

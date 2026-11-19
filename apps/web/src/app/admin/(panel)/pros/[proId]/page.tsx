@@ -1,5 +1,6 @@
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import type { TFunction } from "i18next";
 
 import { Badge } from "@/components/ui/badge";
@@ -182,6 +183,8 @@ export default async function ProPage({ params }: { params: Promise<{ proId: str
   const t = await getT(locale);
   const { proId } = await params;
   const pro = isUuid(proId) ? await loadPro(await staffAuth(), proId) : "not_found";
+  // A pro that does not exist answers 404, with its own heading (not-found.tsx, #494).
+  if (pro === "not_found") notFound();
   const now = new Date();
 
   return (
@@ -193,11 +196,7 @@ export default async function ProPage({ params }: { params: Promise<{ proId: str
         <ArrowLeft aria-hidden className="size-4" />
         {t("admin.pros.detail.back")}
       </Link>
-      {pro === "not_found" ? (
-        <Card>
-          <p className="font-semibold">{t("admin.pros.detail.notFound")}</p>
-        </Card>
-      ) : pro === "error" ? (
+      {pro === "error" ? (
         <Card role="alert">
           <p className="font-semibold text-danger">{t("admin.pros.detail.loadError")}</p>
         </Card>
