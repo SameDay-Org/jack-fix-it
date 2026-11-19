@@ -1110,7 +1110,13 @@
   "idCard": {
     "hello": "Hola, soy:",
     "pro": "PRO",
+    "brand": "Jack Fix It",
+    "memberSince": "Miembro desde",
+    "code": "Código de miembro",
+    "support": "Apoyo cuando lo necesites",
     "a11y": {
+      "verified": "verificado",
+      "memberSince": "miembro desde {{date}}",
       "card": "Tarjeta de identificación",
       "unnamed": "nombre aún sin definir",
       "back": "Reverso de la tarjeta de identificación, código {{code}}",
